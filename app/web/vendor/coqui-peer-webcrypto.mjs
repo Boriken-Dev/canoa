@@ -1,5 +1,5 @@
 /**
- * Draft coqui-peer method p256-spki for browser WebCrypto.
+ * Experimental browser WebCrypto authentication method for coqui-peer.
  * Identity = SHA256(DER SPKI), distinct from coqui-peer-tls certificate IDs.
  * Must run over secure WebTransport/WSS; never auto-enroll an unknown peer.
  */
@@ -183,7 +183,7 @@ export async function createResponder(identity, {allowClient} = {}) {
 }
 
 /** Store non-extractable CryptoKey by structured clone in origin-local IndexedDB. */
-export async function loadOrCreateIdentity(name = 'dev.boriken.canoa.peer') {
+export async function loadOrCreateIdentity(name = 'dev.boriken.coqui.peer-webcrypto') {
   if (!globalThis.indexedDB) throw new Error('IndexedDB storage unavailable');
   const generated = await generateIdentity();
   const db = await new Promise((resolve, reject) => {

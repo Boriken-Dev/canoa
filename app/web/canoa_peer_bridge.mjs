@@ -1,4 +1,4 @@
-import {createInitiator, loadOrCreateIdentity} from './canoa_peer.mjs';
+import {createInitiator, loadOrCreateIdentity} from './vendor/coqui-peer-webcrypto.mjs';
 
 // Application UI uses this bridge only for the peer-proof exchange. It does
 // not expose arbitrary signing, browser APIs, credentials or trusted-identity

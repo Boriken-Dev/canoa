@@ -3,8 +3,8 @@ on:
   push:
     paths:
       - "bindings/browser/**"
-      - "app/web/canoa_peer.mjs"
-      - "app/test/peer_web.test.mjs"
+      - "app/web/vendor/coqui-peer-webcrypto.mjs"
+      - "app/test/coqui_vendor.test.mjs"
       - ".github/workflows/browser.yml"
   pull_request:
     paths:
@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: "22"
       - name: Browser WebCrypto peer authentication tests
-        run: node --test app/test/peer_web.test.mjs
+        run: node --test app/test/coqui_vendor.test.mjs
       - name: Chromium permission tests
         run: npm test
         working-directory: bindings/browser/chromium
