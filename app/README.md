@@ -51,3 +51,7 @@ The [ACP client](lib/acp/client.dart) and [connection orchestrator](lib/acp/conn
 The browser cryptographic method is owned by [coqui-peer](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto) and vendored in `app/web/vendor` at the exact recorded Git blob in `COQUI-SOURCE.json`. Browser-side UI code never implements its own ECDSA handshake. The early-message handoff is provided by `bindings/dart/coqui_net_transport` as a local Dart package, not a Canoa authentication class.
 
 To upgrade the browser method, update its canonical Coqui source and tests first, then replace the exact vendored source and source metadata together; the vendor tests will reject an unrecorded change.
+
+## Smoke testing remote chat
+
+Use the [authenticated ACP echo fixture](../examples/acp-echo/README.md) to verify the WebSocket path from the connection dialog. It requires trusted TLS, explicit Coqui peer allowlisting, and a pinned server key. This is diagnostic only, not a deployed agent service.

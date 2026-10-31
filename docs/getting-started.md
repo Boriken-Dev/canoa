@@ -46,3 +46,7 @@ python app/tool/build.py chromium
 Load `bindings/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`; it does not yet connect a live ACP or MCP server. The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
 
 See [browser integration](browser.md).
+
+## Authenticated WSS smoke test
+
+The [ACP echo fixture](https://github.com/Boriken-Dev/Canoa/tree/main/examples/acp-echo) provides a local test endpoint that uses mutually authenticated Coqui WebCrypto and ACP v2. See its README for TLS certificate setup, explicit browser peer allowlisting and pinning the server PeerId. Its only behavior is echoing messages, not invoking an AI model or browser tool.

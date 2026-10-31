@@ -14,11 +14,13 @@ This page distinguishes tested code from planned integration work.
 | MTU/path-loss recovery decision and WSS redial with injected peer proof | Implemented as an isolated, tested transport prototype; live session supervision pending |
 | ACP v2 initialize, create/resume, prompt, cancel, close and streaming updates | Implemented behind verified-channel interface, tested with simulated agent |
 | Browser WebCrypto coqui-peer method | Experimental canonical method in coqui-peer; vendored exact source in Canoa; UI supports pinned peer ID |
-| Production Coqui pairing and native Rust handshake interoperability | Planned; no auto-enrollment of unknown peers |
+| Native Rust Coqui WebCrypto responder and JS↔Rust proof | Implemented and cross-language CI-tested in coqui-peer; explicit accepted keys and live trust-store revocation supported |
+| Authenticated WSS ACP v2 echo endpoint | Implemented and tested with live TLS WebSocket, browser-compatible Coqui proof and ACP v2 prompt lifecycle; test fixture, not AI agent |
+| Production agent pairing, persistent agent services, trust-management UI | Pending; no auto-enrollment of unknown peers |
 | Native service discovery and optional stdio bridge | Planned |
 | Browser-facing MCP server and remote session controller | Planned |
 | CDP full-debugging mode and approvals | Planned |
 | Actual JS/Wasm user site-adapter execution and sandbox | Planned |
 | Firefox and Safari browser integrations | Planned |
 
-No ACP interoperability, remote browser access or security guarantee is asserted for incomplete components.
+The experimental ACP v2 echo fixture has an end-to-end test. This is not evidence of production agent interoperability, remote browser access or a security audit.

@@ -7,13 +7,14 @@
 [![Rust CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/test.yml?label=Rust%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/test.yml)
 [![Browser CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/browser.yml?label=Browser%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/browser.yml)
 [![Flutter CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/flutter.yml?label=Flutter%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/flutter.yml)
+[![ACP WSS CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/acp-reference.yml?label=ACP%20WSS)](https://github.com/Boriken-Dev/Canoa/actions/workflows/acp-reference.yml)
 [![Docs CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/docs.yml?label=Docs%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/docs.yml)
 
 **Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone [Boriken Dev](https://boriken.dev) project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through preferred WebTransport (HTTPS) with WSS fallback and a documented peer-authentication profile.
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview** and a tested ACP v2 client for verified connections; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Production native Coqui pairing, independently verified end-to-end live ACP chat, remote MCP and debugging transport are not yet working.** No packages have been released.
+> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview** and a tested ACP v2 client for verified connections; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **An authenticated WSS ACP v2 echo fixture is now integration-tested; production agent pairing, general-purpose live agent services, remote MCP and debugging transport are not yet available.** No packages have been released.
 
 ## Features and direction
 
@@ -34,6 +35,7 @@
 | `bindings/dart/coqui_net_transport/` | Protocol-neutral queued message handoff during transport setup |
 | `app/web/vendor/` | Pinned browser WebCrypto method sourced from `coqui-peer` |
 | `app/` | Canonical Flutter chat and session UI |
+| `examples/acp-echo/` | Paired WSS ACP v2 echo test endpoint and integration tests |
 | `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
 | `bindings/` | Additional browser and language bindings |
 | `docs/` | Architecture, protocols, browser support and developer guides |
@@ -49,7 +51,7 @@ flutter build web --release
 flutter build web --release --wasm
 ```
 
-The UI remains an offline preview. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
+The UI starts with offline preview sessions. A manually pinned Coqui peer connection can now be tested against [the WSS ACP echo fixture](examples/acp-echo/README.md), which is not a production agent. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
 
 See the [shared `coqui-net-transport` proposal](https://boriken-dev.github.io/Canoa/coqui-net-transport/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
 
