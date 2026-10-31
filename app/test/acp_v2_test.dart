@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
+import 'package:canoa/session_store.dart';
 import 'package:canoa/transport/agent_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -137,4 +138,65 @@ void main() {
     expect(channel.sent.where((f) => f['method'] == 'session/prompt'), hasLength(1));
     await client.close();
   });
+  test('one verified peer updates only its own Flutter session', () async {
+    final channel = FakeChannel();
+    channel.respondTo = (frame) {
+      if (frame['method'] == 'initialize') {
+        channel.answer(frame['id'] as int, {
+          'protocolVersion': 2,
+          'capabilities': {'session': <String, Object>{}},
+        });
+      } else if (frame['method'] == 'session/prompt') {
+        channel.answer(frame['id'] as int, {'messageId': 'user-1'});
+      }
+    };
+    final client = await verified(channel);
+    await client.initialize();
+    final store = SessionStore(includePreview: false);
+    final session = store.addRemoteSession(
+      title: 'Example', agent: 'Test', peerId: peerId,
+      remoteSessionId: 'session-1',
+      endpoint: Uri.parse('wss://example.org/acp'),
+    );
+    store.attachVerifiedClient(session.id, client);
+    expect(session.status, SessionStatus.connected);
+    channel.notify('other-session', {
+      'sessionUpdate': 'agent_message', 'messageId': 'other',
+      'content': [{'type': 'text', 'text': 'Not this session'}],
+    });
+    channel.notify('session-1', {
+      'sessionUpdate': 'state_update', 'state': 'running',
+    });
+    channel.notify('session-1', {
+      'sessionUpdate': 'agent_message_chunk', 'messageId': 'agent-1',
+      'content': {'type': 'text', 'text': 'Hel'},
+    });
+    channel.notify('session-1', {
+      'sessionUpdate': 'agent_message_chunk', 'messageId': 'agent-1',
+      'content': {'type': 'text', 'text': 'lo'},
+    });
+    expect(session.status, SessionStatus.working);
+    expect(session.messages.single.text, 'Hello');
+    channel.notify('session-1', {
+      'sessionUpdate': 'agent_message', 'messageId': 'agent-1',
+      'content': [{'type': 'text', 'text': 'Hello!'}],
+    });
+    expect(session.messages.single.text, 'Hello!');
+    await store.sendText('Question');
+    expect(session.messages.last.messageId, 'user-1');
+    channel.notify('session-1', {
+      'sessionUpdate': 'user_message', 'messageId': 'user-1',
+      'content': [{'type': 'text', 'text': 'Question'}],
+    });
+    expect(session.messages, hasLength(2));
+    channel.notify('session-1', {
+      'sessionUpdate': 'state_update', 'state': 'idle',
+    });
+    expect(session.status, SessionStatus.connected);
+    await client.close();
+    await Future<void>.delayed(Duration.zero);
+    expect(session.status, SessionStatus.disconnected);
+    store.dispose();
+  });
+
 }
