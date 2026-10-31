@@ -18,7 +18,7 @@ class PackagingTests(unittest.TestCase):
             path = Path(tmp)
             source = path / "web"
             source.mkdir()
-            (source / "index.html").write_text("<html></html>")
+            (source / "index.html").write_text("<html><head></head><body></body></html>")
             (source / "flutter_bootstrap.js").write_text("// bootstrap")
             (source / "main.dart.js").write_text("// code")
             (source / "main.dart.js.map").write_text("map")
