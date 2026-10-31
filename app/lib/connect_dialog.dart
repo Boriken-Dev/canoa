@@ -75,7 +75,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       await widget.onConnect(request);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) setState(() => error = 'Connection refused: ' + e.toString());
+      if (mounted) setState(() => error = 'Connection refused: ${e}');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -103,12 +103,12 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return Text(snapshot.hasError
-                        ? 'Browser identity unavailable: ' + snapshot.error.toString()
+                        ? 'Browser identity unavailable: ${snapshot.error}'
                         : 'Loading your browser identity…');
                   }
                   final peer = snapshot.data!;
                   return Row(children: [
-                    Expanded(child: SelectableText('Your browser peer ID:\n' + peer,
+                    Expanded(child: SelectableText('Your browser peer ID:\n$peer',
                       style: Theme.of(context).textTheme.bodySmall)),
                     IconButton(
                       tooltip: 'Copy your peer ID for pairing',
