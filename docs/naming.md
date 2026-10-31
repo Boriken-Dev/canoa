@@ -29,3 +29,9 @@ Canoa's confirmed repository documentation currently uses [GitHub Pages](https:/
 Use **`coqui-net-transport`** for the shared WebTransport/WebSocket connection, framing and fallback library. This follows the existing Boriken Dev naming family (`coqui-net-acl`, `coqui-peer`). Its API remains application-protocol-neutral; ACP, MCP and Guatiao frame/application semantics do not belong in the transport core.
 
 The Rust crate is currently developed in Canoa's workspace and has not been published independently.
+
+## Browser peer authentication
+
+The reusable browser method is under `coqui-peer/methods/webcrypto`, using the profile `dev.boriken.coqui.peer-webcrypto/v1`. The Canoa-specific browser private-key store is named `dev.boriken.canoa.peer`; another application must use its **own** isolated store name rather than share that identity implicitly.
+
+The method's experimental JavaScript module is bundled locally into Canoa as a Git-blob-pinned vendor artifact to comply with offline/MV3 constraints.

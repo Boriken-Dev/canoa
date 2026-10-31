@@ -50,3 +50,9 @@ The Canoa app transport classes are in `app/lib/transport/agent_transport.dart` 
 - [Agent Client Protocol](https://agentclientprotocol.com/)
 - [ACP Python SDK web transport (experimental)](https://agentclientprotocol.github.io/python-sdk/web-transport/)
 - [WebTransport API](https://developer.mozilla.org/en-US/docs/Web/API/WebTransport_API)
+
+## Coqui layering
+
+The shared `coqui-net-transport` Dart binding owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the Canoa repository. Canoa uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
+
+The Canoa code that performs `hello/challenge/proof/accept` frame exchange is a transport adapter for the Coqui method; it is not a second authentication mechanism. Canoa's default client continues to fail closed when the peer key is unpinned or the remote method is unsupported.

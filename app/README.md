@@ -35,7 +35,7 @@ must also be checked against the extension's CSP and renderer requirements.
 The current UI offers a responsive session list, independent transcripts and
 a composer. It starts in an **explicit offline preview**. Messages typed into
 a preview conversation are kept only in memory and are never sent to an agent.
-The WebTransport-first/WSS-fallback transport is connected to an ACP v2 controller **through an injected verified-peer interface**. The Flutter session store and composer can process streaming text, insertion acknowledgments and state transitions from a verified client. Production coqui-peer authentication and pairing UI, session persistence and remote MCP browsing are still missing; the normal app remains in offline preview.
+The WebTransport-first/WSS-fallback transport is connected to an ACP v2 controller **through an injected verified-peer interface**. The Flutter session store and composer can process streaming text, insertion acknowledgments and state transitions from a verified client. The experimental coqui-peer WebCrypto method and explicit pinned-peer dialog are available. Production Coqui pairing/host authorization, session persistence and remote MCP browsing are still missing; the normal app remains in offline preview.
 
 `lib/session_store.dart` is the shared view model. Transport and browser
 permissions must remain independent of it. A real transport must perform the
@@ -45,3 +45,9 @@ an ACP session.
 ## ACP v2 integration
 
 The [ACP client](lib/acp/client.dart) and [connection orchestrator](lib/acp/connect.dart) intentionally cannot send ACP methods before a supplied verifier proves the expected peer identity. The `SessionStore.attachVerifiedClient` API binds that initialized client to one local/remote session and routes updates by the agent-issued Session ID. See [protocol documentation](../docs/acp-client.md).
+
+## Shared dependencies
+
+The browser cryptographic method is owned by [coqui-peer](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto) and vendored in `app/web/vendor` at the exact recorded Git blob in `COQUI-SOURCE.json`. Browser-side UI code never implements its own ECDSA handshake. The early-message handoff is provided by `bindings/dart/coqui_net_transport` as a local Dart package, not a Canoa authentication class.
+
+To upgrade the browser method, update its canonical Coqui source and tests first, then replace the exact vendored source and source metadata together; the vendor tests will reject an unrecorded change.

@@ -1,6 +1,6 @@
 # ACP v2 Flutter session controller
 
-The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client**, but it does not yet ship a production browser-compatible peer authenticator or connection setup screen. The default PWA/extension chat remains an **offline preview** until those are integrated.
+The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client**, but it ships an experimental pinned-key WebCrypto method from coqui-peer and an explicit connection dialog, but does not yet have a production native responder, pairing workflow or cross-language interoperability tests. The default PWA/extension chat starts with offline previews. A remote connection can be attempted using the pinned-key dialog **only** when the agent endpoint implements the same experimental Coqui method and ACP v2.
 
 ## Components
 
@@ -24,9 +24,9 @@ Session creation requires an absolute workspace path and sends `session/new`. Ex
 
 ## Peer authentication boundary
 
-A verified transport must be produced by a callback that **cryptographically proves the expected peer identity**. A claimed `peerId` string, TLS hostname, or an unverified server hello is never sufficient. The current test suite injects a fake verifier for protocol testing only.
+A verified transport must be produced by a callback that **cryptographically proves the expected peer identity**. A claimed `peerId` string, TLS hostname, or an unverified server hello is never sufficient. The ordinary ACP tests inject a fake verifier for protocol testing only. The browser method is now sourced from [coqui-peer](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto), bundled unchanged with a source-blob hash test, and driven via a transport-level staged message queue.
 
-Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The missing production work is a browser-compatible coqui-peer proof/profile, pairing and revocation UI, cross-language interoperability testing and secure session setup.
+Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The missing production work is a native/server-side coqui-peer WebCrypto responder, pairing and revocation UI, independent cross-language interoperability tests, and full end-to-end tests with a real ACP agent.
 
 The ACP v2 controller is **not** a complete v1 compatibility implementation. It intentionally fails closed if an agent negotiates v1; a versioned adapter should be added rather than speaking v2 messages under a v1 negotiation.
 
@@ -40,3 +40,7 @@ flutter test
 ```
 
 References: [ACP v2 initialization](https://agentclientprotocol.com/protocol/v2/initialization), [session setup](https://agentclientprotocol.com/protocol/v2/session-setup) and [v2 migration](https://agentclientprotocol.com/protocol/v2/migration).
+
+## Message handoff
+
+`bindings/dart/coqui_net_transport` owns the bounded queue of complete messages between connection setup and application use. The `StagedAgentConnection` is a thin adapter from Canoa's transport interfaces. Neither component authenticates the peer or interprets the WebCrypto proof. The authenticated connection is handed to ACP **only after** Coqui succeeds.

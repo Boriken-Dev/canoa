@@ -7,8 +7,8 @@ Canoa is one implementation of an interoperable gateway pattern. Compatible ACP 
 ```text
 Website  --(extension-controlled page grant)--> Browser extension (Canoa)
                                                            |
-                                                 ACP JSON-RPC over WSS/WS
-                                                 + verified peer authentication
+                                                 ACP over WebTransport or WSS
+                                                 + verified coqui-peer identity
                                                            |
                                           Any compatible ACP agent or gateway
                                                            |
@@ -25,12 +25,12 @@ MCP agent/client  -- MCP --> compatible MCP provider / Canoa broker
                             DOM actions  WebMCP tools
 ```
 
-Browsers may connect directly over WSS once they implement the peer-authentication profile and have a verified peer. A native host is an **optional adapter** for mDNS discovery, local stdio/pipe agents, and exposing browser MCP tools to native agents; it is not the sole permission authority or mandatory for WSS.
+Browsers can connect directly over WebTransport/WSS to an endpoint supporting the published **experimental Coqui WebCrypto method**, provided the server's peer key is pinned out-of-band and the server has separately approved the client's identity. The browser handshake is maintained in coqui-peer, not Canoa. A native host is an **optional adapter** for mDNS discovery, local stdio/pipe agents, and exposing browser MCP tools to native agents; it is not the sole permission authority or mandatory for WSS.
 
 ## Permission authorities
 
 - **Browser extension:** final authority for tab disclosure, DOM read/write, webpage WebMCP invocation, webpage-to-agent exposure and prompts. Maintains its own scoped grants and revocation.
-- **Peer handshake/trust:** verifies endpoint identity and key continuity before granting any session. `coqui-peer` provides useful primitives but does not make the browser peer-auth wire format an existing standard.
+- **Peer handshake/trust:** [coqui-peer's experimental WebCrypto method](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto) proves the browser/client key and a pinned server key before ACP. The host separately owns pairing, revocation and authorization; its Rust trust-store integration is not yet implemented.
 - **ACP agent:** independently manages sessions and its internal permissions.
 - **MCP client/provider:** independent authorization and tool execution policy. A browser grant cannot pre-approve remote MCP tool calls.
 - **Native gateway (if installed):** enforces its own peer and client restrictions but **cannot override** the browser's deny decision.
@@ -50,8 +50,16 @@ A Chrome extension cannot directly browse DNS-SD/mDNS through general WebExtensi
 1. Rust registry and deny-by-default rules (implemented).
 2. Browser-local, peer/tab/origin/capability permission model (implemented as isolated policy module; integrated transport pending).
 3. Browser MCP tool catalogue and local permission-gated dispatch (implemented as an unwired scaffold); browser UI and transport integration remain pending.
-4. Browser-compatible versioned coqui-peer wire profile and independently verified WSS/WS ACP bridge (pending).
+4. Browser WebCrypto method source, pinned vendor import and staged transport queue (implemented as experimental components). Native Rust coqui-peer method and end-to-end cross-language interoperability remain pending.
 5. Native discovery adapter, agent-facing MCP service and optional browser tool relay (pending).
 6. Independent implementation conformance tests and additional language bindings (pending).
 
 See [interop.md](interop.md) for the minimum interoperability profile.
+
+## Authentication and transport layering
+
+The source of the browser's cryptographic handshake is `Boriken-Dev/coqui-peer/methods/webcrypto`. Canoa bundles an **unchanged, Git-blob-pinned copy** so that the extension and PWA work offline and satisfy MV3 local-code restrictions. `app/web/canoa_peer_bridge.mjs` adapts this method to Canoa; it contains no independent cryptographic handshake.
+
+The generic Dart `bindings/dart/coqui_net_transport/lib/message_handoff.dart` owns pending-message storage across the pre-application phase. Canoa's `StagedAgentConnection` wraps its existing WebTransport/WSS adapter. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
+
+**Authentication is not pairing.** Canoa does not yet have a production Rust responder compatible with this method or an integrated Coqui pairing/trust-store UI. A pinned user-entered fingerprint is required in the current connection dialog; no unrecognized peer is auto-enrolled.

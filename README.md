@@ -13,7 +13,7 @@
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview** and a tested ACP v2 client for verified connections; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Production peer pairing, direct live ACP chat, remote MCP and debugging transport are not yet working.** No packages have been released.
+> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview** and a tested ACP v2 client for verified connections; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Production native Coqui pairing, independently verified end-to-end live ACP chat, remote MCP and debugging transport are not yet working.** No packages have been released.
 
 ## Features and direction
 
@@ -31,6 +31,8 @@
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
 | `crates/coqui-net-transport/` | Shared transport framing and fallback policy prototype |
+| `bindings/dart/coqui_net_transport/` | Protocol-neutral queued message handoff during transport setup |
+| `app/web/vendor/` | Pinned browser WebCrypto method sourced from `coqui-peer` |
 | `app/` | Canonical Flutter chat and session UI |
 | `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
 | `bindings/` | Additional browser and language bindings |
