@@ -33,7 +33,8 @@ test('mutual proof and explicit trust across one connection', async () => {
 test('unknown client is not auto-paired', async () => {
   const p = await setup(false);
   const response = await p.responder.challenge(p.initiator.hello());
-  await assert.rejects(() => p.responder.accept(await p.initiator.answer(response)), /not paired/);
+  const proof = await p.initiator.answer(response);
+  await assert.rejects(() => p.responder.accept(proof), /not paired/);
 });
 test('an unpinned server is refused before client proof', async () => {
   const p = await setup();
