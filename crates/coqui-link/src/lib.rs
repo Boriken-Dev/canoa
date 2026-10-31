@@ -76,6 +76,104 @@ pub const fn recovery(
     }
 }
 
+/// One explicit set of endpoint locations for a single expected peer.
+/// A caller validates URLs and certificate policy and never guesses WSS
+/// from the WebTransport URL.
+#[derive(Clone, Copy, Debug)]
+pub struct EndpointSet<'a> {
+    pub webtransport: Option<&'a str>,
+    pub websocket: Option<&'a str>,
+}
+
+/// A native or browser adapter provides the actual connection and lifecycle.
+pub trait Channel {
+    fn close(&mut self);
+}
+
+pub trait Dialer {
+    type Connection: Channel;
+
+    fn dial(
+        &mut self,
+        transport: Transport,
+        endpoint: &str,
+    ) -> Result<Self::Connection, Failure>;
+}
+
+/// Optional transport liveness probe, performed before authentication or ACP
+/// messages. A real probe requires protocol support at both endpoints.
+pub trait Preflight<C: Channel> {
+    fn check(&mut self, transport: Transport, channel: &mut C) -> Result<(), Failure>;
+}
+
+pub struct NoPreflight;
+
+impl<C: Channel> Preflight<C> for NoPreflight {
+    fn check(&mut self, _: Transport, _: &mut C) -> Result<(), Failure> {
+        Ok(())
+    }
+}
+
+/// The resulting channel is NOT trusted yet. The caller runs an independent
+/// coqui-peer handshake with the expected peer identity on this channel.
+pub struct UnverifiedLink<C: Channel> {
+    pub transport: Transport,
+    pub channel: C,
+}
+
+/// Open WebTransport first. A failed pre-auth probe can trigger fallback even
+/// when the transport nominally opened, for instance due to QUIC PMTU stalls.
+/// Never retry after returning a link; application recovery is explicit.
+pub fn establish<D, P>(
+    endpoints: EndpointSet<'_>,
+    dialer: &mut D,
+    probe: &mut P,
+) -> Result<UnverifiedLink<D::Connection>, Failure>
+where
+    D: Dialer,
+    P: Preflight<D::Connection>,
+{
+    if let Some(endpoint) = endpoints.webtransport {
+        let attempted = dialer
+            .dial(Transport::WebTransport, endpoint)
+            .and_then(|mut channel| {
+                match probe.check(Transport::WebTransport, &mut channel) {
+                    Ok(()) => Ok(channel),
+                    Err(reason) => {
+                        channel.close();
+                        Err(reason)
+                    }
+                }
+            });
+        match attempted {
+            Ok(channel) => return Ok(UnverifiedLink {
+                transport: Transport::WebTransport,
+                channel,
+            }),
+            Err(reason)
+                if recovery(
+                    Transport::WebTransport,
+                    Phase::Opening,
+                    reason,
+                    endpoints.websocket.is_some(),
+                ) == Recovery::VerifyFallback => {}
+            Err(reason) => return Err(reason),
+        }
+    }
+    let Some(endpoint) = endpoints.websocket else {
+        return Err(Failure::Unavailable);
+    };
+    let mut channel = dialer.dial(Transport::WebSocket, endpoint)?;
+    if let Err(reason) = probe.check(Transport::WebSocket, &mut channel) {
+        channel.close();
+        return Err(reason);
+    }
+    Ok(UnverifiedLink {
+        transport: Transport::WebSocket,
+        channel,
+    })
+}
+
 /// A whole reliable message. No guarantee is made about remote execution.
 /// Stream connections use little-endian u32 body-length framing; WebSocket
 /// adapters can deliver a complete body per message without framing.
