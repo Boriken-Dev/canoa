@@ -121,7 +121,7 @@ class _SessionRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
+    return Material(
       color: const Color(0xFF17242D),
       child: Column(children: [
         Padding(
