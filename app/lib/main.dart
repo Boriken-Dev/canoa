@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'extension_context.dart';
+import 'acp/browser_connect.dart';
+import 'acp/client.dart';
+import 'connect_dialog.dart';
+import 'transport/agent_transport.dart';
 import 'package:flutter/material.dart';
 
 import 'session_store.dart';
@@ -23,6 +27,7 @@ class _CanoaAppState extends State<CanoaApp> {
   late final SessionStore store;
   late final bool ownsStore;
   Timer? _contextTimer;
+  final List<AcpV2Client> _ownedClients = [];
   bool _claimingContext = false;
 
   Future<void> _claimContext() async {
@@ -33,6 +38,34 @@ class _CanoaAppState extends State<CanoaApp> {
       if (context != null && mounted) store.addPageContext(context);
     } finally {
       _claimingContext = false;
+    }
+  }
+
+  Future<void> _connect(ConnectTarget target) async {
+    final ws = Uri.parse(target.webSocket);
+    final wt = target.webTransport.isEmpty
+        ? null : Uri.parse(target.webTransport);
+    final endpoints = AgentEndpoints(webTransport: wt, webSocket: ws);
+    final pinnedPeerId = target.peerId.toLowerCase();
+    final client = await connectBrowserAcp(
+      endpoints, pinnedPeerId: pinnedPeerId,
+    );
+    try {
+      final remoteId = await client.createSession(cwd: target.cwd);
+      if (!mounted) throw StateError('Canoa UI closed');
+      final local = store.addRemoteSession(
+        title: target.title.isEmpty ? 'Remote agent' : target.title,
+        agent: pinnedPeerId.substring(0, 22),
+        peerId: pinnedPeerId,
+        remoteSessionId: remoteId,
+        endpoint: wt ?? ws,
+        websocketFallback: wt == null ? null : ws,
+      );
+      store.attachVerifiedClient(local.id, client);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client.close();
+      rethrow;
     }
   }
 
@@ -51,6 +84,9 @@ class _CanoaAppState extends State<CanoaApp> {
   void dispose() {
     _contextTimer?.cancel();
     if (ownsStore) store.dispose();
+    for (final client in _ownedClients) {
+      unawaited(client.close());
+    }
     super.dispose();
   }
 
@@ -70,16 +106,17 @@ class _CanoaAppState extends State<CanoaApp> {
       ),
       home: AnimatedBuilder(
         animation: store,
-        builder: (context, _) => _CanoaHome(store: store),
+        builder: (context, _) => _CanoaHome(store: store, onConnect: _connect),
       ),
     );
   }
 }
 
 class _CanoaHome extends StatelessWidget {
-  const _CanoaHome({required this.store});
+  const _CanoaHome({required this.store, required this.onConnect});
 
   final SessionStore store;
+  final Future<void> Function(ConnectTarget) onConnect;
 
   @override
   Widget build(BuildContext context) {
@@ -89,7 +126,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect)))
             : null,
         body: SafeArea(
           child: Row(
@@ -97,7 +134,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: 272,
-                  child: _SessionRail(store: store),
+                  child: _SessionRail(store: store, onConnect: onConnect),
                 ),
               Expanded(
                 child: _Conversation(
@@ -115,9 +152,10 @@ class _CanoaHome extends StatelessWidget {
 }
 
 class _SessionRail extends StatelessWidget {
-  const _SessionRail({required this.store});
+  const _SessionRail({required this.store, required this.onConnect});
 
   final SessionStore store;
+  final Future<void> Function(ConnectTarget) onConnect;
 
   @override
   Widget build(BuildContext context) {
@@ -133,6 +171,11 @@ class _SessionRail extends StatelessWidget {
               child: Text('Canoa', style: TextStyle(
                 fontSize: 22, fontWeight: FontWeight.w700,
               )),
+            ),
+            IconButton(
+              tooltip: 'Connect to verified agent',
+              onPressed: () => showCanoaConnectDialog(context, onConnect),
+              icon: const Icon(Icons.link_rounded),
             ),
             IconButton(
               tooltip: 'New session',
