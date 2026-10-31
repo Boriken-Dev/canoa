@@ -34,7 +34,7 @@
 | `crates/coqui-net-transport/` | Shared transport framing and fallback policy prototype |
 | `bindings/dart/coqui_net_transport/` | Protocol-neutral queued message handoff during transport setup |
 | `app/web/vendor/` | Pinned browser WebCrypto method sourced from `coqui-peer` |
-| `app/` | Canonical Flutter chat and session UI |
+| `app/` | Canonical Flutter chat, Canoa.cfg settings and desktop tray UI |
 | `examples/acp-echo/` | Paired WSS ACP v2 echo test endpoint and integration tests |
 | `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
 | `bindings/` | Additional browser and language bindings |
@@ -56,6 +56,12 @@ The UI starts with offline preview sessions. A manually pinned Coqui peer connec
 See the [shared `coqui-net-transport` proposal](https://boriken-dev.github.io/Canoa/coqui-net-transport/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
 
 The [project naming convention](https://boriken-dev.github.io/Canoa/naming/) uses `boriken.dev` and reverse-DNS identifiers such as `dev.boriken.canoa` for application and native host identities.
+
+## Desktop, configuration, and offline dependencies
+
+The desktop app supports the AI6-style [Canoa.cfg](docs/configuration.md) TOML file with a tray context menu (Open, Settings, Hide, Exit). On Windows and macOS two icon clicks open the app; Linux systems that do not forward tray clicks use **Open Canoa** in the menu. The [deps branch](https://github.com/Boriken-Dev/Canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/Canoa/actions/workflows/deps.yml).
+
+The Chromium extension now has a local [MCP JSON-RPC tool adapter and elevated CDP command bridge](docs/browser-mcp.md). Remote MCP/WSS exposure is still gated on an authenticated native gateway and browser approval UI.
 
 ## Development
 

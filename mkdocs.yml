@@ -33,6 +33,9 @@ nav:
   - Transport selection: transport.md
   - Shared coqui-net-transport proposal: coqui-net-transport.md
   - Namespaces and identifiers: naming.md
+  - Desktop and configuration: configuration.md
+  - Offline deps branch: offline-deps.md
+  - Browser MCP and DevTools: browser-mcp.md
   - Browser integration: browser.md
   - ACP permission requests: acp-permissions.md
   - User site adapters: site-adapters.md

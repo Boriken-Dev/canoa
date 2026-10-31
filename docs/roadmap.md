@@ -18,7 +18,9 @@ This page distinguishes tested code from planned integration work.
 | Authenticated WSS ACP v2 echo endpoint | Implemented and tested with live TLS WebSocket, browser-compatible Coqui proof and ACP v2 prompt lifecycle; test fixture, not AI agent |
 | Production agent pairing, persistent agent services, trust-management UI | Pending; no auto-enrollment of unknown peers |
 | Native service discovery and optional stdio bridge | Planned |
-| Browser-facing MCP server and remote session controller | Planned |
+| Local MCP JSON-RPC browser-tool handler | Implemented with test-covered permission checks; not yet available remotely |
+| Elevated CDP adapter | Implemented in the debug-only variant for an allowlisted set of commands; browser approval UI and remote transport remain pending |
+| Browser-facing MCP server and remote session controller | Planned: connect the authenticated peer to the local handler |
 | CDP full-debugging mode and approvals | Planned |
 | Actual JS/Wasm user site-adapter execution and sandbox | Planned |
 | Firefox and Safari browser integrations | Planned |
