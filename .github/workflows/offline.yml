@@ -1,0 +1,38 @@
+name: Offline dependency verification
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/pubspec.yaml"
+      - "app/pubspec.lock"
+      - "bindings/dart/**"
+      - ".github/workflows/offline.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: deps
+          path: deps-cache
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Verify dependency manifest status
+        run: |
+          python -c "import json; d=json.load(open('deps-cache/manifest.json')); assert d['status']=='complete' and len(d['pubPackages'])>0"
+      - name: Resolve Dart graph without network
+        working-directory: app
+        env:
+          PUB_CACHE: ${{ github.workspace }}/deps-cache/pub
+        run: flutter pub get --offline
+      - name: Analyze against mirrored packages
+        working-directory: app
+        env:
+          PUB_CACHE: ${{ github.workspace }}/deps-cache/pub
+        run: flutter analyze
