@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from build import flutter_args, package_ui
+from build import flutter_args, package_ui, package_debug_extension
 
 
 class PackagingTests(unittest.TestCase):
@@ -26,6 +26,25 @@ class PackagingTests(unittest.TestCase):
             self.assertTrue((path / "ui" / "index.html").exists())
             self.assertIn("../bridge.js", (path / "ui" / "index.html").read_text())
             self.assertFalse((path / "ui" / "main.dart.js.map").exists())
+
+    def test_debug_extension_is_a_distinct_unpacked_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / "chromium"
+            (source / "ui").mkdir(parents=True)
+            (source / "ui" / "index.html").write_text("<html></html>")
+            (source / "manifest.json").write_text('{"permissions":["tabs"]}')
+            (source / "manifest.debug.json").write_text(
+                '{"permissions":["tabs","debugger"]}'
+            )
+            package_debug_extension(source, base / "chromium-debug")
+            self.assertIn(
+                "debugger",
+                (base / "chromium-debug" / "manifest.json").read_text(),
+            )
+            self.assertNotIn(
+                "debugger", (source / "manifest.json").read_text(),
+            )
 
     def test_broken_bundle_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

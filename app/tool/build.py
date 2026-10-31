@@ -39,6 +39,26 @@ def package_ui(source: Path, target: Path) -> None:
     index.write_text(html, encoding="utf-8")
 
 
+def package_debug_extension(source: Path, destination: Path) -> None:
+    """Make an isolated, debug-enabled unpacked extension distribution."""
+    if not (source / "manifest.debug.json").is_file():
+        raise FileNotFoundError("Elevated Chromium manifest is unavailable")
+    if not (source / "ui" / "index.html").is_file():
+        raise FileNotFoundError("Build the shared Flutter UI first")
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(
+        source, destination,
+        ignore=shutil.ignore_patterns(
+            "*.test.mjs", "node_modules", "ui/*.map",
+        ),
+    )
+    shutil.copyfile(
+        destination / "manifest.debug.json",
+        destination / "manifest.json",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kind", choices=("pwa", "chromium"))
@@ -46,7 +66,11 @@ def main() -> None:
         "--wasm", action="store_true",
         help="Build Flutter web with --wasm (extension compatibility must be checked)",
     )
+    parser.add_argument("--debug", action="store_true",
+        help="Package a separate Chromium debugger extension with CDP permission")
     opts = parser.parse_args()
+    if opts.debug and opts.kind != "chromium":
+        parser.error("--debug is only valid for chromium")
     subprocess.run(["flutter", "pub", "get"], check=True, cwd=APP)
     subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
     if opts.kind == "chromium":
@@ -55,6 +79,12 @@ def main() -> None:
             ROOT / "bindings" / "browser" / "chromium" / "ui",
         )
         print("Packaged Flutter UI into bindings/browser/chromium/ui")
+        if opts.debug:
+            package_debug_extension(
+                ROOT / "bindings" / "browser" / "chromium",
+                ROOT / "build" / "chromium-debug",
+            )
+            print("Elevated debugger extension in build/chromium-debug")
     else:
         print("Built standalone PWA in app/build/web")
         if opts.wasm:
