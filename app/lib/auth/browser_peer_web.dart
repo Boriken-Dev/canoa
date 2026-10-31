@@ -45,7 +45,7 @@ Future<String> verifyBrowserPeer(AgentConnection channel, String expectedPeerId)
     final challenge = await first.timeout(const Duration(seconds: 15));
     final proof = (await _answer(token.toJS, challenge.toJS).toDart).toDart;
 
-    final second = channel.nextHandshake();
+    final second = channel.nextSetupMessage();
     await channel.send(proof);
     final accepted = await second.timeout(const Duration(seconds: 15));
     return (await _finish(token.toJS, accepted.toJS).toDart).toDart;

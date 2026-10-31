@@ -75,7 +75,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       await widget.onConnect(request);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) setState(() => error = 'Connection refused: ${e}');
+      if (mounted) setState(() => error = 'Connection refused: $e');
     } finally {
       if (mounted) setState(() => busy = false);
     }
