@@ -124,19 +124,23 @@ mod tests {
             service.clone(),
             Capability("prompt".into()),
         );
-        assert!(registry
-            .resolve(
-                &ClientId("second".into()),
-                &service,
-                &Capability("prompt".into())
-            )
-            .is_none());
-        assert!(registry
-            .resolve(
-                &ClientId("first".into()),
-                &service,
-                &Capability("execute".into())
-            )
-            .is_none());
+        assert!(
+            registry
+                .resolve(
+                    &ClientId("second".into()),
+                    &service,
+                    &Capability("prompt".into())
+                )
+                .is_none()
+        );
+        assert!(
+            registry
+                .resolve(
+                    &ClientId("first".into()),
+                    &service,
+                    &Capability("execute".into())
+                )
+                .is_none()
+        );
     }
 }
