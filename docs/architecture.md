@@ -1,63 +1,57 @@
 # Architecture
 
-Canoa connects native applications and browser clients to agent services, and also makes approved browser capabilities available to agents as MCP tools.
+Canoa is one implementation of an interoperable gateway pattern. Compatible ACP clients/servers and other browser bridges are first-class peers; nothing requires a central Canoa service.
 
-## Core flow: application to agent
-
-1. Discover candidates via DNS-SD/mDNS or manual remote configuration.
-2. Authenticate a peer and resolve its trusted identity through coqui-peer.
-3. Match the requesting principal to an explicit capability grant.
-4. Select a protocol adapter (ACP first), initiate or attach to a session and route frames.
-5. Revocation affects future requests and can close active routed sessions.
-
-The Rust `canoa` crate currently contains only an in-memory decision model. Its caller-supplied `verified` boolean is **not** a network security boundary.
-
-## Reverse flow: agent to browser (MCP)
+## Interfaces
 
 ```text
-MCP client / agent
-      |
-authenticated MCP connection (stdio or protected Streamable HTTP)
-      |
-Canoa native broker  [MCP server: tools/list, tools/call]
-      |
-Chrome native messaging (length-prefixed JSON, extension-ID allowlist)
-      |
-bindings/browser/chromium/ (MV3 extension)
-      |
-approved browser tab
-      |---------------- DOM snapshot / click / fill
-      |---------------- WebMCP tools (document.modelContext)
-      |---------------- advertised site MCP endpoint (discovery only)
+Website  --(extension-controlled page grant)--> Browser extension (Canoa)
+                                                           |
+                                                 ACP JSON-RPC over WSS/WS
+                                                 + verified peer authentication
+                                                           |
+                                          Any compatible ACP agent or gateway
+                                                           |
+                                               Agent's own session permissions
+
+MCP agent/client  -- MCP --> compatible MCP provider / Canoa broker
+                                      |
+                          approved browser MCP tools
+                                      |
+                          Browser extension local policy
+                                      |
+                             user-approved tab
+                                  |       |
+                            DOM actions  WebMCP tools
 ```
 
-The broker authenticates MCP callers and owns the permission and origin checks before forwarding any requests. The extension validates the tab and the user's read/interaction grants again. No agent or webpage receives raw broker or agent credentials.
+Browsers may connect directly over WSS once they implement the peer-authentication profile and have a verified peer. A native host is an **optional adapter** for mDNS discovery, local stdio/pipe agents, and exposing browser MCP tools to native agents; it is not the sole permission authority or mandatory for WSS.
 
-The Chromium code is a **client scaffold**. Its native host is not yet implemented, so agents cannot currently connect. Native messaging is not itself MCP.
+## Permission authorities
 
-### Browser permissions
+- **Browser extension:** final authority for tab disclosure, DOM read/write, webpage WebMCP invocation, webpage-to-agent exposure and prompts. Maintains its own scoped grants and revocation.
+- **Peer handshake/trust:** verifies endpoint identity and key continuity before granting any session. `coqui-peer` provides useful primitives but does not make the browser peer-auth wire format an existing standard.
+- **ACP agent:** independently manages sessions and its internal permissions.
+- **MCP client/provider:** independent authorization and tool execution policy. A browser grant cannot pre-approve remote MCP tool calls.
+- **Native gateway (if installed):** enforces its own peer and client restrictions but **cannot override** the browser's deny decision.
 
-- Canoa uses `activeTab` to obtain temporary access when the user clicks its toolbar action.
-- The popup explicitly approves read-only or interaction access to the active tab.
-- Grants are per tab and origin, stored in browser session storage and revoked on navigation, tab closure or explicit user action.
-- Only an extension-owned service worker accepts messages from the native host. No externally-connectable web message channel is registered.
-- The agent's tool permissions and Canoa's browser grants remain separate; read permission does not authorize writes.
-- Never assume web-supplied tool descriptions or HTML are instructions. Treat results as untrusted content.
+Trust requires all relevant parties to approve; an allow from one layer is not an allow from another.
 
-### Page-owned MCP services
+## Browser and page tools
 
-Two different kinds of page publishing are supported by the design:
+Canoa's Chromium implementation lives under `bindings/browser/chromium` and uses Manifest V3. Its local permission store is not shared with other browser implementations. For cross-browser interoperability, standardize the ACP transport and peer-auth proof, not permission database internals.
 
-1. **WebMCP:** pages register JavaScript tools with `document.modelContext.registerTool()`; Canoa may list/call those tools within an approved tab using the experimental API.
-2. **Remote MCP:** sites may advertise a separately hosted MCP server. Canoa recognizes opt-in `<link rel="mcp" href="/mcp">` as a **Canoa-specific convention**, and in a future broker phase may consult the evolving MCP Server Card / AI Catalog conventions.
+Browser-provided MCP tools may read bounded DOM text, inspect permitted tabs, interact with visible elements, and discover/invoke opt-in WebMCP tools. Site-provided MCP endpoints and WebMCP descriptions are untrusted discovery candidates and cannot grant themselves or an agent access.
 
-Advertisements are candidates, not authenticated connections. No advertisement is automatically fetched or connected from the extension. The native broker will enforce HTTPS, endpoint identity, redirect and SSRF rules, and user approval, then perform MCP OAuth if needed.
+A Chrome extension cannot directly browse DNS-SD/mDNS through general WebExtension APIs. It may use a native companion for discovery, but a manually entered WSS endpoint can work without one once peer authentication is implemented.
 
-## Implementation milestones
+## Roadmap
 
-1. Rust in-memory registry, deny-by-default grants and CI (implemented).
-2. Chromium MV3 scaffold: tab consent, bounded DOM tools, WebMCP discovery/invocation, advertised endpoint enumeration (implemented as a native-host client; broker pending).
-3. Native host and authenticated MCP tool server with lifecycle, timeouts and per-caller policy (pending).
-4. DNS-SD/mDNS and manual endpoint inventory, identity proof and pairing through coqui-peer (pending).
-5. ACP session routing and remote MCP clients (pending).
-6. More language bindings and browser targets as needed.
+1. Rust registry and deny-by-default rules (implemented).
+2. Browser-local, peer/tab/origin/capability permission model (implemented as isolated policy module; integrated transport pending).
+3. Browser UI and tab MCP operations, with explicit page permission (pending).
+4. Browser-compatible versioned coqui-peer wire profile and independently verified WSS/WS ACP bridge (pending).
+5. Native discovery adapter, agent-facing MCP service and optional browser tool relay (pending).
+6. Independent implementation conformance tests and additional language bindings (pending).
+
+See [interop.md](interop.md) for the minimum interoperability profile.

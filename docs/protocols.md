@@ -1,23 +1,26 @@
-# Protocol adapters
+# Protocol roles
 
-Canoa uses ACP primarily for applications interacting with agent services. MCP provides the reverse direction: agents use browser tools that Canoa exposes, as well as services hosted by websites.
+Canoa supports two distinct protocol directions: **ACP** for applications connecting to agents, and **MCP** for agents consuming tools and capabilities exposed by a browser or a website.
 
-## Agent Client Protocol
+## ACP over WebSocket
 
-ACP is the agent session protocol, not a discovery, identity or trust system. ACP transports and agent permissions are negotiated by the adapter and service; the broker never forwards a privileged internal token or launch metadata supplied by an untrusted page.
+ACP JSON-RPC is exchanged over WS/WSS according to the remote transport profile implemented by the agent. Canoa cannot presume that every ACP stdio agent also implements WebSocket. The endpoint advertises its ACP protocol version and supports a compatible WS profile. `wss://` is the production default; plaintext `ws://` requires an explicit, local-only developer opt-in.
 
-## Model Context Protocol
+Peer authentication is separate from ACP. Canoa aims to use `coqui-peer` semantics and a **documented interoperable, versioned WebSocket peer-auth profile**, not a secret Canoa token or an unspecified claim of identity. Since a browser cannot select a TLS client certificate or add arbitrary WebSocket headers, browser peer proof must be possible after WSS setup, before sending ACP messages.
 
-The native Canoa broker will implement an MCP **server** using the standard `tools/list` and `tools/call` operations. Its client-facing transport must be stdio or authenticated Streamable HTTP, not Chrome's native messaging wire. Exposed browser tools will include browsing approved tabs, reading bounded page text, interacting with elements under a separate grant, listing/invoking page WebMCP tools, and enumerating endpoint advertisements.
+## MCP: browser tools exposed to agents
 
-The Chromium extension will speak a small **internal** JSON message contract over native messaging to the broker. That contract must not be confused with an MCP transport. Client origin, peer identity, session permissions, request timeouts, and denial handling are the broker's responsibilities.
+The Chromium extension owns policy decisions for tab access. Browser tools such as `browser_read_page`, `browser_click`, `browser_fill`, and WebMCP discovery/invocation are provided only after a local browser grant. A compatible MCP server may forward such calls into the extension, but its approval is insufficient to override a browser denial.
 
-## WebMCP
+ACP and MCP must not be confused: simply opening an ACP WebSocket does not advertise an MCP server to the agent. An agent must explicitly support the MCP transport used by Canoa, or negotiate a standardized MCP-over-ACP extension where available.
 
-Chromium's experimental `document.modelContext` API allows pages to register client-side tools; it is not an HTTP server, and it does not expose MCP resources or prompts. Canoa will treat its output as untrusted data and will not silently invoke tools with side effects. Some versions of Chromium require developer flags or trials; feature detection is mandatory.
+## Website-provided MCP
 
-## MCP endpoint advertisement
+A webpage can register JS tools through WebMCP, or it can advertise an independently hosted MCP service. WebMCP is page-local, not an HTTP MCP server. Endpoint advertisements are only hints, subject to browser consent, endpoint verification, redirects/SSRF checks in the appropriate broker, and any remote MCP authentication.
 
-Canoa initially accepts a `<link rel="mcp" href="/mcp">` hint (a Canoa-specific opt-in convention), along with published MCP discovery metadata when supported by the broker. Advertisements are never treated as credentials or as consent to connect.
+## Sources
 
-References: https://modelcontextprotocol.io/specification ; https://github.com/webmachinelearning/webmcp ; https://github.com/modelcontextprotocol/ext-server-card
+- https://agentclientprotocol.com/
+- https://docs.rs/agent-client-protocol-http/
+- https://modelcontextprotocol.io/
+- https://github.com/webmachinelearning/webmcp

@@ -1,9 +1,10 @@
 # Browser bindings
 
-Browser integration is organized under `bindings/browser/`, alongside any future Python, Node or other language bindings.
+The Canoa browser bindings provide a local permission authority for tools acting on tabs and site-provided services.
 
-- `chromium/`: Chrome/Chromium Manifest V3 extension, branded **Canoa**.
-- `sdk/`: reserved for a portable browser-facing JavaScript API when implemented.
-- `firefox/`: a distinct manifest/host configuration when implemented; do not assume Chromium's native messaging manifest is portable.
+- `chromium/`: Chrome/Chromium MV3 extension, named **Canoa**.
+- Additional browsers and SDKs may be added as independent implementations.
 
-The extension is a client of a separately installed native Canoa broker. A browser extension alone does not supply an MCP transport reachable by agents.
+The extension may connect directly to WSS ACP peers (once their handshake is implemented) and does not require the Canoa native daemon for authorization. An optional native host may discover mDNS services, launch stdio agents or route MCP tools for native MCP clients.
+
+See [the interoperability profile](../../docs/interop.md).
