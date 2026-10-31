@@ -94,6 +94,9 @@ final class HandshakeChannel implements AgentConnection {
     }
     await _subscription.cancel();
     await _upstream.close();
-    if (!_messages.isClosed) await _messages.close();
+    // A single-subscription controller never completes its close future
+    // until somebody subscribes. Failed pre-auth connections have no ACP
+    // listener, so close without awaiting that future.
+    if (!_messages.isClosed) unawaited(_messages.close());
   }
 }

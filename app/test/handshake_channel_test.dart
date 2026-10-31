@@ -33,6 +33,7 @@ void main() {
     final sub = channel.messages.listen(received.add);
     await Future<void>.delayed(Duration.zero);
     source.events.add('second ACP frame');
+    await Future<void>.delayed(Duration.zero);
     expect(received, ['first ACP frame', 'second ACP frame']);
     await sub.cancel();
     await channel.close();
