@@ -1,0 +1,56 @@
+name: Refresh deps branch
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/pubspec.yaml"
+      - "bindings/dart/**"
+      - "tools/mirror_deps.py"
+      - ".github/workflows/deps.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: canoa-deps
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve Dart packages
+        env:
+          PUB_CACHE: /tmp/canoa_pub
+        run: |
+          cd app
+          flutter pub get
+          flutter build web --release --no-web-resources-cdn
+          test -f pubspec.lock
+      - name: Check out deps
+        run: |
+          git fetch origin deps
+          git worktree add --detach "$RUNNER_TEMP/canoa-deps" origin/deps
+      - name: Copy pub and CDN dependencies
+        run: |
+          python tools/mirror_deps.py \
+            --source-pub /tmp/canoa_pub \
+            --destination "$RUNNER_TEMP/canoa-deps" \
+            --revision "$GITHUB_SHA"
+          cp app/pubspec.lock "$RUNNER_TEMP/canoa-deps/pubspec.lock"
+      - name: Push cache
+        run: |
+          cd "$RUNNER_TEMP/canoa-deps"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "deps: mirror Canoa pub and CDN cache"
+            git push origin HEAD:deps
+          fi
