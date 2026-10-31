@@ -1,0 +1,11 @@
+{
+  "name": "Canoa",
+  "short_name": "Canoa",
+  "description": "Multi-session agent chat",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#101820",
+  "theme_color": "#101820"
+}
