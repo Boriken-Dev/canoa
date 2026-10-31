@@ -2,6 +2,7 @@ import {
   DIRECTION, CAPABILITY, isAllowed, makeGrant, revokePeer, revokeTab
 } from "./permissions.js";
 import { captureContext, addContext, takeContext } from "./context-transfer.js";
+import { detachOnTabClosed } from "./devtools.js";
 
 // Browser-owned, deny-by-default policy. No page-origin messages are accepted.
 const KEY = "canoa_grants";
@@ -16,10 +17,12 @@ async function storeGrants(grants) {
 }
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+  await detachOnTabClosed(tabId);
   await storeGrants(revokeTab(await readGrants(), tabId));
 });
 chrome.tabs.onUpdated.addListener(async (tabId, changes) => {
   if (changes.status === "loading") {
+    await detachOnTabClosed(tabId);
     await storeGrants(revokeTab(await readGrants(), tabId));
   }
 });

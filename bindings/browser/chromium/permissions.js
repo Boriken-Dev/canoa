@@ -17,7 +17,8 @@ export const CAPABILITY = Object.freeze({
   READ: "browser.read",
   INTERACT: "browser.interact",
   WEBMCP: "webmcp.invoke",
-  DISCOVER: "mcp.discover"
+  DISCOVER: "mcp.discover",
+  DEBUG: "browser.debug"
 });
 
 const directions = new Set(Object.values(DIRECTION));
@@ -45,7 +46,7 @@ function validGrant(value) {
 
   if (value.direction === DIRECTION.AGENT_TO_PAGE) {
     if (!Number.isSafeInteger(value.tabId) || value.tabId < 0) return false;
-    if (![CAPABILITY.READ, CAPABILITY.INTERACT, CAPABILITY.WEBMCP, CAPABILITY.DISCOVER]
+    if (![CAPABILITY.READ, CAPABILITY.INTERACT, CAPABILITY.WEBMCP, CAPABILITY.DISCOVER, CAPABILITY.DEBUG]
       .includes(value.capability)) return false;
   } else {
     if (value.tabId !== undefined) return false;

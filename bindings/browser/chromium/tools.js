@@ -2,6 +2,30 @@
 // This catalogue is not itself an MCP transport or an accessible web API.
 export const TOOLS = Object.freeze([
   {
+    name: "browser_debug_command",
+    description: "Run an approved Chromium DevTools Protocol command on a tab after a separate elevated browser.debug grant. Available only in the debugger build.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: { type: "integer" },
+        method: { type: "string" },
+        params: { type: "object" }
+      },
+      required: ["tabId", "method"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "browser_debug_detach",
+    description: "Release a previous CDP debugger attachment on a permitted tab.",
+    inputSchema: {
+      type: "object",
+      properties: { tabId: { type: "integer" } },
+      required: ["tabId"], additionalProperties: false
+    }
+  },
+
+  {
     name: "browser_list_tabs",
     description: "List only browser tabs this verified peer is permitted to read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },

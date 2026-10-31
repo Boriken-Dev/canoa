@@ -1,14 +1,17 @@
 import { CAPABILITY, DIRECTION, isAllowed } from "./permissions.js";
 import { TOOLS } from "./tools.js";
+import { debugCommand, debugDetach } from "./devtools.js";
 
-const CAPABILITIES = Object.freeze({
+export const CAPABILITIES = Object.freeze({
   browser_list_tabs: CAPABILITY.READ,
   browser_read_page: CAPABILITY.READ,
   browser_click: CAPABILITY.INTERACT,
   browser_fill: CAPABILITY.INTERACT,
   browser_list_webmcp: CAPABILITY.READ,
   browser_call_webmcp: CAPABILITY.WEBMCP,
-  browser_discover_mcp: CAPABILITY.DISCOVER
+  browser_discover_mcp: CAPABILITY.DISCOVER,
+  browser_debug_command: CAPABILITY.DEBUG,
+  browser_debug_detach: CAPABILITY.DEBUG
 });
 
 const SUPPORTED = new Set(TOOLS.map((tool) => tool.name));
@@ -43,6 +46,13 @@ export async function dispatchBrowserTool({ name, args = {}, peerId, trustedPeer
     if (name === "browser_list_tabs") {
       results.push({ tabId: tab.id, title: tab.title ?? "", url: tab.url });
       continue;
+    }
+
+    if (name === "browser_debug_command") {
+      return debugCommand({tabId: tab.id, method: args.method, params: args.params ?? {}});
+    }
+    if (name === "browser_debug_detach") {
+      return debugDetach({tabId: tab.id});
     }
 
     if (name === "browser_read_page") return inject(tab.id, readPage, [], "ISOLATED");
