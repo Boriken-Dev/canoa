@@ -24,16 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pages: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Install documentation tools
         run: pip install mkdocs-material==9.6.22
       - name: Build Rust API
@@ -62,5 +58,6 @@ jobs:
       pages: write
       id-token: write
     steps:
+      - uses: actions/configure-pages@v5
       - uses: actions/deploy-pages@v4
         id: deployment

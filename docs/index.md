@@ -20,4 +20,4 @@ Canoa provides a common place to discover, authenticate and interact with local 
 
 Canoa is **not** a new agent wire protocol. ACP is the client/agent interface; MCP is the tool interface, and coqui-peer supplies reusable identity and pairing primitives. Implementations may differ provided they agree on a published wire profile and authentication contract.
 
-See the [source repository](https://github.com/Boriken-Dev/Canoa) or the [Rust API](rust/canoa/index.html).
+See the [source repository](https://github.com/Boriken-Dev/Canoa) or the [Rust API](https://boriken-dev.github.io/Canoa/rust/canoa/index.html).
