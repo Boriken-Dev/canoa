@@ -12,6 +12,7 @@ function originOf(input) {
   let url;
   try { url = new URL(input); } catch { throw new TypeError("Invalid site origin"); }
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.hostname.includes("*")) throw new TypeError("Wildcard origins are not supported");
   if (!(url.protocol === "https:" || (url.protocol === "http:" && local)) ||
       input !== url.origin || url.username || url.password) {
     throw new TypeError("Adapter origins must be exact HTTPS origins or local HTTP");
