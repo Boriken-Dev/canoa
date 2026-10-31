@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:canoa/auth/handshake_channel.dart';
+import 'package:canoa/transport/staged_connection.dart';
 import 'package:canoa/transport/agent_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -22,13 +22,13 @@ final class Source implements AgentConnection {
 void main() {
   test('no authentication or ACP frames are dropped at handoff', () async {
     final source = Source();
-    final channel = HandshakeChannel(source);
+    final channel = StagedAgentConnection(source);
     source.events.add('hello');
     source.events.add('challenge');
-    expect(await channel.nextHandshake(), 'hello');
-    expect(await channel.nextHandshake(), 'challenge');
+    expect(await channel.nextSetupMessage(), 'hello');
+    expect(await channel.nextSetupMessage(), 'challenge');
     source.events.add('first ACP frame');
-    channel.promote();
+    channel.allowApplicationMessages();
     final received = <String>[];
     final sub = channel.messages.listen(received.add);
     await Future<void>.delayed(Duration.zero);
@@ -42,26 +42,26 @@ void main() {
 
   test('no duplicate handshake read or double promotion', () async {
     final source = Source();
-    final channel = HandshakeChannel(source);
-    final waiting = channel.nextHandshake();
-    expect(() => channel.nextHandshake(), throwsStateError);
-    expect(() => channel.promote(), throwsStateError);
+    final channel = StagedAgentConnection(source);
+    final waiting = channel.nextSetupMessage();
+    expect(() => channel.nextSetupMessage(), throwsStateError);
+    expect(() => channel.allowApplicationMessages(), throwsStateError);
     source.events.add('hello');
     expect(await waiting, 'hello');
-    channel.promote();
-    expect(() => channel.promote(), throwsStateError);
-    expect(() => channel.nextHandshake(), throwsStateError);
+    channel.allowApplicationMessages();
+    expect(() => channel.allowApplicationMessages(), throwsStateError);
+    expect(() => channel.nextSetupMessage(), throwsStateError);
     await channel.close();
   });
 
   test('disconnect prevents authentication success', () async {
     final source = Source();
-    final channel = HandshakeChannel(source);
-    final waiting = channel.nextHandshake();
+    final channel = StagedAgentConnection(source);
+    final waiting = channel.nextSetupMessage();
     final assertion = expectLater(waiting, throwsStateError);
     await source.events.close();
     await assertion;
-    expect(() => channel.promote(), throwsStateError);
+    expect(() => channel.allowApplicationMessages(), throwsStateError);
     await channel.close();
   });
 }

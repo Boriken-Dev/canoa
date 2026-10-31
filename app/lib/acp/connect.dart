@@ -1,4 +1,4 @@
-import '../auth/handshake_channel.dart';
+import '../transport/staged_connection.dart';
 import '../transport/agent_transport.dart';
 import 'client.dart';
 
@@ -21,7 +21,7 @@ Future<AcpV2Client> connectVerifiedAcp(
     webTransportDialer: webTransportDialer,
     webSocketDialer: webSocketDialer,
   );
-  final connection = HandshakeChannel(source);
+  final connection = StagedAgentConnection(source);
   final client = await AcpV2Client.open(
     connection,
     expectedPeerId: expectedPeerId,
@@ -29,7 +29,7 @@ Future<AcpV2Client> connectVerifiedAcp(
     verificationTimeout: timeout,
   );
   try {
-    connection.promote();
+    connection.allowApplicationMessages();
     await client.initialize();
     return client;
   } catch (_) {

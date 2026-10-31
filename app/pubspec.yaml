@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  coqui_net_transport:
+    path: ../bindings/dart/coqui_net_transport
   web_socket_channel: ^3.0.3
 
 dev_dependencies:

@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:js_interop';
 
 import '../transport/agent_transport.dart';
-import 'handshake_channel.dart';
+import '../transport/staged_connection.dart';
 
 @JS('canoaPeer')
 external JSObject? get _bridge;
@@ -25,8 +25,8 @@ external JSPromise<JSString> _finish(JSString token, JSString accepted);
 external void _abort(JSString token);
 
 Future<String> verifyBrowserPeer(AgentConnection channel, String expectedPeerId) async {
-  if (channel is! HandshakeChannel) {
-    throw StateError('A buffered peer-auth connection is required');
+  if (channel is! StagedAgentConnection) {
+    throw StateError('A staged transport connection is required');
   }
   if (_bridge == null) {
     throw StateError('Canoa WebCrypto peer bridge has not loaded');
@@ -40,7 +40,7 @@ Future<String> verifyBrowserPeer(AgentConnection channel, String expectedPeerId)
       throw const FormatException('Invalid browser identity handshake');
     }
     token = start['token'] as String;
-    final first = channel.nextHandshake();
+    final first = channel.nextSetupMessage();
     await channel.send(start['hello'] as String);
     final challenge = await first.timeout(const Duration(seconds: 15));
     final proof = (await _answer(token.toJS, challenge.toJS).toDart).toDart;
