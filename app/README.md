@@ -35,7 +35,7 @@ must also be checked against the extension's CSP and renderer requirements.
 The current UI offers a responsive session list, independent transcripts and
 a composer. It starts in an **explicit offline preview**. Messages typed into
 a preview conversation are kept only in memory and are never sent to an agent.
-No authenticated ACP WebSocket transport, real remote session state, persistence
+A transport-only WebTransport-first/WSS-fallback connector exists, but no authenticated ACP peer handshake, real remote session state, persistence
 or remote MCP viewer is connected yet.
 
 `lib/session_store.dart` is the shared view model. Transport and browser

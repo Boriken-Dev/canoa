@@ -5,7 +5,7 @@ Canoa is one implementation of a browser-to-agent gateway model. A compatible im
 ## Minimum remote agent interface
 
 1. **Agent Client Protocol (ACP)** is the application protocol. Use the published ACP lifecycle and JSON-RPC methods, not Canoa-specific method replacements.
-2. **WebSocket** is the network transport: `wss://` by default, `ws://` allowed only for explicitly opted-in local development. Each text frame carries one complete ACP JSON-RPC message (including standard responses/notifications); retain ordering and cancellation semantics. ACP remote transports are still developing, so adapters must advertise the exact supported ACP transport/version and negotiate or fail closed on incompatibility.
+2. **WebTransport over HTTPS** is preferred, with **WebSocket over WSS** as fallback. WebTransport uses a Canoa draft profile with an ordered bidirectional stream and little-endian length-prefixed UTF-8 JSON-RPC messages; WebSocket carries complete JSON-RPC text frames. WebTransport is not yet an upstream ACP standard transport; both addresses must be advertised and bound to the same verified peer. See [transport selection](transport.md).
 3. **Authenticated peer identity** must be verified **before** an ACP session is exposed. The `coqui-peer` family is the reference implementation for peer identity, pairing and trust, but merely claiming a `PeerId` string is not proof. A conforming non-Rust implementation needs the same documented on-wire proof and key-rotation semantics; using the Rust crate is not required. A versioned browser-compatible peer-auth profile for WebSockets still needs to be specified and tested against at least two independent implementations.
 4. **Capabilities** are negotiated by ACP. Browser tools are exposed as MCP only when the remote agent can consume them through a supported MCP connection or an explicitly negotiated ACP/MCP bridge. The MCP-over-ACP extension is currently experimental, not assumed mandatory.
 5. **Local policy** is owned by each client implementation. There is no global Canoa permission authority.
@@ -30,9 +30,9 @@ Default deny. Navigation or tab closure revokes tab-scoped grants. An authentica
 
 Websites can register WebMCP tools or advertise independent remote MCP endpoints. Both are *untrusted descriptions*: publication is not user permission and must not automatically establish a connection. Browser-to-site permissions, agent-to-browser permissions and agent-side tool approval are separate decisions.
 
-## Browser WebSocket and peer-auth constraints
+## Browser WebSocket, WebTransport and peer-auth constraints
 
-Browsers do not offer a general API for arbitrary TLS client-certificate selection or custom request headers in the WebSocket constructor. The browser-compatible authentication profile must work at the application layer **after a WSS handshake, before ACP messages**, or through a trusted local companion with verified peer identity. WSS establishes server certificate validation, not peer pairing by itself.
+Browsers do not offer a general API for arbitrary TLS client-certificate selection or custom request headers in the WebSocket constructor. The browser-compatible authentication profile must work at the application layer **after WebTransport/WSS establishment, before ACP messages**, or through a trusted local companion with verified peer identity. WSS establishes server certificate validation, not peer pairing by itself.
 
 Do not send long-lived tokens in URL query strings; they can leak through logs. A challenge/response handshake may use the coqui-peer peer-proof and pairing primitives, but its wire framing and state machine must be published, versioned and interoperability-tested before being called a standard.
 

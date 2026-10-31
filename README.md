@@ -9,7 +9,7 @@
 [![Flutter CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/flutter.yml?label=Flutter%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/flutter.yml)
 [![Docs CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/docs.yml?label=Docs%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/docs.yml)
 
-**Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone Boriken Dev project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through interoperable WS/WSS transports and a documented peer-authentication profile.
+**Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone Boriken Dev project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through preferred WebTransport (HTTPS) with WSS fallback and a documented peer-authentication profile.
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
@@ -18,7 +18,7 @@
 ## Features and direction
 
 - **One chat app:** root `app/` contains a responsive Flutter client for full-page, sidebar, desktop, PWA and optional Wasm builds; the browser extension packages the same app.
-- **Agent independent:** direct connections to compatible ACP peers over WS/WSS; native discovery/stdio adapters are optional.
+- **Agent independent:** WebTransport is preferred; a secure WebSocket fallback is used only when opening it fails. Peer identity is verified separately.
 - **Browser owned permissions:** approve access by verified peer, origin, tab and capability, with cancellation and revocation.
 - **Bidirectional MCP:** agents can request approved DOM/browser tools and website-provided WebMCP; webpages can advertise MCP endpoints.
 - **Developer debugging:** explicit elevated Chromium CDP mode; Firefox and Safari require separate adapters.

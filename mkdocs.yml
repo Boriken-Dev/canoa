@@ -29,6 +29,7 @@ nav:
   - Architecture: architecture.md
   - ACP and MCP: protocols.md
   - Interoperability: interop.md
+  - Transport selection: transport.md
   - Browser integration: browser.md
   - ACP permission requests: acp-permissions.md
   - User site adapters: site-adapters.md

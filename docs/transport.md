@@ -19,7 +19,7 @@ These are transport locations, **not authentication evidence**. Both must resolv
 
 ## Wire framing
 
-- **WebTransport** (a Canoa-specific draft profile): a single reliable bidirectional stream, `u32` little-endian length + UTF-8 JSON-RPC message. Maximum 4 MiB per message. Do not use unreliable datagrams for ACP commands or transcript updates.
+- **WebTransport** (a Canoa-specific draft profile): a single reliable bidirectional stream, `u32` little-endian length + UTF-8 JSON-RPC message. Maximum 1 MiB per message. Do not use unreliable datagrams for ACP commands or transcript updates.
 - **WebSocket** (the experimental remote ACP transport profile): one complete JSON-RPC message per **text frame**, not Guatiao's binary message format.
 - ACP initialization, session methods, notifications, cancellation, ordered updates and permissions are **identical** above the framing adapter.
 - WebTransport is not an official upstream ACP transport yet. A Canoa-compatible agent needs to support this documented stream framing, and interoperability tests between independent implementations are still required.
@@ -42,7 +42,7 @@ Plain WS is available only with explicit local-development opt-in and a loopback
 | Native Flutter/Dart VM | Native backend pending; try fallback | Supported via web_socket_channel |
 | Chrome/Edge side panel | Same Flutter web transport selection | Same WebSocket fallback |
 
-The Canoa app transport classes are now in `app/lib/transport/`, including testable dialer injection and endpoint validation. They establish a message channel **only**; an authenticated live ACP chat is not yet exposed until the versioned peer-authentication profile is implemented.
+The Canoa app transport classes are in `app/lib/transport/agent_transport.dart` and `contracts.dart`, including typed pre-auth fallback failures, testable dialers, and endpoint validation. A browser WebTransport endpoint must have an explicit port. The transport endpoints must share a host. A pinned certificate or protocol failure never silently downgrades to WebSocket. They establish a message channel **only**; an authenticated live ACP chat is not yet exposed until the versioned peer-authentication profile is implemented.
 
 ## References
 

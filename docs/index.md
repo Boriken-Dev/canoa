@@ -11,7 +11,7 @@ Canoa provides a common place to discover, authenticate and interact with local 
 
 - [Getting started](getting-started.md) to build the current Rust core or preview the Flutter interface.
 - [Architecture](architecture.md) explains peer identity, browser authority and tool permission boundaries.
-- [Interoperability](interop.md) defines how independently written clients can share ACP over WS/WSS.
+- [Interoperability](interop.md) and [Transport selection](transport.md) explain preferred WebTransport, WSS fallback and peer verification.
 - [Browser integration](browser.md) describes the Chromium extension, side panel, full-page UI and future cross-browser adapters.
 - [Site adapters](site-adapters.md) describe user-installed JavaScript and Wasm MCP tools for websites.
 - [Roadmap](roadmap.md) distinguishes working components from planned transports.

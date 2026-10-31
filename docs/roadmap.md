@@ -10,7 +10,8 @@ This page distinguishes tested code from planned integration work.
 | Flutter multi-session standalone UI | Offline preview; transport not connected |
 | Packaged Flutter extension side panel and full page | Build script and manifest, not browser integration tested |
 | Browser-to-chat user-selected page or text handoff | Implemented as local-only context attachment; no remote send |
-| Authenticated ACP WS/WSS and cross-language peer handshake | Planned |
+| WebTransport-preferred / WSS fallback agent message transport | Implemented in Dart with framing and fallback tests; not wired to chat |
+| Authenticated ACP peer handshake and live session controller | Planned |
 | Native service discovery and optional stdio bridge | Planned |
 | Browser-facing MCP server and remote session controller | Planned |
 | CDP full-debugging mode and approvals | Planned |
