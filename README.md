@@ -4,7 +4,7 @@
 
 Canoa is a standalone Boriken Dev project implementing interoperable discovery, authentication, permissions and routing between applications and local or remote AI agents. It supports a language-agnostic core and a browser extension, all branded **Canoa**.
 
-> Status: early development. The Rust library contains an in-memory service registry and deny-by-default selection rules. Direct ACP-over-WebSocket connections, a browser-compatible peer-auth profile, browser MCP tools, and browser UI are not implemented yet.
+> Status: early development. The Rust library has an in-memory registry and deny-by-default rules. The Chromium binding now has isolated browser-permission and ACP-permission helpers, MCP tool descriptions, and a local browser-tool dispatcher. No authenticated ACP WebSocket connection, peer-auth wire profile, native MCP server, browser approval UI, or agent-facing MCP transport is implemented yet.
 
 ## Interoperability
 
@@ -41,6 +41,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 ```
+
+See [ACP permission decisions](docs/acp-permissions.md) for the separate standard ACP `session/request_permission` handling.
 
 ## License
 

@@ -49,7 +49,7 @@ A Chrome extension cannot directly browse DNS-SD/mDNS through general WebExtensi
 
 1. Rust registry and deny-by-default rules (implemented).
 2. Browser-local, peer/tab/origin/capability permission model (implemented as isolated policy module; integrated transport pending).
-3. Browser UI and tab MCP operations, with explicit page permission (pending).
+3. Browser MCP tool catalogue and local permission-gated dispatch (implemented as an unwired scaffold); browser UI and transport integration remain pending.
 4. Browser-compatible versioned coqui-peer wire profile and independently verified WSS/WS ACP bridge (pending).
 5. Native discovery adapter, agent-facing MCP service and optional browser tool relay (pending).
 6. Independent implementation conformance tests and additional language bindings (pending).

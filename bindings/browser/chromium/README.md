@@ -1,9 +1,23 @@
 # Canoa for Chromium
 
-Canoa is a Manifest V3 browser extension. It is independently responsible for deciding which verified peer can access which tab, document origin and browser capability. The permission decision cannot be delegated solely to a native gateway.
+Canoa is a Manifest V3 browser extension named **Canoa**, under `bindings/browser/chromium/`.
 
-The initial module `permissions.js` implements the isolated, deny-by-default decision logic for verified peers, tab/origin scoping, individual browser tools and expiry. This is a building block, not a substitute for browser UI and a verified authentication handshake. A native host or WSS peer must supply a genuinely verified identity; never trust a `peerId` supplied by an untrusted webpage.
+## Implemented building blocks
 
-ACP over WS/WSS is the required external agent transport. WSS is the production profile. Coqui-peer's peer-proof format for browser WebSockets needs a publicly documented, versioned wire profile before any implementation can claim compatibility.
+- `permissions.js` and `permissions.test.mjs`: browser-owned, deny-by-default peer/tab/origin/capability grant decisions, expiry and revocation.
+- `acp-permissions.js` and its tests: valid ACP `session/request_permission` choices, including standard selected/cancelled results; never fabricate an option.
+- `tools.js`: MCP tool catalogue (browser tab list, page snapshot, click, fill, WebMCP discovery/invocation and advertised site MCP endpoints).
+- `browser-tools.js`: local dispatcher for those operations. It must receive a cryptographically verified peer from a trusted caller, and checks the extension's grants before any tab action. The adapter does not yet connect it to an MCP server.
+- `manifest.json` / `background.js`: MV3 skeleton, ephemeral browser-local grant storage and tab navigation revocation. No external webpage messages.
 
-The full browser popup, WebMCP integration, MCP tool transport and native discovery adapter remain to be implemented.
+## Still required before release
+
+A working popup/approval UI, authenticated ACP WebSocket client and its interoperable coqui-peer browser handshake, an MCP provider/transport for agents, browser integration wiring, native discovery adapter (optional), automated browser integration tests and distribution packaging.
+
+Without a paired peer and user-consent UI, the extension intentionally exposes no connected agent session and cannot yet serve MCP tools.
+
+## Security boundary
+
+The browser independently decides permission requests for its own tabs and WebMCP tools, and how to respond to ACP agent `session/request_permission`. A remote ACP peer's grant is not permission to read browser tabs. A browser's approval cannot override the agent's own enforcement.
+
+See [architecture](../../../docs/architecture.md), [interop](../../../docs/interop.md) and [ACP permissions](../../../docs/acp-permissions.md).
