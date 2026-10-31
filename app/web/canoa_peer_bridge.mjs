@@ -18,6 +18,9 @@ function token() {
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 const peer = Object.freeze({
+  async localId() {
+    return (await loadOrCreateIdentity()).peerId;
+  },
   async begin(expectedPeerId) {
     if (active.size >= 16) throw new Error('Too many concurrent peer handshakes');
     const identity = await loadOrCreateIdentity();

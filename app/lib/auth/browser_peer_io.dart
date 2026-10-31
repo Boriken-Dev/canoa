@@ -4,3 +4,7 @@ Future<String> verifyBrowserPeer(AgentConnection channel, String expectedPeerId)
     Future.error(UnsupportedError(
       'Browser WebCrypto is unavailable; use a native coqui-peer method',
     ));
+
+Future<String> localBrowserPeerId() => Future.error(
+  UnsupportedError('Native browser identity is unavailable'),
+);

@@ -7,6 +7,14 @@ import 'handshake_channel.dart';
 @JS('canoaPeer')
 external JSObject? get _bridge;
 
+@JS('canoaPeer.localId')
+external JSPromise<JSString> _localId();
+
+Future<String> localBrowserPeerId() async {
+  if (_bridge == null) throw StateError('Canoa peer bridge not loaded');
+  return (await _localId().toDart).toDart;
+}
+
 @JS('canoaPeer.begin')
 external JSPromise<JSString> _begin(JSString expectedPeerId);
 @JS('canoaPeer.answer')
