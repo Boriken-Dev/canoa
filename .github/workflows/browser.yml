@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "bindings/browser/**"
+      - "app/web/canoa_peer.mjs"
+      - "app/test/peer_web.test.mjs"
       - ".github/workflows/browser.yml"
   pull_request:
     paths:
@@ -19,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Browser WebCrypto peer authentication tests
+        run: node --test app/test/peer_web.test.mjs
       - name: Chromium permission tests
         run: npm test
         working-directory: bindings/browser/chromium
