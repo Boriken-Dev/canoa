@@ -11,6 +11,10 @@ dependencies:
     sdk: flutter
   coqui_net_transport:
     path: ../bindings/dart/coqui_net_transport
+  toml: ^0.18.0
+  http: ^1.6.0
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
   web_socket_channel: ^3.0.3
 
 dev_dependencies:
@@ -20,3 +24,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icons/canoa_tray.png
