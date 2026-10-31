@@ -30,6 +30,27 @@ void main() {
     store.dispose();
   });
 
+  test('selected page context is local, per-session and not sent', () {
+    final store = SessionStore(includePreview: false);
+    final first = store.createPreviewSession(title: 'First');
+    final second = store.createPreviewSession(title: 'Second');
+    store.addPageContext('{"url":"https://example.com/p",'
+        '"title":"Page","selection":"Chosen"}');
+    expect(second.messages.single.text, contains('Attached page context (not sent)'));
+    expect(second.messages.single.text, contains('Chosen'));
+    expect(first.messages, isEmpty);
+    store.dispose();
+  });
+
+  test('malformed context is ignored', () {
+    final store = SessionStore(includePreview: false);
+    final session = store.createPreviewSession();
+    store.addPageContext('not json');
+    store.addPageContext('{"url":"javascript:alert(1)"}');
+    expect(session.messages, isEmpty);
+    store.dispose();
+  });
+
   test('plain WS remote endpoints are rejected', () {
     final store = SessionStore(includePreview: false);
     expect(

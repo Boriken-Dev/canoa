@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'extension_context.dart';
 import 'package:flutter/material.dart';
 
 import 'session_store.dart';
@@ -20,16 +22,34 @@ class CanoaApp extends StatefulWidget {
 class _CanoaAppState extends State<CanoaApp> {
   late final SessionStore store;
   late final bool ownsStore;
+  Timer? _contextTimer;
+  bool _claimingContext = false;
+
+  Future<void> _claimContext() async {
+    if (_claimingContext) return;
+    _claimingContext = true;
+    try {
+      final context = await claimExtensionPageContext();
+      if (context != null && mounted) store.addPageContext(context);
+    } finally {
+      _claimingContext = false;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     ownsStore = widget.store == null;
     store = widget.store ?? SessionStore();
+    unawaited(_claimContext());
+    _contextTimer = Timer.periodic(
+      const Duration(seconds: 2), (_) => unawaited(_claimContext()),
+    );
   }
 
   @override
   void dispose() {
+    _contextTimer?.cancel();
     if (ownsStore) store.dispose();
     super.dispose();
   }

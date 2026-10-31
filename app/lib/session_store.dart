@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 /// Canoa's local view of an agent-issued session. The agent session id is
@@ -118,6 +119,33 @@ class SessionStore extends ChangeNotifier {
     _selectedId = session.id;
     notifyListeners();
     return session;
+  }
+
+  /// Attach explicit user-selected page context to the visible local session.
+  /// This does not transmit the page to an agent. The eventual ACP adapter
+  /// must obtain a separate user-approved context/send decision.
+  void addPageContext(String encoded) {
+    final session = selected;
+    if (session == null || encoded.length > 12000) return;
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map<String, dynamic>) return;
+      final url = decoded['url'];
+      if (url is! String) return;
+      final uri = Uri.tryParse(url);
+      if (uri == null || !['http', 'https'].contains(uri.scheme)) return;
+      final title = decoded['title'] is String ? decoded['title'] as String : '';
+      final selection = decoded['selection'] is String ? decoded['selection'] as String : '';
+      final suffix = selection.isEmpty ? '' : '\\nSelected text: ${selection.length > 8000 ? selection.substring(0, 8000) : selection}';
+      session.messages.add(ChatMessage(
+        role: MessageRole.notice,
+        text: 'Attached page context (not sent): ${title.isEmpty ? uri.host : title}\\n$uri$suffix',
+        at: DateTime.now(),
+      ));
+      notifyListeners();
+    } on FormatException {
+      // Ignore malformed extension messages.
+    }
   }
 
   void select(String id) {

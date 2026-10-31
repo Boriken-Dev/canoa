@@ -31,6 +31,12 @@ def package_ui(source: Path, target: Path) -> None:
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source, target, ignore=shutil.ignore_patterns("*.map"))
+    index = target / "index.html"
+    html = index.read_text(encoding="utf-8")
+    if "<head>" not in html:
+        raise ValueError("Flutter index.html has no head element")
+    html = html.replace("<head>", '<head>\\n    <script src="../bridge.js"></script>', 1)
+    index.write_text(html, encoding="utf-8")
 
 
 def main() -> None:

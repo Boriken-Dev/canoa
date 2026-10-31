@@ -9,7 +9,8 @@ The canonical multi-session chat UI lives in root `app/` (Flutter); build with `
 - `permissions.js`, `acp-permissions.js`: independent browser and ACP permission decisions; both have tests.
 - `tools.js`, `browser-tools.js`: local MCP-shaped browser tool catalogue and grant-checked operations, not yet exposed over an MCP server.
 - `site-adapters.js`: validates manifests for user-installed JavaScript or Wasm adapters bound to one or multiple website origins; no arbitrary code execution or adapter installation is implemented yet.
-- `manifest.json` and `background.js`: MV3 side panel, full-page context menu, local policy and tab-navigation revocation.
+- `manifest.json` and `background.js`: MV3 side panel, full-page view, **Ask Canoa** page/selection context menu, local policy and tab-navigation revocation.
+- `context-transfer.js` and `bridge.js`: user-selected context is scrubbed of URL query tokens and handed once to the Flutter UI. It is attached **locally** and never sent to an agent until a real transport and send approval exist.
 - `manifest.debug.json`: elevated debugger build configuration. Debug control requires separate UI authorization and an authenticated agent connection; the file alone does not enable safe remote CDP control.
 
 ## Planned user experience
