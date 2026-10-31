@@ -1,0 +1,51 @@
+name: Flutter
+
+on:
+  push:
+    paths:
+      - "app/**"
+      - "bindings/browser/chromium/bridge.js"
+      - ".github/workflows/flutter.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - "bindings/browser/chromium/bridge.js"
+      - ".github/workflows/flutter.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: Flutter app, web and extension packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Get packages
+        run: flutter pub get
+        working-directory: app
+      - name: Analyze
+        run: flutter analyze
+        working-directory: app
+      - name: Widget and unit tests
+        run: flutter test
+        working-directory: app
+      - name: Python packager tests
+        run: python -m unittest discover -s app/tool -p "test_*.py"
+      - name: Build PWA
+        run: flutter build web --release
+        working-directory: app
+      - name: Package Chromium app
+        run: python app/tool/build.py chromium
+      - name: Check extension assets are bundled locally
+        run: |
+          test -f bindings/browser/chromium/ui/index.html
+          grep -F '../bridge.js' bindings/browser/chromium/ui/index.html
+      - name: Build web Wasm option
+        run: flutter build web --release --wasm
+        working-directory: app

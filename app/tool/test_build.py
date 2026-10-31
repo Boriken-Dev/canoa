@@ -24,6 +24,7 @@ class PackagingTests(unittest.TestCase):
             (source / "main.dart.js.map").write_text("map")
             package_ui(source, path / "ui")
             self.assertTrue((path / "ui" / "index.html").exists())
+            self.assertIn("../bridge.js", (path / "ui" / "index.html").read_text())
             self.assertFalse((path / "ui" / "main.dart.js.map").exists())
 
     def test_broken_bundle_fails_closed(self):

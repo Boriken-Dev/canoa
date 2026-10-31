@@ -6,6 +6,7 @@
 [![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://boriken-dev.github.io/Canoa/)
 [![Rust CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/test.yml?label=Rust%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/test.yml)
 [![Browser CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/browser.yml?label=Browser%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/browser.yml)
+[![Flutter CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/flutter.yml?label=Flutter%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/flutter.yml)
 [![Docs CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/docs.yml?label=Docs%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/docs.yml)
 
 **Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone Boriken Dev project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through interoperable WS/WSS transports and a documented peer-authentication profile.
