@@ -288,6 +288,79 @@ mod tests {
         );
     }
 
+    struct TestChannel {
+        log: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    }
+
+    impl Channel for TestChannel {
+        fn close(&mut self) {
+            self.log.borrow_mut().push("close".to_string());
+        }
+    }
+
+    struct TestDialer {
+        log: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    }
+
+    impl Dialer for TestDialer {
+        type Connection = TestChannel;
+
+        fn dial(
+            &mut self,
+            transport: Transport,
+            _: &str,
+        ) -> Result<TestChannel, Failure> {
+            self.log.borrow_mut().push(format!("dial:{transport:?}"));
+            Ok(TestChannel { log: self.log.clone() })
+        }
+    }
+
+    struct TestProbe {
+        log: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        problem: Failure,
+    }
+
+    impl Preflight<TestChannel> for TestProbe {
+        fn check(
+            &mut self,
+            transport: Transport,
+            _: &mut TestChannel,
+        ) -> Result<(), Failure> {
+            self.log.borrow_mut().push(format!("probe:{transport:?}"));
+            if transport == Transport::WebTransport {
+                return Err(self.problem);
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn establishment_retries_only_pre_auth_path_failures() {
+        for problem in [Failure::SuspectedMtu, Failure::Timeout, Failure::Certificate] {
+            let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut dial = TestDialer { log: log.clone() };
+            let mut probe = TestProbe { log: log.clone(), problem };
+            let result = establish(
+                EndpointSet {
+                    webtransport: Some("https://peer.example:4433/"),
+                    websocket: Some("wss://peer.example/"),
+                },
+                &mut dial,
+                &mut probe,
+            );
+            if problem == Failure::Certificate {
+                assert!(matches!(result, Err(Failure::Certificate)));
+                assert_eq!(*log.borrow(), ["dial:WebTransport", "probe:WebTransport", "close"]);
+            } else {
+                assert_eq!(result.unwrap().transport, Transport::WebSocket);
+                assert_eq!(
+                    *log.borrow(),
+                    ["dial:WebTransport", "probe:WebTransport", "close", "dial:WebSocket", "probe:WebSocket"]
+                );
+            }
+        }
+    }
+
     #[test]
     fn frames_survive_fragmentation_and_coalescing() {
         let mut bytes = encode_frame(b"hello", 10).unwrap();
