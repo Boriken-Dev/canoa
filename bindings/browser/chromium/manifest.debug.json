@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Canoa",
+  "version": "0.0.1",
+  "description": "Canoa browser debugging build with CDP access.",
+  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "contextMenus", "userScripts", "debugger"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Canoa" },
+  "side_panel": { "default_path": "ui/index.html?view=panel" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

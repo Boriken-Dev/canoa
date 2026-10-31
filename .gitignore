@@ -4,3 +4,8 @@
 .env
 .env.*
 !.env.example
+/app/.dart_tool/
+/app/build/
+/app/.flutter-plugins*
+/bindings/browser/chromium/ui/
+/bindings/browser/firefox/ui/

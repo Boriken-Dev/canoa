@@ -2,8 +2,13 @@
   "manifest_version": 3,
   "name": "Canoa",
   "version": "0.0.1",
-  "description": "Connect browser applications and agent peers with user-managed permissions.",
-  "permissions": ["activeTab", "tabs", "scripting", "storage"],
+  "description": "Multi-session ACP chat and browser MCP tools.",
+  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "contextMenus", "userScripts"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_title": "Canoa" }
+  "action": { "default_title": "Canoa" },
+  "side_panel": { "default_path": "ui/index.html?view=panel" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }
