@@ -42,7 +42,7 @@ void main() {
     final channel = FakeChannel();
     final proof = Completer<String>();
     final pending = AcpV2Client.open(channel,
-      expectedPeerId: peerId, verifyPeer: (_, __) => proof.future);
+      expectedPeerId: peerId, verifyPeer: (_, _) => proof.future);
     await Future<void>.delayed(Duration.zero);
     expect(channel.sent, isEmpty);
     proof.complete('wrong');

@@ -217,8 +217,14 @@ class _ConversationState extends State<_Conversation> {
     final text = _input.text;
     if (text.trim().isEmpty) return;
     try {
-      widget.store.sendPreviewText(text);
       _input.clear();
+      unawaited(widget.store.sendText(text).catchError((Object error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Message not accepted: $error')),
+          );
+        }
+      }));
     } on StateError {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Connect and verify an ACP peer before sending.'),
@@ -255,9 +261,10 @@ class _ConversationState extends State<_Conversation> {
                   style: Theme.of(context).textTheme.bodySmall),
               ],
             )),
-            const Chip(
-              avatar: Icon(Icons.science_outlined, size: 16),
-              label: Text('Preview'),
+            Chip(
+              avatar: const Icon(Icons.hub_outlined, size: 16),
+              label: Text(session?.status == SessionStatus.preview
+                  ? 'Preview' : (session?.status.name ?? 'Offline')),
               visualDensity: VisualDensity.compact,
             ),
           ]),
@@ -282,7 +289,9 @@ class _ConversationState extends State<_Conversation> {
         ),
         _Composer(
           controller: _input,
-          enabled: session.status == SessionStatus.preview,
+          enabled: session.status == SessionStatus.preview ||
+              session.status == SessionStatus.connected ||
+              session.status == SessionStatus.working,
           onSend: _send,
         ),
       ],
@@ -349,7 +358,7 @@ class _Composer extends StatelessWidget {
               textInputAction: TextInputAction.send,
               onSubmitted: (_) => onSend(),
               decoration: InputDecoration(
-                hintText: enabled ? 'Message (preview only)' : 'Connect an ACP peer to chat',
+                hintText: enabled ? 'Message agent' : 'Connect an ACP peer to chat',
                 filled: true,
                 fillColor: const Color(0xFF1B3039),
                 border: OutlineInputBorder(
@@ -364,7 +373,7 @@ class _Composer extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            const Text('Local preview only · no agent connection',
+            const Text('Remote sessions require verified peer authentication',
               style: TextStyle(fontSize: 11, color: Color(0xFF9CB3BD))),
           ]),
         ),

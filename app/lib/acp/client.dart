@@ -118,7 +118,7 @@ final class AcpV2Client {
       final completer = _pending.remove(id);
       if (completer == null || completer.isCompleted) return;
       if (envelope['error'] is Map) {
-        completer.completeError(AcpFailure('Agent error: ' + (envelope['error'] as Map).toString()));
+        completer.completeError(AcpFailure('Agent error: ${envelope['error']}'));
       } else if (envelope['result'] is Map) {
         completer.complete(Map<String, dynamic>.from(envelope['result'] as Map));
       } else {
