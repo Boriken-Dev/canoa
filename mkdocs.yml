@@ -28,6 +28,7 @@ nav:
   - Getting started: getting-started.md
   - Architecture: architecture.md
   - ACP and MCP: protocols.md
+  - ACP v2 Flutter client: acp-client.md
   - Interoperability: interop.md
   - Transport selection: transport.md
   - Shared coqui-net-transport proposal: coqui-net-transport.md

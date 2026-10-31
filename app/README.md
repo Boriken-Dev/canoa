@@ -35,10 +35,13 @@ must also be checked against the extension's CSP and renderer requirements.
 The current UI offers a responsive session list, independent transcripts and
 a composer. It starts in an **explicit offline preview**. Messages typed into
 a preview conversation are kept only in memory and are never sent to an agent.
-A transport-only WebTransport-first/WSS-fallback connector exists, but no authenticated ACP peer handshake, real remote session state, persistence
-or remote MCP viewer is connected yet.
+The WebTransport-first/WSS-fallback transport is connected to an ACP v2 controller **through an injected verified-peer interface**. The Flutter session store and composer can process streaming text, insertion acknowledgments and state transitions from a verified client. Production coqui-peer authentication and pairing UI, session persistence and remote MCP browsing are still missing; the normal app remains in offline preview.
 
 `lib/session_store.dart` is the shared view model. Transport and browser
 permissions must remain independent of it. A real transport must perform the
 interoperable peer-auth handshake and bind a verified peer before attaching
 an ACP session.
+
+## ACP v2 integration
+
+The [ACP client](lib/acp/client.dart) and [connection orchestrator](lib/acp/connect.dart) intentionally cannot send ACP methods before a supplied verifier proves the expected peer identity. The `SessionStore.attachVerifiedClient` API binds that initialized client to one local/remote session and routes updates by the agent-issued Session ID. See [protocol documentation](../docs/acp-client.md).

@@ -13,7 +13,7 @@
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview**; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Authenticated peer pairing, live ACP chat, remote MCP and debugging transport are not yet working.** No packages have been released.
+> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview** and a tested ACP v2 client for verified connections; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Production peer pairing, direct live ACP chat, remote MCP and debugging transport are not yet working.** No packages have been released.
 
 ## Features and direction
 
@@ -23,7 +23,7 @@
 - **Bidirectional MCP:** agents can request approved DOM/browser tools and website-provided WebMCP; webpages can advertise MCP endpoints.
 - **Developer debugging:** explicit elevated Chromium CDP mode; Firefox and Safari require separate adapters.
 - **User site adapters:** attach JavaScript or Wasm tools to one or several exact website origins; manifest validation is implemented, runtime sandbox remains planned.
-- **Multi-session:** one workspace for multiple ACP sessions, with remote control and session resume designed separately from browser privilege grants.
+- **Multi-session:** one workspace for multiple ACP sessions, with v2 create/resume/prompt and streamed transcript handling available after verified peer integration.
 
 ## Layout
 
