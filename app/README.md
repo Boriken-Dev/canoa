@@ -58,4 +58,4 @@ Use the [authenticated ACP echo fixture](../examples/acp-echo/README.md) to veri
 
 ## Desktop tray and Canoa.cfg
 
-The app reads a TOML Canoa.cfg just like AI6's OO.cfg. The tray can keep sessions running after the main window is hidden, with Open, Settings, Hide and Exit commands. On supported Windows/macOS tray hosts, a double click opens the main window; Linux AppIndicator requires Open from its menu. Refer to the [configuration guide](../docs/configuration.md). Build platform runners with flutter create --platforms=windows,linux,macos . in app/ before flutter build windows/linux/macos.
+The app reads a TOML Canoa.cfg just like AI6's OO.cfg. The tray can keep sessions running after the main window is hidden, with Open, Settings, Hide and Exit commands. On supported Windows/macOS tray hosts, a double click opens the main window; Linux AppIndicator requires Open from its menu. Refer to the [configuration guide](../docs/configuration.md). Build platform runners with flutter create --org dev.boriken --platforms=windows,linux,macos . in app/ before flutter build windows/linux/macos.

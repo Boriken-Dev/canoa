@@ -33,11 +33,11 @@ The default launch is visible, with close-to-tray enabled. The start-hidden opti
 This repository keeps the canonical Flutter code in app/. Flutter's platform runner directories must be generated before native desktop builds:
 
     cd app
-    flutter create --platforms=windows,linux,macos .
+    flutter create --org dev.boriken --platforms=windows,linux,macos .
     flutter pub get
     flutter build windows  # use linux or macos on that platform
 
-The desktop CI workflow generates the appropriate runner on each OS and builds it. Platform-native plugins and tray host support are required. A standard Flutter Web/PWA build does not create a system notification icon.
+The desktop CI workflow generates the appropriate runner on each OS with Boriken Dev's reverse-DNS namespace and builds it. Windows, macOS and Linux compilation have been verified in GitHub Actions; human tray behavior still needs per-desktop testing. Platform-native plugins and tray host support are required. A standard Flutter Web/PWA build does not create a system notification icon.
 
 ## Limitations
 

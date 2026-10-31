@@ -6,7 +6,7 @@ The shared Flutter UI is in [`app/`](https://github.com/Boriken-Dev/Canoa/tree/m
 
 Canoa's Manifest V3 Chromium binding lives at [`bindings/browser/chromium/`](https://github.com/Boriken-Dev/Canoa/tree/main/bindings/browser/chromium). The extension has its own tab/origin/peer permission checks, browser tool catalogue and code for permission-gated tab actions. The side-panel and full-page entries package the Flutter UI. The native transport and verified agent identity are **not wired yet**.
 
-The standard extension does not request `debugger`. An elevated `manifest.debug.json` enables the Chromium `debugger` API in a separately packaged build. The extension now has an MCP JSON-RPC handler and permission-gated CDP commands, tested independently; a trusted remote bridge and production approval UI are still missing. See [browser MCP and DevTools](browser-mcp.md).
+The standard extension does not request `debugger`. An elevated `manifest.debug.json` enables the Chromium `debugger` API in a separately packaged build. The extension now has an MCP JSON-RPC handler and permission-gated CDP commands, tested independently; a trusted remote bridge and production peer-pairing UI are still missing. Local per-tab browser grants can be managed from the extension's Browser Permissions options page. See [browser MCP and DevTools](browser-mcp.md).
 
 ## Webpage context
 

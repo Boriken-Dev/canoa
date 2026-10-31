@@ -7,7 +7,7 @@ The canonical multi-session chat UI lives in root `app/` (Flutter); build with `
 ## Browser-facing building blocks
 
 - `permissions.js`, `acp-permissions.js`: independent browser and ACP permission decisions; both have tests.
-- `tools.js`, `browser-tools.js`: local MCP-shaped browser tool catalogue and grant-checked operations, not yet exposed over an MCP server.
+- `tools.js`, `browser-tools.js`: local MCP-shaped browser tool catalogue and grant-checked operations, exposed through an internal MCP JSON-RPC tools adapter, but not yet linked to an authenticated remote MCP transport.
 - `site-adapters.js`: validates manifests for user-installed JavaScript or Wasm adapters bound to one or multiple website origins; no arbitrary code execution or adapter installation is implemented yet.
 - `manifest.json` and `background.js`: MV3 side panel, full-page view, **Ask Canoa** page/selection context menu, local policy and tab-navigation revocation.
 - `context-transfer.js` and `bridge.js`: user-selected context is scrubbed of URL query tokens and handed once to the Flutter UI. It is attached **locally** and never sent to an agent until a real transport and send approval exist.
@@ -23,4 +23,4 @@ See [browser comparison](../../../docs/browser-comparison.md), [site adapters](.
 
 ## Current limitations
 
-No end-to-end authenticated ACP-over-WSS agent connection, native MCP bridge, remote session control, automated browser integration tests, installed user scripts, Wasm runtime, or browser approval UI exists yet. The extension build is not ready for Chrome Web Store distribution.
+The authenticated ACP echo fixture exists separately, and the extension now has a local permissions options page, MCP JSON-RPC adapter and debug-only CDP commands. There is still no authenticated remote MCP bridge, production peer pairing UI, installed user-script runtime, cross-browser execution test, or publishable distribution. The options page's grants are not agent identity proofs. The extension build is not ready for Chrome Web Store distribution.
