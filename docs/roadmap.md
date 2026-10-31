@@ -19,9 +19,9 @@ This page distinguishes tested code from planned integration work.
 | Production agent pairing, persistent agent services, trust-management UI | Pending; no auto-enrollment of unknown peers |
 | Native service discovery and optional stdio bridge | Planned |
 | Local MCP JSON-RPC browser-tool handler | Implemented with test-covered permission checks; not yet available remotely |
-| Elevated CDP adapter | Implemented in the debug-only variant for an allowlisted set of commands; browser approval UI and remote transport remain pending |
+| Elevated CDP adapter and local grant UI | Implemented and JS-tested; debug-only manifest, permission options page, console/network event buffer; remote transport pending |
 | Browser-facing MCP server and remote session controller | Planned: connect the authenticated peer to the local handler |
-| CDP full-debugging mode and approvals | Planned |
+| Full remote debugging and audit trail | Planned; local privileged CDP tools are not remote agent access |
 | Actual JS/Wasm user site-adapter execution and sandbox | Planned |
 | Firefox and Safari browser integrations | Planned |
 

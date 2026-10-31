@@ -12,9 +12,9 @@ Read and interaction tools include browser_list_tabs, browser_read_page, browser
 
 ## Elevated Chromium DevTools
 
-The normal manifest has **no debugger permission**. For diagnostics the separately packaged manifest.debug.json declares the Chrome debugger permission. A second browser.debug grant is still required for the authenticated peer and specific tab and origin.
+The normal manifest has **no debugger permission**. For diagnostics, run `python app/tool/build.py chromium --debug` from the repository root. This writes a separate unpacked extension to `build/chromium-debug/`, using `manifest.debug.json` as its manifest. Chrome's Load unpacked action can load that directory without changing the standard manifest. A second browser.debug grant is still required for the authenticated peer and specific tab and origin.
 
-browser_debug_command uses chrome.debugger.attach/sendCommand with an allowlisted subset of the Chrome DevTools Protocol: Runtime.evaluate, Runtime.getProperties, DOM.getDocument, DOM.querySelector, DOM.describeNode, CSS.getComputedStyleForNode, Log.enable, Network.enable, Network.getResponseBody, Performance.enable, Performance.getMetrics and Page.captureScreenshot.
+browser_debug_command uses chrome.debugger.attach/sendCommand with an allowlisted subset of the Chrome DevTools Protocol: Runtime.enable, Runtime.evaluate, Runtime.getProperties, DOM.getDocument, DOM.querySelector, DOM.describeNode, CSS.getComputedStyleForNode, Log.enable, Network.enable, Network.getResponseBody, Performance.enable, Performance.getMetrics and Page.captureScreenshot.
 
 Runtime.evaluate can execute arbitrary JavaScript in the inspected tab and may access sensitive page data; it is an elevated permission, not ordinary browser.read. Responses are size bounded. The adapter detaches on tab close and navigation. browser_debug_detach releases the attachment. browser_debug_events retrieves bounded console logs, JavaScript exceptions and network events from an active CDP attachment (after enabling the respective CDP domains). Unsupported CDP commands are rejected by default.
 

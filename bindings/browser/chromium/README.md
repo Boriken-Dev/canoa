@@ -24,3 +24,7 @@ See [browser comparison](../../../docs/browser-comparison.md), [site adapters](.
 ## Current limitations
 
 The authenticated ACP echo fixture exists separately, and the extension now has a local permissions options page, MCP JSON-RPC adapter and debug-only CDP commands. There is still no authenticated remote MCP bridge, production peer pairing UI, installed user-script runtime, cross-browser execution test, or publishable distribution. The options page's grants are not agent identity proofs. The extension build is not ready for Chrome Web Store distribution.
+
+## Build the elevated CDP variant
+
+Use `python app/tool/build.py chromium --debug`. This produces a **separate** unpacked directory at `build/chromium-debug` with the privileged `debugger` permission, leaving `bindings/browser/chromium/manifest.json` unchanged. Load it explicitly using chrome://extensions → Developer mode → Load unpacked. The browser grants page is accessible under the extension Options menu. Installing the debug build and granting browser.debug is a high-privilege action; remote MCP transport and production peer approvals are not wired yet.
