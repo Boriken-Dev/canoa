@@ -16,7 +16,7 @@ const commands = new Set([
 const attached = new Set();
 const eventLog = new Map();
 const EVENT_LIMIT = 120;
-let listening = false;
+const instrumented = new WeakSet();
 
 function api() {
   if (!globalThis.chrome?.debugger) {
@@ -45,7 +45,7 @@ function checkCommand(method, params) {
   }
 }
 function watchDetach(debuggerApi) {
-  if (listening) return;
+  if (instrumented.has(debuggerApi)) return;
   debuggerApi.onDetach.addListener((target) => {
     if (Number.isSafeInteger(target.tabId)) {
       attached.delete(target.tabId);
@@ -63,7 +63,7 @@ function watchDetach(debuggerApi) {
     if (log.length > EVENT_LIMIT) log.splice(0,log.length-EVENT_LIMIT);
     eventLog.set(target.tabId,log);
   });
-  listening = true;
+  instrumented.add(debuggerApi);
 }
 async function ensureAttached(tabId, debuggerApi) {
   if (attached.has(tabId)) return;
