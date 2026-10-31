@@ -93,11 +93,7 @@ pub trait Channel {
 pub trait Dialer {
     type Connection: Channel;
 
-    fn dial(
-        &mut self,
-        transport: Transport,
-        endpoint: &str,
-    ) -> Result<Self::Connection, Failure>;
+    fn dial(&mut self, transport: Transport, endpoint: &str) -> Result<Self::Connection, Failure>;
 }
 
 /// Optional transport liveness probe, performed before authentication or ACP
@@ -136,20 +132,22 @@ where
     if let Some(endpoint) = endpoints.webtransport {
         let attempted = dialer
             .dial(Transport::WebTransport, endpoint)
-            .and_then(|mut channel| {
-                match probe.check(Transport::WebTransport, &mut channel) {
+            .and_then(
+                |mut channel| match probe.check(Transport::WebTransport, &mut channel) {
                     Ok(()) => Ok(channel),
                     Err(reason) => {
                         channel.close();
                         Err(reason)
                     }
-                }
-            });
+                },
+            );
         match attempted {
-            Ok(channel) => return Ok(UnverifiedLink {
-                transport: Transport::WebTransport,
-                channel,
-            }),
+            Ok(channel) => {
+                return Ok(UnverifiedLink {
+                    transport: Transport::WebTransport,
+                    channel,
+                });
+            }
             Err(reason)
                 if recovery(
                     Transport::WebTransport,
@@ -283,7 +281,12 @@ mod tests {
             Recovery::Deny
         );
         assert_eq!(
-            recovery(Transport::WebTransport, Phase::Active, Failure::PathLost, false),
+            recovery(
+                Transport::WebTransport,
+                Phase::Active,
+                Failure::PathLost,
+                false
+            ),
             Recovery::Deny
         );
     }
@@ -305,13 +308,11 @@ mod tests {
     impl Dialer for TestDialer {
         type Connection = TestChannel;
 
-        fn dial(
-            &mut self,
-            transport: Transport,
-            _: &str,
-        ) -> Result<TestChannel, Failure> {
+        fn dial(&mut self, transport: Transport, _: &str) -> Result<TestChannel, Failure> {
             self.log.borrow_mut().push(format!("dial:{transport:?}"));
-            Ok(TestChannel { log: self.log.clone() })
+            Ok(TestChannel {
+                log: self.log.clone(),
+            })
         }
     }
 
@@ -321,11 +322,7 @@ mod tests {
     }
 
     impl Preflight<TestChannel> for TestProbe {
-        fn check(
-            &mut self,
-            transport: Transport,
-            _: &mut TestChannel,
-        ) -> Result<(), Failure> {
+        fn check(&mut self, transport: Transport, _: &mut TestChannel) -> Result<(), Failure> {
             self.log.borrow_mut().push(format!("probe:{transport:?}"));
             if transport == Transport::WebTransport {
                 return Err(self.problem);
@@ -336,10 +333,17 @@ mod tests {
 
     #[test]
     fn establishment_retries_only_pre_auth_path_failures() {
-        for problem in [Failure::SuspectedMtu, Failure::Timeout, Failure::Certificate] {
+        for problem in [
+            Failure::SuspectedMtu,
+            Failure::Timeout,
+            Failure::Certificate,
+        ] {
             let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
             let mut dial = TestDialer { log: log.clone() };
-            let mut probe = TestProbe { log: log.clone(), problem };
+            let mut probe = TestProbe {
+                log: log.clone(),
+                problem,
+            };
             let result = establish(
                 EndpointSet {
                     webtransport: Some("https://peer.example:4433/"),
@@ -350,12 +354,21 @@ mod tests {
             );
             if problem == Failure::Certificate {
                 assert!(matches!(result, Err(Failure::Certificate)));
-                assert_eq!(*log.borrow(), ["dial:WebTransport", "probe:WebTransport", "close"]);
+                assert_eq!(
+                    *log.borrow(),
+                    ["dial:WebTransport", "probe:WebTransport", "close"]
+                );
             } else {
                 assert_eq!(result.unwrap().transport, Transport::WebSocket);
                 assert_eq!(
                     *log.borrow(),
-                    ["dial:WebTransport", "probe:WebTransport", "close", "dial:WebSocket", "probe:WebSocket"]
+                    [
+                        "dial:WebTransport",
+                        "probe:WebTransport",
+                        "close",
+                        "dial:WebSocket",
+                        "probe:WebSocket"
+                    ]
                 );
             }
         }

@@ -1,11 +1,11 @@
 [package]
-name = "coqui-link"
+name = "coqui-net-transport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Protocol-neutral reliable link framing and transport failover policy"
+description = "Protocol-neutral WebTransport/WebSocket framing and safe fallback policy"
 readme = "README.md"
 
 [dependencies]

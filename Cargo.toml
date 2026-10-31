@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/coqui-link"]
+members = ["crates/canoa", "crates/coqui-net-transport"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"

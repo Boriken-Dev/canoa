@@ -30,7 +30,8 @@ nav:
   - ACP and MCP: protocols.md
   - Interoperability: interop.md
   - Transport selection: transport.md
-  - Shared coqui-link proposal: coqui-link.md
+  - Shared coqui-net-transport proposal: coqui-net-transport.md
+  - Namespaces and identifiers: naming.md
   - Browser integration: browser.md
   - ACP permission requests: acp-permissions.md
   - User site adapters: site-adapters.md

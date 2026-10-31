@@ -9,7 +9,7 @@
 [![Flutter CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/flutter.yml?label=Flutter%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/flutter.yml)
 [![Docs CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/docs.yml?label=Docs%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/docs.yml)
 
-**Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone Boriken Dev project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through preferred WebTransport (HTTPS) with WSS fallback and a documented peer-authentication profile.
+**Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone [Boriken Dev](https://boriken.dev) project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through preferred WebTransport (HTTPS) with WSS fallback and a documented peer-authentication profile.
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
@@ -30,6 +30,7 @@
 | Path | Responsibility |
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
+| `crates/coqui-net-transport/` | Shared transport framing and fallback policy prototype |
 | `app/` | Canonical Flutter chat and session UI |
 | `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
 | `bindings/` | Additional browser and language bindings |
@@ -48,7 +49,9 @@ flutter build web --release --wasm
 
 The UI remains an offline preview. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
 
-See the [shared `coqui-link` proposal](https://boriken-dev.github.io/Canoa/coqui-link/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
+See the [shared `coqui-net-transport` proposal](https://boriken-dev.github.io/Canoa/coqui-net-transport/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
+
+The [project naming convention](https://boriken-dev.github.io/Canoa/naming/) uses `boriken.dev` and reverse-DNS identifiers such as `dev.boriken.canoa` for application and native host identities.
 
 ## Development
 

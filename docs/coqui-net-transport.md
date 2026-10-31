@@ -1,8 +1,8 @@
-# Shared reliable links: proposed `coqui-link`
+# Shared reliable links: proposed `coqui-net-transport`
 
-Canoa's transport selection and the experience in [Guatiao](https://github.com/Boriken-Dev/guatiao), [AI6](https://github.com/jose-pr/ai6) and LineupMux make a case for a reusable, language-independent connection layer named **`coqui-link`**. This page is a design proposal, **not an existing crate or released wire standard**.
+Canoa's transport selection and the experience in [Guatiao](https://github.com/Boriken-Dev/guatiao), [AI6](https://github.com/jose-pr/ai6) and LineupMux make a case for a reusable, language-independent connection layer named **`coqui-net-transport`**. This page is a design proposal, **not an existing crate or released wire standard**.
 
-`coqui-serial` already exists for local COM/tty ports, TCP serial consoles and serial-over-WebSocket. Use **link** for the new package: it means a reliable, ordered peer connection, not a hardware UART or byte-stream line discipline.
+`coqui-serial` already exists for local COM/tty ports, TCP serial consoles and serial-over-WebSocket. Use **net-transport** because the library selects WebTransport, WebSocket and transport fallback; it is not a hardware serial driver. The name follows Boriken Dev's existing `coqui-net-acl` convention.
 
 ## Repository review
 
@@ -22,7 +22,7 @@ ACP / MCP / Guatiao / streaming / other applications
                   |
       application session + resume adapter
                   |
-       coqui-link  (proposed shared crate)
+       coqui-net-transport  (proposed shared crate)
    ordered reliable channel, path health, dial
    WebTransport preferred, WSS fallback
                   |
@@ -34,7 +34,7 @@ ACP / MCP / Guatiao / streaming / other applications
 
 The Rust crate would define a small sans-runtime `Link` / `Connector` contract, explicit `EndpointSet`, `LinkError` classes and `FailoverPolicy`. Native Rust feature-gated drivers could use Quinn/rustls and tungstenite; browser bindings in Dart/JS must use the browser's WebTransport and WebSocket APIs. Do not assume a Rust TCP implementation can simply be compiled to browser Wasm.
 
-Keep the wire profile protocol-agnostic: `coqui-link` offers **reliable, ordered message boundaries** or a byte-stream abstraction; ACP JSON-RPC text frames, Guatiao binary frames and media remain the applications' responsibility. Do not introduce a global proprietary transport handshake unless peers explicitly negotiate its version. An authenticated `coqui-peer` handshake gates application traffic, but a socket's TLS alone does not prove an invited peer identity.
+Keep the wire profile protocol-agnostic: `coqui-net-transport` offers **reliable, ordered message boundaries** or a byte-stream abstraction; ACP JSON-RPC text frames, Guatiao binary frames and media remain the applications' responsibility. Do not introduce a global proprietary transport handshake unless peers explicitly negotiate its version. An authenticated `coqui-peer` handshake gates application traffic, but a socket's TLS alone does not prove an invited peer identity.
 
 ## Transport choice and runtime fallback
 
@@ -49,7 +49,7 @@ Keep the wire profile protocol-agnostic: `coqui-link` offers **reliable, ordered
 
 QUIC requires a path supporting at least **1200 bytes of UDP payload** (RFC 9000 §14). If the path cannot carry that, QUIC must stop using it; connection to WebTransport will fail or stall even though TLS/WebSocket over TCP might work.
 
-Browser JavaScript generally cannot distinguish a QUIC packet-blackhole, an unsupported HTTP/3 route or an MTU error from a generic connection failure. `coqui-link` must therefore accept **unavailable / timed out / no forward progress / suspected MTU** as recoverable *transport* signals. A client should use bounded end-to-end liveness checks on a verified channel rather than guessing MTU from the sizes of ACP messages. Idle sessions are not "stalled" merely because nobody has typed; a negotiated ping/pong or outstanding-operation deadline is needed to detect failure.
+Browser JavaScript generally cannot distinguish a QUIC packet-blackhole, an unsupported HTTP/3 route or an MTU error from a generic connection failure. `coqui-net-transport` must therefore accept **unavailable / timed out / no forward progress / suspected MTU** as recoverable *transport* signals. For the usual low-MTU path (<1200 bytes of UDP payload), WebTransport may fail or time out *before opening a stream*; an ordinary bounded dial timeout triggers WSS fallback without a special MTU probe. A client may also use bounded end-to-end liveness checks on a verified channel rather than guessing MTU from the sizes of ACP messages. Idle sessions are not "stalled" merely because nobody has typed; a negotiated ping/pong or outstanding-operation deadline is needed to detect failure.
 
 Do not weaken certificate pinning to cure an opaque browser error: only fall back to a previously configured WSS endpoint that can independently prove the same accepted `coqui-peer` identity. If the runtime cannot tell a security failure from a path failure, the policy must be explicit and conservative, or prompt the user. The current Canoa transport still fails closed for ambiguous pinned WebTransport errors; further work is needed once the browser-compatible peer proof exists.
 
@@ -61,14 +61,18 @@ Do not weaken certificate pinning to cure an opaque browser error: only fall bac
 - `Connector::dial`: prefer WebTransport, fallback to WSS on recoverable opening failures.
 - `Connector::recover`: open alternate transport, verify *same* peer, return `RecoveryRequired` with old session identifier; no hidden automatic command replay.
 - `LinkError`: distinct `Unavailable`, `PathLost`, `NoProgress`, `Security`, `PeerRejected`, `Protocol` and `Cancelled` cases.
-- `ResumePolicy` is **not** part of `coqui-link`; each application owns its own session semantic and idempotency contract.
+- `ResumePolicy` is **not** part of `coqui-net-transport`; each application owns its own session semantic and idempotency contract.
 
 Canoa implements a [pure transport-recovery policy](https://github.com/Boriken-Dev/Canoa/blob/main/app/lib/transport/recovery_policy.dart) with tests as an interim prototype. It intentionally does not claim to implement a browser peer-proof handshake, production liveness probes or recovered ACP sessions.
+
+## Naming and project identity
+
+The source organization is **Boriken Dev** (`boriken.dev`); reverse-DNS identifiers use `dev.boriken.*` (for example `dev.boriken.canoa`). Rust package names use hyphens (`coqui-net-transport`) rather than reverse-DNS notation. See [naming conventions](naming.md).
 
 ## Extraction sequence
 
 1. Complete and test the transport-neutral contract in Canoa and Guatiao without importing ACP session semantics.
-2. Create the independent **Boriken-Dev/coqui-link** repository and Rust crate when the API stabilizes. Keep Rust 2024, minimum Rust 1.89, and match Boriken Dev's licensing policy.
+2. Create the independent **Boriken-Dev/coqui-net-transport** repository and Rust crate when the API stabilizes. Keep Rust 2024, minimum Rust 1.89, and match Boriken Dev's licensing policy.
 3. Move Rust QUIC/WSS drivers behind optional features; add Dart and JavaScript bindings with browser-native WebTransport rather than shipping an unsuitable native-Wasm socket.
 4. Test a real server on both endpoints, including synthetic UDP/QUIC blackholes, path changes, a WSS fallback, mismatched identities, retransmission ambiguity and recovery without duplicate writes.
 5. Migrate Guatiao/Canoa consumers, then selectively AI6 and LineupMux where they benefit. Do not force unrelated app-specific streaming and terminal behavior into the shared crate.
