@@ -6,7 +6,7 @@
  * Never accept commands directly from website messages or page scripts.
  */
 const commands = new Set([
-  'Runtime.evaluate', 'Runtime.getProperties',
+  'Runtime.enable', 'Runtime.evaluate', 'Runtime.getProperties',
   'DOM.getDocument', 'DOM.querySelector', 'DOM.describeNode',
   'CSS.getComputedStyleForNode',
   'Log.enable', 'Network.enable', 'Network.getResponseBody',
@@ -14,6 +14,8 @@ const commands = new Set([
   'Page.captureScreenshot',
 ]);
 const attached = new Set();
+const eventLog = new Map();
+const EVENT_LIMIT = 120;
 let listening = false;
 
 function api() {
@@ -45,7 +47,21 @@ function checkCommand(method, params) {
 function watchDetach(debuggerApi) {
   if (listening) return;
   debuggerApi.onDetach.addListener((target) => {
-    if (Number.isSafeInteger(target.tabId)) attached.delete(target.tabId);
+    if (Number.isSafeInteger(target.tabId)) {
+      attached.delete(target.tabId);
+      eventLog.delete(target.tabId);
+    }
+  });
+  debuggerApi.onEvent?.addListener((target, method, params) => {
+    if (!Number.isSafeInteger(target.tabId) || !attached.has(target.tabId)) return;
+    if (!['Runtime.consoleAPICalled','Log.entryAdded','Network.loadingFailed',
+      'Network.responseReceived','Runtime.exceptionThrown'].includes(method)) return;
+    const log = eventLog.get(target.tabId) ?? [];
+    // Keep diagnostic metadata bounded. CDP event payloads can contain secrets.
+    const json = JSON.stringify(params ?? {});
+    log.push({method, value:json.slice(0,8192), capturedAt:Date.now()});
+    if (log.length > EVENT_LIMIT) log.splice(0,log.length-EVENT_LIMIT);
+    eventLog.set(target.tabId,log);
   });
   listening = true;
 }
@@ -72,6 +88,7 @@ export async function debugDetach({tabId}, debuggerApi = api()) {
     await debuggerApi.detach({tabId});
     attached.delete(tabId);
   }
+  eventLog.delete(tabId);
   return {detached: true};
 }
 export async function detachOnTabClosed(tabId) {
@@ -79,3 +96,11 @@ export async function detachOnTabClosed(tabId) {
   try { await debugDetach({tabId}); } catch { attached.delete(tabId); }
 }
 export function enabledCommands() { return [...commands]; }
+
+/** Read bounded console, JavaScript exception and network failure activity.
+ * First enable the Log/Runtime/Network CDP domains via browser_debug_command.
+ */
+export function debugEvents({tabId}) {
+  checkTab(tabId);
+  return {events:[...(eventLog.get(tabId) ?? [])]};
+}

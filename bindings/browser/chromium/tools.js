@@ -16,6 +16,15 @@ export const TOOLS = Object.freeze([
     }
   },
   {
+    name: "browser_debug_events",
+    description: "Read bounded console, exception and network diagnostic events from an approved CDP attachment.",
+    inputSchema: {
+      type: "object",
+      properties: { tabId: { type: "integer" } },
+      required: ["tabId"], additionalProperties: false
+    }
+  },
+  {
     name: "browser_debug_detach",
     description: "Release a previous CDP debugger attachment on a permitted tab.",
     inputSchema: {

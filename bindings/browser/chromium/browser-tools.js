@@ -1,6 +1,6 @@
 import { CAPABILITY, DIRECTION, isAllowed } from "./permissions.js";
 import { TOOLS } from "./tools.js";
-import { debugCommand, debugDetach } from "./devtools.js";
+import { debugCommand, debugDetach, debugEvents } from "./devtools.js";
 
 export const CAPABILITIES = Object.freeze({
   browser_list_tabs: CAPABILITY.READ,
@@ -11,7 +11,8 @@ export const CAPABILITIES = Object.freeze({
   browser_call_webmcp: CAPABILITY.WEBMCP,
   browser_discover_mcp: CAPABILITY.DISCOVER,
   browser_debug_command: CAPABILITY.DEBUG,
-  browser_debug_detach: CAPABILITY.DEBUG
+  browser_debug_detach: CAPABILITY.DEBUG,
+  browser_debug_events: CAPABILITY.DEBUG
 });
 
 const SUPPORTED = new Set(TOOLS.map((tool) => tool.name));
@@ -50,6 +51,9 @@ export async function dispatchBrowserTool({ name, args = {}, peerId, trustedPeer
 
     if (name === "browser_debug_command") {
       return debugCommand({tabId: tab.id, method: args.method, params: args.params ?? {}});
+    }
+    if (name === "browser_debug_events") {
+      return debugEvents({tabId: tab.id});
     }
     if (name === "browser_debug_detach") {
       return debugDetach({tabId: tab.id});

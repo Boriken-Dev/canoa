@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {handleMcpRequest,toolsForPeer} from './mcp.js';
 import {DIRECTION,CAPABILITY,makeGrant} from './permissions.js';
-import {debugCommand,debugDetach} from './devtools.js';
+import {debugCommand,debugDetach,debugEvents} from './devtools.js';
 
 const trusted = new Set(['verified-peer']);
 const now = 10000;
@@ -69,4 +69,25 @@ test('CDP attaches once, passes approved commands and can detach',async()=>{
   await debugCommand(op,api);
   await debugDetach({tabId:99},api);
   assert.deepEqual(events.map(e=>e[0]),['attach','send','send','detach']);
+});
+
+test('CDP events are bounded to the debug session and erased on detach',async()=>{
+  let onEvent;
+  let onDetach;
+  const api={
+    onDetach:{addListener(fn){onDetach=fn;}},
+    onEvent:{addListener(fn){onEvent=fn;}},
+    async attach(){},
+    async sendCommand(){return {}},
+    async detach(){},
+  };
+  await debugCommand({tabId:321,method:'Runtime.enable'},api);
+  for(let i=0;i<140;i++){
+    onEvent({tabId:321},'Runtime.consoleAPICalled',{type:'log',message:'line '+i});
+  }
+  assert.equal(debugEvents({tabId:321}).events.length,120);
+  onEvent({tabId:111},'Runtime.consoleAPICalled',{type:'log',message:'secret'});
+  assert.equal(debugEvents({tabId:111}).events.length,0);
+  onDetach({tabId:321});
+  assert.equal(debugEvents({tabId:321}).events.length,0);
 });
