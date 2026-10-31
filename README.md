@@ -1,49 +1,66 @@
 # Canoa
 
-**Discover. Connect. Route.**
+[![Version](https://img.shields.io/badge/version-0.0.0--alpha.0-blue.svg)](https://github.com/Boriken-Dev/Canoa/blob/main/Cargo.toml)
+[![Rust version](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://github.com/Boriken-Dev/Canoa/blob/main/Cargo.toml)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/Boriken-Dev/Canoa/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://boriken-dev.github.io/Canoa/)
+[![Rust CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/test.yml?label=Rust%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/test.yml)
+[![Browser CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/browser.yml?label=Browser%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/browser.yml)
+[![Docs CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/docs.yml?label=Docs%20CI)](https://github.com/Boriken-Dev/Canoa/actions/workflows/docs.yml)
 
-Canoa is a standalone Boriken Dev project implementing interoperable discovery, authentication, permissions and routing between applications and local or remote AI agents. It supports a language-agnostic core and a browser extension, all branded **Canoa**.
+**Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone Boriken Dev project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through interoperable WS/WSS transports and a documented peer-authentication profile.
 
-> Status: early development. The Rust library has an in-memory registry and deny-by-default rules. The Chromium binding now has isolated browser-permission and ACP-permission helpers, MCP tool descriptions, and a local browser-tool dispatcher. No authenticated ACP WebSocket connection, peer-auth wire profile, native MCP server, browser approval UI, or agent-facing MCP transport is implemented yet.
+*Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-## Interoperability
+> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview**; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Authenticated peer pairing, live ACP chat, remote MCP and debugging transport are not yet working.** No packages have been released.
 
-Canoa is **one implementation**, not a proprietary gateway protocol. Other implementations can connect through compatible **ACP over WS/WSS** and a common **peer-authentication wire profile**. The [interop specification](docs/interop.md) explains the transport, peer-proof and conformance requirements. The browser-compatible `coqui-peer` auth profile must be published and validated before it is treated as interoperable.
+## Features and direction
 
-## Capabilities
-
-- Discover local DNS-SD/mDNS services and configure remote agent endpoints.
-- Pair and authenticate endpoints, reusing [coqui-peer](https://github.com/Boriken-Dev/coqui-peer) identity and trust primitives where appropriate.
-- **Browser-managed permissions:** the extension keeps its own per-peer, per-tab, per-origin capability grants, independently from any local broker or remote agent.
-- ACP session access over WebSocket, with WSS as the default and explicit local-only WS exceptions.
-- Agent-facing browser MCP tools (DOM snapshot, page interaction and WebMCP).
-- Website-advertised MCP endpoints, treated as discovery hints requiring independent authorization.
-- Native tools and language bindings as the functionality becomes available; a native companion is optional for direct WSS browser access.
+- **One chat app:** root `app/` contains a responsive Flutter client for full-page, sidebar, desktop, PWA and optional Wasm builds; the browser extension packages the same app.
+- **Agent independent:** direct connections to compatible ACP peers over WS/WSS; native discovery/stdio adapters are optional.
+- **Browser owned permissions:** approve access by verified peer, origin, tab and capability, with cancellation and revocation.
+- **Bidirectional MCP:** agents can request approved DOM/browser tools and website-provided WebMCP; webpages can advertise MCP endpoints.
+- **Developer debugging:** explicit elevated Chromium CDP mode; Firefox and Safari require separate adapters.
+- **User site adapters:** attach JavaScript or Wasm tools to one or several exact website origins; manifest validation is implemented, runtime sandbox remains planned.
+- **Multi-session:** one workspace for multiple ACP sessions, with remote control and session resume designed separately from browser privilege grants.
 
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
-| `crates/canoa/` | Protocol-neutral Rust registry and authorization primitives |
-| `docs/architecture.md` | Security and architectural boundaries |
-| `docs/interop.md` | ACP WS/WSS and peer-auth interoperability contract |
-| `bindings/browser/chromium/` | Canoa Chrome/Chromium extension |
-| `bindings/` | Future browser and language integrations |
-| `examples/` | Real runnable examples as features are implemented |
+| `crates/canoa/` | Rust registry and authorization model |
+| `app/` | Canonical Flutter chat and session UI |
+| `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
+| `bindings/` | Additional browser and language bindings |
+| `docs/` | Architecture, protocols, browser support and developer guides |
+
+## Try the current UI
+
+```sh
+cd app
+flutter pub get
+flutter run -d chrome
+# Standalone web / Wasm builds:
+flutter build web --release
+flutter build web --release --wasm
+```
+
+The UI remains an offline preview. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
 
 ## Development
 
-Rust 1.89 or later:
+Rust 1.89+:
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+(cd bindings/browser/chromium && npm test)
 ```
 
-See [ACP permission decisions](docs/acp-permissions.md) for the separate standard ACP `session/request_permission` handling.
+The [documentation](https://boriken-dev.github.io/Canoa/) contains the [architecture](https://boriken-dev.github.io/Canoa/architecture/), [interoperability profile](https://boriken-dev.github.io/Canoa/interop/), [browser design](https://boriken-dev.github.io/Canoa/browser/), and [roadmap](https://boriken-dev.github.io/Canoa/roadmap/).
 
 ## License
 
-MPL-2.0. See [LICENSE](LICENSE).
+MPL-2.0; see [LICENSE](LICENSE).

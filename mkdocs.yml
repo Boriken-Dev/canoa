@@ -1,0 +1,45 @@
+site_name: Canoa
+site_description: Interoperable agent connectivity, chat and browser MCP tools
+site_url: https://boriken-dev.github.io/Canoa/
+repo_url: https://github.com/Boriken-Dev/Canoa
+repo_name: Boriken-Dev/Canoa
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Architecture: architecture.md
+  - ACP and MCP: protocols.md
+  - Interoperability: interop.md
+  - Browser integration: browser.md
+  - ACP permission requests: acp-permissions.md
+  - User site adapters: site-adapters.md
+  - Browser comparisons: browser-comparison.md
+  - Roadmap: roadmap.md
+  - Rust API: https://boriken-dev.github.io/Canoa/rust/canoa/index.html
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences
