@@ -48,6 +48,8 @@ flutter build web --release --wasm
 
 The UI remains an offline preview. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
 
+See the [shared `coqui-link` proposal](https://boriken-dev.github.io/Canoa/coqui-link/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
+
 ## Development
 
 Rust 1.89+:
