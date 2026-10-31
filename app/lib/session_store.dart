@@ -1,3 +1,4 @@
+import 'acp/client.dart';
 import 'transport/agent_transport.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -8,13 +9,13 @@ enum SessionStatus { preview, disconnected, connecting, connected, working }
 
 enum MessageRole { user, agent, notice }
 
-@immutable
 class ChatMessage {
-  const ChatMessage({required this.role, required this.text, required this.at});
+  ChatMessage({required this.role, required this.text, required this.at, this.messageId});
 
   final MessageRole role;
-  final String text;
+  String text;
   final DateTime at;
+  final String? messageId;
 }
 
 class ChatSession {
@@ -66,6 +67,8 @@ class SessionStore extends ChangeNotifier {
   }
 
   final List<ChatSession> _sessions = [];
+  final Map<String, AcpV2Client> _verifiedClients = {};
+  final Map<String, StreamSubscription<AcpSessionUpdate>> _subscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -136,6 +139,113 @@ class SessionStore extends ChangeNotifier {
     return session;
   }
 
+  /// A verified and initialized ACP client can be bound to one session.
+  /// Opening and peer authentication remain the connector's responsibility.
+  void attachVerifiedClient(String localId, AcpV2Client client) {
+    ChatSession? target;
+    for (final session in _sessions) {
+      if (session.id == localId) target = session;
+    }
+    if (target == null || target.remoteSessionId == null ||
+        target.peerId != client.peerId || client.isClosed) {
+      throw StateError('Verified peer and remote session must match');
+    }
+    final session = target;
+    unawaited(_subscriptions.remove(localId)?.cancel());
+    _verifiedClients[localId] = client;
+    session.status = SessionStatus.connected;
+    _subscriptions[localId] = client.updates.listen(
+      (update) {
+        if (update.sessionId == session.remoteSessionId) {
+          _applyUpdate(session, update);
+        }
+      },
+      onDone: () {
+        _verifiedClients.remove(localId);
+        session.status = SessionStatus.disconnected;
+        notifyListeners();
+      },
+    );
+    notifyListeners();
+  }
+
+  void _applyUpdate(ChatSession session, AcpSessionUpdate update) {
+    if (update.kind == 'state_update') {
+      if (update.state == 'running' || update.state == 'requires_action') {
+        session.status = SessionStatus.working;
+      } else if (update.state == 'idle') {
+        session.status = SessionStatus.connected;
+        if (update.reason == 'error') {
+          session.messages.add(ChatMessage(
+            role: MessageRole.notice,
+            text: 'Agent reported an operation failure.',
+            at: DateTime.now(),
+          ));
+        }
+      }
+    } else if (const [
+      'user_message', 'agent_message', 'user_message_chunk',
+      'agent_message_chunk',
+    ].contains(update.kind)) {
+      final text = update.text;
+      if (text != null) {
+        final role = update.kind.startsWith('user')
+            ? MessageRole.user : MessageRole.agent;
+        ChatMessage? existing;
+        if (update.messageId != null) {
+          for (final message in session.messages) {
+            if (message.messageId == update.messageId) {
+              existing = message;
+              break;
+            }
+          }
+        }
+        if (existing != null) {
+          existing.text = update.kind.endsWith('_chunk')
+              ? existing.text + text : text;
+        } else {
+          session.messages.add(ChatMessage(
+            role: role, text: text,
+            at: DateTime.now(), messageId: update.messageId,
+          ));
+        }
+      }
+    }
+    notifyListeners();
+  }
+
+  /// A v2 prompt response confirms insertion, not agent turn completion.
+  /// The prompt is never retried automatically after a disconnect.
+  Future<void> sendText(String text) async {
+    final session = selected;
+    if (session == null || text.trim().isEmpty) return;
+    if (session.status == SessionStatus.preview) {
+      sendPreviewText(text);
+      return;
+    }
+    final client = _verifiedClients[session.id];
+    if (client == null || client.isClosed || session.remoteSessionId == null) {
+      throw StateError('A verified ACP peer must be connected');
+    }
+    final messageId = await client.prompt(session.remoteSessionId!, text);
+    if (!session.messages.any((message) => message.messageId == messageId)) {
+      session.messages.add(ChatMessage(
+        role: MessageRole.user,
+        text: text, at: DateTime.now(), messageId: messageId,
+      ));
+      notifyListeners();
+    }
+  }
+
+  Future<void> cancelActiveSession() async {
+    final session = selected;
+    final client = session == null ? null : _verifiedClients[session.id];
+    if (session == null || session.remoteSessionId == null || client == null) {
+      throw StateError('No active verified ACP session');
+    }
+    await client.cancel(session.remoteSessionId!);
+  }
+
   /// Attach explicit user-selected page context to the visible local session.
   /// This does not transmit the page to an agent. The eventual ACP adapter
   /// must obtain a separate user-approved context/send decision.
@@ -190,4 +300,14 @@ class SessionStore extends ChangeNotifier {
     ));
     notifyListeners();
   }
+  @override
+  void dispose() {
+    for (final subscription in _subscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _subscriptions.clear();
+    _verifiedClients.clear();
+    super.dispose();
+  }
+
 }
