@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'config/canoa_config.dart';
+import 'canoa_config.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const _SettingsDialog({required this.config});
+  const SettingsDialog({required this.config});
   final CanoaConfig config;
   @override
-  State<_SettingsDialog> createState() => SettingsDialogState();
+  State<SettingsDialog> createState() => SettingsDialogState();
 }
-class SettingsDialogState extends State<_SettingsDialog> {
+class SettingsDialogState extends State<SettingsDialog> {
   late CanoaConfig config = widget.config;
   @override
   Widget build(BuildContext context) => AlertDialog(
