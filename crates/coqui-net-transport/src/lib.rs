@@ -159,7 +159,7 @@ where
         }
     }
     let Some(endpoint) = endpoints.websocket else {
-        return Err(Failure::Unavailable);
+        return Err(Failure::Unsupported);
     };
     let mut channel = dialer.dial(Transport::WebSocket, endpoint)?;
     if let Err(reason) = probe.check(Transport::WebSocket, &mut channel) {
