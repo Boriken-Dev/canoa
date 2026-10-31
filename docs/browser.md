@@ -10,7 +10,7 @@ The standard extension does not request the `debugger` permission; a separate de
 
 ## Webpage context
 
-The intended flow is an explicit **Ask Canoa** context menu or selection action that adds user-approved context to one selected ACP session. A webpage is never allowed to send privileged extension commands merely by being open.
+The extension now offers an **Ask Canoa** context-menu action for a page or user-selected text. The selected context is queued in extension session storage and claimed once by the Flutter UI through an extension-only bridge. Query strings, URL fragments and embedded credentials are stripped before attachment. The resulting note is **local only**; no content is transmitted to an agent because authenticated ACP messaging and explicit send confirmation are still pending. Websites cannot send privileged extension commands merely by being open.
 
 ## Remote browser tools
 

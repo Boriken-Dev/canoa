@@ -43,6 +43,6 @@ python app/tool/build.py chromium
 (cd bindings/browser/chromium && npm test)
 ```
 
-Load `bindings/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. The packaging helper copies the Flutter UI to `ui/`; it does not yet connect a live ACP or MCP server. The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
+Load `bindings/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`; it does not yet connect a live ACP or MCP server. The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
 
 See [browser integration](browser.md).
