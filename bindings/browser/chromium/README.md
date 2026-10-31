@@ -1,23 +1,25 @@
 # Canoa for Chromium
 
-Canoa is a Manifest V3 browser extension named **Canoa**, under `bindings/browser/chromium/`.
+Canoa is a Manifest V3 extension named **Canoa**, under `bindings/browser/chromium/`.
 
-## Implemented building blocks
+The canonical multi-session chat UI lives in root `app/` (Flutter); build with `python app/tool/build.py chromium` to embed the UI in the side panel or a full-page tab. A separate PWA build uses the same source. The backend ACP session transport is not yet connected, so chat is currently a local preview.
 
-- `permissions.js` and `permissions.test.mjs`: browser-owned, deny-by-default peer/tab/origin/capability grant decisions, expiry and revocation.
-- `acp-permissions.js` and its tests: valid ACP `session/request_permission` choices, including standard selected/cancelled results; never fabricate an option.
-- `tools.js`: MCP tool catalogue (browser tab list, page snapshot, click, fill, WebMCP discovery/invocation and advertised site MCP endpoints).
-- `browser-tools.js`: local dispatcher for those operations. It must receive a cryptographically verified peer from a trusted caller, and checks the extension's grants before any tab action. The adapter does not yet connect it to an MCP server.
-- `manifest.json` / `background.js`: MV3 skeleton, ephemeral browser-local grant storage and tab navigation revocation. No external webpage messages.
+## Browser-facing building blocks
 
-## Still required before release
+- `permissions.js`, `acp-permissions.js`: independent browser and ACP permission decisions; both have tests.
+- `tools.js`, `browser-tools.js`: local MCP-shaped browser tool catalogue and grant-checked operations, not yet exposed over an MCP server.
+- `site-adapters.js`: validates manifests for user-installed JavaScript or Wasm adapters bound to one or multiple website origins; no arbitrary code execution or adapter installation is implemented yet.
+- `manifest.json` and `background.js`: MV3 side panel, full-page context menu, local policy and tab-navigation revocation.
+- `manifest.debug.json`: elevated debugger build configuration. Debug control requires separate UI authorization and an authenticated agent connection; the file alone does not enable safe remote CDP control.
 
-A working popup/approval UI, authenticated ACP WebSocket client and its interoperable coqui-peer browser handshake, an MCP provider/transport for agents, browser integration wiring, native discovery adapter (optional), automated browser integration tests and distribution packaging.
+## Planned user experience
 
-Without a paired peer and user-consent UI, the extension intentionally exposes no connected agent session and cannot yet serve MCP tools.
+Match the useful conventions of ChatGPT and Claude in Chrome: **Ask Canoa** on a tab or text selection; attach explicit page/tab context to a chosen session; choose a peer and agent; view multiple chats in a full-page view or a side panel; review an active agent's activity; and grant website and debugging access independently.
 
-## Security boundary
+An agent can use site adapters for stable website-specific MCP tools, ordinary browser DOM tools, or (with elevated permission) Chromium CDP debugging.
 
-The browser independently decides permission requests for its own tabs and WebMCP tools, and how to respond to ACP agent `session/request_permission`. A remote ACP peer's grant is not permission to read browser tabs. A browser's approval cannot override the agent's own enforcement.
+See [browser comparison](../../../docs/browser-comparison.md), [site adapters](../../../docs/site-adapters.md), [interop](../../../docs/interop.md), and [ACP permission policy](../../../docs/acp-permissions.md).
 
-See [architecture](../../../docs/architecture.md), [interop](../../../docs/interop.md) and [ACP permissions](../../../docs/acp-permissions.md).
+## Current limitations
+
+No end-to-end authenticated ACP-over-WSS agent connection, native MCP bridge, remote session control, automated browser integration tests, installed user scripts, Wasm runtime, or browser approval UI exists yet. The extension build is not ready for Chrome Web Store distribution.
