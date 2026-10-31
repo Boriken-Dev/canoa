@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
+import 'package:canoa/acp/connect.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/transport/agent_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -197,6 +198,65 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(session.status, SessionStatus.disconnected);
     store.dispose();
+  });
+
+  test('pre-auth transport fallback preserves peer verification', () async {
+    final calls = <String>[];
+    final channel = FakeChannel();
+    channel.respondTo = (frame) {
+      if (frame['method'] == 'initialize') {
+        channel.answer(frame['id'] as int, {
+          'protocolVersion': 2,
+          'capabilities': {'session': <String, Object>{}},
+        });
+      }
+    };
+    final client = await connectVerifiedAcp(
+      AgentEndpoints(
+        webTransport: Uri.parse('https://agent.example:4433/acp'),
+        webSocket: Uri.parse('wss://agent.example/acp'),
+      ),
+      expectedPeerId: peerId,
+      webTransportDialer: (url, timeout, pins) async {
+        calls.add('webtransport');
+        throw const TransportUnavailable('QUIC blocked or MTU too small');
+      },
+      webSocketDialer: (url, timeout, pins) async {
+        calls.add('websocket');
+        return channel;
+      },
+      verifyPeer: (connection, expected) async {
+        calls.add('verified');
+        return expected;
+      },
+    );
+    expect(calls, ['webtransport', 'websocket', 'verified']);
+    expect(channel.sent.first['method'], 'initialize');
+    await client.close();
+  });
+
+  test('failed peer proof never retries via WebSocket', () async {
+    var fallbackAttempted = false;
+    final channel = FakeChannel();
+    await expectLater(
+      connectVerifiedAcp(
+        AgentEndpoints(
+          webTransport: Uri.parse('https://agent.example:4433/acp'),
+          webSocket: Uri.parse('wss://agent.example/acp'),
+        ),
+        expectedPeerId: peerId,
+        webTransportDialer: (url, timeout, pins) async => channel,
+        webSocketDialer: (url, timeout, pins) async {
+          fallbackAttempted = true;
+          return FakeChannel();
+        },
+        verifyPeer: (connection, expected) async => 'wrong-peer',
+      ),
+      throwsA(isA<AcpFailure>()),
+    );
+    expect(fallbackAttempted, isFalse);
+    expect(channel.closed, isTrue);
+    expect(channel.sent, isEmpty);
   });
 
 }
