@@ -1,0 +1,11 @@
+[package]
+name = "coqui-link"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Protocol-neutral reliable link framing and transport failover policy"
+readme = "README.md"
+
+[dependencies]
