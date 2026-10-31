@@ -1,65 +1,72 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'channel.dart';
+import 'contracts.dart';
 
-/// ACP's remote WebSocket profile: exactly one JSON-RPC message per text frame.
-Future<AcpMessageChannel> openAcpWebSocket(
-  Uri endpoint,
+Future<AgentConnection> openAgentWebSocket(
+  Uri uri,
   Duration timeout,
+  List<String> certificatePins,
 ) async {
-  final socket = WebSocketChannel.connect(endpoint);
+  final channel = WebSocketChannel.connect(uri);
   try {
-    await socket.ready.timeout(timeout);
-    return _SocketMessages(socket);
-  } catch (_) {
-    await socket.sink.close().catchError((Object _) {});
-    rethrow;
+    await channel.ready.timeout(timeout);
+  } catch (e) {
+    unawaited(channel.sink.close());
+    throw TransportUnavailable('WebSocket could not connect: $e');
   }
+  return _WebSocketConnection(channel);
 }
 
-final class _SocketMessages implements AcpMessageChannel {
-  _SocketMessages(this._socket) {
-    _subscription = _socket.stream.listen(
-      (dynamic incoming) {
-        if (_events.isClosed) return;
-        if (incoming is String) {
-          _events.add(incoming);
+final class _WebSocketConnection implements AgentConnection {
+  _WebSocketConnection(this._channel) {
+    _subscription = _channel.stream.listen(
+      (dynamic message) {
+        if (_ended) return;
+        if (message is! String || utf8.encode(message).length > maxAgentMessage) {
+          _end(const TransportProtocolFailure('ACP WebSocket frames must be bounded UTF-8 text'));
         } else {
-          _events.addError(FormatException('ACP WebSocket frames must be text'));
-          unawaited(close());
+          _incoming.add(message);
         }
       },
-      onError: (Object error, StackTrace stack) {
-        if (!_events.isClosed) _events.addError(error, stack);
-      },
-      onDone: () {
-        if (!_events.isClosed) unawaited(_events.close());
-      },
+      onError: (Object error) => _end(error),
+      onDone: () => _end(),
+      cancelOnError: true,
     );
   }
-
-  final WebSocketChannel _socket;
-  final StreamController<String> _events = StreamController<String>();
+  final WebSocketChannel _channel;
+  final StreamController<String> _incoming = StreamController<String>();
   late final StreamSubscription<dynamic> _subscription;
-  bool _closing = false;
+  bool _ended = false;
 
   @override
-  Stream<String> get messages => _events.stream;
+  AgentTransportKind get kind => AgentTransportKind.webSocket;
+  @override
+  Stream<String> get messages => _incoming.stream;
+
+  void _end([Object? error]) {
+    if (_ended) return;
+    _ended = true;
+    if (error != null) _incoming.addError(error);
+    unawaited(_incoming.close());
+  }
 
   @override
   Future<void> send(String message) async {
-    if (_closing || _events.isClosed) throw StateError('ACP WebSocket is closed');
-    _socket.sink.add(message);
+    if (_ended) throw const TransportUnavailable('WebSocket connection closed');
+    if (message.isEmpty || utf8.encode(message).length > maxAgentMessage) {
+      throw const TransportProtocolFailure('ACP WebSocket message exceeds limits or is empty');
+    }
+    _channel.sink.add(message);
   }
 
   @override
   Future<void> close() async {
-    if (_closing) return;
-    _closing = true;
-    await _socket.sink.close();
+    if (_ended) return;
+    _end();
     await _subscription.cancel();
-    if (!_events.isClosed) await _events.close();
+    await _channel.sink.close();
   }
 }
