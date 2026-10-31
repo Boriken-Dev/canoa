@@ -32,7 +32,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets'}.contains(name)) {
-        throw FormatException('Canoa.cfg: unknown table ' + name);
+        throw FormatException('Canoa.cfg: unknown table $name');
       }
     }
     Map<String, dynamic> table(String name, Set<String> allowed) {
@@ -41,7 +41,7 @@ final class CanoaConfig {
       if (raw is! Map) throw FormatException('Canoa.cfg: expected a table');
       final entries = Map<String, dynamic>.from(raw);
       for (final key in entries.keys) {
-        if (!allowed.contains(key)) throw FormatException('Canoa.cfg: invalid key ' + key);
+        if (!allowed.contains(key)) throw FormatException('Canoa.cfg: invalid key $key');
       }
       return entries;
     }
@@ -51,7 +51,7 @@ final class CanoaConfig {
     bool flag(Map<String, dynamic> map, String key, bool fallback) {
       final raw = map[key];
       if (raw == null) return fallback;
-      if (raw is! bool) throw FormatException('Canoa.cfg: invalid boolean ' + key);
+      if (raw is! bool) throw FormatException('Canoa.cfg: invalid boolean $key');
       return raw;
     }
     final timeout = network['connect_timeout'] ?? 10;

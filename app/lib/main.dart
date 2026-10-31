@@ -65,7 +65,7 @@ class _CanoaAppState extends State<CanoaApp> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save Canoa.cfg: ' + error.toString())),
+          SnackBar(content: Text('Could not save Canoa.cfg: $error')),
         );
       }
     }

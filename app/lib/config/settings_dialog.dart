@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'canoa_config.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({required this.config});
+  const SettingsDialog({super.key, required this.config});
   final CanoaConfig config;
   @override
   State<SettingsDialog> createState() => SettingsDialogState();
@@ -38,11 +38,11 @@ class SettingsDialogState extends State<SettingsDialog> {
         ),
         ListTile(
           title: const Text('Network timeout'),
-          subtitle: Text(config.connectTimeout.toString() + ' seconds'),
+          subtitle: Text('${config.connectTimeout} seconds'),
           trailing: DropdownButton<int>(
             value: config.connectTimeout,
             items: [5,10,15,30,60].map((n) => DropdownMenuItem(
-              value: n, child: Text(n.toString() + ' s'))).toList(),
+              value: n, child: Text('$n s'))).toList(),
             onChanged: (value) {
               if (value != null) setState(() => config = config.copyWith(connectTimeout: value));
             },
