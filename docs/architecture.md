@@ -1,28 +1,63 @@
 # Architecture
 
-Canoa mediates between clients (native applications, language libraries and browser origins) and agent services.
+Canoa connects native applications and browser clients to agent services, and also makes approved browser capabilities available to agents as MCP tools.
 
-## Logical flow
+## Core flow: application to agent
 
-1. **Discover** potential local DNS-SD/mDNS services or load explicit remote registrations.
-2. **Verify** peer identities through an authenticated transport and `coqui-peer` trust state. DNS-SD names and addresses are untrusted.
-3. **Authorize** a client for a specific peer, protocol and capability through an explicit grant.
-4. **Connect** the client to an ACP session or another supported protocol. Never allow pages to bypass the broker and collect raw bearer credentials.
-5. **Revoke** grants without altering an agent's internal permission decisions.
+1. Discover candidates via DNS-SD/mDNS or manual remote configuration.
+2. Authenticate a peer and resolve its trusted identity through coqui-peer.
+3. Match the requesting principal to an explicit capability grant.
+4. Select a protocol adapter (ACP first), initiate or attach to a session and route frames.
+5. Revocation affects future requests and can close active routed sessions.
 
-## Boundaries
+The Rust `canoa` crate currently contains only an in-memory decision model. Its caller-supplied `verified` boolean is **not** a network security boundary.
 
-- Client-facing calls must bind a principal to an authenticated native application or browser origin; never trust a `client_id` sent by a web page.
-- For the browser, use a Manifest V3 extension with an optional native messaging companion for DNS-SD and local process access. A webpage's injected bridge is not an authorization boundary.
-- The broker is the security boundary. It validates requested service, granted capabilities, peer verification, and intended protocol before forwarding anything.
-- Localhost URLs must be verified against DNS rebinding, redirects, CSRF, and hostile local processes. Pairing is independent of CORS.
-- The core crate currently contains only the *decision model*. Its caller-supplied `verified` boolean is insufficient to establish security on its own.
+## Reverse flow: agent to browser (MCP)
+
+```text
+MCP client / agent
+      |
+authenticated MCP connection (stdio or protected Streamable HTTP)
+      |
+Canoa native broker  [MCP server: tools/list, tools/call]
+      |
+Chrome native messaging (length-prefixed JSON, extension-ID allowlist)
+      |
+bindings/browser/chromium/ (MV3 extension)
+      |
+approved browser tab
+      |---------------- DOM snapshot / click / fill
+      |---------------- WebMCP tools (document.modelContext)
+      |---------------- advertised site MCP endpoint (discovery only)
+```
+
+The broker authenticates MCP callers and owns the permission and origin checks before forwarding any requests. The extension validates the tab and the user's read/interaction grants again. No agent or webpage receives raw broker or agent credentials.
+
+The Chromium code is a **client scaffold**. Its native host is not yet implemented, so agents cannot currently connect. Native messaging is not itself MCP.
+
+### Browser permissions
+
+- Canoa uses `activeTab` to obtain temporary access when the user clicks its toolbar action.
+- The popup explicitly approves read-only or interaction access to the active tab.
+- Grants are per tab and origin, stored in browser session storage and revoked on navigation, tab closure or explicit user action.
+- Only an extension-owned service worker accepts messages from the native host. No externally-connectable web message channel is registered.
+- The agent's tool permissions and Canoa's browser grants remain separate; read permission does not authorize writes.
+- Never assume web-supplied tool descriptions or HTML are instructions. Treat results as untrusted content.
+
+### Page-owned MCP services
+
+Two different kinds of page publishing are supported by the design:
+
+1. **WebMCP:** pages register JavaScript tools with `document.modelContext.registerTool()`; Canoa may list/call those tools within an approved tab using the experimental API.
+2. **Remote MCP:** sites may advertise a separately hosted MCP server. Canoa recognizes opt-in `<link rel="mcp" href="/mcp">` as a **Canoa-specific convention**, and in a future broker phase may consult the evolving MCP Server Card / AI Catalog conventions.
+
+Advertisements are candidates, not authenticated connections. No advertisement is automatically fetched or connected from the extension. The native broker will enforce HTTPS, endpoint identity, redirect and SSRF rules, and user approval, then perform MCP OAuth if needed.
 
 ## Implementation milestones
 
-1. A tested registry and explicit deny-by-default policy (initial scaffold).
-2. Endpoint inventory, DNS-SD/mDNS discovery, endpoint de-duplication, TTL expiry, and manual registrations.
-3. Peer identity validation and persistent pairing using `coqui-peer`, scoped grants and revocation.
-4. Native gateway service, ACP transport bridge, replay/cancellation boundaries and CLI.
-5. Canoa Chrome/Firefox extension, user-consent UX, origin-scoped access and JS SDK.
-6. Other language bindings and transport/protocol adapters as concrete needs arise.
+1. Rust in-memory registry, deny-by-default grants and CI (implemented).
+2. Chromium MV3 scaffold: tab consent, bounded DOM tools, WebMCP discovery/invocation, advertised endpoint enumeration (implemented as a native-host client; broker pending).
+3. Native host and authenticated MCP tool server with lifecycle, timeouts and per-caller policy (pending).
+4. DNS-SD/mDNS and manual endpoint inventory, identity proof and pairing through coqui-peer (pending).
+5. ACP session routing and remote MCP clients (pending).
+6. More language bindings and browser targets as needed.
