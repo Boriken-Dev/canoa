@@ -1,4 +1,8 @@
+import 'config/settings_dialog.dart';
 import 'dart:async';
+import 'config/canoa_config.dart';
+import 'config/canoa_config_file.dart';
+import 'desktop/desktop_shell.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/client.dart';
@@ -8,16 +12,29 @@ import 'package:flutter/material.dart';
 
 import 'session_store.dart';
 
-void main() {
-  runApp(const CanoaApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final config = await loadConfig();
+  final shell = createDesktopShell();
+  final settingsSignal = ValueNotifier<int>(0);
+  await shell.initialize(config, onSettings: () => settingsSignal.value++);
+  runApp(CanoaApp(
+    config: config, shell: shell, settingsSignal: settingsSignal,
+  ));
 }
 
 /// Shared Flutter application for standalone desktop/web and extension views.
 /// The extension's privileged browser permissions remain in its JS service worker.
 class CanoaApp extends StatefulWidget {
-  const CanoaApp({super.key, this.store});
+  const CanoaApp({
+    super.key, this.store, this.config = const CanoaConfig(),
+    this.shell, this.settingsSignal,
+  });
 
   final SessionStore? store;
+  final CanoaConfig config;
+  final DesktopShell? shell;
+  final ValueNotifier<int>? settingsSignal;
 
   @override
   State<CanoaApp> createState() => _CanoaAppState();
@@ -26,6 +43,33 @@ class CanoaApp extends StatefulWidget {
 class _CanoaAppState extends State<CanoaApp> {
   late final SessionStore store;
   late final bool ownsStore;
+  late CanoaConfig config;
+  void _requestSettings() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showSettings();
+    });
+  }
+  Future<void> _showSettings() async {
+    final changed = await showDialog<CanoaConfig>(
+      context: context,
+      builder: (_) => SettingsDialog(config: config),
+    );
+    if (changed == null || !mounted) return;
+    setState(() => config = changed);
+    await widget.shell?.update(changed);
+    try {
+      await saveConfig(changed);
+    } on UnsupportedError {
+      // Canoa.cfg in web/PWA deployments is read-only.
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save Canoa.cfg: ' + error.toString())),
+        );
+      }
+    }
+  }
   Timer? _contextTimer;
   final List<AcpV2Client> _ownedClients = [];
   bool _claimingContext = false;
@@ -45,10 +89,14 @@ class _CanoaAppState extends State<CanoaApp> {
     final ws = Uri.parse(target.webSocket);
     final wt = target.webTransport.isEmpty
         ? null : Uri.parse(target.webTransport);
-    final endpoints = AgentEndpoints(webTransport: wt, webSocket: ws);
+    final endpoints = AgentEndpoints(
+      webTransport: config.preferWebTransport ? wt : null,
+      webSocket: ws,
+    );
     final pinnedPeerId = target.peerId.toLowerCase();
     final client = await connectBrowserAcp(
       endpoints, pinnedPeerId: pinnedPeerId,
+      timeout: Duration(seconds: config.connectTimeout),
     );
     try {
       final remoteId = await client.createSession(cwd: target.cwd);
@@ -73,6 +121,8 @@ class _CanoaAppState extends State<CanoaApp> {
   void initState() {
     super.initState();
     ownsStore = widget.store == null;
+    config = widget.config;
+    widget.settingsSignal?.addListener(_requestSettings);
     store = widget.store ?? SessionStore();
     unawaited(_claimContext());
     _contextTimer = Timer.periodic(
@@ -83,6 +133,7 @@ class _CanoaAppState extends State<CanoaApp> {
   @override
   void dispose() {
     _contextTimer?.cancel();
+    widget.settingsSignal?.removeListener(_requestSettings);
     if (ownsStore) store.dispose();
     for (final client in _ownedClients) {
       unawaited(client.close());
@@ -106,17 +157,22 @@ class _CanoaAppState extends State<CanoaApp> {
       ),
       home: AnimatedBuilder(
         animation: store,
-        builder: (context, _) => _CanoaHome(store: store, onConnect: _connect),
+        builder: (context, _) => _CanoaHome(
+          store: store, onConnect: _connect, onSettings: _showSettings,
+        ),
       ),
     );
   }
 }
 
 class _CanoaHome extends StatelessWidget {
-  const _CanoaHome({required this.store, required this.onConnect});
+  const _CanoaHome({
+    required this.store, required this.onConnect, required this.onSettings,
+  });
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +182,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onSettings: onSettings)))
             : null,
         body: SafeArea(
           child: Row(
@@ -134,7 +190,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: 272,
-                  child: _SessionRail(store: store, onConnect: onConnect),
+                  child: _SessionRail(store: store, onConnect: onConnect, onSettings: onSettings),
                 ),
               Expanded(
                 child: _Conversation(
@@ -152,10 +208,13 @@ class _CanoaHome extends StatelessWidget {
 }
 
 class _SessionRail extends StatelessWidget {
-  const _SessionRail({required this.store, required this.onConnect});
+  const _SessionRail({
+    required this.store, required this.onConnect, required this.onSettings,
+  });
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +230,11 @@ class _SessionRail extends StatelessWidget {
               child: Text('Canoa', style: TextStyle(
                 fontSize: 22, fontWeight: FontWeight.w700,
               )),
+            ),
+            IconButton(
+              tooltip: 'Canoa settings',
+              onPressed: onSettings,
+              icon: const Icon(Icons.settings_outlined),
             ),
             IconButton(
               tooltip: 'Connect to verified agent',
