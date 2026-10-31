@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Canoa — Browser permissions</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{color-scheme:dark;font:15px system-ui;background:#101820;color:#e4f2f2}
+    main{max-width:850px;margin:2rem auto;padding:1.5rem}label{display:block;margin:1rem 0 .3rem}
+    input,select,button{font:inherit;padding:.65rem;border-radius:.4rem}
+    input,select{background:#263743;color:inherit;border:1px solid #587177;width:100%;box-sizing:border-box}
+    button{background:#397e78;color:white;border:0;cursor:pointer;margin-top:1rem}
+    #grants li{margin:1rem 0}p{line-height:1.6;color:#c3d1d8}
+    .warn{color:#f3be86}code{word-break:break-all}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Canoa browser permissions</h1>
+  <p>Grant a verified agent limited browser access to one tab and origin. A grant does
+    not pair or authenticate an agent. Navigation, revocation, or expiry removes access.</p>
+  <p class="warn">DevTools access can inspect page content, network responses and execute
+    JavaScript. Use only for agents you explicitly trust.</p>
+  <form id="grant-form">
+    <label for="peer">Previously paired agent PeerId</label>
+    <input id="peer" required pattern="sha256:[a-f0-9]{64}" placeholder="sha256:…"
+      autocomplete="off" spellcheck="false">
+    <label for="tab">Website tab</label><select id="tab" required></select>
+    <label for="capability">Permission</label>
+    <select id="capability">
+      <option value="browser.read">Read browser pages</option>
+      <option value="browser.interact">Click and fill elements</option>
+      <option value="mcp.discover">Discover website MCP hints</option>
+      <option value="webmcp.invoke">Invoke website MCP tools</option>
+      <option value="browser.debug">Elevated Chrome DevTools (debug build only)</option>
+    </select>
+    <label for="minutes">Expiry in minutes (1–120)</label>
+    <input id="minutes" type="number" value="15" min="1" max="120" required>
+    <button type="submit">Grant selected access</button>
+  </form>
+  <p role="status" id="status"></p>
+  <h2>Current grants</h2>
+  <ul id="grants"></ul>
+</main>
+<script type="module" src="permissions-ui.js"></script>
+</body>
+</html>

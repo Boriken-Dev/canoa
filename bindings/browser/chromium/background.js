@@ -35,6 +35,11 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["action"]
   });
   chrome.contextMenus.create({
+    id: "canoa-permissions",
+    title: "Canoa browser permissions",
+    contexts: ["action"]
+  });
+  chrome.contextMenus.create({
     id: "canoa-ask",
     title: "Ask Canoa",
     contexts: ["page", "selection"]
@@ -44,6 +49,10 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "canoa-full-page") {
     chrome.tabs.create({ url: chrome.runtime.getURL("ui/index.html?view=full") });
+    return;
+  }
+  if (info.menuItemId === "canoa-permissions") {
+    chrome.runtime.openOptionsPage();
     return;
   }
   if (info.menuItemId !== "canoa-ask" || !tab) return;
@@ -83,4 +92,54 @@ async function localAuthorize(request, verifiedPeerIds) {
 export const permissions = Object.freeze({
   localAuthorize, readGrants, makeGrant, storeGrants, revokePeer,
   direction: DIRECTION, capability: CAPABILITY
+});
+
+// Only the installed extension's own options page can create grants.
+// A trusted peer identity is *still* required at each tool invocation.
+// Websites and injected content scripts cannot send these messages.
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL('permissions.html')) return false;
+  if (!msg || typeof msg !== 'object' ||
+      !['canoa.grants.list','canoa.grants.add','canoa.grants.remove'].includes(msg.type)) {
+    return false;
+  }
+  (async () => {
+    if (msg.type === 'canoa.grants.list') {
+      reply({grants:await readGrants()});
+      return;
+    }
+    const current = await readGrants();
+    if (msg.type === 'canoa.grants.remove') {
+      if (!Number.isSafeInteger(msg.index) ||
+          msg.index < 0 || msg.index >= current.length) throw Error('Invalid grant');
+      current.splice(msg.index,1);
+      await storeGrants(current);
+      reply({grants:current});
+      return;
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(msg.peerId || '') ||
+        !Number.isSafeInteger(msg.tabId) || msg.tabId < 0 ||
+        ![CAPABILITY.READ,CAPABILITY.INTERACT,CAPABILITY.WEBMCP,
+          CAPABILITY.DISCOVER,CAPABILITY.DEBUG].includes(msg.capability) ||
+        !Number.isInteger(msg.minutes) || msg.minutes < 1 || msg.minutes > 120) {
+      throw Error('Invalid browser permission');
+    }
+    if (msg.capability === CAPABILITY.DEBUG &&
+        !chrome.runtime.getManifest().permissions.includes('debugger')) {
+      throw Error('Install the elevated debugger build first');
+    }
+    const tab = await chrome.tabs.get(msg.tabId);
+    if (!tab.url || !/^https?:\/\//.test(tab.url)) throw Error('Protected tab');
+    const grant = makeGrant({
+      direction:DIRECTION.AGENT_TO_PAGE,
+      peerId:msg.peerId,tabId:tab.id,
+      origin:new URL(tab.url).origin,capability:msg.capability,
+      expiresAt:Date.now() + msg.minutes*60*1000,
+    });
+    const updated = [...current,grant].slice(-250);
+    await storeGrants(updated);
+    reply({grants:updated});
+  })().catch(error=>reply({error:String(error.message || error)}));
+  return true;
 });
