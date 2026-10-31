@@ -51,6 +51,34 @@ void main() {
     store.dispose();
   });
 
+  test('remote session stores WebTransport and same-host WSS fallback', () {
+    final store = SessionStore(includePreview: false);
+    final session = store.addRemoteSession(
+      title: 'Remote', agent: 'Example',
+      peerId: 'sha256:example', remoteSessionId: 'session-22',
+      endpoint: Uri.parse('https://agent.example:4433/acp'),
+      websocketFallback: Uri.parse('wss://agent.example:4434/acp'),
+    );
+    expect(session.endpoint!.scheme, 'https');
+    expect(session.websocketFallback!.scheme, 'wss');
+    expect(session.status, SessionStatus.disconnected);
+    store.dispose();
+  });
+
+  test('session refuses fallback to a different host', () {
+    final store = SessionStore(includePreview: false);
+    expect(
+      () => store.addRemoteSession(
+        title: 'Remote', agent: 'Example',
+        peerId: 'sha256:example', remoteSessionId: 'session-22',
+        endpoint: Uri.parse('https://agent.example:4433/acp'),
+        websocketFallback: Uri.parse('wss://other.example/acp'),
+      ),
+      throwsArgumentError,
+    );
+    store.dispose();
+  });
+
   test('plain WS remote endpoints are rejected', () {
     final store = SessionStore(includePreview: false);
     expect(

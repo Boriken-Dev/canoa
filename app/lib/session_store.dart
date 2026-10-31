@@ -1,3 +1,4 @@
+import 'transport/agent_transport.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
@@ -25,6 +26,7 @@ class ChatSession {
     this.peerId,
     this.remoteSessionId,
     this.endpoint,
+    this.websocketFallback,
     List<ChatMessage>? messages,
   }) : messages = messages ?? <ChatMessage>[];
 
@@ -34,7 +36,9 @@ class ChatSession {
   SessionStatus status;
   final String? peerId;
   final String? remoteSessionId;
+  /// Preferred HTTPS WebTransport or direct WSS endpoint.
   final Uri? endpoint;
+  final Uri? websocketFallback;
   final List<ChatMessage> messages;
 }
 
@@ -99,9 +103,19 @@ class SessionStore extends ChangeNotifier {
     required String peerId,
     required String remoteSessionId,
     required Uri endpoint,
+    Uri? websocketFallback,
   }) {
-    if (endpoint.scheme != 'wss') {
-      throw ArgumentError.value(endpoint, 'endpoint', 'Remote sessions require WSS');
+    // This records transport locations, not the authentication state. The
+    // session stays disconnected until peer proof and ACP are implemented.
+    if (endpoint.scheme == 'https') {
+      AgentEndpoints(webTransport: endpoint, webSocket: websocketFallback);
+    } else if (endpoint.scheme == 'wss') {
+      if (websocketFallback != null) {
+        throw ArgumentError('A direct WSS endpoint cannot have a fallback');
+      }
+      AgentEndpoints(webSocket: endpoint);
+    } else {
+      throw ArgumentError.value(endpoint, 'endpoint', 'Use HTTPS WebTransport or WSS');
     }
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
@@ -113,6 +127,7 @@ class SessionStore extends ChangeNotifier {
       peerId: peerId,
       remoteSessionId: remoteSessionId,
       endpoint: endpoint,
+      websocketFallback: websocketFallback,
       status: SessionStatus.disconnected,
     );
     _sessions.insert(0, session);
