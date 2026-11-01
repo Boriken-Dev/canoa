@@ -30,7 +30,7 @@ Browsers can connect directly over WebTransport/WSS to an endpoint supporting th
 ## Permission authorities
 
 - **Browser extension:** final authority for tab disclosure, DOM read/write, webpage WebMCP invocation, webpage-to-agent exposure and prompts. Maintains its own scoped grants and revocation.
-- **Peer handshake/trust:** [coqui-peer's experimental WebCrypto method](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto) proves the browser/client key and a pinned server key before ACP. The host separately owns pairing, revocation and authorization; its Rust trust-store integration is not yet implemented.
+- **Peer handshake/trust:** [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto) proves the browser/client key and a pinned server key before ACP, and every ACP message after that is inside the session it ends in. The host separately owns pairing, revocation and authorization; its Rust trust-store integration is not yet implemented.
 - **ACP agent:** independently manages sessions and its internal permissions.
 - **MCP client/provider:** independent authorization and tool execution policy. A browser grant cannot pre-approve remote MCP tool calls.
 - **Native gateway (if installed):** enforces its own peer and client restrictions but **cannot override** the browser's deny decision.
@@ -53,7 +53,7 @@ See [interop.md](interop.md) for the minimum interoperability profile.
 
 ## Authentication and transport layering
 
-The source of the browser's cryptographic handshake is `Boriken-Dev/coqui-peer/methods/webcrypto`. Canoa bundles an **unchanged, Git-blob-pinned copy** so that the extension and PWA work offline and satisfy MV3 local-code restrictions. `app/web/canoa_peer_bridge.mjs` adapts this method to Canoa; it contains no independent cryptographic handshake.
+The source of the browser's cryptographic handshake is `Boriken-Dev/coqui-peer-webcrypto`. Canoa bundles an **unchanged, Git-blob-pinned copy** so that the extension and PWA work offline and satisfy MV3 local-code restrictions. `app/web/canoa_peer_bridge.mjs` adapts this method to Canoa; it contains no independent cryptographic handshake.
 
 The `coqui_web` Dart package owns pending-message storage across the pre-application phase, in `StagedChannel`. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
 

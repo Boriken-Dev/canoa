@@ -6,7 +6,7 @@ Canoa is one implementation of a browser-to-agent gateway model. A compatible im
 
 1. **Agent Client Protocol (ACP)** is the application protocol. Use the published ACP lifecycle and JSON-RPC methods, not Canoa-specific method replacements.
 2. **WebTransport over HTTPS** is preferred, with **WebSocket over WSS** as fallback. WebTransport uses a Canoa draft profile with an ordered bidirectional stream and little-endian length-prefixed UTF-8 JSON-RPC messages; WebSocket carries complete JSON-RPC text frames. WebTransport is not yet an upstream ACP standard transport; both addresses must be advertised and bound to the same verified peer. See [transport selection](transport.md).
-3. **Authenticated peer identity** must be verified **before** an ACP session is exposed. The `coqui-peer` family is the reference implementation for peer identity, pairing and trust, but merely claiming a `PeerId` string is not proof. A conforming non-Rust implementation needs the same documented on-wire proof and key-rotation semantics; using the Rust crate is not required. The experimental browser method is versioned as `dev.boriken.coqui.peer-webcrypto/v1`, with canonical source in [coqui-peer](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto); it is not an upstream standard. A compatible native/server-side implementation and two-implementation conformance tests remain outstanding.
+3. **Authenticated peer identity** must be verified **before** an ACP session is exposed. The `coqui-peer` family is the reference implementation for peer identity, pairing and trust, but merely claiming a `PeerId` string is not proof. A conforming non-Rust implementation needs the same documented on-wire proof and key-rotation semantics; using the Rust crate is not required. The browser method is versioned as `dev.boriken.coqui.peer-webcrypto/v1`, with its source and wire in [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto); it is not an upstream standard, and has had one independent review. It ends in an encrypted session: every ACP message after the proof is one sealed record in a binary frame, a plain message ends the connection, and a reverse proxy that ends TLS can neither read nor inject.
 4. **Capabilities** are negotiated by ACP. Browser tools are exposed as MCP only when the remote agent can consume them through a supported MCP connection or an explicitly negotiated ACP/MCP bridge. The MCP-over-ACP extension is currently experimental, not assumed mandatory.
 5. **Local policy** is owned by each client implementation. There is no global Canoa permission authority.
 
@@ -37,6 +37,8 @@ Browsers do not offer a general API for arbitrary TLS client-certificate selecti
 Do not send long-lived tokens in URL query strings; they can leak through logs. A challenge/response handshake may use the coqui-peer peer-proof and pairing primitives, but its wire framing and state machine must be published, versioned and interoperability-tested before being called a standard.
 
 Implementations may discover endpoints through DNS-SD or manual pairing. Discovery is not a trust proof.
+
+A web page reaches a person's agents through [ACP in the browser](https://boriken-dev.github.io/coqui-acp/browser/), a draft contract in coqui-acp that any provider can implement. Canoa's extension is meant to be one implementation of it and does not implement it yet.
 
 ## Conformance tests (planned)
 
