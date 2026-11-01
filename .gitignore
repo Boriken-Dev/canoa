@@ -1,11 +1,37 @@
+# Dotfiles at the root are opt-in.
+/.*
+!/.gitignore
+!/.gitattributes
+!/.github/
+
+# Agent config and personal overrides, at any depth.
+.agents
+CLAUDE*
+.claude
+*.local.*
+
+# Rust. The workspace holds libraries, which do not commit a lockfile.
 /target/
-**/.DS_Store
-*.local.toml
-.env
-.env.*
-!.env.example
+/Cargo.lock
+
+# Node
+node_modules/
+
+# Flutter
 /app/.dart_tool/
 /app/build/
 /app/.flutter-plugins*
+
+# Built extension UI
 /bindings/browser/chromium/ui/
 /bindings/browser/firefox/ui/
+
+# Docs build
+/site/
+
+# Secrets and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
