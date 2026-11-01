@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {WebSocket} from 'ws';
 import {generateIdentity,createInitiator} from '../../../app/web/vendor/coqui-peer-webcrypto.mjs';
 import {serve} from '../server.mjs';
+
+// The fixture's TLS certificate comes from OpenSSL; without it the tests skip and say why.
+const needs={skip:spawnSync('openssl',['version']).error?'openssl is not on PATH':false};
 
 async function fixture(allow) {
   const dir=mkdtempSync(path.join(tmpdir(),'canoa-echo-'));
@@ -51,7 +54,7 @@ async function authenticate(f){
   const accepted=await f.next();
   return auth.finish(accepted);
 }
-test('actual WSS browser peer proof and ACP v2 prompt lifecycle',async()=>{
+test('actual WSS browser peer proof and ACP v2 prompt lifecycle',needs,async()=>{
   const f=await fixture(true);
   try{
     assert.equal(await authenticate(f),f.server.peerId);
@@ -82,7 +85,7 @@ test('actual WSS browser peer proof and ACP v2 prompt lifecycle',async()=>{
     assert.equal(events[3].params.update.stopReason,'end_turn');
   }finally{await f.close();}
 });
-test('real WSS refuses browser client missing from allowlist',async()=>{
+test('real WSS refuses browser client missing from allowlist',needs,async()=>{
   const f=await fixture(false);
   try{
     const auth=await createInitiator(f.client,f.server.peerId);
