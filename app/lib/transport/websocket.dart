@@ -27,12 +27,19 @@ final class _WebSocketConnection implements AgentConnection {
         if (_ended) return;
         if (message is! String || utf8.encode(message).length > maxAgentMessage) {
           _end(const TransportProtocolFailure('ACP WebSocket frames must be bounded UTF-8 text'));
+          unawaited(close());
         } else {
           _incoming.add(message);
         }
       },
-      onError: (Object error) => _end(error),
-      onDone: () => _end(),
+      onError: (Object error) {
+        _end(error);
+        unawaited(close());
+      },
+      onDone: () {
+        _end();
+        unawaited(close());
+      },
       cancelOnError: true,
     );
   }
@@ -40,6 +47,7 @@ final class _WebSocketConnection implements AgentConnection {
   final StreamController<String> _incoming = StreamController<String>();
   late final StreamSubscription<dynamic> _subscription;
   bool _ended = false;
+  bool _released = false;
 
   @override
   AgentTransportKind get kind => AgentTransportKind.webSocket;
@@ -64,9 +72,14 @@ final class _WebSocketConnection implements AgentConnection {
 
   @override
   Future<void> close() async {
-    if (_ended) return;
+    // A stream that already ended still holds its socket.
+    if (_released) return;
+    _released = true;
     _end();
     await _subscription.cancel();
-    await _channel.sink.close();
+    // A peer that never answers the close handshake must not hold the caller.
+    try {
+      await _channel.sink.close().timeout(const Duration(seconds: 2));
+    } catch (_) {}
   }
 }

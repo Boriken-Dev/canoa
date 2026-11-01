@@ -109,6 +109,7 @@ final class _WebTransportConnection implements AgentConnection {
   final StreamController<String> _messages = StreamController<String>();
   final AgentFrameDecoder _decoder = AgentFrameDecoder();
   bool _ended = false;
+  bool _released = false;
 
   @override
   AgentTransportKind get kind => AgentTransportKind.webTransport;
@@ -118,8 +119,14 @@ final class _WebTransportConnection implements AgentConnection {
   void start() {
     unawaited(_read());
     _transport.closed.toDart.then(
-      (_) => _end(),
-      onError: (Object error) => _end(TransportUnavailable('WebTransport closed: $error')),
+      (_) {
+        _end();
+        unawaited(close());
+      },
+      onError: (Object error) {
+        _end(TransportUnavailable('WebTransport closed: $error'));
+        unawaited(close());
+      },
     );
   }
 
@@ -139,6 +146,7 @@ final class _WebTransportConnection implements AgentConnection {
     } catch (e) {
       _end(e);
     }
+    unawaited(close());
   }
 
   void _end([Object? error]) {
@@ -156,13 +164,16 @@ final class _WebTransportConnection implements AgentConnection {
       await _writer.write(frame.toJS).toDart;
     } catch (e) {
       _end(e);
+      unawaited(close());
       throw TransportUnavailable('WebTransport send failed: $e');
     }
   }
 
   @override
   Future<void> close() async {
-    if (_ended) return;
+    // A stream that already ended still holds its session.
+    if (_released) return;
+    _released = true;
     _end();
     try { await _writer.close().toDart.timeout(const Duration(seconds: 2)); } catch (_) { }
     try { await _reader.cancel().toDart; } catch (_) { }
