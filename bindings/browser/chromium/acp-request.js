@@ -21,14 +21,14 @@ function validAgent(label, url, peer) {
   }
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
   if (parsed.protocol !== "wss:" && !(parsed.protocol === "ws:" && local)) return "Use wss://, or ws:// on this machine.";
-  if (!/^sha256:[0-9a-f]{64}$/.test(peer)) return "The peer id looks like sha256: and 64 hex digits. Discovery is not trust: get it from the agent's owner.";
+  if (peer !== "" && !/^sha256:[0-9a-f]{64}$/.test(peer)) return "The peer id looks like sha256: and 64 hex digits. Discovery is not trust: get it from the agent's owner.";
   return null;
 }
 
 function agentForm(onAdd) {
   const label = element("input", { type: "text", placeholder: "Name" });
   const url = element("input", { type: "text", placeholder: "wss://host/path or ws://127.0.0.1:8765" });
-  const peer = element("input", { type: "text", placeholder: "sha256:…" });
+  const peer = element("input", { type: "text", placeholder: "sha256:… (empty: nothing proves who answers)" });
   const status = element("p", { className: "warn" });
   const add = element("button", { type: "button", className: "quiet", textContent: "Add this agent" });
   add.addEventListener("click", async () => {
@@ -50,10 +50,10 @@ function grantView(details) {
     const box = element("input", { type: "checkbox", checked });
     box.dataset.key = agent.key ?? "";
     box.dataset.fresh = isNew ? String(added.length - 1) : "";
-    const about = agent.proven ? "proven" : "not proven yet";
+    const about = agent.proven ? "proven" : agent.peer ? "not proven yet" : "unverified";
     picks.append(element("label", { className: "pick" }, box,
       element("span", {}, element("strong", { textContent: agent.label }), ` — ${agent.source ?? "manual"}, ${about}`,
-        element("br"), element("code", { textContent: agent.peer ?? "no peer id" }))));
+        element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }))));
   };
   for (const agent of details.agents) row(agent, details.peers.includes(agent.peer), false);
   if (details.agents.length === 0) picks.append(element("p", { textContent: "No agents yet. Add one below." }));

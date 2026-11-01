@@ -127,7 +127,7 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
       } catch {
         throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
       }
-      await store.markProven(agent.key);
+      if (channel.proven) await store.markProven(agent.key);
       const sessions = new Set(grant.sessions ?? []);
       const scope = new Scope({ ...grant, sessions }, origin);
       const conn = entry.nextConn++;
@@ -146,7 +146,7 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
         }
       });
       channel.onClose(() => finish(link, "agent"));
-      return { conn, agent: await describe(origin, grant, { ...agent, proven: true }) };
+      return { conn, agent: await describe(origin, grant, { ...agent, proven: channel.proven }) };
     },
 
     async revoke({ origin }, { id } = {}) {

@@ -81,6 +81,20 @@ wss.on("connection", (socket) => {
 await new Promise((resolve) => agentServer.listen(0, "127.0.0.1", resolve));
 const agentUrl = `ws://127.0.0.1:${agentServer.address().port}/agent`;
 
+// An agent with no proof at all: plain ACP in text frames.
+const window_plain = [];
+const plainServer = createServer();
+const plainWss = new WebSocketServer({ server: plainServer });
+plainWss.on("connection", (socket) => {
+  socket.on("message", (data) => {
+    const { id, method } = JSON.parse(data.toString());
+    window_plain.push(method);
+    socket.send(JSON.stringify({ jsonrpc: "2.0", id, result: { protocolVersion: 1, agentCapabilities: {} } }));
+  });
+});
+await new Promise((resolve) => plainServer.listen(0, "127.0.0.1", resolve));
+const plainUrl = `ws://127.0.0.1:${plainServer.address().port}/agent`;
+
 // The page, as strict as a page gets: nothing inline, and no network but its own origin.
 const CSP = "default-src 'none'; script-src 'self'; connect-src 'self'";
 const site = createServer((request, response) => {
@@ -300,6 +314,35 @@ try {
     assert.equal(await page.run("document.acp.connect(window.agent).then(() => 'connected', (e) => e.name)"), "NotAllowedError");
     await waitFor("the socket to end", () => sockets.size === 0);
   });
+  await check("unverified: an agent added with no peer id connects, and says it is unverified", async () => {
+    await requested();
+    const view = await prompt();
+    await view.run(`(() => {
+      const inputs = [...document.querySelectorAll('input[type=text]')];
+      inputs[0].value = 'Plain agent'; inputs[1].value = '${plainUrl}'; inputs[2].value = '';
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Add this agent').click();
+    })()`);
+    await waitFor("the added agent", () => view.run("document.querySelectorAll('input[type=checkbox]:checked').length >= 1"));
+    await view.run(`(() => {
+      const inputs = [...document.querySelectorAll('input[type=text]')];
+      inputs.at(-1).value = '/plain';
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
+    })()`).catch(() => {});
+    assert.equal(await page.run("window.asked"), 1);
+    assert.equal(await page.run("window.agent.identity.verified"), false);
+    const plain = window_plain;
+    assert.equal(await page.run(`(async () => {
+      const conn = await document.acp.connect(window.agent);
+      const writer = conn.writable.getWriter();
+      const reader = conn.readable.getReader();
+      await writer.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } }));
+      const answer = JSON.parse((await reader.read()).value);
+      await document.acp.revoke(window.agent);
+      await conn.closed;
+      return answer.id === 1 && conn.agent.identity.verified;
+    })()`), false);
+    assert.equal(plain.length, 1);
+  });
   exitCode = results.some((line) => line.startsWith("FAIL")) ? 1 : 0;
 } catch (error) {
   console.log(`ABORTED: ${error.stack ?? error}`);
@@ -310,6 +353,8 @@ try {
   for (const socket of sockets) socket.terminate();
   wss.close();
   agentServer.close();
+  plainWss.close();
+  plainServer.close();
   site.close();
   try {
     rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });

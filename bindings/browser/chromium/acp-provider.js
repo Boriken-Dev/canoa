@@ -17,7 +17,8 @@ const areaOf = (grant) => (grant.lifetime === "always" ? ["local", GRANTS] : ["s
 const store = {
   agents: () => read("local", AGENTS, []),
   async addAgent({ label, url, peer }) {
-    const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), peer: String(peer), source: "manual" };
+    const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: "manual" };
+    if (peer) agent.peer = String(peer);
     await write("local", AGENTS, [...(await store.agents()), agent]);
     return agent;
   },

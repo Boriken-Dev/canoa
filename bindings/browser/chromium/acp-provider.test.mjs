@@ -78,6 +78,7 @@ function makeDriver() {
     dial: async (agent) => {
       const peer = remote.get(agent.key);
       return {
+        proven: agent.proven !== false,
         send: async (text) => peer.deliver(text),
         onMessage: (handler) => peer.listeners.splice(0, peer.listeners.length, handler),
         onClose: () => {},
