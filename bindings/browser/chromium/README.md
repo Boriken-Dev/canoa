@@ -4,6 +4,20 @@ Canoa is a Manifest V3 extension named **Canoa**, under `bindings/browser/chromi
 
 The canonical multi-session chat UI lives in root `app/` (Flutter); build with `python app/tool/build.py chromium` to embed the UI in the side panel or a full-page tab. A separate PWA build uses the same source. The backend ACP session transport is not yet connected, so chat is currently a local preview.
 
+## A provider of `document.acp`
+
+The extension implements [ACP in the browser](https://boriken-dev.github.io/coqui-acp/browser/), the contract in coqui-acp, so a page can find and use a person's agents without knowing it is Canoa.
+
+- `acp-page.js` runs in the page's world and defines the registry; everything it does is the page's to tamper with.
+- `acp-content.js` sits between it and the service worker, and adds what the page cannot forge: whether the person has just acted.
+- `acp-gateway.js` decides: grants, per-origin ids, and coqui-acp's scope on every message. It trusts only the origin the browser reports.
+- `acp-provider.js` puts that on Chrome's APIs, and `acp-request.html` is the window that asks the person, where a page cannot draw over it.
+- `acp-dial.js` opens a proven, sealed WebSocket. Agents are added by hand with a pinned peer id; discovery is not built yet.
+
+Right-click the toolbar icon for **Let this site ask for my agents** and **Canoa agents**.
+
+`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
+
 ## Browser-facing building blocks
 
 - `permissions.js`, `acp-permissions.js`: independent browser and ACP permission decisions; both have tests.

@@ -3,8 +3,11 @@ import {
 } from "./permissions.js";
 import { captureContext, addContext, takeContext } from "./context-transfer.js";
 import { detachOnTabClosed } from "./devtools.js";
+import { installProvider } from "./acp-provider.js";
 
-// Browser-owned, deny-by-default policy. No page-origin messages are accepted.
+installProvider();
+
+// Browser-owned, deny-by-default policy. A page reaches this extension only through the provider, which checks its sender.
 const KEY = "canoa_grants";
 const CONTEXT_KEY = "canoa_pending_contexts";
 
