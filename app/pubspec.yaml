@@ -9,11 +9,16 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # Sibling checkouts until the repositories are published; then a git dependency pinned to a commit.
   coqui_acp:
-    path: ../../coqui-acp/bindings/dart/coqui_acp
+    git:
+      url: https://github.com/Boriken-Dev/coqui-acp.git
+      path: bindings/dart/coqui_acp
+      ref: 90ea25c4f15f1bde191ae35f841b02711de1fee0
   coqui_web:
-    path: ../../coqui-web/bindings/dart/coqui_web
+    git:
+      url: https://github.com/Boriken-Dev/coqui-web.git
+      path: bindings/dart/coqui_web
+      ref: 60faa0c8a50d0cd8b5ee49f16289bbce6a461a2b
   toml: ^0.18.0
   http: ^1.6.0
   tray_manager: ^0.5.3

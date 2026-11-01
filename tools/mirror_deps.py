@@ -22,13 +22,15 @@ def main():
     parser.add_argument("--skip-cdn",action="store_true")
     args=parser.parse_args()
     target=Path(args.destination)
-    for kind in ("hosted","hosted-hashes"):
+    # git/cache holds a bare clone of each git dependency, which pub checks out from when offline.
+    for kind in ("hosted","hosted-hashes","git/cache"):
         src=Path(args.source_pub)/kind
         dst=target/"pub"/kind
         if dst.exists(): shutil.rmtree(dst)
         if src.exists(): shutil.copytree(src,dst,ignore=shutil.ignore_patterns("*.lock"))
     directory=target/"pub"/"hosted"/"pub.dev"
     packages=sorted(item.name for item in directory.glob("*") if item.is_dir())
+    clones=sorted(item.name for item in (target/"pub"/"git"/"cache").glob("*") if item.is_dir())
     files=[]
     if not args.skip_cdn:
         inventory=json.loads(fetch(INDEX))
@@ -49,7 +51,7 @@ def main():
         with ThreadPoolExecutor(max_workers=12) as workers:
             files=list(workers.map(copy,fonts))
     report=dict(format=1,source="Boriken-Dev/Canoa",sourceCommit=args.revision,
-                status="complete",pubPackages=packages,cdnFiles=files)
+                status="complete",pubPackages=packages,gitClones=clones,cdnFiles=files)
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
-    print("Mirrored",len(packages),"pub packages and",len(files),"font assets")
+    print("Mirrored",len(packages),"pub packages,",len(clones),"git clones and",len(files),"font assets")
 if __name__=="__main__": main()

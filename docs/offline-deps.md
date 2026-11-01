@@ -4,4 +4,4 @@ The [deps branch](https://github.com/Boriken-Dev/Canoa/tree/deps) follows AI6's 
 
 The initial branch is only a scaffold. A cache is ready when manifest.json reports status complete. The Flutter SDK, engine, native toolchains and deployment rewrites for font fallbacks are separate requirements.
 
-To consume after refresh, create a git worktree for deps, point PUB_CACHE at its pub directory and run flutter pub get --offline. Never mirror tokens or private registry credentials.
+The mirror also carries a bare clone of each git dependency, such as `coqui-acp` and `coqui-web`, pinned by commit in `app/pubspec.yaml`, so they resolve offline too. To consume after refresh, create a git worktree for deps, point PUB_CACHE at its pub directory and run flutter pub get --offline. Never mirror tokens or private registry credentials.

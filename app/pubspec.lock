@@ -44,16 +44,20 @@ packages:
   coqui_acp:
     dependency: "direct main"
     description:
-      path: "../../coqui-acp/bindings/dart/coqui_acp"
-      relative: true
-    source: path
+      path: "bindings/dart/coqui_acp"
+      ref: "90ea25c4f15f1bde191ae35f841b02711de1fee0"
+      resolved-ref: "90ea25c4f15f1bde191ae35f841b02711de1fee0"
+      url: "https://github.com/Boriken-Dev/coqui-acp.git"
+    source: git
     version: "0.0.0-alpha.0"
   coqui_web:
     dependency: "direct main"
     description:
-      path: "../../coqui-web/bindings/dart/coqui_web"
-      relative: true
-    source: path
+      path: "bindings/dart/coqui_web"
+      ref: "60faa0c8a50d0cd8b5ee49f16289bbce6a461a2b"
+      resolved-ref: "60faa0c8a50d0cd8b5ee49f16289bbce6a461a2b"
+      url: "https://github.com/Boriken-Dev/coqui-web.git"
+    source: git
     version: "0.0.0-alpha.0"
   crypto:
     dependency: transitive
