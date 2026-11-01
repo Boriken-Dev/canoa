@@ -59,5 +59,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/deploy-pages@v4
         id: deployment

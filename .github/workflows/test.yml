@@ -1,8 +1,25 @@
 name: Test
+# On pushes and pull requests, on demand at any ref, and on a throwaway "ci-*" tag, deleted after its run.
 on:
   push:
+    tags:
+      - "ci-*"
+    branches:
+      - "**"
   pull_request:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        type: string
+        required: false
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -15,6 +32,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}

@@ -1,0 +1,63 @@
+name: Release
+
+# A gate, so a first real release is not the first time this runs. Nothing here publishes: no crate or package of
+# this workspace is released yet. It creates a source release from CHANGELOG.md.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  docs-gate:
+    name: Build the documentation strictly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: pip install mkdocs-material==9.6.22
+      - run: mkdocs build --strict
+
+  release:
+    name: Create source release
+    needs: [test, docs-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract release notes from CHANGELOG.md
+        shell: python
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          import os
+          import pathlib
+          import re
+          import sys
+
+          tag = os.environ["TAG"]
+          version = tag[1:] if tag.startswith("v") else tag
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]:\s|\Z)",
+              changelog,
+              re.DOTALL | re.MULTILINE,
+          )
+          if not match:
+              sys.exit(f"No CHANGELOG.md section found for {version!r}")
+          pathlib.Path("release_notes.md").write_text(match.group(1).strip() + "\n")
+      - name: Create release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          body_path: release_notes.md
