@@ -51,7 +51,13 @@ const peer = Object.freeze({
   abort(id) { active.delete(id); },
   // Calls take their place in the session in call order, so the caller makes them in order.
   seal(id, message) { return established(id).seal(message); },
+  // Null for the peer's close.
   open(id, record) { return established(id).open(record); },
-  closeSession(id) { sessions.delete(id); },
+  closeRecord(id) { return established(id).close(); },
+  verifyEnd(id) { established(id).verifyEnd(); },
+  closeSession(id) {
+    sessions.get(id)?.destroy();
+    sessions.delete(id);
+  },
 });
 globalThis.canoaPeer = peer;

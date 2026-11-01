@@ -85,6 +85,9 @@ test('actual WSS browser peer proof and ACP v2 prompt lifecycle',needs,async()=>
     assert.equal(events[1].params.update.state,'running');
     assert.equal(events[2].params.update.content.text,'Echo: hello from browser');
     assert.equal(events[3].params.update.stopReason,'end_turn');
+    f.socket.send(await session.close());
+    assert.equal(await session.open(new Uint8Array(await f.next())),null);
+    session.verifyEnd();
   }finally{await f.close();}
 });
 test('real WSS refuses browser client missing from allowlist',needs,async()=>{

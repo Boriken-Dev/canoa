@@ -28,7 +28,9 @@ external void _abort(JSString token);
 @JS('canoaPeer.seal')
 external JSPromise<JSUint8Array> _seal(JSString session, JSUint8Array message);
 @JS('canoaPeer.open')
-external JSPromise<JSUint8Array> _open(JSString session, JSUint8Array record);
+external JSPromise<JSUint8Array?> _open(JSString session, JSUint8Array record);
+@JS('canoaPeer.closeRecord')
+external JSPromise<JSUint8Array> _closeRecord(JSString session);
 @JS('canoaPeer.closeSession')
 external void _closeSession(JSString session);
 
@@ -66,7 +68,8 @@ Future<VerifiedPeer> verifyBrowserPeer(WebChannel channel, String expectedPeerId
       SealedChannel(
         channel,
         seal: (message) async => (await _seal(session, message.toJS).toDart).toDart,
-        open: (record) async => (await _open(session, record.toJS).toDart).toDart,
+        open: (record) async => (await _open(session, record.toJS).toDart)?.toDart,
+        closeRecord: () async => (await _closeRecord(session).toDart).toDart,
         release: () => _closeSession(session),
       ),
     );

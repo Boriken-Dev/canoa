@@ -56,6 +56,10 @@ export async function serve({cert,key,identity,allowedPeerId,host='127.0.0.1',po
       }
       if (!binary) throw Error('After the proof every message is a sealed record');
       const opened=await session.open(new Uint8Array(value));
+      if (opened===null) {
+        sending=sending.then(async()=>{socket.send(await session.close());socket.close();});
+        return;
+      }
       const rpc=JSON.parse(new TextDecoder().decode(opened));
       if (!rpc || rpc.jsonrpc!=='2.0' || typeof rpc.method!=='string') throw Error('Bad ACP RPC');
       const {id,method,params={}}=rpc;

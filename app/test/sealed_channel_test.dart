@@ -35,6 +35,7 @@ void main() {
       wire,
       seal: (message) => calls++ == 0 ? slow.future : Future.value(message),
       open: (record) async => record,
+      closeRecord: () async => Uint8List(1),
       release: () {},
     );
     final first = channel.send('first');
@@ -53,6 +54,7 @@ void main() {
       wire,
       seal: (message) async => message,
       open: (record) async => record.first == 0 ? throw StateError('bad record') : shifted(record),
+      closeRecord: () async => Uint8List(1),
       release: () => released = true,
     );
     final received = channel.messages.toList();
@@ -63,5 +65,41 @@ void main() {
     expect(wire.closed, isTrue);
     expect(released, isTrue);
     await expectLater(channel.send('after'), throwsA(isA<TransportUnavailable>()));
+  });
+
+  SealedChannel closing(Wire wire) => SealedChannel(
+    wire,
+    seal: (message) async => message,
+    open: (record) async => record.isEmpty ? null : record,
+    closeRecord: () async => utf8.encode('close'),
+    release: () {},
+  );
+
+  test('the peer\'s close record is an orderly end', () async {
+    final wire = Wire();
+    final received = closing(wire).messages.toList();
+    wire.incoming.add(utf8.encode('hello'));
+    wire.incoming.add(Uint8List(0));
+    expect(await received, ['hello']);
+  });
+
+  test('a connection cut before the close record is a failure', () async {
+    final wire = Wire();
+    final received = closing(wire).messages.toList();
+    wire.incoming.add(utf8.encode('hello'));
+    unawaited(wire.incoming.close());
+    await expectLater(received, throwsA(isA<TransportUnavailable>()));
+    // The channel closes itself in the background once the failure is out.
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(wire.sent.map(utf8.decode), ['close']);
+  });
+
+  test('closing sends the close record after what was queued', () async {
+    final wire = Wire();
+    final channel = closing(wire);
+    await channel.send('last');
+    await channel.close();
+    expect(wire.sent.map(utf8.decode), ['last', 'close']);
+    expect(wire.closed, isTrue);
   });
 }
