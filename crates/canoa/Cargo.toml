@@ -5,7 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Protocol-neutral discovery registry and policy for agent gateway clients"
+description = "A deny-by-default registry of services and client grants"
 readme = "README.md"
+exclude = [".*", "*.local.*"]
+# Nothing consumes it yet: published when the native host does.
+publish = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
 
 [dependencies]
