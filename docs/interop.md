@@ -32,7 +32,7 @@ Websites can register WebMCP tools or advertise independent remote MCP endpoints
 
 ## Browser WebSocket, WebTransport and peer-auth constraints
 
-Browsers do not offer a general API for arbitrary TLS client-certificate selection or custom request headers in the WebSocket constructor. The browser-compatible authentication profile must work at the application layer **after WebTransport/WSS establishment, before ACP messages**, or through a trusted local companion with verified peer identity. WSS establishes server certificate validation, not peer pairing by itself.
+A browser presents a client certificate from the person's store or smart card when a server asks, as for any site, but a page has no API to choose or supply one, or to set custom request headers in the WebSocket constructor. The browser-compatible authentication profile must work at the application layer **after WebTransport/WSS establishment, before ACP messages**, or through a trusted local companion with verified peer identity. WSS establishes server certificate validation, not peer pairing by itself.
 
 Do not send long-lived tokens in URL query strings; they can leak through logs. A challenge/response handshake may use the coqui-peer peer-proof and pairing primitives, but its wire framing and state machine must be published, versioned and interoperability-tested before being called a standard.
 
