@@ -1,7 +1,0 @@
-name: coqui_net_transport
-description: Transport-neutral ordered message handoff, before and after authentication.
-version: 0.0.0
-publish_to: none
-
-environment:
-  sdk: '>=3.9.0 <4.0.0'

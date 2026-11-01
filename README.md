@@ -33,8 +33,6 @@
 | Path | Responsibility |
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
-| `crates/coqui-net-transport/` | Shared transport framing and fallback policy prototype |
-| `bindings/dart/coqui_net_transport/` | Protocol-neutral queued message handoff during transport setup |
 | `app/web/vendor/` | Pinned browser WebCrypto method sourced from `coqui-peer` |
 | `app/` | Canonical Flutter chat, Canoa.cfg settings and desktop tray UI |
 | `examples/acp-echo/` | Paired WSS ACP v2 echo test endpoint and integration tests |
@@ -55,7 +53,7 @@ flutter build web --release --wasm
 
 The UI starts with offline preview sessions. A manually pinned Coqui peer connection can now be tested against [the WSS ACP echo fixture](https://github.com/Boriken-Dev/Canoa/blob/main/examples/acp-echo/README.md), which is not a production agent. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
 
-See the [shared `coqui-net-transport` proposal](https://boriken-dev.github.io/Canoa/coqui-net-transport/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
+Canoa is one implementation on two shared libraries: [coqui-web](https://github.com/Boriken-Dev/coqui-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
 
 The [project naming convention](https://boriken-dev.github.io/Canoa/naming/) uses `boriken.dev` and reverse-DNS identifiers such as `dev.boriken.canoa` for application and native host identities.
 

@@ -55,6 +55,6 @@ See [interop.md](interop.md) for the minimum interoperability profile.
 
 The source of the browser's cryptographic handshake is `Boriken-Dev/coqui-peer/methods/webcrypto`. Canoa bundles an **unchanged, Git-blob-pinned copy** so that the extension and PWA work offline and satisfy MV3 local-code restrictions. `app/web/canoa_peer_bridge.mjs` adapts this method to Canoa; it contains no independent cryptographic handshake.
 
-The generic Dart `bindings/dart/coqui_net_transport/lib/message_handoff.dart` owns pending-message storage across the pre-application phase. Canoa's `StagedAgentConnection` wraps its existing WebTransport/WSS adapter. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
+The `coqui_web` Dart package owns pending-message storage across the pre-application phase, in `StagedChannel`. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
 
 **Authentication is not pairing.** Canoa has no integrated Coqui pairing or trust-store UI. A pinned user-entered fingerprint is required in the connection dialog; no unrecognized peer is auto-enrolled. coqui-peer holds the native Rust responder.

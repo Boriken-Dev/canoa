@@ -6,9 +6,10 @@ The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and a
 
 | File | Responsibility |
 | --- | --- |
-| [`app/lib/transport/agent_transport.dart`](https://github.com/Boriken-Dev/Canoa/blob/main/app/lib/transport/agent_transport.dart) | Prefer WebTransport and fall back to an explicitly advertised WSS endpoint on transport-opening failure |
+| [coqui-web](https://github.com/Boriken-Dev/coqui-web) | Prefer WebTransport and fall back to an explicitly advertised WSS endpoint on transport-opening failure |
 | [`app/lib/acp/connect.dart`](https://github.com/Boriken-Dev/Canoa/blob/main/app/lib/acp/connect.dart) | Verify expected peer ID, initialize ACP v2 and close a rejected link without retrying on WSS |
-| [`app/lib/acp/client.dart`](https://github.com/Boriken-Dev/Canoa/blob/main/app/lib/acp/client.dart) | Correlated JSON-RPC requests and updates, cancellation, session creation and resume |
+| [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) | Correlated JSON-RPC requests and updates, cancellation, session creation and resume, version 1 and 2 |
+| [`app/lib/acp/client.dart`](https://github.com/Boriken-Dev/Canoa/blob/main/app/lib/acp/client.dart) | No client until the peer is proven |
 | [`app/lib/session_store.dart`](https://github.com/Boriken-Dev/Canoa/blob/main/app/lib/session_store.dart) | Bind a verified agent to the correct local/remote session, stream transcript fragments and show foreground state |
 | [`app/test/acp_v2_test.dart`](https://github.com/Boriken-Dev/Canoa/blob/main/app/test/acp_v2_test.dart) | In-memory agent tests, peer-proof rejection, transport downgrade rules and message deduplication |
 
@@ -28,7 +29,7 @@ A verified transport must be produced by a callback that **cryptographically pro
 
 Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The native Rust responder and JavaScript↔Rust handshake tests now live in coqui-peer, with Coqui TrustStore-based acceptance and revocation. Canoa also has a [paired WSS ACP echo fixture](https://github.com/Boriken-Dev/Canoa/tree/main/examples/acp-echo) that exercises a real TLS socket, Coqui proof and v2 session messages. Missing production work is agent-host pairing UI, persistent keys/sessions, production agent adapters and real remote MCP tools. The echo fixture does not execute or represent an AI agent.
 
-The ACP v2 controller is **not** a complete v1 compatibility implementation. It intentionally fails closed if an agent negotiates v1; a versioned adapter should be added rather than speaking v2 messages under a v1 negotiation.
+The client negotiates: it requests v2 and accepts v1, whichever the agent selects. A permission request is refused until Canoa has an approval UI.
 
 ## Verification
 
@@ -43,4 +44,4 @@ References: [ACP v2 initialization](https://agentclientprotocol.com/protocol/v2/
 
 ## Message handoff
 
-`bindings/dart/coqui_net_transport` owns the bounded queue of complete messages between connection setup and application use. The `StagedAgentConnection` is a thin adapter from Canoa's transport interfaces. Neither component authenticates the peer or interprets the WebCrypto proof. The authenticated connection is handed to ACP **only after** Coqui succeeds.
+`coqui_web` owns the bounded queue of complete messages between connection setup and application use. Its `StagedChannel` holds early messages. Neither authenticates the peer or interprets the WebCrypto proof. The authenticated connection is handed to ACP **only after** Coqui succeeds.

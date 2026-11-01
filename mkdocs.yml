@@ -31,7 +31,6 @@ nav:
   - ACP v2 Flutter client: acp-client.md
   - Interoperability: interop.md
   - Transport selection: transport.md
-  - Shared coqui-net-transport proposal: coqui-net-transport.md
   - Namespaces and identifiers: naming.md
   - Desktop and configuration: configuration.md
   - Offline deps branch: offline-deps.md

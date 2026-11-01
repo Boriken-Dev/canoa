@@ -1,6 +1,6 @@
-import '../transport/agent_transport.dart';
+import 'package:coqui_web/coqui_web.dart';
 
-Future<String> verifyBrowserPeer(AgentConnection channel, String expectedPeerId) =>
+Future<String> verifyBrowserPeer(WebChannel channel, String expectedPeerId) =>
     Future.error(UnsupportedError(
       'Browser WebCrypto is unavailable; use a native coqui-peer method',
     ));

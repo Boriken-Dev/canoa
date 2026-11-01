@@ -42,7 +42,7 @@ Plain WS is available only with explicit local-development opt-in and a loopback
 | Native Flutter/Dart VM | Native backend pending; try fallback | Supported via web_socket_channel |
 | Chrome/Edge side panel | Same Flutter web transport selection | Same WebSocket fallback |
 
-The Canoa app transport classes are in `app/lib/transport/agent_transport.dart` and `contracts.dart`, including typed pre-auth fallback failures, testable dialers, and endpoint validation. A browser WebTransport endpoint must have an explicit port. The transport endpoints must share a host. A pinned certificate or protocol failure never silently downgrades to WebSocket. They establish a message channel **only**; an authenticated live ACP chat is not yet exposed until the versioned peer-authentication profile is implemented.
+The transport classes are in [coqui-web](https://github.com/Boriken-Dev/coqui-web), including typed pre-auth fallback failures, testable dialers, and endpoint validation. A browser WebTransport endpoint must have an explicit port. The transport endpoints must share a host. A pinned certificate or protocol failure never silently downgrades to WebSocket. They establish a message channel **only**; an authenticated live ACP chat is not yet exposed until the versioned peer-authentication profile is implemented.
 
 ## References
 
@@ -53,6 +53,6 @@ The Canoa app transport classes are in `app/lib/transport/agent_transport.dart` 
 
 ## Coqui layering
 
-The shared `coqui-net-transport` Dart binding owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the Canoa repository. Canoa uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
+The `coqui_web` Dart package owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the Canoa repository. Canoa uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
 
 The Canoa code that performs `hello/challenge/proof/accept` frame exchange is a transport adapter for the Coqui method; it is not a second authentication mechanism. Canoa's default client continues to fail closed when the peer key is unpinned or the remote method is unsupported.

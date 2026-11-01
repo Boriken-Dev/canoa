@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'acp/client.dart';
-import 'transport/agent_transport.dart';
+import 'package:coqui_web/coqui_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
@@ -68,8 +68,9 @@ class SessionStore extends ChangeNotifier {
   }
 
   final List<ChatSession> _sessions = [];
-  final Map<String, AcpV2Client> _verifiedClients = {};
+  final Map<String, VerifiedAgent> _verifiedClients = {};
   final Map<String, StreamSubscription<AcpSessionUpdate>> _subscriptions = {};
+  final Map<String, StreamSubscription<AcpEvent>> _turnSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -112,12 +113,12 @@ class SessionStore extends ChangeNotifier {
     // This records transport locations, not the authentication state. The
     // session stays disconnected until peer proof and ACP are implemented.
     if (endpoint.scheme == 'https') {
-      AgentEndpoints(webTransport: endpoint, webSocket: websocketFallback);
+      WebEndpoints(webTransport: endpoint, webSocket: websocketFallback);
     } else if (endpoint.scheme == 'wss') {
       if (websocketFallback != null) {
         throw ArgumentError('A direct WSS endpoint cannot have a fallback');
       }
-      AgentEndpoints(webSocket: endpoint);
+      WebEndpoints(webSocket: endpoint);
     } else {
       throw ArgumentError.value(endpoint, 'endpoint', 'Use HTTPS WebTransport or WSS');
     }
@@ -142,7 +143,7 @@ class SessionStore extends ChangeNotifier {
 
   /// A verified and initialized ACP client can be bound to one session.
   /// Opening and peer authentication remain the connector's responsibility.
-  void attachVerifiedClient(String localId, AcpV2Client client) {
+  void attachVerifiedClient(String localId, VerifiedAgent client) {
     ChatSession? target;
     for (final session in _sessions) {
       if (session.id == localId) target = session;
@@ -167,6 +168,19 @@ class SessionStore extends ChangeNotifier {
         notifyListeners();
       },
     );
+    // A v1 turn has no state updates: its end arrives as an event.
+    unawaited(_turnSubscriptions.remove(localId)?.cancel());
+    _turnSubscriptions[localId] = client.events.listen((event) {
+      if (client.protocolVersion != 1) return;
+      if (event is AcpCompleted || event is AcpBlocked) {
+        session.status = SessionStatus.connected;
+        notifyListeners();
+      } else if (event is AcpFailed) {
+        session.status = SessionStatus.connected;
+        session.messages.add(ChatMessage(role: MessageRole.notice, text: event.message, at: DateTime.now()));
+        notifyListeners();
+      }
+    });
     notifyListeners();
   }
 
@@ -201,6 +215,12 @@ class SessionStore extends ChangeNotifier {
             }
           }
         }
+        // A v1 chunk carries no message id: it continues the last message of its role.
+        if (existing == null && update.messageId == null && update.kind.endsWith('_chunk') &&
+            session.messages.isNotEmpty && session.messages.last.role == role &&
+            session.messages.last.messageId == null) {
+          existing = session.messages.last;
+        }
         if (existing != null) {
           existing.text = update.kind.endsWith('_chunk')
               ? existing.text + text : text;
@@ -227,6 +247,14 @@ class SessionStore extends ChangeNotifier {
     final client = _verifiedClients[session.id];
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
+    }
+    if (client.protocolVersion == 1) {
+      // A v1 answer arrives when the whole turn ends, so the message shows now.
+      session.messages.add(ChatMessage(role: MessageRole.user, text: text, at: DateTime.now()));
+      session.status = SessionStatus.working;
+      notifyListeners();
+      await client.prompt(session.remoteSessionId!, text);
+      return;
     }
     final messageId = await client.prompt(session.remoteSessionId!, text);
     if (!session.messages.any((message) => message.messageId == messageId)) {

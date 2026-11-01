@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'dart:js_interop';
 
-import '../transport/agent_transport.dart';
-import '../transport/staged_connection.dart';
+import 'package:coqui_web/coqui_web.dart';
 
 @JS('canoaPeer')
 external JSObject? get _bridge;
@@ -24,8 +23,8 @@ external JSPromise<JSString> _finish(JSString token, JSString accepted);
 @JS('canoaPeer.abort')
 external void _abort(JSString token);
 
-Future<String> verifyBrowserPeer(AgentConnection channel, String expectedPeerId) async {
-  if (channel is! StagedAgentConnection) {
+Future<String> verifyBrowserPeer(WebChannel channel, String expectedPeerId) async {
+  if (channel is! StagedChannel) {
     throw StateError('A staged transport connection is required');
   }
   if (_bridge == null) {

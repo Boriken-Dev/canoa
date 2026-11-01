@@ -7,7 +7,7 @@ import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/client.dart';
 import 'connect_dialog.dart';
-import 'transport/agent_transport.dart';
+import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter/material.dart';
 
 import 'session_store.dart';
@@ -71,7 +71,7 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
   Timer? _contextTimer;
-  final List<AcpV2Client> _ownedClients = [];
+  final List<VerifiedAgent> _ownedClients = [];
   bool _claimingContext = false;
 
   Future<void> _claimContext() async {
@@ -89,7 +89,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final ws = Uri.parse(target.webSocket);
     final wt = target.webTransport.isEmpty
         ? null : Uri.parse(target.webTransport);
-    final endpoints = AgentEndpoints(
+    final endpoints = WebEndpoints(
       webTransport: config.preferWebTransport ? wt : null,
       webSocket: ws,
     );

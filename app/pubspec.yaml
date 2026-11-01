@@ -9,8 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  coqui_net_transport:
-    path: ../bindings/dart/coqui_net_transport
+  # Sibling checkouts until the repositories are published; then a git dependency pinned to a commit.
+  coqui_acp:
+    path: ../../coqui-acp/bindings/dart/coqui_acp
+  coqui_web:
+    path: ../../coqui-web/bindings/dart/coqui_web
   toml: ^0.18.0
   http: ^1.6.0
   tray_manager: ^0.5.3

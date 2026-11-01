@@ -1,5 +1,4 @@
-import '../transport/staged_connection.dart';
-import '../transport/agent_transport.dart';
+import 'package:coqui_web/coqui_web.dart';
 import 'client.dart';
 
 /// Opens the preferred network transport, then proves the SAME expected peer
@@ -7,22 +6,22 @@ import 'client.dart';
 ///
 /// WebTransport -> WebSocket fallback happens only during transport opening.
 /// A rejected peer proof must close the link and must NOT trigger fallback.
-Future<AcpV2Client> connectVerifiedAcp(
-  AgentEndpoints endpoints, {
+Future<VerifiedAgent> connectVerifiedAcp(
+  WebEndpoints endpoints, {
   required String expectedPeerId,
   required VerifyAcpPeer verifyPeer,
   Duration timeout = const Duration(seconds: 10),
-  AgentDialer? webTransportDialer,
-  AgentDialer? webSocketDialer,
+  WebDialer? webTransportDialer,
+  WebDialer? webSocketDialer,
 }) async {
-  final source = await connectAgentTransport(
+  final source = await connectWebChannel(
     endpoints,
     timeout: timeout,
     webTransportDialer: webTransportDialer,
     webSocketDialer: webSocketDialer,
   );
-  final connection = StagedAgentConnection(source);
-  final client = await AcpV2Client.open(
+  final connection = StagedChannel(source);
+  final client = await VerifiedAgent.open(
     connection,
     expectedPeerId: expectedPeerId,
     verifyPeer: verifyPeer,

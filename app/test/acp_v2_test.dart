@@ -4,16 +4,16 @@ import 'dart:convert';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/session_store.dart';
-import 'package:canoa/transport/agent_transport.dart';
+import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final class FakeChannel implements AgentConnection {
+final class FakeChannel implements WebChannel {
   final input = StreamController<String>.broadcast(sync: true);
   final sent = <Map<String, dynamic>>[];
   void Function(Map<String, dynamic>)? respondTo;
   bool closed = false;
   @override
-  AgentTransportKind get kind => AgentTransportKind.webSocket;
+  WebChannelKind get kind => WebChannelKind.webSocket;
   @override
   Stream<String> get messages => input.stream;
   @override
@@ -36,14 +36,14 @@ final class FakeChannel implements AgentConnection {
   }
 }
 const peerId = 'peer:test';
-Future<AcpV2Client> verified(FakeChannel channel) => AcpV2Client.open(
+Future<VerifiedAgent> verified(FakeChannel channel) => VerifiedAgent.open(
     channel, expectedPeerId: peerId, verifyPeer: (_, expected) async => expected);
 
 void main() {
   test('peer proof is required before any ACP request', () async {
     final channel = FakeChannel();
     final proof = Completer<String>();
-    final pending = AcpV2Client.open(channel,
+    final pending = VerifiedAgent.open(channel,
       expectedPeerId: peerId, verifyPeer: (_, _) => proof.future);
     await Future<void>.delayed(Duration.zero);
     expect(channel.sent, isEmpty);
@@ -95,9 +95,9 @@ void main() {
     await client.close();
   });
 
-  test('rejects unsupported v1 and absent session capabilities', () async {
+  test('rejects a v2 agent with no session capabilities, and an unknown version', () async {
     for (final result in [
-      {'protocolVersion': 1, 'capabilities': {'session': <String, Object>{}}},
+      {'protocolVersion': 9, 'capabilities': {'session': <String, Object>{}}},
       {'protocolVersion': 2, 'capabilities': <String, Object>{}},
     ]) {
       final channel = FakeChannel();
@@ -117,7 +117,15 @@ void main() {
       'method': 'session/request_permission'}));
     await Future<void>.delayed(Duration.zero);
     expect((channel.sent.first['error'] as Map)['code'], -32601);
-    expect(((channel.sent.last['result'] as Map)['outcome'] as Map)['outcome'], 'cancelled');
+    expect(channel.sent.last['error'], isNotNull, reason: 'a malformed request is refused, never allowed');
+    channel.input.add(jsonEncode({'jsonrpc': '2.0', 'id': 6, 'method': 'session/request_permission', 'params': {
+      'sessionId': 's1',
+      'toolCall': {'toolCallId': 't1', 'title': 'Run', 'kind': 'execute'},
+      'options': [{'optionId': 'yes', 'kind': 'allow_once'}, {'optionId': 'no', 'kind': 'reject_once'}],
+    }}));
+    await Future<void>.delayed(Duration.zero);
+    expect(((channel.sent.last['result'] as Map)['outcome'] as Map)['optionId'], 'no',
+        reason: 'with no approval UI yet, every permission is refused');
     await client.close();
   });
 
@@ -139,6 +147,41 @@ void main() {
     expect(channel.sent.where((f) => f['method'] == 'session/prompt'), hasLength(1));
     await client.close();
   });
+  test('a v1 agent shows the turn, gathers its chunks, and ends on the prompt answer', () async {
+    final channel = FakeChannel();
+    int? promptId;
+    channel.respondTo = (frame) {
+      if (frame['method'] == 'initialize') {
+        channel.answer(frame['id'] as int, {'protocolVersion': 1, 'agentCapabilities': <String, Object>{}});
+      } else if (frame['method'] == 'session/prompt') {
+        promptId = frame['id'] as int;
+      }
+    };
+    final client = await verified(channel);
+    await client.initialize();
+    expect(client.protocolVersion, 1);
+    final store = SessionStore(includePreview: false);
+    final session = store.addRemoteSession(
+      title: 'Example', agent: 'Test', peerId: peerId,
+      remoteSessionId: 'session-1',
+      endpoint: Uri.parse('wss://example.org/acp'),
+    );
+    store.attachVerifiedClient(session.id, client);
+    final sending = store.sendText('Question');
+    await Future<void>.delayed(Duration.zero);
+    expect(session.status, SessionStatus.working);
+    expect(session.messages.single.text, 'Question', reason: 'the message shows while the turn runs');
+    channel.notify('session-1', {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'Hel'}});
+    channel.notify('session-1', {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'lo'}});
+    expect(session.messages, hasLength(2));
+    expect(session.messages.last.text, 'Hello');
+    channel.answer(promptId!, {'stopReason': 'end_turn'});
+    await sending;
+    expect(session.status, SessionStatus.connected);
+    await client.close();
+    store.dispose();
+  });
+
   test('one verified peer updates only its own Flutter session', () async {
     final channel = FakeChannel();
     channel.respondTo = (frame) {
@@ -212,7 +255,7 @@ void main() {
       }
     };
     final client = await connectVerifiedAcp(
-      AgentEndpoints(
+      WebEndpoints(
         webTransport: Uri.parse('https://agent.example:4433/acp'),
         webSocket: Uri.parse('wss://agent.example/acp'),
       ),
@@ -240,7 +283,7 @@ void main() {
     final channel = FakeChannel();
     await expectLater(
       connectVerifiedAcp(
-        AgentEndpoints(
+        WebEndpoints(
           webTransport: Uri.parse('https://agent.example:4433/acp'),
           webSocket: Uri.parse('wss://agent.example/acp'),
         ),

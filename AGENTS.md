@@ -12,9 +12,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | --- | --- |
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, for a planned native host |
-| `crates/coqui-net-transport/` | Provisional transport framing and fallback policy |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
-| `bindings/dart/coqui_net_transport/` | The queue between connection setup and the application |
 | `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
 | `tools/` | Offline dependency mirroring |
@@ -23,7 +21,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 
 - Publisher and primary domain: **Boriken Dev** (`boriken.dev`); GitHub organization `Boriken-Dev`.
 - Use `dev.boriken.*` for reverse-DNS identifiers (Android application IDs, Apple bundle IDs, native messaging hosts). Canoa uses `dev.boriken.canoa` as its base identifier.
-- Keep ecosystem-native package naming: Rust crates use hyphens (`coqui-net-transport`), Dart packages underscores, and scoped npm packages must use a verified scope. Do not invent a claimed publishing scope.
+- Keep ecosystem-native package naming: Rust crates use hyphens (`coqui-web`), Dart packages underscores, and scoped npm packages must use a verified scope. Do not invent a claimed publishing scope.
 - Documentation remains at GitHub Pages until DNS is configured for a custom domain. Do not claim hypothetical URLs are live.
 - See `docs/naming.md` for the naming registry.
 
