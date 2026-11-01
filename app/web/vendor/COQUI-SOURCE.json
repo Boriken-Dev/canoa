@@ -1,7 +1,7 @@
 {
-  "source": "https://github.com/Boriken-Dev/coqui-peer",
-  "commit": "fa2bb85d4008762ff954f20ad100d5b9f5aa7395",
-  "path": "methods/webcrypto/src/index.mjs",
-  "git_blob_sha1": "90011ec4f91b6f593bf2ae53d5346c204df5a3c7",
+  "source": "https://github.com/Boriken-Dev/coqui-peer-webcrypto",
+  "commit": "293875706f758f11539005ac6bad0473f6d5f254",
+  "path": "bindings/js/coqui-peer-webcrypto/src/index.mjs",
+  "git_blob_sha1": "b3a57cd08fe2b9a66f43ca1d2ee8c7f68f98f11d",
   "profile": "dev.boriken.coqui.peer-webcrypto/v1"
 }

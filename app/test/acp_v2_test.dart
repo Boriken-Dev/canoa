@@ -37,17 +37,17 @@ final class FakeChannel implements WebChannel {
 }
 const peerId = 'peer:test';
 Future<VerifiedAgent> verified(FakeChannel channel) => VerifiedAgent.open(
-    channel, expectedPeerId: peerId, verifyPeer: (_, expected) async => expected);
+    channel, expectedPeerId: peerId, verifyPeer: (proven, expected) async => VerifiedPeer(expected, proven));
 
 void main() {
   test('peer proof is required before any ACP request', () async {
     final channel = FakeChannel();
-    final proof = Completer<String>();
+    final proof = Completer<VerifiedPeer>();
     final pending = VerifiedAgent.open(channel,
       expectedPeerId: peerId, verifyPeer: (_, _) => proof.future);
     await Future<void>.delayed(Duration.zero);
     expect(channel.sent, isEmpty);
-    proof.complete('wrong');
+    proof.complete(VerifiedPeer('wrong', channel));
     await expectLater(pending, throwsA(isA<AcpFailure>()));
     expect(channel.closed, isTrue);
   });
@@ -270,12 +270,29 @@ void main() {
       },
       verifyPeer: (connection, expected) async {
         calls.add('verified');
-        return expected;
+        return VerifiedPeer(expected, connection);
       },
     );
     expect(calls, ['webtransport', 'websocket', 'verified']);
     expect(channel.sent.first['method'], 'initialize');
     await client.close();
+  });
+
+  test('ACP runs on the channel the proof answers with, never the plain one', () async {
+    final plain = FakeChannel();
+    final sealed = FakeChannel();
+    sealed.respondTo = plain.respondTo;
+    final client = await VerifiedAgent.open(
+      plain,
+      expectedPeerId: peerId,
+      verifyPeer: (_, expected) async => VerifiedPeer(expected, sealed),
+    );
+    unawaited(client.initialize().catchError((Object _) {}));
+    await Future<void>.delayed(Duration.zero);
+    expect(plain.sent, isEmpty);
+    expect(sealed.sent.single['method'], 'initialize');
+    await client.close();
+    expect(sealed.closed, isTrue);
   });
 
   test('failed peer proof never retries via WebSocket', () async {
@@ -293,7 +310,7 @@ void main() {
           fallbackAttempted = true;
           return FakeChannel();
         },
-        verifyPeer: (connection, expected) async => 'wrong-peer',
+        verifyPeer: (connection, expected) async => VerifiedPeer('wrong-peer', connection),
       ),
       throwsA(isA<AcpFailure>()),
     );

@@ -21,5 +21,8 @@ test('Canoa can use the pinned method for mutual auth without auto-pairing', asy
   const challenge = await b.challenge(a.hello());
   const clientProof = await a.answer(challenge);
   const accepted = await b.accept(clientProof);
-  assert.equal(await a.finish(accepted.reply), server.peerId);
+  const finished = await a.finish(accepted.reply);
+  assert.equal(finished.peerId, server.peerId);
+  const record = await finished.session.seal('hello');
+  assert.equal(new TextDecoder().decode(await accepted.session.open(record)), 'hello');
 });

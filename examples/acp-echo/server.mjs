@@ -1,24 +1,14 @@
 // Reference ACP v2 echo fixture over WSS + Coqui peer proof. NOT a production agent.
 import https from 'node:https';
 import {readFileSync} from 'node:fs';
-import {randomUUID, createPrivateKey, createPublicKey, createHash, webcrypto} from 'node:crypto';
+import {randomUUID, createPrivateKey} from 'node:crypto';
 import {WebSocketServer} from 'ws';
-import {createResponder, generateIdentity} from '../../app/web/vendor/coqui-peer-webcrypto.mjs';
+import {createResponder, generateIdentity, importIdentity} from '../../app/web/vendor/coqui-peer-webcrypto.mjs';
 
 const validPeer = /^sha256:[0-9a-f]{64}$/;
 export async function loadIdentity(keyFile) {
   if (!keyFile) return generateIdentity();
-  const key = createPrivateKey(readFileSync(keyFile));
-  const publicDer = createPublicKey(key).export({format:'der', type:'spki'});
-  const privateDer = key.export({format:'der', type:'pkcs8'});
-  const privateKey = await webcrypto.subtle.importKey('pkcs8', privateDer,
-    {name:'ECDSA', namedCurve:'P-256'}, false, ['sign']);
-  return Object.freeze({
-    method:'p256-spki',
-    peerId:'sha256:' + createHash('sha256').update(publicDer).digest('hex'),
-    publicKey:Buffer.from(publicDer).toString('base64url'),
-    privateKey,
-  });
+  return importIdentity(createPrivateKey(readFileSync(keyFile)).export({format:'der', type:'pkcs8'}));
 }
 export async function serve({cert,key,identity,allowedPeerId,host='127.0.0.1',port=0}) {
   if (!validPeer.test(allowedPeerId || '') || !identity?.privateKey) {
@@ -33,33 +23,40 @@ export async function serve({cert,key,identity,allowedPeerId,host='127.0.0.1',po
     sockets.add(socket);
     socket.on('close',()=>sockets.delete(socket));
     const sessions = new Map();
-    let state='hello', auth, initialized=false;
+    let state='hello', auth, session, initialized=false;
     let chain=Promise.resolve();
-    const send=x=>socket.send(JSON.stringify(x));
+    // Sealed in call order, and sent in that order: each is one record in one binary frame.
+    let sending=Promise.resolve();
+    const send=x=>{
+      const sealed=session.seal(JSON.stringify(x));
+      sending=sending.then(async()=>socket.send(await sealed));
+    };
     const reply=(id,result)=>send({jsonrpc:'2.0',id,result});
     const fail=(id,code,message)=>send({jsonrpc:'2.0',id,error:{code,message}});
     const update=(sessionId,change)=>send({
       jsonrpc:'2.0',method:'session/update',params:{sessionId,update:change},
     });
     async function processMessage(value,binary) {
-      if (binary) throw Error('Binary frames unsupported');
-      const message=value.toString();
+      const handshake=value.toString();
       if (state==='hello') {
         auth=await createResponder(identity,{
           allowClient: async peerId=>peerId===allowedPeerId,
         });
-        const challenge=await auth.challenge(message);
+        const challenge=await auth.challenge(handshake);
         state='proof';
         socket.send(challenge);
         return;
       }
       if (state==='proof') {
-        const accepted=await auth.accept(message);
+        const accepted=await auth.accept(handshake);
+        session=accepted.session;
         socket.send(accepted.reply);
         state='ready';
         return;
       }
-      const rpc=JSON.parse(message);
+      if (!binary) throw Error('After the proof every message is a sealed record');
+      const opened=await session.open(new Uint8Array(value));
+      const rpc=JSON.parse(new TextDecoder().decode(opened));
       if (!rpc || rpc.jsonrpc!=='2.0' || typeof rpc.method!=='string') throw Error('Bad ACP RPC');
       const {id,method,params={}}=rpc;
       if (method==='initialize' && !initialized) {

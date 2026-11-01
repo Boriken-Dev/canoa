@@ -3,8 +3,16 @@ import 'package:coqui_web/coqui_web.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
 
-/// Must cryptographically verify the remote peer, not trust a supplied ID.
-typedef VerifyAcpPeer = Future<String> Function(WebChannel channel, String expectedPeerId);
+/// A proven peer, and the channel that keeps everything after the proof with that peer.
+final class VerifiedPeer {
+  const VerifiedPeer(this.peerId, this.channel);
+  final String peerId;
+  final WebChannel channel;
+}
+
+/// Must cryptographically verify the remote peer, not trust a supplied ID, and answer with a channel whose messages
+/// are tied to that proof: a plain channel after a proof belongs to whoever carries it.
+typedef VerifyAcpPeer = Future<VerifiedPeer> Function(WebChannel channel, String expectedPeerId);
 
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
@@ -22,18 +30,20 @@ final class VerifiedAgent {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
       final actual = await verifyPeer(channel, expectedPeerId).timeout(verificationTimeout);
-      if (actual != expectedPeerId) {
+      if (actual.peerId != expectedPeerId) {
+        await actual.channel.close();
         throw const AcpFailure('Verified peer does not match expected identity');
       }
+      final proven = actual.channel;
       return VerifiedAgent._(
         AcpClient(
-          incoming: channel.messages,
-          send: channel.send,
-          closeSource: channel.close,
+          incoming: proven.messages,
+          send: proven.send,
+          closeSource: proven.close,
           clientName: 'canoa',
           clientVersion: '0.0.1',
         ),
-        actual,
+        actual.peerId,
       );
     } catch (_) {
       await channel.close();

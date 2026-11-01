@@ -29,7 +29,7 @@ async function fixture(allow) {
   const messages=[];
   let consumer;
   socket.on('message',data=>{
-    const frame=data.toString();
+    const frame=data;
     if(consumer){const take=consumer;consumer=null;take(frame);}
     else messages.push(frame);
   });
@@ -49,35 +49,37 @@ async function fixture(allow) {
 async function authenticate(f){
   const auth=await createInitiator(f.client,f.server.peerId);
   f.socket.send(auth.hello());
-  const challenge=await f.next();
+  const challenge=(await f.next()).toString();
   f.socket.send(await auth.answer(challenge));
-  const accepted=await f.next();
+  const accepted=(await f.next()).toString();
   return auth.finish(accepted);
 }
 test('actual WSS browser peer proof and ACP v2 prompt lifecycle',needs,async()=>{
   const f=await fixture(true);
   try{
-    assert.equal(await authenticate(f),f.server.peerId);
-    const request=(id,method,params)=>f.socket.send(JSON.stringify({
+    const {peerId,session}=await authenticate(f);
+    assert.equal(peerId,f.server.peerId);
+    const request=async(id,method,params)=>f.socket.send(await session.seal(JSON.stringify({
       jsonrpc:'2.0',id,method,params,
-    }));
-    request(1,'initialize',{protocolVersion:2,capabilities:{},
+    })));
+    const answer=async()=>JSON.parse(new TextDecoder().decode(await session.open(new Uint8Array(await f.next()))));
+    await request(1,'initialize',{protocolVersion:2,capabilities:{},
       info:{name:'test-browser',version:'0.0.0'}});
-    const init=JSON.parse(await f.next());
+    const init=await answer();
     assert.equal(init.id,1);
     assert.equal(init.result.protocolVersion,2);
-    request(2,'session/new',{cwd:'/',mcpServers:[]});
-    const created=JSON.parse(await f.next());
+    await request(2,'session/new',{cwd:'/',mcpServers:[]});
+    const created=await answer();
     assert.equal(created.id,2);
     assert.ok(created.result.sessionId);
     const sessionId=created.result.sessionId;
-    request(3,'session/prompt',{sessionId,
+    await request(3,'session/prompt',{sessionId,
       prompt:[{type:'text',text:'hello from browser'}]});
-    const accepted=JSON.parse(await f.next());
+    const accepted=await answer();
     assert.equal(accepted.id,3);
     assert.ok(accepted.result.messageId);
     const events=[];
-    for(let i=0;i<4;i++)events.push(JSON.parse(await f.next()));
+    for(let i=0;i<4;i++)events.push(await answer());
     assert.ok(events.every(x=>x.method==='session/update'&&x.params.sessionId===sessionId));
     assert.equal(events[0].params.update.messageId,accepted.result.messageId);
     assert.equal(events[1].params.update.state,'running');
@@ -90,7 +92,16 @@ test('real WSS refuses browser client missing from allowlist',needs,async()=>{
   try{
     const auth=await createInitiator(f.client,f.server.peerId);
     f.socket.send(auth.hello());
-    f.socket.send(await auth.answer(await f.next()));
+    f.socket.send(await auth.answer((await f.next()).toString()));
+    const code=await new Promise(resolve=>f.socket.once('close',resolve));
+    assert.equal(code,1008);
+  }finally{await f.close();}
+});
+test('a plain message after a good proof ends the connection',needs,async()=>{
+  const f=await fixture(true);
+  try{
+    await authenticate(f);
+    f.socket.send(JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:2}}));
     const code=await new Promise(resolve=>f.socket.once('close',resolve));
     assert.equal(code,1008);
   }finally{await f.close();}
