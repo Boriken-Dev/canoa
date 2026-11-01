@@ -83,8 +83,6 @@ final class RecoveredLink {
 ///
 /// This does not send an ACP initialize, load, prompt or tool request.
 /// Callers explicitly reconcile a previous session and its in-flight work.
-/// No production peer verifier is available in Canoa yet; until it exists,
-/// this API cannot be used to enable live chat.
 Future<RecoveredLink> recoverWebTransportPath({
   required AgentEndpoints endpoints,
   required LinkFailure failure,

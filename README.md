@@ -53,7 +53,7 @@ flutter build web --release
 flutter build web --release --wasm
 ```
 
-The UI starts with offline preview sessions. A manually pinned Coqui peer connection can now be tested against [the WSS ACP echo fixture](examples/acp-echo/README.md), which is not a production agent. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
+The UI starts with offline preview sessions. A manually pinned Coqui peer connection can now be tested against [the WSS ACP echo fixture](https://github.com/Boriken-Dev/Canoa/blob/main/examples/acp-echo/README.md), which is not a production agent. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/Canoa/browser/) before loading it as unpacked.
 
 See the [shared `coqui-net-transport` proposal](https://boriken-dev.github.io/Canoa/coqui-net-transport/) for factoring WebTransport/WSS, peer verification and MTU-aware recovery across Canoa, Guatiao, AI6 and LineupMux.
 
@@ -61,9 +61,9 @@ The [project naming convention](https://boriken-dev.github.io/Canoa/naming/) use
 
 ## Desktop, configuration, and offline dependencies
 
-The desktop app supports the AI6-style [Canoa.cfg](docs/configuration.md) TOML file with a tray context menu (Open, Settings, Hide, Exit). On Windows and macOS two icon clicks open the app; Linux systems that do not forward tray clicks use **Open Canoa** in the menu. The [deps branch](https://github.com/Boriken-Dev/Canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/Canoa/actions/workflows/deps.yml).
+The desktop app supports the AI6-style [Canoa.cfg](https://boriken-dev.github.io/Canoa/configuration/) TOML file with a tray context menu (Open, Settings, Hide, Exit). On Windows and macOS two icon clicks open the app; Linux systems that do not forward tray clicks use **Open Canoa** in the menu. The [deps branch](https://github.com/Boriken-Dev/Canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/Canoa/actions/workflows/deps.yml).
 
-The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](docs/browser-mcp.md). Remote MCP/WSS exposure is still gated on an authenticated gateway and peer pairing UI.
+The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/Canoa/browser-mcp/). Remote MCP/WSS exposure is still gated on an authenticated gateway and peer pairing UI.
 
 ## Development
 
@@ -81,4 +81,4 @@ The [documentation](https://boriken-dev.github.io/Canoa/) contains the [architec
 
 ## License
 
-MPL-2.0; see [LICENSE](LICENSE).
+MPL-2.0; see [LICENSE](https://github.com/Boriken-Dev/Canoa/blob/main/LICENSE).

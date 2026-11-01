@@ -2,10 +2,10 @@
 
 **Discover. Connect. Route.**
 
-Canoa provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes an ACP-oriented Rust core, a responsive Flutter multi-session interface and browser-specific bindings that can offer authorized page/DevTools functionality through MCP.
+Canoa provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes a responsive Flutter multi-session interface, browser-specific bindings that can offer authorized page/DevTools functionality through MCP, and a small Rust registry for a planned native host.
 
 !!! warning "Development status"
-    The registry, browser permission tests and Flutter **offline preview** exist. A working ACP peer-authenticated WebSocket connection, remote MCP browser service and production debugging controls do not yet exist. Nothing in this site implies a published binary or public service.
+    Early development: nothing here implies a published binary or public service. The [roadmap](roadmap.md) is the one record of what exists.
 
 ## Start here
 

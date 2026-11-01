@@ -1,6 +1,6 @@
 # Shared reliable links: proposed `coqui-net-transport`
 
-Canoa's transport selection and the experience in [Guatiao](https://github.com/Boriken-Dev/guatiao), [AI6](https://github.com/jose-pr/ai6) and LineupMux make a case for a reusable, language-independent connection layer named **`coqui-net-transport`**. This page is a design proposal, **not an existing crate or released wire standard**.
+Canoa's transport selection and the experience in [Guatiao](https://github.com/Boriken-Dev/guatiao), [AI6](https://github.com/jose-pr/ai6) and LineupMux make a case for a reusable, language-independent connection layer named **`coqui-net-transport`**. This page is the design of a provisional crate in this workspace, `crates/coqui-net-transport`. It is neither published nor a released wire standard.
 
 `coqui-serial` already exists for local COM/tty ports, TCP serial consoles and serial-over-WebSocket. Use **net-transport** because the library selects WebTransport, WebSocket and transport fallback; it is not a hardware serial driver. The name follows Boriken Dev's existing `coqui-net-acl` convention.
 

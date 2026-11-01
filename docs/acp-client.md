@@ -1,6 +1,6 @@
 # ACP v2 Flutter session controller
 
-The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client**, but it ships an experimental pinned-key WebCrypto method from coqui-peer and an explicit connection dialog, but has a CI-tested native Rust Coqui responder and cross-language interoperability test, but still lacks a production pairing workflow and a complete agent backend. The default PWA/extension chat starts with offline previews. A remote connection can be attempted using the pinned-key dialog **only** when the agent endpoint implements the same experimental Coqui method and ACP v2.
+The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and an explicit pinned-key connection dialog, using the experimental WebCrypto method from coqui-peer. The default PWA and extension chat start with offline previews. A remote connection works only when the agent endpoint implements the same method and ACP v2. There is no production pairing workflow or complete agent backend yet; see the [roadmap](roadmap.md).
 
 ## Components
 

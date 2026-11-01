@@ -45,14 +45,9 @@ Browser-provided MCP tools may read bounded DOM text, inspect permitted tabs, in
 
 A Chrome extension cannot directly browse DNS-SD/mDNS through general WebExtension APIs. It may use a native companion for discovery, but a manually entered WSS endpoint can work without one once peer authentication is implemented.
 
-## Roadmap
+## Status
 
-1. Rust registry and deny-by-default rules (implemented).
-2. Browser-local, peer/tab/origin/capability permission model (implemented as isolated policy module; integrated transport pending).
-3. Browser MCP tool catalogue and local permission-gated dispatch (implemented as an unwired scaffold); browser UI and transport integration remain pending.
-4. Browser WebCrypto method source, pinned vendor import and staged transport queue (implemented as experimental components). Native Rust coqui-peer method and end-to-end cross-language interoperability remain pending.
-5. Native discovery adapter, agent-facing MCP service and optional browser tool relay (pending).
-6. Independent implementation conformance tests and additional language bindings (pending).
+The [roadmap](roadmap.md) is the one record of what exists.
 
 See [interop.md](interop.md) for the minimum interoperability profile.
 
@@ -62,4 +57,4 @@ The source of the browser's cryptographic handshake is `Boriken-Dev/coqui-peer/m
 
 The generic Dart `bindings/dart/coqui_net_transport/lib/message_handoff.dart` owns pending-message storage across the pre-application phase. Canoa's `StagedAgentConnection` wraps its existing WebTransport/WSS adapter. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
 
-**Authentication is not pairing.** Canoa does not yet have a production Rust responder compatible with this method or an integrated Coqui pairing/trust-store UI. A pinned user-entered fingerprint is required in the current connection dialog; no unrecognized peer is auto-enrolled.
+**Authentication is not pairing.** Canoa has no integrated Coqui pairing or trust-store UI. A pinned user-entered fingerprint is required in the connection dialog; no unrecognized peer is auto-enrolled. coqui-peer holds the native Rust responder.

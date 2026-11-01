@@ -10,4 +10,4 @@ The policy distinguishes a missing/blocked QUIC path, timeout, failed forward pr
 
 `coqui-peer` remains responsible for peer identity, invitations and trust. ACP, MCP, Guatiao's value wire protocol and AI6/LineupMux session semantics remain in their respective applications.
 
-See [the shared transport extraction plan](../../docs/coqui-net-transport.md).
+See [the shared transport design](https://boriken-dev.github.io/Canoa/coqui-net-transport/).

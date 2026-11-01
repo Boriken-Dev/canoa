@@ -2,15 +2,22 @@
 
 Canoa uses a Rust workspace with focused crates, public contracts, cross-platform tests and a `bindings/` directory for browser/language integrations.
 
+| Shipped header | Covers |
+| --- | --- |
+| [`crates/canoa/AGENTS.md`](crates/canoa/AGENTS.md) | the `canoa` crate's public API |
+
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
-| `crates/canoa/` | Registry, service descriptors and deny-by-default authorization |
-| `docs/` | Architecture and interoperability contracts |
+| `app/` | The Flutter chat client: web, desktop and the extension's UI |
+| `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, for a planned native host |
+| `crates/coqui-net-transport/` | Provisional transport framing and fallback policy |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
-| `bindings/` | Other language/browser implementations as needed |
-| `examples/` | Runnable examples, not empty placeholders |
+| `bindings/dart/coqui_net_transport/` | The queue between connection setup and the application |
+| `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
+| `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
+| `tools/` | Offline dependency mirroring |
 
 ## Project identity
 
@@ -32,11 +39,23 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 - ACP, MCP, and WebMCP are different protocols/APIs; never assert a webpage's WebMCP tool is an HTTP MCP server.
 - Add crates only for genuine public contracts. No forwarding-only crates.
 
-## Checks
+## Commands
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+(cd app && flutter analyze && flutter test)
+(cd bindings/browser/chromium && npm test)
+(cd examples/acp-echo && npm install && npm test)   # needs OpenSSL
+mkdocs build --strict
 ```
+
+`flutter pub get` with an older Flutter rewrites `app/pubspec.lock`: restore it before committing.
+
+## CI and release
+
+`test.yml` is the Rust gate and runs on a throwaway `ci-*` tag or on demand; `flutter.yml`, `browser.yml`, `desktop.yml`,
+`acp-reference.yml`, `offline.yml` and `deps.yml` cover the other languages and the offline mirror. `docs.yml` owns Pages.
+`release.yml` gates a `v*` tag and publishes no package yet. Pushing a `v*` tag needs the owner's consent for that release.
