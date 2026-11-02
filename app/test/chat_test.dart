@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Directory;
-import 'dart:typed_data';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
