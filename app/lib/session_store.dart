@@ -100,6 +100,30 @@ class SessionStore extends ChangeNotifier {
     return session;
   }
 
+  /// A session over a browser provider's connection, which has no endpoint of Canoa's own.
+  ChatSession addProviderSession({
+    required String title,
+    required String agent,
+    required String peerId,
+    required String remoteSessionId,
+  }) {
+    if (peerId.isEmpty || remoteSessionId.isEmpty) {
+      throw ArgumentError('Peer identity and agent session ID are required');
+    }
+    final session = ChatSession(
+      id: 'local-${++_nextId}',
+      title: title,
+      agent: agent,
+      status: SessionStatus.disconnected,
+      peerId: peerId,
+      remoteSessionId: remoteSessionId,
+    );
+    _sessions.insert(0, session);
+    _selectedId = session.id;
+    notifyListeners();
+    return session;
+  }
+
   /// A verified transport may attach an existing remote session. This method
   /// records its identity but does not establish trust or connect to a peer.
   ChatSession addRemoteSession({

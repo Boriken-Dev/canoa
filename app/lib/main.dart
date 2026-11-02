@@ -5,7 +5,9 @@ import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
+import 'acp/provider_connect.dart';
 import 'acp/client.dart';
+import 'package:coqui_acp/page.dart';
 import 'connect_dialog.dart';
 import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter/material.dart';
@@ -85,6 +87,29 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// Each agent the person grants becomes a session. The provider decides the working directory it was granted.
+  Future<void> _useBrowserAgents(AcpPage acp, {required String cwd, required String title}) async {
+    final agents = await acp.request(purpose: 'Chat with it in Canoa');
+    for (final agent in agents) {
+      final client = await connectProviderAgent(acp, agent);
+      try {
+        final remoteId = await client.createSession(cwd: cwd);
+        if (!mounted) throw StateError('Canoa UI closed');
+        final local = store.addProviderSession(
+          title: title.isEmpty ? agent.label : title,
+          agent: agent.label,
+          peerId: client.peerId,
+          remoteSessionId: remoteId,
+        );
+        store.attachVerifiedClient(local.id, client);
+        _ownedClients.add(client);
+      } catch (_) {
+        await client.close();
+        rethrow;
+      }
+    }
+  }
+
   Future<void> _connect(ConnectTarget target) async {
     final ws = Uri.parse(target.webSocket);
     final wt = target.webTransport.isEmpty
@@ -158,7 +183,7 @@ class _CanoaAppState extends State<CanoaApp> {
       home: AnimatedBuilder(
         animation: store,
         builder: (context, _) => _CanoaHome(
-          store: store, onConnect: _connect, onSettings: _showSettings,
+          store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onSettings: _showSettings,
         ),
       ),
     );
@@ -167,11 +192,12 @@ class _CanoaAppState extends State<CanoaApp> {
 
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
-    required this.store, required this.onConnect, required this.onSettings,
+    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onSettings,
   });
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
+  final UseBrowserAgents onUseBrowserAgents;
   final VoidCallback onSettings;
 
   @override
@@ -182,7 +208,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onSettings: onSettings)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onSettings: onSettings)))
             : null,
         body: SafeArea(
           child: Row(
@@ -190,7 +216,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: 272,
-                  child: _SessionRail(store: store, onConnect: onConnect, onSettings: onSettings),
+                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onSettings: onSettings),
                 ),
               Expanded(
                 child: _Conversation(
@@ -209,11 +235,12 @@ class _CanoaHome extends StatelessWidget {
 
 class _SessionRail extends StatelessWidget {
   const _SessionRail({
-    required this.store, required this.onConnect, required this.onSettings,
+    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onSettings,
   });
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
+  final UseBrowserAgents onUseBrowserAgents;
   final VoidCallback onSettings;
 
   @override
@@ -238,7 +265,12 @@ class _SessionRail extends StatelessWidget {
             ),
             IconButton(
               tooltip: 'Connect to verified agent',
-              onPressed: () => showCanoaConnectDialog(context, onConnect),
+              onPressed: () => showCanoaConnectDialog(
+                context,
+                onConnect,
+                browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
+                onUseBrowserAgents: onUseBrowserAgents,
+              ),
               icon: const Icon(Icons.link_rounded),
             ),
             IconButton(

@@ -16,7 +16,7 @@ The extension implements [ACP in the browser](https://boriken-dev.github.io/coqu
 
 Right-click the toolbar icon for **Let this site ask for my agents** and **Canoa agents**.
 
-`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket, and with `CANOA_E2E_BRIDGE=<path to coqui-acp-bridge>` through the real companion: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
+`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket, with `CANOA_E2E_BRIDGE=<path to coqui-acp-bridge>` through the real companion, bridge and stdio agent over WebTransport and WebSocket, and with `CANOA_E2E_PAGES=<dir>` from a Rust page in WebAssembly and from Canoa's own connection code, as `e2e/run.mjs` describes: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
 
 ## Browser-facing building blocks
 

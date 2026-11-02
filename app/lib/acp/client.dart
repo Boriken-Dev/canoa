@@ -1,4 +1,5 @@
 import 'package:coqui_acp/coqui_acp.dart';
+import 'package:coqui_acp/page.dart';
 import 'package:coqui_web/coqui_web.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
@@ -49,6 +50,26 @@ final class VerifiedAgent {
       await channel.close();
       rethrow;
     }
+  }
+
+  /// Over a connection a browser's provider holds. The proof is the provider's, and without one there is no client.
+  static Future<VerifiedAgent> fromProvider(AcpPageConnection connection) async {
+    final agent = connection.agent;
+    final peer = agent.peer;
+    if (!agent.verified || peer == null) {
+      await connection.close();
+      throw const AcpFailure('The browser has not proven who this agent is');
+    }
+    return VerifiedAgent._(
+      AcpClient(
+        incoming: connection.messages,
+        send: connection.send,
+        closeSource: connection.close,
+        clientName: 'canoa',
+        clientVersion: '0.0.1',
+      ),
+      peer,
+    );
   }
 
   Stream<AcpSessionUpdate> get updates => _client.updates;

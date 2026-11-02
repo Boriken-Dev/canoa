@@ -17,6 +17,7 @@ This page distinguishes tested code from planned integration work.
 | Native Rust Coqui WebCrypto responder and JS↔Rust proof | Implemented and cross-language CI-tested in coqui-peer; explicit accepted keys and live trust-store revocation supported |
 | Authenticated WSS ACP v2 echo endpoint | Implemented and tested with live TLS WebSocket, browser-compatible Coqui proof and ACP v2 prompt lifecycle; test fixture, not AI agent |
 | Production agent pairing, persistent agent services, trust-management UI | Pending; no auto-enrollment of unknown peers |
+| Agents from the browser's provider in Canoa's web build | Implemented: the connect dialog offers them when a provider is present, and takes only an agent it reports as proven |
 | Native service discovery and stdio bridge | Implemented in `coqui-acp-bridge`: `serve --advertise`, `discover` and a native companion the extension asks when the person looks nearby; a stdio agent on the network under a proven peer |
 | Local MCP JSON-RPC browser-tool handler | Implemented with test-covered permission checks; not yet available remotely |
 | Elevated CDP adapter and local grant UI | Implemented and JS-tested; debug-only manifest, permission options page, console/network event buffer; remote transport pending |

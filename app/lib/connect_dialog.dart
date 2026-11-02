@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:coqui_acp/page.dart';
+
 import 'auth/browser_peer.dart';
 
 /// Explicit, out-of-band connection configuration for a pinned peer.
@@ -20,17 +22,28 @@ class ConnectTarget {
   final String title;
 }
 
+/// Uses the agents a person grants through the browser's provider, asking them in the provider's own window.
+typedef UseBrowserAgents = Future<void> Function(AcpPage acp, {required String cwd, required String title});
+
 Future<void> showCanoaConnectDialog(
   BuildContext context,
-  Future<void> Function(ConnectTarget) onConnect,
-) => showDialog<void>(
+  Future<void> Function(ConnectTarget) onConnect, {
+  Future<AcpPage?>? browserProvider,
+  UseBrowserAgents? onUseBrowserAgents,
+}) => showDialog<void>(
   context: context,
-  builder: (_) => _ConnectDialog(onConnect: onConnect),
+  builder: (_) => _ConnectDialog(
+    onConnect: onConnect,
+    browserProvider: browserProvider,
+    onUseBrowserAgents: onUseBrowserAgents,
+  ),
 );
 
 class _ConnectDialog extends StatefulWidget {
-  const _ConnectDialog({required this.onConnect});
+  const _ConnectDialog({required this.onConnect, this.browserProvider, this.onUseBrowserAgents});
   final Future<void> Function(ConnectTarget) onConnect;
+  final Future<AcpPage?>? browserProvider;
+  final UseBrowserAgents? onUseBrowserAgents;
 
   @override
   State<_ConnectDialog> createState() => _ConnectDialogState();
@@ -81,6 +94,21 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     }
   }
 
+  /// No await before the provider's request: it needs the click's user activation.
+  Future<void> _useBrowser(AcpPage acp) async {
+    if (busy) return;
+    final asked = widget.onUseBrowserAgents!(acp, cwd: cwd.text.trim(), title: title.text.trim());
+    setState(() {busy = true; error = null;});
+    try {
+      await asked;
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => error = 'Connection refused: $e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -98,6 +126,22 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                 'Canoa never trusts the first key it sees.',
               ),
               const SizedBox(height: 12),
+              if (widget.onUseBrowserAgents != null)
+                FutureBuilder<AcpPage?>(
+                  future: widget.browserProvider,
+                  builder: (context, snapshot) {
+                    final acp = snapshot.data;
+                    if (acp == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: FilledButton.icon(
+                        onPressed: busy ? null : () => _useBrowser(acp),
+                        icon: const Icon(Icons.extension_rounded),
+                        label: const Text('Use an agent from this browser'),
+                      ),
+                    );
+                  },
+                ),
               FutureBuilder<String>(
                 future: localPeerId,
                 builder: (context, snapshot) {
