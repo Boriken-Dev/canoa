@@ -43,7 +43,7 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
         verified: agent.proven === true,
         method: agent.proven === true ? "dev.boriken.coqui.peer-webcrypto/v1" : null,
       },
-      offers: { acpVersions: agent.acpVersions ?? [], transports: agent.transports ?? ["websocket"] },
+      offers: { acpVersions: agent.acpVersions ?? [], transports: agent.webtransport ? ["webtransport", "websocket"] : ["websocket"] },
       status: "unknown",
       scope: { permissions: grant.permissions === true, lifetime: grant.lifetime, mcpOrigins: grant.mcpOrigins ?? [] },
     };

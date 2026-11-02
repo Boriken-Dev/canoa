@@ -8,6 +8,14 @@ const MAX_CANDIDATES = 64;
 const MAX_LABEL = 80;
 const SOURCES = ["mdns", "local"];
 
+/** Where WebTransport is, if the candidate gave both a port and a certificate hash to pin. */
+function webTransportOf(item) {
+  if (!Number.isInteger(item.webtransport) || item.webtransport < 1 || item.webtransport > 65535) return undefined;
+  if (typeof item.webtransportHash !== "string" || !PEER.test(item.webtransportHash)) return undefined;
+  const { hostname, pathname } = new URL(item.url);
+  return { url: `https://${hostname}:${item.webtransport}${pathname}`, hash: item.webtransportHash };
+}
+
 function reachable(text) {
   try {
     const url = new URL(text);
@@ -24,14 +32,16 @@ export function readCandidates(reply, known = []) {
   for (const item of list) {
     if (typeof item?.label !== "string" || !item.label.trim() || typeof item.url !== "string" || !reachable(item.url)) continue;
     const peer = typeof item.peer === "string" && PEER.test(item.peer) ? item.peer : undefined;
-    if (known.some((agent) => agent.url === item.url && agent.peer === peer)) continue;
+    const webtransport = webTransportOf(item);
+    if (known.some((agent) => agent.url === item.url && agent.peer === peer && agent.webtransport?.hash === webtransport?.hash)) continue;
     const same = peer === undefined ? undefined : known.find((agent) => agent.peer === peer);
     usable.push({
       label: item.label.trim().slice(0, MAX_LABEL),
       url: item.url,
       peer,
       source: SOURCES.includes(item.source) ? item.source : "mdns",
-      // The same key somewhere else: worth saying, and no reason to treat it as that agent until it proves the key.
+      webtransport,
+      // The same key somewhere else, which choosing moves that agent to: it still has to prove the key.
       sameKeyAs: same?.label,
     });
   }

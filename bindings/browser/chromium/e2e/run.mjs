@@ -38,11 +38,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The agent: the handshake, then sealed JSON-RPC. It records what reached it.
 const identity = await generateIdentity();
+// One key per agent, by the path it is reached on: the same key at another address would be the same agent.
+const foundIdentity = await generateIdentity();
+const fallbackIdentity = await generateIdentity();
+const identities = { "/agent/found": foundIdentity, "/agent/fallback": fallbackIdentity };
 const reached = [];
+let browserPeer;
 const sockets = new Set();
 const agentServer = createServer();
 const wss = new WebSocketServer({ server: agentServer });
-wss.on("connection", (socket) => {
+wss.on("connection", (socket, request) => {
   sockets.add(socket);
   socket.on("close", () => sockets.delete(socket));
   let auth;
@@ -53,7 +58,10 @@ wss.on("connection", (socket) => {
   socket.on("message", (data, binary) => {
     chain = chain.then(async () => {
       if (!auth) {
-        auth = await createResponder(identity, { allowClient: async () => true });
+        auth = await createResponder(identities[request.url] ?? identity, { allowClient: async (peer) => {
+          browserPeer = peer;
+          return true;
+        } });
         socket.send(await auth.challenge(data.toString()));
       } else if (!session) {
         const accepted = await auth.accept(data.toString());
@@ -182,11 +190,12 @@ async function check(name, run) {
 
 let exitCode = 1;
 let companionInstalled = false;
+const bridges = [];
 const watchdog = setTimeout(() => {
   console.log("FAILED: the run took too long");
   chrome.kill();
   process.exit(1);
-}, 240_000);
+}, 300_000);
 try {
   debug = await waitFor("the browser", () => {
     try {
@@ -364,7 +373,7 @@ try {
     })()`).catch(() => {});
 
     await check("discovery: the companion finds an agent, shown unticked with its key, and the page sees nothing until it is chosen", async () => {
-      describe("found.json", "Found agent", identity.peerId, "found");
+      describe("found.json", "Found agent", foundIdentity.peerId, "found");
       await requested();
       const view = await prompt();
       await search(view, "Found agent");
@@ -373,7 +382,7 @@ try {
         return { ticked: item.querySelector('input').checked, text: item.textContent };
       })()`);
       assert.equal(row.ticked, false);
-      assert.ok(row.text.includes(identity.peerId), row.text);
+      assert.ok(row.text.includes(foundIdentity.peerId), row.text);
       assert.ok(row.text.includes("on this machine"), row.text);
       const seen = await page.run("document.acp.agents().then((agents) => agents.map((agent) => agent.label))");
       assert.ok(!seen.includes("Found agent"), seen.join());
@@ -386,6 +395,18 @@ try {
       assert.equal(await page.run(open), true);
       const init = await page.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })");
       assert.equal(init.result.protocolVersion, 1);
+      await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
+    });
+    await check("fallback: WebTransport that does not open falls back to the WebSocket, under the same proof", async () => {
+      writeFileSync(path.join(descriptors, "fallback.json"), JSON.stringify({ txtvers: 1, proto: "acp", label: "Fallback agent", url: `${agentUrl}/fallback`,
+        peer: fallbackIdentity.peerId, wt: 1, wth: `sha256:${"0".repeat(64)}` }));
+      await requested();
+      const view = await prompt();
+      await search(view, "Fallback agent");
+      await choose(view, "Fallback agent", "/fallback");
+      assert.equal(await page.run("window.asked"), 1);
+      assert.deepEqual(await page.run("window.agent.offers.transports"), ["webtransport", "websocket"]);
+      assert.equal(await page.run(open), true);
       await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
     });
     await check("spoof: an advertisement naming a key the agent does not hold is refused at connect", async () => {
@@ -401,6 +422,84 @@ try {
       assert.equal(await page.run("document.acp.connect(window.agent).then(() => 'connected', (e) => e.name)"), "NetworkError");
       assert.equal(reached.length, before, "no ACP message may reach anyone");
     });
+
+    // The real bridge and a real stdio agent. It serves a certificate no browser would take for a WebSocket, so a turn that
+    // completes went over WebTransport.
+    const agentProgram = path.join(work, "agent.mjs");
+    writeFileSync(agentProgram, `import { createInterface } from "node:readline";
+      createInterface({ input: process.stdin }).on("line", (line) => {
+        const { id, method } = JSON.parse(line);
+        if (id === undefined) return;
+        const result = method === "initialize" ? { protocolVersion: 1, agentCapabilities: {} } : method === "session/new" ? { sessionId: "real" } : {};
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+      });`);
+    const bridgeKey = path.join(work, "bridge.key");
+    const bridgePeer = execFileSync(bridge, ["keygen", bridgeKey], { encoding: "utf8" }).trim();
+    const startBridge = async ({ key = bridgeKey, label = "Real bridge", flags } = {}) => {
+      const listener = createServer();
+      await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
+      const { port } = listener.address();
+      await new Promise((resolve) => listener.close(resolve));
+      const transport = flags ?? ["--tls-short-lived", "--webtransport-port", String(port)];
+      const child = spawn(bridge, ["serve", "--listen", `127.0.0.1:${port}`, "--identity", key, "--allow", browserPeer, ...transport,
+        "--advertise", label, "--", process.execPath, agentProgram],
+      { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors } });
+      let said = "";
+      child.stderr.on("data", (chunk) => {
+        said += chunk;
+      });
+      await waitFor("the bridge to listen", () => said.includes("listening on"));
+      bridges.push(child);
+      return { child, said: () => said };
+    };
+    const turn = `(async () => {
+      await page_open();
+      const init = await window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      const made = await window.rpc({ jsonrpc: '2.0', id: 2, method: 'session/new', params: { cwd: '/x', mcpServers: [] } });
+      return [window.conn.agent.identity.verified, init.result.protocolVersion, made.result.sessionId];
+    })()`.replace("page_open()", open);
+    await check("websocket: a whole exchange over a WebSocket, through the real bridge, to a real stdio agent", async () => {
+      const plainKey = path.join(work, "plain.key");
+      const plainPeer = execFileSync(bridge, ["keygen", plainKey], { encoding: "utf8" }).trim();
+      await startBridge({ key: plainKey, label: "Plain bridge", flags: [] });
+      await requested();
+      const view = await prompt();
+      await search(view, "Plain bridge");
+      await choose(view, "Plain bridge", "/plain");
+      assert.equal(await page.run("window.asked"), 1);
+      assert.equal(await page.run("window.agent.identity.peer"), plainPeer);
+      assert.deepEqual(await page.run("window.agent.offers.transports"), ["websocket"]);
+      assert.deepEqual(await page.run(turn), [true, 1, "real"]);
+      await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
+    });
+    let first;
+    await check("webtransport: a whole exchange over WebTransport with a pinned certificate, through the real bridge, to a real stdio agent", async () => {
+      first = await startBridge();
+      await requested();
+      const view = await prompt();
+      await search(view, "Real bridge");
+      await choose(view, "Real bridge", "/real");
+      assert.equal(await page.run("window.asked"), 1);
+      assert.equal(await page.run("window.agent.identity.peer"), bridgePeer);
+      assert.deepEqual(await page.run(turn), [true, 1, "real"]);
+      assert.ok(first.said().includes(`${browserPeer} proven`), first.said());
+      await page.run("window.conn.close ? window.conn.close() : null; true");
+    });
+    await check("restart: a new certificate, found again and chosen, moves the same agent, whose grant holds", async () => {
+      first.child.kill();
+      await waitFor("the bridge to go", () => first.child.exitCode !== null || first.child.signalCode !== null);
+      await startBridge();
+      await page.call("Page.reload");
+      await waitFor("the provider", () => page.run("window.ready === true && typeof document.acp === 'object'"));
+      await requested();
+      const view = await prompt();
+      await search(view, "Choosing this moves it here");
+      const row = await view.run(`[...document.querySelectorAll('label.pick')].find((each) => each.textContent.includes('Choosing this moves it here')).textContent`);
+      assert.ok(row.includes("Real bridge"), row);
+      await choose(view, "Choosing this moves it here", "/real");
+      assert.equal(await page.run("window.asked"), 1);
+      assert.deepEqual(await page.run(turn), [true, 1, "real"]);
+    });
   } else {
     console.log("skipped: discovery and spoof need CANOA_E2E_BRIDGE");
   }
@@ -410,6 +509,7 @@ try {
 } finally {
   clearTimeout(watchdog);
   if (companionInstalled) execFileSync(bridge, ["companion", "uninstall"], { stdio: "ignore" });
+  for (const child of bridges) child.kill();
   chrome.kill();
   await sleep(1500);
   for (const socket of sockets) socket.terminate();

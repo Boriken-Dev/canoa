@@ -73,7 +73,7 @@ function grantView(details) {
     const lines = [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
     if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
     lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
-    if (agent.sameKeyAs) lines.push(element("br"), `Names the same key as ${agent.sameKeyAs}.`);
+    if (agent.sameKeyAs) lines.push(element("br"), `Names the same key as ${agent.sameKeyAs}. Choosing this moves it here.`);
     picks.append(element("label", { className: "pick" }, box, element("span", {}, ...lines)));
   };
   for (const agent of details.agents) row(agent, details.peers.includes(agent.peer), false);

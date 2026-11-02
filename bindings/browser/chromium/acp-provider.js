@@ -19,10 +19,20 @@ const areaOf = (grant) => (grant.lifetime === "always" ? ["local", GRANTS] : ["s
 
 const store = {
   agents: () => read("local", AGENTS, []),
-  async addAgent({ label, url, peer, source }) {
+  async addAgent({ label, url, peer, source, webtransport }) {
+    const agents = await store.agents();
+    // The same key at a new address is the same agent, whose grants carry over and whose name stays the person's. The address
+    // is only a hint: an agent that moved or restarted still has to prove the key.
+    const held = peer ? agents.find((agent) => agent.peer === peer) : undefined;
+    if (held !== undefined) {
+      const moved = { ...held, url: String(url), webtransport };
+      await write("local", AGENTS, agents.map((agent) => (agent === held ? moved : agent)));
+      return moved;
+    }
     const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: FOUND.includes(source) ? source : "manual" };
     if (peer) agent.peer = String(peer);
-    await write("local", AGENTS, [...(await store.agents()), agent]);
+    if (webtransport) agent.webtransport = { url: String(webtransport.url), hash: String(webtransport.hash) };
+    await write("local", AGENTS, [...agents, agent]);
     return agent;
   },
   async removeAgent(key) {

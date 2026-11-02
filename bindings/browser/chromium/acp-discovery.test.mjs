@@ -6,9 +6,10 @@ import { readCandidates } from "./acp-discovery.js";
 const KEY = `sha256:${"a".repeat(64)}`;
 const OTHER = `sha256:${"b".repeat(64)}`;
 const good = { label: "Mine", url: "wss://10.0.0.5:8765/acp", peer: KEY, source: "mdns" };
+const withTransport = { ...good, webtransport: 8766, webtransportHash: OTHER };
 
 test("a good candidate comes through with what it claims", () => {
-  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, sameKeyAs: undefined }]);
+  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, webtransport: undefined, sameKeyAs: undefined }]);
 });
 
 test("nothing usable in a bad reply", () => {
@@ -44,6 +45,20 @@ test("length and count are bounded", () => {
 
 test("an agent the person has at that address with that key is not offered again", () => {
   assert.deepEqual(readCandidates({ candidates: [good] }, [{ label: "Had", url: good.url, peer: KEY }]), []);
+});
+
+test("WebTransport needs a port and a hash, and uses the address and path it came with", () => {
+  assert.deepEqual(readCandidates({ candidates: [withTransport] })[0].webtransport, { url: "https://10.0.0.5:8766/acp", hash: OTHER });
+  for (const bad of [{ webtransport: 0 }, { webtransport: 70000 }, { webtransport: "8766" }, { webtransportHash: "sha256:zz" }, { webtransportHash: null }]) {
+    assert.equal(readCandidates({ candidates: [{ ...withTransport, ...bad }] })[0].webtransport, undefined, JSON.stringify(bad));
+  }
+});
+
+test("a new certificate at the same address is offered again, so the agent can move to it", () => {
+  const had = { label: "Had", url: good.url, peer: KEY, webtransport: { url: "https://10.0.0.5:8766/acp", hash: KEY } };
+  const [found] = readCandidates({ candidates: [withTransport] }, [had]);
+  assert.equal(found.sameKeyAs, "Had");
+  assert.deepEqual(readCandidates({ candidates: [{ ...withTransport, webtransportHash: KEY }] }, [had]), []);
 });
 
 test("another address with a key the person knows says so, and stays a new candidate", () => {
