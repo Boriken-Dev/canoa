@@ -46,6 +46,8 @@ jobs:
         run: |
           test -f bindings/browser/chromium/ui/index.html
           grep -F '../bridge.js' bindings/browser/chromium/ui/index.html
+          grep -F '../acp-page.js' bindings/browser/chromium/ui/index.html
+          grep -F '../acp-content.js' bindings/browser/chromium/ui/index.html
       - name: Build web Wasm option
         run: flutter build web --release --wasm
         working-directory: app

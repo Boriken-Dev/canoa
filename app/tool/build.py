@@ -11,11 +11,16 @@ APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
 
 
-def flutter_args(kind: str, wasm: bool) -> list[str]:
+def flutter_program() -> str:
+    # By its full name: on Windows it is flutter.bat, which starting a process by "flutter" does not find.
     flutter = shutil.which("flutter")
     if flutter is None:
         raise RuntimeError("Flutter is not on PATH")
-    args = [flutter, "build", "web", "--release", "--no-web-resources-cdn"]
+    return flutter
+
+
+def flutter_args(kind: str, wasm: bool) -> list[str]:
+    args = [flutter_program(), "build", "web", "--release", "--no-web-resources-cdn"]
     if wasm:
         args.append("--wasm")
     if kind == "chromium":
@@ -35,7 +40,7 @@ def package_ui(source: Path, target: Path) -> None:
     html = index.read_text(encoding="utf-8")
     if "<head>" not in html:
         raise ValueError("Flutter index.html has no head element")
-    html = html.replace("<head>", '<head>\\n    <script src="../bridge.js"></script>', 1)
+    html = html.replace("<head>", '<head>\n    <script src="../bridge.js"></script>\n    <script src="../acp-page.js"></script>\n    <script src="../acp-content.js"></script>', 1)
     index.write_text(html, encoding="utf-8")
 
 
@@ -71,7 +76,7 @@ def main() -> None:
     opts = parser.parse_args()
     if opts.debug and opts.kind != "chromium":
         parser.error("--debug is only valid for chromium")
-    subprocess.run(["flutter", "pub", "get"], check=True, cwd=APP)
+    subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
     if opts.kind == "chromium":
         package_ui(
