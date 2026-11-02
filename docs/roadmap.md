@@ -20,10 +20,10 @@ This page distinguishes tested code from planned integration work.
 | Running an agent on this computer from the desktop app | Implemented for any ACP program: presets for Claude, Codex and Gemini when installed, each permission request answered in the conversation, nothing left running on close. Rich rendering and themes are planned |
 | Agents from the browser's provider in Canoa's web build | Implemented: the connect dialog offers them when a provider is present, and takes only an agent it reports as proven |
 | Native service discovery and stdio bridge | Implemented in `coqui-acp-bridge`: `serve --advertise`, `discover` and a native companion the extension asks when the person looks nearby; a stdio agent on the network under a proven peer |
-| Local MCP JSON-RPC browser-tool handler | Implemented with test-covered permission checks; not yet available remotely |
+| Browser tools for an agent of Canoa's own chat | Implemented over `mcp-offer/1` on the agent's proven link: it asks, a person picks the tab, its tool list grows, and it loses them on revocation, navigation or time. A real Claude agent ran this in real Edge; none of it runs in CI's browser |
 | Elevated CDP adapter and local grant UI | Implemented and JS-tested; debug-only manifest, permission options page, console/network event buffer; remote transport pending |
-| Browser-facing MCP server and remote session controller | Planned: connect the authenticated peer to the local handler |
-| Full remote debugging and audit trail | Planned; local privileged CDP tools are not remote agent access |
+| MCP client outside any ACP session reaching the browser's tools | Planned |
+| Full remote debugging and audit trail | Debug tools are requestable in the debugger build, with no test against a real agent; no audit trail |
 | Actual JS/Wasm user site-adapter execution and sandbox | Planned |
 | Firefox and Safari browser integrations | Planned |
 
