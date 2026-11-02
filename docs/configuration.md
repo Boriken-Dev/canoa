@@ -37,7 +37,11 @@ This repository keeps the canonical Flutter code in app/. Flutter's platform run
     flutter pub get
     flutter build windows  # use linux or macos on that platform
 
-The desktop CI workflow generates the appropriate runner on each OS with Boriken Dev's reverse-DNS namespace and builds it. Windows, macOS and Linux compilation have been verified in GitHub Actions; human tray behavior still needs per-desktop testing. Platform-native plugins and tray host support are required. A standard Flutter Web/PWA build does not create a system notification icon.
+On Linux the tray and window packages (leanflutter's `tray_manager` and `window_manager`) link system libraries that no Dart package carries, so a build needs them installed, offline too:
+
+    sudo apt-get install libayatana-appindicator3-dev libgtk-3-dev libx11-dev libxi-dev
+
+The `deps` branch mirrors those packages' Dart side and names these in its `manifest.json`. The desktop CI workflow generates the appropriate runner on each OS with Boriken Dev's reverse-DNS namespace and builds it. Windows, macOS and Linux compilation have been verified in GitHub Actions; human tray behavior still needs per-desktop testing. Platform-native plugins and tray host support are required. A standard Flutter Web/PWA build does not create a system notification icon.
 
 ## Limitations
 

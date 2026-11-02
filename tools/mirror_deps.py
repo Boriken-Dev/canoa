@@ -9,6 +9,11 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 INDEX = "https://raw.githubusercontent.com/jose-pr/ai6/main/clients/outer-office/tool/cdn_files.json"
+# leanflutter's desktop packages: the tray and the window. A desktop build needs all of these, whichever of them pub resolves.
+DESKTOP_PACKAGES = ("tray_manager","window_manager","screen_retriever","screen_retriever_linux","screen_retriever_macos",
+                    "screen_retriever_platform_interface","screen_retriever_windows","menu_base")
+# What those packages link on Linux, which no pub cache can carry: the manifest says so, for someone building offline.
+DESKTOP_LINUX_SYSTEM = ("libayatana-appindicator3-dev","libgtk-3-dev","libx11-dev","libxi-dev")
 def fetch(url):
     request=urllib.request.Request(url, headers={"User-Agent":"Canoa-Offline-Mirror"})
     with urllib.request.urlopen(request,timeout=90) as response:
@@ -31,6 +36,8 @@ def main():
     directory=target/"pub"/"hosted"/"pub.dev"
     packages=sorted(item.name for item in directory.glob("*") if item.is_dir())
     clones=sorted(item.name for item in (target/"pub"/"git"/"cache").glob("*") if item.is_dir())
+    missing=[name for name in DESKTOP_PACKAGES if not any(package.rsplit("-",1)[0]==name for package in packages)]
+    if missing: raise SystemExit("Desktop packages missing from the mirror: "+", ".join(missing))
     files=[]
     if not args.skip_cdn:
         inventory=json.loads(fetch(INDEX))
@@ -51,7 +58,8 @@ def main():
         with ThreadPoolExecutor(max_workers=12) as workers:
             files=list(workers.map(copy,fonts))
     report=dict(format=1,source="Boriken-Dev/Canoa",sourceCommit=args.revision,
-                status="complete",pubPackages=packages,gitClones=clones,cdnFiles=files)
+                status="complete",pubPackages=packages,gitClones=clones,cdnFiles=files,
+                desktopPackages=list(DESKTOP_PACKAGES),desktopLinuxSystemPackages=list(DESKTOP_LINUX_SYSTEM))
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
     print("Mirrored",len(packages),"pub packages,",len(clones),"git clones and",len(files),"font assets")
 if __name__=="__main__": main()
