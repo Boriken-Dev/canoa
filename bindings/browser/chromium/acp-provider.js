@@ -17,48 +17,47 @@ const write = (area, key, value) => chrome.storage[area].set({ [key]: value });
 const sameGrant = (a, b) => a.origin === b.origin && a.agent === b.agent;
 const areaOf = (grant) => (grant.lifetime === "always" ? ["local", GRANTS] : ["session", ONCE]);
 
+// Each change reads a whole list and writes it back, so two at once could bring back what the other removed.
+let changes = Promise.resolve();
+const oneAtATime = (change) => {
+  const done = changes.then(change, change);
+  changes = done.catch(() => {});
+  return done;
+};
+
+async function replaceAgent(key, change) {
+  const agents = await read("local", AGENTS, []);
+  await write("local", AGENTS, agents.map((agent) => (agent.key === key ? change(agent) : agent)));
+}
+
+async function dropGrant(grant) {
+  for (const [area, name] of [["local", GRANTS], ["session", ONCE]]) {
+    await write(area, name, (await read(area, name, [])).filter((held) => !sameGrant(held, grant)));
+  }
+}
+
 const store = {
   agents: () => read("local", AGENTS, []),
-  async addAgent({ label, url, peer, source, webtransport }) {
-    const agents = await store.agents();
-    // The same key at a new address is the same agent, whose grants carry over and whose name stays the person's. The address
-    // is only a hint: an agent that moved or restarted still has to prove the key.
-    const held = peer ? agents.find((agent) => agent.peer === peer) : undefined;
-    if (held !== undefined) {
-      const moved = { ...held, url: String(url), webtransport };
-      await write("local", AGENTS, agents.map((agent) => (agent === held ? moved : agent)));
-      return moved;
-    }
-    const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: FOUND.includes(source) ? source : "manual" };
-    if (peer) agent.peer = String(peer);
-    if (webtransport) agent.webtransport = { url: String(webtransport.url), hash: String(webtransport.hash) };
-    await write("local", AGENTS, [...agents, agent]);
-    return agent;
-  },
-  async removeAgent(key) {
+  addAgent: (details) => oneAtATime(() => addAgent(details)),
+  removeAgent: (key) => oneAtATime(async () => {
     await write("local", AGENTS, (await store.agents()).filter((agent) => agent.key !== key));
     for (const [area, name] of [["local", GRANTS], ["session", ONCE]]) {
       await write(area, name, (await read(area, name, [])).filter((grant) => grant.agent !== key));
     }
-  },
-  async markProven(key) {
-    const agents = await store.agents();
-    await write("local", AGENTS, agents.map((agent) => (agent.key === key ? { ...agent, proven: true } : agent)));
-  },
+  }),
+  markProven: (key) => oneAtATime(() => replaceAgent(key, (agent) => ({ ...agent, proven: true }))),
+  settleMove: (key) => oneAtATime(() => replaceAgent(key, ({ previous, ...agent }) => agent)),
+  revertMove: (key) => oneAtATime(() => replaceAgent(key, ({ previous, ...agent }) => ({ ...agent, ...previous }))),
   async allGrants() {
     return [...(await read("local", GRANTS, [])), ...(await read("session", ONCE, []))];
   },
   grants: async (origin) => (await store.allGrants()).filter((grant) => grant.origin === origin),
-  async saveGrant(grant) {
-    await store.deleteGrant(grant);
+  saveGrant: (grant) => oneAtATime(async () => {
+    await dropGrant(grant);
     const [area, name] = areaOf(grant);
     await write(area, name, [...(await read(area, name, [])), grant]);
-  },
-  async deleteGrant(grant) {
-    for (const [area, name] of [["local", GRANTS], ["session", ONCE]]) {
-      await write(area, name, (await read(area, name, [])).filter((held) => !sameGrant(held, grant)));
-    }
-  },
+  }),
+  deleteGrant: (grant) => oneAtATime(() => dropGrant(grant)),
   async secret() {
     let secret = await read("local", SECRET);
     if (secret === undefined) {
@@ -68,6 +67,24 @@ const store = {
     return secret;
   },
 };
+
+async function addAgent({ label, url, peer, source, webtransport }) {
+    const agents = await store.agents();
+    // The same key at a new address is the same agent, whose grants carry over and whose name stays the person's. Anyone can
+    // name a public key, so nothing counts as shown until a proof there, and the old address is kept until then.
+    const held = peer ? agents.find((agent) => agent.peer === peer) : undefined;
+    if (held !== undefined) {
+      const previous = held.previous ?? { url: held.url, webtransport: held.webtransport, proven: held.proven };
+      const moved = { ...held, url: String(url), webtransport, proven: false, previous };
+      await write("local", AGENTS, agents.map((agent) => (agent === held ? moved : agent)));
+      return moved;
+    }
+    const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: FOUND.includes(source) ? source : "manual" };
+    if (peer) agent.peer = String(peer);
+    if (webtransport) agent.webtransport = { url: String(webtransport.url), hash: String(webtransport.hash) };
+    await write("local", AGENTS, [...agents, agent]);
+    return agent;
+}
 
 /** Asks the companion who is around. No companion is an answer too: the person can still add an agent by hand. */
 async function nearby() {
@@ -139,7 +156,7 @@ export async function allowSite(origin, tabId) {
 
 export async function forgetSite(origin) {
   await chrome.scripting.unregisterContentScripts({ ids: [scriptId(origin, "main"), scriptId(origin, "isolated")] }).catch(() => {});
-  for (const grant of await store.grants(origin)) await store.deleteGrant(grant);
+  for (const grant of await store.grants(origin)) await gateway.revokeByPerson(grant);
 }
 
 export function installProvider() {
@@ -178,10 +195,10 @@ export function installProvider() {
       store.addAgent(message.agent).then((agent) => reply(agent));
       return true;
     } else if (message.acp === "remove") {
-      store.removeAgent(message.key).then(() => reply(true));
+      gateway.removeByPerson(message.key).then(() => reply(true));
       return true;
     } else if (message.acp === "revoke") {
-      store.deleteGrant(message.grant).then(() => reply(true));
+      gateway.revokeByPerson(message.grant).then(() => reply(true));
       return true;
     }
     return false;

@@ -3,6 +3,9 @@
 import { Scope } from "./vendor/coqui-acp/scope.mjs";
 
 const MAX_TEXT = 400;
+// Windows waiting to ask the person about one connection. Past this an agent is refused without asking: it has no way to make
+// one person read more than one at a time, and a request of its own making costs it nothing.
+const MAX_WAITING_PERMISSIONS = 8;
 const refuse = (name, message) => Object.assign(new Error(message), { refusal: { name, message } });
 const NOT_ALLOWED = () => refuse("NotAllowedError", "this page may not do that");
 
@@ -124,25 +127,44 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
       let channel;
       try {
         channel = await dial(agent);
+        if (agent.previous) await store.settleMove(agent.key);
       } catch {
-        throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
+        // Whoever said it moved did not hold the key, or is not there: it goes back to where it last was.
+        if (!agent.previous) throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
+        try {
+          channel = await dial({ ...agent, ...agent.previous });
+          await store.revertMove(agent.key);
+        } catch {
+          throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
+        }
       }
       if (channel.proven) await store.markProven(agent.key);
       const sessions = new Set(grant.sessions ?? []);
       const scope = new Scope({ ...grant, sessions }, origin);
       const conn = entry.nextConn++;
-      const link = { conn, entry, channel, scope, grant, sessions, known: sessions.size };
+      const link = { conn, entry, channel, scope, grant, sessions, known: sessions.size, waiting: 0, asking: Promise.resolve() };
       entry.links.set(conn, link);
       live.add(link);
       channel.onMessage((message) => {
+        if (!live.has(link)) return;
         const step = scope.fromAgent(message);
         saveSessions(link);
         if (step.forward !== undefined) port.postMessage({ conn, msg: step.forward });
         if (step.reply !== undefined) channel.send(step.reply);
         if (step.ask !== undefined) {
-          Promise.resolve(askPermission({ origin, label: agent.label, request: step.ask }))
-            .catch(() => null)
-            .then((option) => channel.send(scope.answerPermission(step.ask, option)));
+          // A request about no session of this page's has nothing to show, and one window at a time is all a person can read.
+          if (!sessions.has(step.ask.params?.sessionId) || link.waiting >= MAX_WAITING_PERMISSIONS) {
+            channel.send(scope.answerPermission(step.ask, null));
+          } else {
+            link.waiting += 1;
+            link.asking = link.asking
+              .then(() => (live.has(link) ? askPermission({ origin, label: agent.label, request: step.ask }) : null))
+              .catch(() => null)
+              .then((option) => {
+                link.waiting -= 1;
+                if (live.has(link)) channel.send(scope.answerPermission(step.ask, option));
+              });
+          }
         }
       });
       channel.onClose(() => finish(link, "agent"));
@@ -166,7 +188,8 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
   };
 
   function saveSessions(link) {
-    if (link.sessions.size === link.known) return;
+    // A link that has ended has no grant to write back: the person may have just revoked it.
+    if (!live.has(link) || link.sessions.size === link.known) return;
     link.known = link.sessions.size;
     link.grant.sessions = [...link.sessions];
     store.saveGrant(link.grant);
@@ -204,7 +227,32 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
     );
   }
 
+  function closeLinks(matches) {
+    const origins = new Set();
+    for (const link of [...live]) {
+      if (matches(link.grant)) {
+        origins.add(link.grant.origin);
+        finish(link, "revoked");
+      }
+    }
+    return origins;
+  }
+
   return {
+    /** The person took a grant away, outside any page. Its connections end first, so none can write it back. */
+    async revokeByPerson(grant) {
+      closeLinks((held) => held.origin === grant.origin && held.agent === grant.agent);
+      await store.deleteGrant(grant);
+      announce(grant.origin);
+    },
+
+    /** The person removed an agent, and with it every site's grant. */
+    async removeByPerson(key) {
+      const origins = closeLinks((held) => held.agent === key);
+      await store.removeAgent(key);
+      for (const origin of origins) announce(origin);
+    },
+
     /** One document's port. `origin` and `tabId` are what the browser reported about its sender. */
     attach(port, { origin, tabId }) {
       const entry = { port, origin, tabId, links: new Map(), nextConn: 1 };
