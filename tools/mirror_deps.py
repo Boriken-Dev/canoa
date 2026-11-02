@@ -57,7 +57,7 @@ def main():
             return dict(host=e["host"],path=name,sha256=digest(data),bytes=len(data))
         with ThreadPoolExecutor(max_workers=12) as workers:
             files=list(workers.map(copy,fonts))
-    report=dict(format=1,source="Boriken-Dev/Canoa",sourceCommit=args.revision,
+    report=dict(format=1,source="Boriken-Dev/canoa",sourceCommit=args.revision,
                 status="complete",pubPackages=packages,gitClones=clones,cdnFiles=files,
                 desktopPackages=list(DESKTOP_PACKAGES),desktopLinuxSystemPackages=list(DESKTOP_LINUX_SYSTEM))
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")

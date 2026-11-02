@@ -2,7 +2,7 @@
 
 Canoa uses the **same deployment configuration convention** as AI6's Outer Office: a user-level TOML file ending in .cfg, with the environment override taking priority.
 
-The default template is [examples/config/Canoa.cfg](https://github.com/Boriken-Dev/Canoa/blob/main/examples/config/Canoa.cfg).
+The default template is [examples/config/Canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/Canoa.cfg).
 
 | Platform | Config location |
 | --- | --- |

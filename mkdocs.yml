@@ -1,8 +1,8 @@
 site_name: Canoa
 site_description: Interoperable agent connectivity, chat and browser MCP tools
-site_url: https://boriken-dev.github.io/Canoa/
-repo_url: https://github.com/Boriken-Dev/Canoa
-repo_name: Boriken-Dev/Canoa
+site_url: https://boriken-dev.github.io/canoa/
+repo_url: https://github.com/Boriken-Dev/canoa
+repo_name: Boriken-Dev/canoa
 edit_uri: edit/main/docs/
 docs_dir: docs
 
@@ -40,7 +40,7 @@ nav:
   - User site adapters: site-adapters.md
   - Browser comparisons: browser-comparison.md
   - Roadmap: roadmap.md
-  - Rust API: https://boriken-dev.github.io/Canoa/rust/canoa/index.html
+  - Rust API: https://boriken-dev.github.io/canoa/rust/canoa/index.html
 
 plugins:
   - search

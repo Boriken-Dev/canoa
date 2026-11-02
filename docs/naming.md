@@ -6,7 +6,7 @@ Canoa and associated Coqui libraries are published under **[Boriken Dev](https:/
 | --- | --- | --- |
 | Publisher / company | Boriken Dev | Boriken Dev |
 | Primary public domain | `boriken.dev` | `https://boriken.dev` |
-| GitHub organization | `Boriken-Dev` | `Boriken-Dev/Canoa` |
+| GitHub organization | `Boriken-Dev` | `Boriken-Dev/canoa` |
 | Java / Kotlin / Android application ID | reversed domain `dev.boriken.*` | `dev.boriken.canoa` |
 | Apple bundle ID | reversed domain `dev.boriken.*` | `dev.boriken.canoa` |
 | Chrome native messaging host | lowercase dotted identifier | `dev.boriken.canoa` |
@@ -22,7 +22,7 @@ This is a *namespace convention*, not a claim that every future distribution nam
 
 ## Public sites and docs
 
-Canoa's confirmed repository documentation currently uses [GitHub Pages](https://boriken-dev.github.io/Canoa/). Do not switch MkDocs `site_url`, change package links, or create deployment instructions for a `*.boriken.dev` hostname until DNS, HTTPS, and publication are configured.
+Canoa's confirmed repository documentation currently uses [GitHub Pages](https://boriken-dev.github.io/canoa/). Do not switch MkDocs `site_url`, change package links, or create deployment instructions for a `*.boriken.dev` hostname until DNS, HTTPS, and publication are configured.
 
 ## Shared libraries
 

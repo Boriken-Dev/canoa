@@ -2,13 +2,13 @@
 
 [![Version](https://img.shields.io/crates/v/canoa.svg)](https://crates.io/crates/canoa)
 [![Rust version](https://img.shields.io/crates/msrv/canoa.svg)](https://crates.io/crates/canoa)
-[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/Boriken-Dev/Canoa/blob/main/LICENSE)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/Boriken-Dev/canoa/blob/main/LICENSE)
 [![Docs](https://img.shields.io/docsrs/canoa)](https://docs.rs/canoa)
-[![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/Canoa/test.yml)](https://github.com/Boriken-Dev/Canoa/actions/workflows/test.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/test.yml)](https://github.com/Boriken-Dev/canoa/actions/workflows/test.yml)
 
 **A deny-by-default registry of services and client grants.** A service resolves for a client only when it is verified and
 that client holds an explicit grant for that capability. It is a scaffold for Canoa's planned native host, and nothing
-uses it yet: not a security boundary by itself. See the [documentation](https://boriken-dev.github.io/Canoa/).
+uses it yet: not a security boundary by itself. See the [documentation](https://boriken-dev.github.io/canoa/).
 
 ## Features
 
@@ -53,8 +53,8 @@ cargo test --workspace --all-features
 
 ### Releasing
 
-Not released; see the repository's [CHANGELOG](https://github.com/Boriken-Dev/Canoa/blob/main/CHANGELOG.md).
+Not released; see the repository's [CHANGELOG](https://github.com/Boriken-Dev/canoa/blob/main/CHANGELOG.md).
 
 ## License
 
-MPL-2.0; see [LICENSE](https://github.com/Boriken-Dev/Canoa/blob/main/LICENSE).
+MPL-2.0; see [LICENSE](https://github.com/Boriken-Dev/canoa/blob/main/LICENSE).
