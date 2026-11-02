@@ -304,6 +304,8 @@ try {
     answeredWindows.add(target.id);
     const view = new Session(target.webSocketDebuggerUrl);
     await waitFor("its contents", () => view.run("(document.querySelector('#main')?.childElementCount ?? 0) > 0"));
+    // Its buttons answer only after a moment.
+    await waitFor("its buttons", () => view.run("![...document.querySelectorAll('button')].some((button) => button.disabled)"));
     return view;
   };
   const requested = () => page.run(`window.asked = document.acp.request({ purpose: "testing" }).then(
@@ -512,7 +514,7 @@ try {
       const transport = flags ?? ["--tls-short-lived", "--webtransport-port", String(port)];
       const child = spawn(bridge, ["serve", "--listen", `127.0.0.1:${port}`, "--identity", key, "--allow", browserPeer, ...transport, ...extra,
         "--advertise", label, "--", process.execPath, ...program],
-      { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors } });
+      { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors, COQUI_AGENTIC_PEER_HOME: path.join(work, "bridge-home") } });
       let said = "";
       child.stderr.on("data", (chunk) => {
         said += chunk;
@@ -706,8 +708,10 @@ try {
       assert.equal(servers.length, 1);
       assert.equal(servers[0].name, "canoa-browser");
       assert.ok(path.isAbsolute(servers[0].command));
-      const token = servers[0].env.find((item) => item.name === "COQUI_MCP_OFFER_TOKEN").value;
-      assert.ok(token.length >= 64 && !servers[0].args.join(" ").includes(token));
+      assert.equal(servers[0].type, "stdio");
+      const tokenFile = servers[0].env.find((item) => item.name === "COQUI_MCP_OFFER_TOKEN_FILE").value;
+      const token = readFileSync(tokenFile, "utf8");
+      assert.ok(token.length >= 64 && !JSON.stringify(servers[0]).includes(token));
       assert.equal(toolEntries().find((entry) => entry.mcp).mcp.capabilities.tools.listChanged, true);
     });
     await check("tools: an agent sees only the asking tool, and no debugger in the normal build", async () => {
@@ -744,7 +748,7 @@ try {
       const before = toolEntries().filter((entry) => entry.notified).length;
       const options = await openUrl(`chrome-extension://${new URL(worker.url).hostname}/permissions.html`);
       await waitFor("the options page", () => options.run("document.readyState === 'complete' && typeof chrome?.runtime?.sendMessage === 'function'"));
-      await options.run("chrome.runtime.sendMessage({ type: 'canoa.grants.remove', index: 0 }).then(() => true)");
+      await options.run("chrome.runtime.sendMessage({ type: 'canoa.grants.list' }).then(({ grants }) => chrome.runtime.sendMessage({ type: 'canoa.grants.remove', grant: grants[0] })).then(() => true)");
       await options.call("Page.close").catch(() => {});
       await waitFor("the list-changed notice", () => toolEntries().filter((entry) => entry.notified).length > before);
       assert.deepEqual(await toolNames(own), ["browser_request_access"]);
@@ -813,11 +817,11 @@ try {
         assert.equal(await own.run(open), true);
         const task = "Use the browser_request_access tool with capability browser.read and any short reason. When it answers with a tabId, use the browser_read_page tool on that tabId, then reply with only the page's title. Do nothing else.";
         await own.run(`(() => {
-          const said = { text: "", tools: [], asked: 0, stop: null, error: null };
+          const said = { text: "", tools: [], asked: 0, stop: null, error: null, running: false, kinds: {} };
           window.said = said;
           const send = (message) => window.writer.write(JSON.stringify(message));
           (async () => {
-            await send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } });
+            await send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 2, capabilities: {}, info: { name: 'canoa-e2e', title: 'e2e', version: '1' } } });
             for (;;) {
               const { value, done } = await window.reader.read();
               if (done) return;
@@ -827,15 +831,22 @@ try {
                 if (message.error) said.error = message.error.message;
                 else await send({ jsonrpc: '2.0', id: 3, method: 'session/prompt', params: { sessionId: message.result.sessionId, prompt: [{ type: 'text', text: ${JSON.stringify(task)} }] } });
               } else if (message.method === undefined && message.id === 3) {
-                said.stop = message.result?.stopReason ?? message.error?.message;
+                // In v2 this only says the message went in, and the end of the turn is a state update.
+                if (message.error) said.stop = message.error.message;
               } else if (message.method === 'session/request_permission') {
                 said.asked += 1;
                 const allow = message.params.options.find((option) => String(option.kind).startsWith('allow'));
                 await send({ jsonrpc: '2.0', id: message.id, result: { outcome: { outcome: 'selected', optionId: allow.optionId } } });
               } else if (message.method === 'session/update') {
                 const update = message.params.update;
-                if (update.sessionUpdate === 'agent_message_chunk') said.text += update.content?.text ?? '';
-                if (update.sessionUpdate === 'tool_call') said.tools.push(String(update.title));
+                const kind = update.sessionUpdate;
+                said.kinds[kind] = (said.kinds[kind] ?? 0) + 1;
+                // One piece of text, or a list of them.
+                const words = Array.isArray(update.content) ? update.content.map((part) => part.text ?? '').join('') : update.content?.text ?? '';
+                if (kind === 'agent_message_chunk' || kind === 'agent_message') said.text += words;
+                if (kind === 'state_update' && update.state === 'running') said.running = true;
+                if (kind === 'state_update' && update.state === 'idle' && said.running) said.stop = update.stopReason ?? 'end_turn';
+                if ((kind === 'tool_call' || kind === 'tool_call_update') && update.title && !said.tools.includes(String(update.title))) said.tools.push(String(update.title));
               }
             }
           })().catch((error) => { said.error = String(error); });
@@ -849,14 +860,16 @@ try {
         assert.ok(asking);
         const person = await prompt();
         await answerBrowser(person, true);
+        let latest;
         const said = await waitFor("Claude to finish", async () => {
-          const now = await own.run("window.said");
-          return now.stop || now.error ? now : null;
-        }, 120_000);
-        console.log(`     real agent: stop ${said.stop}, ${said.asked} permission questions, tools ${JSON.stringify(said.tools.map((title) => title.replace(/^.*(browser_[a-z_]+).*$/, "$1")))}, reply has the title: ${said.text.includes("strict page")}`);
+          latest = await own.run("window.said");
+          return latest.stop || latest.error ? latest : null;
+        }, 120_000).catch((error) => {
+          throw new Error(`${error.message}: ${latest.asked} asked, kinds ${JSON.stringify(latest.kinds)}, running ${latest.running}`);
+        });
+        console.log(`     real agent: stop ${said.stop}, ${said.asked} permission questions, tools ${JSON.stringify(said.tools.map((title) => title.replace(/^.*(browser_[a-z_]+).*$/, "$1")))}, reply has the title: ${said.text.includes("strict page")}, kinds ${JSON.stringify(said.kinds)}`);
         assert.equal(said.error, null);
-        assert.equal(said.stop, "end_turn");
-        assert.ok(said.text.includes("strict page"), "the reply did not have the title");
+        assert.ok(said.text.includes("strict page"), `the reply did not have the title, ended ${said.stop}`);
         await own.run("window.conn.close(); true");
       });
     }

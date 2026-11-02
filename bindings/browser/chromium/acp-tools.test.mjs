@@ -8,7 +8,8 @@ import { createGateway } from "./acp-gateway.js";
 import { createTools, OFFER, SERVER_NAME } from "./acp-tools.js";
 import { handleMcpRequest } from "./mcp.js";
 import { askableCapabilities, createAccess } from "./mcp-access.js";
-import { CAPABILITY, DIRECTION, makeGrant } from "./permissions.js";
+import { CAPABILITY, DIRECTION, makeGrant, sameGrant } from "./permissions.js";
+import { plainSelector } from "./browser-tools.js";
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -27,7 +28,7 @@ function linkedMuxes() {
   return { near: createMux(near, { side: "dialed" }), far: createMux(far, { side: "answered" }) };
 }
 
-const ENTRY = { name: SERVER_NAME, command: "/abs/bridge", args: ["mcp-shim"], env: [{ name: "A", value: "127.0.0.1:1" }] };
+const ENTRY = { type: "stdio", name: SERVER_NAME, command: "/abs/bridge", args: ["mcp-shim"], env: [{ name: "A", value: "127.0.0.1:1" }] };
 
 /** The bridge's half: answers an offer with `entry`, and hands back each offer's stream. */
 function fakeBridge(far, entry = ENTRY) {
@@ -76,6 +77,7 @@ test("for each way of opening a session, one offer of its own", async () => {
 test("a bridge answering anything but a server entry gets no entry declared, and the session still opens", async () => {
   for (const entry of [
     { ...ENTRY, name: "other" },
+    { ...ENTRY, type: "http" },
     { ...ENTRY, command: 7 },
     { ...ENTRY, args: "mcp-shim" },
     { ...ENTRY, env: [{ name: "A" }] },
@@ -130,6 +132,41 @@ test("so many calls at once are refused past a limit, with the rest answered", a
   const refused = await receiveJson(offered[0]);
   assert.equal(refused.id, 17);
   assert.equal(refused.error.code, -32000);
+});
+
+test("an agent that asks and never reads cannot grow what waits here", async () => {
+  const { near, far } = linkedMuxes();
+  const offered = fakeBridge(far);
+  let handled = 0;
+  const tools = createTools({
+    mux: near,
+    handle: async (request) => {
+      handled += 1;
+      return { jsonrpc: "2.0", id: request.id, result: "x".repeat(64 * 1024) };
+    },
+  });
+  await tools.declared(sessionNew());
+  // Its window of a mebibyte fills, and from then on each answer holds a place until it can go.
+  for (let id = 1; id <= 400; id += 1) await offered[0].send(JSON.stringify(rpc(id, "tools/list")));
+  await settle();
+  assert.ok(handled < 60, `handled ${handled}`);
+});
+
+test("ending a session ends its offer, a new one's by what the agent answered", async () => {
+  const { near, far } = linkedMuxes();
+  const offered = fakeBridge(far);
+  const tools = createTools({ mux: near, handle: async () => null });
+  await tools.declared(JSON.stringify(rpc(5, "session/new", { mcpServers: [] })));
+  tools.fromAgent(JSON.stringify({ jsonrpc: "2.0", id: 5, result: { sessionId: "made" } }));
+  await tools.declared(JSON.stringify(rpc(6, "session/load", { sessionId: "other", mcpServers: [] })));
+  await tools.declared(JSON.stringify(rpc(7, "session/close", { sessionId: "made" })));
+  assert.equal(await offered[0].receive(), null, "that session's stream ended");
+  await tools.declared(JSON.stringify(rpc(8, "session/close", { sessionId: "other" })));
+  assert.equal(await offered[1].receive(), null);
+  // An agent refusing the session ends what was offered for it.
+  await tools.declared(JSON.stringify(rpc(9, "session/new", { mcpServers: [] })));
+  tools.fromAgent(JSON.stringify({ jsonrpc: "2.0", id: 9, error: { code: 1, message: "no" } }));
+  assert.equal(await offered[2].receive(), null);
 });
 
 test("a change reaches every session's stream, and an ended one is left alone", async () => {
@@ -348,6 +385,7 @@ function gatewayWith({ origin, offers }) {
           const message = JSON.parse(text);
           return JSON.stringify({ ...message, params: { ...message.params, mcpServers: [ENTRY] } });
         },
+        fromAgent() {},
         end() {},
       };
     },
@@ -367,14 +405,19 @@ function gatewayWith({ origin, offers }) {
     offered,
     sent,
     async open() {
+      const answered = async (id) => {
+        for (;;) {
+          const found = port.posted.find((message) => message.id === id);
+          if (found !== undefined) return found.result;
+          await settle();
+        }
+      };
       listeners[0]({ id: 1, op: "agents" });
-      await settle();
-      const { id } = port.posted.at(-1).result[0];
+      const [{ id }] = await answered(1);
       listeners[0]({ id: 2, op: "connect", args: { id } });
-      await settle();
-      const { conn } = port.posted.at(-1).result;
+      const { conn } = await answered(2);
       listeners[0]({ conn, msg: sessionNew() });
-      await settle();
+      while (sent.length === 0) await settle();
     },
   };
 }
@@ -384,6 +427,91 @@ test("Canoa's own chat gets the tools from an agent offering them", async () => 
   await own.open();
   assert.deepEqual(own.dialed, [{ link: true }]);
   assert.deepEqual(own.sent[0].params.mcpServers, [ENTRY]);
+});
+
+test("one window per origin, however many requests a person's one click lets a page make", async () => {
+  let answer;
+  let asked = 0;
+  const gateway = createGateway({
+    store: { agents: async () => [], grants: async () => [], secret: async () => "secret" },
+    dial: async () => {
+      throw new Error("no");
+    },
+    askPerson: () => {
+      asked += 1;
+      return new Promise((resolve) => (answer = resolve));
+    },
+  });
+  const posted = [];
+  const listeners = [];
+  gateway.attach({
+    postMessage: (message) => posted.push(message),
+    onMessage: { addListener: (listen) => listeners.push(listen) },
+    onDisconnect: { addListener() {} },
+  }, { origin: "https://site.example", tabId: 1 });
+  for (let id = 1; id <= 50; id += 1) listeners[0]({ id, op: "request", activated: true, args: {} });
+  await settle();
+  assert.equal(asked, 1);
+  assert.equal(posted.filter((message) => message.error?.name === "NotAllowedError").length, 49);
+  answer(null);
+  await settle();
+  listeners[0]({ id: 51, op: "request", activated: true, args: {} });
+  await settle();
+  assert.equal(asked, 2);
+});
+
+test("what a page says for the person's window cannot disguise itself, and only an origin passes as one", async () => {
+  let details;
+  const gateway = createGateway({
+    store: { agents: async () => [], grants: async () => [], secret: async () => "secret" },
+    dial: async () => {
+      throw new Error("no");
+    },
+    askPerson: async (asked) => {
+      details = asked;
+      return null;
+    },
+  });
+  const listeners = [];
+  gateway.attach({
+    postMessage() {},
+    onMessage: { addListener: (listen) => listeners.push(listen) },
+    onDisconnect: { addListener() {} },
+  }, { origin: "https://site.example", tabId: 1 });
+  listeners[0]({
+    id: 1,
+    op: "request",
+    activated: true,
+    args: { purpose: `safe\u202eexe.gnp\n\n\n`, mcpOrigins: ["https://a.example", "Canoa has verified this site", "https://b.example/path", "javascript:alert(1)"] },
+  });
+  await settle();
+  assert.equal(details.purpose, "safe exe.gnp");
+  assert.deepEqual(details.mcpOrigins, ["https://a.example"]);
+});
+
+test("a click or a fill can name what the page lists, and cannot ask about what is in it", () => {
+  for (const fine of ["#save", "button.primary", "form > input", "#a\\:b", "div .x", "a,b"]) assert.ok(plainSelector(fine), fine);
+  for (const bad of ['input[name=csrf][value^="a"]', "html:has(input)", "a:not(b)", "a[href]", 7, "x".repeat(501), "*:is(a)"]) assert.ok(!plainSelector(bad), String(bad));
+});
+
+test("a grant is the same one by what it is, not where it sits", () => {
+  const made = { direction: DIRECTION.AGENT_TO_PAGE, peerId: "p", tabId: 1, origin: "https://a.example", capability: CAPABILITY.READ, expiresAt: 5 };
+  assert.ok(sameGrant(made, { ...made }));
+  for (const change of [{ tabId: 2 }, { peerId: "q" }, { origin: "https://b.example" }, { capability: CAPABILITY.INTERACT }, { expiresAt: 6 }]) {
+    assert.ok(!sameGrant(made, { ...made, ...change }), JSON.stringify(change));
+  }
+  assert.ok(!sameGrant(made, undefined));
+});
+
+test("an answer too large for the agent says so rather than never arriving", async () => {
+  const answer = await handleMcpRequest({
+    request: rpc(1, "tools/call", { name: "browser_read_page", arguments: { tabId: 5 } }),
+    peerId: "sha256:agent",
+    trustedPeers: new Set(["sha256:agent"]),
+    grants: [makeGrant({ direction: DIRECTION.AGENT_TO_PAGE, peerId: "sha256:agent", tabId: 5, origin: "https://a.example", capability: CAPABILITY.READ, expiresAt: Date.now() + 60_000 })],
+    dispatch: async () => "x".repeat(2 * 1024 * 1024),
+  });
+  assert.equal(answer.result.isError, true);
 });
 
 test("a page's session has no browser server and no link, ever, whatever the agent offers", async () => {

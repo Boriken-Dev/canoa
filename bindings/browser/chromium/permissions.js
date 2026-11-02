@@ -94,6 +94,12 @@ export function revokeTab(grants, tabId) {
   return grants.filter((g) => g.tabId !== tabId);
 }
 
+/** Whether two grants are the same one: a position in the list says nothing, since grants come and go behind whoever is looking. */
+export function sameGrant(a, b) {
+  return a?.direction === b?.direction && a?.peerId === b?.peerId && a?.tabId === b?.tabId
+    && a?.origin === b?.origin && a?.capability === b?.capability && a?.expiresAt === b?.expiresAt;
+}
+
 export function revokePeer(grants, peerId) {
   if (!Array.isArray(grants)) return [];
   return grants.filter((g) => g.peerId !== peerId);

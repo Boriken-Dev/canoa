@@ -111,6 +111,12 @@ export async function handleMcpRequest({
     const value = await dispatch({
       name,args,peerId,trustedPeers,grants,now,
     });
+    // A page decides what comes back, and an answer that never reached the agent would leave it waiting.
+    if (JSON.stringify(value ?? null).length > MAX_RPC_BYTES) {
+      return result(id, {
+        isError:true, content:[{type:'text',text:'That answer is too large to send'}],
+      });
+    }
     return result(id, {
       content:[{type:'text',text:JSON.stringify(value)}],
       structuredContent:{result:value},
@@ -119,7 +125,7 @@ export async function handleMcpRequest({
   } catch (error) {
     return result(id, {
       isError:true,
-      content:[{type:'text',text:'Browser tool failed: ' + String(error.message || error)}],
+      content:[{type:'text',text:'Browser tool failed: ' + String(error.message || error).slice(0, 500)}],
     });
   }
 }

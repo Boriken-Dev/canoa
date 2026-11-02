@@ -3,7 +3,7 @@
   "name": "Canoa",
   "version": "0.0.1",
   "description": "Canoa browser debugging build with CDP access.",
-  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "contextMenus", "userScripts", "nativeMessaging", "debugger"],
+  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "contextMenus", "nativeMessaging", "debugger"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "options_ui": { "page": "permissions.html", "open_in_tab": true },

@@ -11,6 +11,27 @@ function element(tag, properties = {}, ...children) {
   return node;
 }
 
+/** What another party wrote, without what could reorder or hide what is shown around it. */
+const clean = (value, limit = 300) => String(value ?? "").replace(/\p{Cf}|\p{Cc}/gu, " ").trim().slice(0, limit);
+
+/**
+ * Nothing here answers for the first moment it can be seen, or after it comes to the front: a page can time a window to land under
+ * a click meant for something else. Buttons added later are the person's own doing.
+ */
+function holdClicks() {
+  let timer;
+  const hold = () => {
+    const buttons = [...main.querySelectorAll("button")];
+    for (const button of buttons) button.disabled = true;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      for (const button of buttons) button.disabled = false;
+    }, 500);
+  };
+  window.addEventListener("focus", hold);
+  hold();
+}
+
 function validAgent(label, url, peer) {
   if (!label.trim()) return "Give it a name.";
   let parsed;
@@ -145,13 +166,14 @@ function grantView(details) {
     ...(details.own ? [] : [element("label", { className: "pick" }, approve,
       element("span", { className: "warn", textContent: "This site can approve what the agent does for me" }))]),
     allow, refuse);
+  holdClicks();
 }
 
 function permissionView(details) {
   const { toolCall, options } = details.request.params ?? {};
-  const title = toolCall?.title ?? toolCall?.kind ?? "a tool";
-  const buttons = (Array.isArray(options) ? options : []).map((option) => {
-    const button = element("button", { type: "button", textContent: String(option.name ?? option.optionId) });
+  const title = clean(details.request.params?.title ?? toolCall?.title ?? toolCall?.kind ?? "a tool");
+  const buttons = (Array.isArray(options) ? options : []).slice(0, 8).map((option) => {
+    const button = element("button", { type: "button", textContent: clean(option.name ?? option.optionId, 80) });
     if (String(option.kind ?? "").startsWith("reject")) button.className = "quiet";
     button.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: option.optionId }));
     return button;
@@ -161,7 +183,8 @@ function permissionView(details) {
   main.replaceChildren(
     element("p", {}, element("strong", { textContent: details.label }), " wants to use a tool, in a conversation started by ",
       element("span", { className: "site", textContent: details.origin }), "."),
-    element("p", { textContent: String(title) }), ...buttons, cancel);
+    element("p", { textContent: title }), ...buttons, cancel);
+  holdClicks();
 }
 
 const WHAT = {
@@ -208,6 +231,7 @@ function browserView(details) {
     ...(details.capability === "browser.debug" ? [element("p", { className: "warn", textContent: "The debugger can read this site's cookies and anything else on the page, and act as you there." })] : []),
     element("p", { textContent: "What it reads there can try to talk it into things. Share only what you would show it yourself." }),
     tabs, minutes, allow, refuse, status);
+  holdClicks();
 }
 
 async function manageView() {

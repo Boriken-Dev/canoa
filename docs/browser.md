@@ -20,17 +20,17 @@ An agent that Canoa's own chat started can use the browser's tools, when its bri
 2. For each session, the worker opens another stream, and the bridge answers with a stdio `mcpServers` entry that the worker adds to the session. The relay still reads no ACP.
 3. The agent starts that program, a small shim, as it would any stdio server. The shim shows a token on a loopback port made for that stream, and from then on carries MCP's own messages to the extension.
 
-**What an agent has.** At first, one tool: `browser_request_access`. It names a capability and a reason, and opens the extension's own window, where a page cannot draw. There the person sees the reason as the agent's own words, and picks the tab and for how long. On a yes the agent's tool list grows, and it is told so. Browser-local checks still decide every call, against the tab, its origin, the capability and the time left, however the agent is identified.
+**What an agent has.** `browser_request_access`, and whatever that agent's peer still holds a grant for, so at first that one tool. It names a capability and a reason, and opens the extension's own window, where a page cannot draw. There the person sees the reason as the agent's own words, and picks the tab and for how long. On a yes the agent's tool list grows, and it is told so. Browser-local checks still decide every call, against the tab, its origin, the capability and the time left, however the agent is identified.
 
 | It takes | To |
 | --- | --- |
 | Refusing, or no answer in two minutes | No grant, and 30 seconds before that agent can ask again |
-| Navigating the tab, closing it, or the time running out | End the grant |
+| Loading a new page in the tab, closing it, or the time running out | End the grant. A grant the person gives after the tab moved within its site stays for that page |
 | Removing it under **Canoa browser permissions** | End the grant, and tell the agent |
 
 **Who has none of this.** A session a page started: only the extension's own chat gets the server, the worker adds it after the page's scope, and a page's connection has no streams at all. A page cannot give this grant, since it could then steer an agent into driving the browser. The debugger tools exist only in the debugger build, as their own capability, and only `http` and `https` tabs can be offered, which leaves out the extension's window and the browser's own pages.
 
-**What stays true.** What an agent reads on a page can try to talk it into things, and a grant lets it act on that, so share a tab as you would show it to the agent yourself. A grant is by peer, so several agents behind one bridge share it. Any program running as you can read the shim's environment and use what that agent holds. Anyone able to pair with `acp/1` can already run commands on that machine: the bridge's own documentation says so.
+**What stays true.** What an agent reads on a page can try to talk it into things, and a grant lets it act on that, so share a tab as you would show it to the agent yourself. A grant is by peer, so several agents behind one bridge share it. Any program running as you on the agent's machine can read the shim's token file and use what that agent holds; another user on that machine cannot. Anyone able to pair with `acp/1` can already run commands on that machine: the bridge's own documentation says so.
 
 ## Other browsers
 

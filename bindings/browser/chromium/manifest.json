@@ -3,7 +3,7 @@
   "name": "Canoa",
   "version": "0.0.1",
   "description": "Multi-session ACP chat and browser MCP tools.",
-  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "contextMenus", "userScripts", "nativeMessaging"],
+  "permissions": ["activeTab", "tabs", "scripting", "storage", "sidePanel", "contextMenus", "nativeMessaging"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "options_ui": { "page": "permissions.html", "open_in_tab": true },

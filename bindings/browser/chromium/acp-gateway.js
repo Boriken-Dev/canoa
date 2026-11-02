@@ -10,8 +10,21 @@ const MAX_WAITING_PERMISSIONS = 8;
 const refuse = (name, message) => Object.assign(new Error(message), { refusal: { name, message } });
 const NOT_ALLOWED = () => refuse("NotAllowedError", "this page may not do that");
 
+// Format characters can reorder what is shown around them, or hide part of it.
 function text(value) {
-  return typeof value === "string" ? value.slice(0, MAX_TEXT) : undefined;
+  return typeof value === "string" ? value.replace(/\p{Cf}|\p{Cc}/gu, " ").trim().slice(0, MAX_TEXT) : undefined;
+}
+
+/** Only what really is an origin: these are shown under a warning, so they must not be able to say anything else. */
+function origins(value) {
+  return list(value).filter((item) => {
+    try {
+      const url = new URL(item);
+      return url.origin === item && (url.protocol === "https:" || url.protocol === "http:");
+    } catch {
+      return false;
+    }
+  });
 }
 
 function list(value) {
@@ -35,6 +48,8 @@ async function hash(textValue) {
 export function createGateway({ store, dial, askPerson, askPermission, ownOrigin, offerTools }) {
   const ports = new Set();
   const live = new Set();
+  // One window per origin: a person's one click lasts a few seconds, and a page could otherwise open as many as it likes in them.
+  const asking = new Set();
 
   async function publicId(origin, key) {
     return hash(`${await store.secret()}\0${origin}\0${key}`);
@@ -86,20 +101,27 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     },
 
     async request({ origin, tabId, activated }, options = {}) {
-      if (activated !== true) throw NOT_ALLOWED();
-      const known = await store.agents();
-      const own = origin === ownOrigin;
-      const decision = await askPerson({
-        origin,
-        own,
-        tabId,
-        purpose: text(options.purpose),
-        mcpOrigins: list(options.mcpOrigins),
-        peers: list(options.peers),
-        permissions: options.permissions === true,
-        agents: known.map(({ key, label, source, peer, proven }) => ({ key, label, source, peer, proven })),
-      });
+      if (activated !== true || asking.has(origin)) throw NOT_ALLOWED();
+      asking.add(origin);
+      let decision;
+      try {
+        const known = await store.agents();
+        const own = origin === ownOrigin;
+        decision = await askPerson({
+          origin,
+          own,
+          tabId,
+          purpose: text(options.purpose),
+          mcpOrigins: origins(options.mcpOrigins),
+          peers: list(options.peers),
+          permissions: options.permissions === true,
+          agents: known.map(({ key, label, source, peer, proven }) => ({ key, label, source, peer, proven })),
+        });
+      } finally {
+        asking.delete(origin);
+      }
       if (!decision) throw NOT_ALLOWED();
+      const own = origin === ownOrigin;
       const added = [];
       for (const agent of decision.add ?? []) added.push(await store.addAgent(agent));
       const keys = [...(decision.allow ?? []), ...added.map((agent) => agent.key)];
@@ -117,7 +139,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
           cwd: typeof decision.cwd === "string" ? decision.cwd : null,
           // The chat is where a person answers, so it needs no separate say.
           permissions: decision.permissions === true || own,
-          mcpOrigins: list(decision.mcpOrigins),
+          mcpOrigins: origins(decision.mcpOrigins),
           sessions: earlier?.sessions ?? [],
         };
         await store.saveGrant(grant);
@@ -157,6 +179,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       live.add(link);
       channel.onMessage((message) => {
         if (!live.has(link)) return;
+        link.tools?.fromAgent(message);
         const step = scope.fromAgent(message);
         saveSessions(link);
         if (step.forward !== undefined) port.postMessage({ conn, msg: step.forward });

@@ -1,5 +1,5 @@
 import {
-  DIRECTION, CAPABILITY, isAllowed, makeGrant, revokePeer, revokeTab
+  DIRECTION, CAPABILITY, isAllowed, makeGrant, revokePeer, revokeTab, sameGrant
 } from "./permissions.js";
 import { captureContext, addContext, takeContext } from "./context-transfer.js";
 import { detachOnTabClosed } from "./devtools.js";
@@ -105,12 +105,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       return;
     }
     if (msg.type === 'canoa.grants.remove') {
-      const updated = await updateGrants((current) => {
-        if (!Number.isSafeInteger(msg.index) ||
-            msg.index < 0 || msg.index >= current.length) throw Error('Invalid grant');
-        return current.toSpliced(msg.index,1);
-      });
-      reply({grants:updated});
+      reply({grants:await updateGrants((current) => current.filter((grant) => !sameGrant(grant,msg.grant)))});
       return;
     }
     if (!/^sha256:[a-f0-9]{64}$/.test(msg.peerId || '') ||

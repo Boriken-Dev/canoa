@@ -38,7 +38,7 @@ async function refresh(){
     const button=document.createElement('button');
     button.textContent='Revoke';
     button.addEventListener('click',async()=>{
-      try{await request({type:'canoa.grants.remove',index:i});await refresh();}
+      try{await request({type:'canoa.grants.remove',grant});await refresh();}
       catch(e){show(e.message);}
     });
     row.append(text,' ',button);
@@ -65,6 +65,10 @@ form.addEventListener('submit',async event=>{
     show('Permission added. The verified agent still needs a valid Coqui connection.');
     await refresh();
   }catch(e){show(e.message);}
+});
+// Grants change behind this page: a tab closes, a navigation ends one, an agent is given another.
+chrome.storage.onChanged.addListener((_,area)=>{
+  if (area==='session') refresh().catch(error=>show(error.message));
 });
 await tabs().catch(error=>show(error.message));
 await refresh().catch(error=>show(error.message));

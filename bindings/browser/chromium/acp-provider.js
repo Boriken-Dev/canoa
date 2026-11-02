@@ -14,6 +14,7 @@ const ONCE = "canoa_acp_once";
 const SECRET = "canoa_acp_secret";
 const PORT_NAME = "canoa-acp";
 const ASK_MS = 120_000;
+const TOOL_MS = 30_000;
 const SEARCH_SECONDS = 3;
 const FOUND = ["dns-sd", "local"];
 
@@ -140,6 +141,15 @@ onGrantsChanged(() => {
   for (const tools of toolHosts) tools.changed();
 });
 
+/** A page's own code runs in some tools, and a call to it that never ends would hold its place for ever. */
+const within = (run, ms) => (details) => {
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("the page did not answer in time")), ms);
+  });
+  return Promise.race([run(details), limit]).finally(() => clearTimeout(timer));
+};
+
 /** The browser's tools for one proven link. Each call is decided from the grants as they are then. */
 function offerTools({ mux, peer, label }) {
   const capabilities = askableCapabilities(debuggerBuild());
@@ -150,7 +160,7 @@ function offerTools({ mux, peer, label }) {
       peerId: peer,
       trustedPeers: new Set([peer]),
       grants: await readGrants(),
-      dispatch: dispatchBrowserTool,
+      dispatch: within(dispatchBrowserTool, TOOL_MS),
       access: {
         capabilities,
         request: ({ capability, reason }) => requestAccess({ peer, label, capability, reason }),
@@ -208,6 +218,13 @@ export async function forgetSite(origin) {
 }
 
 export function installProvider() {
+  // Closing the window is a refusal, there and then.
+  chrome.windows.onRemoved.addListener((windowId) => {
+    for (const entry of asking.values()) {
+      if (entry.windowId === windowId) entry.done(null);
+    }
+  });
+
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== PORT_NAME) return;
     const { id, origin, frameId, tab, url } = port.sender ?? {};
