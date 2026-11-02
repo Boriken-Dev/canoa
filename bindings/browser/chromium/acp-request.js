@@ -70,6 +70,9 @@ function describeAgent(agent) {
     : [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
   if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
   lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
+  if (agent.offers?.length > 0) {
+    lines.push(element("br"), `Says it serves: ${agent.offers.join(", ")}`);
+  }
   if (agent.sameKeyAs) {
     lines.push(element("br"), element("span", { className: "warn", textContent: `Anyone can name a public key. Choosing this moves ${agent.sameKeyAs} here, and whoever is asking gets ${agent.sameKeyAs}. If it cannot prove the key there, it goes back.` }));
   }

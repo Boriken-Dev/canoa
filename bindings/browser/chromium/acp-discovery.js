@@ -8,6 +8,8 @@ const MAX_CANDIDATES = 64;
 const MAX_LABEL = 80;
 const MAX_URL = 512;
 const SOURCES = ["dns-sd", "local"];
+const MAX_OFFERS = 16;
+const OFFER = /^[\x21-\x7e]{1,64}$/;
 
 /** Where WebTransport is, if the candidate gave both a port and a certificate hash to pin. */
 function webTransportOf(item) {
@@ -15,6 +17,14 @@ function webTransportOf(item) {
   if (typeof item.webtransportHash !== "string" || !PEER.test(item.webtransportHash)) return undefined;
   const { hostname, pathname } = new URL(item.url);
   return { url: `https://${hostname}:${item.webtransport}${pathname}`, hash: item.webtransportHash };
+}
+
+/** The protocols a candidate says it serves, as a hint for choosing: what a peer may open is decided on the link itself. */
+function offersOf(item) {
+  if (!Array.isArray(item.offers)) return [];
+  return item.offers
+    .filter((offer) => typeof offer === "string" && OFFER.test(offer) && !/[,=]/.test(offer))
+    .slice(0, MAX_OFFERS);
 }
 
 function parsed(text) {
@@ -58,6 +68,7 @@ export function readCandidates(reply, known = []) {
       peer,
       source,
       webtransport,
+      offers: offersOf(item),
       // The same key somewhere else, which choosing moves that agent to: it still has to prove the key.
       sameKeyAs: same?.label,
       // Two names alike with different keys is what a stranger imitating an agent looks like.

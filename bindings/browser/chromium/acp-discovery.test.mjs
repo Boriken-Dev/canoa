@@ -9,7 +9,7 @@ const good = { label: "Mine", url: "wss://10.0.0.5:8765/acp", peer: KEY, source:
 const withTransport = { ...good, webtransport: 8766, webtransportHash: OTHER };
 
 test("a good candidate comes through with what it claims", () => {
-  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, webtransport: undefined, sameKeyAs: undefined, sameNameAs: undefined }]);
+  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, webtransport: undefined, offers: [], sameKeyAs: undefined, sameNameAs: undefined }]);
 });
 
 test("nothing usable in a bad reply", () => {
@@ -100,4 +100,12 @@ test("another address with a key the person knows says so, and stays a new candi
   const [fresh] = readCandidates({ candidates: [{ ...good, peer: OTHER }] }, [{ label: "Had", url: good.url, peer: KEY }]);
   assert.equal(fresh.sameKeyAs, undefined);
   assert.equal(fresh.peer, OTHER);
+});
+
+test("what a candidate says it serves is read as a stranger wrote it", () => {
+  const offers = (value) => readCandidates({ candidates: [{ ...good, offers: value }] })[0].offers;
+  assert.deepEqual(offers(["acp/1", "mcp"]), ["acp/1", "mcp"]);
+  assert.deepEqual(offers("acp/1"), []);
+  assert.deepEqual(offers(["a b", "a,b", "a=b", "", 7, null, "\u202eacp", "x".repeat(65), "mcp"]), ["mcp"]);
+  assert.equal(offers(Array.from({ length: 100 }, (_, index) => `p${index}`)).length, 16);
 });
