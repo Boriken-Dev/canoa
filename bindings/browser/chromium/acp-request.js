@@ -118,9 +118,9 @@ function grantView(details) {
   });
   refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
 
-  const asked = [
-    element("p", {}, element("span", { className: "site", textContent: details.origin }), " asks to use your agents."),
-  ];
+  const asked = details.own
+    ? [element("p", { textContent: "Canoa's chat asks to use your agents. What they ask to do is answered in the conversation." })]
+    : [element("p", {}, element("span", { className: "site", textContent: details.origin }), " asks to use your agents.")];
   if (details.purpose) asked.push(element("p", { className: "theirs", textContent: `In its own words: ${details.purpose}` }));
   asked.push(element("p", { textContent: "It will be able to start conversations and read the answers. It will see the peer id of each agent you choose. It sees nothing about the others." }));
   if (details.mcpOrigins.length > 0) {
@@ -142,8 +142,8 @@ function grantView(details) {
     }),
     element("label", { textContent: "Working directory for its sessions" }), cwd,
     element("label", { textContent: "For how long" }), lifetime,
-    element("label", { className: "pick" }, approve,
-      element("span", { className: "warn", textContent: "This site can approve what the agent does for me" })),
+    ...(details.own ? [] : [element("label", { className: "pick" }, approve,
+      element("span", { className: "warn", textContent: "This site can approve what the agent does for me" }))]),
     allow, refuse);
 }
 
@@ -162,6 +162,52 @@ function permissionView(details) {
     element("p", {}, element("strong", { textContent: details.label }), " wants to use a tool, in a conversation started by ",
       element("span", { className: "site", textContent: details.origin }), "."),
     element("p", { textContent: String(title) }), ...buttons, cancel);
+}
+
+const WHAT = {
+  "browser.read": "read a tab: its text, and what can be clicked in it",
+  "browser.interact": "click and type in a tab",
+  "webmcp.invoke": "run the tools a page offers to agents",
+  "mcp.discover": "see which MCP servers a page names",
+  "browser.debug": "control a tab with the debugger",
+};
+
+function browserView(details) {
+  const tabs = element("div");
+  const pick = (tab) => {
+    const box = element("input", { type: "radio", name: "tab", value: String(tab.id) });
+    box.dataset.origin = tab.origin;
+    tabs.append(element("label", { className: "pick" }, box,
+      element("span", {}, element("span", { className: "site", textContent: tab.origin }), element("br"), tab.title ?? "")));
+  };
+  // The tab in front first, and none chosen: reaching a page is what the person is deciding.
+  for (const tab of [...details.tabs].sort((a, b) => Number(b.active) - Number(a.active))) pick(tab);
+  if (details.tabs.length === 0) tabs.append(element("p", { textContent: "No tab here can be shared." }));
+  const minutes = element("select", {}, ...details.minutes.map((value) => element("option", { value: String(value), textContent: `For ${value} minutes` })));
+  const status = element("p", { className: "warn" });
+  const allow = element("button", { type: "button", textContent: "Allow this tab" });
+  const refuse = element("button", { type: "button", className: "quiet", textContent: "Refuse" });
+  allow.addEventListener("click", async () => {
+    const chosen = tabs.querySelector("input:checked");
+    if (chosen === null) {
+      status.textContent = "Choose a tab.";
+      return;
+    }
+    // Chrome's own prompt, if this site has none yet. It needs this click.
+    const reached = await chrome.permissions.request({ origins: [`${chosen.dataset.origin}/*`] });
+    if (!reached) {
+      status.textContent = "Without that, the agent could not reach this tab.";
+      return;
+    }
+    send({ acp: "answer", ask: askId, answer: { tabId: Number(chosen.value), minutes: Number(minutes.value) } });
+  });
+  refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  main.replaceChildren(
+    element("p", {}, element("strong", { textContent: details.label }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
+    element("p", { className: "theirs", textContent: details.reason ? `In its own words: ${details.reason}` : "It gave no reason." }),
+    ...(details.capability === "browser.debug" ? [element("p", { className: "warn", textContent: "The debugger can read this site's cookies and anything else on the page, and act as you there." })] : []),
+    element("p", { textContent: "What it reads there can try to talk it into things. Share only what you would show it yourself." }),
+    tabs, minutes, allow, refuse, status);
 }
 
 async function manageView() {
@@ -210,5 +256,6 @@ if (params.has("manage")) {
   const details = await send({ acp: "details", ask: askId });
   if (details === null) main.textContent = "This request has ended.";
   else if (details.kind === "permission") permissionView(details);
+  else if (details.kind === "browser") browserView(details);
   else grantView(details);
 }

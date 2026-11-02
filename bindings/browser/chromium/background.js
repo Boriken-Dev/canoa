@@ -4,29 +4,21 @@ import {
 import { captureContext, addContext, takeContext } from "./context-transfer.js";
 import { detachOnTabClosed } from "./devtools.js";
 import { installProvider } from "./acp-provider.js";
+import { readGrants, updateGrants } from "./browser-grants.js";
 
 installProvider();
 
 // Browser-owned, deny-by-default policy. A page reaches this extension only through the provider, which checks its sender.
-const KEY = "canoa_grants";
 const CONTEXT_KEY = "canoa_pending_contexts";
-
-async function readGrants() {
-  const value = (await chrome.storage.session.get(KEY))[KEY];
-  return Array.isArray(value) ? value : [];
-}
-async function storeGrants(grants) {
-  await chrome.storage.session.set({ [KEY]: grants });
-}
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await detachOnTabClosed(tabId);
-  await storeGrants(revokeTab(await readGrants(), tabId));
+  await updateGrants((grants) => revokeTab(grants, tabId));
 });
 chrome.tabs.onUpdated.addListener(async (tabId, changes) => {
   if (changes.status === "loading") {
     await detachOnTabClosed(tabId);
-    await storeGrants(revokeTab(await readGrants(), tabId));
+    await updateGrants((grants) => revokeTab(grants, tabId));
   }
 });
 
@@ -93,7 +85,7 @@ async function localAuthorize(request, verifiedPeerIds) {
   return isAllowed({ grants: await readGrants(), request, trustedPeers: verifiedPeerIds });
 }
 export const permissions = Object.freeze({
-  localAuthorize, readGrants, makeGrant, storeGrants, revokePeer,
+  localAuthorize, readGrants, makeGrant, updateGrants, revokePeer,
   direction: DIRECTION, capability: CAPABILITY
 });
 
@@ -112,13 +104,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       reply({grants:await readGrants()});
       return;
     }
-    const current = await readGrants();
     if (msg.type === 'canoa.grants.remove') {
-      if (!Number.isSafeInteger(msg.index) ||
-          msg.index < 0 || msg.index >= current.length) throw Error('Invalid grant');
-      current.splice(msg.index,1);
-      await storeGrants(current);
-      reply({grants:current});
+      const updated = await updateGrants((current) => {
+        if (!Number.isSafeInteger(msg.index) ||
+            msg.index < 0 || msg.index >= current.length) throw Error('Invalid grant');
+        return current.toSpliced(msg.index,1);
+      });
+      reply({grants:updated});
       return;
     }
     if (!/^sha256:[a-f0-9]{64}$/.test(msg.peerId || '') ||
@@ -140,9 +132,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       origin:new URL(tab.url).origin,capability:msg.capability,
       expiresAt:Date.now() + msg.minutes*60*1000,
     });
-    const updated = [...current,grant].slice(-250);
-    await storeGrants(updated);
-    reply({grants:updated});
+    reply({grants:await updateGrants((current) => [...current,grant].slice(-250))});
   })().catch(error=>reply({error:String(error.message || error)}));
   return true;
 });

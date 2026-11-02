@@ -1,7 +1,12 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
 import { dialAgent } from "./acp-dial.js";
-import { COMPANION, readCandidates } from "./acp-discovery.js";
+import { COMPANION, offersOf, readCandidates } from "./acp-discovery.js";
 import { createGateway } from "./acp-gateway.js";
+import { createTools } from "./acp-tools.js";
+import { dispatchBrowserTool } from "./browser-tools.js";
+import { onGrantsChanged, readGrants, updateGrants } from "./browser-grants.js";
+import { handleMcpRequest } from "./mcp.js";
+import { askableCapabilities, createAccess } from "./mcp-access.js";
 
 const AGENTS = "canoa_acp_agents";
 const GRANTS = "canoa_acp_grants";
@@ -68,20 +73,21 @@ const store = {
   },
 };
 
-async function addAgent({ label, url, peer, source, webtransport }) {
+async function addAgent({ label, url, peer, source, webtransport, offers }) {
     const agents = await store.agents();
     // The same key at a new address is the same agent, whose grants carry over and whose name stays the person's. Anyone can
     // name a public key, so nothing counts as shown until a proof there, and the old address is kept until then.
     const held = peer ? agents.find((agent) => agent.peer === peer) : undefined;
     if (held !== undefined) {
       const previous = held.previous ?? { url: held.url, webtransport: held.webtransport, proven: held.proven };
-      const moved = { ...held, url: String(url), webtransport, proven: false, previous };
+      const moved = { ...held, url: String(url), webtransport, offers: offersOf({ offers }), proven: false, previous };
       await write("local", AGENTS, agents.map((agent) => (agent === held ? moved : agent)));
       return moved;
     }
     const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: FOUND.includes(source) ? source : "manual" };
     if (peer) agent.peer = String(peer);
     if (webtransport) agent.webtransport = { url: String(webtransport.url), hash: String(webtransport.hash) };
+    agent.offers = offersOf({ offers });
     await write("local", AGENTS, [...agents, agent]);
     return agent;
 }
@@ -121,11 +127,53 @@ async function ask(details, width, height) {
   });
 }
 
+const OWN_ORIGIN = new URL(chrome.runtime.getURL("")).origin;
+const debuggerBuild = () => chrome.runtime.getManifest().permissions.includes("debugger");
+const requestAccess = createAccess({
+  tabs: () => chrome.tabs.query({}),
+  ask: (details) => ask({ kind: "browser", ...details }, 520, 620),
+  updateGrants,
+  debuggerBuild: debuggerBuild(),
+});
+const toolHosts = new Set();
+onGrantsChanged(() => {
+  for (const tools of toolHosts) tools.changed();
+});
+
+/** The browser's tools for one proven link. Each call is decided from the grants as they are then. */
+function offerTools({ mux, peer, label }) {
+  const capabilities = askableCapabilities(debuggerBuild());
+  const tools = createTools({
+    mux,
+    handle: async (request) => handleMcpRequest({
+      request,
+      peerId: peer,
+      trustedPeers: new Set([peer]),
+      grants: await readGrants(),
+      dispatch: dispatchBrowserTool,
+      access: {
+        capabilities,
+        request: ({ capability, reason }) => requestAccess({ peer, label, capability, reason }),
+      },
+    }),
+  });
+  toolHosts.add(tools);
+  return {
+    ...tools,
+    end() {
+      toolHosts.delete(tools);
+      tools.end();
+    },
+  };
+}
+
 const gateway = createGateway({
   store,
-  dial: (agent) => dialAgent(agent),
+  dial: (agent, options) => dialAgent(agent, options),
   askPerson: (details) => ask({ kind: "grant", ...details }, 520, 680),
   askPermission: (details) => ask({ kind: "permission", ...details }, 480, 420),
+  ownOrigin: OWN_ORIGIN,
+  offerTools,
 });
 
 function secureOrigin(origin) {
@@ -162,7 +210,12 @@ export async function forgetSite(origin) {
 export function installProvider() {
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== PORT_NAME) return;
-    const { id, origin, frameId, tab } = port.sender ?? {};
+    const { id, origin, frameId, tab, url } = port.sender ?? {};
+    // Canoa's own chat, which a side panel shows in no tab. Only its pages: this origin is what gets the browser's tools.
+    if (id === chrome.runtime.id && origin === OWN_ORIGIN && url?.startsWith(chrome.runtime.getURL("ui/"))) {
+      gateway.attach(port, { origin, tabId: tab?.id });
+      return;
+    }
     // A top-level document of a secure origin, as the browser reports it. A cross-origin frame gets nothing in this version.
     if (id !== chrome.runtime.id || frameId !== 0 || tab?.id === undefined || !secureOrigin(origin)) {
       port.disconnect();

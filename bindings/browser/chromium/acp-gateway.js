@@ -1,6 +1,7 @@
 // What a page may do with a person's agents: grants, the scope on every message, and the connections. No chrome.* here, so the
 // conformance checks in coqui-acp run against this very code. `origin` always comes from the browser, never from the page.
 import { Scope } from "./vendor/coqui-acp/scope.mjs";
+import { OFFER } from "./acp-tools.js";
 
 const MAX_TEXT = 400;
 // Windows waiting to ask the person about one connection. Past this an agent is refused without asking: it has no way to make
@@ -27,8 +28,11 @@ async function hash(textValue) {
  * @param dial (agent) => a proven channel: { send(text), onMessage(fn), onClose(fn), close() }
  * @param askPerson (details) => { allow: agent keys, add: new agents, cwd, permissions, lifetime } or null, in the provider's window
  * @param askPermission (details) => an option id, or null
+ * @param ownOrigin Canoa's own chat, the one origin whose sessions get the browser's tools. A page's never do: it could steer an agent
+ *   into driving the browser.
+ * @param offerTools ({ mux, peer, label }) => what gives a link's sessions those tools, from acp-tools.js
  */
-export function createGateway({ store, dial, askPerson, askPermission }) {
+export function createGateway({ store, dial, askPerson, askPermission, ownOrigin, offerTools }) {
   const ports = new Set();
   const live = new Set();
 
@@ -84,8 +88,10 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
     async request({ origin, tabId, activated }, options = {}) {
       if (activated !== true) throw NOT_ALLOWED();
       const known = await store.agents();
+      const own = origin === ownOrigin;
       const decision = await askPerson({
         origin,
+        own,
         tabId,
         purpose: text(options.purpose),
         mcpOrigins: list(options.mcpOrigins),
@@ -109,7 +115,8 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
           tabId,
           lifetime: decision.lifetime === "always" ? "always" : "once",
           cwd: typeof decision.cwd === "string" ? decision.cwd : null,
-          permissions: decision.permissions === true,
+          // The chat is where a person answers, so it needs no separate say.
+          permissions: decision.permissions === true || own,
           mcpOrigins: list(decision.mcpOrigins),
           sessions: earlier?.sessions ?? [],
         };
@@ -124,15 +131,17 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
     async connect(entry, { id } = {}) {
       const { origin, port } = entry;
       const { grant, agent } = await find(origin, id);
+      // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
+      const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
       let channel;
       try {
-        channel = await dial(agent);
+        channel = await dial(agent, options);
         if (agent.previous) await store.settleMove(agent.key);
       } catch {
         // Whoever said it moved did not hold the key, or is not there: it goes back to where it last was.
         if (!agent.previous) throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
         try {
-          channel = await dial({ ...agent, ...agent.previous });
+          channel = await dial({ ...agent, ...agent.previous }, options);
           await store.revertMove(agent.key);
         } catch {
           throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
@@ -142,7 +151,8 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
       const sessions = new Set(grant.sessions ?? []);
       const scope = new Scope({ ...grant, sessions }, origin);
       const conn = entry.nextConn++;
-      const link = { conn, entry, channel, scope, grant, sessions, known: sessions.size, waiting: 0, asking: Promise.resolve() };
+      const link = { conn, entry, channel, scope, grant, sessions, known: sessions.size, waiting: 0, asking: Promise.resolve(), outgoing: Promise.resolve() };
+      if (channel.proven && channel.mux !== undefined) link.tools = offerTools({ mux: channel.mux, peer: agent.peer, label: agent.label });
       entry.links.set(conn, link);
       live.add(link);
       channel.onMessage((message) => {
@@ -198,6 +208,7 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
   function finish(link, reason, notify = true) {
     if (!live.delete(link)) return;
     link.entry.links.delete(link.conn);
+    link.tools?.end();
     link.channel.close();
     if (notify) link.entry.port.postMessage({ conn: link.conn, closed: reason });
   }
@@ -211,7 +222,7 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
         finish(link, "page", false);
       } else if (typeof message.msg === "string") {
         const step = link.scope.fromPage(message.msg);
-        if (step.forward !== undefined) link.channel.send(step.forward);
+        if (step.forward !== undefined) forward(link, step.forward);
         if (step.reply !== undefined) entry.port.postMessage({ conn: link.conn, msg: step.reply });
       }
       return;
@@ -225,6 +236,18 @@ export function createGateway({ store, dial, askPerson, askPermission }) {
       (result) => entry.port.postMessage({ id: message.id, result }),
       (error) => entry.port.postMessage({ id: message.id, error: error.refusal ?? { name: "NetworkError", message: "that failed" } }),
     );
+  }
+
+  /** In order, though adding a server to a session takes a moment. */
+  function forward(link, text) {
+    if (link.tools === undefined) {
+      link.channel.send(text);
+      return;
+    }
+    link.outgoing = link.outgoing
+      .then(() => link.tools.declared(text))
+      .then((declared) => (live.has(link) ? link.channel.send(declared) : undefined))
+      .catch(() => finish(link, "agent"));
   }
 
   function closeLinks(matches) {

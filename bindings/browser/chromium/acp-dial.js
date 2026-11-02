@@ -1,6 +1,7 @@
 // A proven channel to an agent: the WebCrypto handshake on WebTransport or a WebSocket, then every message sealed. Its code ships
 // with the extension, so nothing on the path can replace it.
 import { createInitiator, loadOrCreateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
+import { createMux } from "./vendor/coqui-agentic-peer/mux.mjs";
 
 const STORE = "dev.boriken.canoa.peer";
 const PROOF_MS = 15_000;
@@ -178,8 +179,43 @@ async function dialUnproven(agent, WebSocketClass) {
   };
 }
 
+/** ACP on one stream of a link whose other streams `mux` opens. Refused or ended, it closes as any channel does. */
+async function acpOverLink(proven) {
+  const closing = [];
+  const mux = createMux({
+    send: (bytes) => proven.sendBytes(bytes),
+    onMessage: (take) => proven.onBytes(take),
+    onClose: (listen) => proven.onClose(() => {
+      listen();
+      for (const close of closing) close();
+    }),
+  }, { side: "dialed" });
+  const stream = await mux.open("acp/1");
+  return {
+    proven: true,
+    mux,
+    send: (message) => stream.send(message),
+    // Not read until there is someone to give it to.
+    onMessage(handler) {
+      (async () => {
+        for (;;) {
+          const message = await stream.receive();
+          if (message === null) break;
+          handler(new TextDecoder().decode(message));
+        }
+      })().catch(() => {}).finally(() => proven.close());
+    },
+    onClose(handler) {
+      closing.push(handler);
+    },
+    close: () => proven.close(),
+  };
+}
+
+/** `link` runs ACP on a stream of a link, for an agent that says it serves one: anything else would read the first frame as ACP. */
 export async function dialAgent(agent, {
   identity,
+  link = false,
   WebSocketClass = globalThis.WebSocket,
   WebTransportClass = globalThis.WebTransport,
 } = {}) {
@@ -190,6 +226,7 @@ export async function dialAgent(agent, {
   const inbox = [];
   let waiter;
   let onMessage = () => {};
+  let onBytes = (bytes) => onMessage(new TextDecoder().decode(bytes));
   let onClose = () => {};
   let session;
   let cut;
@@ -199,7 +236,7 @@ export async function dialAgent(agent, {
       // A record that does not open ends the session, and a plain message never reaches the scope.
       opening = opening.then(async () => {
         const message = await session.open(new Uint8Array(event.data));
-        if (message !== null) onMessage(new TextDecoder().decode(message));
+        if (message !== null) onBytes(message);
       }).catch(() => socket.close());
     } else if ((event.data.byteLength ?? event.data.length) > MAX_PROOF_MESSAGE || inbox.length >= MAX_PROOF_WAITING) {
       socket.close();
@@ -241,9 +278,13 @@ export async function dialAgent(agent, {
     sending = sending.then(async () => socket.send(await sealed)).catch(() => socket.close());
     return sending;
   };
-  return {
+  const proven = {
     proven: true,
     send: (message) => enqueue(session.seal(message)),
+    sendBytes: (bytes) => enqueue(session.seal(bytes)),
+    onBytes(handler) {
+      onBytes = handler;
+    },
     onMessage(handler) {
       onMessage = handler;
     },
@@ -257,4 +298,5 @@ export async function dialAgent(agent, {
       });
     },
   };
+  return link ? acpOverLink(proven) : proven;
 }

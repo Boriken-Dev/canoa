@@ -39,6 +39,9 @@ const manifest = JSON.parse(readFileSync(path.join(unpacked, "manifest.json"), "
 manifest.host_permissions = ["http://127.0.0.1/*"];
 delete manifest.side_panel;
 writeFileSync(path.join(unpacked, "manifest.json"), JSON.stringify(manifest));
+// Canoa's own chat as the packaged UI loads the provider, without building Flutter for it.
+mkdirSync(path.join(unpacked, "ui"));
+writeFileSync(path.join(unpacked, "ui", "own.html"), '<!doctype html><title>own</title><script src="../acp-page.js"></script><script src="../acp-content.js"></script><p>own</p>');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The agent: the handshake, then sealed JSON-RPC. It records what reached it.
@@ -245,7 +248,7 @@ const watchdog = setTimeout(() => {
   console.log(`FAILED: the run took too long, at: ${lastCall}`);
   chrome.kill();
   process.exit(1);
-}, 200_000);
+}, process.env.CANOA_E2E_REAL_AGENT ? 600_000 : 300_000);
 try {
   debug = await waitFor("the browser", () => {
     try {
@@ -504,11 +507,11 @@ try {
       });`);
     const bridgeKey = path.join(work, "bridge.key");
     const bridgePeer = execFileSync(bridge, ["keygen", bridgeKey], { encoding: "utf8" }).trim();
-    const startBridge = async ({ key = bridgeKey, label = "Real bridge", flags } = {}) => {
+    const startBridge = async ({ key = bridgeKey, label = "Real bridge", flags, extra = [], program = [agentProgram] } = {}) => {
       const port = await freeForBoth();
       const transport = flags ?? ["--tls-short-lived", "--webtransport-port", String(port)];
-      const child = spawn(bridge, ["serve", "--listen", `127.0.0.1:${port}`, "--identity", key, "--allow", browserPeer, ...transport,
-        "--advertise", label, "--", process.execPath, agentProgram],
+      const child = spawn(bridge, ["serve", "--listen", `127.0.0.1:${port}`, "--identity", key, "--allow", browserPeer, ...transport, ...extra,
+        "--advertise", label, "--", process.execPath, ...program],
       { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors } });
       let said = "";
       child.stderr.on("data", (chunk) => {
@@ -596,6 +599,266 @@ try {
       });
     } else {
       console.log("skipped: wasm and dart need CANOA_E2E_PAGES");
+    }
+
+    // An agent with a real MCP client, which starts the stdio server it is given and does what each prompt says.
+    const toolLog = path.join(work, "tools.log");
+    const toolAgent = path.join(work, "tool-agent.cjs");
+    writeFileSync(toolAgent, `const { spawn } = require("node:child_process");
+      const { appendFileSync } = require("node:fs");
+      const readline = require("node:readline");
+      const note = (entry) => appendFileSync(process.argv[2], JSON.stringify(entry) + "\\n");
+      let shim;
+      let next = 1;
+      const waiting = new Map();
+      const call = (method, params) => new Promise((resolve) => {
+        const id = next++;
+        waiting.set(id, resolve);
+        shim.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\\n");
+      });
+      function start(server) {
+        const env = { ...process.env };
+        for (const { name, value } of server.env) env[name] = value;
+        shim = spawn(server.command, server.args, { env, stdio: ["pipe", "pipe", "ignore"] });
+        shim.on("exit", () => note({ shimExited: true }));
+        readline.createInterface({ input: shim.stdout }).on("line", (line) => {
+          const message = JSON.parse(line);
+          if (message.method) note({ notified: message.method });
+          else waiting.get(message.id)?.(message);
+        });
+      }
+      const answer = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+      readline.createInterface({ input: process.stdin }).on("line", async (line) => {
+        const { id, method, params } = JSON.parse(line);
+        if (method === "initialize") return answer(id, { protocolVersion: 1, agentCapabilities: {} });
+        if (method === "session/new") {
+          note({ servers: params.mcpServers });
+          if (params.mcpServers.length > 0) {
+            start(params.mcpServers[0]);
+            const opened = await call("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+            note({ mcp: opened.result });
+          }
+          return answer(id, { sessionId: "tools" });
+        }
+        if (method === "session/prompt") {
+          const asked = JSON.parse(params.prompt[0].text);
+          note({ result: await call(asked.method, asked.params) });
+          return answer(id, { stopReason: "end_turn" });
+        }
+        if (id !== undefined) answer(id, {});
+      });`);
+    const toolEntries = () => {
+      try {
+        return readFileSync(toolLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      } catch {
+        return [];
+      }
+    };
+    const toolResult = async (session, method, params = {}) => {
+      const before = toolEntries().filter((entry) => entry.result).length;
+      const text = JSON.stringify(JSON.stringify({ method, params }));
+      const ended = await session.run(`window.rpc({ jsonrpc: '2.0', id: window.nextId++, method: 'session/prompt', params: { sessionId: 'tools', prompt: [{ type: 'text', text: ${text} }] } })`);
+      assert.equal(ended.result.stopReason, "end_turn");
+      return (await waitFor("the agent's result", () => toolEntries().filter((entry) => entry.result)[before])).result;
+    };
+    const toolNames = async (session) => (await toolResult(session, "tools/list")).result.tools.map((tool) => tool.name);
+    const callTool = (session, name, args) => toolResult(session, "tools/call", { name, arguments: args });
+    const openUrl = async (url) => {
+      const made = await (await fetch(`http://127.0.0.1:${debug}/json/new?${encodeURIComponent(url)}`, { method: "PUT" })).json();
+      const session = new Session(made.webSocketDebuggerUrl);
+      await session.call("Runtime.enable");
+      return session;
+    };
+    const browserTab = await openUrl(pageUrl);
+    const newestTab = () => sw.run(`chrome.tabs.query({}).then((tabs) => Math.max(...tabs.filter((tab) => tab.url === ${JSON.stringify(pageUrl)}).map((tab) => tab.id)))`);
+    const tabId = await newestTab();
+    const own = await openUrl(`chrome-extension://${new URL(worker.url).hostname}/ui/own.html`);
+    await waitFor("the provider in Canoa's own page", () => own.run("typeof document.acp === 'object'"));
+    const answerBrowser = (view, allow) => view.run(allow
+      ? `(() => {
+          [...document.querySelectorAll('input[name=tab]')].find((input) => input.value === '${tabId}').click();
+          [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow this tab').click();
+        })()`
+      : "[...document.querySelectorAll('button')].find((b) => b.textContent === 'Refuse').click()", { gesture: true }).catch(() => {});
+    const askBrowser = async (allow) => {
+      const asking = callTool(own, "browser_request_access", { capability: "browser.read", reason: "I would like to read the page" });
+      const view = await prompt();
+      const shown = await view.run("document.querySelector('#main').textContent");
+      await answerBrowser(view, allow);
+      return { answer: await asking, shown };
+    };
+
+    await check("tools: Canoa's own chat dials a link and its session gets a stdio server whose token is not in its arguments", async () => {
+      execFileSync(bridge, ["keygen", path.join(work, "tools.key")], { encoding: "utf8" });
+      await startBridge({ key: path.join(work, "tools.key"), label: "Tool bridge", extra: ["--mcp-offers"], program: [toolAgent, toolLog] });
+      await own.run(`window.asked = document.acp.request({ purpose: "Chat with it in Canoa" }).then((agents) => { window.agent = agents[0]; return agents.length; }, (e) => e.name); window.nextId = 10; true`, { gesture: true });
+      const view = await prompt();
+      assert.ok(await view.run("document.querySelector('#main').textContent.includes(\"Canoa's chat asks\")"));
+      assert.ok(!(await view.run("document.querySelector('#main').textContent.includes('can approve what the agent does')")));
+      await search(view, "Tool bridge");
+      assert.ok(await view.run("document.querySelector('#main').textContent.includes('mcp-offer/1')"));
+      await choose(view, "Tool bridge", "/tools");
+      assert.equal(await own.run("window.asked"), 1);
+      assert.equal(await own.run(open), true);
+      assert.equal((await own.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })")).result.protocolVersion, 1);
+      assert.equal((await own.run("window.rpc({ jsonrpc: '2.0', id: 2, method: 'session/new', params: { cwd: '/x', mcpServers: [] } })")).result.sessionId, "tools");
+      const { servers } = toolEntries().find((entry) => entry.servers);
+      assert.equal(servers.length, 1);
+      assert.equal(servers[0].name, "canoa-browser");
+      assert.ok(path.isAbsolute(servers[0].command));
+      const token = servers[0].env.find((item) => item.name === "COQUI_MCP_OFFER_TOKEN").value;
+      assert.ok(token.length >= 64 && !servers[0].args.join(" ").includes(token));
+      assert.equal(toolEntries().find((entry) => entry.mcp).mcp.capabilities.tools.listChanged, true);
+    });
+    await check("tools: an agent sees only the asking tool, and no debugger in the normal build", async () => {
+      assert.deepEqual(await toolNames(own), ["browser_request_access"]);
+      const listed = await toolResult(own, "tools/list");
+      assert.ok(!listed.result.tools[0].inputSchema.properties.capability.enum.includes("browser.debug"));
+      const denied = await callTool(own, "browser_read_page", { tabId });
+      assert.equal(denied.result.isError, true);
+      const debug = await callTool(own, "browser_request_access", { capability: "browser.debug", reason: "x" });
+      assert.equal(debug.result.isError, true);
+      assert.equal((await targets()).filter((item) => item.url.includes("acp-request.html?ask=") && !answeredWindows.has(item.id)).length, 0);
+    });
+    await check("tools: the person is asked in the provider's window, the tool list grows, and the tool reads the real tab", async () => {
+      const before = toolEntries().filter((entry) => entry.notified).length;
+      const { answer, shown } = await askBrowser(true);
+      assert.ok(shown.includes("In its own words: I would like to read the page"), shown);
+      assert.ok(shown.includes(origin), shown);
+      assert.equal(answer.result.isError, false);
+      assert.equal(JSON.parse(answer.result.content[0].text).tabId, tabId);
+      await waitFor("the list-changed notice", () => toolEntries().filter((entry) => entry.notified).length > before);
+      assert.deepEqual(await toolNames(own), ["browser_request_access", "browser_list_tabs", "browser_read_page", "browser_list_webmcp"]);
+      const read = await callTool(own, "browser_read_page", { tabId });
+      assert.equal(read.result.isError, false);
+      assert.equal(read.result.structuredContent.result.title, "strict page");
+      assert.equal(read.result.structuredContent.result.text.trim(), "page");
+      // Another tab of the same site was not what the person chose.
+      const another = await openUrl(pageUrl);
+      const anotherId = await newestTab();
+      assert.notEqual(anotherId, tabId);
+      assert.equal((await callTool(own, "browser_read_page", { tabId: anotherId })).result.isError, true);
+      await another.call("Page.close").catch(() => {});
+    });
+    await check("tools: taking the grant away tells the agent, and the tool is gone", async () => {
+      const before = toolEntries().filter((entry) => entry.notified).length;
+      const options = await openUrl(`chrome-extension://${new URL(worker.url).hostname}/permissions.html`);
+      await waitFor("the options page", () => options.run("document.readyState === 'complete' && typeof chrome?.runtime?.sendMessage === 'function'"));
+      await options.run("chrome.runtime.sendMessage({ type: 'canoa.grants.remove', index: 0 }).then(() => true)");
+      await options.call("Page.close").catch(() => {});
+      await waitFor("the list-changed notice", () => toolEntries().filter((entry) => entry.notified).length > before);
+      assert.deepEqual(await toolNames(own), ["browser_request_access"]);
+      assert.equal((await callTool(own, "browser_read_page", { tabId })).result.isError, true);
+    });
+    await check("tools: navigating the tab away ends the grant", async () => {
+      await askBrowser(true);
+      assert.ok((await toolNames(own)).includes("browser_read_page"));
+      await browserTab.run("location.reload(); true");
+      await waitFor("the grant to go", async () => !(await toolNames(own)).includes("browser_read_page"));
+    });
+    await check("tools: the person refusing is what the agent hears, and it cannot ask again at once", async () => {
+      const { answer } = await askBrowser(false);
+      assert.equal(answer.result.isError, true);
+      assert.deepEqual(await toolNames(own), ["browser_request_access"]);
+      const again = await callTool(own, "browser_request_access", { capability: "browser.read", reason: "please" });
+      assert.equal(again.result.isError, true);
+      assert.ok(JSON.parse(again.result.content[0].text).why.includes("just now"));
+    });
+    await check("tools: a page's session with that same agent has no browser server", async () => {
+      await requested();
+      const view = await prompt();
+      await choose(view, "Tool bridge", "/page");
+      assert.equal(await page.run("window.asked"), 1);
+      await page.run(open);
+      const before = toolEntries().filter((entry) => entry.servers).length;
+      await page.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })");
+      await page.run("window.rpc({ jsonrpc: '2.0', id: 2, method: 'session/new', params: { cwd: '/x', mcpServers: [] } })");
+      const made = await waitFor("the session", () => toolEntries().filter((entry) => entry.servers)[before]);
+      assert.deepEqual(made.servers, []);
+      await revokeHere();
+    });
+    await check("tools: ending the connection ends the shim", async () => {
+      await own.run("window.conn.close(); true");
+      await waitFor("the shim to exit", () => toolEntries().some((entry) => entry.shimExited));
+    });
+    await check("tools: the same over a plain WebSocket, for an agent with no WebTransport", async () => {
+      execFileSync(bridge, ["keygen", path.join(work, "plain-tools.key")], { encoding: "utf8" });
+      await startBridge({ key: path.join(work, "plain-tools.key"), label: "Plain tool bridge", flags: [], extra: ["--mcp-offers"], program: [toolAgent, toolLog] });
+      await own.run(`window.asked = document.acp.request({}).then((agents) => { window.agent = agents[0]; return agents.length; }, (e) => e.name); true`, { gesture: true });
+      const view = await prompt();
+      await search(view, "Plain tool bridge");
+      await choose(view, "Plain tool bridge", "/tools");
+      assert.equal(await own.run("window.asked"), 1);
+      assert.deepEqual(await own.run("window.agent.offers.transports"), ["websocket"]);
+      assert.equal(await own.run(open), true);
+      await own.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })");
+      await own.run("window.rpc({ jsonrpc: '2.0', id: 2, method: 'session/new', params: { cwd: '/x', mcpServers: [] } })");
+      assert.deepEqual(await toolNames(own), ["browser_request_access"]);
+      await own.run("window.conn.close(); true");
+    });
+    // Spends a little of the person's subscription, in a temporary directory, and prints the shape of what happened, never its text.
+    if (process.env.CANOA_E2E_REAL_AGENT === "claude") {
+      await check("real agent: Claude asks for a tab, a person allows it, and it reads the page with a tool it did not have when it started", async () => {
+        const cwd = path.join(work, "real-agent");
+        mkdirSync(cwd);
+        const key = path.join(work, "real.key");
+        execFileSync(bridge, ["keygen", key], { encoding: "utf8" });
+        const npx = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npx-cli.js");
+        await startBridge({ key, label: "Real Claude", flags: [], extra: ["--mcp-offers"], program: [npx, "-y", "@agentclientprotocol/claude-agent-acp@0.99.1"] });
+        await own.run(`window.asked = document.acp.request({}).then((agents) => { window.agent = agents[0]; return agents.length; }, (e) => e.name); true`, { gesture: true });
+        const view = await prompt();
+        await search(view, "Real Claude");
+        await choose(view, "Real Claude", cwd);
+        assert.equal(await own.run("window.asked"), 1);
+        assert.equal(await own.run(open), true);
+        const task = "Use the browser_request_access tool with capability browser.read and any short reason. When it answers with a tabId, use the browser_read_page tool on that tabId, then reply with only the page's title. Do nothing else.";
+        await own.run(`(() => {
+          const said = { text: "", tools: [], asked: 0, stop: null, error: null };
+          window.said = said;
+          const send = (message) => window.writer.write(JSON.stringify(message));
+          (async () => {
+            await send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } });
+            for (;;) {
+              const { value, done } = await window.reader.read();
+              if (done) return;
+              const message = JSON.parse(value);
+              if (message.method === undefined && message.id === 1) await send({ jsonrpc: '2.0', id: 2, method: 'session/new', params: { cwd: '/x', mcpServers: [] } });
+              else if (message.method === undefined && message.id === 2) {
+                if (message.error) said.error = message.error.message;
+                else await send({ jsonrpc: '2.0', id: 3, method: 'session/prompt', params: { sessionId: message.result.sessionId, prompt: [{ type: 'text', text: ${JSON.stringify(task)} }] } });
+              } else if (message.method === undefined && message.id === 3) {
+                said.stop = message.result?.stopReason ?? message.error?.message;
+              } else if (message.method === 'session/request_permission') {
+                said.asked += 1;
+                const allow = message.params.options.find((option) => String(option.kind).startsWith('allow'));
+                await send({ jsonrpc: '2.0', id: message.id, result: { outcome: { outcome: 'selected', optionId: allow.optionId } } });
+              } else if (message.method === 'session/update') {
+                const update = message.params.update;
+                if (update.sessionUpdate === 'agent_message_chunk') said.text += update.content?.text ?? '';
+                if (update.sessionUpdate === 'tool_call') said.tools.push(String(update.title));
+              }
+            }
+          })().catch((error) => { said.error = String(error); });
+          return true;
+        })()`);
+        const asking = await waitFor("Claude to ask for a tab", async () => {
+          const said = await own.run("window.said");
+          if (said.error || said.stop) throw new Error(`it ended without asking: ${said.error ?? said.stop}, ${said.tools.length} tools`);
+          return (await targets()).find((item) => item.url.includes("acp-request.html?ask=") && !answeredWindows.has(item.id));
+        }, 120_000);
+        assert.ok(asking);
+        const person = await prompt();
+        await answerBrowser(person, true);
+        const said = await waitFor("Claude to finish", async () => {
+          const now = await own.run("window.said");
+          return now.stop || now.error ? now : null;
+        }, 120_000);
+        console.log(`     real agent: stop ${said.stop}, ${said.asked} permission questions, tools ${JSON.stringify(said.tools.map((title) => title.replace(/^.*(browser_[a-z_]+).*$/, "$1")))}, reply has the title: ${said.text.includes("strict page")}`);
+        assert.equal(said.error, null);
+        assert.equal(said.stop, "end_turn");
+        assert.ok(said.text.includes("strict page"), "the reply did not have the title");
+        await own.run("window.conn.close(); true");
+      });
     }
   } else {
     console.log("skipped: discovery and spoof need CANOA_E2E_BRIDGE");

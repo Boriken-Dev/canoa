@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/Boriken-Dev/coqui-agentic-peer",
+  "commit": "190fe8f5bcf2270d50774ccd2e2eb8965d218f89",
+  "path": "bindings/js/src",
+  "files": {
+    "mux.mjs": "d89af6020d4fc7c61c46c11c57b84624468664ff"
+  }
+}

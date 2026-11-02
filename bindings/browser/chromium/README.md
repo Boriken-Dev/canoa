@@ -2,7 +2,7 @@
 
 Canoa is a Manifest V3 extension named **Canoa**, under `bindings/browser/chromium/`.
 
-The canonical multi-session chat UI lives in root `app/` (Flutter); build with `python app/tool/build.py chromium` to embed the UI in the side panel or a full-page tab. A separate PWA build uses the same source. The backend ACP session transport is not yet connected, so chat is currently a local preview.
+The canonical multi-session chat UI lives in root `app/` (Flutter); build with `python app/tool/build.py chromium` to embed the UI in the side panel or a full-page tab, where it reaches agents through the same provider a page does. A separate PWA build uses the same source.
 
 ## A provider of `document.acp`
 
@@ -16,12 +16,13 @@ The extension implements [ACP in the browser](https://boriken-dev.github.io/coqu
 
 Right-click the toolbar icon for **Let this site ask for my agents** and **Canoa agents**.
 
-`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket, with `CANOA_E2E_BRIDGE=<path to coqui-acp-bridge>` through the real companion, bridge and stdio agent over WebTransport and WebSocket, and with `CANOA_E2E_PAGES=<dir>` from a Rust page in WebAssembly and from Canoa's own connection code, as `e2e/run.mjs` describes: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
+`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket, with `CANOA_E2E_BRIDGE=<path to coqui-acp-bridge>` through the real companion, bridge and stdio agent over WebTransport and WebSocket, and with `CANOA_E2E_PAGES=<dir>` from a Rust page in WebAssembly and from Canoa's own connection code, as `e2e/run.mjs` describes: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. With a bridge, it also runs an agent with a real MCP client through the browser's tools, and with `CANOA_E2E_REAL_AGENT=claude` and `CLAUDE_CODE_EXECUTABLE` set, a real Claude turn, which spends a little of the subscription. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
 
 ## Browser-facing building blocks
 
 - `permissions.js`, `acp-permissions.js`: independent browser and ACP permission decisions; both have tests.
-- `tools.js`, `browser-tools.js`: local MCP-shaped browser tool catalogue and grant-checked operations, exposed through an internal MCP JSON-RPC tools adapter, but not yet linked to an authenticated remote MCP transport.
+- `tools.js`, `browser-tools.js`: the browser tool catalogue and its grant-checked operations.
+- `mcp.js`, `mcp-access.js`, `acp-tools.js`: those tools as an MCP server for an agent of Canoa's own chat, over its proven link, with `browser_request_access` the one tool it has before a person grants more. See [browser integration](../../../docs/browser.md).
 - `site-adapters.js`: validates manifests for user-installed JavaScript or Wasm adapters bound to one or multiple website origins; no arbitrary code execution or adapter installation is implemented yet.
 - `manifest.json` and `background.js`: MV3 side panel, full-page view, **Ask Canoa** page/selection context menu, local policy and tab-navigation revocation.
 - `context-transfer.js` and `bridge.js`: user-selected context is scrubbed of URL query tokens and handed once to the Flutter UI. It is attached **locally** and never sent to an agent until a real transport and send approval exist.
@@ -37,7 +38,7 @@ See [browser comparison](../../../docs/browser-comparison.md), [site adapters](.
 
 ## Current limitations
 
-The authenticated ACP echo fixture exists separately, and the extension now has a local permissions options page, MCP JSON-RPC adapter and debug-only CDP commands. There is still no authenticated remote MCP bridge, production peer pairing UI, installed user-script runtime, cross-browser execution test, or publishable distribution. The options page's grants are not agent identity proofs. The extension build is not ready for Chrome Web Store distribution.
+There is still no production peer pairing UI, installed user-script runtime, cross-browser execution test, or publishable distribution. The options page's grants are not agent identity proofs. The extension build is not ready for Chrome Web Store distribution.
 
 ## Build the elevated CDP variant
 

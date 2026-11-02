@@ -20,7 +20,7 @@ function webTransportOf(item) {
 }
 
 /** The protocols a candidate says it serves, as a hint for choosing: what a peer may open is decided on the link itself. */
-function offersOf(item) {
+export function offersOf(item) {
   if (!Array.isArray(item.offers)) return [];
   return item.offers
     .filter((offer) => typeof offer === "string" && OFFER.test(offer) && !/[,=]/.test(offer))
