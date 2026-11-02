@@ -38,7 +38,13 @@ Future<bool> isInstalled(AgentCommand command) async {
 
 /// Everything under [pid], found while it can still be: a child that has died leaves its own children with no link back to it.
 Future<List<int>> _descendants(int pid) async {
-  final found = await Process.run('pgrep', ['-P', '$pid']);
+  final ProcessResult found;
+  try {
+    found = await Process.run('pgrep', ['-P', '$pid']);
+  } on ProcessException {
+    // A system without it still has to end the child itself.
+    return const [];
+  }
   final children = LineSplitter.split(found.stdout as String).map(int.tryParse).whereType<int>().toList();
   return [
     ...children,
