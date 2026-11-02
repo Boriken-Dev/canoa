@@ -19,6 +19,39 @@ final class AgentCommand {
   final Map<String, String> programPaths;
 }
 
+/// A command as a person typed it: words split on spaces, with quotes around any that hold one. Null for nothing, or an open quote.
+AgentCommand? parseCommand(String text) {
+  final words = <String>[];
+  final word = StringBuffer();
+  String? quote;
+  var inWord = false;
+  for (final char in text.trim().split('')) {
+    if (quote != null) {
+      if (char == quote) {
+        quote = null;
+      } else {
+        word.write(char);
+      }
+    } else if (char == '"' || char == "'") {
+      quote = char;
+      inWord = true;
+    } else if (char.trim().isEmpty) {
+      if (inWord) {
+        words.add(word.toString());
+        word.clear();
+        inWord = false;
+      }
+    } else {
+      word.write(char);
+      inWord = true;
+    }
+  }
+  if (quote != null) return null;
+  if (inWord) words.add(word.toString());
+  if (words.isEmpty || words.first.isEmpty) return null;
+  return AgentCommand(label: words.first, program: words.first, args: words.sublist(1));
+}
+
 /// What runs with no setup, for whoever has the tool signed in already. An adapter drives that tool, so its subscription applies
 /// and no API key is involved. The versions are pinned because an adapter is code fetched when it starts.
 const List<AgentCommand> agentPresets = [

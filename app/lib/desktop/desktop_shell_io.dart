@@ -10,6 +10,8 @@ class _Shell with WindowListener, TrayListener implements DesktopShell {
   CanoaConfig config = const CanoaConfig();
   void Function()? onSettings;
   bool ready = false, quitting = false;
+  @override
+  Future<void> Function()? beforeQuit;
   DateTime? lastClick;
   bool get isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
@@ -84,6 +86,7 @@ class _Shell with WindowListener, TrayListener implements DesktopShell {
   }
   Future<void> _quit() async {
     quitting = true;
+    await beforeQuit?.call();
     await dispose();
     await windowManager.destroy();
   }

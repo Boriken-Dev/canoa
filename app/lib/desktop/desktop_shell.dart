@@ -7,5 +7,8 @@ abstract interface class DesktopShell {
   Future<void> update(CanoaConfig config);
   Future<void> open();
   Future<void> dispose();
+
+  /// Runs before the app quits, to end what it started.
+  set beforeQuit(Future<void> Function()? ending);
 }
 DesktopShell createDesktopShell() => platform.createDesktopShell();

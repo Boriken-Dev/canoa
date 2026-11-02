@@ -6,6 +6,8 @@ const bool canRunLocalAgents = false;
 
 Future<bool> isInstalled(AgentCommand command) async => false;
 
+String? defaultWorkingDirectory() => null;
+
 Future<VerifiedAgent> startLocalAgent(
   AgentCommand command, {
   AcpDecider? decider,

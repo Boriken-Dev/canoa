@@ -1,6 +1,9 @@
+import 'dart:convert' show jsonEncode;
+
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
+import '../acp/agent_commands.dart';
 import '../theme/look.dart';
 
 /// Deployment config uses TOML in Canoa.cfg, consistent with AI6's OO.cfg.
@@ -15,11 +18,15 @@ final class CanoaConfig {
     this.cdn = 'none',
     this.look = LookId.bubbles,
     this.brightness = 'dark',
+    this.agents = const [],
   });
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
   final String cdn;
   final LookId look;
+
+  /// Agents this person added, offered beside the presets when what they need is installed.
+  final List<AgentCommand> agents;
 
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
@@ -42,6 +49,7 @@ final class CanoaConfig {
         cdn: cdn,
         look: look ?? this.look,
         brightness: brightness ?? this.brightness,
+        agents: agents,
       );
 
   factory CanoaConfig.parse(String source) {
@@ -49,7 +57,7 @@ final class CanoaConfig {
         ? source.substring(source.indexOf('\n') + 1) : source;
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
-      if (!{'desktop', 'network', 'assets', 'appearance'}.contains(name)) {
+      if (!{'desktop', 'network', 'assets', 'appearance', 'agents'}.contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
     }
@@ -90,7 +98,27 @@ final class CanoaConfig {
     if (brightness is! String || !{'light', 'dark', 'system'}.contains(brightness)) {
       throw const FormatException('Canoa.cfg: appearance.brightness must be light, dark or system');
     }
+    final agents = <AgentCommand>[];
+    final rawAgents = data['agents'];
+    if (rawAgents != null) {
+      if (rawAgents is! Map) throw const FormatException('Canoa.cfg: agents must be a table of agents');
+      for (final entry in rawAgents.entries) {
+        final agent = entry.value;
+        if (agent is! Map || agent['program'] is! String || (agent['program'] as String).isEmpty) {
+          throw FormatException('Canoa.cfg: agents.${entry.key} needs a program');
+        }
+        for (final key in agent.keys) {
+          if (key != 'program' && key != 'args') throw FormatException('Canoa.cfg: agents.${entry.key}: invalid key $key');
+        }
+        final args = agent['args'] ?? const <Object>[];
+        if (args is! List || args.any((arg) => arg is! String)) {
+          throw FormatException('Canoa.cfg: agents.${entry.key}.args must be a list of strings');
+        }
+        agents.add(AgentCommand(label: '${entry.key}', program: agent['program'] as String, args: args.cast<String>()));
+      }
+    }
     return CanoaConfig(
+      agents: agents,
       look: look, brightness: brightness,
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
@@ -117,5 +145,9 @@ cdn = "$cdn"
 [appearance]
 look = "${look.name}"
 brightness = "$brightness"
-''';
+${agents.map((agent) => '''
+[agents.${jsonEncode(agent.label)}]
+program = ${jsonEncode(agent.program)}
+args = ${jsonEncode(agent.args)}
+''').join()}''';
 }

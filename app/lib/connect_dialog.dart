@@ -76,6 +76,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   final pinned = TextEditingController();
   final cwd = TextEditingController(text: '/');
   final title = TextEditingController();
+  final command = TextEditingController();
   late final Future<String> localPeerId = localBrowserPeerId();
   bool busy = false;
   String? error;
@@ -122,6 +123,15 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     }
     return found;
   }();
+
+  void _runTyped() {
+    final parsed = parseCommand(command.text);
+    if (parsed == null) {
+      setState(() => error = 'That is not a command: check its quotes.');
+      return;
+    }
+    _runLocal(parsed);
+  }
 
   Future<void> _runLocal(AgentCommand command) async {
     if (busy) return;
@@ -190,6 +200,22 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                       ),
                     );
                   },
+                ),
+              if (widget.onRunLocalAgent != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: TextField(
+                    controller: command,
+                    decoration: InputDecoration(
+                      labelText: 'Or run any ACP agent, by its command',
+                      suffixIcon: IconButton(
+                        tooltip: 'Run this command',
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        onPressed: busy ? null : _runTyped,
+                      ),
+                    ),
+                    onSubmitted: (_) => _runTyped(),
+                  ),
                 ),
               if (widget.onUseBrowserAgents != null)
                 FutureBuilder<AcpPage?>(

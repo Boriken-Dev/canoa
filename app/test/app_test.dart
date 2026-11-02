@@ -1,7 +1,9 @@
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
+import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/connect_dialog.dart';
+import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -105,4 +107,83 @@ void main() {
       expect(await answer, isA<AcpDeny>());
     });
   });
+
+  group('a command a person gives', () {
+    test('is split the way they meant', () {
+      final parsed = parseCommand('  my-agent --acp "a path/with space" \'x y\' ""');
+      expect(parsed?.program, 'my-agent');
+      expect(parsed?.args, ['--acp', 'a path/with space', 'x y', '']);
+      expect(parsed?.label, 'my-agent');
+    });
+
+    test('is refused when it is not one', () {
+      expect(parseCommand(''), isNull);
+      expect(parseCommand('   '), isNull);
+      expect(parseCommand('"open quote'), isNull);
+      expect(parseCommand('""'), isNull);
+    });
+
+    testWidgets('typed in the dialog runs, and a bad one says so', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      AgentCommand? ran;
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
+        onPressed: () => showCanoaConnectDialog(
+          context,
+          (_) async {},
+          onRunLocalAgent: (command, {required cwd, required title}) async => ran = command,
+          localAgents: const [],
+          checkInstalled: (_) async => true,
+        ),
+        child: const Text('open'),
+      ))));
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      await tester.pump();
+      final field = find.widgetWithText(TextField, 'Or run any ACP agent, by its command');
+      await tester.enterText(field, '"oops');
+      await tester.tap(find.byTooltip('Run this command'));
+      await tester.pump();
+      expect(find.textContaining('check its quotes'), findsOneWidget);
+      expect(ran, isNull);
+      await tester.enterText(field, 'my-agent --acp');
+      await tester.tap(find.byTooltip('Run this command'));
+      await tester.pump();
+      await tester.pump();
+      expect(ran?.args, ['--acp']);
+    });
+  });
+
+  group('agents in Canoa.cfg', () {
+    test('survive a round trip, with names that need quoting', () {
+      const config = CanoaConfig(agents: [AgentCommand(label: 'My "agent"', program: r'C:\tools\agent.exe', args: ['--acp', 'a b'])]);
+      final read = CanoaConfig.parse(config.encode());
+      expect(read.agents.single.label, 'My "agent"');
+      expect(read.agents.single.program, r'C:\tools\agent.exe');
+      expect(read.agents.single.args, ['--acp', 'a b']);
+    });
+
+    test('are refused when they are not right', () {
+      expect(() => CanoaConfig.parse('[agents.a]\nargs = []\n'), throwsFormatException);
+      expect(() => CanoaConfig.parse('[agents.a]\nprogram = 7\n'), throwsFormatException);
+      expect(() => CanoaConfig.parse('[agents.a]\nprogram = "x"\nargs = [1]\n'), throwsFormatException);
+      expect(() => CanoaConfig.parse('[agents.a]\nprogram = "x"\nextra = 1\n'), throwsFormatException);
+    });
+  });
+
+  testWidgets('quitting has something to run, and leaving takes it back', (tester) async {
+    final shell = _FakeShell();
+    await tester.pumpWidget(CanoaApp(store: SessionStore(includePreview: false), shell: shell));
+    expect(shell.beforeQuit, isNotNull);
+    await shell.beforeQuit!();
+    await tester.pumpWidget(const SizedBox());
+    expect(shell.beforeQuit, isNull);
+  });
+}
+
+final class _FakeShell implements DesktopShell {
+  @override
+  Future<void> Function()? beforeQuit;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

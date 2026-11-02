@@ -28,6 +28,12 @@ Future<String?> _find(String program) async {
   }
 }
 
+/// Where an agent starts when a person names nowhere: their home, and not the root of the filesystem.
+String? defaultWorkingDirectory() {
+  final environment = Platform.environment;
+  return environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+}
+
 /// Whether what it needs is on this computer, so nothing is offered that cannot start.
 Future<bool> isInstalled(AgentCommand command) async {
   for (final program in [command.program, ...command.requires]) {

@@ -119,13 +119,15 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// An agent as a child of this app. Its permission requests go to the person, in the conversation.
   Future<void> _runLocalAgent(AgentCommand command, {required String cwd, required String title}) async {
+    // The dialog's `/` is a remote agent's default. For one on this computer it would be the root of the filesystem.
+    final where = cwd.isEmpty || cwd == '/' ? defaultWorkingDirectory() : cwd;
     final client = await startLocalAgent(
       command,
       decider: store.askPermission,
-      workingDirectory: cwd.isEmpty || cwd == '/' ? null : cwd,
+      workingDirectory: where,
     );
     try {
-      final opened = await client.openSession(cwd: cwd);
+      final opened = await client.openSession(cwd: where ?? cwd);
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? command.label : title,
@@ -141,6 +143,12 @@ class _CanoaAppState extends State<CanoaApp> {
       await client.close();
       rethrow;
     }
+  }
+
+  Future<void> _endAgents() async {
+    final ending = [for (final client in _ownedClients) client.close()];
+    _ownedClients.clear();
+    await Future.wait(ending).timeout(const Duration(seconds: 5), onTimeout: () => const []);
   }
 
   Future<void> _connect(ConnectTarget target) async {
@@ -186,6 +194,8 @@ class _CanoaAppState extends State<CanoaApp> {
     config = widget.config;
     widget.settingsSignal?.addListener(_requestSettings);
     store = widget.store ?? SessionStore();
+    // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
+    widget.shell?.beforeQuit = _endAgents;
     unawaited(_claimContext());
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
@@ -202,6 +212,7 @@ class _CanoaAppState extends State<CanoaApp> {
   void dispose() {
     _contextTimer?.cancel();
     widget.settingsSignal?.removeListener(_requestSettings);
+    widget.shell?.beforeQuit = null;
     if (ownsStore) store.dispose();
     for (final client in _ownedClients) {
       unawaited(client.close());
@@ -221,6 +232,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: store,
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onRunLocalAgent: canRunLocalAgents ? _runLocalAgent : null, onSettings: _showSettings,
+          agents: [...agentPresets, ...config.agents],
         ),
       ),
     );
@@ -230,7 +242,10 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
+    this.agents = agentPresets,
   });
+
+  final List<AgentCommand> agents;
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
@@ -246,7 +261,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, agents: agents)))
             : null,
         body: SafeArea(
           child: Row(
@@ -254,7 +269,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: context.look.railWidth,
-                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings),
+                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, agents: agents),
                 ),
               Expanded(
                 child: _Conversation(
@@ -274,7 +289,10 @@ class _CanoaHome extends StatelessWidget {
 class _SessionRail extends StatelessWidget {
   const _SessionRail({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
+    this.agents = agentPresets,
   });
+
+  final List<AgentCommand> agents;
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
@@ -310,6 +328,7 @@ class _SessionRail extends StatelessWidget {
                 browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
                 onUseBrowserAgents: onUseBrowserAgents,
                 onRunLocalAgent: onRunLocalAgent,
+                localAgents: agents,
               ),
               icon: const Icon(Icons.link_rounded),
             ),
