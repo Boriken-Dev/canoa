@@ -15,7 +15,7 @@ import 'package:coqui_web/coqui_web.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
-import 'chat/agent_events.dart' show AgentCommandInfo;
+import 'chat/agent_events.dart' show AgentCommandInfo, isLongToApprove;
 import 'chat/transcript.dart';
 import 'session_store.dart';
 import 'theme/look.dart';
@@ -673,6 +673,14 @@ class _PermissionCard extends StatelessWidget {
                               style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
                             ),
                           ),
+                        ),
+                      ),
+                    if (question.detail != null && isLongToApprove(question.detail!))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'This is long. Scroll to read all of it before you answer.',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
                         ),
                       ),
                     if (session.pendingPermissions.length > 1)

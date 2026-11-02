@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 // What an agent reports beyond its messages. All of it comes from the agent, so every field is checked for its type and bounded:
 // a wrong one is ignored rather than trusted, and an agent cannot grow this without limit.
 
@@ -285,12 +287,32 @@ final class SessionUsage {
   }
 }
 
-/// What the person sees of what a tool is about to do. Without this, a card can only repeat the title an agent chose.
+final _hidden = RegExp(r'[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]');
+
+/// Text a person is about to approve: nothing in it can reorder or hide the rest, and each line break can be seen.
+String _plainly(String text) => text.replaceAll('\r\n', '\n').replaceAll(_hidden, ' ').replaceAll('\n', '⏎\n');
+
+/// What the person sees of what a tool is about to do. Without this, a card can only repeat the title an agent chose. All of what it
+/// was given shows, the part that decides it first: a value left out is a value they did not approve.
 String? describeToolInput(Object? raw) {
   if (raw is! Map) return null;
-  for (final key in const ['command', 'file_path', 'path', 'url', 'pattern', 'query']) {
+  const first = ['command', 'file_path', 'path', 'url', 'pattern', 'query'];
+  final keys = [...first.where(raw.containsKey), ...raw.keys.whereType<String>().where((key) => !first.contains(key))];
+  final lines = <String>[];
+  for (final key in keys) {
     final value = raw[key];
-    if (value is String && value.isNotEmpty) return boundedHead(value, 2000);
+    if (value is String && value.isNotEmpty) {
+      lines.add(first.contains(key) && lines.isEmpty ? _plainly(value) : '$key: ${_plainly(value)}');
+    } else if (value is num || value is bool) {
+      lines.add('$key: $value');
+    } else if (value is List || value is Map) {
+      lines.add('$key: ${_plainly(jsonEncode(value))}');
+    }
   }
-  return null;
+  return lines.isEmpty ? null : boundedHead(lines.join('\n'), maxDescribedInput);
 }
+
+const int maxDescribedInput = 4000;
+
+/// Whether what [describeToolInput] gave is more than its box shows at once, which a person has to be told.
+bool isLongToApprove(String detail) => detail.length > 300 || '\n'.allMatches(detail).length > 4;
