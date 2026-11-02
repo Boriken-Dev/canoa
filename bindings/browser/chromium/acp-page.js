@@ -15,6 +15,8 @@
   function makeRegistry() {
     const providers = [];
     const events = new EventTarget();
+  let handler = null;
+  events.addEventListener("agentschange", (event) => handler?.(event));
     const announce = () => window.dispatchEvent(new CustomEvent("acp:ready", { detail: { acp: registry } }));
     const registry = Object.freeze({
       version: 1,
@@ -37,7 +39,13 @@
       async revoke(agent) {
         return route(providers, agent).revoke(agent);
       },
-      addEventListener: (...args) => events.addEventListener(...args),
+      get onagentschange() {
+      return handler;
+    },
+    set onagentschange(value) {
+      handler = typeof value === "function" ? value : null;
+    },
+    addEventListener: (...args) => events.addEventListener(...args),
       removeEventListener: (...args) => events.removeEventListener(...args),
       register(provider) {
         providers.push(provider);
