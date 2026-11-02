@@ -1,6 +1,8 @@
 // What an agent sends, shaped as a real one sends it, through the store and into the conversation, in every look.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory;
+import 'dart:typed_data';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
@@ -15,6 +17,23 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// Text is drawn a little differently on each platform, by a fraction of a percent here, and a broken layout moves far more than that.
+final class _PlatformTolerant extends LocalFileComparator {
+  _PlatformTolerant(super.testFile);
+
+  static const double tolerated = 0.015;
+
+  @override
+  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
+    final result = await GoldenFileComparator.compareLists(imageBytes, await getGoldenBytes(golden));
+    if (!result.passed && result.diffPercent > tolerated) {
+      fail(await generateFailureOutput(result, golden, basedir));
+    }
+    result.dispose();
+    return true;
+  }
+}
 
 /// The agent's end of a connection, in memory.
 final class FakeAgent {
@@ -104,6 +123,10 @@ Future<void> _openAll(WidgetTester tester, Finder titles) async {
 }
 
 void main() {
+  setUpAll(() {
+    goldenFileComparator = _PlatformTolerant(Uri.file('${Directory.current.path}/test/chat_test.dart'));
+  });
+
   group('what an agent sends', () {
     testWidgets('every kind a real agent sent has a rendering', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1200, 2200));
