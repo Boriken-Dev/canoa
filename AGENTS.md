@@ -54,6 +54,6 @@ mkdocs build --strict
 
 ## CI and release
 
-`test.yml` is the Rust gate and runs on a throwaway `ci-*` tag or on demand; `flutter.yml`, `browser.yml`, `desktop.yml`,
-`acp-reference.yml`, `offline.yml` and `deps.yml` cover the other languages and the offline mirror. `docs.yml` owns Pages.
-`release.yml` gates a `v*` tag and publishes no package yet. Pushing a `v*` tag needs the owner's consent for that release.
+Checks run on a developer's own machines, by the commands above. `test.yml`, `flutter.yml`, `browser.yml`, `desktop.yml`,
+`acp-reference.yml`, `offline.yml` and `deps.yml` run only when started by hand. `docs.yml` publishes Pages from `main`.
+`release.yml` gates a `v*` tag, running `test.yml`, and publishes no package yet. Pushing a `v*` tag needs the owner's consent for that release.

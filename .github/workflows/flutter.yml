@@ -1,16 +1,6 @@
 name: Flutter
 
 on:
-  push:
-    paths:
-      - "app/**"
-      - "bindings/browser/chromium/bridge.js"
-      - ".github/workflows/flutter.yml"
-  pull_request:
-    paths:
-      - "app/**"
-      - "bindings/browser/chromium/bridge.js"
-      - ".github/workflows/flutter.yml"
   workflow_dispatch:
 
 permissions:

@@ -1,14 +1,5 @@
 name: Desktop builds
 on:
-  push:
-    branches: [main]
-    paths:
-      - "app/**"
-      - ".github/workflows/desktop.yml"
-  pull_request:
-    paths:
-      - "app/**"
-      - ".github/workflows/desktop.yml"
   workflow_dispatch:
 permissions:
   contents: read

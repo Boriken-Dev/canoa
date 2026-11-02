@@ -1,12 +1,5 @@
 name: Offline dependency verification
 on:
-  push:
-    branches: [main]
-    paths:
-      - "app/pubspec.yaml"
-      - "app/pubspec.lock"
-      - "bindings/dart/**"
-      - ".github/workflows/offline.yml"
   workflow_dispatch:
 permissions:
   contents: read

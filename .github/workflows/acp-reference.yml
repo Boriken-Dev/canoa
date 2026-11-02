@@ -1,16 +1,6 @@
 name: ACP WSS reference
 
 on:
-  push:
-    paths:
-      - 'examples/acp-echo/**'
-      - 'app/web/vendor/**'
-      - '.github/workflows/acp-reference.yml'
-  pull_request:
-    paths:
-      - 'examples/acp-echo/**'
-      - 'app/web/vendor/**'
-      - '.github/workflows/acp-reference.yml'
   workflow_dispatch:
 
 permissions:

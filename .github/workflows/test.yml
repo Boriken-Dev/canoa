@@ -1,12 +1,6 @@
 name: Test
 # On pushes and pull requests, on demand at any ref, and on a throwaway "ci-*" tag, deleted after its run.
 on:
-  push:
-    tags:
-      - "ci-*"
-    branches:
-      - "**"
-  pull_request:
   workflow_dispatch:
     inputs:
       ref:

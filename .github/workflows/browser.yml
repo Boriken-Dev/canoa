@@ -1,15 +1,5 @@
 name: Browser
 on:
-  push:
-    paths:
-      - "bindings/browser/**"
-      - "app/web/vendor/coqui-peer-webcrypto.mjs"
-      - "app/test/coqui_vendor.test.mjs"
-      - ".github/workflows/browser.yml"
-  pull_request:
-    paths:
-      - "bindings/browser/**"
-      - ".github/workflows/browser.yml"
   workflow_dispatch:
 permissions:
   contents: read

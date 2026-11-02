@@ -1,12 +1,5 @@
 name: Refresh deps branch
 on:
-  push:
-    branches: [main]
-    paths:
-      - "app/pubspec.yaml"
-      - "bindings/dart/**"
-      - "tools/mirror_deps.py"
-      - ".github/workflows/deps.yml"
   workflow_dispatch:
 permissions:
   contents: write
