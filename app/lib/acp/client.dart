@@ -27,6 +27,7 @@ final class VerifiedAgent {
     required String expectedPeerId,
     required VerifyAcpPeer verifyPeer,
     Duration verificationTimeout = const Duration(seconds: 10),
+    AcpDecider? decider,
   }) async {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
@@ -41,6 +42,7 @@ final class VerifiedAgent {
           incoming: proven.messages,
           send: proven.send,
           closeSource: proven.close,
+          decider: decider,
           clientName: 'canoa',
           clientVersion: '0.0.1',
         ),
@@ -74,7 +76,7 @@ final class VerifiedAgent {
   );
 
   /// Over a connection a browser's provider holds. The proof is the provider's, and without one there is no client.
-  static Future<VerifiedAgent> fromProvider(AcpPageConnection connection) async {
+  static Future<VerifiedAgent> fromProvider(AcpPageConnection connection, {AcpDecider? decider}) async {
     final agent = connection.agent;
     final peer = agent.peer;
     if (!agent.verified || peer == null) {
@@ -86,6 +88,7 @@ final class VerifiedAgent {
         incoming: connection.messages,
         send: connection.send,
         closeSource: connection.close,
+        decider: decider,
         clientName: 'canoa',
         clientVersion: '0.0.1',
       ),
@@ -99,6 +102,10 @@ final class VerifiedAgent {
   int? get protocolVersion => _client.protocolVersion;
   Future<void> initialize() => _client.initialize();
   Future<String> createSession({required String cwd}) => _client.createSession(cwd: cwd);
+  Future<AcpOpenedSession> openSession({required String cwd}) => _client.openSession(cwd: cwd);
+  Future<Map<String, dynamic>> setConfigOption(String sessionId, String configId, String value) =>
+      _client.setConfigOption(sessionId, configId, value);
+  Future<void> setMode(String sessionId, String modeId) => _client.setMode(sessionId, modeId);
   Future<void> resumeSession(String id, {required String cwd, bool replayHistory = false}) =>
       _client.resumeSession(id, cwd: cwd, replayHistory: replayHistory);
   Future<String?> prompt(String sessionId, String text) => _client.prompt(sessionId, text);

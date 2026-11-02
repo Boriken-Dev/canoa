@@ -13,6 +13,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
   Duration timeout = const Duration(seconds: 10),
   WebDialer? webTransportDialer,
   WebDialer? webSocketDialer,
+  AcpDecider? decider,
 }) async {
   final source = await connectWebChannel(
     endpoints,
@@ -26,6 +27,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
     expectedPeerId: expectedPeerId,
     verifyPeer: verifyPeer,
     verificationTimeout: timeout,
+    decider: decider,
   );
   try {
     connection.allowApplicationMessages();

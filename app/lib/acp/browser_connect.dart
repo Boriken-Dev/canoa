@@ -9,7 +9,8 @@ Future<VerifiedAgent> connectBrowserAcp(
   WebEndpoints endpoints, {
   required String pinnedPeerId,
   Duration timeout = const Duration(seconds: 10),
+  AcpDecider? decider,
 }) => connectVerifiedAcp(
   endpoints, expectedPeerId: pinnedPeerId,
-  verifyPeer: verifyBrowserPeer, timeout: timeout,
+  verifyPeer: verifyBrowserPeer, timeout: timeout, decider: decider,
 );

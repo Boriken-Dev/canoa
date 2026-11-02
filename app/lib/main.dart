@@ -14,7 +14,10 @@ import 'connect_dialog.dart';
 import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter/material.dart';
 
+import 'chat/agent_events.dart' show AgentCommandInfo;
+import 'chat/transcript.dart';
 import 'session_store.dart';
+import 'theme/look.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -93,16 +96,18 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _useBrowserAgents(AcpPage acp, {required String cwd, required String title}) async {
     final agents = await acp.request(purpose: 'Chat with it in Canoa');
     for (final agent in agents) {
-      final client = await connectProviderAgent(acp, agent);
+      final client = await connectProviderAgent(acp, agent, decider: store.askPermission);
       try {
-        final remoteId = await client.createSession(cwd: cwd);
+        final opened = await client.openSession(cwd: cwd);
         if (!mounted) throw StateError('Canoa UI closed');
         final local = store.addProviderSession(
           title: title.isEmpty ? agent.label : title,
           agent: agent.label,
           peerId: client.peerId,
-          remoteSessionId: remoteId,
+          remoteSessionId: opened.id,
         );
+        local.agentNames = title.isEmpty;
+        store.applyOpened(local, opened);
         store.attachVerifiedClient(local.id, client);
         _ownedClients.add(client);
       } catch (_) {
@@ -120,14 +125,16 @@ class _CanoaAppState extends State<CanoaApp> {
       workingDirectory: cwd.isEmpty || cwd == '/' ? null : cwd,
     );
     try {
-      final remoteId = await client.createSession(cwd: cwd);
+      final opened = await client.openSession(cwd: cwd);
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? command.label : title,
         agent: command.label,
         peerId: client.peerId,
-        remoteSessionId: remoteId,
+        remoteSessionId: opened.id,
       );
+      local.agentNames = title.isEmpty;
+      store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
     } catch (_) {
@@ -148,9 +155,11 @@ class _CanoaAppState extends State<CanoaApp> {
     final client = await connectBrowserAcp(
       endpoints, pinnedPeerId: pinnedPeerId,
       timeout: Duration(seconds: config.connectTimeout),
+      decider: store.askPermission,
     );
     try {
-      final remoteId = await client.createSession(cwd: target.cwd);
+      final opened = await client.openSession(cwd: target.cwd);
+      final remoteId = opened.id;
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addRemoteSession(
         title: target.title.isEmpty ? 'Remote agent' : target.title,
@@ -160,6 +169,8 @@ class _CanoaAppState extends State<CanoaApp> {
         endpoint: wt ?? ws,
         websocketFallback: wt == null ? null : ws,
       );
+      local.agentNames = target.title.isEmpty;
+      store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
     } catch (_) {
@@ -182,6 +193,12 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   @override
+  void didUpdateWidget(CanoaApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.config != oldWidget.config) config = widget.config;
+  }
+
+  @override
   void dispose() {
     _contextTimer?.cancel();
     widget.settingsSignal?.removeListener(_requestSettings);
@@ -197,15 +214,9 @@ class _CanoaAppState extends State<CanoaApp> {
     return MaterialApp(
       title: 'Canoa',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF58D0C1),
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xFF101820),
-      ),
+      theme: themeFor(config.look, Brightness.light),
+      darkTheme: themeFor(config.look, Brightness.dark),
+      themeMode: config.themeMode,
       home: AnimatedBuilder(
         animation: store,
         builder: (context, _) => _CanoaHome(
@@ -242,7 +253,7 @@ class _CanoaHome extends StatelessWidget {
             children: [
               if (!narrow)
                 SizedBox(
-                  width: 272,
+                  width: context.look.railWidth,
                   child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings),
                 ),
               Expanded(
@@ -274,12 +285,12 @@ class _SessionRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF17242D),
+      color: context.look.rail,
       child: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 18, 10, 12),
           child: Row(children: [
-            const Icon(Icons.sailing_rounded, color: Color(0xFF6DE2D2)),
+            Icon(Icons.sailing_rounded, color: context.look.accent),
             const SizedBox(width: 10),
             const Expanded(
               child: Text('Canoa', style: TextStyle(
@@ -326,7 +337,7 @@ class _SessionRail extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 child: ListTile(
                   selected: active,
-                  selectedTileColor: const Color(0xFF294952),
+                  selectedTileColor: context.look.selected,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   leading: const Icon(Icons.chat_bubble_outline, size: 21),
                   title: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -346,11 +357,11 @@ class _SessionRail extends StatelessWidget {
           ),
         ),
         const Divider(height: 1),
-        const Padding(
-          padding: EdgeInsets.all(16),
+        Padding(
+          padding: const EdgeInsets.all(16),
           child: Text(
             'Agent connections and sync require verified ACP peers.',
-            style: TextStyle(color: Color(0xFFABBEC8), fontSize: 12),
+            style: TextStyle(color: context.look.muted, fontSize: 12),
           ),
         ),
       ]),
@@ -409,7 +420,7 @@ class _ConversationState extends State<_Conversation> {
 
     return Column(children: [
       Material(
-        color: const Color(0xFF15222C),
+        color: context.look.bar,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(children: [
@@ -446,80 +457,76 @@ class _ConversationState extends State<_Conversation> {
             controller: _scroll,
             padding: EdgeInsets.symmetric(
               horizontal: widget.narrow ? 12 : 40,
-              vertical: 24,
+              vertical: context.look.padding + 10,
             ),
             itemCount: session.messages.length,
             itemBuilder: (context, index) {
-              final message = session.messages[index];
-              return _MessageBubble(message: message);
+              return TranscriptEntry(message: session.messages[index], session: session);
             },
           ),
         ),
+        if (session.plan.isNotEmpty) PlanPanel(entries: session.plan),
         if (session.pendingPermissions.isNotEmpty)
           _PermissionCard(store: widget.store, session: session),
+        SessionControls(
+          session: session,
+          onChoose: (option, value) => unawaited(widget.store.choose(session, option, value)),
+        ),
         _Composer(
           controller: _input,
           enabled: session.status == SessionStatus.preview ||
               session.status == SessionStatus.connected ||
               session.status == SessionStatus.working,
           onSend: _send,
+          working: session.status == SessionStatus.working,
+          onStop: () {
+            final messenger = ScaffoldMessenger.of(context);
+            unawaited(widget.store.cancelActiveSession().catchError((Object error) {
+              messenger.showSnackBar(SnackBar(content: Text('Could not stop: $error')));
+            }));
+          },
+          commands: session.commands,
         ),
       ],
     ]);
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
-
-  final ChatMessage message;
-
-  @override
-  Widget build(BuildContext context) {
-    final fromUser = message.role == MessageRole.user;
-    final notice = message.role == MessageRole.notice;
-    return Align(
-      alignment: fromUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 14),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: notice
-                ? const Color(0xFF26333D)
-                : fromUser ? const Color(0xFF235853) : const Color(0xFF1D2B34),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Text(message.text, style: TextStyle(
-            fontSize: notice ? 13 : 15,
-            color: notice ? const Color(0xFFBDD0D6) : null,
-            height: 1.45,
-          )),
-        ),
-      ),
-    );
-  }
-}
-
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller, required this.enabled, required this.onSend,
+    this.working = false, this.onStop, this.commands = const [],
   });
 
   final TextEditingController controller;
   final bool enabled;
   final VoidCallback onSend;
+  final bool working;
+  final VoidCallback? onStop;
+  final List<AgentCommandInfo> commands;
 
   @override
   Widget build(BuildContext context) {
+    final look = context.look;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
       child: Center(
         heightFactor: 1,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 820),
+          constraints: BoxConstraints(maxWidth: look.messageWidth + 100),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder: (context, value, _) => CommandSuggestions(
+                commands: commands,
+                typed: value.text,
+                onPick: (command) {
+                  final text = '/${command.name} ';
+                  controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+                },
+              ),
+            ),
+            const SizedBox(height: 4),
             TextField(
               controller: controller,
               enabled: enabled,
@@ -530,21 +537,23 @@ class _Composer extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: enabled ? 'Message agent' : 'Connect an ACP peer to chat',
                 filled: true,
-                fillColor: const Color(0xFF1B3039),
+                fillColor: look.composer,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(look.radius + 2),
                   borderSide: BorderSide.none,
                 ),
-                suffixIcon: IconButton(
-                  tooltip: 'Send',
-                  onPressed: enabled ? onSend : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                ),
+                suffixIcon: working
+                    ? IconButton(tooltip: 'Stop', onPressed: onStop, icon: const Icon(Icons.stop_circle_outlined))
+                    : IconButton(
+                        tooltip: 'Send',
+                        onPressed: enabled ? onSend : null,
+                        icon: const Icon(Icons.arrow_upward_rounded),
+                      ),
               ),
             ),
             const SizedBox(height: 8),
-            const Text('Remote sessions require verified peer authentication',
-              style: TextStyle(fontSize: 11, color: Color(0xFF9CB3BD))),
+            Text('Remote sessions require verified peer authentication',
+              style: TextStyle(fontSize: 11, color: look.muted)),
           ]),
         ),
       ),
@@ -577,6 +586,24 @@ class _PermissionCard extends StatelessWidget {
                   children: [
                     Text('${session.agent} wants to use a tool', style: Theme.of(context).textTheme.labelMedium),
                     Text(question.title),
+                    if (question.detail?.isNotEmpty ?? false)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 120),
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              question.detail!,
+                              style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (session.pendingPermissions.length > 1)
+                      Text(
+                        '${session.pendingPermissions.length - 1} more after this',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
                   ],
                 ),
               ),

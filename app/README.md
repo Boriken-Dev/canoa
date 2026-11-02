@@ -60,6 +60,10 @@ Use the [authenticated ACP echo fixture](../examples/acp-echo/README.md) to veri
 
 The desktop app runs any program that speaks ACP on its standard streams, with no bridge and no pairing, since it is the person's own program. The connect dialog offers Claude, Codex and Gemini when what each needs is installed: the first two through their ACP adapters, fetched with `npx`, driving the tool you have already signed in to, so its subscription applies and no API key is involved. The first run downloads the adapter. Each permission request waits in the conversation until you answer, and closing the session ends the agent and anything it started.
 
+Canoa can only show what an agent asks. An adapter drives your installed tool under that tool's own settings, so what you have already allowed there, such as Claude's `permissions.allow` rules, runs without a question here. Tool calls still appear in the conversation as they happen.
+
+An agent's Markdown is untrusted: images are not fetched, and a link is copied rather than opened.
+
 ## Desktop tray and Canoa.cfg
 
 The app reads a TOML Canoa.cfg just like AI6's OO.cfg. The tray can keep sessions running after the main window is hidden, with Open, Settings, Hide and Exit commands. On supported Windows/macOS tray hosts, a double click opens the main window; Linux AppIndicator requires Open from its menu. Refer to the [configuration guide](../docs/configuration.md). Build platform runners with flutter create --org dev.boriken --platforms=windows,linux,macos . in app/ before flutter build windows/linux/macos.

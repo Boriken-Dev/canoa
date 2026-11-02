@@ -6,9 +6,10 @@ import 'client.dart';
 /// the provider reports as proven, the same rule as for one it connects to itself.
 Future<VerifiedAgent> connectProviderAgent(
   AcpPage acp,
-  AcpPageAgent agent,
-) async {
-  final client = await VerifiedAgent.fromProvider(await acp.connect(agent));
+  AcpPageAgent agent, {
+  AcpDecider? decider,
+}) async {
+  final client = await VerifiedAgent.fromProvider(await acp.connect(agent), decider: decider);
   try {
     await client.initialize();
     return client;

@@ -13,12 +13,13 @@ dependencies:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp
-      ref: 1e7313052683162514faca14f496559081ff4278
+      ref: 7f753632e040a0e0240c45a20c769f57b91a8d4a
   coqui_web:
     git:
       url: https://github.com/Boriken-Dev/coqui-web.git
       path: bindings/dart/coqui_web
       ref: 60faa0c8a50d0cd8b5ee49f16289bbce6a461a2b
+  flutter_markdown_plus: ^1.0.12
   toml: ^0.18.0
   http: ^1.6.0
   tray_manager: ^0.5.3

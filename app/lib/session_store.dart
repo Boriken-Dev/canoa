@@ -4,26 +4,38 @@ import 'package:coqui_web/coqui_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
+import 'chat/agent_events.dart';
+
 /// Canoa's local view of an agent-issued session. The agent session id is
 /// separate from the local view id and is absent from offline previews.
 enum SessionStatus { preview, disconnected, connecting, connected, working }
 
-enum MessageRole { user, agent, notice }
+enum MessageRole { user, agent, notice, thought, tool }
+
+/// The most a conversation keeps. An agent's turn can run a very long time, and the oldest entries are what go.
+const int maxEntries = 5000;
+
+/// The most one message keeps, since an agent can send any amount.
+const int maxMessageText = 2 * 1024 * 1024;
 
 class ChatMessage {
-  ChatMessage({required this.role, required this.text, required this.at, this.messageId});
+  ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool});
 
   final MessageRole role;
   String text;
   final DateTime at;
   final String? messageId;
+  final ToolCall? tool;
 }
 
 /// A tool an agent wants to use, waiting on the person. Nothing answers it for them.
 final class PermissionQuestion {
-  PermissionQuestion(this.title, this.kind);
+  PermissionQuestion(this.title, this.kind, {this.detail});
   final String title;
   final String? kind;
+
+  /// What it would run or touch, when the agent said.
+  final String? detail;
   final Completer<AcpDecision> _answer = Completer();
 }
 
@@ -42,6 +54,19 @@ class ChatSession {
 
   /// What the agent is waiting for the person to answer, oldest first.
   final List<PermissionQuestion> pendingPermissions = [];
+
+  /// What the agent lets a person choose, its plan, its commands and what it has used, each as it last said.
+  List<ConfigOption> options = const [];
+  List<PlanEntry> plan = const [];
+  List<AgentCommandInfo> commands = const [];
+  SessionUsage usage = const SessionUsage();
+
+  /// Commands the agent ran, which a tool's card shows.
+  final Map<String, TerminalView> terminals = {};
+  final Map<String, ChatMessage> toolEntries = {};
+
+  /// Whether the agent may name the conversation, which it may until the person has.
+  bool agentNames = false;
 
   final String id;
   String title;
@@ -118,7 +143,16 @@ class SessionStore extends ChangeNotifier {
       if (session.remoteSessionId == request.sessionId) target = session;
     }
     if (target == null) return Future.value(const AcpDeny('not a session here'));
-    final question = PermissionQuestion(request.title ?? request.kind ?? 'A tool', request.kind);
+    // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about.
+    if (request.toolCall != null) _applyTool(target, request.toolCall!);
+    final question = PermissionQuestion(
+      shortText(request.title) ?? shortText(request.kind) ?? 'A tool',
+      request.kind,
+      detail: [
+        ?shortText(request.description),
+        ?describeToolInput(request.rawInput),
+      ].join('\n').trim(),
+    );
     target.pendingPermissions.add(question);
     notifyListeners();
     return question._answer.future;
@@ -132,9 +166,9 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _refuseWaiting(ChatSession session) {
+  void _endWaiting(ChatSession session, AcpDecision answer) {
     for (final question in session.pendingPermissions) {
-      question._answer.complete(const AcpDeny('the agent went away'));
+      question._answer.complete(answer);
     }
     session.pendingPermissions.clear();
   }
@@ -228,7 +262,7 @@ class SessionStore extends ChangeNotifier {
       onDone: () {
         _verifiedClients.remove(localId);
         session.status = SessionStatus.disconnected;
-        _refuseWaiting(session);
+        _endWaiting(session, const AcpDeny('the agent went away'));
         notifyListeners();
       },
     );
@@ -248,13 +282,123 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What the agent said when it opened [session].
+  void applyOpened(ChatSession session, AcpOpenedSession opened) {
+    _setOptions(session, opened.raw['configOptions'], opened.raw['modes']);
+    session.commands = parseCommands(opened.raw['availableCommands']) ?? session.commands;
+    notifyListeners();
+  }
+
+  void _setOptions(ChatSession session, Object? configOptions, Object? modes) {
+    final parsed = parseConfigOptions(configOptions);
+    // An agent with both says the same thing twice, and ACP prefers the options.
+    final mode = parsed == null || parsed.isEmpty ? parseModes(modes) : null;
+    if (parsed != null && parsed.isNotEmpty) {
+      session.options = parsed;
+    } else if (mode != null) {
+      session.options = [mode];
+    }
+  }
+
+  /// Sets one of the agent's choices. It stays as it was unless the agent agrees, which it says in its answer or an update.
+  Future<void> choose(ChatSession session, ConfigOption option, String value) async {
+    final client = _verifiedClients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || remote == null) return;
+    try {
+      if (option.isMode) {
+        await client.setMode(remote, value);
+        _setCurrent(session, option.id, value);
+      } else {
+        final reply = await client.setConfigOption(remote, option.id, value);
+        final told = parseConfigOptions(reply['configOptions']);
+        if (told != null && told.isNotEmpty) {
+          session.options = told;
+        } else {
+          _setCurrent(session, option.id, value);
+        }
+      }
+    } on AcpFailure catch (error) {
+      _note(session, 'The agent did not change ${option.label}: ${error.message}');
+    }
+    notifyListeners();
+  }
+
+  void _setCurrent(ChatSession session, String id, String value) {
+    session.options = [
+      for (final option in session.options)
+        option.id == id
+            ? ConfigOption(id: id, label: option.label, current: value, choices: option.choices, isMode: option.isMode)
+            : option,
+    ];
+  }
+
+  void _note(ChatSession session, String text) {
+    session.messages.add(ChatMessage(role: MessageRole.notice, text: text, at: DateTime.now()));
+  }
+
+  void _trim(ChatSession session) {
+    final over = session.messages.length - maxEntries;
+    if (over <= 0) return;
+    for (final gone in session.messages.take(over)) {
+      if (gone.tool != null) session.toolEntries.remove(gone.tool!.id);
+    }
+    session.messages.removeRange(0, over);
+  }
+
+  void _applyTool(ChatSession session, Map<String, dynamic> raw) {
+    final id = raw['toolCallId'];
+    if (id is! String || id.isEmpty) return;
+    var entry = session.toolEntries[id];
+    if (entry == null) {
+      entry = ChatMessage(role: MessageRole.tool, text: '', at: DateTime.now(), tool: ToolCall(id));
+      session.toolEntries[id] = entry;
+      session.messages.add(entry);
+    }
+    entry.tool!.apply(raw);
+  }
+
+  void _applyTerminal(ChatSession session, Map<String, dynamic> raw) {
+    final id = raw['terminalId'];
+    if (id is! String || id.isEmpty) return;
+    if (session.terminals.length >= maxTerminals && !session.terminals.containsKey(id)) {
+      session.terminals.remove(session.terminals.keys.first);
+    }
+    (session.terminals[id] ??= TerminalView()).apply(raw);
+  }
+
   void _applyUpdate(ChatSession session, AcpSessionUpdate update) {
+    switch (update.kind) {
+      case 'tool_call' || 'tool_call_update':
+        _applyTool(session, update.raw);
+      case 'terminal_update':
+        _applyTerminal(session, update.raw);
+      case 'plan':
+        session.plan = parsePlan(update.raw['entries']) ?? session.plan;
+      case 'available_commands_update':
+        session.commands = parseCommands(update.raw['availableCommands']) ?? session.commands;
+      case 'usage_update':
+        session.usage = session.usage.applied(update.raw);
+      case 'config_option_update':
+        _setOptions(session, update.raw['configOptions'], null);
+      case 'current_mode_update':
+        if (update.raw['currentModeId'] case final String mode) {
+          for (final option in session.options) {
+            if (option.isMode) _setCurrent(session, option.id, mode);
+          }
+        }
+      case 'session_info_update':
+        final title = shortText(update.raw['title']);
+        if (title != null && session.agentNames) session.title = title;
+    }
     if (update.kind == 'state_update') {
       if (update.state == 'running' || update.state == 'requires_action') {
         session.status = SessionStatus.working;
       } else if (update.state == 'idle') {
         session.status = SessionStatus.connected;
-        if (update.reason == 'error') {
+        if (update.reason == 'cancelled') {
+          _note(session, 'Stopped.');
+        } else if (update.reason == 'error') {
           session.messages.add(ChatMessage(
             role: MessageRole.notice,
             text: 'Agent reported an operation failure.',
@@ -264,12 +408,13 @@ class SessionStore extends ChangeNotifier {
       }
     } else if (const [
       'user_message', 'agent_message', 'user_message_chunk',
-      'agent_message_chunk',
+      'agent_message_chunk', 'agent_thought_chunk', 'agent_thought',
     ].contains(update.kind)) {
       final text = update.text;
       if (text != null) {
         final role = update.kind.startsWith('user')
-            ? MessageRole.user : MessageRole.agent;
+            ? MessageRole.user
+            : update.kind.startsWith('agent_thought') ? MessageRole.thought : MessageRole.agent;
         ChatMessage? existing;
         if (update.messageId != null) {
           for (final message in session.messages) {
@@ -286,16 +431,17 @@ class SessionStore extends ChangeNotifier {
           existing = session.messages.last;
         }
         if (existing != null) {
-          existing.text = update.kind.endsWith('_chunk')
-              ? existing.text + text : text;
+          existing.text = boundedHead(update.kind.endsWith('_chunk')
+              ? existing.text + text : text, maxMessageText);
         } else {
           session.messages.add(ChatMessage(
-            role: role, text: text,
+            role: role, text: boundedHead(text, maxMessageText),
             at: DateTime.now(), messageId: update.messageId,
           ));
         }
       }
     }
+    _trim(session);
     notifyListeners();
   }
 
@@ -336,6 +482,9 @@ class SessionStore extends ChangeNotifier {
     if (session == null || session.remoteSessionId == null || client == null) {
       throw StateError('No active verified ACP session');
     }
+    // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is.
+    _endWaiting(session, const AcpCancel());
+    notifyListeners();
     await client.cancel(session.remoteSessionId!);
   }
 
