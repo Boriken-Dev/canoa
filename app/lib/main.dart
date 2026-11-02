@@ -6,7 +6,9 @@ import 'desktop/desktop_shell.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/provider_connect.dart';
+import 'acp/agent_commands.dart';
 import 'acp/client.dart';
+import 'acp/local_agent.dart';
 import 'package:coqui_acp/page.dart';
 import 'connect_dialog.dart';
 import 'package:coqui_web/coqui_web.dart';
@@ -110,6 +112,30 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// An agent as a child of this app. Its permission requests go to the person, in the conversation.
+  Future<void> _runLocalAgent(AgentCommand command, {required String cwd, required String title}) async {
+    final client = await startLocalAgent(
+      command,
+      decider: store.askPermission,
+      workingDirectory: cwd.isEmpty || cwd == '/' ? null : cwd,
+    );
+    try {
+      final remoteId = await client.createSession(cwd: cwd);
+      if (!mounted) throw StateError('Canoa UI closed');
+      final local = store.addProviderSession(
+        title: title.isEmpty ? command.label : title,
+        agent: command.label,
+        peerId: client.peerId,
+        remoteSessionId: remoteId,
+      );
+      store.attachVerifiedClient(local.id, client);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client.close();
+      rethrow;
+    }
+  }
+
   Future<void> _connect(ConnectTarget target) async {
     final ws = Uri.parse(target.webSocket);
     final wt = target.webTransport.isEmpty
@@ -183,7 +209,7 @@ class _CanoaAppState extends State<CanoaApp> {
       home: AnimatedBuilder(
         animation: store,
         builder: (context, _) => _CanoaHome(
-          store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onSettings: _showSettings,
+          store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onRunLocalAgent: canRunLocalAgents ? _runLocalAgent : null, onSettings: _showSettings,
         ),
       ),
     );
@@ -192,12 +218,13 @@ class _CanoaAppState extends State<CanoaApp> {
 
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
-    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onSettings,
+    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
   });
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
   final UseBrowserAgents onUseBrowserAgents;
+  final RunLocalAgent? onRunLocalAgent;
   final VoidCallback onSettings;
 
   @override
@@ -208,7 +235,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onSettings: onSettings)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings)))
             : null,
         body: SafeArea(
           child: Row(
@@ -216,7 +243,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: 272,
-                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onSettings: onSettings),
+                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings),
                 ),
               Expanded(
                 child: _Conversation(
@@ -235,12 +262,13 @@ class _CanoaHome extends StatelessWidget {
 
 class _SessionRail extends StatelessWidget {
   const _SessionRail({
-    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onSettings,
+    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
   });
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
   final UseBrowserAgents onUseBrowserAgents;
+  final RunLocalAgent? onRunLocalAgent;
   final VoidCallback onSettings;
 
   @override
@@ -270,6 +298,7 @@ class _SessionRail extends StatelessWidget {
                 onConnect,
                 browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
                 onUseBrowserAgents: onUseBrowserAgents,
+                onRunLocalAgent: onRunLocalAgent,
               ),
               icon: const Icon(Icons.link_rounded),
             ),
@@ -426,6 +455,8 @@ class _ConversationState extends State<_Conversation> {
             },
           ),
         ),
+        if (session.pendingPermissions.isNotEmpty)
+          _PermissionCard(store: widget.store, session: session),
         _Composer(
           controller: _input,
           enabled: session.status == SessionStatus.preview ||
@@ -515,6 +546,51 @@ class _Composer extends StatelessWidget {
             const Text('Remote sessions require verified peer authentication',
               style: TextStyle(fontSize: 11, color: Color(0xFF9CB3BD))),
           ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// What an agent is waiting on. It stays until the person answers: nothing answers it for them.
+class _PermissionCard extends StatelessWidget {
+  const _PermissionCard({required this.store, required this.session});
+
+  final SessionStore store;
+  final ChatSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final question = session.pendingPermissions.first;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              const Icon(Icons.shield_outlined),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${session.agent} wants to use a tool', style: Theme.of(context).textTheme.labelMedium),
+                    Text(question.title),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => store.answerPermission(session, allow: false),
+                child: const Text('Refuse'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => store.answerPermission(session, allow: true),
+                child: const Text('Allow'),
+              ),
+            ],
+          ),
         ),
       ),
     );

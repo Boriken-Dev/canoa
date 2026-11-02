@@ -19,6 +19,14 @@ class ChatMessage {
   final String? messageId;
 }
 
+/// A tool an agent wants to use, waiting on the person. Nothing answers it for them.
+final class PermissionQuestion {
+  PermissionQuestion(this.title, this.kind);
+  final String title;
+  final String? kind;
+  final Completer<AcpDecision> _answer = Completer();
+}
+
 class ChatSession {
   ChatSession({
     required this.id,
@@ -31,6 +39,9 @@ class ChatSession {
     this.websocketFallback,
     List<ChatMessage>? messages,
   }) : messages = messages ?? <ChatMessage>[];
+
+  /// What the agent is waiting for the person to answer, oldest first.
+  final List<PermissionQuestion> pendingPermissions = [];
 
   final String id;
   String title;
@@ -98,6 +109,34 @@ class SessionStore extends ChangeNotifier {
     _selectedId = session.id;
     notifyListeners();
     return session;
+  }
+
+  /// Puts a permission request to the person, in the conversation it belongs to. A request about no session here is refused.
+  Future<AcpDecision> askPermission(AcpPermissionRequest request) {
+    ChatSession? target;
+    for (final session in _sessions) {
+      if (session.remoteSessionId == request.sessionId) target = session;
+    }
+    if (target == null) return Future.value(const AcpDeny('not a session here'));
+    final question = PermissionQuestion(request.title ?? request.kind ?? 'A tool', request.kind);
+    target.pendingPermissions.add(question);
+    notifyListeners();
+    return question._answer.future;
+  }
+
+  /// The person's answer to the oldest question in [session].
+  void answerPermission(ChatSession session, {required bool allow}) {
+    if (session.pendingPermissions.isEmpty) return;
+    final question = session.pendingPermissions.removeAt(0);
+    question._answer.complete(allow ? const AcpAllow() : const AcpDeny('the person refused'));
+    notifyListeners();
+  }
+
+  void _refuseWaiting(ChatSession session) {
+    for (final question in session.pendingPermissions) {
+      question._answer.complete(const AcpDeny('the agent went away'));
+    }
+    session.pendingPermissions.clear();
   }
 
   /// A session over a browser provider's connection, which has no endpoint of Canoa's own.
@@ -189,6 +228,7 @@ class SessionStore extends ChangeNotifier {
       onDone: () {
         _verifiedClients.remove(localId);
         session.status = SessionStatus.disconnected;
+        _refuseWaiting(session);
         notifyListeners();
       },
     );

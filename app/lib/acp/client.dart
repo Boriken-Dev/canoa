@@ -52,6 +52,27 @@ final class VerifiedAgent {
     }
   }
 
+  /// A child of this app, speaking ACP on its standard streams. It is the person's own program, so nothing needs proving.
+  factory VerifiedAgent.fromChild({
+    required String label,
+    required Stream<String> messages,
+    required Future<void> Function(String) send,
+    required Future<void> Function() close,
+    AcpDecider? decider,
+  }) => VerifiedAgent._(
+    AcpClient(
+      incoming: messages,
+      send: send,
+      closeSource: close,
+      decider: decider,
+      clientName: 'canoa',
+      clientVersion: '0.0.1',
+      // An adapter fetched with `npx` downloads itself the first time, before it answers anything.
+      requestTimeout: const Duration(minutes: 3),
+    ),
+    'local:$label',
+  );
+
   /// Over a connection a browser's provider holds. The proof is the provider's, and without one there is no client.
   static Future<VerifiedAgent> fromProvider(AcpPageConnection connection) async {
     final agent = connection.agent;

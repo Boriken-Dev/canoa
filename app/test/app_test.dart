@@ -1,3 +1,5 @@
+import 'package:canoa/acp/agent_commands.dart';
+import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:canoa/connect_dialog.dart';
 import 'package:canoa/main.dart';
@@ -58,6 +60,49 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.textContaining('NotAllowedError'), findsOneWidget);
+    });
+  });
+
+  group('agents on this computer', () {
+    testWidgets('only what is installed is offered, and running one closes the dialog', (tester) async {
+      AgentCommand? ran;
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
+        onPressed: () => showCanoaConnectDialog(
+          context,
+          (_) async {},
+          onRunLocalAgent: (command, {required cwd, required title}) async => ran = command,
+          localAgents: const [
+            AgentCommand(label: 'Here', program: 'here'),
+            AgentCommand(label: 'Missing', program: 'missing'),
+          ],
+          checkInstalled: (command) async => command.label == 'Here',
+        ),
+        child: const Text('open'),
+      ))));
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Run Here'), findsOneWidget);
+      expect(find.text('Run Missing'), findsNothing);
+      await tester.tap(find.text('Run Here'));
+      await tester.pump();
+      await tester.pump();
+      expect(ran?.label, 'Here');
+      expect(find.text('Run Here'), findsNothing);
+    });
+
+    testWidgets('a permission waits in the conversation until the person answers', (tester) async {
+      final store = SessionStore(includePreview: false);
+      final session = store.addProviderSession(title: 'T', agent: 'Agent', peerId: 'local:a', remoteSessionId: 'r');
+      store.select(session.id);
+      final answer = store.askPermission(const AcpPermissionRequest(sessionId: 'r', toolCallId: 't', title: 'Delete a file'));
+      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pump();
+      expect(find.text('Delete a file'), findsOneWidget);
+      await tester.tap(find.text('Refuse'));
+      await tester.pump();
+      expect(find.text('Delete a file'), findsNothing);
+      expect(await answer, isA<AcpDeny>());
     });
   });
 }

@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import 'package:coqui_acp/page.dart';
 
+import 'acp/agent_commands.dart';
+import 'acp/local_agent.dart';
 import 'auth/browser_peer.dart';
 
 /// Explicit, out-of-band connection configuration for a pinned peer.
@@ -22,6 +24,9 @@ class ConnectTarget {
   final String title;
 }
 
+/// Runs an agent on this computer, as a child of the app.
+typedef RunLocalAgent = Future<void> Function(AgentCommand command, {required String cwd, required String title});
+
 /// Uses the agents a person grants through the browser's provider, asking them in the provider's own window.
 typedef UseBrowserAgents = Future<void> Function(AcpPage acp, {required String cwd, required String title});
 
@@ -30,17 +35,33 @@ Future<void> showCanoaConnectDialog(
   Future<void> Function(ConnectTarget) onConnect, {
   Future<AcpPage?>? browserProvider,
   UseBrowserAgents? onUseBrowserAgents,
+  RunLocalAgent? onRunLocalAgent,
+  List<AgentCommand> localAgents = agentPresets,
+  Future<bool> Function(AgentCommand) checkInstalled = isInstalled,
 }) => showDialog<void>(
   context: context,
   builder: (_) => _ConnectDialog(
     onConnect: onConnect,
     browserProvider: browserProvider,
     onUseBrowserAgents: onUseBrowserAgents,
+    onRunLocalAgent: onRunLocalAgent,
+    localAgents: localAgents,
+    checkInstalled: checkInstalled,
   ),
 );
 
 class _ConnectDialog extends StatefulWidget {
-  const _ConnectDialog({required this.onConnect, this.browserProvider, this.onUseBrowserAgents});
+  const _ConnectDialog({
+    required this.onConnect,
+    this.browserProvider,
+    this.onUseBrowserAgents,
+    this.onRunLocalAgent,
+    this.localAgents = agentPresets,
+    this.checkInstalled = isInstalled,
+  });
+  final Future<bool> Function(AgentCommand) checkInstalled;
+  final RunLocalAgent? onRunLocalAgent;
+  final List<AgentCommand> localAgents;
   final Future<void> Function(ConnectTarget) onConnect;
   final Future<AcpPage?>? browserProvider;
   final UseBrowserAgents? onUseBrowserAgents;
@@ -94,6 +115,27 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     }
   }
 
+  late final Future<List<AgentCommand>> _installed = () async {
+    final found = <AgentCommand>[];
+    for (final command in widget.localAgents) {
+      if (await widget.checkInstalled(command)) found.add(command);
+    }
+    return found;
+  }();
+
+  Future<void> _runLocal(AgentCommand command) async {
+    if (busy) return;
+    setState(() {busy = true; error = null;});
+    try {
+      await widget.onRunLocalAgent!(command, cwd: cwd.text.trim(), title: title.text.trim());
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   /// No await before the provider's request: it needs the click's user activation.
   Future<void> _useBrowser(AcpPage acp) async {
     if (busy) return;
@@ -126,6 +168,29 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                 'Canoa never trusts the first key it sees.',
               ),
               const SizedBox(height: 12),
+              if (widget.onRunLocalAgent != null)
+                FutureBuilder<List<AgentCommand>>(
+                  future: _installed,
+                  builder: (context, snapshot) {
+                    final found = snapshot.data ?? const <AgentCommand>[];
+                    if (found.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final command in found)
+                            FilledButton.icon(
+                              onPressed: busy ? null : () => _runLocal(command),
+                              icon: const Icon(Icons.play_arrow_rounded),
+                              label: Text('Run ${command.label}'),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               if (widget.onUseBrowserAgents != null)
                 FutureBuilder<AcpPage?>(
                   future: widget.browserProvider,

@@ -1,0 +1,39 @@
+/// An agent this computer can run: a program speaking ACP on its standard streams, or an adapter that makes one.
+final class AgentCommand {
+  const AgentCommand({
+    required this.label,
+    required this.program,
+    this.args = const [],
+    this.requires = const [],
+    this.programPaths = const {},
+  });
+
+  final String label;
+  final String program;
+  final List<String> args;
+
+  /// Other programs it needs, such as the tool an adapter drives. It is offered only when these are found.
+  final List<String> requires;
+
+  /// Environment variables naming a program by its full path, resolved when it starts.
+  final Map<String, String> programPaths;
+}
+
+/// What runs with no setup, for whoever has the tool signed in already. An adapter drives that tool, so its subscription applies
+/// and no API key is involved. The versions are pinned because an adapter is code fetched when it starts.
+const List<AgentCommand> agentPresets = [
+  AgentCommand(
+    label: 'Claude',
+    program: 'npx',
+    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.99.1'],
+    requires: ['claude'],
+    programPaths: {'CLAUDE_CODE_EXECUTABLE': 'claude'},
+  ),
+  AgentCommand(
+    label: 'Codex',
+    program: 'npx',
+    args: ['-y', '@agentclientprotocol/codex-acp@2.5.0'],
+    requires: ['codex'],
+  ),
+  AgentCommand(label: 'Gemini', program: 'gemini', args: ['--acp']),
+];
