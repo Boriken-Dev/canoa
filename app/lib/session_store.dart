@@ -18,6 +18,24 @@ const int maxEntries = 5000;
 /// The most one message keeps, since an agent can send any amount.
 const int maxMessageText = 2 * 1024 * 1024;
 
+/// The most that goes with one message. An agent's context is what these fill, so they stay what a person would pick by hand.
+const int maxAttachments = 8;
+const int maxAttachedText = 1024 * 1024;
+const int maxAttachedImage = 5 * 1024 * 1024;
+
+/// An image's type, from what it was chosen as or its name, or null for anything else.
+String? imageTypeOf(String name, String? mimeType) {
+  if (const {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}.contains(mimeType)) return mimeType;
+  final dot = name.lastIndexOf('.');
+  return switch (dot < 0 ? '' : name.substring(dot + 1).toLowerCase()) {
+    'png' => 'image/png',
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'gif' => 'image/gif',
+    'webp' => 'image/webp',
+    _ => null,
+  };
+}
+
 class ChatMessage {
   ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool});
 
@@ -49,8 +67,15 @@ class ChatSession {
     this.remoteSessionId,
     this.endpoint,
     this.websocketFallback,
+    this.cwd,
     List<ChatMessage>? messages,
   }) : messages = messages ?? <ChatMessage>[];
+
+  /// Where the agent works, on its machine, when this side knows.
+  final String? cwd;
+
+  /// What goes with the next message.
+  final List<AcpAttachment> attachments = [];
 
   /// What the agent is waiting for the person to answer, oldest first.
   final List<PermissionQuestion> pendingPermissions = [];
@@ -179,6 +204,7 @@ class SessionStore extends ChangeNotifier {
     required String agent,
     required String peerId,
     required String remoteSessionId,
+    String? cwd,
   }) {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
@@ -190,6 +216,7 @@ class SessionStore extends ChangeNotifier {
       status: SessionStatus.disconnected,
       peerId: peerId,
       remoteSessionId: remoteSessionId,
+      cwd: cwd,
     );
     _sessions.insert(0, session);
     _selectedId = session.id;
@@ -449,7 +476,7 @@ class SessionStore extends ChangeNotifier {
   /// The prompt is never retried automatically after a disconnect.
   Future<void> sendText(String text) async {
     final session = selected;
-    if (session == null || text.trim().isEmpty) return;
+    if (session == null || (text.trim().isEmpty && session.attachments.isEmpty)) return;
     if (session.status == SessionStatus.preview) {
       sendPreviewText(text);
       return;
@@ -458,22 +485,127 @@ class SessionStore extends ChangeNotifier {
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
     }
+    final attachments = List.of(session.attachments);
+    final sent = attachments.isEmpty ? null : 'Sent with this: ${attachments.map((item) => item.name).join(', ')}';
     if (client.protocolVersion == 1) {
       // A v1 answer arrives when the whole turn ends, so the message shows now.
-      session.messages.add(ChatMessage(role: MessageRole.user, text: text, at: DateTime.now()));
+      if (text.trim().isNotEmpty) session.messages.add(ChatMessage(role: MessageRole.user, text: text, at: DateTime.now()));
+      if (sent != null) _note(session, sent);
+      session.attachments.clear();
       session.status = SessionStatus.working;
       notifyListeners();
-      await client.prompt(session.remoteSessionId!, text);
+      await client.prompt(session.remoteSessionId!, text, attachments: attachments);
       return;
     }
-    final messageId = await client.prompt(session.remoteSessionId!, text);
-    if (!session.messages.any((message) => message.messageId == messageId)) {
+    final messageId = await client.prompt(session.remoteSessionId!, text, attachments: attachments);
+    session.attachments.clear();
+    if (text.trim().isNotEmpty && !session.messages.any((message) => message.messageId == messageId)) {
       session.messages.add(ChatMessage(
         role: MessageRole.user,
         text: text, at: DateTime.now(), messageId: messageId,
       ));
-      notifyListeners();
     }
+    if (sent != null) _note(session, sent);
+    notifyListeners();
+  }
+
+  /// Whether this session's agent takes anything with a message.
+  bool canAttach(ChatSession session) {
+    final client = _verifiedClients[session.id];
+    return client != null && !client.isClosed && (client.takesImages || client.takesFiles);
+  }
+
+  /// Takes a file a person chose, to go with their next message. What is wrong with it, for them to read, or null.
+  String? addAttachment(ChatSession session, String name, List<int> bytes, {String? mimeType}) {
+    final client = _verifiedClients[session.id];
+    if (client == null || client.isClosed) return 'This conversation has no agent.';
+    if (session.attachments.length >= maxAttachments) return 'That is as many as one message can take.';
+    if (session.attachments.any((item) => item.name == name)) return '$name is already there.';
+    if (bytes.isEmpty) return '$name is empty.';
+    final image = imageTypeOf(name, mimeType);
+    if (image != null) {
+      if (!client.takesImages) return '${session.agent} does not take images.';
+      if (bytes.length > maxAttachedImage) return '$name is larger than an image can be here.';
+      session.attachments.add(AcpAttachment.image(name, image, bytes));
+    } else {
+      if (!client.takesFiles) return '${session.agent} does not take files.';
+      if (bytes.length > maxAttachedText) return '$name is larger than a file can be here.';
+      final String text;
+      try {
+        text = utf8.decode(bytes);
+      } on FormatException {
+        return '$name is not text, and only text files and images can be sent.';
+      }
+      session.attachments.add(AcpAttachment.text(name, text, mimeType: mimeType));
+    }
+    notifyListeners();
+    return null;
+  }
+
+  void removeAttachment(ChatSession session, AcpAttachment attachment) {
+    session.attachments.remove(attachment);
+    notifyListeners();
+  }
+
+  /// Whether a person can ask this session's agent for its earlier conversations.
+  bool canListEarlier(ChatSession session) {
+    final client = _verifiedClients[session.id];
+    return client != null && !client.isClosed && client.canReopenSessions;
+  }
+
+  /// The agent's other conversations, where this one is working when that is known. It lists them, and they are its own to name.
+  Future<AcpSessionPage> earlierSessions(ChatSession from, {String? cursor}) async {
+    final client = _verifiedClients[from.id];
+    if (client == null || client.isClosed) throw StateError('A verified ACP peer must be connected');
+    final page = await client.listSessions(cwd: from.cwd, cursor: cursor);
+    return AcpSessionPage(
+      page.sessions.where((session) => session.id != from.remoteSessionId).toList(),
+      page.nextCursor,
+    );
+  }
+
+  /// Opens an earlier conversation beside this one, on the same agent. One already open is selected, not opened twice.
+  Future<ChatSession> openEarlier(ChatSession from, AcpSessionInfo earlier) async {
+    final client = _verifiedClients[from.id];
+    final cwd = earlier.cwd ?? from.cwd;
+    if (client == null || client.isClosed) throw StateError('A verified ACP peer must be connected');
+    if (cwd == null) throw StateError('The agent did not say where that conversation was');
+    for (final session in _sessions) {
+      if (session.remoteSessionId == earlier.id && _verifiedClients[session.id] == client) {
+        select(session.id);
+        return session;
+      }
+    }
+    final session = addProviderSession(
+      title: shortText(earlier.title) ?? 'Earlier conversation',
+      agent: from.agent,
+      peerId: client.peerId,
+      remoteSessionId: earlier.id,
+      cwd: cwd,
+    );
+    // Listening first, since the conversation arrives before the answer does.
+    attachVerifiedClient(session.id, client);
+    try {
+      final opened = await client.reopenSession(earlier.id, cwd: cwd);
+      applyOpened(session, opened);
+      if (!opened.replayed) _note(session, 'The agent resumed this without sending what was said before.');
+      session.status = SessionStatus.connected;
+      notifyListeners();
+      return session;
+    } catch (_) {
+      forget(session);
+      rethrow;
+    }
+  }
+
+  /// Takes a conversation out of the list. The agent still has it, and its connection stays with whoever else uses it.
+  void forget(ChatSession session) {
+    unawaited(_subscriptions.remove(session.id)?.cancel());
+    unawaited(_turnSubscriptions.remove(session.id)?.cancel());
+    _verifiedClients.remove(session.id);
+    _sessions.remove(session);
+    if (_selectedId == session.id) _selectedId = _sessions.isEmpty ? null : _sessions.first.id;
+    notifyListeners();
   }
 
   Future<void> cancelActiveSession() async {

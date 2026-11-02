@@ -108,7 +108,13 @@ final class VerifiedAgent {
   Future<void> setMode(String sessionId, String modeId) => _client.setMode(sessionId, modeId);
   Future<void> resumeSession(String id, {required String cwd, bool replayHistory = false}) =>
       _client.resumeSession(id, cwd: cwd, replayHistory: replayHistory);
-  Future<String?> prompt(String sessionId, String text) => _client.prompt(sessionId, text);
+  bool get takesImages => _client.takesImages;
+  bool get takesFiles => _client.takesFiles;
+  bool get canReopenSessions => _client.canReopenSessions;
+  Future<AcpSessionPage> listSessions({String? cwd, String? cursor}) => _client.listSessions(cwd: cwd, cursor: cursor);
+  Future<AcpOpenedSession> reopenSession(String id, {required String cwd}) => _client.reopenSession(id, cwd: cwd);
+  Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) =>
+      _client.prompt(sessionId, text, attachments: attachments);
   Future<void> cancel(String sessionId) => _client.cancel(sessionId);
   Future<void> closeSession(String sessionId) => _client.closeSession(sessionId);
   Future<void> close() => _client.close();

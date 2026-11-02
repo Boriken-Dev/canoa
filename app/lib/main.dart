@@ -12,6 +12,7 @@ import 'acp/local_agent.dart';
 import 'package:coqui_acp/page.dart';
 import 'connect_dialog.dart';
 import 'package:coqui_web/coqui_web.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'chat/agent_events.dart' show AgentCommandInfo;
@@ -132,6 +133,7 @@ class _CanoaAppState extends State<CanoaApp> {
       final local = store.addProviderSession(
         title: title.isEmpty ? command.label : title,
         agent: command.label,
+        cwd: where ?? cwd,
         peerId: client.peerId,
         remoteSessionId: opened.id,
       );
@@ -411,9 +413,33 @@ class _ConversationState extends State<_Conversation> {
     super.dispose();
   }
 
+  Future<void> _attach(ChatSession session) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final chosen = await openFiles();
+    for (final file in chosen) {
+      final problem = widget.store.addAttachment(session, file.name, await file.readAsBytes(), mimeType: file.mimeType);
+      if (problem != null) messenger.showSnackBar(SnackBar(content: Text(problem)));
+    }
+  }
+
+  Future<void> _showEarlier(ChatSession session) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final picked = await showDialog<AcpSessionInfo>(
+      context: context,
+      builder: (context) => EarlierConversations(list: (cursor) => widget.store.earlierSessions(session, cursor: cursor)),
+    );
+    if (picked == null) return;
+    try {
+      await widget.store.openEarlier(session, picked);
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('That conversation could not be opened: $error')));
+    }
+  }
+
   void _send() {
     final text = _input.text;
-    if (text.trim().isEmpty) return;
+    final attached = widget.store.selected?.attachments.isNotEmpty ?? false;
+    if (text.trim().isEmpty && !attached) return;
     try {
       _input.clear();
       unawaited(widget.store.sendText(text).catchError((Object error) {
@@ -459,6 +485,12 @@ class _ConversationState extends State<_Conversation> {
                   style: Theme.of(context).textTheme.bodySmall),
               ],
             )),
+            if (session != null && widget.store.canListEarlier(session))
+              IconButton(
+                tooltip: 'Earlier conversations',
+                icon: const Icon(Icons.history),
+                onPressed: () => unawaited(_showEarlier(session)),
+              ),
             Chip(
               avatar: const Icon(Icons.hub_outlined, size: 16),
               label: Text(session?.status == SessionStatus.preview
@@ -505,6 +537,9 @@ class _ConversationState extends State<_Conversation> {
             }));
           },
           commands: session.commands,
+          attachments: session.attachments,
+          onAttach: widget.store.canAttach(session) ? () => unawaited(_attach(session)) : null,
+          onRemove: (attachment) => widget.store.removeAttachment(session, attachment),
         ),
       ],
     ]);
@@ -515,6 +550,7 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller, required this.enabled, required this.onSend,
     this.working = false, this.onStop, this.commands = const [],
+    this.attachments = const [], this.onAttach, this.onRemove,
   });
 
   final TextEditingController controller;
@@ -523,6 +559,9 @@ class _Composer extends StatelessWidget {
   final bool working;
   final VoidCallback? onStop;
   final List<AgentCommandInfo> commands;
+  final List<AcpAttachment> attachments;
+  final VoidCallback? onAttach;
+  final ValueChanged<AcpAttachment>? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -546,6 +585,21 @@ class _Composer extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
+            if (attachments.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(spacing: 6, runSpacing: 4, children: [
+                    for (final attachment in attachments)
+                      InputChip(
+                        avatar: Icon(attachment.isImage ? Icons.image_outlined : Icons.description_outlined, size: 16),
+                        label: Text(attachment.name, overflow: TextOverflow.ellipsis),
+                        onDeleted: () => onRemove?.call(attachment),
+                      ),
+                  ]),
+                ),
+              ),
             TextField(
               controller: controller,
               enabled: enabled,
@@ -561,6 +615,9 @@ class _Composer extends StatelessWidget {
                   borderRadius: BorderRadius.circular(look.radius + 2),
                   borderSide: BorderSide.none,
                 ),
+                prefixIcon: onAttach == null
+                    ? null
+                    : IconButton(tooltip: 'Attach', onPressed: enabled ? onAttach : null, icon: const Icon(Icons.attach_file)),
                 suffixIcon: working
                     ? IconButton(tooltip: 'Stop', onPressed: onStop, icon: const Icon(Icons.stop_circle_outlined))
                     : IconButton(

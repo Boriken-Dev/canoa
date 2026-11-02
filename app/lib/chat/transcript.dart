@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:coqui_acp/coqui_acp.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -456,6 +459,86 @@ class CommandSuggestions extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// What an agent says it has from before, for a person to pick one. Titles are the agent's, and the list asks for more only when told.
+class EarlierConversations extends StatefulWidget {
+  const EarlierConversations({super.key, required this.list});
+
+  final Future<AcpSessionPage> Function(String? cursor) list;
+
+  @override
+  State<EarlierConversations> createState() => _EarlierConversationsState();
+}
+
+class _EarlierConversationsState extends State<EarlierConversations> {
+  final List<AcpSessionInfo> _found = [];
+  String? _cursor;
+  bool _loading = true;
+  String? _problem;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_more());
+  }
+
+  Future<void> _more() async {
+    setState(() {
+      _loading = true;
+      _problem = null;
+    });
+    try {
+      final page = await widget.list(_cursor);
+      if (!mounted) return;
+      setState(() {
+        _found.addAll(page.sessions);
+        _cursor = page.nextCursor;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _problem = 'This connection does not offer that.';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Earlier conversations'),
+      content: SizedBox(
+        width: 520,
+        height: 420,
+        child: Column(children: [
+          if (_problem != null)
+            Padding(padding: const EdgeInsets.all(8), child: Text(_problem!))
+          else if (!_loading && _found.isEmpty)
+            const Padding(padding: EdgeInsets.all(8), child: Text('The agent has none here.')),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _found.length,
+              itemBuilder: (context, index) {
+                final earlier = _found[index];
+                final about = [shortText(earlier.updatedAt), shortText(earlier.cwd)].whereType<String>().join(' · ');
+                return ListTile(
+                  title: Text(shortText(earlier.title) ?? 'Untitled', maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: about.isEmpty ? null : Text(about, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => Navigator.of(context).pop(earlier),
+                );
+              },
+            ),
+          ),
+          if (_loading) const Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()),
+          if (!_loading && _cursor != null)
+            TextButton(onPressed: () => unawaited(_more()), child: const Text('More')),
+        ]),
+      ),
+      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
     );
   }
 }
