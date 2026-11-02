@@ -8,6 +8,9 @@ const PROOF_MS = 15_000;
 const WEBTRANSPORT_OPEN_MS = 5_000;
 // What coqui-acp-bridge takes: a 16 MiB line and a record's overhead.
 const MAX_MESSAGE = 16 * 1024 * 1024 + 64;
+// Nobody has proved anything yet, so nobody gets to send much: the same limit the bridge holds a peer to.
+const MAX_PROOF_MESSAGE = 3072;
+const MAX_PROOF_WAITING = 8;
 
 const asText = (data) => (typeof data === "string" ? data : new TextDecoder().decode(data));
 
@@ -21,24 +24,41 @@ export function frame(body) {
 }
 
 /** Takes the stream's chunks as they come, and returns the whole messages each completes. Throws on what no peer may send. */
-export function createDeframer(limit = MAX_MESSAGE) {
-  let held = new Uint8Array(0);
-  return (chunk) => {
-    const joined = new Uint8Array(held.length + chunk.length);
-    joined.set(held);
-    joined.set(chunk, held.length);
-    const messages = [];
-    let at = 0;
-    while (joined.length - at >= 4) {
-      const length = new DataView(joined.buffer, joined.byteOffset + at, 4).getUint32(0, true);
-      if (length === 0 || length > limit) throw new Error("a message of a length no peer may send");
-      if (joined.length - at - 4 < length) break;
-      messages.push(joined.slice(at + 4, at + 4 + length).buffer);
-      at += 4 + length;
+export function createDeframer(initialLimit = MAX_MESSAGE) {
+  let limit = initialLimit;
+  // Grown by doubling, so a large message in small chunks is not copied again at every chunk.
+  let buffer = new Uint8Array(4096);
+  let start = 0;
+  let end = 0;
+  const hold = (chunk) => {
+    const live = end - start;
+    if (end + chunk.length > buffer.length) {
+      const larger = live + chunk.length > buffer.length ? new Uint8Array(Math.max(buffer.length * 2, live + chunk.length)) : buffer;
+      larger.set(buffer.subarray(start, end));
+      buffer = larger;
+      start = 0;
+      end = live;
     }
-    held = joined.slice(at);
+    buffer.set(chunk, end);
+    end += chunk.length;
+  };
+  const deframe = (chunk) => {
+    hold(chunk);
+    const messages = [];
+    while (end - start >= 4) {
+      const length = new DataView(buffer.buffer, buffer.byteOffset + start, 4).getUint32(0, true);
+      if (length === 0 || length > limit) throw new Error("a message of a length no peer may send");
+      if (end - start - 4 < length) break;
+      messages.push(buffer.slice(start + 4, start + 4 + length).buffer);
+      start += 4 + length;
+    }
+    if (start === end) start = end = 0;
     return messages;
   };
+  deframe.raiseLimit = (next) => {
+    limit = next;
+  };
+  return deframe;
 }
 
 /** The same small surface as a WebSocket, so the proof does not care which it runs on. */
@@ -49,6 +69,7 @@ function webTransportLink({ url, hash }, WebTransportClass) {
   };
   const value = Uint8Array.from(hash.slice("sha256:".length).match(/../g), (pair) => parseInt(pair, 16));
   const transport = new WebTransportClass(url, { serverCertificateHashes: [{ algorithm: "sha-256", value }] });
+  const deframe = createDeframer(MAX_PROOF_MESSAGE);
   let writer;
   let closed = false;
   const end = () => {
@@ -65,7 +86,6 @@ function webTransportLink({ url, hash }, WebTransportClass) {
     await transport.ready;
     const stream = await transport.createBidirectionalStream();
     writer = stream.writable.getWriter();
-    const deframe = createDeframer();
     (async () => {
       const reader = stream.readable.getReader();
       for (;;) {
@@ -89,6 +109,7 @@ function webTransportLink({ url, hash }, WebTransportClass) {
     socket: {
       send: (body) => writer.write(frame(body)),
       close: end,
+      proven: () => deframe.raiseLimit(MAX_MESSAGE),
       addEventListener: (type, listen) => listeners[type]?.push(listen),
     },
   };
@@ -180,6 +201,8 @@ export async function dialAgent(agent, {
         const message = await session.open(new Uint8Array(event.data));
         if (message !== null) onMessage(new TextDecoder().decode(message));
       }).catch(() => socket.close());
+    } else if ((event.data.byteLength ?? event.data.length) > MAX_PROOF_MESSAGE || inbox.length >= MAX_PROOF_WAITING) {
+      socket.close();
     } else if (waiter !== undefined) {
       const take = waiter;
       waiter = undefined;
@@ -208,6 +231,7 @@ export async function dialAgent(agent, {
       ({ session } = await proof.finish(asText(await next())));
     })();
     await within(exchange, PROOF_MS, "no proof in time");
+    socket.proven?.();
   } catch (error) {
     socket.close();
     throw error;

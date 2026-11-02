@@ -62,6 +62,23 @@ function searchButton(onFound) {
 
 const WHERE = { "dns-sd": "says it is on this network", local: "on this machine", manual: "added by hand" };
 
+/** A row about an agent. A record naming a key the person knows is about that agent, so its own choice of name is not shown. */
+function describeAgent(agent) {
+  const about = agent.proven ? "proven" : agent.peer ? "not proven yet" : "unverified";
+  const lines = agent.sameKeyAs
+    ? [element("strong", { textContent: agent.sameKeyAs }), " — something on this network says it is now at this address"]
+    : [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
+  if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
+  lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
+  if (agent.sameKeyAs) {
+    lines.push(element("br"), element("span", { className: "warn", textContent: `Anyone can name a public key. Choosing this moves ${agent.sameKeyAs} here, and whoever is asking gets ${agent.sameKeyAs}. If it cannot prove the key there, it goes back.` }));
+  }
+  if (agent.sameNameAs) {
+    lines.push(element("br"), element("span", { className: "warn", textContent: `You have another agent called ${agent.sameNameAs}, with a different key.` }));
+  }
+  return lines;
+}
+
 function grantView(details) {
   const added = [];
   const picks = element("div");
@@ -69,12 +86,7 @@ function grantView(details) {
     const box = element("input", { type: "checkbox", checked });
     box.dataset.key = agent.key ?? "";
     box.dataset.fresh = isNew ? String(added.length - 1) : "";
-    const about = agent.proven ? "proven" : agent.peer ? "not proven yet" : "unverified";
-    const lines = [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
-    if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
-    lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
-    if (agent.sameKeyAs) lines.push(element("br"), `Names the same key as ${agent.sameKeyAs}. Choosing this moves it here.`);
-    picks.append(element("label", { className: "pick" }, box, element("span", {}, ...lines)));
+    picks.append(element("label", { className: "pick" }, box, element("span", {}, ...describeAgent(agent))));
   };
   for (const agent of details.agents) row(agent, details.peers.includes(agent.peer), false);
   if (details.agents.length === 0) picks.append(element("p", { textContent: "No agents yet. Add one below." }));
@@ -111,7 +123,8 @@ function grantView(details) {
   if (details.mcpOrigins.length > 0) {
     asked.push(element("p", { className: "warn", textContent: `It may also connect them to: ${details.mcpOrigins.join(", ")}` }));
   }
-  main.replaceChildren(...asked, element("h2", { textContent: "Choose agents" }), picks,
+  // Above the list, so a row that appears cannot land under a second click.
+  main.replaceChildren(...asked, element("h2", { textContent: "Choose agents" }),
     searchButton((candidates) => {
       for (const candidate of candidates) {
         if (added.some((agent) => agent.url === candidate.url && agent.peer === candidate.peer)) continue;
@@ -119,7 +132,7 @@ function grantView(details) {
         // Never ticked for the person: choosing one is what accepts its key.
         row(candidate, false, true);
       }
-    }),
+    }), picks,
     agentForm(async (agent) => {
       added.push(agent);
       row(agent, true, true);
@@ -172,13 +185,12 @@ async function manageView() {
   main.replaceChildren(element("h1", { textContent: "Canoa agents" }), element("ul", {}, ...agentRows),
     searchButton((candidates) => {
       found.replaceChildren(...candidates.map((candidate) => {
-        const add = element("button", { type: "button", className: "quiet", textContent: "Add" });
+        const add = element("button", { type: "button", className: "quiet", textContent: candidate.sameKeyAs ? `Move ${candidate.sameKeyAs} here` : "Add" });
         add.addEventListener("click", async () => {
           await send({ acp: "add", agent: candidate });
           manageView();
         });
-        return element("li", {}, element("strong", { textContent: candidate.label }), ` — ${WHERE[candidate.source]}`, element("br"),
-          element("code", { textContent: `${candidate.url} ${candidate.peer ?? "no peer id"}` }), element("br"), add);
+        return element("li", {}, ...describeAgent(candidate), element("br"), add);
       }));
     }), found,
     agentForm(async (agent) => {

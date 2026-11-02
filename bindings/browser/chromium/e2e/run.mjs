@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createSocket } from "node:dgram";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -156,6 +157,9 @@ const chrome = spawn(browser, [
   "--disable-features=DisableLoadExtensionCommandLineSwitch", "about:blank",
 ], { stdio: "ignore", env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors } });
 
+// What a run was doing when it stopped, for a watchdog's report.
+let lastCall = "";
+
 class Session {
   constructor(url) {
     this.socket = new WebSocket(url);
@@ -180,6 +184,7 @@ class Session {
     };
   }
   async call(method, params = {}) {
+    lastCall = `${method} ${String(params.expression ?? "").slice(0, 120)}`;
     await this.opened;
     const id = this.next++;
     return new Promise((resolve, reject) => {
@@ -217,14 +222,30 @@ async function check(name, run) {
   console.log(results.at(-1));
 }
 
+/** A port free for TCP and UDP alike. A system can reserve a number for one and not the other. */
+async function freeForBoth() {
+  for (;;) {
+    const listener = createServer();
+    await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    const { port } = listener.address();
+    const free = await new Promise((resolve) => {
+      const socket = createSocket("udp4");
+      socket.once("error", () => resolve(false));
+      socket.bind(port, "127.0.0.1", () => socket.close(() => resolve(true)));
+    });
+    await new Promise((resolve) => listener.close(resolve));
+    if (free) return port;
+  }
+}
+
 let exitCode = 1;
 let companionInstalled = false;
 const bridges = [];
 const watchdog = setTimeout(() => {
-  console.log("FAILED: the run took too long");
+  console.log(`FAILED: the run took too long, at: ${lastCall}`);
   chrome.kill();
   process.exit(1);
-}, 360_000);
+}, 200_000);
 try {
   debug = await waitFor("the browser", () => {
     try {
@@ -248,6 +269,18 @@ try {
   const page = new Session(created.webSocketDebuggerUrl);
   await page.call("Runtime.enable");
 
+  // Bounded, and saying which half never came: a revoke that hangs is what this has to catch.
+  const revokeHere = async () => {
+    const said = await page.run(`(async () => {
+      const within = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve("timed out"), 15000))]);
+      const revoked = await within(document.acp.revoke(window.agent).then(() => "answered"));
+      if (revoked !== "answered") return "revoke never answered";
+      const closed = await within(window.conn.closed);
+      return closed === "timed out" ? "closed never resolved" : closed.reason;
+    })()`);
+    assert.equal(said, "revoked");
+  };
+
   await check("strict-csp: document.acp is there under the page's CSP, and found by event", async () => {
     await waitFor("the provider", () => page.run("typeof document.acp === 'object' && window.found === document.acp"));
     assert.equal(await page.run("document.acp.version"), 1);
@@ -261,8 +294,11 @@ try {
     assert.equal(name, "NotAllowedError");
   });
 
+  // A window already answered can still be closing, and answering it again would leave the new one waiting.
+  const answeredWindows = new Set();
   const prompt = async () => {
-    const target = await waitFor("the person's window", async () => (await targets()).find((item) => item.url.includes("acp-request.html?ask=")));
+    const target = await waitFor("the person's window", async () => (await targets()).find((item) => item.url.includes("acp-request.html?ask=") && !answeredWindows.has(item.id)));
+    answeredWindows.add(target.id);
     const view = new Session(target.webSocketDebuggerUrl);
     await waitFor("its contents", () => view.run("(document.querySelector('#main')?.childElementCount ?? 0) > 0"));
     return view;
@@ -395,7 +431,7 @@ try {
       try {
         await waitFor(`${label} in the window`, () => view.run(`document.querySelector('#main').textContent.includes(${JSON.stringify(label)})`), 20_000);
       } catch (error) {
-        throw new Error(`${error.message}; it showed: ${await view.run("document.querySelector('#main').textContent")}`);
+        throw new Error(`${error.message}; it said: ${(await view.run("document.querySelector('#main').textContent")).split("Look for agents nearby")[1]?.slice(0, 500)}`);
       }
     };
     const choose = (view, label, cwd) => view.run(`(() => {
@@ -428,7 +464,7 @@ try {
       assert.equal(await page.run(open), true);
       const init = await page.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })");
       assert.equal(init.result.protocolVersion, 1);
-      await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
+      await revokeHere();
     });
     await check("fallback: WebTransport that does not open falls back to the WebSocket, under the same proof", async () => {
       writeFileSync(path.join(descriptors, "fallback.json"), JSON.stringify({ txtvers: 1, proto: "acp", label: "Fallback agent", url: `${agentUrl}/fallback`,
@@ -440,7 +476,7 @@ try {
       assert.equal(await page.run("window.asked"), 1);
       assert.deepEqual(await page.run("window.agent.offers.transports"), ["webtransport", "websocket"]);
       assert.equal(await page.run(open), true);
-      await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
+      await revokeHere();
     });
     await check("spoof: an advertisement naming a key the agent does not hold is refused at connect", async () => {
       const someoneElse = await generateIdentity();
@@ -469,10 +505,7 @@ try {
     const bridgeKey = path.join(work, "bridge.key");
     const bridgePeer = execFileSync(bridge, ["keygen", bridgeKey], { encoding: "utf8" }).trim();
     const startBridge = async ({ key = bridgeKey, label = "Real bridge", flags } = {}) => {
-      const listener = createServer();
-      await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
-      const { port } = listener.address();
-      await new Promise((resolve) => listener.close(resolve));
+      const port = await freeForBoth();
       const transport = flags ?? ["--tls-short-lived", "--webtransport-port", String(port)];
       const child = spawn(bridge, ["serve", "--listen", `127.0.0.1:${port}`, "--identity", key, "--allow", browserPeer, ...transport,
         "--advertise", label, "--", process.execPath, agentProgram],
@@ -503,7 +536,7 @@ try {
       assert.equal(await page.run("window.agent.identity.peer"), plainPeer);
       assert.deepEqual(await page.run("window.agent.offers.transports"), ["websocket"]);
       assert.deepEqual(await page.run(turn), [true, 1, "real"]);
-      await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
+      await revokeHere();
     });
     let first;
     await check("webtransport: a whole exchange over WebTransport with a pinned certificate, through the real bridge, to a real stdio agent", async () => {
@@ -526,10 +559,8 @@ try {
       await waitFor("the provider", () => page.run("window.ready === true && typeof document.acp === 'object'"));
       await requested();
       const view = await prompt();
-      await search(view, "Choosing this moves it here");
-      const row = await view.run(`[...document.querySelectorAll('label.pick')].find((each) => each.textContent.includes('Choosing this moves it here')).textContent`);
-      assert.ok(row.includes("Real bridge"), row);
-      await choose(view, "Choosing this moves it here", "/real");
+      await search(view, "Choosing this moves Real bridge here");
+      await choose(view, "Choosing this moves Real bridge here", "/real");
       assert.equal(await page.run("window.asked"), 1);
       assert.deepEqual(await page.run(turn), [true, 1, "real"]);
     });

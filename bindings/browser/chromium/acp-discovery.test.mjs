@@ -9,7 +9,7 @@ const good = { label: "Mine", url: "wss://10.0.0.5:8765/acp", peer: KEY, source:
 const withTransport = { ...good, webtransport: 8766, webtransportHash: OTHER };
 
 test("a good candidate comes through with what it claims", () => {
-  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, webtransport: undefined, sameKeyAs: undefined }]);
+  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, webtransport: undefined, sameKeyAs: undefined, sameNameAs: undefined }]);
 });
 
 test("nothing usable in a bad reply", () => {
@@ -19,17 +19,49 @@ test("nothing usable in a bad reply", () => {
 });
 
 test("only a secure address, or plain on this machine", () => {
-  const url = (text) => readCandidates({ candidates: [{ ...good, url: text }] }).length;
+  const url = (text) => readCandidates({ candidates: [{ ...good, source: "local", url: text }] }).length;
   assert.equal(url("ws://127.0.0.1:1/acp"), 1);
   assert.equal(url("ws://[::1]:1/acp"), 1);
   assert.equal(url("ws://10.0.0.5:1/acp"), 0);
+  assert.equal(url("wss://10.0.0.5:1/acp"), 0, "a local descriptor names this machine");
+  assert.equal(url("ws://agent.example.com:443@127.0.0.1:1/acp"), 0, "a user name that reads like a host");
+  assert.equal(url(`ws://127.0.0.1:1/${"x".repeat(600)}`), 0);
   assert.equal(url("http://10.0.0.5:1/acp"), 0);
   assert.equal(url("javascript:alert(1)"), 0);
   assert.equal(url("not a url"), 0);
 });
 
+test("a record cannot point a person at their own machine, however it is spelled", () => {
+  const offered = (url) => readCandidates({ candidates: [{ ...good, url }] }).length;
+  assert.equal(offered("wss://10.0.0.5:1/acp"), 1);
+  assert.equal(offered("wss://agent.example.com/acp"), 1);
+  for (const url of ["wss://localhost:1/acp", "wss://foo.localhost:1/acp", "wss://127.0.0.1:1/acp", "wss://127.1:1/acp", "wss://2130706433:1/acp",
+    "wss://0x7f.0.0.1:1/acp", "wss://0.0.0.0:1/acp", "wss://169.254.169.254:1/acp", "wss://[::1]:1/acp", "wss://[::ffff:127.0.0.1]:1/acp",
+    "wss://[::127.0.0.1]:1/acp", "wss://[64:ff9b::7f00:1]:1/acp", "wss://[fe80::1]:1/acp", "wss://intranet:1/acp"]) {
+    assert.equal(offered(url), 0, url);
+  }
+});
+
+test("on the network a record has to name a key, and on this machine it need not", () => {
+  assert.deepEqual(readCandidates({ candidates: [{ ...good, peer: undefined }] }), []);
+  assert.deepEqual(readCandidates({ candidates: [{ ...good, peer: "sha256:zz" }] }), []);
+  const [local] = readCandidates({ candidates: [{ label: "Here", url: "ws://127.0.0.1:1/acp", source: "local" }] });
+  assert.equal(local.peer, undefined);
+});
+
+test("a name cannot hide part of itself or reorder what is shown around it", () => {
+  const [found] = readCandidates({ candidates: [{ ...good, label: "a\u202Eb\u200Bc\u00ADd\u0007e" }] });
+  assert.equal(found.label, "abcde");
+  assert.deepEqual(readCandidates({ candidates: [{ ...good, label: "\u202E\u200B" }] }), []);
+});
+
+test("another agent with the same name and a different key says so", () => {
+  const [found] = readCandidates({ candidates: [good] }, [{ label: "Mine", url: "wss://10.0.0.6:1/acp", peer: OTHER }]);
+  assert.equal(found.sameNameAs, "Mine");
+  assert.equal(found.sameKeyAs, undefined);
+});
+
 test("a malformed key is no key, and a blank label is no candidate", () => {
-  assert.equal(readCandidates({ candidates: [{ ...good, peer: "sha256:zz" }] })[0].peer, undefined);
   assert.deepEqual(readCandidates({ candidates: [{ ...good, label: "   " }] }), []);
   assert.deepEqual(readCandidates({ candidates: [{ ...good, label: 7 }] }), []);
 });
