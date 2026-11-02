@@ -1,5 +1,6 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
 import { dialAgent } from "./acp-dial.js";
+import { COMPANION, readCandidates } from "./acp-discovery.js";
 import { createGateway } from "./acp-gateway.js";
 
 const AGENTS = "canoa_acp_agents";
@@ -8,6 +9,8 @@ const ONCE = "canoa_acp_once";
 const SECRET = "canoa_acp_secret";
 const PORT_NAME = "canoa-acp";
 const ASK_MS = 120_000;
+const SEARCH_SECONDS = 3;
+const FOUND = ["mdns", "local"];
 
 const read = async (area, key, fallback) => (await chrome.storage[area].get(key))[key] ?? fallback;
 const write = (area, key, value) => chrome.storage[area].set({ [key]: value });
@@ -16,8 +19,8 @@ const areaOf = (grant) => (grant.lifetime === "always" ? ["local", GRANTS] : ["s
 
 const store = {
   agents: () => read("local", AGENTS, []),
-  async addAgent({ label, url, peer }) {
-    const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: "manual" };
+  async addAgent({ label, url, peer, source }) {
+    const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: FOUND.includes(source) ? source : "manual" };
     if (peer) agent.peer = String(peer);
     await write("local", AGENTS, [...(await store.agents()), agent]);
     return agent;
@@ -55,6 +58,16 @@ const store = {
     return secret;
   },
 };
+
+/** Asks the companion who is around. No companion is an answer too: the person can still add an agent by hand. */
+async function nearby() {
+  try {
+    const reply = await chrome.runtime.sendNativeMessage(COMPANION, { op: "discover", seconds: SEARCH_SECONDS });
+    return { candidates: readCandidates(reply, await store.agents()) };
+  } catch {
+    return { candidates: [], noCompanion: true };
+  }
+}
 
 const asking = new Map();
 
@@ -145,6 +158,9 @@ export function installProvider() {
     } else if (message.acp === "answer") {
       entry?.done(message.answer ?? null);
       reply(true);
+    } else if (message.acp === "nearby") {
+      nearby().then(reply);
+      return true;
     } else if (message.acp === "manage") {
       Promise.all([store.agents(), store.allGrants()]).then(([agents, grants]) => reply({ agents, grants }));
       return true;

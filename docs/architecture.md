@@ -43,7 +43,7 @@ Canoa's Chromium implementation lives under `bindings/browser/chromium` and uses
 
 Browser-provided MCP tools may read bounded DOM text, inspect permitted tabs, interact with visible elements, and discover/invoke opt-in WebMCP tools. Site-provided MCP endpoints and WebMCP descriptions are untrusted discovery candidates and cannot grant themselves or an agent access.
 
-A Chrome extension cannot directly browse DNS-SD/mDNS through general WebExtension APIs. It may use a native companion for discovery, but a manually entered WSS endpoint can work without one once peer authentication is implemented.
+A Chrome extension cannot directly browse DNS-SD/mDNS through general WebExtension APIs. It asks `coqui-acp-bridge`'s native companion when the person chooses to look nearby, and an endpoint entered by hand works without one.
 
 ## Status
 

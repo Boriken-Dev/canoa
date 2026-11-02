@@ -43,6 +43,25 @@ function agentForm(onAdd) {
     element("label", { textContent: "Peer id" }), peer, add, status);
 }
 
+/** Searching is the person's choice, each time: it starts a program and listens on the network. */
+function searchButton(onFound) {
+  const status = element("p");
+  const search = element("button", { type: "button", className: "quiet", textContent: "Look for agents nearby" });
+  search.addEventListener("click", async () => {
+    search.disabled = true;
+    status.textContent = "Looking…";
+    const { candidates, noCompanion } = await send({ acp: "nearby" });
+    search.disabled = false;
+    status.textContent = noCompanion
+      ? "That needs coqui-acp-bridge installed: coqui-acp-bridge companion install --extension-id " + chrome.runtime.id
+      : candidates.length === 0 ? "Nothing found." : "Anyone can claim anything here. Check a key with the agent's owner before you choose it.";
+    onFound(candidates);
+  });
+  return element("div", {}, search, status);
+}
+
+const WHERE = { mdns: "says it is on this network", local: "on this machine", manual: "added by hand" };
+
 function grantView(details) {
   const added = [];
   const picks = element("div");
@@ -51,9 +70,11 @@ function grantView(details) {
     box.dataset.key = agent.key ?? "";
     box.dataset.fresh = isNew ? String(added.length - 1) : "";
     const about = agent.proven ? "proven" : agent.peer ? "not proven yet" : "unverified";
-    picks.append(element("label", { className: "pick" }, box,
-      element("span", {}, element("strong", { textContent: agent.label }), ` — ${agent.source ?? "manual"}, ${about}`,
-        element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }))));
+    const lines = [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
+    if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
+    lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
+    if (agent.sameKeyAs) lines.push(element("br"), `Names the same key as ${agent.sameKeyAs}.`);
+    picks.append(element("label", { className: "pick" }, box, element("span", {}, ...lines)));
   };
   for (const agent of details.agents) row(agent, details.peers.includes(agent.peer), false);
   if (details.agents.length === 0) picks.append(element("p", { textContent: "No agents yet. Add one below." }));
@@ -91,6 +112,14 @@ function grantView(details) {
     asked.push(element("p", { className: "warn", textContent: `It may also connect them to: ${details.mcpOrigins.join(", ")}` }));
   }
   main.replaceChildren(...asked, element("h2", { textContent: "Choose agents" }), picks,
+    searchButton((candidates) => {
+      for (const candidate of candidates) {
+        if (added.some((agent) => agent.url === candidate.url && agent.peer === candidate.peer)) continue;
+        added.push(candidate);
+        // Never ticked for the person: choosing one is what accepts its key.
+        row(candidate, false, true);
+      }
+    }),
     agentForm(async (agent) => {
       added.push(agent);
       row(agent, true, true);
@@ -127,7 +156,7 @@ async function manageView() {
       await send({ acp: "remove", key: agent.key });
       manageView();
     });
-    return element("li", {}, element("strong", { textContent: agent.label }), " ", element("code", { textContent: `${agent.url} ${agent.peer}` }), element("br"), remove);
+    return element("li", {}, element("strong", { textContent: agent.label }), " ", element("code", { textContent: `${agent.url} ${agent.peer ?? "no peer id"}` }), element("br"), remove);
   });
   const grantRows = grants.map((grant) => {
     const label = agents.find((agent) => agent.key === grant.agent)?.label ?? grant.agent;
@@ -139,7 +168,19 @@ async function manageView() {
     const extra = grant.permissions ? ", can approve for me" : "";
     return element("li", {}, element("span", { className: "site", textContent: grant.origin }), ` may use ${label} (${grant.lifetime}${extra})`, element("br"), revoke);
   });
+  const found = element("ul");
   main.replaceChildren(element("h1", { textContent: "Canoa agents" }), element("ul", {}, ...agentRows),
+    searchButton((candidates) => {
+      found.replaceChildren(...candidates.map((candidate) => {
+        const add = element("button", { type: "button", className: "quiet", textContent: "Add" });
+        add.addEventListener("click", async () => {
+          await send({ acp: "add", agent: candidate });
+          manageView();
+        });
+        return element("li", {}, element("strong", { textContent: candidate.label }), ` — ${WHERE[candidate.source]}`, element("br"),
+          element("code", { textContent: `${candidate.url} ${candidate.peer ?? "no peer id"}` }), element("br"), add);
+      }));
+    }), found,
     agentForm(async (agent) => {
       await send({ acp: "add", agent });
       manageView();

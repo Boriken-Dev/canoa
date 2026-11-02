@@ -1,12 +1,13 @@
 // The provider in a real browser: a real page under a strict CSP, the real extension, and an agent on a real socket proving
 // itself with the real handshake. Drives the browser over its DevTools protocol, with the person's window clicked by script.
 //
-//   CANOA_E2E_BROWSER=path/to/chrome node e2e/run.mjs
+//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] node e2e/run.mjs
 //
+// With a bridge, its companion is registered for this user during the run and removed after, replacing any registered before.
 // Needs `npm install` in examples/acp-echo, for its WebSocket server.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -20,10 +21,13 @@ const extension = path.resolve(here, "..");
 const { WebSocketServer } = createRequire(import.meta.url)("../../../../examples/acp-echo/node_modules/ws");
 const browser = process.env.CANOA_E2E_BROWSER;
 if (!browser) throw new Error("set CANOA_E2E_BROWSER");
+const bridge = process.env.CANOA_E2E_BRIDGE;
 
 const work = mkdtempSync(path.join(tmpdir(), "canoa-e2e-"));
 const profile = path.join(work, "profile");
 const unpacked = path.join(work, "extension");
+const descriptors = path.join(work, "agents");
+mkdirSync(descriptors);
 cpSync(extension, unpacked, { recursive: true, filter: (from) => !/(node_modules|[/\\]e2e|[/\\]ui|\.test\.mjs)/.test(path.relative(extension, from) || "x") });
 // What a person's "let this site ask" grants, which needs Chrome's own prompt otherwise.
 const manifest = JSON.parse(readFileSync(path.join(unpacked, "manifest.json"), "utf8"));
@@ -113,7 +117,7 @@ const chrome = spawn(browser, [
   "--headless=new", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
   `--load-extension=${unpacked}`, `--disable-extensions-except=${unpacked}`,
   "--disable-features=DisableLoadExtensionCommandLineSwitch", "about:blank",
-], { stdio: "ignore" });
+], { stdio: "ignore", env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors } });
 
 class Session {
   constructor(url) {
@@ -177,11 +181,12 @@ async function check(name, run) {
 }
 
 let exitCode = 1;
+let companionInstalled = false;
 const watchdog = setTimeout(() => {
   console.log("FAILED: the run took too long");
   chrome.kill();
   process.exit(1);
-}, 150_000);
+}, 240_000);
 try {
   debug = await waitFor("the browser", () => {
     try {
@@ -221,7 +226,7 @@ try {
   const prompt = async () => {
     const target = await waitFor("the person's window", async () => (await targets()).find((item) => item.url.includes("acp-request.html?ask=")));
     const view = new Session(target.webSocketDebuggerUrl);
-    await waitFor("its contents", () => view.run("document.querySelector('#main').childElementCount > 0"));
+    await waitFor("its contents", () => view.run("(document.querySelector('#main')?.childElementCount ?? 0) > 0"));
     return view;
   };
   const requested = () => page.run(`window.asked = document.acp.request({ purpose: "testing" }).then(
@@ -343,11 +348,68 @@ try {
     })()`), false);
     assert.equal(plain.length, 1);
   });
+  if (bridge) {
+    execFileSync(bridge, ["companion", "install", "--extension-id", new URL(worker.url).hostname], { stdio: "ignore" });
+    companionInstalled = true;
+    const describe = (name, label, peer, tail) => writeFileSync(path.join(descriptors, name), JSON.stringify({ txtvers: 1, proto: "acp", label, url: `${agentUrl}/${tail}`, peer }));
+    const search = async (view, label) => {
+      await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Look for agents nearby').click()");
+      await waitFor(`${label} in the window`, () => view.run(`document.querySelector('#main').textContent.includes(${JSON.stringify(label)})`), 20_000);
+    };
+    const choose = (view, label, cwd) => view.run(`(() => {
+      const row = [...document.querySelectorAll('label.pick')].find((item) => item.textContent.includes(${JSON.stringify(label)}));
+      row.querySelector('input[type=checkbox]').click();
+      [...document.querySelectorAll('input[type=text]')].at(-1).value = ${JSON.stringify(cwd)};
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
+    })()`).catch(() => {});
+
+    await check("discovery: the companion finds an agent, shown unticked with its key, and the page sees nothing until it is chosen", async () => {
+      describe("found.json", "Found agent", identity.peerId, "found");
+      await requested();
+      const view = await prompt();
+      await search(view, "Found agent");
+      const row = await view.run(`(() => {
+        const item = [...document.querySelectorAll('label.pick')].find((each) => each.textContent.includes('Found agent'));
+        return { ticked: item.querySelector('input').checked, text: item.textContent };
+      })()`);
+      assert.equal(row.ticked, false);
+      assert.ok(row.text.includes(identity.peerId), row.text);
+      assert.ok(row.text.includes("on this machine"), row.text);
+      const seen = await page.run("document.acp.agents().then((agents) => agents.map((agent) => agent.label))");
+      assert.ok(!seen.includes("Found agent"), seen.join());
+      await choose(view, "Found agent", "/found");
+      assert.equal(await page.run("window.asked"), 1);
+      assert.equal(await page.run("window.agent.label"), "Found agent");
+      assert.equal(await page.run("window.agent.identity.verified"), false, "shown is not proven");
+    });
+    await check("discovery: chosen and connected, the real handshake proves the key it named", async () => {
+      assert.equal(await page.run(open), true);
+      const init = await page.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })");
+      assert.equal(init.result.protocolVersion, 1);
+      await page.run("document.acp.revoke(window.agent).then(() => window.conn.closed)");
+    });
+    await check("spoof: an advertisement naming a key the agent does not hold is refused at connect", async () => {
+      const someoneElse = await generateIdentity();
+      describe("spoof.json", "Spoofed agent", someoneElse.peerId, "spoof");
+      const before = reached.length;
+      await requested();
+      const view = await prompt();
+      await search(view, "Spoofed agent");
+      await choose(view, "Spoofed agent", "/spoof");
+      assert.equal(await page.run("window.asked"), 1);
+      assert.equal(await page.run("window.agent.label"), "Spoofed agent");
+      assert.equal(await page.run("document.acp.connect(window.agent).then(() => 'connected', (e) => e.name)"), "NetworkError");
+      assert.equal(reached.length, before, "no ACP message may reach anyone");
+    });
+  } else {
+    console.log("skipped: discovery and spoof need CANOA_E2E_BRIDGE");
+  }
   exitCode = results.some((line) => line.startsWith("FAIL")) ? 1 : 0;
 } catch (error) {
   console.log(`ABORTED: ${error.stack ?? error}`);
 } finally {
   clearTimeout(watchdog);
+  if (companionInstalled) execFileSync(bridge, ["companion", "uninstall"], { stdio: "ignore" });
   chrome.kill();
   await sleep(1500);
   for (const socket of sockets) socket.terminate();

@@ -12,11 +12,11 @@ The extension implements [ACP in the browser](https://boriken-dev.github.io/coqu
 - `acp-content.js` sits between it and the service worker, and adds what the page cannot forge: whether the person has just acted.
 - `acp-gateway.js` decides: grants, per-origin ids, and coqui-acp's scope on every message. It trusts only the origin the browser reports.
 - `acp-provider.js` puts that on Chrome's APIs, and `acp-request.html` is the window that asks the person, where a page cannot draw over it.
-- `acp-dial.js` opens a proven, sealed WebSocket. Agents are added by hand with a pinned peer id; discovery is not built yet.
+- `acp-dial.js` opens a proven, sealed WebSocket. Agents are added by hand, or chosen from what `acp-discovery.js` reads out of coqui-acp-bridge's companion when the person asks to look nearby. What it finds is a claim: nothing is ticked for the person, and a key it named is tested only by the proof at connect.
 
 Right-click the toolbar icon for **Let this site ask for my agents** and **Canoa agents**.
 
-`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
+`npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket, and with `CANOA_E2E_BRIDGE=<path to coqui-acp-bridge>` through the real companion: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
 
 ## Browser-facing building blocks
 
