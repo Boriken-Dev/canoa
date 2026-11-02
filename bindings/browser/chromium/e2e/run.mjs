@@ -1,7 +1,10 @@
 // The provider in a real browser: a real page under a strict CSP, the real extension, and an agent on a real socket proving
 // itself with the real handshake. Drives the browser over its DevTools protocol, with the person's window clicked by script.
 //
-//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] node e2e/run.mjs
+//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] [CANOA_E2E_PAGES=dir] node e2e/run.mjs
+//
+// CANOA_E2E_PAGES holds the other languages' pages: wasm/page.js and page_bg.wasm from coqui-acp-page's example through
+// wasm-bindgen --target web, and dart/page.js from app/tool/provider_page.dart through dart compile js.
 //
 // With a bridge, its companion is registered for this user during the run and removed after, replacing any registered before.
 // Needs `npm install` in examples/acp-echo, for its WebSocket server.
@@ -22,6 +25,7 @@ const { WebSocketServer } = createRequire(import.meta.url)("../../../../examples
 const browser = process.env.CANOA_E2E_BROWSER;
 if (!browser) throw new Error("set CANOA_E2E_BROWSER");
 const bridge = process.env.CANOA_E2E_BRIDGE;
+const pages = process.env.CANOA_E2E_PAGES;
 
 const work = mkdtempSync(path.join(tmpdir(), "canoa-e2e-"));
 const profile = path.join(work, "profile");
@@ -109,7 +113,32 @@ const plainUrl = `ws://127.0.0.1:${plainServer.address().port}/agent`;
 
 // The page, as strict as a page gets: nothing inline, and no network but its own origin.
 const CSP = "default-src 'none'; script-src 'self'; connect-src 'self'";
+// A page in another language, exactly as strict but for what loading WebAssembly needs.
+const LANGUAGE_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'";
+const TYPES = { ".js": "text/javascript", ".wasm": "application/wasm" };
 const site = createServer((request, response) => {
+  if (pages && request.url.startsWith("/pages/")) {
+    const file = path.join(pages, ...request.url.slice("/pages/".length).split("/").filter((part) => part !== ".."));
+    response.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream", "content-security-policy": LANGUAGE_CSP });
+    response.end(readFileSync(file));
+    return;
+  }
+  if (request.url === "/wasm-app.js") {
+    response.writeHead(200, { "content-type": "text/javascript", "content-security-policy": LANGUAGE_CSP });
+    response.end("import init, { ask_for_agents, run_turn } from '/pages/wasm/page.js'; await init(); window.language = { ask: () => ask_for_agents('from Rust'), turn: run_turn }; window.ready = true;");
+    return;
+  }
+  if (request.url === "/wasm.html" || request.url === "/dart.html") {
+    const script = request.url === "/wasm.html" ? '<script type="module" src="/wasm-app.js"></script>' : '<script src="/pages/dart/page.js"></script><script src="/dart-app.js"></script>';
+    response.writeHead(200, { "content-type": "text/html", "content-security-policy": LANGUAGE_CSP });
+    response.end(`<!doctype html><title>page</title>${script}<p>page</p>`);
+    return;
+  }
+  if (request.url === "/dart-app.js") {
+    response.writeHead(200, { "content-type": "text/javascript", "content-security-policy": LANGUAGE_CSP });
+    response.end("window.language = { ask: () => window.canoaAsk(), turn: (label, text) => window.canoaTurn(label, text) }; window.ready = true;");
+    return;
+  }
   if (request.url === "/app.js") {
     response.writeHead(200, { "content-type": "text/javascript", "content-security-policy": CSP });
     response.end("window.addEventListener('acp:ready', (event) => { window.found = event.detail.acp; }); window.dispatchEvent(new Event('acp:request')); window.ready = true;");
@@ -195,7 +224,7 @@ const watchdog = setTimeout(() => {
   console.log("FAILED: the run took too long");
   chrome.kill();
   process.exit(1);
-}, 300_000);
+}, 360_000);
 try {
   debug = await waitFor("the browser", () => {
     try {
@@ -363,7 +392,11 @@ try {
     const describe = (name, label, peer, tail) => writeFileSync(path.join(descriptors, name), JSON.stringify({ txtvers: 1, proto: "acp", label, url: `${agentUrl}/${tail}`, peer }));
     const search = async (view, label) => {
       await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Look for agents nearby').click()");
-      await waitFor(`${label} in the window`, () => view.run(`document.querySelector('#main').textContent.includes(${JSON.stringify(label)})`), 20_000);
+      try {
+        await waitFor(`${label} in the window`, () => view.run(`document.querySelector('#main').textContent.includes(${JSON.stringify(label)})`), 20_000);
+      } catch (error) {
+        throw new Error(`${error.message}; it showed: ${await view.run("document.querySelector('#main').textContent")}`);
+      }
     };
     const choose = (view, label, cwd) => view.run(`(() => {
       const row = [...document.querySelectorAll('label.pick')].find((item) => item.textContent.includes(${JSON.stringify(label)}));
@@ -430,7 +463,7 @@ try {
       createInterface({ input: process.stdin }).on("line", (line) => {
         const { id, method } = JSON.parse(line);
         if (id === undefined) return;
-        const result = method === "initialize" ? { protocolVersion: 1, agentCapabilities: {} } : method === "session/new" ? { sessionId: "real" } : {};
+        const result = method === "initialize" ? { protocolVersion: 1, agentCapabilities: {} } : method === "session/new" ? { sessionId: "real" } : method === "session/prompt" ? { stopReason: "end_turn" } : {};
         process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
       });`);
     const bridgeKey = path.join(work, "bridge.key");
@@ -500,6 +533,39 @@ try {
       assert.equal(await page.run("window.asked"), 1);
       assert.deepEqual(await page.run(turn), [true, 1, "real"]);
     });
+    if (pages) {
+      const languagePage = async (url) => {
+        const made = await (await fetch(`http://127.0.0.1:${debug}/json/new?${encodeURIComponent(`${pageUrl}${url}`)}`, { method: "PUT" })).json();
+        const session = new Session(made.webSocketDebuggerUrl);
+        await session.call("Runtime.enable");
+        await waitFor("the language's page", () => session.run("window.ready === true && typeof document.acp === 'object'"));
+        return session;
+      };
+      const grantToLanguage = async (session) => {
+        await session.run("window.asked = window.language.ask().then((count) => count, (error) => String(error)); true", { gesture: true });
+        const view = await prompt();
+        await choose(view, "Real bridge", "/language");
+        assert.equal(await session.run("window.asked"), 1);
+      };
+      await check("wasm: a Rust page compiled to WebAssembly asks for an agent and runs a turn through the extension", async () => {
+        const session = await languagePage("wasm.html");
+        await grantToLanguage(session);
+        const [initialized, made, answered] = JSON.parse(await session.run("window.language.turn('Real bridge', 'hello from Rust')"));
+        assert.equal(JSON.parse(initialized).result.protocolVersion, 1);
+        assert.equal(JSON.parse(made).result.sessionId, "real");
+        assert.equal(JSON.parse(answered).result.stopReason, "end_turn");
+      });
+      await check("dart: Canoa's own connection code asks for an agent and runs a turn through the extension", async () => {
+        const session = await languagePage("dart.html");
+        await grantToLanguage(session);
+        const answer = JSON.parse(await session.run("window.language.turn('Real bridge', 'hello from Canoa')"));
+        assert.equal(answer.peer, bridgePeer);
+        assert.equal(answer.session, "real");
+        assert.equal(answer.stop, "end_turn");
+      });
+    } else {
+      console.log("skipped: wasm and dart need CANOA_E2E_PAGES");
+    }
   } else {
     console.log("skipped: discovery and spoof need CANOA_E2E_BRIDGE");
   }

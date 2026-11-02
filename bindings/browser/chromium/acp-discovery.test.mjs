@@ -5,7 +5,7 @@ import { readCandidates } from "./acp-discovery.js";
 
 const KEY = `sha256:${"a".repeat(64)}`;
 const OTHER = `sha256:${"b".repeat(64)}`;
-const good = { label: "Mine", url: "wss://10.0.0.5:8765/acp", peer: KEY, source: "mdns" };
+const good = { label: "Mine", url: "wss://10.0.0.5:8765/acp", peer: KEY, source: "dns-sd" };
 const withTransport = { ...good, webtransport: 8766, webtransportHash: OTHER };
 
 test("a good candidate comes through with what it claims", () => {
@@ -35,7 +35,7 @@ test("a malformed key is no key, and a blank label is no candidate", () => {
 });
 
 test("an unknown source cannot claim to be this machine", () => {
-  assert.equal(readCandidates({ candidates: [{ ...good, source: "trusted" }] })[0].source, "mdns");
+  assert.equal(readCandidates({ candidates: [{ ...good, source: "trusted" }] })[0].source, "dns-sd");
 });
 
 test("length and count are bounded", () => {

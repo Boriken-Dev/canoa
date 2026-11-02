@@ -6,7 +6,7 @@ const PEER = /^sha256:[0-9a-f]{64}$/;
 const LOOPBACK = ["localhost", "127.0.0.1", "[::1]"];
 const MAX_CANDIDATES = 64;
 const MAX_LABEL = 80;
-const SOURCES = ["mdns", "local"];
+const SOURCES = ["dns-sd", "local"];
 
 /** Where WebTransport is, if the candidate gave both a port and a certificate hash to pin. */
 function webTransportOf(item) {
@@ -39,7 +39,7 @@ export function readCandidates(reply, known = []) {
       label: item.label.trim().slice(0, MAX_LABEL),
       url: item.url,
       peer,
-      source: SOURCES.includes(item.source) ? item.source : "mdns",
+      source: SOURCES.includes(item.source) ? item.source : "dns-sd",
       webtransport,
       // The same key somewhere else, which choosing moves that agent to: it still has to prove the key.
       sameKeyAs: same?.label,

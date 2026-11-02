@@ -60,7 +60,7 @@ function searchButton(onFound) {
   return element("div", {}, search, status);
 }
 
-const WHERE = { mdns: "says it is on this network", local: "on this machine", manual: "added by hand" };
+const WHERE = { "dns-sd": "says it is on this network", local: "on this machine", manual: "added by hand" };
 
 function grantView(details) {
   const added = [];

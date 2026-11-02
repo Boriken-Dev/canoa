@@ -10,7 +10,7 @@ const SECRET = "canoa_acp_secret";
 const PORT_NAME = "canoa-acp";
 const ASK_MS = 120_000;
 const SEARCH_SECONDS = 3;
-const FOUND = ["mdns", "local"];
+const FOUND = ["dns-sd", "local"];
 
 const read = async (area, key, fallback) => (await chrome.storage[area].get(key))[key] ?? fallback;
 const write = (area, key, value) => chrome.storage[area].set({ [key]: value });
