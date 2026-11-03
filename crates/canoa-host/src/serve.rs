@@ -24,7 +24,8 @@ use coqui_peer_webcrypto::{Identity, PeerId, Trust, TrustStore, WebCrypto};
 use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel, Failure, Limits};
 
-use crate::config::{Config, Entry, EntryKind};
+use crate::config::{Config, Entry, EntryKind, Origin};
+use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 
 /// The longest ACP message either way, as one line.
@@ -143,6 +144,7 @@ enum Run {
     Provider {
         program: OsString,
         args: Vec<OsString>,
+        line: HostLine,
     },
 }
 
@@ -239,21 +241,30 @@ impl fmt::Debug for Serving {
     }
 }
 
-/// The arguments that make `program` serve a provider entry on its standard streams.
+/// The arguments that make `program` serve a provider entry on its standard streams. They hold paths and names only: the
+/// settings go on its standard input.
 fn provider_args(
     entry: &Entry,
-    library: &std::path::Path,
+    origin: &Origin,
     provider: &str,
+    directory: &std::path::Path,
     max_sessions: usize,
 ) -> Vec<OsString> {
+    let (flag, file) = match origin {
+        Origin::Library(library) => ("--library", library),
+        Origin::Source { file, .. } => ("--source", file),
+    };
     let mut args = vec![
         OsString::from("provider"),
-        OsString::from("--library"),
-        library.as_os_str().to_owned(),
+        OsString::from(flag),
+        file.as_os_str().to_owned(),
         OsString::from("--provider"),
         OsString::from(provider),
         OsString::from("--max-sessions"),
         OsString::from(max_sessions.to_string()),
+        OsString::from("--directory"),
+        directory.as_os_str().to_owned(),
+        OsString::from("--settings-on-stdin"),
     ];
     for root in &entry.working_roots {
         args.push(OsString::from("--working-root"));
@@ -308,16 +319,26 @@ impl Serving {
                     },
                 ),
                 EntryKind::Provider {
-                    library,
+                    origin,
                     provider,
+                    settings,
+                    directory,
                     max_sessions,
-                } => (
-                    "provider",
-                    Run::Provider {
-                        program: options.provider_program.as_os_str().to_owned(),
-                        args: provider_args(entry, library, provider, *max_sessions),
-                    },
-                ),
+                } => {
+                    let mut line = HostLine::default();
+                    line.settings.clone_from(settings);
+                    if let Origin::Source { settings, .. } = origin {
+                        line.source_settings = Some(settings.clone());
+                    }
+                    (
+                        "provider",
+                        Run::Provider {
+                            program: options.provider_program.as_os_str().to_owned(),
+                            args: provider_args(entry, origin, provider, directory, *max_sessions),
+                            line,
+                        },
+                    )
+                }
             };
             let id = ServiceId::new(entry.name.clone());
             // The host started this entry from its own configuration, which is what verifies it.
@@ -488,7 +509,7 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
 
 fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &PeerId) {
     let (program, args) = match &served.run {
-        Run::Agent { program, args, .. } | Run::Provider { program, args } => (program, args),
+        Run::Agent { program, args, .. } | Run::Provider { program, args, .. } => (program, args),
     };
     // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
     let (key, agent) = match shared.start(program, args) {
@@ -500,9 +521,46 @@ fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &
     };
     let end = match &served.run {
         Run::Agent { scope, .. } => relay(&Scoped::new(channel, scope), &agent),
-        Run::Provider { .. } => relay(channel, &agent),
+        // The host's settings reach the provider before anything the client sent.
+        Run::Provider { line, .. } => relay(&Prefilled::new(channel, line.to_line()), &agent),
     };
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
     let _ = agent.stop();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_provider_command_line_holds_no_setting() {
+        let config = Config::from_str_in(
+            "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n[host.providers.p.source_settings]\npaths = [\"SECRET-1\"]\n[host.providers.p.settings]\nkey = \"SECRET-2\"\n",
+            std::path::Path::new("/canoa"),
+        )
+        .expect("parses");
+        let entry = &config.entries[0];
+        let EntryKind::Provider {
+            origin,
+            provider,
+            directory,
+            max_sessions,
+            ..
+        } = &entry.kind
+        else {
+            panic!("a provider");
+        };
+        let args = provider_args(entry, origin, provider, directory, *max_sessions);
+        assert!(
+            args.iter().any(|arg| arg == "--settings-on-stdin"),
+            "{args:?}"
+        );
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.to_string_lossy().contains("SECRET")),
+            "{args:?}"
+        );
+    }
 }

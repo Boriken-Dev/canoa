@@ -57,7 +57,9 @@ listen = "127.0.0.1:7801"
         }
     );
     let EntryKind::Provider {
-        library,
+        origin,
+        settings,
+        directory,
         max_sessions,
         ..
     } = &config.entry("zeta").expect("there").kind
@@ -65,10 +67,137 @@ listen = "127.0.0.1:7801"
         panic!("a provider");
     };
     assert_eq!(
-        *library,
-        std::path::absolute(base().join("echo.dll")).expect("absolute")
+        *origin,
+        Origin::Library(std::path::absolute(base().join("echo.dll")).expect("absolute"))
     );
+    assert_eq!(*settings, None);
+    assert_eq!(*directory, std::path::absolute(base()).expect("absolute"));
     assert_eq!(*max_sessions, DEFAULT_MAX_SESSIONS);
+}
+
+fn provider_kind(text: &str) -> (Origin, Option<Settings>) {
+    let config = parse(text).expect("parses");
+    let EntryKind::Provider {
+        origin, settings, ..
+    } = config.entries[0].kind.clone()
+    else {
+        panic!("a provider");
+    };
+    (origin, settings)
+}
+
+#[test]
+fn a_source_entry_takes_its_settings_as_a_table() {
+    let (origin, settings) = provider_kind(
+        r#"
+[host.providers.python]
+source = "guatiao_source_py.dll"
+provider = "acp_echo_echo"
+[host.providers.python.source_settings]
+dirs = ["python"]
+paths = ["/opt/guatiao", "kinds"]
+[host.providers.python.settings]
+prefix = "hi"
+nested = { depth = 2, ratio = 0.5, on = true, list = [1, "two"] }
+"#,
+    );
+    let Origin::Source {
+        file,
+        settings: source,
+    } = origin
+    else {
+        panic!("a source: {origin:?}");
+    };
+    assert_eq!(
+        file,
+        std::path::absolute(base().join("guatiao_source_py.dll")).expect("absolute")
+    );
+    assert_eq!(
+        serde_json::Value::Object(source.as_map().clone()),
+        serde_json::json!({"dirs": ["python"], "paths": ["/opt/guatiao", "kinds"]})
+    );
+    assert_eq!(
+        serde_json::Value::Object(settings.expect("settings").as_map().clone()),
+        serde_json::json!({"prefix": "hi", "nested": {"depth": 2, "ratio": 0.5, "on": true, "list": [1, "two"]}})
+    );
+}
+
+#[test]
+fn a_source_needs_no_settings() {
+    let (origin, settings) =
+        provider_kind("[host.providers.p]\nsource = \"s.so\"\nprovider = \"p\"\n");
+    assert!(
+        matches!(&origin, Origin::Source { settings, .. } if settings.as_map().is_empty()),
+        "{origin:?}"
+    );
+    assert_eq!(settings, None);
+}
+
+#[test]
+fn a_library_takes_settings_and_no_source_settings() {
+    let (origin, settings) = provider_kind(
+        "[host.providers.p]\nlibrary = \"l.dll\"\nprovider = \"p\"\n[host.providers.p.settings]\nprefix = \"hi\"\n",
+    );
+    assert!(matches!(origin, Origin::Library(_)), "{origin:?}");
+    assert_eq!(
+        settings.expect("settings").as_map().get("prefix"),
+        Some(&serde_json::json!("hi"))
+    );
+    let error = parse(
+        "[host.providers.p]\nlibrary = \"l.dll\"\nprovider = \"p\"\n[host.providers.p.source_settings]\ndirs = []\n",
+    )
+    .expect_err("refused");
+    assert!(error.to_string().contains("source_settings"), "{error}");
+}
+
+#[test]
+fn library_and_source_exclude_each_other_and_one_is_needed() {
+    let both = "[host.providers.p]\nlibrary = \"l\"\nsource = \"s\"\nprovider = \"p\"\n";
+    assert!(
+        parse(both)
+            .expect_err("refused")
+            .to_string()
+            .contains("exclude")
+    );
+    let neither = "[host.providers.p]\nprovider = \"p\"\n";
+    assert!(
+        parse(neither)
+            .expect_err("refused")
+            .to_string()
+            .contains("library or source")
+    );
+    for empty in ["library = \"\"", "source = \"\""] {
+        let text = format!("[host.providers.p]\n{empty}\nprovider = \"p\"\n");
+        assert!(parse(&text).is_err(), "{empty}");
+    }
+}
+
+#[test]
+fn settings_are_tables_of_what_json_carries() {
+    for bad in [
+        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n[host.providers.p.source_settings]\nwhen = 1979-05-27\n",
+        "[host.providers.p]\nlibrary = \"l\"\nprovider = \"p\"\n[host.providers.p.settings]\nx = nan\n",
+        "[host.providers.p]\nlibrary = \"l\"\nprovider = \"p\"\n[host.providers.p.settings]\nx = [inf]\n",
+        "[host.providers.p]\nlibrary = \"l\"\nprovider = \"p\"\nsettings = \"x\"\n",
+        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\nsource_settings = [1]\n",
+    ] {
+        assert!(parse(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_setting_is_never_shown() {
+    let secret = "sk-ant-oat01-SECRETSECRET";
+    let text = format!(
+        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n[host.providers.p.source_settings]\ntoken = \"{secret}\"\n[host.providers.p.settings]\nkey = \"{secret}\"\n"
+    );
+    let config = parse(&text).expect("parses");
+    let shown = format!("{config:?}");
+    assert!(!shown.contains("SECRET"), "{shown}");
+    assert!(shown.contains("token") && shown.contains("key"), "{shown}");
+    let refused = format!("{text}when = 1979-05-27\n");
+    let error = parse(&refused).expect_err("a date is refused");
+    assert!(!error.to_string().contains("SECRET"), "{error}");
 }
 
 #[test]
@@ -218,7 +347,7 @@ fn a_byte_order_mark_is_ignored() {
 
 #[test]
 fn any_text_gives_a_value_or_an_error() {
-    let sample = "[host]\norigins = [\"https://a\"]\n[host.agents.a]\nprogram = \"x\"\nargs = [\"y\"]\nlisten = \"127.0.0.1:1\"\n[host.providers.p]\nlibrary = \"l\"\nprovider = \"p\"\npeers = []\n";
+    let sample = "[host]\norigins = [\"https://a\"]\n[host.agents.a]\nprogram = \"x\"\nargs = [\"y\"]\nlisten = \"127.0.0.1:1\"\n[host.providers.p]\nlibrary = \"l\"\nprovider = \"p\"\npeers = []\n[host.providers.q]\nsource = \"s\"\nprovider = \"q\"\n[host.providers.q.source_settings]\ndirs = [\"d\", 1.5]\n[host.providers.q.settings]\nx = { y = [true] }\n";
     for end in 0..=sample.len() {
         if sample.is_char_boundary(end) {
             let _ = parse(&sample[..end]);

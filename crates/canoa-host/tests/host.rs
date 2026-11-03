@@ -28,6 +28,24 @@ fn provider_entry(name: &str, extra: &str) -> String {
     )
 }
 
+fn source_entry(name: &str, extra: &str) -> String {
+    format!(
+        "[host.providers.{name}]\nsource = {}\nprovider = \"source_echo\"\n{extra}\n",
+        quoted(&example("echo_source", true).to_string_lossy())
+    )
+}
+
+/// The text of one turn answering `hello` on `entry`, or why there was none.
+fn hello(host: &Host, client: &Identity, entry: &str) -> Result<String, String> {
+    let dir = cwd(&host.scratch);
+    with_link(host.url(entry), client, host.peer, |rpc| {
+        rpc.initialize().map_err(|error| error.to_string())?;
+        let session = new_session(rpc, &dir).map_err(|error| error.to_string())?;
+        rpc.prompt(session["sessionId"].as_str().expect("an id"), "hello")
+            .map_err(|error| error.to_string())
+    })?
+}
+
 fn new_session(
     rpc: &support::Rpc<'_, coqui_web::websocket::Channel>,
     cwd: &str,
@@ -306,4 +324,82 @@ fn a_provider_library_that_offers_nothing_by_that_id_fails_the_connection_alone(
         rpc.initialize().expect("the other entry still serves");
     })
     .expect("a paired key is served");
+}
+
+#[test]
+fn a_source_entry_serves_the_provider_its_settings_describe() {
+    let host = Host::start(
+        &source_entry(
+            "source",
+            "[host.providers.source.source_settings]\nprefix = \"from the source\"",
+        ),
+        1,
+    );
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    assert_eq!(
+        hello(&host, &client, "source").as_deref(),
+        Ok("from the source: hello")
+    );
+}
+
+#[test]
+fn a_relative_path_in_source_settings_is_taken_from_the_configs_directory() {
+    let scratch = Scratch::new();
+    std::fs::write(scratch.0.join("prefix.txt"), "from a file\n").expect("written");
+    let config = source_entry(
+        "source",
+        "[host.providers.source.source_settings]\nprefix_file = \"prefix.txt\"",
+    );
+    let host = Host::start_in(scratch, &config, 1, &[]);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    assert_eq!(
+        hello(&host, &client, "source").as_deref(),
+        Ok("from a file: hello")
+    );
+}
+
+#[test]
+fn a_provider_built_from_settings_answers_with_them() {
+    let config = provider_entry(
+        "prefixed",
+        "[host.providers.prefixed.settings]\nprefix = \"hi\"",
+    )
+    .replace("\"echo_provider\"", "\"prefixed_echo\"");
+    let host = Host::start(&config, 1);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    assert_eq!(
+        hello(&host, &client, "prefixed").as_deref(),
+        Ok("hi: hello")
+    );
+}
+
+#[test]
+fn settings_that_are_missing_wrong_or_unwanted_fail_that_connection_alone() {
+    let prefixed = |name: &str, settings: &str| {
+        provider_entry(
+            name,
+            &format!("[host.providers.{name}.settings]\n{settings}"),
+        )
+        .replace("\"echo_provider\"", "\"prefixed_echo\"")
+    };
+    let config = provider_entry("missing", "").replace("\"echo_provider\"", "\"prefixed_echo\"")
+        + &prefixed("misspelled", "prefx = \"hi\"")
+        + &prefixed("mistyped", "prefix = 3")
+        + &prefixed("refused", "prefix = \"\"")
+        + &provider_entry(
+            "unwanted",
+            "[host.providers.unwanted.settings]\nprefix = \"hi\"",
+        )
+        + &provider_entry("echo", "");
+    let host = Host::start(&config, 6);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    for entry in ["missing", "misspelled", "mistyped", "refused", "unwanted"] {
+        let failed = hello(&host, &client, entry);
+        assert!(failed.is_err(), "{entry}: {failed:?}");
+    }
+    assert_eq!(hello(&host, &client, "echo").as_deref(), Ok("echo: hello"));
 }

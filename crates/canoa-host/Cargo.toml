@@ -28,6 +28,7 @@ coqui-peer.workspace = true
 coqui-peer-webcrypto.workspace = true
 coqui-web.workspace = true
 guatiao.workspace = true
+guatiao-serde.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -42,6 +43,10 @@ url = "2.5"
 # Fixtures the tests run, built by `cargo test` into target/<profile>/examples.
 [[example]]
 name = "echo_provider"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "echo_source"
 crate-type = ["cdylib"]
 
 [[example]]

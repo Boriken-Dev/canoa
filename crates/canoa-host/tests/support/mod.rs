@@ -98,7 +98,30 @@ impl Host {
     /// As [`Host::start`], with more arguments to `serve` and more environment, and its input kept open for
     /// [`Host::close_input`].
     pub fn start_with(config: &str, entries: usize, args: &[&str], env: &[(&str, &str)]) -> Self {
-        let scratch = Scratch::new();
+        let env: Vec<(&str, std::ffi::OsString)> = env
+            .iter()
+            .map(|(name, value)| (*name, std::ffi::OsString::from(value)))
+            .collect();
+        Self::launch(Scratch::new(), config, entries, args, &env)
+    }
+
+    /// As [`Host::start`], in `scratch`, with `env` added to the host's environment.
+    pub fn start_in(
+        scratch: Scratch,
+        config: &str,
+        entries: usize,
+        env: &[(&str, std::ffi::OsString)],
+    ) -> Self {
+        Self::launch(scratch, config, entries, &[], env)
+    }
+
+    fn launch(
+        scratch: Scratch,
+        config: &str,
+        entries: usize,
+        args: &[&str],
+        env: &[(&str, std::ffi::OsString)],
+    ) -> Self {
         let path = scratch.0.join("Canoa.cfg");
         std::fs::write(&path, config).expect("Canoa.cfg is written");
         let mut child = Command::new(host_binary())
@@ -106,7 +129,7 @@ impl Host {
             .arg("--config")
             .arg(&path)
             .args(args)
-            .envs(env.iter().copied())
+            .envs(env.iter().map(|(name, value)| (name, value)))
             .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
             .env("CANOA_LOG", "debug")
             .stdin(Stdio::piped())

@@ -15,7 +15,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use canoa_host::{Config, PeerState, ProviderOptions, ServeOptions, Serving, peers};
+use canoa_host::{
+    Config, HostLine, Origin, PeerState, ProviderOptions, ServeOptions, Serving, peers,
+};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use coqui_agentic_peer::{auth, home, pairing};
 use coqui_web::websocket::{self, Frames};
@@ -78,9 +80,12 @@ enum Command {
     /// Serve one Guatiao agent provider as an ACP agent on standard input and output.
     Provider {
         /// The Guatiao library file. Loading it runs its code: name only a file you would run.
+        #[arg(long, required_unless_present = "source", conflicts_with = "source")]
+        library: Option<PathBuf>,
+        /// A Guatiao source file, such as guatiao_source_py, and the code it loads: name only files you would run.
         #[arg(long)]
-        library: PathBuf,
-        /// The provider's id in the library.
+        source: Option<PathBuf>,
+        /// The provider's id.
         #[arg(long)]
         provider: String,
         /// A directory a session's cwd must be under; repeat for several. None takes any absolute path.
@@ -89,6 +94,12 @@ enum Command {
         /// Sessions the connection may hold.
         #[arg(long, default_value_t = canoa_host::config::DEFAULT_MAX_SESSIONS)]
         max_sessions: usize,
+        /// The directory to run in, from which relative paths in the settings are taken.
+        #[arg(long)]
+        directory: Option<PathBuf>,
+        /// Read the settings from the first line of standard input, as `canoa-host serve` writes them.
+        #[arg(long)]
+        settings_on_stdin: bool,
     },
 }
 
@@ -395,11 +406,37 @@ fn run(cli: Cli) -> Result<(), Failed> {
         }
         Command::Provider {
             library,
+            source,
             provider,
             working_roots,
             max_sessions,
+            directory,
+            settings_on_stdin,
         } => {
-            let mut options = ProviderOptions::new(library, provider);
+            // A file named on the command line is taken from where the command was given.
+            let absolute = |path: PathBuf| std::path::absolute(&path).unwrap_or(path);
+            let (library, source) = (library.map(absolute), source.map(absolute));
+            if let Some(directory) = directory {
+                std::env::set_current_dir(&directory).map_err(|error| {
+                    Failed::run(format!("could not run in {}: {error}", directory.display()))
+                })?;
+            }
+            let line = if settings_on_stdin {
+                HostLine::read(&mut std::io::stdin().lock(), canoa_host::serve::MAX_LINE)
+                    .map_err(Failed::run)?
+            } else {
+                HostLine::default()
+            };
+            let origin = match (library, source) {
+                (Some(library), None) if line.source_settings.is_none() => Origin::Library(library),
+                (None, Some(file)) => Origin::Source {
+                    file,
+                    settings: line.source_settings.unwrap_or_default(),
+                },
+                _ => return Err(Failed::usage("source settings go with --source alone")),
+            };
+            let mut options = ProviderOptions::new(origin, provider);
+            options.settings = line.settings;
             options.working_roots = working_roots;
             options.max_sessions = max_sessions;
             canoa_host::serve_stdio(&options).map_err(Failed::run)

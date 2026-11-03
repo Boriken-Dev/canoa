@@ -57,15 +57,59 @@ pub enum EntryKind {
         /// Its arguments.
         args: Vec<OsString>,
     },
-    /// A Guatiao library offering an `agent_provider`, served through the ACP facade in a process of its own.
+    /// A Guatiao `agent_provider`, from a library or a source, served through the ACP facade in a process of its own.
     Provider {
-        /// The library file, absolute.
-        library: PathBuf,
-        /// The provider's id in the library.
+        /// Where its code comes from.
+        origin: Origin,
+        /// The provider's id.
         provider: String,
+        /// The provider's configuration, checked against the schema it declares when a connection loads it.
+        settings: Option<Settings>,
+        /// The directory the provider's process runs in, absolute: Canoa.cfg's.
+        directory: PathBuf,
         /// Sessions one connection may hold.
         max_sessions: usize,
     },
+}
+
+/// Where a provider's code comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Origin {
+    /// A Guatiao library file, absolute.
+    Library(PathBuf),
+    /// A Guatiao source file, absolute, such as `guatiao_source_py`, which serves libraries written in another language.
+    Source {
+        /// The source file.
+        file: PathBuf,
+        /// What the source is added with: for Python, the directories of its manifests and its import paths.
+        settings: Settings,
+    },
+}
+
+/// A table of settings from Canoa.cfg, as JSON, the form a provider process receives it in. `Debug` shows its keys,
+/// never its values, which may be secrets.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Settings(serde_json::Map<String, serde_json::Value>);
+
+impl Settings {
+    /// Settings holding `map`.
+    #[must_use]
+    pub fn new(map: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self(map)
+    }
+
+    /// The table.
+    #[must_use]
+    pub fn as_map(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Settings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
 }
 
 /// Why Canoa.cfg could not be used. No variant quotes a value from the file, which may hold a secret.
@@ -166,7 +210,10 @@ struct RawAgent {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProvider {
-    library: String,
+    library: Option<String>,
+    source: Option<String>,
+    source_settings: Option<toml::Table>,
+    settings: Option<toml::Table>,
     provider: String,
     max_sessions: Option<usize>,
     listen: Option<String>,
@@ -177,7 +224,7 @@ struct RawProvider {
 }
 
 impl Config {
-    /// Reads `path`. Relative library paths are taken from the file's directory.
+    /// Reads `path`. Relative `library` and `source` paths are taken from the file's directory, where a provider runs.
     ///
     /// # Errors
     ///
@@ -199,7 +246,8 @@ impl Config {
         Self::from_str_in(text, base)
     }
 
-    /// Parses Canoa.cfg's text, with relative library paths taken from `base`. Touches no file.
+    /// Parses Canoa.cfg's text, with relative `library` and `source` paths taken from `base`, where a provider runs.
+    /// Touches no file.
     ///
     /// # Errors
     ///
@@ -237,12 +285,46 @@ impl Config {
             };
             entries.push(entry(name, kind, common)?);
         }
+        let directory = directory_of(base);
         for (name, provider) in host.providers {
             check_name(&name)?;
-            if provider.library.is_empty() || provider.provider.is_empty() {
-                return Err(invalid(&name, "library and provider must not be empty"));
+            if provider.provider.is_empty() {
+                return Err(invalid(&name, "provider must not be empty"));
             }
-            let library = base.join(&provider.library);
+            let file = |path: &str| {
+                if path.is_empty() {
+                    return Err(invalid(&name, "library or source must not be empty"));
+                }
+                let path = base.join(path);
+                Ok(std::path::absolute(&path).unwrap_or(path))
+            };
+            let origin = match (
+                &provider.library,
+                &provider.source,
+                provider.source_settings,
+            ) {
+                (Some(_), Some(_), _) => {
+                    return Err(invalid(&name, "library and source exclude each other"));
+                }
+                (None, None, _) => {
+                    return Err(invalid(&name, "a provider needs library or source"));
+                }
+                (Some(_), None, Some(_)) => {
+                    return Err(invalid(
+                        &name,
+                        "source_settings go with source, not library",
+                    ));
+                }
+                (Some(library), None, None) => Origin::Library(file(library)?),
+                (None, Some(source), settings) => Origin::Source {
+                    file: file(source)?,
+                    settings: settings_of(&name, settings.unwrap_or_default())?,
+                },
+            };
+            let settings = provider
+                .settings
+                .map(|table| settings_of(&name, table))
+                .transpose()?;
             let max_sessions = provider.max_sessions.unwrap_or(DEFAULT_MAX_SESSIONS);
             if max_sessions == 0 {
                 return Err(invalid(&name, "max_sessions must be at least 1"));
@@ -254,8 +336,10 @@ impl Config {
                 max_peers: provider.max_peers,
             };
             let kind = EntryKind::Provider {
-                library: std::path::absolute(&library).unwrap_or(library),
+                origin,
                 provider: provider.provider,
+                settings,
+                directory: directory.clone(),
                 max_sessions,
             };
             entries.push(entry(name, kind, common)?);
@@ -279,6 +363,46 @@ fn invalid(name: &str, what: &str) -> ConfigError {
         entry: Some(name.to_owned()),
         what: what.to_owned(),
     }
+}
+
+/// `base` made absolute; an empty one is the current directory, as a path joined to it is taken from there.
+fn directory_of(base: &Path) -> PathBuf {
+    if base.as_os_str().is_empty() {
+        return std::env::current_dir().unwrap_or_default();
+    }
+    std::path::absolute(base).unwrap_or_else(|_| base.to_owned())
+}
+
+/// A TOML table as JSON. A date, which JSON has no type for, and a float that is not a number are refused.
+fn settings_of(name: &str, table: toml::Table) -> Result<Settings, ConfigError> {
+    object_of(table).map(Settings).ok_or_else(|| {
+        invalid(
+            name,
+            "a setting holds a date, or a float that is not a number, which a provider cannot be given",
+        )
+    })
+}
+
+fn object_of(table: toml::Table) -> Option<serde_json::Map<String, serde_json::Value>> {
+    table
+        .into_iter()
+        .map(|(key, value)| Some((key, json_of(value)?)))
+        .collect()
+}
+
+fn json_of(value: toml::Value) -> Option<serde_json::Value> {
+    use serde_json::Value as Json;
+    Some(match value {
+        toml::Value::String(text) => Json::String(text),
+        toml::Value::Integer(number) => Json::from(number),
+        toml::Value::Float(number) => Json::Number(serde_json::Number::from_f64(number)?),
+        toml::Value::Boolean(flag) => Json::Bool(flag),
+        toml::Value::Datetime(_) => return None,
+        toml::Value::Array(items) => {
+            Json::Array(items.into_iter().map(json_of).collect::<Option<_>>()?)
+        }
+        toml::Value::Table(table) => Json::Object(object_of(table)?),
+    })
 }
 
 /// Checked before anything quotes the name, since a key in the file may hold any character.

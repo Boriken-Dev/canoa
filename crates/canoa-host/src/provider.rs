@@ -1,24 +1,31 @@
 //! One Guatiao provider, served as an ACP agent on standard input and output: what the host runs for each connection to a
-//! provider entry, so the library is mapped in a process of its own and ends with the connection.
+//! provider entry, so the library or source is mapped in a process of its own and ends with the connection.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
+use std::io::{BufRead, Read as _};
 use std::path::PathBuf;
 
 use coqui_acp::lines;
-use coqui_acp_provider::guatiao::library::Registry;
-use coqui_acp_provider::{AcpFacade, AgentProvider, Settings};
+use coqui_acp_provider::guatiao::library::{ImportSearch, Registry};
+use coqui_acp_provider::guatiao::{Alloc, Map, Value};
+use coqui_acp_provider::{AcpFacade, AgentProvider, Settings as FacadeSettings};
+use serde::{Deserialize, Serialize};
+
+use crate::config::{Origin, Settings};
 
 /// What [`serve_stdio`] loads and how it serves it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ProviderOptions {
-    /// The Guatiao library file.
-    pub library: PathBuf,
-    /// The provider's id in it.
+    /// The Guatiao library or source file.
+    pub origin: Origin,
+    /// The provider's id.
     pub provider: String,
+    /// The provider's configuration; `None` takes the provider's own instance.
+    pub settings: Option<Settings>,
     /// Directories a session's `cwd` must be under; empty takes any absolute path.
     pub working_roots: Vec<PathBuf>,
     /// Sessions the connection may hold.
@@ -26,15 +33,86 @@ pub struct ProviderOptions {
 }
 
 impl ProviderOptions {
-    /// Options for `provider` in `library`, with any working directory and the facade's own session limit.
+    /// Options for `provider` from `origin`, with no configuration, any working directory and the facade's own session
+    /// limit.
     #[must_use]
-    pub fn new(library: impl Into<PathBuf>, provider: impl Into<String>) -> Self {
+    pub fn new(origin: Origin, provider: impl Into<String>) -> Self {
         Self {
-            library: library.into(),
+            origin,
             provider: provider.into(),
+            settings: None,
             working_roots: Vec::new(),
-            max_sessions: Settings::default().max_sessions,
+            max_sessions: FacadeSettings::default().max_sessions,
         }
+    }
+}
+
+/// The settings `canoa-host serve` gives a provider process as the first line of its standard input, so that no value is
+/// on a command line, which other users of the machine may read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HostLine {
+    /// What a source is added with.
+    pub source_settings: Option<Settings>,
+    /// The provider's configuration.
+    pub settings: Option<Settings>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Line {
+    canoa_host: u32,
+    #[serde(default)]
+    source_settings: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    settings: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// What [`Line::canoa_host`] holds: a client's ACP message never has the field, so one is never read as settings.
+const LINE_VERSION: u32 = 1;
+
+impl HostLine {
+    /// The line as JSON, with no line break in it or after it.
+    #[must_use]
+    pub fn to_line(&self) -> Vec<u8> {
+        let line = Line {
+            canoa_host: LINE_VERSION,
+            source_settings: self.source_settings.as_ref().map(|s| s.as_map().clone()),
+            settings: self.settings.as_ref().map(|s| s.as_map().clone()),
+        };
+        serde_json::to_vec(&line).unwrap_or_default()
+    }
+
+    /// Reads one line of at most `max` bytes from `input`, leaving the rest of it for the transport.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::HostLine`] for input that ends first, a line too long, or a line that is not this one.
+    pub fn read(input: &mut impl BufRead, max: usize) -> Result<Self, ProviderError> {
+        let mut text = String::new();
+        let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+        input
+            .take(limit)
+            .read_line(&mut text)
+            .map_err(|_| ProviderError::HostLine("standard input could not be read"))?;
+        if !text.ends_with('\n') {
+            return Err(ProviderError::HostLine(if text.len() > max {
+                "the first line is too long"
+            } else {
+                "standard input ended before the first line did"
+            }));
+        }
+        let line: Line = serde_json::from_str(text.trim_end())
+            .map_err(|_| ProviderError::HostLine("the first line is not the host's settings"))?;
+        if line.canoa_host != LINE_VERSION {
+            return Err(ProviderError::HostLine(
+                "the first line is another version's",
+            ));
+        }
+        Ok(Self {
+            source_settings: line.source_settings.map(Settings::new),
+            settings: line.settings.map(Settings::new),
+        })
     }
 }
 
@@ -44,12 +122,20 @@ impl ProviderOptions {
 pub enum ProviderError {
     /// The library could not be loaded; the loader's words.
     Load(String),
-    /// The library offers nothing by that id.
+    /// The source could not be added, or refused its settings; its words or the loader's.
+    Source(String),
+    /// Nothing loaded offers a provider by that id.
     Missing,
     /// What it offers by that id is another kind, or a table of another version of the kind.
     WrongKind,
-    /// The provider needs a configuration, which this host does not give.
+    /// The provider needs a configuration, and the entry gives no `settings`.
     NeedsConfiguration,
+    /// The entry gives `settings` to a provider that takes none.
+    TakesNoSettings,
+    /// The settings do not fit the provider's schema, or the provider refused them. Names a setting, never a value.
+    Settings(String),
+    /// The first line of standard input was not the host's settings.
+    HostLine(&'static str),
     /// Standard input and output could not carry ACP.
     Transport(std::io::Error),
     /// The facade ended with an error; its words.
@@ -60,13 +146,19 @@ impl fmt::Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Load(why) => write!(f, "the library did not load: {why}"),
-            Self::Missing => f.write_str("the library offers no provider by that id"),
+            Self::Source(why) => write!(f, "the source was not added: {why}"),
+            Self::Missing => f.write_str("nothing loaded offers a provider by that id"),
             Self::WrongKind => {
                 f.write_str("that provider is not an agent_provider of this version")
             }
             Self::NeedsConfiguration => {
-                f.write_str("that provider needs a configuration, which this host does not give")
+                f.write_str("that provider needs a configuration: give the entry a settings table")
             }
+            Self::TakesNoSettings => f.write_str(
+                "that provider takes no configuration: remove the entry's settings table",
+            ),
+            Self::Settings(why) => write!(f, "the provider's settings were refused: {why}"),
+            Self::HostLine(why) => write!(f, "the host's settings did not arrive: {why}"),
             Self::Transport(error) => write!(f, "standard input and output did not start: {error}"),
             Self::Facade(why) => write!(f, "the ACP facade failed: {why}"),
         }
@@ -84,17 +176,20 @@ impl core::error::Error for ProviderError {
 
 /// Loads the provider and serves it on this process's standard input and output until the client closes them.
 ///
-/// **Mapping the library runs its code** with this process's rights: name only a file you would run as a program. Its
-/// imports are found beside it and in the system's directories, not in the working directory or `PATH`. Nothing may print
-/// to standard output while this runs, since that is the transport.
+/// **Loading runs code** with this process's rights, before any check: a library's, or a source's and then whatever it
+/// loads, which for Python is the interpreter, its environment and every module its settings and manifests reach. Name
+/// only files you would run as a program. A library's imports are found beside it and in the system's directories, not in
+/// the working directory or `PATH`; on Windows a source's imports are looked for in the working directory and on `PATH`
+/// too, when those leave one missing. Nothing may print to standard output while this runs, since that is the transport.
 ///
 /// # Errors
 ///
-/// [`ProviderError`] for a library that does not load or offer the provider, and for a transport or facade failure.
+/// [`ProviderError`] for a library or source that does not load, a provider it does not offer or settings it refuses, and
+/// for a transport or facade failure.
 pub fn serve_stdio(options: &ProviderOptions) -> Result<(), ProviderError> {
     // What the provider hands out points into the library, so the registry and its mapping outlive the facade.
     let (_registry, provider) = load(options)?;
-    let mut settings = Settings::default();
+    let mut settings = FacadeSettings::default();
     settings.working_roots.clone_from(&options.working_roots);
     settings.max_sessions = options.max_sessions;
     let (transport, _diagnostics) = lines::over_io(
@@ -110,15 +205,144 @@ pub fn serve_stdio(options: &ProviderOptions) -> Result<(), ProviderError> {
         .run(transport)
         .map_err(|error| ProviderError::Facade(error.to_string()))
 }
+
 fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>), ProviderError> {
     let mut registry = Registry::new("canoa-host", env!("CARGO_PKG_VERSION"));
-    registry
-        .load_file(&options.library)
-        .map_err(|error| ProviderError::Load(error.to_string()))?;
+    match &options.origin {
+        Origin::Library(library) => {
+            registry
+                .load_file(library)
+                .map_err(|error| ProviderError::Load(error.to_string()))?;
+        }
+        Origin::Source { file, settings } => {
+            // A language's runtime is often installed elsewhere than the source: Python's python3.dll, on Windows.
+            registry.set_import_search(ImportSearch::Path);
+            let config = map_of(settings).map_err(ProviderError::Source)?;
+            registry
+                .add_source_file(file, &config)
+                .map_err(|error| ProviderError::Source(error.to_string()))?;
+            for refused in registry.refresh().refused {
+                tracing::warn!(
+                    library = refused.id.as_deref().unwrap_or("?"),
+                    "the source refused a library: {}",
+                    refused.reason
+                );
+            }
+        }
+    }
     let offer = registry
         .offer::<dyn AgentProvider>(&options.provider)
         .ok_or(ProviderError::Missing)?
         .map_err(|_| ProviderError::WrongKind)?;
-    let provider = offer.shared().ok_or(ProviderError::NeedsConfiguration)?;
+    let provider: Arc<dyn AgentProvider> = match &options.settings {
+        None => offer.shared().ok_or(ProviderError::NeedsConfiguration)?,
+        Some(_) if !offer.builds_instances() => return Err(ProviderError::TakesNoSettings),
+        Some(settings) => {
+            let config = Value::from(map_of(settings).map_err(ProviderError::Settings)?);
+            Arc::new(
+                offer
+                    .instantiate(&config)
+                    .map_err(|error| ProviderError::Settings(error.to_string()))?,
+            )
+        }
+    };
     Ok((registry, provider))
+}
+
+/// `settings` as a Guatiao map.
+fn map_of(settings: &Settings) -> Result<Map, String> {
+    let mut map = Map::new();
+    for (key, value) in settings.as_map() {
+        let value = guatiao_serde::adapt::to_value_in(value, Alloc::rust())
+            .map_err(|_| format!("the setting {key:?} cannot be a Guatiao value"))?;
+        map.set(key, value);
+    }
+    Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::std_instead_of_core,
+        reason = "tests name what they use from std"
+    )]
+
+    use std::io::BufReader;
+
+    use super::*;
+
+    fn settings(json: serde_json::Value) -> Settings {
+        let serde_json::Value::Object(map) = json else {
+            panic!("an object");
+        };
+        Settings::new(map)
+    }
+
+    #[test]
+    fn the_host_line_is_one_line_and_reads_back() {
+        let line = HostLine {
+            source_settings: Some(settings(serde_json::json!({"dirs": ["a\nb"], "paths": []}))),
+            settings: Some(settings(serde_json::json!({"key": "x\ry"}))),
+        };
+        let bytes = line.to_line();
+        assert!(!bytes.iter().any(|byte| matches!(byte, b'\n' | b'\r')));
+        let mut input = bytes.clone();
+        input.extend_from_slice(b"\n{\"jsonrpc\":\"2.0\"}\n");
+        let mut reader = BufReader::new(input.as_slice());
+        assert_eq!(HostLine::read(&mut reader, 1024).expect("read"), line);
+        let mut rest = String::new();
+        reader.read_to_string(&mut rest).expect("the rest");
+        assert_eq!(
+            rest, "{\"jsonrpc\":\"2.0\"}\n",
+            "the transport keeps what follows"
+        );
+    }
+
+    #[test]
+    fn a_client_message_is_never_read_as_the_host_line() {
+        for first in [
+            "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{}}\n",
+            "{}\n",
+            "{\"settings\":{\"prefix\":\"x\"}}\n",
+            "{\"canoa_host\":2}\n",
+            "{\"canoa_host\":1,\"settings\":{},\"jsonrpc\":\"2.0\"}\n",
+            "not json\n",
+        ] {
+            let error =
+                HostLine::read(&mut BufReader::new(first.as_bytes()), 1024).expect_err(first);
+            assert!(
+                matches!(error, ProviderError::HostLine(_)),
+                "{first}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_host_line_that_ends_early_or_runs_long_is_refused() {
+        let line = HostLine::default().to_line();
+        let max = line.len();
+        let mut long = line.clone();
+        long.extend_from_slice(b" \n");
+        for (input, max) in [(line.clone(), max), (long, max), (Vec::new(), max)] {
+            let error =
+                HostLine::read(&mut BufReader::new(input.as_slice()), max).expect_err("refused");
+            assert!(matches!(error, ProviderError::HostLine(_)), "{error}");
+        }
+        let mut exact = line;
+        exact.push(b'\n');
+        HostLine::read(&mut BufReader::new(exact.as_slice()), max)
+            .expect("a line of max bytes fits");
+    }
+
+    #[test]
+    fn the_host_line_shows_no_value() {
+        let shown = format!(
+            "{:?}",
+            HostLine {
+                source_settings: None,
+                settings: Some(settings(serde_json::json!({"token": "sk-SECRET"}))),
+            }
+        );
+        assert!(!shown.contains("SECRET"), "{shown}");
+    }
 }

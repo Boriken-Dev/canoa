@@ -311,6 +311,7 @@ dependencies = [
  "coqui-peer-webcrypto",
  "coqui-web",
  "guatiao",
+ "guatiao-serde",
  "indexmap 2.14.2",
  "serde",
  "serde_json",
