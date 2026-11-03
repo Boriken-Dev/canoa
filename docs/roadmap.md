@@ -22,7 +22,7 @@ This page distinguishes tested code from planned integration work.
 | Native service discovery and stdio bridge | Implemented in `coqui-acp-bridge`: `serve --advertise`, `discover` and a native companion the extension asks when the person looks nearby; a stdio agent on the network under a proven peer |
 | Browser tools for an agent of Canoa's own chat | Implemented over `mcp-offer/1` on the agent's proven link: it asks, a person picks the tab, its tool list grows, and it loses them on revocation, navigation or time. A real Claude agent ran this in real Edge; none of it runs in CI's browser |
 | Elevated CDP adapter and local grant UI | Implemented and JS-tested; debug-only manifest, permission options page, console/network event buffer; remote transport pending |
-| MCP client outside any ACP session reaching the browser's tools | Planned |
+| MCP client outside any ACP session reaching the browser's tools | Implemented, off by default, for one paired machine: `coqui-acp-bridge mcp-config` prints one stable entry, the worker keeps a proven link and a free stream with no ACP on it, and a person allows each tab. The official SDK's client and real Claude Code ran it in real Edge, and it stayed up idle past 5 minutes there; none of it runs in CI's browser, and no other browser was tried |
 | Full remote debugging and audit trail | Debug tools are requestable in the debugger build, with no test against a real agent; no audit trail |
 | Actual JS/Wasm user site-adapter execution and sandbox | Planned |
 | Firefox and Safari browser integrations | Planned |

@@ -61,7 +61,7 @@ The [project naming convention](https://boriken-dev.github.io/canoa/naming/) use
 
 The desktop app supports the AI6-style [Canoa.cfg](https://boriken-dev.github.io/canoa/configuration/) TOML file with a tray context menu (Open, Settings, Hide, Exit). On Windows and macOS two icon clicks open the app; Linux systems that do not forward tray clicks use **Open Canoa** in the menu. The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/canoa/actions/workflows/deps.yml).
 
-The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/canoa/browser-mcp/). Remote MCP/WSS exposure is still gated on an authenticated gateway and peer pairing UI.
+The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/canoa/browser-mcp/). An agent of Canoa's own chat, and with a person's say an MCP client on a paired machine, reach those tools over a proven link with nothing listening in the browser: see [browser integration](https://boriken-dev.github.io/canoa/browser/).
 
 ## Development
 
