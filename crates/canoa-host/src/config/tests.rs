@@ -117,7 +117,7 @@ fn a_missing_required_setting_is_named() {
 
 #[test]
 fn listening_beyond_loopback_is_refused() {
-    for listen in ["0.0.0.0:7801", "10.7.0.1:7801", "[::]:7801"] {
+    for listen in ["0.0.0.0:7801", "192.0.2.1:7801", "[::]:7801"] {
         let text = format!("[host.agents.a]\nprogram = \"x\"\nlisten = \"{listen}\"\n");
         let error = parse(&text).expect_err("refused");
         assert!(error.to_string().contains("loopback"), "{error}");

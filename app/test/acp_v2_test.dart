@@ -323,7 +323,7 @@ void main() {
     final local = chatEndpoints(webSocket: 'ws://127.0.0.1:7801');
     expect(local.webSocket, Uri.parse('ws://127.0.0.1:7801'));
     expect(chatEndpoints(webSocket: 'ws://[::1]:7801').webSocket?.port, 7801);
-    expect(() => chatEndpoints(webSocket: 'ws://10.7.0.1:7801'), throwsArgumentError);
+    expect(() => chatEndpoints(webSocket: 'ws://192.0.2.1:7801'), throwsArgumentError);
     expect(() => chatEndpoints(webSocket: 'ws://agent.example/acp'), throwsArgumentError);
     final both = chatEndpoints(
       webSocket: 'wss://agent.example/acp',
