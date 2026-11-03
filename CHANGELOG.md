@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A sealed link that ends while the chat is still sending a request now fails that request. Before, under Noise, a refused key's link could end while the first request was being sealed, and the error reached no one.
 - Settings opens from the side rail: its dialog, like Hosting's, now opens on the app's own navigator.
 - A failed WebSocket or WebTransport connection now releases its socket. Before, `close()` did nothing once the stream had ended, so a peer that sent a frame over the limit left the socket open.
 

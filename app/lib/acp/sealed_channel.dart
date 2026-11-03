@@ -32,22 +32,36 @@ final class SealedChannel implements WebChannel {
 
   @override
   Stream<String> get messages async* {
-    await for (final record in _source.bytes) {
-      final Uint8List? opened;
-      try {
-        opened = await _open(record);
-      } catch (_) {
-        unawaited(close());
-        throw const TransportProtocolFailure('A message was not from the proven peer');
+    try {
+      await for (final record in _source.bytes) {
+        final Uint8List? opened;
+        try {
+          opened = await _open(record);
+        } catch (_) {
+          unawaited(close());
+          throw const TransportProtocolFailure('A message was not from the proven peer');
+        }
+        // The peer's close: an orderly end, with nothing held back.
+        if (opened == null) return;
+        yield utf8.decode(opened);
       }
-      // The peer's close: an orderly end, with nothing held back.
-      if (opened == null) return;
-      yield utf8.decode(opened);
+    } catch (_) {
+      await _settled();
+      rethrow;
     }
     if (!_closed) {
       unawaited(close());
+      await _settled();
       throw const TransportUnavailable('The connection was cut before the peer closed it');
     }
+  }
+
+  /// Lets sends already handed to this channel settle, and their callers resume, before the link's end is reported: a caller
+  /// still sending a request has not yet begun to wait for its answer, and an end reported first would reach no one. Bounded,
+  /// so a seal that never returns cannot hold the end back.
+  Future<void> _settled() async {
+    await _sending.timeout(const Duration(seconds: 5), onTimeout: () {});
+    await Future<void>.delayed(Duration.zero);
   }
 
   /// Sequence numbers go in call order, and records must reach the wire in that order.

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/sealed_channel.dart';
 import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -92,6 +93,36 @@ void main() {
     // The channel closes itself in the background once the failure is out.
     await Future<void>.delayed(const Duration(milliseconds: 10));
     expect(wire.sent.map(utf8.decode), ['close']);
+  });
+
+  // A refused Noise key's link ends this way: the initiator finishes before the responder decides, and the link ends while
+  // the first request is still being sealed.
+  test('a link that ends while a request is being sealed fails that request, and leaves no error unhandled', () async {
+    final wire = Wire();
+    final staged = StagedChannel(wire);
+    final sealing = Completer<Uint8List>();
+    final channel = SealedChannel(
+      staged,
+      seal: (message) => sealing.future,
+      open: (record) async => record,
+      closeRecord: () async => Uint8List(1),
+      release: () {},
+    );
+    final client = AcpClient(
+      incoming: channel.messages,
+      send: channel.send,
+      closeSource: channel.close,
+      clientName: 'test',
+      clientVersion: '0',
+    );
+    staged.allowApplicationMessages();
+    final initialized = client.initialize();
+    await Future<void>.delayed(Duration.zero);
+    await wire.incoming.close();
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    sealing.complete(Uint8List(1));
+    await expectLater(initialized, throwsA(anything));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
   });
 
   test('closing sends the close record after what was queued', () async {
