@@ -57,4 +57,4 @@ The source of the browser's cryptographic handshake is `Boriken-Dev/coqui-peer-w
 
 The `coqui_web` Dart package owns pending-message storage across the pre-application phase, in `StagedChannel`. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
 
-**Authentication is not pairing.** A pinned user-entered fingerprint is required in the connection dialog, and no unrecognized peer is auto-enrolled. `canoa-host accept` pairs a key that connected once and waits; the app has no pairing screen yet. coqui-peer holds the native Rust responder.
+**Authentication is not pairing.** A pinned user-entered fingerprint is required in the connection dialog, and no unrecognized peer is auto-enrolled. A key that connected once waits on the host until a person pairs it, in the desktop app's Hosting dialog, which shows the whole id to compare, or with `canoa-host accept`; a native program can pair by a PIN the host shows. The desktop app runs the host as its child. coqui-peer holds the native Rust responder.

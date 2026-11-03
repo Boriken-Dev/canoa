@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The chat dials `ws://` on loopback, where the host listens. Everything after the peer proof is sealed, so the transport carries nothing it could read.
 - The app keeps Canoa.cfg's `[host]` table when it saves its settings.
 - `canoa-host serve --until-stdin-closes`: the host ends every agent it started, then itself, when its input closes, so it ends with the program that runs it. `Serving::stopper` and `Stopper::stop_agents` do the same from the library.
+- The desktop app runs `canoa-host` as its child: the one `CANOA_HOST` names, else the one beside its executable, which the desktop build now puts there. It is started again after an unplanned end, with a pause that doubles up to a minute, and ended with its agents on quit or when the app dies.
+- **Hosting**, in the side rail and the tray menu: the host's state and id, its agents, adding one by its command, the keys that may connect, pairing or removing one only from a dialog that shows its whole id, and a PIN for a native program.
+- The tray menu opens Hosting, a double click on the tray icon opens the chat, and where Linux shows no tray icons, closing the window minimizes it rather than hiding it out of reach. Settings has **Quit Canoa**.
 - `canoa-host pair`: shows a PIN that a native client uses to pair, such as `coqui-acp-bridge pair-dial`. One wrong try ends it.
 
 ### Changed
@@ -23,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Settings opens from the side rail: its dialog, like Hosting's, now opens on the app's own navigator.
 - A failed WebSocket or WebTransport connection now releases its socket. Before, `close()` did nothing once the stream had ended, so a peer that sent a frame over the limit left the socket open.
 
 ### Changed

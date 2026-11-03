@@ -66,4 +66,8 @@ An agent's Markdown is untrusted: images are not fetched, and a link is copied r
 
 ## Desktop tray and Canoa.cfg
 
-The app reads a TOML Canoa.cfg just like AI6's OO.cfg. The tray can keep sessions running after the main window is hidden, with Open, Settings, Hide and Exit commands. On supported Windows/macOS tray hosts, a double click opens the main window; Linux AppIndicator requires Open from its menu. Refer to the [configuration guide](../docs/configuration.md). Build platform runners with flutter create --org dev.boriken --platforms=windows,linux,macos . in app/ before flutter build windows/linux/macos.
+The app reads a TOML Canoa.cfg just like AI6's OO.cfg. Closing the window keeps the app, its conversations and what it hosts running in the tray, whose menu has Open, Hosting, Settings, Hide and Exit; a double click on the icon opens the chat on Windows, and on Linux the menu's Open does. Where Linux shows no tray icons at all, closing minimizes the window instead, and Settings has **Quit Canoa**. Refer to the [configuration guide](../docs/configuration.md). Build platform runners with flutter create --org dev.boriken --platforms=windows,linux,macos . in app/ before flutter build windows/linux/macos.
+
+The desktop app runs `canoa-host` as its child (`lib/desktop/host_supervisor.dart`): the one `CANOA_HOST` names, else the one beside its executable. **Hosting** adds an agent, pairs and removes keys and shows a PIN; see [the host](../docs/host.md#in-the-desktop-app).
+
+`integration_test/desktop_test.dart` runs the app on a real desktop (`flutter test integration_test/desktop_test.dart -d windows`, or `-d linux`) with `CANOA_TEST_HOST`, `CANOA_TEST_NODE` and `CANOA_TEST_APP` as `test/host_test.dart` describes.
