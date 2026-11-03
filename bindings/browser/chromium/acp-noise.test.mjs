@@ -201,3 +201,39 @@ test("the mcp-config command names this browser's key for the machine's method, 
   assert.equal(mcpConfigCommand({ noise: null, webcrypto: "sha256:w" }, "noise"), null);
   assert.equal(mcpConfigCommand(ids, undefined), "coqui-acp-bridge mcp-config --peer sha256:w");
 });
+
+/** A Noise agent that proves itself, then turns this key away by ending the connection `after` ms past the handshake. */
+async function refusingAgent(after) {
+  const server = await noise.generateIdentity();
+  const client = await noise.generateIdentity();
+  const responder = await noise.createResponder(server, { allowClient: async () => true });
+  let step = 0;
+  const Socket = socketTo(async (bytes, reply, end) => {
+    step += 1;
+    if (step === 1) reply(await responder.challenge(bytes));
+    else if (step === 2) {
+      await responder.accept(bytes);
+      setTimeout(end, after);
+    }
+  });
+  return { agent: { url: "ws://127.0.0.1:1/", peer: server.peerId, method: "noise" }, client, Socket };
+}
+
+test("a Noise agent that turns this key away right after the handshake fails the dial, as a refused WebCrypto proof does", async () => {
+  const { agent, client, Socket } = await refusingAgent(5);
+  const started = Date.now();
+  await assert.rejects(dialAgent(agent, { identity: client, WebSocketClass: Socket }), /turned this browser's key away/);
+  assert.ok(Date.now() - started < 3000, `${Date.now() - started} ms`);
+});
+
+test("a link that ended before anyone listened still tells whoever listens later", async () => {
+  const { agent, client, Socket } = await refusingAgent(20);
+  const link = await dialAgent(agent, { identity: client, WebSocketClass: Socket, settle: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const heard = await Promise.race([
+    new Promise((resolve) => link.onClose(() => resolve("closed"))),
+    new Promise((resolve) => setTimeout(() => resolve("never"), 1000)),
+  ]);
+  assert.equal(heard, "closed");
+  assert.equal(link.ending, "cut");
+});

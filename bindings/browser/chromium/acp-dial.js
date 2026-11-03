@@ -13,6 +13,11 @@ export const DEFAULT_METHOD = "webcrypto";
 const STORES = Object.freeze({ webcrypto: "dev.boriken.canoa.peer", noise: "dev.boriken.canoa.peer-noise" });
 const MODULES = Object.freeze({ webcrypto, noise });
 const PROOF_MS = 15_000;
+/**
+ * How long a Noise dial waits after its handshake for the agent to end the connection, which is how an agent turns a key away:
+ * a Noise initiator finishes before the responder decides, so this is what lets a refused key fail the dial as a WebCrypto one does.
+ */
+export const NOISE_SETTLE_MS = 500;
 /** How long a pairing may take by default, from its handshake to the end of the exchange: `pair-accept --run-seconds`'s 120. */
 export const PAIR_MS = 120_000;
 // A path that drops QUIC shows only as silence, and the WebSocket is still worth trying within the proof's time.
@@ -202,10 +207,13 @@ async function dialUnproven(agent, WebSocketClass) {
 /** Streams on a proven link. `heartbeat` asks now and then and notices silence, off unless set. */
 function bareLink(proven, heartbeat) {
   const closing = [];
+  // A link can end before anyone asks to hear of it; whoever asks later is told at once.
+  let over = false;
   const mux = createMux({
     send: (bytes) => proven.sendBytes(bytes),
     onMessage: (take) => proven.onBytes(take),
     onClose: (listen) => proven.onClose(() => {
+      over = true;
       listen();
       for (const close of closing) close();
     }),
@@ -218,7 +226,8 @@ function bareLink(proven, heartbeat) {
       return proven.ending;
     },
     onClose(handler) {
-      closing.push(handler);
+      if (over) queueMicrotask(handler);
+      else closing.push(handler);
     },
     close: () => proven.close(),
   };
@@ -346,6 +355,7 @@ export async function dialAgent(agent, {
   link = false,
   bare = false,
   heartbeat,
+  settle = NOISE_SETTLE_MS,
   WebSocketClass = globalThis.WebSocket,
   WebTransportClass = globalThis.WebTransport,
 } = {}) {
@@ -383,7 +393,10 @@ export async function dialAgent(agent, {
   // How the link ended: "closed" when the agent's close record came or this side ended it, "cut" when the transport just
   // stopped, which a relay can make look like an orderly end.
   let ending;
+  let socketClosed = false;
+  let ended = false;
   socket.addEventListener("close", () => {
+    socketClosed = true;
     cut?.(new Error("the connection closed during the proof"));
     opening.finally(() => {
       if (ending === undefined && session !== undefined) {
@@ -395,6 +408,7 @@ export async function dialAgent(agent, {
         }
       }
       ending ??= "cut";
+      ended = true;
       onClose();
     });
   });
@@ -421,6 +435,16 @@ export async function dialAgent(agent, {
         ({ session } = await proof.finish(asText(await next())));
       })();
     await within(exchange, PROOF_MS, "no proof in time");
+    if (method === "noise" && settle > 0) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, settle);
+        socket.addEventListener("close", () => {
+          clearTimeout(timer);
+          resolve();
+        }, { once: true });
+      });
+    }
+    if (socketClosed) throw new Error("the agent turned this browser's key away, or ended the connection, right after the proof");
     socket.proven?.();
   } catch (error) {
     socket.close();
@@ -447,6 +471,7 @@ export async function dialAgent(agent, {
     },
     onClose(handler) {
       onClose = handler;
+      if (ended) queueMicrotask(handler);
     },
     close() {
       ending ??= "closed";
