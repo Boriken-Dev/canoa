@@ -20,10 +20,107 @@ Configuration tables:
 - [host] what `canoa-host` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
 - [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200)
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
+- [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
 
 The session list is `sessions.json` beside Canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session.
 
 Do not store identity private keys, tokens or passwords in Canoa.cfg.
+
+## Profiles
+
+A profile is what an agent is launched with: environment variables, an initial context, skills, MCP servers, and the
+model, effort and mode it starts with. It comes in layers, merged lowest first:
+
+1. **built-in**: Canoa's own, which sets nothing;
+2. **overlays**, each named in `[overlays]`, in the file's order;
+3. **yours**: `[profile]` in Canoa.cfg;
+4. **the project's**: `.canoa/profile.toml` in the working directory, only once you trust that directory;
+5. **the agent's entry**: `[agents.NAME.profile]`, where `NAME` is an agent's label (an entry with only a `profile` names
+   a preset, such as `Claude`);
+6. **the session** being started.
+
+A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
+lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's
+`model`, `effort`, `mode` or `context`. **Settings → Profiles** shows the effective profile of each agent, every value
+beside the layer it came from, and what each layer removed. canoa-host reads the same schema
+(`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds the app and the host to the same merge.
+Which of these each harness can take, and when, is in [the roadmap](roadmap.md); applying a profile to a harness is
+not done yet.
+
+```toml
+[overlays]
+team = "https://github.com/example/canoa-profiles.git@main#team"   # <repository>@<ref>#<path>, as dotagents writes it
+mine = { dir = "profiles/mine" }                                   # a directory, relative to Canoa.cfg's
+
+[profile]
+model = "claude-sonnet-4-5"
+effort = "high"
+mode = "plan"
+context = { text = "Answer in Spanish." }      # or { file = "CONTEXT.md" }
+unset = ["mode"]                               # not beside a value it takes back
+
+[profile.env.RUST_LOG]
+value = "debug"                                # written here: never a secret
+[profile.env.GITHUB_TOKEN]
+from_env = "GITHUB_TOKEN"                      # this process's variable, read when a session starts
+[profile.env.API_KEY]
+from_file = "keys/api"                         # a file's text, less one final line break, read when a session starts
+[profile.env.OLD]
+remove = true
+
+[profile.skills.review]
+path = "skills/review"                         # a directory holding SKILL.md
+
+[profile.mcp.files]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+[profile.mcp.files.env.ROOT]
+value = "."
+[profile.mcp.docs]
+type = "http"                                  # or "sse"; url is http:// or https://
+url = "https://docs.example/mcp"
+[profile.mcp.docs.headers.Authorization]
+from_env = "DOCS_MCP_AUTH"
+
+[agents.Claude.profile]
+model = "claude-opus-4-1"
+```
+
+A profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
+a key the schema does not know is refused. Names: environment variables a letter or `_` then letters, digits or `_`;
+skills, MCP servers and headers 1 to 64 letters, digits, `-` or `_`. A relative path is read from its layer's
+directory: Canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project. **An overlay
+or a project comes from elsewhere**, so its paths must be relative and stay inside its directory: no root, drive, `~`,
+`:` or `..`, and a file it names for a secret is read only if, its links followed, it is still inside.
+
+**Secrets** come from a reference, `from_env` or `from_file`, and are never written into a profile. A reference is
+resolved only when a session starts; the view shows the reference, and nothing logs the value. Errors name a key, never
+a value.
+
+### Overlays
+
+An overlay is a directory holding `profile.toml` and whatever it names, such as skills. From git, the desktop app
+installs it into `overlays/NAME/` beside Canoa.cfg, with `overlays/NAME.json` recording the source, **the commit** and
+each file's git blob id, and its history in `overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in
+Settings → Profiles fetch the source and show the commit it would move to and every file it adds, changes or removes;
+nothing changes until you apply, and what is applied is that commit, wherever the ref has moved since. The ref is a
+branch, a tag or a commit id. An overlay is upstream's copy, replaced whole on each apply: put your own additions in
+`[profile]`, which wins over it. An overlay installed from another source than the one Canoa.cfg names is left out
+until it is synced.
+
+Nothing from a source runs: its files are read out of git's object store, never checked out, so no hook, filter or
+attribute of the source applies; links and submodules are listed and never installed, and a file name that is not safe
+on every platform (`..`, `\`, `:`, a Windows device name) refuses the whole overlay. Git may fetch only over `https`,
+`http`, `ssh`, `git` and `file`, never a transport helper such as `ext::`, and never prompts. An overlay holds at most
+4096 files and 64 MiB. A local directory, `{ dir = "..." }`, is read in place, as it is when an agent starts.
+
+### Trusting a project
+
+A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first. The
+trust is kept per directory, links resolved, in `trust.json` beside Canoa.cfg, with the SHA-256 of the file you were
+shown: if the file changes, it is ignored again until you trust it again. **Stop trusting** revokes it for every later
+session. A web build reads no working directory and installs no overlay.
 
 ## Windows, macOS and Linux tray behavior
 
