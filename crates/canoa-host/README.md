@@ -111,7 +111,7 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 - **A provider source** runs code and loads more: for Python, the interpreter the system finds, its `site-packages`, the
   host's `PYTHONPATH`, and every directory and manifest its settings name. On Windows, when the narrow search leaves an
   import missing, such as `python3.dll`, the source's imports are looked for in the working directory and on `PATH` as
-  well. Its code shares standard input and output with the ACP stream.
+  well. What it prints goes to the host's log, never to the client.
 - **A stdio agent** is the program the file names, found as the operating system finds a command.
 
 ## Development

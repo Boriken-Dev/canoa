@@ -74,6 +74,8 @@ pub const MAX_UNPROVEN: usize = 64;
 pub const PROOF_LIMIT: Duration = 15 s;
 pub const FIRST_MESSAGE: Duration = 60 s;
 pub const ACP_CAPABILITY: &str = "acp/1";
+pub const OUTPUT_LIMIT: usize = 1024 * 1024;   // what a provider's process may print per connection
+pub const START_LIMIT: Duration = 30 s;        // for a provider's process to connect back
 
 #[non_exhaustive] pub struct ServeOptions { pub provider_program: PathBuf }
 pub fn ServeOptions::new(provider_program: impl Into<PathBuf>) -> ServeOptions
@@ -86,14 +88,14 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 #[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String }   // kind: "agent" or "provider"
 ```
 
-- `stop_agents` ends each agent with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound: end the process to free them.
+- `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound: end the process to free them.
 
 - `bind` binds every entry before any is served, so a failure leaves none listening. A plain socket beyond loopback is refused by `coqui-web` too.
 - Each connection: the WebSocket handshake, then the `coqui-peer-webcrypto` proof within `PROOF_LIMIT`, with the trust store deciding (a stranger that proved its key is recorded as waiting). Then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
 - The first message must be plain ACP: a link of streams (`coqui_agentic_peer::mux`) is refused. Then a fresh process serves that connection, relayed by `coqui_acp_bridge::relay`, and is stopped with its process tree when either side ends.
 - An agent entry runs `program args`. Every message from the client to it is parsed and the host's own serialization forwarded: `params` other than an object is answered `-32602`, since a list would fill a request's fields in order; `_meta` is removed at every depth; a request whose `params.mcpServers` holds anything but `http` or `sse` over `https`, or `acp`, is answered `-32602` and never reaches the agent; with `working_roots`, so is one whose `cwd` or `additionalDirectories` is outside them; what is not one JSON object is answered `-32700` or `-32600`. A refused notification is dropped.
 - A provider entry is not filtered: its facade reads the client's `_meta` launch values (`context`, `model`, `effort`, an opaque `meta`) and hands them to the provider, and refuses an environment name. What a provider does with them is the provider's.
-- A provider entry runs `provider_program provider (--library L | --source S) --provider ID --max-sessions N --directory D --settings-on-stdin [--working-root R]...`, so a library or source is loaded only in that connection's process, which runs in `D`. The command line holds paths and names only: the host writes the entry's `source_settings` and `settings` as the first line of the process's standard input (`HostLine`), ahead of anything the client sent. Its facade refuses any `mcpServers` and checks `working_roots` itself.
+- A provider entry runs `provider_program provider (--library L | --source S) --provider ID --max-sessions N --directory D --settings-on-stdin [--working-root R]... --connect A`, so a library or source is loaded only in that connection's process, which runs in `D`. The command line holds paths, names and the address only. For each connection the host listens on a loopback port of its own, `A`; writes the entry's `source_settings` and `settings` and a one-time token of 32 random bytes as the first line of the process's standard input (`HostLine`), then closes it; and takes the first connection to `A` that sends the token within `START_LIMIT`, up to 8 that do not. ACP runs on that socket alone. What the process writes to standard output or error goes to the host's standard error, `OUTPUT_LIMIT` bytes per connection in all, the rest read and dropped after one warning; none of it reaches the client. The process and what it starts are ended with the connection, by job object on Windows and process group elsewhere. Its facade refuses any `mcpServers` and checks `working_roots` itself.
 - `max_peers` connections per entry at once; past it a proven peer is turned away. Past `MAX_UNPROVEN` handshakes at once across entries, a new connection is dropped.
 
 ```rust
@@ -106,13 +108,14 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 #[non_exhaustive] pub struct ProviderOptions { pub origin: Origin, pub provider: String, pub settings: Option<Settings>, pub working_roots: Vec<PathBuf>, pub max_sessions: usize }
 pub fn ProviderOptions::new(origin: Origin, provider: impl Into<String>) -> ProviderOptions   // no settings, any cwd, the facade's default max_sessions
 pub fn serve_stdio(options: &ProviderOptions) -> Result<(), ProviderError>
+pub fn serve_connected(options: &ProviderOptions, address: SocketAddr, token: &str) -> Result<(), ProviderError>   // loopback only
 
-#[non_exhaustive] pub struct HostLine { pub source_settings: Option<Settings>, pub settings: Option<Settings> }   // Default, Eq
+#[non_exhaustive] pub struct HostLine { pub source_settings: Option<Settings>, pub settings: Option<Settings>, pub token: Option<String> }   // Default, Eq; Debug shows no value or token
 pub fn HostLine::to_line(&self) -> Vec<u8>                                           // one line of JSON, no line break
 pub fn HostLine::read(input: &mut impl BufRead, max: usize) -> Result<HostLine, ProviderError>   // one line of at most max bytes
 ```
 
-`serve_stdio` loads the code, takes the provider, and runs `coqui_acp_provider::AcpFacade` on standard input and output until the client closes them. Nothing in this process may write to standard output or read standard input: loaded code shares both with the transport, so a Python `print()`, or a subprocess that inherits them, writes into the client's ACP stream or takes the client's messages.
+`serve_stdio` loads the code, takes the provider, and runs `coqui_acp_provider::AcpFacade` on standard input and output until the client closes them. There, loaded code shares both with the transport: a Python `print()`, or a subprocess that inherits them, writes into the client's ACP stream or takes its messages. `serve_connected` connects to `address`, sends `token` and a line break, then loads the code and runs the facade on that socket, so the process's own standard streams are the provider's alone; it is what `serve` runs.
 
 - **A library** is mapped with Guatiao's default import search. On Windows: the library's own directory, the executable's, the system's; not the working directory or `PATH`. Elsewhere the platform's: `LD_LIBRARY_PATH`, the file's run path (its own directory only through `$ORIGIN`), the system's.
 - **A source** is added with `settings` as a Guatiao map, then the registry is refreshed once; a library the source refuses is logged and passed over. On Windows the import search is `ImportSearch::Path`: when the default search leaves an import missing (`python3.dll`, for Python), the source is loaded again with Windows' standard search, and then every import it has, not only the missing one, is looked for in the source's own directory, the system directories, **the working directory (Canoa.cfg's, under `serve`) and every directory on `PATH`**, in that order. Elsewhere the search is the platform's (`LD_LIBRARY_PATH`, the file's run path, the system's).
@@ -120,7 +123,7 @@ pub fn HostLine::read(input: &mut impl BufRead, max: usize) -> Result<HostLine, 
 
 **Loading runs code** with this process's rights, before any check, and trusts whoever can write any file it reads or the directories holding them. For a library, that is the file. For `guatiao_source_py` it is also: the Python whose shared library the loader finds (on Windows the first `python3.dll` the search above meets, then the first `python3X.dll` it names); that Python's standard library, `site-packages`, the user's own site-packages, and their `.pth` files, since the interpreter is not isolated; the `PYTHON*` variables of this process's environment, which it inherits from the host (`PYTHONPATH`, `PYTHONHOME`), and `GUATIAO_LIBRARY`, which picks the native library Guatiao's Python binding loads; on Windows, a `canoa-host._pth` or `pyvenv.cfg` beside the `canoa-host` executable, which the interpreter reads, so whoever can write that directory chooses where its modules come from; every directory in `paths`; every manifest in `dirs` and `manifests` and every directory its own `paths` names; and every module those import.
 
-`HostLine::read` reads up to the line break and leaves the rest to the transport. The line is `{"canoa_host": 1, "source_settings": {...}, "settings": {...}}`; anything else, a client's ACP message included, is `ProviderError::HostLine`.
+`HostLine::read` reads up to the line break and leaves the rest to the transport. The line is `{"canoa_host": 1, "source_settings": {...}, "settings": {...}, "token": "..."}`; anything else, a client's ACP message included, is `ProviderError::HostLine`.
 
 ## Pairing (`canoa_host::peers`)
 
@@ -151,7 +154,7 @@ canoa-host accept PEER
 canoa-host revoke PEER
 canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes]
 canoa-host provider (--library FILE | --source FILE) --provider ID [--working-root DIR]... [--max-sessions N]
-                    [--directory DIR] [--settings-on-stdin]
+                    [--directory DIR] [--settings-on-stdin [--connect ADDRESS]]
 ```
 
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer"}`, `peer` being this host's id, once every entry is bound; then it serves until stopped. It logs on standard error.
@@ -162,7 +165,7 @@ canoa-host provider (--library FILE | --source FILE) --provider ID [--working-ro
 - `check` prints `NAME KIND LISTEN` per entry, or `{"name", "kind", "listen"}` with `--format json`, and serves nothing.
 - `peers` prints `accepted ID` and `waiting ID [from ADDRESS]`, or `{"peer", "state", "source"}`.
 - Canoa.cfg is `--config`, else `CANOA_CONFIG`, else `%APPDATA%\Canoa\Canoa.cfg` on Windows, `~/Library/Application Support/Canoa/Canoa.cfg` on macOS, `$XDG_CONFIG_HOME/Canoa/Canoa.cfg` (else `~/.config/…`) elsewhere: where the app keeps it.
-- `provider` takes `--library` and `--source` from where it was started, then runs in `--directory`; with `--settings-on-stdin` it reads a `HostLine` first, as `serve` writes it.
+- `provider` takes `--library` and `--source` from where it was started, then runs in `--directory`; with `--settings-on-stdin` it reads a `HostLine` first, as `serve` writes it; with `--connect` it serves on that loopback socket after sending the line's token, rather than on standard input and output.
 - Exit status: 0 success; 1 the operation failed; 2 the invocation or Canoa.cfg was wrong, `serve` with nothing to serve, or a text that is not a peer id.
 
 ## Environment variables

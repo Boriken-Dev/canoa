@@ -46,8 +46,9 @@ paths = ["python/guatiao", "python/coqui_acp_provider"]    # what goes first on 
 `source` and the `dirs`, `manifests` and `paths` lists are made absolute from Canoa.cfg's directory when the file is read;
 the provider's process runs in that directory, so any other relative path in `source_settings` is taken from there too.
 
-The provider's code shares its process's standard input and output with the ACP stream: a provider that prints to
-standard output, or starts a program that inherits them, writes into the client's stream or reads the client's messages.
+What a provider prints, to standard output or standard error, goes to the host's log, up to 1 MiB per connection, and
+never to the client: the host and the provider's process speak ACP over a loopback socket of their own, which the process
+proves with a one-time token. Its standard input is closed once the settings are read.
 
 On Windows the Python's `python3.dll` has to be found: put its directory (`sys.base_prefix`) on the host's `PATH`. On
 Linux and macOS the source links that Python's shared library, found where the loader looks, or through
