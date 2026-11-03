@@ -75,10 +75,9 @@ export function createStanding({ setting, agentOf, dial, toolsFor, onStatus = ()
     let ready = false;
     try {
       stream = await entry.link.mux.open(OFFER, METADATA);
-      // Turning this off cannot have closed what was still opening.
-      if (entry.ended) throw new Error("turned off");
       entry.spare = stream;
       if (!saying(await stream.receive(), READY)) throw new Error("that is no standing stream");
+      // Turning this off cannot have closed what was still opening.
       if (entry.ended) throw new Error("turned off");
       ready = true;
       tries = 0;
