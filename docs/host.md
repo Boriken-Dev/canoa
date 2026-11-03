@@ -119,7 +119,8 @@ reject = { type = "extension_ui_response", id = "{id}", cancelled = true }
   `prompt` line; `cancel`, when given, is written on `session/cancel`, and a turn not ended `CANCEL_GRACE` (10 s) later
   has its process ended. Without `cancel`, cancelling ends the process. Either way, once its process ends the session takes
   no more prompts. `message` starts a process per prompt: the prompt is `{prompt}` in `args`, or else its standard input,
-  which then closes; the turn ends when a rule says so or when the process exits. A `message` tool remembers nothing
+  which then closes; an argument that is `{prompt}` alone must come right after `--`, so a prompt beginning with `-` is
+  not read as an option. The turn ends when a rule says so or when the process exits. A `message` tool remembers nothing
   unless `resume_args` names the session it reported (a `session` rule), put before `args` from the second prompt on.
 - **Rules**: each line the tool writes is taken by the first rule whose `when` paths all hold their values; a line that is
   not JSON, or that no rule takes, is passed over. `send` is `text` or `thought` (`agent_message_chunk`,
@@ -127,14 +128,20 @@ reject = { type = "extension_ui_response", id = "{id}", cancelled = true }
   fails with this text), `end` (with `stop`, or `error`), `session`, `ask`, `reply` (a line written back at once) or `ignore`.
   In text, `{path}` is the line's value at a dotted path, such as `{args.command}` or `{result.content.0.text}`. In the
   JSON of `prompt`, `cancel`, `allow`, `reject` and `line`, a string that is a placeholder alone keeps the value's type,
-  and only values are filled: a prompt cannot add a key or end the line, since it is never parsed as JSON.
+  and only values are filled: a prompt cannot add a key or end the line, since it is never parsed as JSON, and U+2028 and
+  U+2029, at which some line readers split, are escaped.
+- **On a command line**: `serve` gives the entry, as JSON, to `canoa-host tool` on its command line, which other users of
+  the machine may be able to read. Put nothing secret in a tool entry; a key belongs in the host's environment, which the
+  tool inherits. An entry is at most 16 KiB as JSON and holds no NUL, or Canoa.cfg is refused.
 - **The person is told** what they would not otherwise know: every session opens with the notices the entry implies,
   listed under `_meta["dev.boriken.canoa/notices"]` in the answer to `session/new`, which the app shows in the
-  conversation. One says what the tool does without asking, in the entry's own `unasked` words, which every entry must give;
+  conversation as the agent's words (any agent can send that key, so the app never shows it as its own). One says what the tool does without asking, in the entry's own `unasked` words, which every entry must give;
   a `message` tool's also says that each message runs it anew.
-- **Permissions**: an `ask` rule sends `session/request_permission` with Allow and Refuse, and writes `allow` back only when
-  the person picks Allow. Anything else, an error or a cancelled request included, writes `reject`; so does a request that
-  comes when no turn is running or 16 are already waiting. What the tool does without such a line is not asked about: the
+- **Permissions**: an `ask` rule sends `session/request_permission` with Allow and Refuse, the whole question as the call's
+  input besides its title, and writes `allow` back only when the person picks Allow during the turn that asked. Anything
+  else, an error or a cancelled request included, writes `reject`; so does a request that comes when no turn is running or
+  16 are already waiting, and every question still waiting when its turn ends or is cancelled, at that moment, so an answer
+  after that reaches nothing. What the tool does without such a line is not asked about: the
   host cannot see it before it happens, only show it as it runs, as a tool call.
 
 **What Pi does without asking.** Pi has no approval of its own: its documentation says it "does not ask for approval before
@@ -232,12 +239,16 @@ only from a dialog that shows its whole id.
   there is the one that loads.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
 - **A tool entry** runs its program with the host's environment, in the session's working directory, with the rights of
-  the account that runs the host. The host takes what the tool writes as untrusted: a title, an id or a failure loses its
+  the account that runs the host. The client names that directory: set `working_roots` on a tool entry, or any directory
+  of this user's will do. A network share or device path is refused, since even looking at one reaches another machine
+  with this user's credentials. On Windows the program finds nothing in that directory by a bare name
+  (`NoDefaultCurrentDirectoryInExePath` is set for it), which matters for a `.cmd` such as npm's `pi.cmd`; naming `node`
+  and Pi's script by absolute path avoids `cmd.exe` altogether. The host takes what the tool writes as untrusted: a title, an id or a failure loses its
   control and format characters and is cut to 4 KiB, text is split into updates of at most 1 MiB, and a line over 16 MiB
   ends the process. What the tool does is the tool's: only what its rules turn into `ask` reaches the person first. A
   process ends with its session's end, its cancel or its connection: on Windows with everything it started, by a job object
   of its own; on Unix, what it started stays in the host's process group for that connection and ends with the connection,
-  unless it left the group.
+  unless it left the group: a command a tool starts in a session of its own (Node's `detached`) outlives the connection.
 - **A provider gets what a client asks of it**: the facade passes a session's `context`, `model`, `effort` and opaque
   `meta` through, as a provider's own interface defines them.
 
