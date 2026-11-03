@@ -208,6 +208,76 @@ fn one_wrong_pin_ends_the_pairing_and_accepts_nobody() {
     );
 }
 
+/// The status line a WebSocket upgrade to `url` gets, sent with `origin` as a browser's page would send it.
+fn upgrade_status(url: &str, origin: Option<&str>) -> String {
+    use std::io::{Read as _, Write as _};
+    let address = url.trim_start_matches("ws://");
+    let mut stream = std::net::TcpStream::connect(address).expect("pair listens");
+    stream.set_read_timeout(Some(WAIT)).expect("a timeout");
+    let origin = origin.map_or(String::new(), |origin| format!("Origin: {origin}\r\n"));
+    write!(
+        stream,
+        "GET / HTTP/1.1\r\nHost: {address}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n{origin}\r\n"
+    )
+    .expect("the request is sent");
+    let mut answer = [0_u8; 64];
+    let read = stream.read(&mut answer).unwrap_or(0);
+    String::from_utf8_lossy(&answer[..read])
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_owned()
+}
+
+#[test]
+fn a_web_page_cannot_reach_pair_and_costs_the_pin_nothing() {
+    let scratch = Scratch::new();
+    let home = scratch.0.join("home");
+    let (shown, mut child, _lines) = start_pairing(&home, &["--timeout-seconds", "60"]);
+    let url = shown["url"].as_str().expect("a URL");
+    let page = upgrade_status(url, Some("https://evil.example"));
+    assert!(
+        page.contains(" 403 "),
+        "a page's upgrade is refused: {page}"
+    );
+    let opaque = upgrade_status(url, Some("null"));
+    assert!(opaque.contains(" 403 "), "{opaque}");
+
+    let joiner = Identity::generate().expect("a key");
+    let joiner_store = TrustStore::open(&scratch.0.join("joiner")).expect("a store");
+    let pin = shown["pin"].as_str().expect("a PIN");
+    join(url, &joiner, pin, &joiner_store).expect("the PIN still pairs a native client");
+    assert!(child.wait().expect("pair ends").success());
+}
+
+#[test]
+fn pair_tied_to_its_input_ends_when_it_closes() {
+    let scratch = Scratch::new();
+    let mut child = Command::new(host_binary())
+        .args(["pair", "--until-stdin-closes"])
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("pair starts");
+    let mut first = String::new();
+    BufReader::new(child.stdout.take().expect("its output"))
+        .read_line(&mut first)
+        .expect("pair says its PIN");
+    assert!(first.contains("\"pin\""), "{first}");
+    drop(child.stdin.take());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while child.try_wait().expect("its status").is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "pair outlived its input"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn pair_listens_only_on_loopback() {
     let scratch = Scratch::new();

@@ -172,16 +172,22 @@ struct Agents {
 }
 
 impl Shared {
-    /// Records `agent` as running, under the key to [`Shared::forget`] it by; `None` once the host is stopping.
-    fn keep(&self, agent: &Arc<Agent>) -> Option<u64> {
+    /// Starts an agent and records it, under the key to [`Shared::forget`] it by; `Ok(None)` once the host is stopping.
+    /// Both happen under the lock [`Stopper::stop_agents`] takes, so no agent starts unseen while the host stops.
+    fn start(
+        &self,
+        program: &OsString,
+        args: &[OsString],
+    ) -> std::io::Result<Option<(u64, Arc<Agent>)>> {
         let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
         if agents.stopping {
-            return None;
+            return Ok(None);
         }
+        let agent = Arc::new(Agent::spawn(program, args, MAX_LINE)?);
         agents.next += 1;
         let key = agents.next;
-        agents.running.insert(key, Arc::clone(agent));
-        Some(key)
+        agents.running.insert(key, Arc::clone(&agent));
+        Ok(Some((key, agent)))
     }
 
     fn forget(&self, key: u64) {
@@ -484,16 +490,13 @@ fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &
     let (program, args) = match &served.run {
         Run::Agent { program, args, .. } | Run::Provider { program, args } => (program, args),
     };
-    let agent = match Agent::spawn(program, args, MAX_LINE) {
-        Ok(agent) => Arc::new(agent),
+    // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
+    let (key, agent) = match shared.start(program, args) {
+        Ok(Some(started)) => started,
+        Ok(None) => return,
         Err(error) => {
             return tracing::warn!(entry = served.name, "the agent could not start: {error}");
         }
-    };
-    let Some(key) = shared.keep(&agent) else {
-        tracing::info!(entry = served.name, %peer, "turned away: the host is stopping");
-        let _ = agent.stop();
-        return;
     };
     let end = match &served.run {
         Run::Agent { scope, .. } => relay(&Scoped::new(channel, scope), &agent),

@@ -73,7 +73,7 @@ canoa-host id
 canoa-host peers [--format text|json]
 canoa-host accept PEER
 canoa-host revoke PEER
-canoa-host pair [--listen ADDR] [--timeout-seconds N]
+canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes]
 canoa-host provider --library FILE --provider ID [--working-root DIR]... [--max-sessions N]
 ```
 

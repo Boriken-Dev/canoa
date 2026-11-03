@@ -71,6 +71,9 @@ enum Command {
         /// How long to wait for the PIN to be used.
         #[arg(long, default_value_t = 300)]
         timeout_seconds: u64,
+        /// End, the PIN unused, when standard input closes: for a program that runs this as its child.
+        #[arg(long)]
+        until_stdin_closes: bool,
     },
     /// Serve one Guatiao agent provider as an ACP agent on standard input and output.
     Provider {
@@ -188,21 +191,7 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
     }
     if args.until_stdin_closes {
         let stopper = serving.stopper();
-        std::thread::Builder::new()
-            .name("canoa-host-stdin".to_owned())
-            .spawn(move || {
-                // Whatever arrives is not read as anything: only its end matters.
-                let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
-                // Nothing is logged from here: a parent that died can leave standard error a pipe nobody reads, and on
-                // Windows a write to it then waits for ever. Should ending an agent wait like that, the host ends anyway.
-                std::thread::spawn(|| {
-                    std::thread::sleep(Duration::from_secs(5));
-                    std::process::exit(0);
-                });
-                stopper.stop_agents();
-                std::process::exit(0);
-            })
-            .map_err(Failed::run)?;
+        end_with_input(0, move || stopper.stop_agents())?;
     }
     serving.run();
     Ok(())
@@ -213,7 +202,30 @@ const MAX_PAIRING_RUNS: usize = 16;
 /// How long one connection may take to pair.
 const PAIRING_RUN: Duration = Duration::from_secs(60);
 
-fn pair(listen: SocketAddr, timeout: Duration) -> Result<(), Failed> {
+/// Ends this process when standard input closes, logging nothing first: a parent that died can leave standard error a
+/// pipe nobody reads, and on Windows a write to it then never returns.
+fn end_with_input(code: i32, before: impl FnOnce() + Send + 'static) -> Result<(), Failed> {
+    std::thread::Builder::new()
+        .name("canoa-host-stdin".to_owned())
+        .spawn(move || {
+            // Whatever arrives is not read as anything: only its end matters.
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            // Should what runs first wait like that, the process ends anyway.
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(5));
+                std::process::exit(code);
+            });
+            before();
+            std::process::exit(code);
+        })
+        .map(drop)
+        .map_err(Failed::run)
+}
+
+/// No browser sends this as its `Origin`, so the pairing listener takes only clients that send none: native programs.
+const NO_BROWSER: &str = "-";
+
+fn pair(listen: SocketAddr, timeout: Duration, until_stdin_closes: bool) -> Result<(), Failed> {
     if !listen.ip().is_loopback() {
         return Err(Failed::usage("pair listens only on loopback"));
     }
@@ -221,11 +233,18 @@ fn pair(listen: SocketAddr, timeout: Duration) -> Result<(), Failed> {
     let store = Arc::new(store()?);
     let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
-    let listener = listener.with_frames(Frames::Binary).with_limits(
-        Limits::default()
-            .with_max_message(auth::MAX_PROOF_MESSAGE)
-            .with_pending(8),
-    );
+    // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake.
+    let listener = listener
+        .with_frames(Frames::Binary)
+        .with_origins([NO_BROWSER.to_owned()])
+        .with_limits(
+            Limits::default()
+                .with_max_message(auth::MAX_PROOF_MESSAGE)
+                .with_pending(8),
+        );
+    if until_stdin_closes {
+        end_with_input(1, || {})?;
+    }
     let desk = pairing::desk().map_err(Failed::run)?;
     let shown = desk.show_pin().map_err(Failed::run)?;
     print(
@@ -357,7 +376,12 @@ fn run(cli: Cli) -> Result<(), Failed> {
         Command::Pair {
             listen,
             timeout_seconds,
-        } => pair(listen, Duration::from_secs(timeout_seconds)),
+            until_stdin_closes,
+        } => pair(
+            listen,
+            Duration::from_secs(timeout_seconds),
+            until_stdin_closes,
+        ),
         Command::Accept { peer } => {
             let id = peers::accept(&store()?, &peer).map_err(peers_failure)?;
             print(&format!("accepted {id}"))
