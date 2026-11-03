@@ -7,8 +7,8 @@
 //
 // CANOA_E2E_IDLE_MS leaves it alone that long with nothing attached to the worker and no extension page open, then asks whether the
 // link is the one it started with: DevTools attached to a worker keeps it alive, so this attaches to none. CANOA_E2E_KEEPALIVE=heartbeat,
-// alarm or none takes the other away from a copy of the extension, to measure what each does. CANOA_E2E_IDLE_TABS=none closes the last
-// tab too.
+// awake, alarm or none leaves only that one in a copy of the extension, to measure what each does. CANOA_E2E_IDLE_TABS=none closes the
+// last tab too.
 //
 // CANOA_E2E_REAL_AGENT=claude-code and CLAUDE_CODE_EXECUTABLE run a real Claude Code turn from the same entry, in a temporary directory
 // with no tools of its own, printing the shape of its events and never their text. It spends a little of the person's subscription.
@@ -33,7 +33,7 @@ const browser = process.env.CANOA_E2E_BROWSER;
 const bridge = process.env.CANOA_E2E_BRIDGE;
 if (!browser || !bridge) throw new Error("set CANOA_E2E_BROWSER and CANOA_E2E_BRIDGE");
 const idleMs = Number(process.env.CANOA_E2E_IDLE_MS ?? 0);
-const keepalive = process.env.CANOA_E2E_KEEPALIVE ?? "both";
+const keepalive = process.env.CANOA_E2E_KEEPALIVE ?? "all";
 const transports = (process.env.CANOA_E2E_TRANSPORTS ?? "websocket,webtransport").split(",");
 const realAgent = process.env.CANOA_E2E_REAL_AGENT === "claude-code" ? process.env.CLAUDE_CODE_EXECUTABLE : undefined;
 
@@ -98,12 +98,16 @@ function unpack(to) {
   writeFileSync(path.join(to, "manifest.json"), JSON.stringify(manifest));
   const provider = path.join(to, "acp-provider.js");
   let code = readFileSync(provider, "utf8");
-  if (keepalive === "none" || keepalive === "alarm") {
+  if (keepalive !== "all" && keepalive !== "heartbeat") {
     assert.ok(code.includes("const HEARTBEAT = {"));
     code = code.replace(/const HEARTBEAT = \{[^}]*\};/, "const HEARTBEAT = undefined;");
   }
-  if (keepalive === "none" || keepalive === "heartbeat") {
+  if (keepalive !== "all" && keepalive !== "alarm") {
     code = code.replaceAll("chrome.alarms.create(STANDING_ALARM, { periodInMinutes: ALARM_MINUTES })", "Promise.resolve()");
+  }
+  if (keepalive !== "all" && keepalive !== "awake") {
+    assert.ok(code.includes("stayAwake(status.state"));
+    code = code.replace('stayAwake(status.state === "connected");', "");
   }
   writeFileSync(provider, code);
 }
@@ -331,10 +335,16 @@ async function forTransport(transport) {
       assert.equal(linksMade(), 0, "no link came of any of it");
     });
 
-    await check(`${transport}: on for one machine, it opens a link with no ACP on it`, async () => {
+    await check(`${transport}: on for one machine, it opens a link with no ACP on it, and what that machine held before goes`, async () => {
+      await fromPermissions(async (options) => {
+        const siteTabId = await options.run(`chrome.tabs.query({}).then((tabs) => tabs.find((tab) => tab.url === ${JSON.stringify(pageUrl)}).id)`);
+        const given = await ask(options, { type: "canoa.grants.add", peerId: bridgePeer, tabId: siteTabId, capability: "browser.read", minutes: 15 });
+        assert.equal(given.grants.length, 1, JSON.stringify(given));
+      });
       await turnOn();
       assert.equal(linksMade(), 1);
       assert.ok(!said.includes("acp/1"), "no agent ran");
+      assert.deepEqual((await fromPermissions((options) => ask(options, { type: "canoa.grants.list" }))).grants, []);
     });
 
     const doorFile = path.join(env.COQUI_AGENTIC_PEER_HOME, "offers", `standing-${browserPeer.slice("sha256:".length)}.json`);

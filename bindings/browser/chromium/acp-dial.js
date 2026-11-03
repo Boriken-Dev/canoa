@@ -189,7 +189,8 @@ function bareLink(proven, heartbeat) {
       listen();
       for (const close of closing) close();
     }),
-  }, { side: "dialed", limits: { heartbeat } });
+  // Nothing here accepts a stream the far side opens, so none is held for it.
+  }, { side: "dialed", limits: { heartbeat, maxPendingOpens: 0 } });
   return {
     proven: true,
     mux,

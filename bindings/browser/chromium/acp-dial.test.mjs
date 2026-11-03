@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createDeframer, frame } from "./acp-dial.js";
+import { createDeframer, dialAgent, frame } from "./acp-dial.js";
+import { createMux } from "./vendor/coqui-agentic-peer/mux.mjs";
+import { createResponder, generateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
 
 const text = (buffer) => new TextDecoder().decode(buffer);
 
@@ -48,4 +50,77 @@ test("an empty message or one past the limit is refused before it is held", () =
   assert.throws(() => createDeframer()(new Uint8Array(4)));
   assert.throws(() => createDeframer(4)(frame("hello")));
   assert.throws(() => createDeframer()(new Uint8Array([255, 255, 255, 255])));
+});
+
+/** A far side on a socket in memory: the real proof, then a real mux on the sealed link. */
+async function dialedLink(options) {
+  const serverIdentity = await generateIdentity();
+  const clientIdentity = await generateIdentity();
+  const auth = await createResponder(serverIdentity, { allowClient: async () => true });
+  let session;
+  const heard = { frames: [] };
+  const far = { onMessage: () => {}, closed: () => {} };
+  class Socket {
+    binaryType = "";
+    listeners = { open: [], message: [], close: [], error: [] };
+    constructor() {
+      setTimeout(() => this.emit("open", {}));
+    }
+    addEventListener(type, listen) {
+      this.listeners[type].push(listen);
+    }
+    emit(type, event) {
+      for (const listen of this.listeners[type]) listen(event);
+    }
+    deliver(data) {
+      this.emit("message", { data });
+    }
+    async send(data) {
+      if (!session) {
+        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+        if (!heard.hello) {
+          heard.hello = true;
+          this.deliver(await auth.challenge(text));
+        } else {
+          const accepted = await auth.accept(text);
+          session = accepted.session;
+          far.socket = this;
+          this.deliver(accepted.reply);
+        }
+        return;
+      }
+      const opened = await session.open(new Uint8Array(data));
+      if (opened !== null) {
+        heard.frames.push(opened[0]);
+        far.onMessage(new Uint8Array(opened));
+      }
+    }
+    close() {
+      this.emit("close", {});
+    }
+  }
+  const link = await dialAgent({ peer: serverIdentity.peerId, url: "ws://x" }, { identity: clientIdentity, bare: true, WebSocketClass: Socket, WebTransportClass: undefined, ...options });
+  const mux = createMux({
+    send: async (bytes) => far.socket.deliver((await session.seal(bytes)).buffer),
+    onMessage: (take) => {
+      far.onMessage = take;
+    },
+    onClose: () => {},
+  }, { side: "answered" });
+  return { link, mux, heard };
+}
+
+test("a bare link opens no stream of its own, and refuses one the far side opens, since nothing here would accept it", async () => {
+  const { link, mux, heard } = await dialedLink({});
+  assert.equal(typeof link.mux.open, "function");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(heard.frames, [], "no acp/1, and nothing else");
+  const opened = await mux.open("anything");
+  await assert.rejects(opened.receive(), (error) => error.reason === "refused");
+});
+
+test("a heartbeat, when asked for, goes out as the mux's own ping", async () => {
+  const { heard } = await dialedLink({ heartbeat: { interval: 5, misses: 100 } });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.ok(heard.frames.includes(4), JSON.stringify(heard.frames));
 });

@@ -44,7 +44,10 @@
   <h2>Programs on a paired machine</h2>
   <p>Off unless you turn it on, for one machine. An editor or a command-line agent there can then ask you for a tab, as an agent in
     Canoa's chat does, with nothing listening in this browser. Canoa cannot tell which program asks: it shows you the machine, and
-    what you allow is shared by whatever runs as you there.</p>
+    what you allow is shared by whatever runs as that machine's user there, and by that machine's agents in Canoa's chat. Turning this
+    on or off ends what that machine was allowed so far.</p>
+  <p>Off does not close everything: while Canoa's chat has a conversation open with an agent there, a program running as that user could
+    find that conversation's server and ask you through it.</p>
   <label for="machine">Machine</label>
   <select id="machine"></select>
   <button type="button" id="standing-toggle">Turn on</button>

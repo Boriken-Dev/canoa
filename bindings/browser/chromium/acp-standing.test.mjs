@@ -154,14 +154,34 @@ test("a program taking a stream gets MCP on it and sees only the one tool, and t
   assert.equal(json(await bridge[1].receive()).id, 2);
 });
 
-test("anything but MCP on the stream before it is claimed ends the link rather than reaching a tool", async () => {
-  const { standing, state, statuses } = setUp();
+test("anything but a claim on a free stream reaches no tool and ends that stream, and the next opens after a moment", async () => {
+  const { standing, state, timers } = setUp();
   await standing.ensure();
   const { bridge } = state.links[0];
   await until("the stream", () => bridge.length === 1);
   await bridge[0].send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
-  await until("the link to end", () => state.links[0].closed);
-  assert.equal(statuses.at(-1).state, "unreachable");
+  assert.equal(await bridge[0].receive(), null);
+  assert.equal(state.links[0].closed, false);
+  assert.equal(bridge.length, 1, "no loop a bridge can drive");
+  await until("the next to be put off", () => timers.length === 1);
+  timers.shift()();
+  await until("the next", () => bridge.length === 2);
+});
+
+test("a free stream ending takes nothing from the programs on the others", async () => {
+  const { standing, state, timers, statuses } = setUp();
+  await standing.ensure();
+  const { bridge } = state.links[0];
+  await until("the stream", () => bridge.length === 1);
+  await claim(bridge[0]);
+  await until("the next", () => bridge.length === 2);
+  await settle();
+  bridge[1].close();
+  await until("the next to be put off", () => timers.length === 1);
+  assert.equal(state.links[0].closed, false);
+  await bridge[0].send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }));
+  assert.equal(json(await bridge[0].receive()).id, 1);
+  assert.equal(statuses.at(-1).state, "connected");
 });
 
 test("a stream a program has left is released, and one still stands for the next", async () => {
@@ -222,6 +242,56 @@ test("turning it off closes the free stream at once, so nothing coming in that m
   await standing.changed();
   assert.equal(state.links[0].closed, false, "the link is still there");
   assert.equal(await bridge[0].receive(), null);
+});
+
+test("turned off while a stream is still opening, it says off and keeps nothing", async () => {
+  const statuses = [];
+  const state = { on: "a" };
+  const { far, nearEnd } = linkedMuxes();
+  const bridge = fakeBridge(far);
+  // A link slow to take a message: the stream is still opening when the setting changes.
+  const send = nearEnd.send;
+  nearEnd.send = async (bytes) => {
+    await settle(20);
+    return send(bytes);
+  };
+  const slow = createMux(nearEnd, { side: "dialed" });
+  const standing = createStanding({
+    setting: async () => state.on,
+    agentOf: async () => AGENT,
+    dial: async () => ({ mux: slow, onClose() {}, close() {} }),
+    toolsFor: () => ({ end() {}, adopt() {} }),
+    onStatus: (status) => statuses.push(status.state),
+    setTimer() {},
+  });
+  await standing.ensure();
+  state.on = null;
+  await standing.changed();
+  await settle(80);
+  assert.equal(statuses.at(-1), "off", statuses.join());
+  assert.ok(!statuses.includes("connected"), statuses.join());
+  assert.equal(await Promise.race([bridge[0]?.receive(), settle(50).then(() => "still open")]), bridge.length === 0 ? "still open" : null);
+});
+
+test("turned off while the dial is being answered, the link it got is closed and no stream opens", async () => {
+  const state = { on: "a" };
+  const { near, far } = linkedMuxes();
+  const bridge = fakeBridge(far);
+  let closed = false;
+  const standing = createStanding({
+    setting: async () => state.on,
+    agentOf: async () => AGENT,
+    dial: async () => {
+      state.on = null;
+      return { mux: near, onClose() {}, close() { closed = true; } };
+    },
+    toolsFor: () => assert.fail("nothing to serve"),
+    setTimer() {},
+  });
+  await standing.ensure();
+  assert.equal(closed, true);
+  await settle();
+  assert.equal(bridge.length, 0);
 });
 
 test("turning it on for another machine ends the first", async () => {
@@ -367,6 +437,21 @@ test("the window says a program on that machine is asking, and turning this off 
   assert.equal(shown.peer, AGENT.peer);
   assert.equal(answer.allowed, false);
   assert.deepEqual(grants, []);
+});
+
+test("already turned off when a program asks, no window opens", async () => {
+  let asked = false;
+  const access = createAccess({
+    tabs: async () => [{ id: 3, title: "t", url: "https://a.example/", active: true }],
+    ask: async () => {
+      asked = true;
+      return { tabId: 3, minutes: 15 };
+    },
+    updateGrants: async () => assert.fail("no grant"),
+  });
+  const answer = await access({ peer: AGENT.peer, label: "x", capability: "browser.read", reason: "", via: "program", still: async () => false });
+  assert.equal(answer.allowed, false);
+  assert.equal(asked, false);
 });
 
 test("still on as the grant is stored, it is stored; a session's own agent is asked for with nothing else", async () => {

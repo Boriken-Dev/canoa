@@ -227,9 +227,10 @@ function browserView(details) {
   refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
   const who = details.via === "program"
     ? [element("p", {}, element("strong", { textContent: `A program on ${details.label}` }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
-      element("p", { className: "warn", textContent: "Canoa cannot tell which program: whatever runs as you on that machine can ask here, and shares what you allow." }),
+      element("p", { className: "warn", textContent: "Canoa cannot tell which program. Whatever can use that machine's key, which is whatever runs as its user there, can ask here and shares what you allow." }),
       element("p", {}, element("code", { textContent: details.peer }))]
-    : [element("p", {}, element("strong", { textContent: details.label }), ` asks to ${WHAT[details.capability] ?? details.capability}.`)];
+    : [element("p", {}, element("strong", { textContent: details.label }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
+      ...(details.programs ? [element("p", { className: "warn", textContent: "You turned on programs for that machine, so they can use what you allow here too." })] : [])];
   main.replaceChildren(
     ...who,
     element("p", { className: "theirs", textContent: details.reason ? `In its own words: ${details.reason}` : "It gave no reason." }),

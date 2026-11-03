@@ -14,6 +14,9 @@ const RETRY_MS = [1_000, 5_000];
 /** How long a goodbye has to cross before the link goes: what is still queued on a link that has gone is dropped there. */
 const GOODBYE_MS = 250;
 
+/** After a free stream ended unused. A bridge that keeps doing that gets no faster loop than this. */
+const NEXT_STREAM_MS = 1_000;
+
 /** What a program hears when a person turns this off, before its server ends. */
 export const GOODBYE = JSON.stringify({
   jsonrpc: "2.0",
@@ -69,16 +72,28 @@ export function createStanding({ setting, agentOf, dial, toolsFor, onStatus = ()
     if (entry.ended || entry.waiting || entry.programs >= MAX_PROGRAMS) return;
     entry.waiting = true;
     let stream;
+    let ready = false;
     try {
       stream = await entry.link.mux.open(OFFER, METADATA);
+      // Turning this off cannot have closed what was still opening.
+      if (entry.ended) throw new Error("turned off");
       entry.spare = stream;
       if (!saying(await stream.receive(), READY)) throw new Error("that is no standing stream");
+      if (entry.ended) throw new Error("turned off");
+      ready = true;
       tries = 0;
       say("connected", entry.agent);
       if (!saying(await stream.receive(), CLAIMED)) throw new Error("the stream ended unused");
     } catch (error) {
       stream?.close();
       entry.waiting = false;
+      entry.spare = null;
+      if (entry.ended) return;
+      // One stream going is no reason to end what the others carry, while the link they share is there.
+      if (entry.link.mux.linkState().up && (ready || entry.programs > 0)) {
+        setTimer(() => standBy(entry), NEXT_STREAM_MS);
+        return;
+      }
       lost(entry, error?.reason === "refused" ? "refused" : "unreachable");
       return;
     }
@@ -125,6 +140,11 @@ export function createStanding({ setting, agentOf, dial, toolsFor, onStatus = ()
     } catch {
       say("unreachable", agent);
       retry();
+      return;
+    }
+    // Turned off or moved on while that was being answered: whoever changed it is waiting for this attempt, and then looks again.
+    if ((await setting()) !== wanted) {
+      link.close();
       return;
     }
     const entry = { key: wanted, agent, link, tools: toolsFor({ mux: link.mux, agent }), programs: 0, waiting: false, spare: null, ended: false };

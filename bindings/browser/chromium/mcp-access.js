@@ -38,6 +38,8 @@ export function createAccess({ tabs, ask, updateGrants, debuggerBuild = false, n
     if (now() < state.notBefore) return { allowed: false, why: "The person said no just now. Do not ask again yet." };
     state.asking = true;
     try {
+      // Not a window a person can answer only to hear it counted for nothing, once they have given a site's host permission.
+      if (still !== undefined && !(await still())) return { allowed: false, why: "This was turned off." };
       const open = (await tabs()).filter((tab) => Number.isSafeInteger(tab.id) && /^https?:\/\//.test(tab.url ?? ""));
       const answer = await ask({
         label,

@@ -105,6 +105,12 @@ export function revokePeer(grants, peerId) {
   return grants.filter((g) => g.peerId !== peerId);
 }
 
+/** The tabs a peer's debugger grants name: what has to be detached as well, when those grants go. */
+export function debuggedTabs(grants, peerId) {
+  if (!Array.isArray(grants)) return [];
+  return [...new Set(grants.filter((g) => g.peerId === peerId && g.capability === CAPABILITY.DEBUG).map((g) => g.tabId))];
+}
+
 export function pruneExpired(grants, now = Date.now()) {
   if (!Array.isArray(grants)) return [];
   return grants.filter((g) => validGrant(g) && g.expiresAt > now);

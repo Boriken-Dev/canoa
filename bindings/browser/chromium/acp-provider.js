@@ -8,7 +8,8 @@ import { dispatchBrowserTool } from "./browser-tools.js";
 import { onGrantsChanged, readGrants, updateGrants } from "./browser-grants.js";
 import { handleMcpRequest } from "./mcp.js";
 import { askableCapabilities, createAccess } from "./mcp-access.js";
-import { revokePeer } from "./permissions.js";
+import { debuggedTabs, revokePeer } from "./permissions.js";
+import { detachOnTabClosed } from "./devtools.js";
 
 const AGENTS = "canoa_acp_agents";
 const GRANTS = "canoa_acp_grants";
@@ -21,8 +22,11 @@ const SEARCH_SECONDS = 3;
 const STANDING = "canoa_standing";
 const STANDING_STATUS = "canoa_standing_status";
 const STANDING_ALARM = "canoa-standing";
-// A browser ends an idle worker after 30 seconds, and with it the socket: this traffic is what counts as not idle.
+// Notices a link that has gone silent, which a socket alone may not for a long time.
 const HEARTBEAT = { interval: 20_000, misses: 3 };
+// A browser ends an idle worker after 30 seconds, and with it the socket. A WebSocket's traffic counts as activity and a WebTransport's
+// does not, and an extension API call counts on either. Held only while the link is up, so nothing keeps a worker for a machine that is off.
+const AWAKE_MS = 20_000;
 // Wakes a worker that ended anyway and finds the link gone. 30 seconds is the least an alarm may be set for.
 const ALARM_MINUTES = 0.5;
 const FOUND = ["dns-sd", "local"];
@@ -141,7 +145,7 @@ const OWN_ORIGIN = new URL(chrome.runtime.getURL("")).origin;
 const debuggerBuild = () => chrome.runtime.getManifest().permissions.includes("debugger");
 const requestAccess = createAccess({
   tabs: () => chrome.tabs.query({}),
-  ask: (details) => ask({ kind: "browser", ...details }, 520, 620),
+  ask: async (details) => ask({ kind: "browser", ...details, programs: await programsShare(details.peer) }, 520, 620),
   updateGrants,
   debuggerBuild: debuggerBuild(),
 });
@@ -199,10 +203,26 @@ const gateway = createGateway({
   offerTools,
 });
 
+let awake;
+function stayAwake(on) {
+  if (on && awake === undefined) {
+    awake = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {});
+    }, AWAKE_MS);
+  } else if (!on && awake !== undefined) {
+    clearInterval(awake);
+    awake = undefined;
+  }
+}
+
 const standing = createStanding({
   setting: () => read("local", STANDING, null),
   agentOf: async (key) => (await store.agents()).find((agent) => agent.key === key),
-  dial: (agent) => dialRecord(store, dialAgent, agent, { bare: true, heartbeat: HEARTBEAT }),
+  dial: async (agent) => {
+    const link = await dialRecord(store, dialAgent, agent, { bare: true, heartbeat: HEARTBEAT });
+    await store.markProven(agent.key);
+    return link;
+  },
   toolsFor: ({ mux, agent }) => offerTools({
     mux,
     peer: agent.peer,
@@ -211,6 +231,7 @@ const standing = createStanding({
     still: async () => (await read("local", STANDING, null)) === agent.key,
   }),
   onStatus: (status) => {
+    stayAwake(status.state === "connected");
     write("session", STANDING_STATUS, status).catch(() => {});
   },
 });
@@ -227,25 +248,53 @@ async function standingView() {
   };
 }
 
-/** Turns it on for one agent, or off with null. What was given to the one it was on for goes too: a person turning this off means it. */
+function closeWindowsAsking(peer) {
+  for (const entry of asking.values()) {
+    if (entry.details.kind === "browser" && entry.details.peer === peer) entry.done(null);
+  }
+}
+
+/** Nothing a machine's agents were given before reaches its programs by a person turning this on, and nothing outlasts turning it off. */
+async function forgetPeer(peer) {
+  closeWindowsAsking(peer);
+  let debugged = [];
+  await updateGrants((grants) => {
+    debugged = debuggedTabs(grants, peer);
+    return revokePeer(grants, peer);
+  });
+  for (const tabId of debugged) await detachOnTabClosed(tabId).catch(() => {});
+}
+
+/** Turns it on for one agent, or off with null. */
 async function setStanding(key) {
   const agents = await store.agents();
+  const peerOf = (candidate) => agents.find((agent) => agent.key === candidate)?.peer;
   if (key !== null) {
     const agent = agents.find((candidate) => candidate.key === key);
     if (typeof agent?.peer !== "string" || agent.offers?.includes(OFFER) !== true) throw new Error("That machine cannot do this.");
   }
   const before = await read("local", STANDING, null);
   await write("local", STANDING, key);
-  if (key === null) await chrome.alarms.clear(STANDING_ALARM);
-  else await chrome.alarms.create(STANDING_ALARM, { periodInMinutes: ALARM_MINUTES });
-  const peer = agents.find((agent) => agent.key === before)?.peer;
-  if (before !== null && before !== key && peer !== undefined) {
-    for (const entry of asking.values()) {
-      if (entry.details.kind === "browser" && entry.details.peer === peer) entry.done(null);
+  try {
+    if (key === null) await chrome.alarms.clear(STANDING_ALARM);
+    else await chrome.alarms.create(STANDING_ALARM, { periodInMinutes: ALARM_MINUTES });
+    if (before !== key) {
+      for (const peer of new Set([peerOf(before), peerOf(key)])) {
+        if (peer !== undefined) await forgetPeer(peer);
+      }
     }
-    await updateGrants((grants) => revokePeer(grants, peer));
+  } finally {
+    // Whatever failed above, the setting is written and the link follows it.
+    await standing.changed();
+    // A program may have got its question in while the link was ending.
+    if (before !== null && before !== key && peerOf(before) !== undefined) closeWindowsAsking(peerOf(before));
   }
-  await standing.changed();
+}
+
+/** Whether what a person allows this peer also reaches its machine's programs. */
+async function programsShare(peer) {
+  const on = await read("local", STANDING, null);
+  return on !== null && (await store.agents()).find((agent) => agent.key === on)?.peer === peer;
 }
 
 function secureOrigin(origin) {

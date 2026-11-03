@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CAPABILITY, DIRECTION, isAllowed, makeGrant, pruneExpired, revokePeer, revokeTab
+  CAPABILITY, debuggedTabs, DIRECTION, isAllowed, makeGrant, pruneExpired, revokePeer, revokeTab
 } from "./permissions.js";
 
 const NOW = 1_800_000_000_000;
@@ -79,4 +79,15 @@ test("reject invalid origins and incompatible scopes", () => {
     direction: DIRECTION.PAGE_TO_AGENT, peerId: PEER, origin,
     tabId: 7, capability: CAPABILITY.CONNECT, expiresAt: NOW + 1000
   }), TypeError);
+});
+
+test("the tabs a peer's debugger grants name are what has to be detached when they go, and no other peer's", () => {
+  const grants = [
+    { peerId: "a", tabId: 1, capability: "browser.debug" },
+    { peerId: "a", tabId: 1, capability: "browser.debug" },
+    { peerId: "a", tabId: 2, capability: "browser.read" },
+    { peerId: "b", tabId: 3, capability: "browser.debug" },
+  ];
+  assert.deepEqual(debuggedTabs(grants, "a"), [1]);
+  assert.deepEqual(debuggedTabs(undefined, "a"), []);
 });
