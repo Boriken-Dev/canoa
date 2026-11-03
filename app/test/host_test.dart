@@ -16,6 +16,8 @@ import 'dart:typed_data';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/auth/peer_proof.dart';
+import 'package:canoa/desktop/host_supervisor.dart';
+import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // Absolute, since the provider's library is named in a Canoa.cfg written to a temporary directory and read from there.
@@ -222,6 +224,94 @@ void main() {
       await client.close();
     }
   }, skip: skip);
+
+  group('the app running the host', () {
+    late Directory dir;
+    late HostSupervisor supervisor;
+    late File config;
+
+    setUp(() async {
+      dir = await Directory.systemTemp.createTemp('canoa-supervised');
+      config = File('${dir.path}/Canoa.cfg');
+      await config.writeAsString('''
+[host.agents.fixture]
+program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
+''');
+      supervisor = HostSupervisor(
+        ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'}),
+        firstPause: const Duration(milliseconds: 200),
+      );
+    });
+
+    tearDown(() async {
+      await supervisor.stop();
+      supervisor.dispose();
+      await dir.delete(recursive: true);
+    });
+
+    Future<void> until(bool Function() done, String what) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (!done()) {
+        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    test('serves Canoa.cfg, and a key the person pairs in the app reaches its agent', () async {
+      await supervisor.apply(configPath: config.path, hasEntries: true);
+      await until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      final url = supervisor.listening.single.url;
+      final client = connectVerifiedAcp(
+        chatEndpoints(webSocket: url),
+        expectedPeerId: supervisor.peerId!,
+        verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+      );
+      await expectLater(client, throwsA(anything), reason: 'an unpaired key is turned away');
+      final browserId = await browser.localId();
+      final waiting = await supervisor.keys();
+      expect(waiting.where((key) => !key.accepted).map((key) => key.id), contains(browserId));
+      await supervisor.accept(browserId);
+      expect((await supervisor.keys()).firstWhere((key) => key.id == browserId).accepted, isTrue);
+      final agent = await connectVerifiedAcp(
+        chatEndpoints(webSocket: url),
+        expectedPeerId: supervisor.peerId!,
+        verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+      );
+      try {
+        final opened = await agent.openSession(cwd: dir.path);
+        expect(await turn(agent, opened.id, 'hello'), 'echo: hello');
+      } finally {
+        await agent.close();
+      }
+      await supervisor.revoke(browserId);
+      expect((await supervisor.keys()).map((key) => key.id), isNot(contains(browserId)));
+    }, skip: skip);
+
+    test('a host that dies is started again, and stopping ends it for good', () async {
+      await supervisor.apply(configPath: config.path, hasEntries: true);
+      await until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      final first = supervisor.pid!;
+      Process.killPid(first, ProcessSignal.sigkill);
+      await until(() => supervisor.phase == HostPhase.waiting, 'the supervisor to see it end');
+      await until(() => supervisor.phase == HostPhase.running, 'the host to run again');
+      final second = supervisor.pid!;
+      expect(second, isNot(first));
+      await supervisor.stop();
+      expect(supervisor.phase, HostPhase.stopped);
+      expect(supervisor.pid, isNull);
+      await Future<void>.delayed(const Duration(seconds: 1));
+      expect(supervisor.phase, HostPhase.stopped, reason: 'nothing starts it again');
+      expect(Process.killPid(second), isFalse, reason: 'the host has ended');
+    }, skip: skip);
+
+    test('a Canoa.cfg the host refuses is said in its words and not retried', () async {
+      await config.writeAsString('[host.agents.fixture]\nprogram = "x"\nlisten = "0.0.0.0:7999"\n');
+      expect(await supervisor.check(config.path), isNotNull);
+      await supervisor.apply(configPath: config.path, hasEntries: true);
+      await until(() => supervisor.phase == HostPhase.failed, 'the host to refuse it');
+      expect(supervisor.problem, contains('loopback'));
+    }, skip: skip);
+  });
 
   test('a key the host removes loses its link and cannot come back', () async {
     final client = await connect('echo');
