@@ -6,6 +6,9 @@ import 'package:flutter/foundation.dart';
 
 import 'chat/agent_events.dart';
 import 'chat/update_record.dart';
+import 'ledger/session_ledger.dart';
+
+export 'ledger/session_ledger.dart' show SessionPlace;
 
 /// Canoa's local view of an agent-issued session. The agent session id is
 /// separate from the local view id and is absent from offline previews.
@@ -69,11 +72,19 @@ class ChatSession {
     this.endpoint,
     this.websocketFallback,
     this.cwd,
+    this.place = SessionPlace.local,
+    this.method,
     List<ChatMessage>? messages,
   }) : messages = messages ?? <ChatMessage>[];
 
   /// Where the agent works, on its machine, when this side knows.
   final String? cwd;
+
+  /// Where the agent runs, as this app reached it.
+  final SessionPlace place;
+
+  /// The proof a peer's key makes, for a session reached by its endpoint.
+  final String? method;
 
   /// What goes with the next message.
   final List<AcpAttachment> attachments = [];
@@ -109,7 +120,7 @@ class ChatSession {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder}) {
+  SessionStore({bool includePreview = true, this.recorder, this.ledger}) {
     if (includePreview) {
       final first = createPreviewSession(title: 'Getting started', agent: 'Canoa preview');
       first.messages.addAll([
@@ -131,6 +142,9 @@ class SessionStore extends ChangeNotifier {
 
   /// Told the kind and shape of each update this store applies, for a test or the `CANOA_EVENT_LOG` setting.
   final UpdateRecorder? recorder;
+
+  /// Where every session opened or resumed here is noted, to be listed and opened again after the app ends.
+  final SessionLedger? ledger;
 
   final List<ChatSession> _sessions = [];
   final Map<String, VerifiedAgent> _verifiedClients = {};
@@ -213,7 +227,7 @@ class SessionStore extends ChangeNotifier {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
     }
-    final session = ChatSession(
+    return _insert(ChatSession(
       id: 'local-${++_nextId}',
       title: title,
       agent: agent,
@@ -221,7 +235,11 @@ class SessionStore extends ChangeNotifier {
       peerId: peerId,
       remoteSessionId: remoteSessionId,
       cwd: cwd,
-    );
+      place: peerId.startsWith('local:') ? SessionPlace.local : SessionPlace.browser,
+    ));
+  }
+
+  ChatSession _insert(ChatSession session) {
     _sessions.insert(0, session);
     _selectedId = session.id;
     notifyListeners();
@@ -237,23 +255,27 @@ class SessionStore extends ChangeNotifier {
     required String remoteSessionId,
     required Uri endpoint,
     Uri? websocketFallback,
+    SessionPlace place = SessionPlace.peer,
+    String? method,
+    String? cwd,
   }) {
     // This records transport locations, not the authentication state. The
     // session stays disconnected until peer proof and ACP are implemented.
     if (endpoint.scheme == 'https') {
-      WebEndpoints(webTransport: endpoint, webSocket: websocketFallback);
-    } else if (endpoint.scheme == 'wss') {
+      WebEndpoints(webTransport: endpoint, webSocket: websocketFallback, allowLocalPlainWebSocket: true);
+    } else if (endpoint.scheme == 'wss' || endpoint.scheme == 'ws') {
       if (websocketFallback != null) {
         throw ArgumentError('A direct WSS endpoint cannot have a fallback');
       }
-      WebEndpoints(webSocket: endpoint);
+      // Plain WebSocket only on loopback, where canoa-host listens.
+      WebEndpoints(webSocket: endpoint, allowLocalPlainWebSocket: true);
     } else {
       throw ArgumentError.value(endpoint, 'endpoint', 'Use HTTPS WebTransport or WSS');
     }
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
     }
-    final session = ChatSession(
+    return _insert(ChatSession(
       id: 'local-${++_nextId}',
       title: title,
       agent: agent,
@@ -262,16 +284,15 @@ class SessionStore extends ChangeNotifier {
       endpoint: endpoint,
       websocketFallback: websocketFallback,
       status: SessionStatus.disconnected,
-    );
-    _sessions.insert(0, session);
-    _selectedId = session.id;
-    notifyListeners();
-    return session;
+      place: place,
+      method: method,
+      cwd: cwd,
+    ));
   }
 
-  /// A verified and initialized ACP client can be bound to one session.
+  /// A verified and initialized ACP client can be bound to one session, which the ledger then notes unless [record] is false.
   /// Opening and peer authentication remain the connector's responsibility.
-  void attachVerifiedClient(String localId, VerifiedAgent client) {
+  void attachVerifiedClient(String localId, VerifiedAgent client, {bool record = true}) {
     ChatSession? target;
     for (final session in _sessions) {
       if (session.id == localId) target = session;
@@ -317,14 +338,52 @@ class SessionStore extends ChangeNotifier {
       if (event is AcpCompleted || event is AcpCancelled) {
         session.status = SessionStatus.connected;
         if (event is AcpCancelled) _note(session, 'Stopped.');
+        _keepText(session);
         notifyListeners();
       } else if (event is AcpFailed) {
         session.status = SessionStatus.connected;
         session.messages.add(ChatMessage(role: MessageRole.notice, text: event.message, at: DateTime.now()));
+        _keepText(session);
         notifyListeners();
       }
     });
+    if (record) _record(session, client);
     notifyListeners();
+  }
+
+  /// Notes [session] in the ledger, with what its agent said about itself.
+  void _record(ChatSession session, VerifiedAgent client) {
+    final remote = session.remoteSessionId;
+    final peerId = session.peerId;
+    if (ledger == null || remote == null || peerId == null) return;
+    final identity = client.identity;
+    ledger!.record(
+      peerId: peerId,
+      sessionId: remote,
+      entry: session.agent,
+      place: session.place,
+      reportedName: identity.name,
+      grokShell: identity.grokShell,
+      version: identity.version,
+      reopenBy: identity.reopenBy,
+      cwd: session.cwd,
+      title: session.title,
+      endpoint: session.endpoint?.toString(),
+      fallback: session.websocketFallback?.toString(),
+      method: session.method,
+    );
+  }
+
+  /// Keeps what was said in [session] with its ledger entry, which the ledger does only when the person turned that on.
+  void _keepText(ChatSession session) {
+    final remote = session.remoteSessionId;
+    final peerId = session.peerId;
+    if (ledger == null || remote == null || peerId == null || !ledger!.settings.keepText) return;
+    ledger!.keepText(peerId, remote, [
+      for (final message in session.messages)
+        if (message.role == MessageRole.user || message.role == MessageRole.agent)
+          KeptMessage(message.role.name, message.text, message.at),
+    ]);
   }
 
   /// The `_meta` key under which `canoa-host` lists, in its answer to `session/new`, what a person should know about an agent
@@ -451,7 +510,12 @@ class SessionStore extends ChangeNotifier {
         }
       case Rendering.title:
         final title = shortText(update.raw['title']);
-        if (title != null && session.agentNames) session.title = title;
+        if (title != null && session.agentNames) {
+          session.title = title;
+          if (session.peerId != null && session.remoteSessionId != null) {
+            ledger?.touch(session.peerId!, session.remoteSessionId!, title: title);
+          }
+        }
       case Rendering.status:
         if (update.state == 'running' || update.state == 'requires_action') {
           session.status = SessionStatus.working;
@@ -466,6 +530,7 @@ class SessionStore extends ChangeNotifier {
               at: DateTime.now(),
             ));
           }
+          _keepText(session);
         }
       case Rendering.message || Rendering.thought:
         final text = update.text;
@@ -518,6 +583,7 @@ class SessionStore extends ChangeNotifier {
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
     }
+    if (session.peerId != null) ledger?.touch(session.peerId!, session.remoteSessionId!);
     final attachments = List.of(session.attachments);
     final sent = attachments.isEmpty ? null : 'Sent with this: ${attachments.map((item) => item.name).join(', ')}';
     if (client.protocolVersion == 1) {
@@ -617,12 +683,13 @@ class SessionStore extends ChangeNotifier {
       cwd: cwd,
     );
     // Listening first, since the conversation arrives before the answer does.
-    attachVerifiedClient(session.id, client);
+    attachVerifiedClient(session.id, client, record: false);
     try {
       final opened = await client.reopenSession(earlier.id, cwd: cwd);
       applyOpened(session, opened);
       if (!opened.replayed) _note(session, 'The agent resumed this without sending what was said before.');
       session.status = SessionStatus.connected;
+      _record(session, client);
       notifyListeners();
       return session;
     } catch (_) {
@@ -631,8 +698,85 @@ class SessionStore extends ChangeNotifier {
     }
   }
 
+  /// Opens a session from the ledger again on [client], an agent just started or connected for it, by `session/load` or
+  /// `session/resume`, whichever the agent offers. One already open is selected instead, and [client] is left to the caller.
+  Future<ChatSession> reopen(LedgerEntry entry, VerifiedAgent client) async {
+    for (final session in _sessions) {
+      if (session.peerId == entry.peerId && session.remoteSessionId == entry.sessionId) {
+        select(session.id);
+        return session;
+      }
+    }
+    if (client.peerId != entry.peerId) throw StateError('That agent is not the one this session was opened with');
+    if (client.identity.reopenBy == null || !client.canReopenSessions) {
+      throw AcpFailure('${entry.harness} offers neither session/load nor session/resume, so this session cannot be opened again');
+    }
+    final cwd = entry.cwd;
+    if (cwd == null) throw StateError('Canoa did not note where this session was, which the agent needs to open it');
+    // What the agent lists now names the session, when it still has it under the same name.
+    var title = entry.title ?? 'Earlier conversation';
+    try {
+      if (await client.describe() case AcpDescription(sessions: AcpKnown(value: final listed))) {
+        for (final info in listed) {
+          if (info.id == entry.sessionId) title = shortText(info.title) ?? title;
+        }
+      }
+    } on AcpFailure {
+      // Only the name depends on it.
+    }
+    final endpoint = entry.endpoint == null ? null : Uri.tryParse(entry.endpoint!);
+    final session = _insert(ChatSession(
+      id: 'local-${++_nextId}',
+      title: title,
+      agent: entry.entry,
+      status: SessionStatus.disconnected,
+      peerId: client.peerId,
+      remoteSessionId: entry.sessionId,
+      cwd: cwd,
+      place: entry.place,
+      endpoint: endpoint,
+      websocketFallback: entry.fallback == null ? null : Uri.tryParse(entry.fallback!),
+      method: entry.method,
+    ));
+    attachVerifiedClient(session.id, client, record: false);
+    try {
+      final opened = await client.reopenSession(entry.sessionId, cwd: cwd);
+      applyOpened(session, opened);
+      if (!opened.replayed) {
+        _note(session, 'The agent resumed this without sending what was said before.');
+        if (entry.messages.isNotEmpty) {
+          _note(session, 'What Canoa kept of it follows, from its own list, not from the agent.');
+          for (final kept in entry.messages) {
+            session.messages.add(ChatMessage(role: _keptRole(kept.role), text: kept.text, at: kept.at));
+          }
+        }
+      }
+      session.status = SessionStatus.connected;
+      _record(session, client);
+      notifyListeners();
+      return session;
+    } catch (_) {
+      forget(session);
+      rethrow;
+    }
+  }
+
+  static MessageRole _keptRole(String role) => role == 'user' ? MessageRole.user : MessageRole.agent;
+
+  /// Shows what Canoa kept of a session it cannot open again, as an offline preview that sends nothing.
+  ChatSession showKept(LedgerEntry entry) {
+    final session = createPreviewSession(title: entry.title ?? 'Earlier conversation', agent: entry.harness);
+    _note(session, 'What Canoa kept of this session. ${entry.whyNotReopened ?? ''} Nothing typed here reaches an agent.');
+    for (final kept in entry.messages) {
+      session.messages.add(ChatMessage(role: _keptRole(kept.role), text: kept.text, at: kept.at));
+    }
+    notifyListeners();
+    return session;
+  }
+
   /// Takes a conversation out of the list. The agent still has it, and its connection stays with whoever else uses it.
   void forget(ChatSession session) {
+    _keepText(session);
     unawaited(_subscriptions.remove(session.id)?.cancel());
     unawaited(_turnSubscriptions.remove(session.id)?.cancel());
     _verifiedClients.remove(session.id);

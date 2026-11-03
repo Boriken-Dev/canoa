@@ -21,12 +21,19 @@ import 'package:flutter/material.dart';
 import 'chat/agent_events.dart' show AgentCommandInfo, isLongToApprove;
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
+import 'auth/peer_proof.dart' show PeerMethod;
+import 'ledger/ledger_backend.dart';
+import 'ledger/ledger_list.dart';
+import 'ledger/session_ledger.dart';
 import 'session_store.dart';
 import 'theme/look.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final config = await loadConfig();
+  // Beside Canoa.cfg on a desktop, in this origin's IndexedDB on the web.
+  final ledger = SessionLedger(platformLedgerBackend(configPath: desktopConfigPath()), settings: config.sessions);
+  await ledger.load();
   final shell = createDesktopShell();
   final settingsSignal = ValueNotifier<int>(0);
   final hostingSignal = ValueNotifier<int>(0);
@@ -38,7 +45,7 @@ Future<void> main() async {
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
-    host: host, hostingSignal: hostingSignal,
+    host: host, hostingSignal: hostingSignal, ledger: ledger,
   ));
   await host?.apply(configPath: desktopConfigPath(), hasEntries: config.hostEntries.isNotEmpty);
 }
@@ -49,10 +56,13 @@ class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
-    this.configPath, this.writeConfig,
+    this.configPath, this.writeConfig, this.ledger,
   });
 
   final SessionStore? store;
+
+  /// The list of sessions kept across runs, for a store this app makes; a given [store] brings its own.
+  final SessionLedger? ledger;
   final CanoaConfig config;
   final DesktopShell? shell;
   final ValueNotifier<int>? settingsSignal;
@@ -131,7 +141,9 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       fromDialog = await showDialog<CanoaConfig>(
         context: above,
-        builder: (_) => SettingsDialog(config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null),
+        builder: (_) => SettingsDialog(
+          config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
+        ),
       );
     } finally {
       _settingsOpen = false;
@@ -140,6 +152,7 @@ class _CanoaAppState extends State<CanoaApp> {
     // [host] stays as the app has it now: Hosting may have changed it while Settings was open.
     final changed = fromDialog.withHost(config.host);
     setState(() => config = changed);
+    store.ledger?.configure(changed.sessions);
     await widget.shell?.update(changed);
     try {
       await _write(changed);
@@ -225,8 +238,53 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// Opens a session from the list again: its agent is started or reached again, then asked to open it.
+  Future<void> _reopen(LedgerEntry entry) async {
+    for (final session in store.sessions) {
+      if (session.peerId == entry.peerId && session.remoteSessionId == entry.sessionId) {
+        store.select(session.id);
+        return;
+      }
+    }
+    final why = entry.whyNotReopened;
+    if (why != null) throw StateError(why);
+    final VerifiedAgent client;
+    switch (entry.place) {
+      case SessionPlace.local:
+        final command = [...agentPresets, ...config.agents].where((agent) => agent.label == entry.entry).firstOrNull;
+        if (command == null) throw StateError('No agent named ${entry.entry} is set up here now');
+        if (!canRunLocalAgents) throw StateError('This build cannot run agents on this computer');
+        client = await startLocalAgent(command, decider: store.askPermission, workingDirectory: entry.cwd);
+      case SessionPlace.host || SessionPlace.peer:
+        final endpoint = Uri.tryParse(entry.endpoint ?? '');
+        final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
+        if (endpoint == null || method == null) throw StateError('Canoa did not note how to reach that peer');
+        final overWebTransport = endpoint.scheme == 'https';
+        client = await connectBrowserAcp(
+          chatEndpoints(
+            webSocket: overWebTransport ? (entry.fallback ?? '') : endpoint.toString(),
+            webTransport: overWebTransport ? endpoint.toString() : '',
+            preferWebTransport: config.preferWebTransport,
+          ),
+          pinnedPeerId: entry.peerId, method: method,
+          timeout: Duration(seconds: config.connectTimeout),
+          decider: store.askPermission,
+        );
+      case SessionPlace.browser:
+        throw StateError(why ?? 'Reopen it from Earlier conversations');
+    }
+    try {
+      await store.reopen(entry, client);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client.close();
+      rethrow;
+    }
+  }
+
   /// Ends every agent this app started, and the host with the agents it started.
   Future<void> _endAgents() async {
+    await store.ledger?.flush();
     final ending = [for (final client in _ownedClients) client.close(), ?widget.host?.stop()];
     _ownedClients.clear();
     // Longer than the host has to end its agents.
@@ -258,6 +316,9 @@ class _CanoaAppState extends State<CanoaApp> {
         remoteSessionId: remoteId,
         endpoint: wt ?? ws,
         websocketFallback: wt == null ? null : ws,
+        place: widget.host?.peerId?.toLowerCase() == pinnedPeerId ? SessionPlace.host : SessionPlace.peer,
+        method: target.method.id,
+        cwd: target.cwd,
       );
       local.agentNames = target.title.isEmpty;
       store.applyOpened(local, opened);
@@ -276,7 +337,7 @@ class _CanoaAppState extends State<CanoaApp> {
     config = widget.config;
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
-    store = widget.store ?? SessionStore(recorder: updateRecorderFromEnvironment());
+    store = widget.store ?? SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger);
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     unawaited(_claimContext());
@@ -318,7 +379,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: store,
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onRunLocalAgent: canRunLocalAgents ? _runLocalAgent : null, onSettings: _showSettings,
-          onHosting: widget.host == null ? null : _showHosting,
+          onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
           agents: [...agentPresets, ...config.agents],
         ),
       ),
@@ -329,7 +390,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets, this.onHosting,
+    this.agents = agentPresets, this.onHosting, this.onReopen,
   });
 
   final List<AgentCommand> agents;
@@ -340,6 +401,7 @@ class _CanoaHome extends StatelessWidget {
   final RunLocalAgent? onRunLocalAgent;
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
+  final Future<void> Function(LedgerEntry)? onReopen;
 
   @override
   Widget build(BuildContext context) {
@@ -349,7 +411,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, agents: agents)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen, agents: agents)))
             : null,
         body: SafeArea(
           child: Row(
@@ -357,7 +419,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: context.look.railWidth,
-                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, agents: agents),
+                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen, agents: agents),
                 ),
               Expanded(
                 child: _Conversation(
@@ -377,7 +439,7 @@ class _CanoaHome extends StatelessWidget {
 class _SessionRail extends StatelessWidget {
   const _SessionRail({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets, this.onHosting,
+    this.agents = agentPresets, this.onHosting, this.onReopen,
   });
 
   final List<AgentCommand> agents;
@@ -388,6 +450,7 @@ class _SessionRail extends StatelessWidget {
   final RunLocalAgent? onRunLocalAgent;
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
+  final Future<void> Function(LedgerEntry)? onReopen;
 
   @override
   Widget build(BuildContext context) {
@@ -443,8 +506,12 @@ class _SessionRail extends StatelessWidget {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: store.sessions.length,
+            itemCount: store.sessions.length + (store.ledger == null ? 0 : 1),
             itemBuilder: (context, index) {
+              // The open conversations, then the ledger's sessions that are not open now, by harness.
+              if (index == store.sessions.length) {
+                return LedgerList(ledger: store.ledger!, store: store, onReopen: onReopen);
+              }
               final session = store.sessions[index];
               final active = session.id == store.selectedId;
               return Padding(

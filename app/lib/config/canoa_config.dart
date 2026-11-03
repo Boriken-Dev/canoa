@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
+import '../ledger/session_ledger.dart';
 import '../theme/look.dart';
 
 /// One entry of `[host]`, as Canoa.cfg has it.
@@ -48,6 +49,7 @@ final class CanoaConfig {
     this.brightness = 'dark',
     this.agents = const [],
     this.host,
+    this.sessions = const LedgerSettings(),
   });
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
@@ -60,6 +62,9 @@ final class CanoaConfig {
   /// The `[host]` table, which `canoa-host` reads: kept as it was read, so saving settings never loses it.
   final Map<String, dynamic>? host;
 
+  /// `[sessions]` and `[harnesses]`: how much the session list keeps, and the harness each reported agent name stands for.
+  final LedgerSettings sessions;
+
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
 
@@ -71,7 +76,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness}) =>
+      LookId? look, String? brightness, LedgerSettings? sessions}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -83,6 +88,7 @@ final class CanoaConfig {
         brightness: brightness ?? this.brightness,
         agents: agents,
         host: host,
+        sessions: sessions ?? this.sessions,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -97,6 +103,7 @@ final class CanoaConfig {
     brightness: brightness,
     agents: agents,
     host: host,
+    sessions: sessions,
   );
 
   /// What `[host]` names for canoa-host to serve, agents first, as written. canoa-host itself checks each one.
@@ -157,7 +164,7 @@ final class CanoaConfig {
         ? source.substring(source.indexOf('\n') + 1) : source;
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
-      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host'}.contains(name)) {
+      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses'}.contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
     }
@@ -175,6 +182,7 @@ final class CanoaConfig {
     final network = table('network', {'prefer_webtransport','connect_timeout'});
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
+    final sessions = table('sessions', {'keep', 'keep_text', 'text_messages'});
     bool flag(Map<String, dynamic> map, String key, bool fallback) {
       final raw = map[key];
       if (raw == null) return fallback;
@@ -219,6 +227,15 @@ final class CanoaConfig {
     }
     final host = data['host'];
     if (host != null && host is! Map) throw const FormatException('Canoa.cfg: host must be a table');
+    int count(String key, int fallback) {
+      final raw = sessions[key] ?? fallback;
+      if (raw is! int || raw < 0) throw FormatException('Canoa.cfg: sessions.$key must be a whole number, 0 or more');
+      return raw;
+    }
+    final harnesses = data['harnesses'] ?? const <String, Object?>{};
+    if (harnesses is! Map || harnesses.values.any((label) => label is! String || label.trim().isEmpty)) {
+      throw const FormatException('Canoa.cfg: harnesses must map each reported agent name to a label');
+    }
     return CanoaConfig(
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
@@ -228,6 +245,12 @@ final class CanoaConfig {
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
+      sessions: LedgerSettings(
+        keep: count('keep', LedgerSettings.defaultKeep),
+        keepText: flag(sessions, 'keep_text', false),
+        textMessages: count('text_messages', LedgerSettings.defaultTextMessages),
+        harnesses: {for (final MapEntry(:key, :value) in harnesses.entries) '$key': value as String},
+      ),
     );
   }
 
@@ -248,7 +271,12 @@ cdn = "$cdn"
 [appearance]
 look = "${look.name}"
 brightness = "$brightness"
-${agents.map((agent) => '''
+
+[sessions]
+keep = ${sessions.keep}
+keep_text = ${sessions.keepText}
+text_messages = ${sessions.textMessages}
+${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
