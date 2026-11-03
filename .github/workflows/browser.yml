@@ -11,8 +11,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Browser WebCrypto peer authentication tests
-        run: node --test app/test/coqui_vendor.test.mjs
+      - name: Browser peer authentication tests, both methods
+        # A pairing desk's timers outlive its test.
+        run: node --test --test-force-exit app/test/coqui_vendor.test.mjs app/test/canoa_peer_bridge.test.mjs
       - name: Chromium permission tests
         run: npm test
         working-directory: bindings/browser/chromium
