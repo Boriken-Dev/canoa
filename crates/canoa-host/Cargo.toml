@@ -1,0 +1,57 @@
+[package]
+name = "canoa-host"
+description = "Serves stdio ACP agents and Guatiao agent providers from Canoa.cfg to paired keys, on loopback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["acp", "agent", "host", "guatiao"]
+categories = ["command-line-utilities", "network-programming"]
+exclude = [".*", "*.local.*"]
+# Its git dependencies are unpublished: released once they are.
+publish = false
+
+[[bin]]
+name = "canoa-host"
+path = "src/main.rs"
+
+[dependencies]
+canoa = { path = "../canoa" }
+clap.workspace = true
+coqui-acp.workspace = true
+coqui-acp-bridge.workspace = true
+coqui-acp-provider.workspace = true
+coqui-agentic-peer.workspace = true
+coqui-peer.workspace = true
+coqui-peer-webcrypto.workspace = true
+coqui-web.workspace = true
+guatiao.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# The address a test client dials; already in the graph through coqui-web.
+url = "2.5"
+
+# Fixtures the tests run, built by `cargo test` into target/<profile>/examples.
+[[example]]
+name = "echo_provider"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "stdio_agent"
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

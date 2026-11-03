@@ -10,9 +10,8 @@ CLAUDE*
 .claude
 *.local.*
 
-# Rust. The workspace holds libraries, which do not commit a lockfile.
+# Rust. The workspace builds a binary, canoa-host, so its lockfile is committed.
 /target/
-/Cargo.lock
 
 # Node
 node_modules/

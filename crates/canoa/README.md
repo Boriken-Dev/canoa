@@ -7,8 +7,8 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/test.yml)](https://github.com/Boriken-Dev/canoa/actions/workflows/test.yml)
 
 **A deny-by-default registry of services and client grants.** A service resolves for a client only when it is verified and
-that client holds an explicit grant for that capability. It is a scaffold for Canoa's planned native host, and nothing
-uses it yet: not a security boundary by itself. See the [documentation](https://boriken-dev.github.io/canoa/).
+that client holds an explicit grant for that capability. `canoa-host` keeps its
+entries and their grants in one: not a security boundary by itself. See the [documentation](https://boriken-dev.github.io/canoa/).
 
 ## Features
 
@@ -18,7 +18,7 @@ uses it yet: not a security boundary by itself. See the [documentation](https://
 
 ## Installation
 
-Not published. `publish = false` until the native host consumes it. There are no Cargo features.
+Not published. `publish = false` until `canoa-host` is. There are no Cargo features.
 
 ## Quick start
 
