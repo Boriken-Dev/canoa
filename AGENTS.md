@@ -60,6 +60,20 @@ mkdocs build --strict
 
 `flutter pub get` with an older Flutter rewrites `app/pubspec.lock`: restore it before committing.
 
+A coding task through the desktop window, its widgets only (fix a failing test, stop and continue, attach, refuse one question,
+close and reopen from Earlier conversations), then checked on disk. It needs `node` on PATH and a runner from `flutter create
+--platforms=windows .` (or `linux`); screenshots go to `CANOA_TEST_SHOTS`, each distinct update's kind and shape to
+`CANOA_TEST_UPDATES`:
+
+```sh
+(cd app && flutter test integration_test/coding_task_test.dart -d windows)   # a scripted agent, nothing spent
+(cd app && CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart -d windows)   # spends the subscription
+```
+
+`CANOA_EVENT_LOG=<file>` makes the app append the kind, shape and rendering of each distinct ACP update it receives, never its
+text. `test/fixtures/coding_task_updates.jsonl` is that record from a real run; `chat_test.dart` fails when any kind in it would
+reach the fallback, which shows nothing.
+
 ## CI and release
 
 Checks run on a developer's own machines, by the commands above. `test.yml`, `flutter.yml`, `browser.yml`, `desktop.yml`,

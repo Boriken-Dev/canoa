@@ -71,3 +71,17 @@ The app reads a TOML Canoa.cfg just like AI6's OO.cfg. Closing the window keeps 
 The desktop app runs `canoa-host` as its child (`lib/desktop/host_supervisor.dart`): the one `CANOA_HOST` names, else the one beside its executable. **Hosting** adds an agent, pairs and removes keys and shows a PIN; see [the host](../docs/host.md#in-the-desktop-app).
 
 `integration_test/desktop_test.dart` runs the app on a real desktop (`flutter test integration_test/desktop_test.dart -d windows`, or `-d linux`) with `CANOA_TEST_HOST`, `CANOA_TEST_NODE` and `CANOA_TEST_APP` as `test/host_test.dart` describes.
+
+## A coding task, end to end
+
+`integration_test/coding_task_test.dart` does what a person would, in the desktop window and through its widgets only: it makes a throwaway Node project with a failing test, runs an agent there, has it fix the test, add one and rename a function, allows every question but one, stops a turn and continues it, attaches a file, closes the conversation and opens it again from **Earlier conversations**. Then it checks the project on disk, and that every kind of update the agent sent has a rendering of its own. A question reaching outside the project's temporary directory, which a person's own agent settings can ask for, is refused.
+
+```sh
+cd app
+flutter test integration_test/coding_task_test.dart -d windows                              # scripted agent, nothing spent
+CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart -d windows  # the Claude preset, on your sign-in
+```
+
+`node` has to be on PATH. `CANOA_TEST_SHOTS=<dir>` keeps a screenshot of each step, and `CANOA_TEST_UPDATES=<file>` the kind and shape of each distinct update. The file dialog is the one thing the test answers for the person: it picks the attached file itself. Conversations are not kept across an app restart yet, so reopening is done after closing a conversation, not after quitting.
+
+Outside the test, `CANOA_EVENT_LOG=<file>` makes the app append the kind, shape and rendering of each distinct ACP update it receives, as a JSON line. A shape keeps the protocol's own words, such as a tool's `kind`, and replaces every other string with `"string"`, so nothing anyone wrote is kept. `test/fixtures/coding_task_updates.jsonl` is that record from a real Claude run; `test/chat_test.dart` replays it and fails if any kind would reach the fallback, which shows nothing.
