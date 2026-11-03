@@ -584,6 +584,12 @@ class _ConversationState extends State<_Conversation> {
                 icon: const Icon(Icons.history),
                 onPressed: () => unawaited(_showEarlier(session)),
               ),
+            if (session != null)
+              IconButton(
+                tooltip: 'Close conversation',
+                icon: const Icon(Icons.close),
+                onPressed: () => unawaited(widget.store.close(session)),
+              ),
             Chip(
               avatar: const Icon(Icons.hub_outlined, size: 16),
               label: Text(session?.status == SessionStatus.preview

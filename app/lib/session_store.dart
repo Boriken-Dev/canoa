@@ -641,6 +641,15 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Ends a conversation here: a question still open is answered cancelled, and its agent ends once no other conversation here
+  /// uses it. What the agent saved stays with the agent, for Earlier conversations to open again.
+  Future<void> close(ChatSession session) async {
+    final client = _verifiedClients[session.id];
+    _endWaiting(session, const AcpCancel());
+    forget(session);
+    if (client != null && !_verifiedClients.values.contains(client)) await client.close();
+  }
+
   Future<void> cancelActiveSession() async {
     final session = selected;
     final client = session == null ? null : _verifiedClients[session.id];
