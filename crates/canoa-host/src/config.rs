@@ -11,6 +11,8 @@ use coqui_peer_webcrypto::PeerId;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use crate::tool::ToolSpec;
+
 /// Connections an entry serves at once when the file does not say.
 pub const DEFAULT_MAX_PEERS: usize = 4;
 /// Sessions one connection to a provider may hold when the file does not say.
@@ -18,7 +20,8 @@ pub const DEFAULT_MAX_SESSIONS: usize = 8;
 /// The longest entry name, which appears in logs and in what `serve` prints.
 pub const MAX_NAME: usize = 64;
 
-/// What the host serves: every entry of `[host.agents]` and `[host.providers]`, in the file's order, agents first.
+/// What the host serves: every entry of `[host.agents]`, `[host.providers]` and `[host.tools]`, in the file's order, agents
+/// first, then providers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Config {
@@ -69,6 +72,11 @@ pub enum EntryKind {
         directory: PathBuf,
         /// Sessions one connection may hold.
         max_sessions: usize,
+    },
+    /// A command-line tool with no ACP of its own, served as an ACP agent by the rules its entry gives.
+    Tool {
+        /// The program, how a prompt reaches it and what its events become.
+        spec: crate::tool::ToolSpec,
     },
 }
 
@@ -184,6 +192,8 @@ struct RawHost {
     agents: IndexMap<String, RawAgent>,
     #[serde(default)]
     providers: IndexMap<String, RawProvider>,
+    #[serde(default)]
+    tools: IndexMap<String, toml::Table>,
 }
 
 /// The settings both tables share. serde does not hold `deny_unknown_fields` across `flatten`, so each table lists them.
@@ -348,6 +358,11 @@ impl Config {
             };
             entries.push(entry(name, kind, common)?);
         }
+        for (name, table) in host.tools {
+            check_name(&name)?;
+            let (common, spec) = tool_of(&name, table)?;
+            entries.push(entry(name, EntryKind::Tool { spec }, common)?);
+        }
         check_unique(&entries)?;
         Ok(Self {
             origins: host.origins,
@@ -437,6 +452,64 @@ fn json_of(value: toml::Value) -> Option<serde_json::Value> {
     })
 }
 
+/// A tool entry: the settings every entry has, taken out by hand since serde does not hold `deny_unknown_fields` across
+/// `flatten`, then the rest as the tool's. Errors name a setting, never a value.
+fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), ConfigError> {
+    let wrong = |key: &str| invalid(name, &format!("{key} has the wrong type"));
+    let text = |value: toml::Value, key: &str| match value {
+        toml::Value::String(text) => Ok(text),
+        _ => Err(wrong(key)),
+    };
+    let texts = |value: toml::Value, key: &str| match value {
+        toml::Value::Array(items) => items.into_iter().map(|item| text(item, key)).collect(),
+        _ => Err(wrong(key)),
+    };
+    let listen = table
+        .remove("listen")
+        .map(|value| text(value, "listen"))
+        .transpose()?;
+    let working_roots = table
+        .remove("working_roots")
+        .map(|value| texts(value, "working_roots"))
+        .transpose()?
+        .unwrap_or_default();
+    let peers = table
+        .remove("peers")
+        .map(|value| texts(value, "peers"))
+        .transpose()?;
+    let max_peers = match table.remove("max_peers") {
+        None => None,
+        Some(toml::Value::Integer(count)) => Some(
+            usize::try_from(count).map_err(|_| invalid(name, "max_peers must be at least 1"))?,
+        ),
+        Some(_) => return Err(wrong("max_peers")),
+    };
+    let spec: ToolSpec =
+        toml::Value::Table(table)
+            .try_into()
+            .map_err(|error: toml::de::Error| {
+                let message = error.message();
+                let what = if message.starts_with("missing field") {
+                    message.to_string()
+                } else if message.starts_with("unknown field") {
+                    "a setting this host does not know".to_owned()
+                } else if message.starts_with("unknown variant") {
+                    "a setting has a value this host does not know".to_owned()
+                } else {
+                    "a setting has the wrong type".to_owned()
+                };
+                invalid(name, &what)
+            })?;
+    spec.check().map_err(|what| invalid(name, &what))?;
+    let common = RawCommon {
+        listen,
+        working_roots,
+        peers,
+        max_peers,
+    };
+    Ok((common, spec))
+}
+
 /// Checked before anything quotes the name, since a key in the file may hold any character.
 fn check_name(name: &str) -> Result<(), ConfigError> {
     if name.is_empty()
@@ -507,10 +580,7 @@ fn check_unique(entries: &[Entry]) -> Result<(), ConfigError> {
     for (index, entry) in entries.iter().enumerate() {
         for earlier in &entries[..index] {
             if earlier.name == entry.name {
-                return Err(invalid(
-                    &entry.name,
-                    "an agent and a provider share this name",
-                ));
+                return Err(invalid(&entry.name, "two entries share this name"));
             }
             if entry.listen.port() != 0 && earlier.listen == entry.listen {
                 return Err(invalid(

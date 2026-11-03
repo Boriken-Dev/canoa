@@ -79,9 +79,9 @@ pub enum ServeError {
 impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NothingToServe => {
-                f.write_str("Canoa.cfg has no [host.agents] or [host.providers] entry to serve")
-            }
+            Self::NothingToServe => f.write_str(
+                "Canoa.cfg has no [host.agents], [host.providers] or [host.tools] entry to serve",
+            ),
             Self::Listen { entry, failure } => {
                 write!(f, "host entry {entry} could not listen: {failure}")
             }
@@ -97,7 +97,7 @@ impl core::error::Error for ServeError {}
 pub struct Listening {
     /// The entry's name.
     pub name: String,
-    /// `agent` or `provider`.
+    /// `agent`, `provider` or `tool`.
     pub kind: &'static str,
     /// The address a client dials.
     pub url: String,
@@ -304,6 +304,18 @@ fn provider_args(
     args
 }
 
+/// The arguments that make `program` serve a tool entry: its name and the entry as JSON, which holds no setting a client
+/// gave and nothing the tool's own command line does not show.
+fn tool_args(name: &str, spec: &crate::tool::ToolSpec) -> Vec<OsString> {
+    vec![
+        OsString::from("tool"),
+        OsString::from("--name"),
+        OsString::from(name),
+        OsString::from("--spec"),
+        OsString::from(serde_json::to_string(spec).unwrap_or_default()),
+    ]
+}
+
 impl Serving {
     /// Binds every entry of `config` on its loopback address, proving peers with `identity` against `store`. Nothing is
     /// accepted until [`Serving::run`].
@@ -370,6 +382,15 @@ impl Serving {
                         },
                     )
                 }
+                // A stdio agent like any other, so the scope applies to its clients and its processes end with the link.
+                EntryKind::Tool { spec } => (
+                    "tool",
+                    Run::Agent {
+                        program: options.provider_program.as_os_str().to_owned(),
+                        args: tool_args(&entry.name, spec),
+                        scope: Scope::new(entry.working_roots.clone()),
+                    },
+                ),
             };
             let id = ServiceId::new(entry.name.clone());
             // The host started this entry from its own configuration, which is what verifies it.

@@ -105,6 +105,15 @@ enum Command {
         #[arg(long, requires = "settings_on_stdin")]
         connect: Option<std::net::SocketAddr>,
     },
+    /// Serve one [host.tools] entry as an ACP agent on standard input and output: what `serve` runs for each connection.
+    Tool {
+        /// The entry's name, which the agent's notices use.
+        #[arg(long)]
+        name: String,
+        /// The entry's table as JSON, without listen, working_roots, peers and max_peers.
+        #[arg(long)]
+        spec: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -330,6 +339,7 @@ fn check(args: &ConfigArgs) -> Result<(), Failed> {
         let kind = match entry.kind {
             canoa_host::EntryKind::Agent { .. } => "agent",
             canoa_host::EntryKind::Provider { .. } => "provider",
+            canoa_host::EntryKind::Tool { .. } => "tool",
             _ => "other",
         };
         let line = match args.format {
@@ -454,6 +464,14 @@ fn run(cli: Cli) -> Result<(), Failed> {
                 (None, _) => canoa_host::serve_stdio(&options),
             }
             .map_err(Failed::run)
+        }
+        Command::Tool { name, spec } => {
+            let spec: canoa_host::ToolSpec = serde_json::from_str(&spec)
+                .map_err(|_| Failed::usage("--spec is not a tool entry of this version"))?;
+            canoa_host::tool::serve_stdio(spec, &name).map_err(|error| match error {
+                canoa_host::tool::ToolError::Spec(_) => Failed::usage(error),
+                _ => Failed::run(error),
+            })
         }
     }
 }
