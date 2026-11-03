@@ -143,6 +143,12 @@ struct ServeArgs {
     config: ConfigArgs,
     #[command(flatten)]
     method: MethodArg,
+    /// What one key may carry in each direction, in bytes. Default 2^38; above it the log says it is weakened.
+    #[arg(long, value_name = "BYTES")]
+    key_limit: Option<u64>,
+    /// Under Noise, end a session at the key limit rather than changing keys, as WebCrypto always does.
+    #[arg(long)]
+    no_rekey: bool,
     /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
     #[arg(long)]
     until_stdin_closes: bool,
@@ -221,12 +227,15 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
     let peer = identity.peer_id().to_string();
     let program = std::env::current_exe()
         .map_err(|error| Failed::run(format!("this program cannot find itself: {error}")))?;
-    let serving = Serving::bind(&config, identity, store()?, &ServeOptions::new(program)).map_err(
-        |error| match error {
+    let mut options = ServeOptions::new(program).with_rekey(!args.no_rekey);
+    if let Some(bytes) = args.key_limit {
+        options = options.with_key_limit(bytes);
+    }
+    let serving =
+        Serving::bind(&config, identity, store()?, &options).map_err(|error| match error {
             canoa_host::ServeError::NothingToServe => Failed::usage(error),
             _ => Failed::run(error),
-        },
-    )?;
+        })?;
     for listening in serving.listening() {
         let line = serde_json::json!({
             "name": listening.name,

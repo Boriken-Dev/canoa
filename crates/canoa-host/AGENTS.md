@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `2dd3266`), `coqui-agentic-peer` (`a4c1e01`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `6ba2102`), `coqui-agentic-peer` (`dbac9b6`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
 The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `config`, `peers`, `provider`, `serve`, `tool`.
 
@@ -94,8 +94,10 @@ pub const ACP_CAPABILITY: &str = "acp/1";
 pub const OUTPUT_LIMIT: usize = 1024 * 1024;   // what a provider's process may print per connection
 pub const START_LIMIT: Duration = 30 s;        // for a provider's process to connect back
 
-#[non_exhaustive] pub struct ServeOptions { pub provider_program: PathBuf }
-pub fn ServeOptions::new(provider_program: impl Into<PathBuf>) -> ServeOptions
+#[non_exhaustive] pub struct ServeOptions { pub provider_program: PathBuf, pub key_limit: Option<u64>, pub rekey: bool }
+pub fn ServeOptions::new(provider_program: impl Into<PathBuf>) -> ServeOptions   // each method's defaults: key limit 2^38, rekey on
+pub const fn ServeOptions::with_key_limit(self, bytes: u64) -> ServeOptions      // no floor; above the default the log says weakened
+pub const fn ServeOptions::with_rekey(self, rekey: bool) -> ServeOptions
 
 pub fn Serving::bind(config: &Config, identity: coqui_agentic_peer::auth::Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
 pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the identity's: every entry proves by it
@@ -200,7 +202,7 @@ A key is paired when the store accepts it. `accept` takes only a key that is wai
 ## Command line
 
 ```text
-canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto]
+canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
 canoa-host check [--config FILE] [--format text|json]
 canoa-host id [--method noise|webcrypto]
 canoa-host peers [--format text|json]
@@ -212,7 +214,7 @@ canoa-host provider (--library FILE | --source FILE) --provider ID [--working-ro
 canoa-host tool --name NAME --spec JSON
 ```
 
-- `--method` names the proof: this user's identity of that method, made when absent. Without it, the identity this user has, or a new one of the default method, WebCrypto; a home holding one of each refuses (status 1) until one is named. An identity never changes method.
+- `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, WebCrypto. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound; then it serves until stopped. It logs on standard error.
 - `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every agent is ended (`Stopper::stop_agents`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
 - `pair` (`--listen` default `127.0.0.1:0`, loopback only, else status 2; `--timeout-seconds` default 300) prints `{"pin", "peer", "method", "url"}`, a six-digit PIN, this host's id, its method and the address to dial, and pairs by that method; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.

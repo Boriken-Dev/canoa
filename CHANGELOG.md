@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `canoa-host serve --key-limit` and `--no-rekey`, and `ServeOptions::with_key_limit` and `with_rekey`; a setting looser than the default is logged. A client of the other method is logged as a method mismatch, never as a key to accept. A home records the method named last, so a host the app runs naming none keeps working after a move.
+- Hosting shows the method beside the host's id, and the app's and the extension's add-by-hand forms ask for the agent's method instead of assuming one.
+- The extension reports a link that ends without the agent's close record as cut, sizes its frame limit for the longest record a Noise sender can make, refuses a known key named under another method, shows `mcp-config` with its key for the chosen machine's method, and says the `pair-accept --origin` its own origin needs.
+
 - The extension proves an agent by the method stored with its key, Noise or WebCrypto, and pairs with a machine by the PIN it shows under Noise (**Pair with a code**). Each method has a key of its own. An agent stored before methods is WebCrypto's; a browser whose WebCrypto has no X25519 shows a Noise agent as unreachable, and says why, rather than trying another method. Discovered agents carry the method their record names.
 - `app/web/vendor` holds `coqui-peer-noise` beside `coqui-peer-webcrypto`, each pinned by blob in `COQUI-SOURCE.json`, now one entry per file.
 

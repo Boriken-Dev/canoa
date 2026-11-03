@@ -49,15 +49,35 @@ pub const ACP_CAPABILITY: &str = "acp/1";
 pub struct ServeOptions {
     /// The program that serves a provider: this host's own executable, run as `PROGRAM provider ...`.
     pub provider_program: PathBuf,
+    /// What one key may carry in each direction, in bytes; the method's own default, 2^38, when `None`.
+    pub key_limit: Option<u64>,
+    /// Whether a Noise sender changes its key at the limit; WebCrypto has no key change and ends the session there.
+    pub rekey: bool,
 }
 
 impl ServeOptions {
-    /// Options running providers through `provider_program`.
+    /// Options running providers through `provider_program`, with each method's default session settings.
     #[must_use]
     pub fn new(provider_program: impl Into<PathBuf>) -> Self {
         Self {
             provider_program: provider_program.into(),
+            key_limit: None,
+            rekey: true,
         }
+    }
+
+    /// What one key may carry in each direction, in bytes. No floor; above the default the host logs it as weakened.
+    #[must_use]
+    pub const fn with_key_limit(mut self, bytes: u64) -> Self {
+        self.key_limit = Some(bytes);
+        self
+    }
+
+    /// Whether a Noise sender changes its key at the limit, rather than ending the session.
+    #[must_use]
+    pub const fn with_rekey(mut self, rekey: bool) -> Self {
+        self.rekey = rekey;
+        self
     }
 }
 
@@ -334,7 +354,25 @@ impl Serving {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
-        let method = Proof::new(identity).with_initiators(Trust::Store(TrustStore::clone(&store)));
+        let mut method =
+            Proof::new(identity).with_initiators(Trust::Store(TrustStore::clone(&store)));
+        if let Some(bytes) = options.key_limit {
+            method = method.with_key_limit(bytes);
+        }
+        // Turning the key change off is every method's to do: WebCrypto has none, and ends a session at its limit.
+        if !options.rekey
+            && let Ok(off) = method.clone().with_rekey(false)
+        {
+            method = off;
+        }
+        for weakened in method.weakened() {
+            tracing::warn!(
+                "weakened: {} is {}, looser than {}",
+                weakened.setting,
+                weakened.value,
+                weakened.strict
+            );
+        }
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
@@ -532,10 +570,20 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         shared.method.method().record_length(MAX_LINE),
     ) {
         Ok(established) => established,
-        Err(error) => {
+        // A client of the other method has no key here to accept: it has to pair again under this host's method.
+        Err(error @ coqui_agentic_peer::Error::OtherMethod { .. }) => {
+            return tracing::info!(entry = served.name, "a client was refused: {error}");
+        }
+        Err(error @ coqui_agentic_peer::Error::Proof(_)) => {
             return tracing::info!(
                 entry = served.name,
                 "a key was refused: {error}; a key that proved itself and is not paired waits for `canoa-host accept`"
+            );
+        }
+        Err(error) => {
+            return tracing::info!(
+                entry = served.name,
+                "a connection ended before its proof: {error}"
             );
         }
     };

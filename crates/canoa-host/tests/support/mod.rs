@@ -144,6 +144,21 @@ impl Host {
         )
     }
 
+    /// As [`Host::start_logged`], with more arguments to `serve`.
+    pub fn start_logged_with(
+        scratch: Scratch,
+        config: &str,
+        entries: usize,
+        args: &[&str],
+    ) -> (Self, PathBuf) {
+        let log = scratch.0.join("host.log");
+        let file = std::fs::File::create(&log).expect("a log file");
+        (
+            Self::launch(scratch, config, entries, args, &[], Stdio::from(file)),
+            log,
+        )
+    }
+
     /// As [`Host::start`], in `scratch`, with `env` added to the host's environment.
     pub fn start_in(
         scratch: Scratch,

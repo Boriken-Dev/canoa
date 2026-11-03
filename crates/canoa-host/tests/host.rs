@@ -525,10 +525,34 @@ fn a_client_of_the_other_method_is_refused_and_the_host_says_why() {
     );
     let written = log_holding(&log, &[&said]);
     assert!(written.contains(&said), "{written}");
+    // A key of the other method is never one to accept: the line about it must not say so.
+    let line = written
+        .lines()
+        .find(|line| line.contains(&said))
+        .expect("the refusal");
+    assert!(!line.contains("accept"), "{line}");
 }
 
 #[test]
-fn a_home_with_an_identity_of_each_method_names_the_one_to_use() {
+fn the_session_settings_are_the_hosts_to_choose_and_a_looser_one_is_said() {
+    let (host, log) = Host::start_logged_with(
+        Scratch::new(),
+        &agent_entry("fixture", ""),
+        1,
+        &["--key-limit", "18446744073709551615"],
+    );
+    let written = log_holding(&log, &["weakened"]);
+    assert!(written.contains("weakened"), "{written}");
+    let client = support::key();
+    host.pair(&client);
+    assert_eq!(
+        hello(&host, &client, "fixture").expect("a turn"),
+        "echo: hello"
+    );
+}
+
+#[test]
+fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
     use coqui_agentic_peer::auth::Method;
     let host = Host::start(&agent_entry("fixture", ""), 1);
     let other = Method::ALL
@@ -551,10 +575,11 @@ fn a_home_with_an_identity_of_each_method_names_the_one_to_use() {
         .env("COQUI_AGENTIC_PEER_HOME", host.home())
         .output()
         .expect("id runs");
-    assert_eq!(neither.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&neither.stderr).contains("an identity of each method"),
-        "{neither:?}"
+    // The home records the method named last, so a program naming none, as Canoa's app runs the host, gets that one.
+    assert!(neither.status.success(), "{neither:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&neither.stdout).trim(),
+        String::from_utf8_lossy(&theirs.stdout).trim()
     );
     let ours = host.command(&["id"]);
     assert_eq!(
