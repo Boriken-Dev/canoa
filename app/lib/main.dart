@@ -25,6 +25,8 @@ import 'auth/peer_proof.dart' show PeerMethod;
 import 'ledger/ledger_backend.dart';
 import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
+import 'profile/profile_home_platform.dart';
+import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
 import 'theme/look.dart';
 
@@ -143,6 +145,7 @@ class _CanoaAppState extends State<CanoaApp> {
         context: above,
         builder: (_) => SettingsDialog(
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
+          onProfiles: _showProfiles,
         ),
       );
     } finally {
@@ -166,6 +169,21 @@ class _CanoaAppState extends State<CanoaApp> {
       }
     }
   }
+  /// The profiles as Canoa.cfg has them now, for every agent the app offers or the file gives a profile.
+  Future<void> _showProfiles() async {
+    final above = _navigator.currentContext;
+    if (above == null) return;
+    await showDialog<void>(
+      context: above,
+      builder: (_) => ProfilesDialog(
+        config: config,
+        agents: {for (final agent in [...agentPresets, ...config.agents]) agent.label, ...config.agentProfiles.keys}
+            .toList(),
+        home: platformProfileHome(configPath: _configPath),
+      ),
+    );
+  }
+
   /// This state sits above the app's Navigator, so its dialogs open in the Navigator's context.
   final _navigator = GlobalKey<NavigatorState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();

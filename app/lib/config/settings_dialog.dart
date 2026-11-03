@@ -4,11 +4,14 @@ import '../ledger/session_ledger.dart';
 import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger});
+  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles});
   final CanoaConfig config;
 
   /// The session list, whose kept text Settings can clear.
   final SessionLedger? ledger;
+
+  /// Opens the effective profile of each agent.
+  final VoidCallback? onProfiles;
 
   /// Ends the app and what it started, on a desktop: the way out where there is no tray menu.
   final Future<void> Function()? onQuit;
@@ -108,6 +111,16 @@ class SettingsDialogState extends State<SettingsDialog> {
           value: config.sessions.keepText,
           onChanged: (v) => setState(() => config = config.copyWith(sessions: _sessions(keepText: v))),
         ),
+        if (widget.onProfiles != null)
+          ListTile(
+            title: const Text('Profiles'),
+            subtitle: const Text('What each agent starts with, and the layer each value comes from'),
+            trailing: TextButton(
+              key: const Key('settings-profiles'),
+              onPressed: widget.onProfiles,
+              child: const Text('Show…'),
+            ),
+          ),
         if (widget.ledger != null)
           ListenableBuilder(
             listenable: widget.ledger!,

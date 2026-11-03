@@ -237,6 +237,27 @@ void main() {
     await shell.beforeQuit!();
     expect(tool.children.single.inputClosed, isTrue, reason: 'the host and its agents end with the app');
   });
+
+  testWidgets('settings open the profiles, each agent offered with its effective profile', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('canoa-profiles');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    await tester.binding.setSurfaceSize(const Size(1200, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final config = CanoaConfig.parse('[profile]\neffort = "high"\n[agents.Mine.profile]\nmodel = "m"\n');
+    await tester.pumpWidget(CanoaApp(
+      store: SessionStore(includePreview: false), config: config, configPath: '${dir.path}/Canoa.cfg',
+    ));
+    await tester.tap(find.byTooltip('Canoa settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings-profiles')));
+    await tester.pumpAndSettle();
+    expect(find.text('Effective profile'), findsOneWidget);
+    expect(find.text('user'), findsOneWidget, reason: 'effort comes from the person\'s own layer');
+    await tester.tap(find.byKey(const Key('profile-agent')));
+    await tester.pumpAndSettle();
+    expect(find.text('Claude').last, findsOneWidget);
+    expect(find.text('Mine').last, findsOneWidget, reason: 'a profile alone names an agent to show');
+  });
 }
 
 void _staleDialogs() {
