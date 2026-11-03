@@ -42,8 +42,12 @@ dirs = ["python/echo"]                                     # directories of *.gu
 paths = ["python/guatiao", "python/coqui_acp_provider"]    # what goes first on sys.path: Guatiao's binding, the kinds
 ```
 
-`library` and `source` exclude each other, and `source_settings` goes with `source` alone. Relative paths, in
-`source_settings` as in `library` and `source`, are taken from Canoa.cfg's directory: the provider's process runs there.
+`library` and `source` exclude each other, and `source_settings` goes with `source` alone. Relative paths in `library`,
+`source` and the `dirs`, `manifests` and `paths` lists are made absolute from Canoa.cfg's directory when the file is read;
+the provider's process runs in that directory, so any other relative path in `source_settings` is taken from there too.
+
+The provider's code shares its process's standard input and output with the ACP stream: a provider that prints to
+standard output, or starts a program that inherits them, writes into the client's stream or reads the client's messages.
 
 On Windows the Python's `python3.dll` has to be found: put its directory (`sys.base_prefix`) on the host's `PATH`. On
 Linux and macOS the source links that Python's shared library, found where the loader looks, or through
@@ -134,13 +138,15 @@ only from a dialog that shows its whole id.
   does. It is mapped only in the process serving one connection, so a crash ends that connection alone, but it is
   trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A provider source runs code too, and loads more.** Python's source trusts, besides its own file: the Python whose
-  shared library the system finds; that Python's standard library, `site-packages` and `.pth` files; the host's
-  `PYTHONPATH` and `PYTHONHOME`, which its process inherits; every directory in `paths`; every manifest in `dirs` and the
+  shared library the system finds; that Python's standard library, `site-packages`, your own site-packages and their
+  `.pth` files; the host's `PYTHONPATH`, `PYTHONHOME` and `GUATIAO_LIBRARY`, which its process inherits; on Windows, a
+  `canoa-host._pth` or `pyvenv.cfg` beside `canoa-host`'s executable; every directory in `paths`; every manifest in `dirs` and the
   directories it names; and every module those import. Whoever can write any of them runs code as you.
 - **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
-  and in the system's directories only. For a source, an import those leave missing, such as `python3.dll`, is looked for
-  again in the source's own directory, the system directories, the provider's working directory (Canoa.cfg's) and every
-  directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads.
+  and in the system's directories only. For a source, when those leave an import missing, such as `python3.dll`, the source
+  is loaded again and all its imports are looked for in the source's own directory, the system directories, the
+  provider's working directory (Canoa.cfg's) and every directory on `PATH`, in that order: the first `python3.dll` found
+  there is the one that loads.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
 - **A provider gets what a client asks of it**: the facade passes a session's `context`, `model`, `effort` and opaque
   `meta` through, as a provider's own interface defines them.

@@ -109,8 +109,9 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 - **A provider library** is native code: loading it runs it, with this user's rights, in the process serving that
   connection. It is trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A provider source** runs code and loads more: for Python, the interpreter the system finds, its `site-packages`, the
-  host's `PYTHONPATH`, and every directory and manifest its settings name. On Windows an import the narrow search leaves
-  missing, such as `python3.dll`, is looked for in the working directory and on `PATH` as well.
+  host's `PYTHONPATH`, and every directory and manifest its settings name. On Windows, when the narrow search leaves an
+  import missing, such as `python3.dll`, the source's imports are looked for in the working directory and on `PATH` as
+  well. Its code shares standard input and output with the ACP stream.
 - **A stdio agent** is the program the file names, found as the operating system finds a command.
 
 ## Development

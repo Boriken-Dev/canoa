@@ -28,7 +28,7 @@ max_sessions = 8                      # sessions one connection may hold
 
 [host.providers.NAME.source_settings]  # with source only; what the source is added with
 dirs = ["python"]                     # for guatiao_source_py: directories of *.guatiao.toml manifests
-paths = ["/opt/guatiao/python"]       # and what goes on sys.path; relative paths are from the file's directory
+paths = ["/opt/guatiao/python"]       # and what goes on sys.path; relative paths are made absolute from the file's directory
 
 [host.providers.NAME.settings]        # the provider's configuration, for one that is built from one
 prefix = "hi"                         # checked against the provider's schema when a connection loads it
@@ -62,6 +62,7 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 
 - `entries` keeps the file's order, every agent before every provider. A file with no `[host]` gives no entries.
 - `library` and `source` are made absolute against `base` (the file's directory for `load`); `directory` is `base` made absolute, where the provider's process runs.
+- In `source_settings`, every text in a `dirs`, `manifests` or `paths` list is made absolute against the directory, since a source may otherwise resolve it against a later working directory; other keys pass as written.
 - `source_settings` and `settings` are TOML tables held as JSON. A date, or a float that is not a number, is refused; nothing checks them further until a connection loads the provider, since checking means loading its code.
 - A leading byte-order mark is ignored; anything else not UTF-8 is a parse error.
 
@@ -111,13 +112,13 @@ pub fn HostLine::to_line(&self) -> Vec<u8>                                      
 pub fn HostLine::read(input: &mut impl BufRead, max: usize) -> Result<HostLine, ProviderError>   // one line of at most max bytes
 ```
 
-`serve_stdio` loads the code, takes the provider, and runs `coqui_acp_provider::AcpFacade` on standard input and output until the client closes them. Nothing in this process may write to standard output.
+`serve_stdio` loads the code, takes the provider, and runs `coqui_acp_provider::AcpFacade` on standard input and output until the client closes them. Nothing in this process may write to standard output or read standard input: loaded code shares both with the transport, so a Python `print()`, or a subprocess that inherits them, writes into the client's ACP stream or takes the client's messages.
 
-- **A library** is mapped with Guatiao's default import search: the library's own directory, the executable's, the system's; not the working directory or `PATH`.
-- **A source** is added with `settings` as a Guatiao map, then the registry is refreshed once; a library the source refuses is logged and passed over. On Windows the import search is `ImportSearch::Path`: an import the default search leaves missing (`python3.dll`, for Python) is looked for again from the source's own directory, the system directories, **the working directory (Canoa.cfg's, under `serve`) and every directory on `PATH`**, in that order. Elsewhere the search is the platform's (`LD_LIBRARY_PATH`, the file's run path, the system's).
+- **A library** is mapped with Guatiao's default import search. On Windows: the library's own directory, the executable's, the system's; not the working directory or `PATH`. Elsewhere the platform's: `LD_LIBRARY_PATH`, the file's run path (its own directory only through `$ORIGIN`), the system's.
+- **A source** is added with `settings` as a Guatiao map, then the registry is refreshed once; a library the source refuses is logged and passed over. On Windows the import search is `ImportSearch::Path`: when the default search leaves an import missing (`python3.dll`, for Python), the source is loaded again with Windows' standard search, and then every import it has, not only the missing one, is looked for in the source's own directory, the system directories, **the working directory (Canoa.cfg's, under `serve`) and every directory on `PATH`**, in that order. Elsewhere the search is the platform's (`LD_LIBRARY_PATH`, the file's run path, the system's).
 - **The provider**: with no `settings`, its own instance; a provider built only from a configuration is `NeedsConfiguration`. With `settings`, an instance built from them: Guatiao checks them against the schema the provider declares, then the provider may refuse them; a provider that is its own one instance is `TakesNoSettings`.
 
-**Loading runs code** with this process's rights, before any check, and trusts whoever can write any file it reads or the directories holding them. For a library, that is the file. For `guatiao_source_py` it is also: the Python whose shared library the loader finds (on Windows the first `python3.dll` the search above meets, then the first `python3X.dll` it names); that Python's standard library, `site-packages` and `.pth` files; the `PYTHON*` variables of this process's environment, which it inherits from the host (`PYTHONPATH`, `PYTHONHOME`); every directory in `paths`; every manifest in `dirs` and `manifests` and every directory its own `paths` names; and every module those import.
+**Loading runs code** with this process's rights, before any check, and trusts whoever can write any file it reads or the directories holding them. For a library, that is the file. For `guatiao_source_py` it is also: the Python whose shared library the loader finds (on Windows the first `python3.dll` the search above meets, then the first `python3X.dll` it names); that Python's standard library, `site-packages`, the user's own site-packages, and their `.pth` files, since the interpreter is not isolated; the `PYTHON*` variables of this process's environment, which it inherits from the host (`PYTHONPATH`, `PYTHONHOME`), and `GUATIAO_LIBRARY`, which picks the native library Guatiao's Python binding loads; on Windows, a `canoa-host._pth` or `pyvenv.cfg` beside the `canoa-host` executable, which the interpreter reads, so whoever can write that directory chooses where its modules come from; every directory in `paths`; every manifest in `dirs` and `manifests` and every directory its own `paths` names; and every module those import.
 
 `HostLine::read` reads up to the line break and leaves the rest to the transport. The line is `{"canoa_host": 1, "source_settings": {...}, "settings": {...}}`; anything else, a client's ACP message included, is `ProviderError::HostLine`.
 
