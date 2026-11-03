@@ -18,6 +18,10 @@ Configuration tables:
 - [network] prefer_webtransport, connect_timeout (seconds, between 1 and 120)
 - [assets] cdn = "none" or "local" (deployment option; font hosting remains a separate build concern)
 - [host] what `canoa-host` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
+- [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200)
+- [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
+
+The session list is `sessions.json` beside Canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session.
 
 Do not store identity private keys, tokens or passwords in Canoa.cfg.
 
@@ -64,4 +68,4 @@ The `deps` branch mirrors those packages' Dart side and names these in its `mani
 
 ## Limitations
 
-Canoa is still an early-stage app. The tray controller preserves the process, in-memory sessions and the host while its window is hidden; it does not replace a native background service, persist sessions across system restarts, or automatically install a startup entry.
+Canoa is still an early-stage app. The tray controller preserves the process, in-memory sessions and the host while its window is hidden; it does not replace a native background service or automatically install a startup entry. After a restart, sessions are listed from `sessions.json` and open again only through their agents, which have to offer `session/load` or `session/resume`.

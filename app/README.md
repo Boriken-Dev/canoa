@@ -35,7 +35,7 @@ must also be checked against the extension's CSP and renderer requirements.
 The current UI offers a responsive session list, independent transcripts and
 a composer. It starts in an **explicit offline preview**. Messages typed into
 a preview conversation are kept only in memory and are never sent to an agent.
-The WebTransport-first/WSS-fallback transport is connected to an ACP v2 controller **through an injected verified-peer interface**. The Flutter session store and composer can process streaming text, insertion acknowledgments and state transitions from a verified client. The experimental coqui-peer WebCrypto method and explicit pinned-peer dialog are available. Production Coqui pairing/host authorization, session persistence and remote MCP browsing are still missing; the normal app remains in offline preview.
+The WebTransport-first/WSS-fallback transport is connected to an ACP v2 controller **through an injected verified-peer interface**. The Flutter session store and composer can process streaming text, insertion acknowledgments and state transitions from a verified client. The experimental coqui-peer WebCrypto method and explicit pinned-peer dialog are available. Production Coqui pairing/host authorization and remote MCP browsing are still missing; the normal app remains in offline preview. The list of sessions is kept across runs: see [Sessions by harness](#sessions-by-harness).
 
 `lib/session_store.dart` is the shared view model. Transport and browser
 permissions must remain independent of it. A real transport must perform the
@@ -64,6 +64,24 @@ Canoa can only show what an agent asks. An adapter drives your installed tool un
 
 An agent's Markdown is untrusted: images are not fetched, and a link is copied rather than opened.
 
+## Sessions by harness
+
+Every session the app opens or resumes is noted in a ledger (`lib/ledger/`): its harness, the version the agent reported, the agent entry it came from, where it runs (this computer, the app's `canoa-host`, a paired peer with its id, or the browser's provider), its working directory, the agent's own session id, its title, and when it was created and last used. The side list shows those not open now, grouped by harness, with a chip per harness to show only that one. **Reopen** starts the entry's agent again, or reaches the peer again, and asks it for the session by `session/load` or `session/resume`, whichever its capabilities offer; where it offers neither, or the session came through the browser's provider, the row says so instead. Removing a row removes Canoa's note only, never the agent's own session, and the confirmation says so.
+
+The harness comes from what `initialize` reports. Claude's, Codex's and Pi's adapters report their own package names and Grok reports none, so a map gives each its harness: Claude Code, Codex, Gemini, Pi, OpenCode and Grok are built in, `[harnesses]` in Canoa.cfg adds or overrides names, and an agent the map does not know is labelled by its entry or preset name. The version shown is the reporter's, named after it when that is an adapter (`claude-agent-acp 0.99.1`).
+
+On a desktop the ledger is `sessions.json` beside Canoa.cfg; on the web, in the PWA and in the extension it is this origin's IndexedDB (`canoa-sessions`). `[sessions] keep` bounds it (200 by default; the least recently used go first). What was said is not kept unless **Keep what was said with each session** is turned on in Settings (`keep_text`, at most `text_messages` per session, each message cut at 64 KiB); turning it off, or **Clear what was said**, removes what was kept. Kept text is shown when a reopened agent does not send the conversation again, or, for a session that cannot be reopened, from **Show what was kept**.
+
+`integration_test/session_ledger_test.dart` proves it across a real restart, in two runs of the app sharing a directory:
+
+```sh
+cd app
+CANOA_TEST_LEDGER_DIR=<empty dir> CANOA_TEST_LEDGER_STEP=record flutter test integration_test/session_ledger_test.dart -d windows
+CANOA_TEST_LEDGER_DIR=<same dir>  CANOA_TEST_LEDGER_STEP=reopen flutter test integration_test/session_ledger_test.dart -d windows
+```
+
+The scripted stand-in plays Claude's adapter, a name Canoa.cfg maps to Pi, and an agent that names nothing and cannot reopen. The second run checks it is another process, finds each harness's group, filters by Pi, reopens the Claude Code session and gets an answer in it, and removes Pi's row while Pi's own session stays. `test/ledger_web_test.dart` runs the IndexedDB backend in a browser: `flutter test --platform chrome test/ledger_web_test.dart`.
+
 ## Desktop tray and Canoa.cfg
 
 The app reads a TOML Canoa.cfg just like AI6's OO.cfg. Closing the window keeps the app, its conversations and what it hosts running in the tray, whose menu has Open, Hosting, Settings, Hide and Exit; a double click on the icon opens the chat on Windows, and on Linux the menu's Open does. Where Linux shows no tray icons at all, closing minimizes the window instead, and Settings has **Quit Canoa**. Refer to the [configuration guide](../docs/configuration.md). Build platform runners with flutter create --org dev.boriken --platforms=windows,linux,macos . in app/ before flutter build windows/linux/macos.
@@ -84,6 +102,6 @@ CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart
 
 With `Claude`, the test runs the preset's adapter through `integration_test/without_user_settings.mjs`, which sets `_meta.claudeCode.options.settingSources` to project and local on each session it opens: Claude Code then starts without your user-level settings, `~/.claude/CLAUDE.md` and user skills, while your login still applies. The preset people use is unchanged.
 
-`node` has to be on PATH. `CANOA_TEST_SHOTS=<dir>` keeps a screenshot of each step, and `CANOA_TEST_UPDATES=<file>` the kind and shape of each distinct update. The file dialog is the one thing the test answers for the person: it picks the attached file itself. Conversations are not kept across an app restart yet, so reopening is done after closing a conversation, not after quitting.
+`node` has to be on PATH. `CANOA_TEST_SHOTS=<dir>` keeps a screenshot of each step, and `CANOA_TEST_UPDATES=<file>` the kind and shape of each distinct update. The file dialog is the one thing the test answers for the person: it picks the attached file itself. Reopening here is done after closing a conversation; after quitting, `integration_test/session_ledger_test.dart` does it.
 
 Outside the test, `CANOA_EVENT_LOG=<file>` makes the app append the kind, shape and rendering of each distinct ACP update it receives, as a JSON line. A shape keeps the protocol's own words, such as a tool's `kind`, and replaces every other string with `"string"`, so nothing anyone wrote is kept. `test/fixtures/coding_task_updates.jsonl` is that record from a real Claude run; `test/chat_test.dart` replays it and fails if any kind would reach the fallback, which shows nothing.

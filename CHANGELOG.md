@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The app keeps a list of every session it opens or resumes, by harness, across runs: the harness and the version the agent reported, the agent entry, where it runs (this computer, the app's `canoa-host`, a paired peer with its id, or the browser's provider), its working directory, the agent's session id, its title, and when it was created and last used. The side list groups the sessions not open now by harness, filters by one, and reopens one by starting its agent again or reaching its peer again, through `session/load` or `session/resume` as the agent offers; where it offers neither, or the session came through the browser, the row says so. Removing a row never deletes the agent's own session, and the confirmation says so. On a desktop it is `sessions.json` beside Canoa.cfg, on the web this origin's IndexedDB.
+- Canoa.cfg `[sessions]`: `keep` (200), `keep_text` (off) and `text_messages` (200). What was said is kept only when `keep_text` is on, and Settings clears it. `[harnesses]` maps the name an agent reports to a harness, beyond the built-in Claude Code, Codex, Gemini, Pi, OpenCode and Grok; an unknown agent is labelled by its entry.
 - `canoa-host serve --key-limit` and `--no-rekey`, and `ServeOptions::with_key_limit` and `with_rekey`; a setting looser than the default is logged. A client of the other method is logged as a method mismatch, never as a key to accept. A home records the method named last, so a host the app runs naming none keeps working after a move.
 - Hosting shows the method beside the host's id, and the app's and the extension's add-by-hand forms ask for the agent's method instead of assuming one.
 - Hosting reports a host that refused Canoa.cfg in the host's own words: it waits, up to `errorDrain` (2 s), for the host's standard error to close after its exit, which can come first.
@@ -45,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A session with an agent on `canoa-host`'s plain WebSocket on loopback is taken into the chat's list: it refused any `ws://` endpoint, though the dialer allows one on loopback.
 - A sealed link that ends while the chat is still sending a request now fails that request. Before, under Noise, a refused key's link could end while the first request was being sealed, and the error reached no one.
 - Settings opens from the side rail: its dialog, like Hosting's, now opens on the app's own navigator.
 - A failed WebSocket or WebTransport connection now releases its socket. Before, `close()` did nothing once the stream had ended, so a peer that sent a frame over the limit left the socket open.
