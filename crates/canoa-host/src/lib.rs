@@ -6,6 +6,7 @@ extern crate alloc;
 mod child;
 pub mod config;
 pub mod peers;
+pub mod profile;
 pub mod provider;
 mod scope;
 pub mod serve;

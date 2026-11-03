@@ -4,13 +4,13 @@ Header-file-style reference for the `canoa-host` crate: every public item with i
 
 No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `5397c7d`), `coqui-agentic-peer` (`79a9f39`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `config`, `peers`, `provider`, `serve`, `tool`.
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `config`, `peers`, `profile`, `provider`, `serve`, `tool`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
 ## Canoa.cfg (`canoa_host::config`)
 
-The host reads only `[host]`; the app's tables (`desktop`, `network`, `assets`, `appearance`, `agents`) are not read. Every table the host reads refuses a key it does not know.
+The host reads only `[host]`; the app's tables (`desktop`, `network`, `assets`, `appearance`, `agents`, `overlays`, `profile`) are not read. Every table the host reads refuses a key it does not know.
 
 ```toml
 [host]
@@ -180,6 +180,68 @@ pub fn serve_stdio(spec: ToolSpec, name: &str) -> Result<(), ToolError>
 - **Cancel.** A cancelled turn is answered `cancelled` however it ends. `session` with `cancel`: the line is written, and a turn still running `CANCEL_GRACE` later has its process ended and the session with it. Otherwise the process is ended at once; in `session` mode the session with it.
 - **`ask`** sends `session/request_permission` (v1: `toolCall` `{"toolCallId": "canoa-host-ask-N", "title", "status": "pending", "rawInput": {"text": the whole question, cut to MAX_TEXT}}`, options `allow`/`allow_once` and `reject`/`reject_once`) and writes `allow` only for an answer selecting `allow` while the turn that asked runs uncancelled; any other answer and an error write `reject`. A request that comes with no turn running, cancelled, or `MAX_ASKS` waiting is refused at once, without asking. When a turn is cancelled or ends, every question of its session still waiting gets `reject` then and is forgotten, so a later answer reaches nothing; so is one whose process was replaced or ended.
 - **Processes** run `program` (with `args`; in `message` mode `resume_args` first once a `session` rule has recorded one) in the session's `cwd`, with this process's environment. A line to one goes through a queue of 64; a full queue ends it. Its standard error goes to this process's, `OUTPUT_LIMIT` bytes per process. A line of output over `serve::MAX_LINE` ends it. On Windows each process is in a job object of its own, ended with it, and runs with `NoDefaultCurrentDirectoryInExePath` set, so a `.cmd` tool does not take a program it names bare from the client's `cwd`; on Unix it stays in this process's group, and ending it ends only it. When `input` ends, each process's input is closed, and it is ended 1 s later; under `serve` that does not happen, since the host ends the whole connection's process tree at once.
+
+## Profiles (`canoa_host::profile`)
+
+The schema of a profile, what an agent is launched with, and its merge in layers. The app reads the same schema; `tests/vectors/profile.json` holds both to the same views and refusals. `serve` does not apply profiles yet.
+
+```toml
+model = "m"                      # effort, mode likewise: text, not empty, no control character
+context = { text = "..." }       # or { file = "CONTEXT.md" }: exactly one
+unset = ["model"]                # model, effort, mode or context of a lower layer; not beside that key
+[env.NAME]                       # NAME: a letter or _, then letters, digits or _, up to 128
+value = "v"                      # exactly one of value, from_env (a variable's name), from_file (a path), remove = true
+[skills.NAME]                    # NAME, and mcp's and headers': 1 to 64 letters, digits, - or _
+path = "skills/review"           # or remove = true
+[mcp.NAME]
+type = "stdio"                   # stdio: command, args, [mcp.NAME.env.X]; http or sse: url (http:// or https://), [mcp.NAME.headers.X]
+command = "npx"                  # or remove = true alone
+```
+
+```rust
+pub const MAX_NAME: usize = 64;
+pub const MAX_ENV_NAME: usize = 128;
+
+#[non_exhaustive] pub enum LayerKind { BuiltIn, Overlay, User, Project, Agent, Session }   // Copy, Ord: lowest first
+pub const fn LayerKind::as_str(self) -> &'static str      // "built-in", "overlay", "user", "project", "agent", "session"
+pub const fn LayerKind::is_confined(self) -> bool         // Overlay and Project
+pub struct LayerId { pub kind: LayerKind, pub name: String }   // Display: "user", "overlay:team", "agent:Claude"
+pub fn LayerId::new(kind: LayerKind, name: impl Into<String>) -> LayerId
+
+#[non_exhaustive] pub struct Profile { pub model, effort, mode: Option<String>, pub context: Option<Context>, pub unset: Vec<Scalar>, pub env: IndexMap<String, Change<EnvValue>>, pub skills: IndexMap<String, Change<Skill>>, pub mcp: IndexMap<String, Change<McpServer>> }   // Default
+pub fn Profile::from_str(text: &str, kind: LayerKind) -> Result<Profile, ProfileError>    // touches no file, reads no variable
+pub fn Profile::from_table(table: toml::Table, kind: LayerKind) -> Result<Profile, ProfileError>
+#[non_exhaustive] pub enum EnvValue { Value(String), FromEnv(String), FromFile(String) }   // Debug never shows a Value's text
+#[non_exhaustive] pub enum Context { Text(String), File(String) }
+#[non_exhaustive] pub struct Skill { pub path: String }   pub fn Skill::new(path) -> Skill
+#[non_exhaustive] pub enum McpServer { Stdio { command, args, env }, Http { url, headers }, Sse { url, headers } }
+#[non_exhaustive] pub enum Change<T> { Set(T), Remove }
+#[non_exhaustive] pub enum Scalar { Model, Effort, Mode, Context }
+
+#[non_exhaustive] pub struct Layer { pub id: LayerId, pub dir: Option<PathBuf>, pub profile: Profile }
+pub fn Layer::new(id: LayerId, dir: Option<PathBuf>, profile: Profile) -> Layer
+pub fn merge(layers: &[Layer]) -> Effective
+#[non_exhaustive] pub struct Effective { pub model, effort, mode: Option<Sourced<String>>, pub context: Option<Sourced<Context>>, pub env, skills, mcp: IndexMap<String, Sourced<_>>, pub removed: Vec<Removed> }
+#[non_exhaustive] pub struct Sourced<T> { pub value: T, pub layer: LayerId, pub dir: Option<PathBuf> }
+#[non_exhaustive] pub struct Removed { pub key: String, pub layer: LayerId, pub was: LayerId }
+pub fn Effective::view(&self) -> serde_json::Value          // references as written, never resolved
+pub fn Effective::environment(&self, lookup: impl Fn(&str) -> Option<String>) -> Result<Vec<(String, Secret)>, ProfileError>
+pub fn resolve(key: &str, value: &EnvValue, dir: Option<&Path>, confined: bool, lookup: impl Fn(&str) -> Option<String>) -> Result<Secret, ProfileError>
+pub struct Secret(..)   pub fn Secret::expose(&self) -> &str   // Debug "Secret(..)", Display "(hidden)"
+
+#[non_exhaustive] pub enum OverlaySource { Git { repo: String, reference: String, path: String }, Dir(PathBuf) }
+pub fn OverlaySource::parse_git(source: &str) -> Result<OverlaySource, ProfileError>   // <repository>@<ref>[#<path>]
+
+#[non_exhaustive] pub enum ProfileError { Parse { line, column }, Invalid { key: String, rule: Rule }, Resolve { key: String, what: &'static str } }
+#[non_exhaustive] pub enum Rule { Name, Path, Form, Value }
+pub const fn ProfileError::code(&self) -> &'static str     // "parse", "name", "path", "form", "value", "resolve"
+```
+
+- **Merge**: lowest first. A scalar a later layer sets replaces the lower one; `unset` takes it away first. A named entry a later layer sets replaces the lower one whole and keeps its place; `Change::Remove` takes it out, and set again later it comes last. `removed` lists only what was there to remove, in order.
+- **Paths** are judged on the text, the same on every platform. In a confined layer (overlay, project) a path is relative and stays below its directory: no leading `/`, `\` or `~`, no `:`, no `..` segment. Elsewhere any non-empty path without NUL.
+- **Errors** never quote a value: `Invalid.key` names the setting (`env.A`, `mcp.a.headers.T`), or for a refused name the table holding it (`env`, `mcp.a.env`). The first refusal in a document is, in order: anything serde refuses (an unknown key, a wrong type, a key twice) as `Parse`; then `model`, `effort`, `mode`, `context`, `unset`, then `env`, `skills` and `mcp` entries in the document's order.
+- **`resolve`** reads `FromEnv` through `lookup` and `FromFile` from `dir` (an absolute path only outside a confined layer), less one final `\n` or `\r\n`. For a confined layer the file and `dir` are canonicalized and the file must be under `dir`, so a link out of the project is refused. Call it only when a session starts.
+- **`parse_git`**: the ref follows the last `@`, the path the last `#`. Refused: no ref; a repository that opens with `-`, holds a space or control character, names a transport helper (`::`), or a scheme other than `https`, `http`, `ssh`, `git`, `file`; a ref `git check-ref-format` refuses, or one opening with `-`; a path empty after `#`, absolute, holding `\` or `:`, or with a `..` segment. `Dir` is never parsed here.
 
 ## Pairing (`canoa_host::peers`)
 

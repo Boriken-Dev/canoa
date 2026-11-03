@@ -397,3 +397,12 @@ fn relative_paths_a_source_reads_are_made_absolute_against_the_configs_directory
         "a key no source reads as a path list is passed as written"
     );
 }
+
+#[test]
+fn the_apps_profile_tables_are_left_to_the_app() {
+    let config = parse(
+        "[overlays]\nteam = \"https://example.invalid/p.git@main\"\n[profile]\nmodel = \"m\"\n[agents.Claude.profile]\neffort = \"high\"\n",
+    )
+    .expect("parses");
+    assert!(config.entries.is_empty());
+}
