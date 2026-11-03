@@ -5,8 +5,10 @@
 //
 //   flutter test integration_test/coding_task_test.dart -d windows   (or -d linux)
 //
-// `node` has to be on PATH. CANOA_TEST_TASK_AGENT=Claude runs the real Claude preset on the person's own sign-in, which spends the
-// subscription; without it a scripted stand-in (scripted_agent.mjs) plays the agent and nothing is spent. CANOA_TEST_SHOTS names a
+// `node` has to be on PATH. CANOA_TEST_TASK_AGENT=Claude runs the Claude preset's adapter on the person's own sign-in, through
+// without_user_settings.mjs so that their user-level settings and CLAUDE.md stay out, and spends the subscription; without it a
+// scripted stand-in (scripted_agent.mjs) plays the agent and nothing is spent. Reaching outside the temporary directory fails the
+// test, whether asked (and refused) or done unasked. CANOA_TEST_SHOTS names a
 // directory for a screenshot of each step, and CANOA_TEST_UPDATES a file for the kind and shape of each distinct update. Neither
 // holds what was said, except the screenshots, which show the screen. CANOA_TEST_APP is this app's directory (default: the
 // working directory).
@@ -15,6 +17,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:canoa/acp/agent_commands.dart';
+import 'package:canoa/chat/agent_events.dart' show ToolStatus;
 import 'package:canoa/chat/transcript.dart';
 import 'package:canoa/chat/update_record.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -99,11 +102,28 @@ List<String> _mentioning(Directory dir, String word) => [
       entry.path.substring(dir.path.length + 1),
 ];
 
+/// An absolute path (Windows, Git Bash's `/c/...` or Unix) or the home directory, where it starts a word.
+final _place = RegExp(
+  r'''(?<![\w.\-/\\])(?:[A-Za-z]:[\\/]|/[A-Za-z][\w.\-]*/|~[\\/]|\$HOME\b|\$env:USERPROFILE\b|%USERPROFILE%)[^\s"'`;|&<>()]*''',
+);
+
+/// Whether [text] names a place outside [root]. `/dev/null` is nowhere.
+bool _reachesOut(String text, String root) {
+  String plain(String path) =>
+      path.replaceAll(r'\', '/').replaceFirstMapped(RegExp(r'^/([A-Za-z])/'), (drive) => '${drive[1]}:/').toLowerCase();
+  final inside = plain(root);
+  for (final match in _place.allMatches(text)) {
+    final path = match[0]!;
+    if (path == '/dev/null') continue;
+    if (!RegExp(r'^(?:[A-Za-z]:[\\/]|/)').hasMatch(path) || !plain(path).startsWith(inside)) return true;
+  }
+  return false;
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('a coding task, start to end, through the window', (tester) async {
-    final label = _real ?? 'Scripted';
     final dir = Directory.systemTemp.createTempSync('canoa-task-');
     final repo = Directory('${dir.path}${Platform.pathSeparator}repo')..createSync();
     await _project(repo);
@@ -113,15 +133,28 @@ void main() {
     updatesFile?.writeAsStringSync('');
     final recorder = UpdateRecorder(write: (line) => updatesFile?.writeAsStringSync('$line\n', mode: FileMode.append));
     final store = SessionStore(includePreview: false, recorder: recorder);
-    final scripted = AgentCommand(
-      label: 'Scripted',
-      program: 'node',
-      args: ['$_appDir/integration_test/scripted_agent.mjs', '--state=${dir.path}/scripted.json'],
-    );
+    final preset = _real == null ? null : agentPresets.firstWhere((preset) => preset.label == _real);
+    final agent = switch (preset) {
+      null => AgentCommand(
+        label: 'Scripted',
+        program: 'node',
+        args: ['$_appDir/integration_test/scripted_agent.mjs', '--state=${dir.path}/scripted.json'],
+      ),
+      // Claude through its preset's own adapter, but without the person's user-level settings and CLAUDE.md.
+      final AgentCommand claude when claude.label == 'Claude' => AgentCommand(
+        label: 'Claude without user settings',
+        program: 'node',
+        args: ['$_appDir/integration_test/without_user_settings.mjs', '--', claude.program, ...claude.args],
+        requires: claude.requires,
+        programPaths: claude.programPaths,
+      ),
+      final AgentCommand other => other,
+    };
+    final label = agent.label;
     final screen = GlobalKey();
     await tester.pumpWidget(RepaintBoundary(
       key: screen,
-      child: CanoaApp(store: store, config: CanoaConfig(agents: _real == null ? [scripted] : const [])),
+      child: CanoaApp(store: store, config: CanoaConfig(agents: agent == preset ? const [] : [agent])),
     ));
     await tester.pumpAndSettle();
 
@@ -168,6 +201,13 @@ void main() {
     }
 
     bool cardSays(Pattern part) => showing(find.descendant(of: question, matching: find.textContaining(part)));
+    String cardText() => [
+      for (final element in find.descendant(of: question, matching: find.byWidgetPredicate((widget) => widget is Text || widget is SelectableText)).evaluate())
+        switch (element.widget) {
+          Text(:final data) || SelectableText(:final data) => data ?? '',
+          _ => '',
+        },
+    ].join('\n');
 
     /// Drags the conversation to its end, as a person has to: it does not follow new entries by itself.
     Future<void> toEnd() async {
@@ -183,7 +223,7 @@ void main() {
     }
 
     /// Sends [text], answers each question, and waits for the turn to end. A question whose card mentions [refuse] is refused, and so
-    /// is one reaching outside the temporary directory, which a person's own agent settings can ask for. With [stop], the first
+    /// is one reaching outside the temporary directory, which the test then fails on. With [stop], the first
     /// question is not answered: Stop is pressed instead.
     Future<({int asked, int refused, int outside, bool stopped})> turn(String name, String text, {String? refuse, bool stop = false}) async {
       await tester.tap(composer);
@@ -198,8 +238,8 @@ void main() {
       while (showing(working)) {
         if (showing(question)) {
           asked++;
-          // The adapter's reason for a path outside the working directory, or a command naming a dot-directory in the home one.
-          final away = cardSays('outside allowed working director') || cardSays(RegExp(r'~[/\\]\.'));
+          // The adapter's reason for a path outside the working directory, or any other place outside the temporary one.
+          final away = cardSays('outside allowed working director') || _reachesOut(cardText(), dir.path);
           final refusing = away || (refuse != null && cardSays(refuse));
           if (asked == 1 || refusing || stop) await shot('$name-question$asked${away ? '-outside' : refusing ? '-refusing' : ''}');
           if (stop && !away) {
@@ -247,6 +287,12 @@ void main() {
     final attached = await turn('notes', _followNotes, refuse: 'obsolete');
     debugPrint('STEP notes: asked ${attached.asked}, refused ${attached.refused}, outside the directory ${attached.outside}');
     final usage = store.selected?.usage.describe();
+    // Tools that ran without a question, such as reads, are seen here: none may have reached outside either.
+    final ranOutside = [
+      for (final entry in store.selected?.toolEntries.values ?? const <ChatMessage>[])
+        if (entry.tool!.status == ToolStatus.done && _reachesOut([entry.tool!.title, ...entry.tool!.locations].join('\n'), dir.path))
+          entry,
+    ].length;
 
     // Closed, then a new conversation with the same agent, from which the closed one is opened again.
     await tester.tap(find.byTooltip('Close conversation'));
@@ -282,8 +328,8 @@ void main() {
     for (final seen in recorder.seen) {
       debugPrint('KIND ${seen.kind} ${seen.rendering.name} x${seen.count} ${jsonEncode(seen.shape)}');
     }
-    debugPrint('USAGE ${usage ?? 'none said'}; refused as outside the directory: '
-        '${fixed.outside + stopped.outside + continued.outside + attached.outside}');
+    final askedOutside = fixed.outside + stopped.outside + continued.outside + attached.outside;
+    debugPrint('USAGE ${usage ?? 'none said'}; outside the directory: $askedOutside asked and refused, $ranOutside ran');
 
     final (exitCode, passing) = await _nodeTest(repo);
     final oldName = _mentioning(repo, 'addNumbers');
@@ -315,6 +361,8 @@ void main() {
     expect(listedCount, greaterThan(0));
     expect(reopenedUser, greaterThanOrEqualTo(3), reason: 'the earlier conversation came back with what was said');
     expect(recorder.unshown, isEmpty, reason: 'kinds no rendering of their own showed');
+    expect(askedOutside, 0, reason: 'the agent asked to reach outside the temporary directory');
+    expect(ranOutside, 0, reason: 'a tool reached outside the temporary directory');
     if (_real != null) {
       expect(exitCode, 0, reason: 'the tests pass');
       expect(passing, greaterThanOrEqualTo(2), reason: 'a second test was added');
