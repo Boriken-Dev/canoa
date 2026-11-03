@@ -58,6 +58,7 @@ effort = "high"
 mode = "plan"
 context = { text = "Answer in Spanish." }      # or { file = "CONTEXT.md" }
 unset = ["mode"]                               # not beside a value it takes back
+share_env = ["GITHUB_TOKEN"]                   # variables overlays and projects may read; only in your own layers
 
 [profile.env.RUST_LOG]
 value = "debug"                                # written here: never a secret
@@ -90,34 +91,53 @@ model = "claude-opus-4-1"
 A profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
 a key the schema does not know is refused. Names: environment variables a letter or `_` then letters, digits or `_`;
 skills, MCP servers and headers 1 to 64 letters, digits, `-` or `_`. A relative path is read from its layer's
-directory: Canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project. **An overlay
-or a project comes from elsewhere**, so its paths must be relative and stay inside its directory: no root, drive, `~`,
-`:` or `..`, and a file it names for a secret is read only if, its links followed, it is still inside.
+directory: Canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project.
+
+**An overlay or a project comes from elsewhere**, so it is held to more:
+
+- Its paths must be relative and stay inside its directory: no root, drive, `~`, `:` or `..`, and a file it names for
+  a secret is read only if, its links followed, it is still inside.
+- It reads only the variables of this computer that one of your own layers lists in `share_env`, such as
+  `share_env = ["GITHUB_TOKEN"]` in `[profile]`. An environment variable or an MCP server of its that reads any other
+  is left out, the lower layer's entry stays, and Settings → Profiles lists it as left out and what it reads.
+- It may not set the variables that decide what a process runs or loads, where an agent's own requests go, where a
+  harness keeps its configuration, or which certificates are trusted: `PATH`, `NODE_OPTIONS`, `HOME`, `TMP`,
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and the like, anything starting `LD_`, `DYLD_`, `PYTHON`, `GIT_`, `NPM_CONFIG_`,
+  `CANOA_` or `COQUI_`, and anything ending `_BASE_URL` or `_PROXY`, in any case. Your own layers may set them. The
+  whole list is `RESERVED_ENV` in `canoa_host::profile`.
 
 **Secrets** come from a reference, `from_env` or `from_file`, and are never written into a profile. A reference is
-resolved only when a session starts; the view shows the reference, and nothing logs the value. Errors name a key, never
-a value.
+resolved only when a session starts; the view shows the reference and the variable each MCP header or variable comes
+from, and nothing logs the value. A `from_file` reads a regular file of at most 1 MiB. Errors name a key, never a
+value.
 
 ### Overlays
 
 An overlay is a directory holding `profile.toml` and whatever it names, such as skills. From git, the desktop app
 installs it into `overlays/NAME/` beside Canoa.cfg, with `overlays/NAME.json` recording the source, **the commit** and
 each file's git blob id, and its history in `overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in
-Settings → Profiles fetch the source and show the commit it would move to and every file it adds, changes or removes;
-nothing changes until you apply, and what is applied is that commit, wherever the ref has moved since. The ref is a
-branch, a tag or a commit id. An overlay is upstream's copy, replaced whole on each apply: put your own additions in
-`[profile]`, which wins over it. An overlay installed from another source than the one Canoa.cfg names is left out
-until it is synced.
+Settings → Profiles fetch the source and show the commit it would move to, every file it adds, changes or removes, and
+its `profile.toml`; nothing changes until you apply, and what is applied is that commit, wherever the ref has moved
+since. The ref is a branch, a tag, or a whole commit id, which names that commit even if a branch or tag carries the
+same name; an abbreviated id is not taken. Only that ref is fetched, one commit deep. An overlay is upstream's copy,
+replaced whole on each apply: put your own additions in `[profile]`, which wins over it. An overlay installed from
+another source than the one Canoa.cfg names is left out until it is synced.
 
 Nothing from a source runs: its files are read out of git's object store, never checked out, so no hook, filter or
-attribute of the source applies; links and submodules are listed and never installed, and a file name that is not safe
-on every platform (`..`, `\`, `:`, a Windows device name) refuses the whole overlay. Git may fetch only over `https`,
-`http`, `ssh`, `git` and `file`, never a transport helper such as `ext::`, and never prompts. An overlay holds at most
-4096 files and 64 MiB. A local directory, `{ dir = "..." }`, is read in place, as it is when an agent starts.
+attribute of the source applies; links and submodules are listed and never installed. A file name that is not safe on
+every platform refuses the whole overlay: `..`, `\`, `:`, `"`, `*`, `<`, `>`, `?`, `|`, a control or invisible
+character, a Windows device name, `.git` in any case, `~` followed by a digit (a Windows short name), or two names
+that differ only in case. Git may fetch only over `https`, `ssh`, `file` with no host, and `http` or `git` at a whole
+commit id; never a transport helper such as `ext::`, nor another host's share. It asks nothing in a terminal and tells
+Git Credential Manager not to ask; another credential helper you configured may still ask. Git is run from an absolute
+directory of `PATH`, never from the current directory. An overlay holds at most 4096 files and 64 MiB, listing stops
+as soon as it passes either, and each git command is ended after 5 minutes. A local directory, `{ dir = "..." }`, is
+read in place, as it is when an agent starts.
 
 ### Trusting a project
 
-A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first. The
+A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first, every
+invisible or control character in it named as `<U+XXXX>`. The
 trust is kept per directory, links resolved, in `trust.json` beside Canoa.cfg, with the SHA-256 of the file you were
 shown: if the file changes, it is ignored again until you trust it again. **Stop trusting** revokes it for every later
 session. A web build reads no working directory and installs no overlay.
