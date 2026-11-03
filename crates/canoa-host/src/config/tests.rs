@@ -145,6 +145,24 @@ fn an_entry_name_is_an_identifier() {
 }
 
 #[test]
+fn a_name_is_checked_before_an_error_quotes_it() {
+    for body in ["program = \"\"", "program = \"x\"\nlisten = \"nowhere\""] {
+        let text = format!("[host.agents.\"\\u001b]0;x\\u0007\"]\n{body}\n");
+        let error = parse(&text).expect_err("refused");
+        assert!(
+            !error.to_string().chars().any(char::is_control),
+            "{error:?}"
+        );
+    }
+    let provider = "[host.providers.\"\\u001b[2J\"]\nlibrary = \"\"\nprovider = \"p\"\n";
+    let error = parse(provider).expect_err("refused");
+    assert!(
+        !error.to_string().chars().any(char::is_control),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn peers_are_peer_ids() {
     let text = format!("[host.agents.a]\nprogram = \"x\"\npeers = [\"{PEER}\"]\n");
     let config = parse(&text).expect("parses");

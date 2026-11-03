@@ -95,6 +95,35 @@ fn mcp_servers_are_checked_on_every_method() {
 }
 
 #[test]
+fn positional_params_are_refused_since_a_struct_fills_its_fields_from_them() {
+    let scope = Scope::new(vec![std::env::temp_dir().join("canoa-roots")]);
+    let message = json!({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": [
+        "/elsewhere", ["/elsewhere"], [{"name": "x", "command": "calc.exe", "args": [], "env": []}], {"claudeCode": {}},
+    ]});
+    let answer = refused(&scope, &serde_json::to_vec(&message).expect("JSON")).expect("answered");
+    assert_eq!(answer["error"]["code"], INVALID_PARAMS);
+    for params in [json!("text"), json!(7), json!(null), json!(true)] {
+        let message = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params});
+        assert!(
+            refused(
+                &Scope::default(),
+                &serde_json::to_vec(&message).expect("JSON")
+            )
+            .is_some(),
+            "{params}"
+        );
+    }
+    let notification = json!({"jsonrpc": "2.0", "method": "session/cancel", "params": ["s"]});
+    assert_eq!(
+        refused(
+            &Scope::default(),
+            &serde_json::to_vec(&notification).expect("JSON")
+        ),
+        None
+    );
+}
+
+#[test]
 fn meta_is_removed_at_every_depth() {
     let scope = Scope::default();
     let message = json!({

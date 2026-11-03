@@ -221,6 +221,7 @@ impl Config {
         }
         let mut entries = Vec::new();
         for (name, agent) in host.agents {
+            check_name(&name)?;
             if agent.program.is_empty() {
                 return Err(invalid(&name, "program is empty"));
             }
@@ -237,6 +238,7 @@ impl Config {
             entries.push(entry(name, kind, common)?);
         }
         for (name, provider) in host.providers {
+            check_name(&name)?;
             if provider.library.is_empty() || provider.provider.is_empty() {
                 return Err(invalid(&name, "library and provider must not be empty"));
             }
@@ -279,7 +281,8 @@ fn invalid(name: &str, what: &str) -> ConfigError {
     }
 }
 
-fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, ConfigError> {
+/// Checked before anything quotes the name, since a key in the file may hold any character.
+fn check_name(name: &str) -> Result<(), ConfigError> {
     if name.is_empty()
         || name.len() > MAX_NAME
         || !name
@@ -293,6 +296,10 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
             ),
         });
     }
+    Ok(())
+}
+
+fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, ConfigError> {
     let listen = match common.listen {
         None => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         Some(text) => text

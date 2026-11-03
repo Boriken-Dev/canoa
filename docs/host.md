@@ -51,7 +51,8 @@ A key's first use is always the person's decision: nothing is accepted automatic
   on this machine without asking anyone. The host applies [the page scope](https://github.com/Boriken-Dev/coqui-acp/blob/main/docs/browser.md#scope)'s
   rule to a stdio agent's clients: such an entry is refused whole, an `http` or `sse` server must be `https`, and `_meta`,
   which an agent may read as launch options, is removed. A provider's facade takes no MCP server at all.
-- **Only the working roots it names**, when an entry names any.
+- **Only the working roots it names**, when an entry names any, compared as written: a link inside a root that points
+  outside it is followed.
 
 ## What it trusts
 
@@ -61,6 +62,8 @@ A key's first use is always the person's decision: nothing is accepted automatic
   does. It is mapped only in the process serving one connection, so a crash ends that connection alone, but it is
   trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
+- **A provider gets what a client asks of it**: the facade passes a session's `context`, `model`, `effort` and opaque
+  `meta` through, as a provider's own interface defines them.
 
 ## Claude and ChatGPT
 

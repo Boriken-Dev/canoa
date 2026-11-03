@@ -178,6 +178,25 @@ fn removing_a_key_ends_its_link() {
 }
 
 #[test]
+fn a_key_removed_before_its_first_message_never_reaches_an_agent() {
+    let host = Host::start(&agent_entry("fixture", ""), 1);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    let answered = with_link(host.url("fixture"), &client, host.peer, |rpc| {
+        let removed = host.command(&["revoke", &client.peer_id().to_string()]);
+        assert!(removed.status.success());
+        std::thread::sleep(Duration::from_millis(2500));
+        let _ = rpc.send(&json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": 1}}));
+        rpc.next_message(Duration::from_secs(5))
+    })
+    .expect("the key was paired when it connected");
+    assert!(
+        answered.is_err(),
+        "the agent answered a removed key: {answered:?}"
+    );
+}
+
+#[test]
 fn an_entry_that_lists_its_peers_turns_away_other_paired_keys() {
     let listed = Identity::generate().expect("a key");
     let other = Identity::generate().expect("a key");

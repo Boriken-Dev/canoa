@@ -61,9 +61,13 @@ impl Scope {
         strip_meta(object);
         let id = object.get("id").cloned();
         let is_request = object.contains_key("method") && id.is_some();
-        if let Some(params) = object.get("params").and_then(Value::as_object)
-            && let Err(why) = self.check_params(params)
-        {
+        // ACP's parameters are always an object. A list would fill a request's fields in order, past every check below.
+        let checked = match object.get("params") {
+            None => Ok(()),
+            Some(Value::Object(params)) => self.check_params(params),
+            Some(_) => Err("params must be an object"),
+        };
+        if let Err(why) = checked {
             return Verdict::Refuse(
                 is_request.then(|| error(id.as_ref().unwrap_or(&Value::Null), INVALID_PARAMS, why)),
             );
