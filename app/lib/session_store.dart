@@ -323,10 +323,24 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The `_meta` key under which `canoa-host` lists, in its answer to `session/new`, what a person should know about an agent
+  /// before using it: what a command-line tool does without asking, and whether it remembers earlier messages.
+  static const hostNoticesKey = 'dev.boriken.canoa/notices';
+
+  /// Notices taken from one answer; the rest are passed over.
+  static const maxHostNotices = 4;
+
   /// What the agent said when it opened [session].
   void applyOpened(ChatSession session, AcpOpenedSession opened) {
     _setOptions(session, opened.raw['configOptions'], opened.raw['modes']);
     session.commands = parseCommands(opened.raw['availableCommands']) ?? session.commands;
+    final meta = opened.raw['_meta'];
+    if (meta is Map && meta[hostNoticesKey] is List) {
+      for (final notice in (meta[hostNoticesKey] as List).take(maxHostNotices)) {
+        final text = shortText(notice);
+        if (text != null) _note(session, text);
+      }
+    }
     notifyListeners();
   }
 

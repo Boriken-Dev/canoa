@@ -1,4 +1,5 @@
 import 'package:canoa/session_store.dart';
+import 'package:coqui_acp/coqui_acp.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -13,6 +14,38 @@ void main() {
     expect(second.messages.first.text, 'World');
     store.select(first.id);
     expect(store.selected?.title, 'First');
+    store.dispose();
+  });
+
+  test("the host's notices about an agent show when its session opens, bounded", () {
+    final store = SessionStore(includePreview: false);
+    final session = store.addProviderSession(
+      title: 'pi', agent: 'pi', peerId: 'sha256:example', remoteSessionId: 's1',
+    );
+    store.applyOpened(session, AcpOpenedSession('s1', {
+      'sessionId': 's1',
+      '_meta': {
+        SessionStore.hostNoticesKey: [
+          'pi runs bash\u202e without asking',
+          42,
+          'Each message runs pi anew.',
+          'x' * 2000,
+          'four',
+          'five',
+        ],
+      },
+    }));
+    final notices = session.messages.where((message) => message.role == MessageRole.notice).map((m) => m.text).toList();
+    expect(notices, hasLength(3), reason: 'four taken, one of them not text');
+    expect(notices[0], 'pi runs bash  without asking');
+    expect(notices[1], 'Each message runs pi anew.');
+    expect(notices[2].length, lessThanOrEqualTo(513));
+
+    final plain = store.addProviderSession(
+      title: 'agent', agent: 'agent', peerId: 'sha256:example', remoteSessionId: 's2',
+    );
+    store.applyOpened(plain, AcpOpenedSession('s2', {'sessionId': 's2', '_meta': {SessionStore.hostNoticesKey: 'not a list'}}));
+    expect(plain.messages, isEmpty);
     store.dispose();
   });
 
