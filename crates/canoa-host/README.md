@@ -7,14 +7,17 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/test.yml)](https://github.com/Boriken-Dev/canoa/actions/workflows/test.yml)
 
 **Serves the agents Canoa.cfg names to keys you paired, on this machine's loopback, and to nobody else.** An entry is a
-program that speaks the Agent Client Protocol on its standard streams, or a Guatiao library offering an `agent_provider`,
-served through `coqui-acp-provider`'s facade. Each entry listens on a WebSocket of its own; a client proves a key the trust
+program that speaks the Agent Client Protocol on its standard streams, or a Guatiao `agent_provider` from a library or
+from a source such as Python's, served through `coqui-acp-provider`'s facade. Each entry listens on a WebSocket of its own; a client proves a key the trust
 store accepts, and every message after that is sealed in the session the proof ended in. See the
 [documentation](https://boriken-dev.github.io/canoa/host/).
 
 ## Features
 
 - Stdio ACP agents and Guatiao agent providers, one `Canoa.cfg` entry each, a fresh process per connection.
+- A provider written in Python, Lua, JavaScript, Rhai or WebAssembly through its Guatiao source, and a provider built from
+  a `settings` table checked against its schema. Settings reach the provider's process on its standard input, never its
+  command line.
 - The in-band WebCrypto proof only: no connection reaches an agent without a paired key, and a removed key loses its link
   within about a second.
 - Loopback only. A proxy that ends TLS can carry it further, since the proof does not depend on TLS.
@@ -45,6 +48,13 @@ working_roots = ["/home/me/src"]
 library = "echo_provider.so"
 provider = "echo_provider"
 listen = "127.0.0.1:7802"
+
+[host.providers.python]
+source = "libguatiao_source_py.so"
+provider = "acp_echo_echo"
+[host.providers.python.source_settings]
+dirs = ["python/echo"]
+paths = ["python/guatiao", "python/coqui_acp_provider"]
 ```
 
 ```sh
@@ -74,7 +84,8 @@ canoa-host peers [--format text|json]
 canoa-host accept PEER
 canoa-host revoke PEER
 canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes]
-canoa-host provider --library FILE --provider ID [--working-root DIR]... [--max-sessions N]
+canoa-host provider (--library FILE | --source FILE) --provider ID [--working-root DIR]... [--max-sessions N]
+                    [--directory DIR] [--settings-on-stdin]
 ```
 
 `serve --until-stdin-closes` is for a program running the host as its child, such as Canoa's desktop app: when its input
@@ -97,6 +108,9 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 - **A paired key** reaches its entries' agents, which act with this user's rights as far as each agent lets them.
 - **A provider library** is native code: loading it runs it, with this user's rights, in the process serving that
   connection. It is trusted as fully as a program you run, and so is whoever can write it or its directory.
+- **A provider source** runs code and loads more: for Python, the interpreter the system finds, its `site-packages`, the
+  host's `PYTHONPATH`, and every directory and manifest its settings name. On Windows an import the narrow search leaves
+  missing, such as `python3.dll`, is looked for in the working directory and on `PATH` as well.
 - **A stdio agent** is the program the file names, found as the operating system finds a command.
 
 ## Development
@@ -105,7 +119,11 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
+CANOA_TEST_PYTHON=python3 cargo test -p canoa-host --test python_source
 ```
+
+The last builds Guatiao's Python source against the Python it names, which needs its shared library, and serves
+coqui-acp's Python echo provider through one entry. Without `CANOA_TEST_PYTHON` that test is ignored.
 
 ### Releasing
 

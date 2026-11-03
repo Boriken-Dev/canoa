@@ -5,8 +5,9 @@ loopback WebSocket of its own:
 
 - **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as Claude's
   adapter, Codex's adapter or `gemini --acp`.
-- **A Guatiao provider**: a library offering coqui-acp-provider's `agent_provider` kind, written once in any language
-  Guatiao builds a library from, and served through its ACP facade.
+- **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
+  library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
+  libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.
 
 The API and every setting are in the crate's [API header](https://github.com/Boriken-Dev/canoa/blob/main/crates/canoa-host/AGENTS.md).
 
@@ -24,6 +25,49 @@ library = "echo_provider.dll"
 provider = "echo_provider"
 listen = "127.0.0.1:7802"
 ```
+
+### A provider written in Python
+
+Guatiao's `guatiao_source_py`, built against a Python, serves Python modules as libraries. One entry names the source
+file, the provider, and the source's settings:
+
+```toml
+[host.providers.python]
+source = "guatiao_source_py.dll"
+provider = "acp_echo_echo"
+listen = "127.0.0.1:7803"
+
+[host.providers.python.source_settings]
+dirs = ["python/echo"]                                     # directories of *.guatiao.toml manifests
+paths = ["python/guatiao", "python/coqui_acp_provider"]    # what goes first on sys.path: Guatiao's binding, the kinds
+```
+
+`library` and `source` exclude each other, and `source_settings` goes with `source` alone. Relative paths, in
+`source_settings` as in `library` and `source`, are taken from Canoa.cfg's directory: the provider's process runs there.
+
+On Windows the Python's `python3.dll` has to be found: put its directory (`sys.base_prefix`) on the host's `PATH`. On
+Linux and macOS the source links that Python's shared library, found where the loader looks, or through
+`LD_LIBRARY_PATH` or `DYLD_FALLBACK_LIBRARY_PATH`.
+
+### A provider built from settings
+
+A provider that declares a configuration has no instance until it is given one. `settings` gives it:
+
+```toml
+[host.providers.prefixed]
+library = "echo_provider.dll"
+provider = "prefixed_echo"
+
+[host.providers.prefixed.settings]
+prefix = "hi"
+```
+
+The table is checked against the schema the provider declares when a connection loads it, since checking means running
+its code; a misspelled or ill-typed setting fails that connection, and the host's log names the setting, never its value.
+A provider that is its own instance refuses `settings`.
+
+Settings are read from Canoa.cfg only, never from a client. They reach the provider's process on its standard input, not
+on its command line, which other users of the machine may be able to read.
 
 `canoa-host serve` reads the same Canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
 prints one JSON line per entry: its name, kind, address and the host's peer id. The app keeps `[host]` as it is when it
@@ -89,6 +133,14 @@ only from a dialog that shows its whole id.
 - **A provider library is native code.** Loading it runs it, with this user's rights, before anything can check what it
   does. It is mapped only in the process serving one connection, so a crash ends that connection alone, but it is
   trusted as fully as a program you run, and so is whoever can write it or its directory.
+- **A provider source runs code too, and loads more.** Python's source trusts, besides its own file: the Python whose
+  shared library the system finds; that Python's standard library, `site-packages` and `.pth` files; the host's
+  `PYTHONPATH` and `PYTHONHOME`, which its process inherits; every directory in `paths`; every manifest in `dirs` and the
+  directories it names; and every module those import. Whoever can write any of them runs code as you.
+- **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
+  and in the system's directories only. For a source, an import those leave missing, such as `python3.dll`, is looked for
+  again in the source's own directory, the system directories, the provider's working directory (Canoa.cfg's) and every
+  directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
 - **A provider gets what a client asks of it**: the facade passes a session's `context`, `model`, `effort` and opaque
   `meta` through, as a provider's own interface defines them.

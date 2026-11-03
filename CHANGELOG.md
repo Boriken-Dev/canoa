@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Hosting**, in the side rail and the tray menu: the host's state and id, its agents, adding one by its command, the keys that may connect, pairing or removing one only from a dialog that shows its whole id, and a PIN for a native program.
 - The tray menu opens Hosting, a double click on the tray icon opens the chat, and where Linux shows no tray icons, closing the window minimizes it rather than hiding it out of reach. Settings has **Quit Canoa**.
 - `canoa-host pair`: shows a PIN that a native client uses to pair, such as `coqui-acp-bridge pair-dial`. One wrong try ends it.
+- A `canoa-host` provider entry can name a Guatiao source instead of a library, with `[host.providers.NAME.source_settings]`: a provider written in Python, Lua, JavaScript, Rhai or WebAssembly is served from one entry. `[host.providers.NAME.settings]` gives a provider the configuration it declares, checked against its schema. Settings reach the provider's process on its standard input, never its command line, and the process runs in Canoa.cfg's directory.
 
 ### Changed
 
