@@ -400,7 +400,7 @@ try {
   if (bridge) {
     execFileSync(bridge, ["companion", "install", "--extension-id", new URL(worker.url).hostname], { stdio: "ignore" });
     companionInstalled = true;
-    const describe = (name, label, peer, tail) => writeFileSync(path.join(descriptors, name), JSON.stringify({ txtvers: 1, proto: "acp", label, url: `${agentUrl}/${tail}`, peer }));
+    const describe = (name, label, peer, tail) => writeFileSync(path.join(descriptors, name), JSON.stringify({ txtvers: 1, proto: "acp", label, url: `${agentUrl}/${tail}`, peer, method: METHOD }));
     const search = async (view, label) => {
       await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Look for agents nearby').click()");
       try {
@@ -442,7 +442,7 @@ try {
       await revokeHere();
     });
     await check("fallback: WebTransport that does not open falls back to the WebSocket, under the same proof", async () => {
-      writeFileSync(path.join(descriptors, "fallback.json"), JSON.stringify({ txtvers: 1, proto: "acp", label: "Fallback agent", url: `${agentUrl}/fallback`,
+      writeFileSync(path.join(descriptors, "fallback.json"), JSON.stringify({ txtvers: 1, proto: "acp", label: "Fallback agent", url: `${agentUrl}/fallback`, method: METHOD,
         peer: fallbackIdentity.peerId, wt: 1, wth: `sha256:${"0".repeat(64)}` }));
       await requested();
       const view = await prompt();
