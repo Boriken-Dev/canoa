@@ -296,9 +296,23 @@ class SessionStore extends ChangeNotifier {
     // A v1 turn has no state updates: its end arrives as an event.
     unawaited(_turnSubscriptions.remove(localId)?.cancel());
     _turnSubscriptions[localId] = client.events.listen((event) {
+      if (event is AcpOutputLost) {
+        final messages = event.lines == 1 ? '1 message' : '${event.lines} messages';
+        _note(session, 'While nobody was connected, $messages from the agent (${event.bytes} bytes) were dropped, '
+            'so something it said or did is missing here.');
+        notifyListeners();
+        return;
+      }
+      if (event is AcpBlocked) {
+        // The agent was told the question was cancelled, and its turn goes on until it ends it.
+        _note(session, 'A question from the agent was answered cancelled: ${event.message}.');
+        notifyListeners();
+        return;
+      }
       if (client.protocolVersion != 1) return;
-      if (event is AcpCompleted || event is AcpBlocked) {
+      if (event is AcpCompleted || event is AcpCancelled) {
         session.status = SessionStatus.connected;
+        if (event is AcpCancelled) _note(session, 'Stopped.');
         notifyListeners();
       } else if (event is AcpFailed) {
         session.status = SessionStatus.connected;

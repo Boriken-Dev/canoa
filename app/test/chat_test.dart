@@ -51,6 +51,8 @@ final class FakeAgent {
         sent.add(message);
         if (message['method'] == 'initialize') {
           reply(message['id'], {'protocolVersion': 1, 'agentCapabilities': <String, Object?>{}});
+        } else if (message['method'] == 'session/new') {
+          reply(message['id'], {'sessionId': 's1'});
         } else if (message['method'] == 'session/set_config_option') {
           reply(message['id'], {'configOptions': <Object>[]});
         } else if (message['id'] != null && message['method'] != 'session/prompt') {
@@ -59,7 +61,9 @@ final class FakeAgent {
       },
     );
     await client.initialize();
-    final session = store.addProviderSession(title: 'Fake', agent: 'Fake', peerId: client.peerId, remoteSessionId: 's1');
+    // The client takes only the traffic of sessions it opened.
+    final opened = await client.openSession(cwd: '/work');
+    final session = store.addProviderSession(title: 'Fake', agent: 'Fake', peerId: client.peerId, remoteSessionId: opened.id);
     store.attachVerifiedClient(session.id, client);
     store.select(session.id);
     return session;
@@ -258,6 +262,36 @@ void main() {
       expect(agent.sent.where((message) => message['method'] == 'session/cancel'), hasLength(1));
       agent.reply(agent.sent.firstWhere((message) => message['method'] == 'session/prompt')['id'], {'stopReason': 'cancelled'});
       await _settle(tester);
+      expect(session.status, SessionStatus.connected, reason: 'a cancelled turn has ended');
+      expect(find.byTooltip('Send'), findsOneWidget);
+      expect(session.messages.last.text, 'Stopped.');
+    });
+
+    testWidgets('a question the client could not read is said, and the turn goes on', (tester) async {
+      final (agent, session, store) = await _fed(tester);
+      await tester.runAsync(() async {
+        unawaited(store.sendText('go'));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      agent.incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': 66, 'method': 'session/request_permission', 'params': {'sessionId': 's1'}}));
+      await _settle(tester);
+      expect(agent.sent.singleWhere((message) => message['id'] == 66)['result'], {'outcome': {'outcome': 'cancelled'}});
+      expect(session.status, SessionStatus.working, reason: 'only the agent ends its turn');
+      expect(session.messages.last.role, MessageRole.notice);
+      expect(session.messages.last.text, contains('cannot read'));
+    });
+
+    testWidgets('output a bridge dropped while nobody was connected is said in the conversation', (tester) async {
+      final (agent, session, _) = await _fed(tester);
+      agent.update({'sessionUpdate': 'agent_message_chunk', 'messageId': 'm1', 'content': {'type': 'text', 'text': 'before'}});
+      agent.incoming.add(jsonEncode({
+        'jsonrpc': '2.0',
+        'method': acpOutputLost,
+        'params': {'lines': 3, 'bytes': 2048},
+      }));
+      await _settle(tester);
+      expect(session.messages.last.role, MessageRole.notice);
+      expect(session.messages.last.text, contains('3 messages'));
     });
   });
 

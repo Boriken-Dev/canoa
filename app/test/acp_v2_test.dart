@@ -110,14 +110,24 @@ void main() {
 
   test('unsolicited privileged client methods fail closed', () async {
     final channel = FakeChannel();
+    channel.respondTo = (request) {
+      if (request['method'] == 'initialize') {
+        channel.answer(request['id'] as int, {'protocolVersion': 1, 'agentCapabilities': <String, Object>{}});
+      } else if (request['method'] == 'session/new') {
+        channel.answer(request['id'] as int, {'sessionId': 's1'});
+      }
+    };
     final client = await verified(channel);
+    await client.initialize();
+    await client.createSession(cwd: '/work');
+    channel.sent.clear();
     channel.input.add(jsonEncode({'jsonrpc': '2.0', 'id': 4,
       'method': 'terminal/create'}));
     channel.input.add(jsonEncode({'jsonrpc': '2.0', 'id': 5,
       'method': 'session/request_permission'}));
     await Future<void>.delayed(Duration.zero);
     expect((channel.sent.first['error'] as Map)['code'], -32601);
-    expect(channel.sent.last['error'], isNotNull, reason: 'a malformed request is refused, never allowed');
+    expect(channel.sent.last['result'], {'outcome': {'outcome': 'cancelled'}}, reason: 'a malformed request is cancelled, never allowed');
     channel.input.add(jsonEncode({'jsonrpc': '2.0', 'id': 6, 'method': 'session/request_permission', 'params': {
       'sessionId': 's1',
       'toolCall': {'toolCallId': 't1', 'title': 'Run', 'kind': 'execute'},
@@ -190,12 +200,15 @@ void main() {
           'protocolVersion': 2,
           'capabilities': {'session': <String, Object>{}},
         });
+      } else if (frame['method'] == 'session/new') {
+        channel.answer(frame['id'] as int, {'sessionId': 'session-1'});
       } else if (frame['method'] == 'session/prompt') {
         channel.answer(frame['id'] as int, {'messageId': 'user-1'});
       }
     };
     final client = await verified(channel);
     await client.initialize();
+    await client.createSession(cwd: '/work');
     final store = SessionStore(includePreview: false);
     final session = store.addRemoteSession(
       title: 'Example', agent: 'Test', peerId: peerId,
