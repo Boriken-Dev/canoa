@@ -6,6 +6,34 @@ import 'package:toml/toml.dart';
 import '../acp/agent_commands.dart';
 import '../theme/look.dart';
 
+/// One entry of `[host]`, as Canoa.cfg has it.
+final class HostEntry {
+  const HostEntry({required this.name, required this.kind, required this.runs, this.args = const [], this.listen});
+
+  factory HostEntry.read(String name, String kind, Map<dynamic, dynamic> table) => HostEntry(
+    name: name,
+    kind: kind,
+    runs: '${table[kind == 'agent' ? 'program' : 'library'] ?? ''}',
+    args: [if (table['args'] case final List<dynamic> args) for (final arg in args) '$arg'],
+    listen: table['listen'] is String ? table['listen'] as String : null,
+  );
+
+  /// canoa-host's rule for an entry's name.
+  static bool isName(String name) => RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(name);
+
+  final String name;
+
+  /// `agent` or `provider`.
+  final String kind;
+
+  /// The program an agent runs, or a provider's library.
+  final String runs;
+  final List<String> args;
+
+  /// The address it listens on, when the file names one.
+  final String? listen;
+}
+
 /// Deployment config uses TOML in Canoa.cfg, consistent with AI6's OO.cfg.
 /// This file must never contain secrets or private keys.
 final class CanoaConfig {
@@ -56,6 +84,73 @@ final class CanoaConfig {
         agents: agents,
         host: host,
       );
+
+  /// This configuration with [host] as its `[host]` table.
+  CanoaConfig withHost(Map<String, dynamic>? host) => CanoaConfig(
+    startHidden: startHidden,
+    closeToTray: closeToTray,
+    minimizeToTray: minimizeToTray,
+    preferWebTransport: preferWebTransport,
+    connectTimeout: connectTimeout,
+    cdn: cdn,
+    look: look,
+    brightness: brightness,
+    agents: agents,
+    host: host,
+  );
+
+  /// What `[host]` names for canoa-host to serve, agents first, as written. canoa-host itself checks each one.
+  List<HostEntry> get hostEntries => [
+    for (final (table, kind) in const [('agents', 'agent'), ('providers', 'provider')])
+      if (host?[table] case final Map<dynamic, dynamic> entries)
+        for (final MapEntry(:key, :value) in entries.entries)
+          if (value is Map) HostEntry.read('$key', kind, value),
+  ];
+
+  /// This configuration with a stdio ACP agent added to `[host]`, which canoa-host serves on [listen].
+  CanoaConfig withHostAgent({
+    required String name,
+    required String program,
+    List<String> args = const [],
+    required String listen,
+    List<String> workingRoots = const [],
+  }) {
+    if (!HostEntry.isName(name)) {
+      throw ArgumentError.value(name, 'name', 'Use 1 to 64 letters, digits, - or _');
+    }
+    if (hostEntries.any((entry) => entry.name == name)) {
+      throw ArgumentError.value(name, 'name', 'Another entry has that name');
+    }
+    if (program.trim().isEmpty) throw ArgumentError.value(program, 'program', 'Name a program');
+    final copy = _deepCopy(host ?? const {});
+    final table = (copy['agents'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+    table[name] = <String, dynamic>{
+      'program': program,
+      if (args.isNotEmpty) 'args': args,
+      'listen': listen,
+      if (workingRoots.isNotEmpty) 'working_roots': workingRoots,
+    };
+    copy['agents'] = table;
+    return withHost(copy);
+  }
+
+  /// This configuration without the `[host]` entry [name].
+  CanoaConfig withoutHostEntry(String name) {
+    final copy = _deepCopy(host ?? const {});
+    for (final table in const ['agents', 'providers']) {
+      (copy[table] as Map<String, dynamic>?)?.remove(name);
+    }
+    return withHost(copy);
+  }
+
+  static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
+    for (final MapEntry(:key, :value) in map.entries)
+      '$key': switch (value) {
+        final Map<dynamic, dynamic> inner => _deepCopy(inner),
+        final List<dynamic> list => List<dynamic>.of(list),
+        _ => value,
+      },
+  };
 
   factory CanoaConfig.parse(String source) {
     final content = source.startsWith('#!toml')

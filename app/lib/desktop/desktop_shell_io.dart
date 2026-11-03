@@ -1,41 +1,92 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import '../config/canoa_config.dart';
 import 'desktop_shell.dart';
 
-DesktopShell createDesktopShell() => _Shell();
-class _Shell with WindowListener, TrayListener implements DesktopShell {
+DesktopShell createDesktopShell() => TrayShell();
+
+/// Whether something on this Linux session's bus shows StatusNotifier items, which is how its tray icon is drawn. A desktop
+/// with none, such as WSLg's, would leave a window hidden to the tray with no way back.
+Future<bool> linuxShowsTrayIcons() async {
+  try {
+    final asked = await Process.run('gdbus', [
+      'call', '--session', '--dest', 'org.freedesktop.DBus', '--object-path', '/org/freedesktop/DBus',
+      '--method', 'org.freedesktop.DBus.NameHasOwner', 'org.kde.StatusNotifierWatcher',
+    ]).timeout(const Duration(seconds: 3));
+    return asked.exitCode == 0 && (asked.stdout as String).contains('true');
+  } on Object {
+    return false;
+  }
+}
+
+/// The window and its tray icon. On Windows a double click on the icon opens the chat; on Linux, whose StatusNotifier
+/// icons pass no clicks on, the menu's Open does.
+class TrayShell with WindowListener, TrayListener implements DesktopShell {
+  TrayShell({
+    @visibleForTesting Future<bool> Function()? trayAvailable,
+    @visibleForTesting bool? desktop,
+    @visibleForTesting DateTime Function()? clock,
+  }) : _trayAvailable = trayAvailable ?? (() async => !Platform.isLinux || await linuxShowsTrayIcons()),
+       _desktop = desktop ?? (Platform.isWindows || Platform.isMacOS || Platform.isLinux),
+       _clock = clock ?? DateTime.now;
+
+  /// Two clicks this close together are a double click: Windows' own default.
+  static const Duration doubleClick = Duration(milliseconds: 500);
+
+  final Future<bool> Function() _trayAvailable;
+  final bool _desktop;
+  final DateTime Function() _clock;
   CanoaConfig config = const CanoaConfig();
-  void Function()? onSettings;
+  void Function()? onSettings, onHosting;
   bool ready = false, quitting = false;
+  bool _hasTray = false;
   @override
   Future<void> Function()? beforeQuit;
   DateTime? lastClick;
-  bool get isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  /// The tray's menu, once it has one.
+  @visibleForTesting
+  Menu? menu;
 
   @override
-  Future<void> initialize(CanoaConfig settings, {required void Function() onSettings}) async {
+  bool get isDesktop => _desktop;
+
+  @override
+  bool get hasTray => _hasTray;
+
+  @override
+  Future<void> initialize(CanoaConfig settings, {required void Function() onSettings, void Function()? onHosting}) async {
     config = settings;
     this.onSettings = onSettings;
-    if (!isDesktop) return;
+    this.onHosting = onHosting;
+    if (!_desktop) return;
     await windowManager.ensureInitialized();
     await windowManager.setPreventClose(true);
     windowManager.addListener(this);
-    trayManager.addListener(this);
-    await trayManager.setIcon('assets/icons/canoa_tray.png');
-    await trayManager.setToolTip('Canoa — agent connections');
-    await trayManager.setContextMenu(Menu(items: [
-      MenuItem(key: 'open', label: 'Open Canoa'),
-      MenuItem(key: 'settings', label: 'Settings…'),
-      MenuItem(key: 'hide', label: 'Hide to tray'),
-      MenuItem.separator(),
-      MenuItem(key: 'quit', label: 'Exit Canoa'),
-    ]));
+    _hasTray = await _trayAvailable();
+    if (_hasTray) {
+      trayManager.addListener(this);
+      await trayManager.setIcon('assets/icons/canoa_tray.png');
+      await trayManager.setToolTip('Canoa');
+      await trayManager.setContextMenu(menu = Menu(items: [
+        MenuItem(key: 'open', label: 'Open Canoa'),
+        MenuItem(key: 'hosting', label: 'Hosting…'),
+        MenuItem(key: 'settings', label: 'Settings…'),
+        MenuItem(key: 'hide', label: 'Hide to tray'),
+        MenuItem.separator(),
+        MenuItem(key: 'quit', label: 'Exit Canoa'),
+      ]));
+    }
     ready = true;
-    if (config.startHidden) await windowManager.hide();
+    if (config.startHidden) await _putAway();
   }
+
+  /// Out of the way, where the person can bring it back from: the tray, or the taskbar without one.
+  Future<void> _putAway() => _hasTray ? windowManager.hide() : windowManager.minimize();
+
   @override
   Future<void> update(CanoaConfig settings) async { config = settings; }
   @override
@@ -47,11 +98,9 @@ class _Shell with WindowListener, TrayListener implements DesktopShell {
   }
   @override
   void onTrayIconMouseDown() {
-    // Legacy tray_manager 0.5.x reports clicks but not double-click events.
-    // Linux AppIndicator does not forward clicks; menu Open remains available.
-    final now = DateTime.now();
-    if (lastClick != null &&
-        now.difference(lastClick!) <= const Duration(milliseconds: 450)) {
+    // tray_manager reports each click, and no double click.
+    final now = _clock();
+    if (lastClick != null && now.difference(lastClick!) <= doubleClick) {
       lastClick = null;
       unawaited(open());
     } else {
@@ -63,39 +112,47 @@ class _Shell with WindowListener, TrayListener implements DesktopShell {
     unawaited(trayManager.popUpContextMenu());
   }
   @override
-  void onTrayMenuItemClick(MenuItem item) {
-    switch (item.key) {
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
       case 'open': unawaited(open());
+      case 'hosting': unawaited(open().then((_) => onHosting?.call()));
       case 'settings': unawaited(open().then((_) => onSettings?.call()));
       case 'hide': unawaited(windowManager.hide());
-      case 'quit': unawaited(_quit());
+      case 'quit': unawaited(quit());
     }
   }
   @override
   void onWindowClose() {
     if (quitting) return;
     if (config.closeToTray) {
-      unawaited(windowManager.hide());
+      unawaited(_putAway());
     } else {
-      unawaited(_quit());
+      unawaited(quit());
     }
   }
   @override
   void onWindowMinimize() {
-    if (config.minimizeToTray) unawaited(windowManager.hide());
+    if (config.minimizeToTray && _hasTray) unawaited(windowManager.hide());
   }
-  Future<void> _quit() async {
+  @override
+  Future<void> quit() async {
+    if (quitting) return;
     quitting = true;
-    await beforeQuit?.call();
-    await dispose();
-    await windowManager.destroy();
+    try {
+      await beforeQuit?.call();
+    } finally {
+      await dispose();
+      await windowManager.destroy();
+    }
   }
   @override
   Future<void> dispose() async {
     if (!ready) return;
     ready = false;
-    trayManager.removeListener(this);
     windowManager.removeListener(this);
-    await trayManager.destroy();
+    if (_hasTray) {
+      trayManager.removeListener(this);
+      await trayManager.destroy();
+    }
   }
 }

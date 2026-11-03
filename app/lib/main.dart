@@ -3,6 +3,9 @@ import 'dart:async';
 import 'config/canoa_config.dart';
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
+import 'desktop/host_supervisor.dart';
+import 'desktop/host_tool.dart';
+import 'desktop/hosting_dialog.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/connect.dart' show chatEndpoints;
@@ -25,10 +28,18 @@ Future<void> main() async {
   final config = await loadConfig();
   final shell = createDesktopShell();
   final settingsSignal = ValueNotifier<int>(0);
-  await shell.initialize(config, onSettings: () => settingsSignal.value++);
+  final hostingSignal = ValueNotifier<int>(0);
+  final host = shell.isDesktop ? HostSupervisor(findHostTool()) : null;
+  await shell.initialize(
+    config,
+    onSettings: () => settingsSignal.value++,
+    onHosting: host == null ? null : () => hostingSignal.value++,
+  );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
+    host: host, hostingSignal: hostingSignal,
   ));
+  await host?.apply(configPath: desktopConfigPath(), hasEntries: config.hostEntries.isNotEmpty);
 }
 
 /// Shared Flutter application for standalone desktop/web and extension views.
@@ -36,13 +47,17 @@ Future<void> main() async {
 class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
-    this.shell, this.settingsSignal,
+    this.shell, this.settingsSignal, this.host, this.hostingSignal,
   });
 
   final SessionStore? store;
   final CanoaConfig config;
   final DesktopShell? shell;
   final ValueNotifier<int>? settingsSignal;
+
+  /// The `canoa-host` this app runs, on a desktop.
+  final HostSupervisor? host;
+  final ValueNotifier<int>? hostingSignal;
 
   @override
   State<CanoaApp> createState() => _CanoaAppState();
@@ -58,10 +73,42 @@ class _CanoaAppState extends State<CanoaApp> {
       if (mounted) _showSettings();
     });
   }
+  void _requestHosting() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_showHosting());
+    });
+  }
+
+  Future<void> _showHosting() async {
+    final host = widget.host;
+    if (host == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => HostingDialog(supervisor: host, config: config, onSave: _saveHosting),
+    );
+  }
+
+  /// Saves Canoa.cfg once canoa-host finds nothing wrong with it, then serves it.
+  Future<String?> _saveHosting(CanoaConfig changed) async {
+    final host = widget.host;
+    final path = desktopConfigPath();
+    if (host == null || path == null) return 'Canoa.cfg has no place on this computer';
+    if (changed.hostEntries.isNotEmpty) {
+      final problem = await withFileBeside(path, changed.encode(), host.check);
+      if (problem != null) return problem;
+    }
+    await saveConfig(changed);
+    if (mounted) setState(() => config = changed);
+    await host.apply(configPath: path, hasEntries: changed.hostEntries.isNotEmpty);
+    return null;
+  }
+
   Future<void> _showSettings() async {
+    final shell = widget.shell;
     final changed = await showDialog<CanoaConfig>(
       context: context,
-      builder: (_) => SettingsDialog(config: config),
+      builder: (_) => SettingsDialog(config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null),
     );
     if (changed == null || !mounted) return;
     setState(() => config = changed);
@@ -147,8 +194,9 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// Ends every agent this app started, and the host with the agents it started.
   Future<void> _endAgents() async {
-    final ending = [for (final client in _ownedClients) client.close()];
+    final ending = [for (final client in _ownedClients) client.close(), ?widget.host?.stop()];
     _ownedClients.clear();
     await Future.wait(ending).timeout(const Duration(seconds: 5), onTimeout: () => const []);
   }
@@ -195,6 +243,7 @@ class _CanoaAppState extends State<CanoaApp> {
     ownsStore = widget.store == null;
     config = widget.config;
     widget.settingsSignal?.addListener(_requestSettings);
+    widget.hostingSignal?.addListener(_requestHosting);
     store = widget.store ?? SessionStore();
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
@@ -214,6 +263,7 @@ class _CanoaAppState extends State<CanoaApp> {
   void dispose() {
     _contextTimer?.cancel();
     widget.settingsSignal?.removeListener(_requestSettings);
+    widget.hostingSignal?.removeListener(_requestHosting);
     widget.shell?.beforeQuit = null;
     if (ownsStore) store.dispose();
     for (final client in _ownedClients) {
@@ -234,6 +284,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: store,
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onRunLocalAgent: canRunLocalAgents ? _runLocalAgent : null, onSettings: _showSettings,
+          onHosting: widget.host == null ? null : _showHosting,
           agents: [...agentPresets, ...config.agents],
         ),
       ),
@@ -244,7 +295,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets,
+    this.agents = agentPresets, this.onHosting,
   });
 
   final List<AgentCommand> agents;
@@ -254,6 +305,7 @@ class _CanoaHome extends StatelessWidget {
   final UseBrowserAgents onUseBrowserAgents;
   final RunLocalAgent? onRunLocalAgent;
   final VoidCallback onSettings;
+  final VoidCallback? onHosting;
 
   @override
   Widget build(BuildContext context) {
@@ -263,7 +315,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, agents: agents)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, agents: agents)))
             : null,
         body: SafeArea(
           child: Row(
@@ -271,7 +323,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: context.look.railWidth,
-                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, agents: agents),
+                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, agents: agents),
                 ),
               Expanded(
                 child: _Conversation(
@@ -291,7 +343,7 @@ class _CanoaHome extends StatelessWidget {
 class _SessionRail extends StatelessWidget {
   const _SessionRail({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets,
+    this.agents = agentPresets, this.onHosting,
   });
 
   final List<AgentCommand> agents;
@@ -301,6 +353,7 @@ class _SessionRail extends StatelessWidget {
   final UseBrowserAgents onUseBrowserAgents;
   final RunLocalAgent? onRunLocalAgent;
   final VoidCallback onSettings;
+  final VoidCallback? onHosting;
 
   @override
   Widget build(BuildContext context) {
@@ -322,6 +375,12 @@ class _SessionRail extends StatelessWidget {
               onPressed: onSettings,
               icon: const Icon(Icons.settings_outlined),
             ),
+            if (onHosting != null)
+              IconButton(
+                tooltip: 'Hosting',
+                onPressed: onHosting,
+                icon: const Icon(Icons.dns_outlined),
+              ),
             IconButton(
               tooltip: 'Connect to verified agent',
               onPressed: () => showCanoaConnectDialog(

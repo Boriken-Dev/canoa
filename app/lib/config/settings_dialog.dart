@@ -3,8 +3,11 @@ import 'canoa_config.dart';
 import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.config});
+  const SettingsDialog({super.key, required this.config, this.onQuit});
   final CanoaConfig config;
+
+  /// Ends the app and what it started, on a desktop: the way out where there is no tray menu.
+  final Future<void> Function()? onQuit;
   @override
   State<SettingsDialog> createState() => SettingsDialogState();
 }
@@ -76,6 +79,8 @@ class SettingsDialogState extends State<SettingsDialog> {
       ],
     )),
     actions: [
+      if (widget.onQuit != null)
+        TextButton(onPressed: () => widget.onQuit!(), child: const Text('Quit Canoa')),
       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
       FilledButton(onPressed: () => Navigator.pop(context, config), child: const Text('Save')),
     ],

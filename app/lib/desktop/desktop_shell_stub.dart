@@ -7,11 +7,17 @@ class _NoShell implements DesktopShell {
   Future<void> Function()? beforeQuit;
 
   @override
-  Future<void> initialize(CanoaConfig config, {required void Function() onSettings}) async {}
+  Future<void> initialize(CanoaConfig config, {required void Function() onSettings, void Function()? onHosting}) async {}
   @override
   Future<void> update(CanoaConfig config) async {}
   @override
   Future<void> open() async {}
   @override
   Future<void> dispose() async {}
+  @override
+  bool get hasTray => false;
+  @override
+  bool get isDesktop => false;
+  @override
+  Future<void> quit() async {}
 }
