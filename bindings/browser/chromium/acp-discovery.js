@@ -12,6 +12,31 @@ const MAX_OFFERS = 16;
 const METHODS = ["noise", "webcrypto"];
 const OFFER = /^[\x21-\x7e]{1,64}$/;
 
+/** The method an agent added with a key proves by: the one named, else WebCrypto's, as for a record naming none. */
+export function addedMethod(method) {
+  if (method === undefined || method === null) return "webcrypto";
+  if (!METHODS.includes(method)) throw new Error("the method is noise or webcrypto");
+  return method;
+}
+
+/**
+ * The agent the person already has with `peer`, if any. A peer id names a key of one type, so the same id under another
+ * method is a mistake or a lie, and is refused with the reason rather than added beside it.
+ */
+export function sameKey(agents, peer, method) {
+  const held = agents.find((agent) => agent.peer === peer);
+  if (held === undefined) return undefined;
+  const heldMethod = held.method ?? "webcrypto";
+  if (heldMethod !== method) throw new Error(`that key is a ${heldMethod} key here, and cannot be a ${method} agent's`);
+  return held;
+}
+
+/** What the person runs on a machine for its MCP clients, naming this browser's key for that machine's method; null when this browser has none. */
+export function mcpConfigCommand(ids, method) {
+  const id = ids[method ?? "webcrypto"];
+  return typeof id === "string" ? `coqui-acp-bridge mcp-config --peer ${id}` : null;
+}
+
 /** Where WebTransport is, if the candidate gave both a port and a certificate hash to pin. */
 function webTransportOf(item) {
   if (!Number.isInteger(item.webtransport) || item.webtransport < 1 || item.webtransport > 65535) return undefined;

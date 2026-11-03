@@ -13,13 +13,22 @@ export const DEFAULT_METHOD = "webcrypto";
 const STORES = Object.freeze({ webcrypto: "dev.boriken.canoa.peer", noise: "dev.boriken.canoa.peer-noise" });
 const MODULES = Object.freeze({ webcrypto, noise });
 const PROOF_MS = 15_000;
-// A pairing waits for the person at the other end only as long as its PIN does.
-const PAIR_MS = 120_000;
+/** How long a pairing may take by default, from its handshake to the end of the exchange: `pair-accept --run-seconds`'s 120. */
+export const PAIR_MS = 120_000;
 // A path that drops QUIC shows only as silence, and the WebSocket is still worth trying within the proof's time.
 const WEBTRANSPORT_OPEN_MS = 5_000;
 // What coqui-acp-bridge takes: a 16 MiB line, as a record of each method.
 const MAX_LINE = 16 * 1024 * 1024;
-const MAX_MESSAGE = Math.max(MAX_LINE + 64, noise.recordLength(MAX_LINE));
+const MAX_MESSAGE = Math.max(MAX_LINE + 64, recordLimit("noise", MAX_LINE));
+
+/**
+ * The longest record a message of `n` bytes can become under `method`, whatever key limit its sender runs: a Noise sender may
+ * change keys before any part, 19 bytes each, on top of `recordLength`'s 19 per part.
+ */
+export function recordLimit(method, n) {
+  if (method !== "noise") return n + 17;
+  return noise.recordLength(n) + 19 * Math.max(1, Math.ceil(n / 65_518));
+}
 // Nobody has proved anything yet, so nobody gets to send much: the same limit the bridge holds a peer to.
 const MAX_PROOF_MESSAGE = 3072;
 const MAX_PROOF_WAITING = 8;
@@ -205,6 +214,9 @@ function bareLink(proven, heartbeat) {
   return {
     proven: true,
     mux,
+    get ending() {
+      return proven.ending;
+    },
     onClose(handler) {
       closing.push(handler);
     },
@@ -219,6 +231,9 @@ async function acpOverLink(proven) {
   return {
     proven: true,
     mux,
+    get ending() {
+      return proven.ending;
+    },
     send: (message) => stream.send(message),
     // Not read until there is someone to give it to.
     onMessage(handler) {
@@ -297,7 +312,7 @@ function queue(socket) {
  * Pairs this browser's Noise key with the agent's machine at `url`, a `coqui-acp-bridge pair-accept --method noise`, by the PIN it
  * shows, and answers the key that machine proved. A wrong PIN is spent: never try it again, and ask for a new one.
  */
-export async function pairWithPin({ url, pin }, { identity: given, WebSocketClass = globalThis.WebSocket } = {}) {
+export async function pairWithPin({ url, pin }, { identity: given, wait = PAIR_MS, WebSocketClass = globalThis.WebSocket } = {}) {
   const identity = given ?? (await localIdentity("noise"));
   const socket = new WebSocketClass(url);
   socket.binaryType = "arraybuffer";
@@ -315,7 +330,7 @@ export async function pairWithPin({ url, pin }, { identity: given, WebSocketClas
     const { reply, pairing } = await near.answer(bytes(answered));
     socket.send(reply);
     const transport = { send: async (message) => socket.send(message), recv: async () => bytes(await next()) };
-    const { peerId } = await within(pairing.join(String(pin), transport), PAIR_MS, "the pairing did not finish in time");
+    const { peerId } = await within(pairing.join(String(pin), transport), wait, "the pairing did not finish in time");
     return peerId;
   } finally {
     socket.close();
@@ -365,9 +380,23 @@ export async function dialAgent(agent, {
       inbox.push(event.data);
     }
   });
+  // How the link ended: "closed" when the agent's close record came or this side ended it, "cut" when the transport just
+  // stopped, which a relay can make look like an orderly end.
+  let ending;
   socket.addEventListener("close", () => {
     cut?.(new Error("the connection closed during the proof"));
-    opening.finally(() => onClose());
+    opening.finally(() => {
+      if (ending === undefined && session !== undefined) {
+        try {
+          session.verifyEnd();
+          ending = "closed";
+        } catch {
+          ending = "cut";
+        }
+      }
+      ending ??= "cut";
+      onClose();
+    });
   });
   const next = () => new Promise((resolve, reject) => {
     if (inbox.length > 0) {
@@ -404,6 +433,10 @@ export async function dialAgent(agent, {
   };
   const proven = {
     proven: true,
+    /** Once closed: "closed" in order, "cut" when the transport stopped without the agent's close record. */
+    get ending() {
+      return ending;
+    },
     send: (message) => enqueue(session.seal(message)),
     sendBytes: (bytes) => enqueue(session.seal(bytes)),
     onBytes(handler) {
@@ -416,6 +449,7 @@ export async function dialAgent(agent, {
       onClose = handler;
     },
     close() {
+      ending ??= "closed";
       enqueue(session.close()).finally(() => {
         socket.close();
         session.destroy();

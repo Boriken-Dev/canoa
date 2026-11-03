@@ -51,14 +51,16 @@ function agentForm(onAdd) {
   const url = element("input", { type: "text", placeholder: "wss://host/path or ws://127.0.0.1:8765" });
   const peer = element("input", { type: "text", placeholder: "sha256:… (empty: nothing proves who answers)" });
   // The method the agent's key proves by, which its owner says with the key; never guessed from a connection.
-  const method = element("select", {}, element("option", { value: "webcrypto", textContent: "WebCrypto" }), element("option", { value: "noise", textContent: "Noise" }));
+  const method = element("select", {}, element("option", { value: "", textContent: "Choose: its owner says which" }),
+    element("option", { value: "noise", textContent: "Noise" }), element("option", { value: "webcrypto", textContent: "WebCrypto" }));
   const status = element("p", { className: "warn" });
   const add = element("button", { type: "button", className: "quiet", textContent: "Add this agent" });
   add.addEventListener("click", async () => {
-    const problem = validAgent(label.value, url.value.trim(), peer.value.trim());
+    const problem = validAgent(label.value, url.value.trim(), peer.value.trim())
+      ?? (peer.value.trim() !== "" && method.value === "" ? "Choose the method the agent proves by: coqui-acp-bridge serve and canoa-host serve print it." : null);
     status.textContent = problem ?? "";
     if (problem !== null) return;
-    await onAdd({ label: label.value.trim(), url: url.value.trim(), peer: peer.value.trim(), method: method.value });
+    await onAdd({ label: label.value.trim(), url: url.value.trim(), peer: peer.value.trim(), method: method.value || undefined });
     label.value = url.value = peer.value = "";
   });
   return element("fieldset", {}, element("legend", { textContent: "Add one by hand" }),
@@ -92,7 +94,9 @@ function pairForm(onPaired) {
     label.value = url.value = pairUrl.value = "";
     onPaired(answer.agent);
   });
-  return element("fieldset", {}, element("legend", { textContent: "Pair with a code" }),
+  // pair-accept refuses a browser unless it lists the browser's origin, so a page cannot spend the PIN.
+  const command = element("p", {}, "On the machine: ", element("code", { textContent: `coqui-acp-bridge pair-accept --method noise --listen 127.0.0.1:PORT --origin chrome-extension://${chrome.runtime.id}` }));
+  return element("fieldset", {}, element("legend", { textContent: "Pair with a code" }), command,
     element("label", { textContent: "Name" }), label, element("label", { textContent: "Address" }), url,
     element("label", { textContent: "Pairing address" }), pairUrl, element("label", { textContent: "PIN" }), pin, pair, status);
 }

@@ -75,7 +75,6 @@ const watchdog = setTimeout(() => {
 }, 240_000);
 try {
   const noiseSide = await hear();
-  await reachable(noiseSide.pairUrl);
   await reachable(noiseSide.noiseUrl);
   const flags = noiseSide.spki ? [`--ignore-certificate-errors-spki-list=${noiseSide.spki}`] : [];
   chrome = spawn(browser, [
@@ -94,6 +93,10 @@ try {
   const worker = await waitFor("the extension's service worker", async () =>
     (await targets()).find((target) => target.type === "service_worker" && target.url.startsWith("chrome-extension://") && target.url.endsWith("/background.js")), 20_000);
   const id = new URL(worker.url).hostname;
+  // pair-accept lets in only this extension's origin.
+  side.stdin.write(`pair chrome-extension://${id}\n`);
+  const { pin } = await hear();
+  await reachable(noiseSide.pairUrl);
   const opened = await (await fetch(`http://127.0.0.1:${debug}/json/new?${encodeURIComponent(`chrome-extension://${id}/acp-request.html?manage=1`)}`, { method: "PUT" })).json();
   const page = new Session(opened.webSocketDebuggerUrl);
   await waitFor("the agents window", async () => (await page.run("document.querySelectorAll('fieldset').length").catch(() => 0)) >= 2);
@@ -131,7 +134,7 @@ try {
     await page.run(fill(0, "noise agent"));
     await page.run(fill(1, noiseSide.noiseUrl));
     await page.run(fill(2, noiseSide.pairUrl));
-    await page.run(fill(3, noiseSide.pin));
+    await page.run(fill(3, pin));
     await page.run(`[...document.querySelectorAll("fieldset")[1].querySelectorAll("button")].find((b) => b.textContent === "Pair").click()`, { gesture: true });
     const stored = await waitFor("the paired agent", async () => {
       const { agents } = await page.run(`chrome.runtime.sendMessage({ acp: "manage" })`);
@@ -156,10 +159,11 @@ try {
     if (ran.method !== "webcrypto" || ran.stop !== "end_turn" || !ran.echoed.includes("hello from webcrypto agent")) throw new Error(JSON.stringify(ran));
   });
 
-  await check("a Noise agent stored as WebCrypto is refused, and nothing tries the other method", async () => {
-    await page.run(`chrome.runtime.sendMessage({ acp: "add", agent: { label: "mislabelled", url: ${JSON.stringify(noiseSide.noiseUrl)}, peer: ${JSON.stringify(noiseSide.noisePeer)}, method: "webcrypto" } })`);
-    const refused = await turn("mislabelled").then(() => "served", (error) => error.message);
-    if (refused === "served") throw new Error("a WebCrypto proof reached a Noise agent");
+  await check("the paired Noise key named as a WebCrypto agent is refused, with the reason", async () => {
+    const answer = await page.run(`chrome.runtime.sendMessage({ acp: "add", agent: { label: "mislabelled", url: ${JSON.stringify(noiseSide.noiseUrl)}, peer: ${JSON.stringify(noiseSide.noisePeer)}, method: "webcrypto" } })`);
+    if (!/is a noise key here/.test(answer?.error ?? "")) throw new Error(JSON.stringify(answer));
+    const { agents } = await page.run(`chrome.runtime.sendMessage({ acp: "manage" })`);
+    if (agents.some((agent) => agent.label === "mislabelled")) throw new Error("it was added");
   });
 
   side.stdin.end();

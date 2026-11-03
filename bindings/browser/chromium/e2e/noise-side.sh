@@ -4,8 +4,9 @@
 #
 #   bash noise-side.sh BRIDGE AGENT [NGINX]
 #
-# It prints one JSON object per line: the Noise side first, the WebCrypto side after a line "allow <peer id>" on its input. When
-# its input ends it stops what it started, by process id, and removes its directory.
+# It prints one JSON object per line: the Noise side first; a PIN after a line "pair <browser origin>", for pair-accept to let
+# that origin in; the WebCrypto side after a line "allow <peer id>". When its input ends it stops what it started, by process
+# id, and removes its directory.
 set -euo pipefail
 bridge=$1
 agent=$2
@@ -34,16 +35,11 @@ while True:
 export COQUI_AGENTIC_PEER_HOME=$work/home
 
 pair_port=$(free_port)
-mkfifo "$work/pair.out"
-"$bridge" pair-accept --listen "127.0.0.1:$pair_port" --method noise --timeout-seconds 600 > "$work/pair.out" 2> "$work/pair.err" &
-pids+=($!)
-exec 3< "$work/pair.out"
-read -r pin <&3
-read -r noise_peer <&3
-
 noise_port=$(free_port)
 "$bridge" serve --paired --method noise --listen "127.0.0.1:$noise_port" -- "$agent" > "$work/noise.out" 2> "$work/noise.err" &
 pids+=($!)
+for _ in $(seq 100); do [ -s "$work/noise.out" ] && break; sleep 0.1; done
+noise_peer=$(head -1 "$work/noise.out")
 
 scheme=ws
 front_pair=127.0.0.1:$pair_port
@@ -93,13 +89,24 @@ CONF
   front_pair=127.0.0.1:$front/pair
   front_noise=127.0.0.1:$front/noise
 fi
-for port in $pair_port $noise_port ${front:-}; do
+for port in $noise_port ${front:-}; do
   for _ in $(seq 100); do (exec 9<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && break; sleep 0.1; done
 done
-printf '{"pin":"%s","pairUrl":"%s://%s","noiseUrl":"%s://%s","noisePeer":"%s","spki":"%s"}\n' \
-  "$pin" "$scheme" "$front_pair" "$scheme" "$front_noise" "$noise_peer" "$spki"
+printf '{"pairUrl":"%s://%s","noiseUrl":"%s://%s","noisePeer":"%s","spki":"%s"}\n' \
+  "$scheme" "$front_pair" "$scheme" "$front_noise" "$noise_peer" "$spki"
 
 while read -r command peer; do
+  if [ "$command" = pair ]; then
+    mkfifo "$work/pair.out"
+    "$bridge" pair-accept --listen "127.0.0.1:$pair_port" --method noise --origin "$peer" > "$work/pair.out" 2> "$work/pair.err" &
+    pids+=($!)
+    exec 3< "$work/pair.out"
+    read -r pin <&3
+    read -r _ <&3
+    for _ in $(seq 100); do (exec 9<>"/dev/tcp/127.0.0.1/$pair_port") 2>/dev/null && break; sleep 0.1; done
+    printf '{"pin":"%s"}\n' "$pin"
+    continue
+  fi
   [ "$command" = allow ] || continue
   "$bridge" keygen "$work/webcrypto.pem" --method webcrypto > "$work/webcrypto.peer"
   "$bridge" serve --identity "$work/webcrypto.pem" --allow "$peer" --listen "127.0.0.1:$webcrypto_port" -- "$agent" \

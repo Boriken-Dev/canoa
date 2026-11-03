@@ -94,7 +94,11 @@ async function refreshStanding(){
   standingToggle.textContent=view.on===null?'Turn on':'Turn off';
   standingToggle.disabled=view.on===null && !view.machines.some(({serves})=>serves);
   standingStatus.textContent=view.machines.length===0?'No paired machine yet: add an agent under Canoa agents first.':STANDING_SAYS[view.status.state]??'';
-  standingCommand.textContent='coqui-acp-bridge mcp-config --peer '+view.browser;
+  // The key this browser proves by to the chosen machine, whose method decides which; never a key it does not have.
+  const shown=view.machines.find(({key})=>key===machine.value);
+  standingCommand.textContent=shown===undefined
+    ?Object.entries(view.ids).filter(([,id])=>id!==null).map(([method,id])=>method+': '+id).join('\n')
+    :shown.command??('This browser cannot prove by '+shown.method+' here, so it has no key for that machine.');
 }
 standingToggle.addEventListener('click',async()=>{
   try{

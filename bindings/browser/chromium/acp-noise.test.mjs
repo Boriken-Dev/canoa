@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { dialAgent, methodOf, pairWithPin, unreachable } from "./acp-dial.js";
-import { readCandidates } from "./acp-discovery.js";
+import { dialAgent, methodOf, pairWithPin, recordLimit, unreachable } from "./acp-dial.js";
+import { addedMethod, mcpConfigCommand, readCandidates, sameKey } from "./acp-discovery.js";
 import * as noise from "./vendor/coqui-peer-noise.mjs";
 import * as webcrypto from "./vendor/coqui-peer-webcrypto.mjs";
 
@@ -141,4 +141,63 @@ test("a candidate names its method, none is WebCrypto's, and one this browser ca
   assert.equal(readCandidates({ candidates: [item("noise")] })[0].method, "noise");
   assert.equal(readCandidates({ candidates: [item("webcrypto")] })[0].method, "webcrypto");
   assert.deepEqual(readCandidates({ candidates: [item("tls"), item(7)] }), []);
+});
+
+test("a link ended without the agent's close record is reported as cut, and one closed in order as closed", async () => {
+  for (const sendsClose of [false, true]) {
+    const server = await noise.generateIdentity();
+    const client = await noise.generateIdentity();
+    const responder = await noise.createResponder(server, { allowClient: async () => true });
+    let step = 0;
+    let session;
+    const Socket = socketTo(async (bytes, reply, end) => {
+      step += 1;
+      if (step === 1) reply(await responder.challenge(bytes));
+      else if (step === 2) ({ session } = await responder.accept(bytes));
+      else {
+        await session.open(bytes);
+        if (sendsClose) reply(await session.close());
+        setTimeout(end, 50);
+      }
+    });
+    const link = await dialAgent({ url: "ws://127.0.0.1:1/", peer: server.peerId, method: "noise" }, { identity: client, WebSocketClass: Socket });
+    const ended = new Promise((resolve) => link.onClose(() => resolve(link.ending)));
+    await link.send("hello");
+    assert.equal(await ended, sendsClose ? "closed" : "cut");
+  }
+});
+
+test("a frame limit takes the longest record a Noise sender can make, key changes and all", async () => {
+  const MESSAGE = 16 * 1024 * 1024;
+  const server = await noise.generateIdentity();
+  const client = await noise.generateIdentity();
+  const initiator = await noise.createInitiator(client, server.peerId, { keyLimit: 1 << 20 });
+  const responder = await noise.createResponder(server, { allowClient: async () => true });
+  const challenge = await responder.challenge(await initiator.hello());
+  const { reply, session } = await initiator.answer(challenge);
+  await responder.accept(reply);
+  const record = await session.seal(new Uint8Array(MESSAGE));
+  assert.ok(record.length <= recordLimit("noise", MESSAGE), `${record.length - recordLimit("noise", MESSAGE)} over`);
+  assert.equal(recordLimit("webcrypto", 10), 27);
+});
+
+test("an added agent's method is the one named, else WebCrypto's as for a record, and a known key under another method is refused", () => {
+  assert.equal(addedMethod(undefined), "webcrypto");
+  assert.equal(addedMethod(null), "webcrypto");
+  assert.equal(addedMethod("noise"), "noise");
+  assert.throws(() => addedMethod("tls"), /noise or webcrypto/);
+  const known = [{ key: "a", peer: "sha256:1", method: "noise" }, { key: "b", peer: "sha256:2" }];
+  assert.equal(sameKey(known, "sha256:1", "noise").key, "a");
+  assert.equal(sameKey(known, "sha256:2", "webcrypto").key, "b");
+  assert.equal(sameKey(known, "sha256:3", "noise"), undefined);
+  assert.throws(() => sameKey(known, "sha256:1", "webcrypto"), /a noise key/);
+  assert.throws(() => sameKey(known, "sha256:2", "noise"), /a webcrypto key/);
+});
+
+test("the mcp-config command names this browser's key for the machine's method, and none it cannot prove by", () => {
+  const ids = { noise: "sha256:n", webcrypto: "sha256:w" };
+  assert.equal(mcpConfigCommand(ids, "webcrypto"), "coqui-acp-bridge mcp-config --peer sha256:w");
+  assert.equal(mcpConfigCommand(ids, "noise"), "coqui-acp-bridge mcp-config --peer sha256:n");
+  assert.equal(mcpConfigCommand({ noise: null, webcrypto: "sha256:w" }, "noise"), null);
+  assert.equal(mcpConfigCommand(ids, undefined), "coqui-acp-bridge mcp-config --peer sha256:w");
 });
