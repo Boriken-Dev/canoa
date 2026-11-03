@@ -1,6 +1,7 @@
 //! Each entry on a loopback WebSocket of its own: a peer proves a key the trust store accepts, then every message is sealed
 //! in the session the proof ended in, and a fresh agent process serves that connection until either side ends.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -10,6 +11,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
@@ -158,6 +160,62 @@ struct Shared {
     store: Arc<TrustStore>,
     registry: Registry,
     unproven: Gate,
+    agents: Mutex<Agents>,
+}
+
+/// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
+#[derive(Default)]
+struct Agents {
+    stopping: bool,
+    next: u64,
+    running: BTreeMap<u64, Arc<Agent>>,
+}
+
+impl Shared {
+    /// Records `agent` as running, under the key to [`Shared::forget`] it by; `None` once the host is stopping.
+    fn keep(&self, agent: &Arc<Agent>) -> Option<u64> {
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        if agents.stopping {
+            return None;
+        }
+        agents.next += 1;
+        let key = agents.next;
+        agents.running.insert(key, Arc::clone(agent));
+        Some(key)
+    }
+
+    fn forget(&self, key: u64) {
+        self.agents
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .running
+            .remove(&key);
+    }
+}
+
+/// Stops what a [`Serving`] runs, from another thread.
+#[derive(Clone)]
+pub struct Stopper(Arc<Shared>);
+
+impl fmt::Debug for Stopper {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Stopper").finish_non_exhaustive()
+    }
+}
+
+impl Stopper {
+    /// Ends every agent process running, with what each started, and every later connection before its agent starts.
+    /// The listeners stay bound: end the process to free them.
+    pub fn stop_agents(&self) {
+        let running = {
+            let mut agents = self.0.agents.lock().unwrap_or_else(PoisonError::into_inner);
+            agents.stopping = true;
+            core::mem::take(&mut agents.running)
+        };
+        for agent in running.values() {
+            let _ = agent.stop();
+        }
+    }
 }
 
 /// Every entry bound to its address, not yet taking connections.
@@ -286,6 +344,7 @@ impl Serving {
                 store,
                 registry,
                 unproven: Gate::new(MAX_UNPROVEN),
+                agents: Mutex::new(Agents::default()),
             }),
             listeners,
             listening,
@@ -296,6 +355,12 @@ impl Serving {
     #[must_use]
     pub fn listening(&self) -> &[Listening] {
         &self.listening
+    }
+
+    /// What ends the agents this serves, for a thread other than the one in [`Serving::run`].
+    #[must_use]
+    pub fn stopper(&self) -> Stopper {
+        Stopper(Arc::clone(&self.shared))
     }
 
     /// Takes connections on every entry until the process ends. Each handshake and proof runs on a thread of its own, so
@@ -408,27 +473,33 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         }
         Ok(Some(first)) => {
             tracing::info!(entry = served.name, %peer, "proven");
-            give_agent(served, &Prefilled::new(&sealed, first), &peer);
+            give_agent(shared, served, &Prefilled::new(&sealed, first), &peer);
         }
         Ok(None) | Err(_) => {}
     }
     sealed.close();
 }
 
-fn give_agent<C: Channel>(served: &Served, channel: &C, peer: &PeerId) {
+fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &PeerId) {
     let (program, args) = match &served.run {
         Run::Agent { program, args, .. } | Run::Provider { program, args } => (program, args),
     };
     let agent = match Agent::spawn(program, args, MAX_LINE) {
-        Ok(agent) => agent,
+        Ok(agent) => Arc::new(agent),
         Err(error) => {
             return tracing::warn!(entry = served.name, "the agent could not start: {error}");
         }
+    };
+    let Some(key) = shared.keep(&agent) else {
+        tracing::info!(entry = served.name, %peer, "turned away: the host is stopping");
+        let _ = agent.stop();
+        return;
     };
     let end = match &served.run {
         Run::Agent { scope, .. } => relay(&Scoped::new(channel, scope), &agent),
         Run::Provider { .. } => relay(channel, &agent),
     };
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
+    shared.forget(key);
     let _ = agent.stop();
 }

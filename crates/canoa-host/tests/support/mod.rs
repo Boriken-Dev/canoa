@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, ChildStdin, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
@@ -83,6 +83,7 @@ impl Drop for Scratch {
 /// `canoa-host serve` on a configuration, with a home of its own.
 pub struct Host {
     child: Child,
+    stdin: Option<ChildStdin>,
     pub urls: BTreeMap<String, String>,
     pub peer: PeerId,
     pub scratch: Scratch,
@@ -91,6 +92,12 @@ pub struct Host {
 impl Host {
     /// Writes `config` as Canoa.cfg and serves it, waiting for one line per entry.
     pub fn start(config: &str, entries: usize) -> Self {
+        Self::start_with(config, entries, &[], &[])
+    }
+
+    /// As [`Host::start`], with more arguments to `serve` and more environment, and its input kept open for
+    /// [`Host::close_input`].
+    pub fn start_with(config: &str, entries: usize, args: &[&str], env: &[(&str, &str)]) -> Self {
         let scratch = Scratch::new();
         let path = scratch.0.join("Canoa.cfg");
         std::fs::write(&path, config).expect("Canoa.cfg is written");
@@ -98,13 +105,16 @@ impl Host {
             .arg("serve")
             .arg("--config")
             .arg(&path)
+            .args(args)
+            .envs(env.iter().copied())
             .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
             .env("CANOA_LOG", "debug")
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
             .expect("the host starts");
+        let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("its output");
         let (lines, received) = mpsc::channel();
         std::thread::spawn(move || {
@@ -136,9 +146,35 @@ impl Host {
         }
         Self {
             child,
+            stdin,
             urls,
             peer: peer.expect("at least one entry"),
             scratch,
+        }
+    }
+
+    /// Ends the host process at once, as a crash would.
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    /// Closes the host's standard input, as its parent ending does.
+    pub fn close_input(&mut self) {
+        drop(self.stdin.take());
+    }
+
+    /// The host's exit status, once it has ended within `wait`.
+    pub fn ended_within(&mut self, wait: Duration) -> Option<std::process::ExitStatus> {
+        let until = Instant::now() + wait;
+        loop {
+            if let Some(status) = self.child.try_wait().expect("the host's status") {
+                return Some(status);
+            }
+            if Instant::now() >= until {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -280,6 +316,24 @@ pub fn with_link<R>(
     sealed.close();
     channel.close();
     Ok(result)
+}
+
+/// Whether a process `pid` is running, asked of the system's own tools.
+pub fn running(pid: u32) -> bool {
+    if cfg!(windows) {
+        let listed = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .expect("tasklist runs");
+        String::from_utf8_lossy(&listed.stdout).contains(&format!("\"{pid}\""))
+    } else {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill runs")
+            .success()
+    }
 }
 
 /// A directory to work in, absolute, as ACP wants.

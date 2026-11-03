@@ -12,4 +12,4 @@ pub mod serve;
 pub use config::{Config, ConfigError, Entry, EntryKind};
 pub use peers::{Peer, PeerState, PeersError};
 pub use provider::{ProviderError, ProviderOptions, serve_stdio};
-pub use serve::{Listening, ServeError, ServeOptions, Serving};
+pub use serve::{Listening, ServeError, ServeOptions, Serving, Stopper};

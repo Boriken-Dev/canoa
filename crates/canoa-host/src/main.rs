@@ -7,12 +7,19 @@
 )]
 
 use std::io::{IsTerminal as _, Write as _};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use canoa_host::{Config, PeerState, ProviderOptions, ServeOptions, Serving, peers};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use coqui_agentic_peer::home;
+use coqui_agentic_peer::{auth, home, pairing};
+use coqui_web::websocket::{self, Frames};
+use coqui_web::{Channel as _, Failure, Limits};
 
 const AFTER_HELP: &str = "\
 Environment:
@@ -34,7 +41,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Serve every entry of Canoa.cfg's [host] table until stopped; prints one JSON line per entry.
-    Serve(ConfigArgs),
+    Serve(ServeArgs),
     /// Check Canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
     /// Print this host's peer id, which a client pins.
@@ -55,6 +62,16 @@ enum Command {
         /// The key's peer id.
         peer: String,
     },
+    /// Show a PIN and pair the native key that uses it, then end. Prints {"pin", "peer", "url"}, then {"paired"}.
+    /// One wrong try ends it. A browser cannot pair this way: it connects once and is accepted by its id.
+    Pair {
+        /// The loopback address to wait on.
+        #[arg(long, default_value = "127.0.0.1:0")]
+        listen: SocketAddr,
+        /// How long to wait for the PIN to be used.
+        #[arg(long, default_value_t = 300)]
+        timeout_seconds: u64,
+    },
     /// Serve one Guatiao agent provider as an ACP agent on standard input and output.
     Provider {
         /// The Guatiao library file. Loading it runs its code: name only a file you would run.
@@ -70,6 +87,15 @@ enum Command {
         #[arg(long, default_value_t = canoa_host::config::DEFAULT_MAX_SESSIONS)]
         max_sessions: usize,
     },
+}
+
+#[derive(Debug, Args)]
+struct ServeArgs {
+    #[command(flatten)]
+    config: ConfigArgs,
+    /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
+    #[arg(long)]
+    until_stdin_closes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -139,8 +165,8 @@ fn print(line: &str) -> Result<(), Failed> {
         .map_err(Failed::run)
 }
 
-fn serve(args: &ConfigArgs) -> Result<(), Failed> {
-    let config = load(args)?;
+fn serve(args: &ServeArgs) -> Result<(), Failed> {
+    let config = load(&args.config)?;
     let identity = home::identity(None).map_err(Failed::run)?;
     let peer = identity.peer_id().to_string();
     let program = std::env::current_exe()
@@ -160,8 +186,103 @@ fn serve(args: &ConfigArgs) -> Result<(), Failed> {
         });
         print(&line.to_string())?;
     }
+    if args.until_stdin_closes {
+        let stopper = serving.stopper();
+        std::thread::Builder::new()
+            .name("canoa-host-stdin".to_owned())
+            .spawn(move || {
+                // Whatever arrives is not read as anything: only its end matters.
+                let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+                tracing::info!("standard input closed: ending every agent and the host");
+                stopper.stop_agents();
+                std::process::exit(0);
+            })
+            .map_err(Failed::run)?;
+    }
     serving.run();
     Ok(())
+}
+
+/// Connections pairing at once; past it a new one is dropped.
+const MAX_PAIRING_RUNS: usize = 16;
+/// How long one connection may take to pair.
+const PAIRING_RUN: Duration = Duration::from_secs(60);
+
+fn pair(listen: SocketAddr, timeout: Duration) -> Result<(), Failed> {
+    if !listen.ip().is_loopback() {
+        return Err(Failed::usage("pair listens only on loopback"));
+    }
+    let identity = Arc::new(home::identity(None).map_err(Failed::run)?);
+    let store = Arc::new(store()?);
+    let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
+    let bound = listener.local_addr().map_err(Failed::run)?;
+    let listener = listener.with_frames(Frames::Binary).with_limits(
+        Limits::default()
+            .with_max_message(auth::MAX_PROOF_MESSAGE)
+            .with_pending(8),
+    );
+    let desk = pairing::desk().map_err(Failed::run)?;
+    let shown = desk.show_pin().map_err(Failed::run)?;
+    print(
+        &serde_json::json!({
+            "pin": shown.pin.as_str(),
+            "peer": identity.peer_id().to_string(),
+            "url": format!("ws://{bound}"),
+        })
+        .to_string(),
+    )?;
+    let until = Instant::now() + timeout;
+    let (report, reports) = mpsc::channel();
+    let running = Arc::new(AtomicUsize::new(0));
+    loop {
+        while let Ok(result) = reports.try_recv() {
+            match result {
+                Ok(peer) => {
+                    return print(&serde_json::json!({ "paired": peer }).to_string());
+                }
+                Err(why) => {
+                    tracing::info!("a pairing attempt failed: {why}");
+                    if desk.shown_pin().is_none() {
+                        return Err(Failed::run("the PIN is used up or expired: start again"));
+                    }
+                }
+            }
+        }
+        if Instant::now() >= until {
+            return Err(Failed::run("nobody paired in time"));
+        }
+        let pending = match listener.next(Some(Duration::from_millis(100))) {
+            Ok(pending) => pending,
+            Err(Failure::Timeout) => continue,
+            Err(failure) => return Err(Failed::run(failure)),
+        };
+        // Each connection runs apart, so one that connects and says nothing costs neither the PIN nor the wait.
+        if running.fetch_add(1, Ordering::SeqCst) >= MAX_PAIRING_RUNS {
+            running.fetch_sub(1, Ordering::SeqCst);
+            continue;
+        }
+        let (identity, store, desk, report, running) = (
+            Arc::clone(&identity),
+            Arc::clone(&store),
+            desk.clone(),
+            report.clone(),
+            Arc::clone(&running),
+        );
+        std::thread::spawn(move || {
+            let result = pending
+                .handshake()
+                .map_err(|failure| failure.to_string())
+                .and_then(|channel| {
+                    let paired =
+                        pairing::respond(&channel, &identity, &store, &desk, None, PAIRING_RUN);
+                    channel.close();
+                    paired.map_err(|error| error.to_string())
+                })
+                .map(|paired| paired.peer.id().to_string());
+            running.fetch_sub(1, Ordering::SeqCst);
+            let _ = report.send(result);
+        });
+    }
 }
 
 fn check(args: &ConfigArgs) -> Result<(), Failed> {
@@ -228,6 +349,10 @@ fn run(cli: Cli) -> Result<(), Failed> {
                 .to_string(),
         ),
         Command::Peers { format } => list_peers(format),
+        Command::Pair {
+            listen,
+            timeout_seconds,
+        } => pair(listen, Duration::from_secs(timeout_seconds)),
         Command::Accept { peer } => {
             let id = peers::accept(&store()?, &peer).map_err(peers_failure)?;
             print(&format!("accepted {id}"))
@@ -292,7 +417,8 @@ mod tests {
         let Command::Serve(args) = cli.command else {
             panic!("serve");
         };
-        assert_eq!(args.config, Some(PathBuf::from("x.cfg")));
+        assert_eq!(args.config.config, Some(PathBuf::from("x.cfg")));
+        assert!(!args.until_stdin_closes);
     }
 
     #[test]

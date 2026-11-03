@@ -67,14 +67,19 @@ assert_eq!(config.entries[0].name, "echo");
 ## Command line
 
 ```text
-canoa-host serve [--config FILE]
+canoa-host serve [--config FILE] [--until-stdin-closes]
 canoa-host check [--config FILE] [--format text|json]
 canoa-host id
 canoa-host peers [--format text|json]
 canoa-host accept PEER
 canoa-host revoke PEER
+canoa-host pair [--listen ADDR] [--timeout-seconds N]
 canoa-host provider --library FILE --provider ID [--working-root DIR]... [--max-sessions N]
 ```
+
+`serve --until-stdin-closes` is for a program running the host as its child, such as Canoa's desktop app: when its input
+closes, the host ends every agent it started, then itself. `pair` shows a PIN that a native client, such as
+`coqui-acp-bridge pair-dial`, uses to pair; a browser has no PIN exchange, and pairs by connecting once and being accepted.
 
 Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg was wrong.
 

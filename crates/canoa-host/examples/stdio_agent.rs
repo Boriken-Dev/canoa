@@ -1,6 +1,8 @@
 //! A small ACP agent on its standard streams, the stdio entry the host's tests serve. It echoes prompts; a prompt starting
 //! `ask` first asks the client's permission and answers with the option chosen. It answers `session/new` with the
 //! parameters it received, and `_fixture/received` with every method it has seen, so a test can tell what reached it.
+//! `_fixture/pid` answers its process id. With `CANOA_TEST_AGENT_STAYS` set it stays a minute after its input closes, as an
+//! agent that ignores its input would, so a test sees whether something else ends it.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -81,6 +83,7 @@ fn main() {
                 json!({"stopReason": "end_turn"})
             }
             "_fixture/received" => json!({"methods": seen}),
+            "_fixture/pid" => json!({"pid": std::process::id()}),
             _ => {
                 send(
                     json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "method not found"}}),
@@ -89,5 +92,8 @@ fn main() {
             }
         };
         send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
+    }
+    if std::env::var_os("CANOA_TEST_AGENT_STAYS").is_some() {
+        std::thread::sleep(std::time::Duration::from_secs(60));
     }
 }

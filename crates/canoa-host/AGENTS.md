@@ -4,7 +4,7 @@ Header-file-style reference for the `canoa-host` crate: every public item with i
 
 No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `2b83200`), `coqui-agentic-peer`, `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Peer`, `PeerState`, `PeersError`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions` and `Serving`. Public modules: `config`, `peers`, `provider`, `serve`.
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Peer`, `PeerState`, `PeersError`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving` and `Stopper`. Public modules: `config`, `peers`, `provider`, `serve`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library runs native code; see `serve_stdio`.
 
@@ -66,9 +66,13 @@ pub fn ServeOptions::new(provider_program: impl Into<PathBuf>) -> ServeOptions
 
 pub fn Serving::bind(config: &Config, identity: Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
 pub fn Serving::listening(&self) -> &[Listening]
+pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another thread
 pub fn Serving::run(self)                      // takes connections until the process ends
+pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves
 #[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String }   // kind: "agent" or "provider"
 ```
+
+- `stop_agents` ends each agent with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound: end the process to free them.
 
 - `bind` binds every entry before any is served, so a failure leaves none listening. A plain socket beyond loopback is refused by `coqui-web` too.
 - Each connection: the WebSocket handshake, then the `coqui-peer-webcrypto` proof within `PROOF_LIMIT`, with the trust store deciding (a stranger that proved its key is recorded as waiting). Then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
@@ -113,16 +117,19 @@ A key is paired when the store accepts it. `accept` takes only a key that is wai
 ## Command line
 
 ```text
-canoa-host serve [--config FILE]
+canoa-host serve [--config FILE] [--until-stdin-closes]
 canoa-host check [--config FILE] [--format text|json]
 canoa-host id
 canoa-host peers [--format text|json]
 canoa-host accept PEER
 canoa-host revoke PEER
+canoa-host pair [--listen ADDR] [--timeout-seconds N]
 canoa-host provider --library FILE --provider ID [--working-root DIR]... [--max-sessions N]
 ```
 
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer"}`, `peer` being this host's id, once every entry is bound; then it serves until stopped. It logs on standard error.
+- `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every agent is ended (`Stopper::stop_agents`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
+- `pair` (`--listen` default `127.0.0.1:0`, loopback only, else status 2; `--timeout-seconds` default 300) prints `{"pin", "peer", "url"}`, a six-digit PIN, this host's id and the address to dial; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout. A pairing connection serves no agent. A browser cannot pair this way: the WebCrypto module has no PIN exchange.
 - `check` prints `NAME KIND LISTEN` per entry, or `{"name", "kind", "listen"}` with `--format json`, and serves nothing.
 - `peers` prints `accepted ID` and `waiting ID [from ADDRESS]`, or `{"peer", "state", "source"}`.
 - Canoa.cfg is `--config`, else `CANOA_CONFIG`, else `%APPDATA%\Canoa\Canoa.cfg` on Windows, `~/Library/Application Support/Canoa/Canoa.cfg` on macOS, `$XDG_CONFIG_HOME/Canoa/Canoa.cfg` (else `~/.config/…`) elsewhere: where the app keeps it.
@@ -143,7 +150,7 @@ canoa-host provider --library FILE --provider ID [--working-root DIR]... [--max-
 - A stdio agent inherits the host's environment and working directory. An agent can still start whatever its own tools start when the client allows them; the host stops only what a client could start without the agent asking.
 - A paired key reaches every session an agent keeps for this user: `session/list` and `session/load` pass to a stdio agent unchanged.
 - `working_roots` compare paths as written: a link inside a root that points outside it is followed by the agent.
-- If the host itself is killed, the agents it started are not: each sees its standard input close, and most then exit.
+- If the host itself is killed, on Windows the system ends its agents with it (each is in a job object closed with the host); on Unix each sees its standard input close, and most then exit. `serve --until-stdin-closes` ends them on every platform when the parent goes.
 - Each connection is a fresh process, so a turn in progress ends with its link; a later connection resumes a session only if the agent kept it.
 - `peers` is read when the host starts; a key removed from the trust store loses its link within about a second without a restart.
 - Plain WebSocket on loopback carries only the proof and sealed records. Anyone on this machine can connect and make a proven key wait; only an accepted key gets further.

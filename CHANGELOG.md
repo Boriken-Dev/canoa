@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `canoa-host`, a new crate and command: serves each `[host]` entry of Canoa.cfg, a stdio ACP agent or a Guatiao agent provider, to keys you paired, on loopback only. `peers`, `accept` and `revoke` manage the keys; a removed key loses its link within about a second. A client cannot have it start a program: a stdio MCP server in a request and `_meta` never reach a stdio agent.
 - The chat dials `ws://` on loopback, where the host listens. Everything after the peer proof is sealed, so the transport carries nothing it could read.
 - The app keeps Canoa.cfg's `[host]` table when it saves its settings.
+- `canoa-host serve --until-stdin-closes`: the host ends every agent it started, then itself, when its input closes, so it ends with the program that runs it. `Serving::stopper` and `Stopper::stop_agents` do the same from the library.
+- `canoa-host pair`: shows a PIN that a native client uses to pair, such as `coqui-acp-bridge pair-dial`. One wrong try ends it.
 
 ### Changed
 
