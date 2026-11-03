@@ -5,6 +5,7 @@ import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
+import '../profile/profile.dart';
 import '../theme/look.dart';
 
 /// One entry of `[host]`, as Canoa.cfg has it.
@@ -50,6 +51,10 @@ final class CanoaConfig {
     this.agents = const [],
     this.host,
     this.sessions = const LedgerSettings(),
+    this.overlays = const {},
+    this.profile = const Profile(),
+    this.agentProfiles = const {},
+    this.tables = const {},
   });
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
@@ -64,6 +69,18 @@ final class CanoaConfig {
 
   /// `[sessions]` and `[harnesses]`: how much the session list keeps, and the harness each reported agent name stands for.
   final LedgerSettings sessions;
+
+  /// `[overlays]`: each named overlay's source, in the file's order, which is the order they layer in.
+  final Map<String, OverlaySource> overlays;
+
+  /// `[profile]`: the person's own layer.
+  final Profile profile;
+
+  /// `[agents.NAME.profile]`: each agent entry's layer, by the agent's label; an entry with no program names a preset.
+  final Map<String, Profile> agentProfiles;
+
+  /// `[overlays]`, `[profile]` and each `[agents.NAME.profile]` as they were read, so saving writes them back unchanged.
+  final Map<String, Object?> tables;
 
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
@@ -89,6 +106,10 @@ final class CanoaConfig {
         agents: agents,
         host: host,
         sessions: sessions ?? this.sessions,
+        overlays: overlays,
+        profile: profile,
+        agentProfiles: agentProfiles,
+        tables: tables,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -104,6 +125,10 @@ final class CanoaConfig {
     agents: agents,
     host: host,
     sessions: sessions,
+    overlays: overlays,
+    profile: profile,
+    agentProfiles: agentProfiles,
+    tables: tables,
   );
 
   /// What `[host]` names for canoa-host to serve, agents first, as written. canoa-host itself checks each one.
@@ -164,7 +189,8 @@ final class CanoaConfig {
         ? source.substring(source.indexOf('\n') + 1) : source;
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
-      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses'}.contains(name)) {
+      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile'}
+          .contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
     }
@@ -207,16 +233,27 @@ final class CanoaConfig {
       throw const FormatException('Canoa.cfg: appearance.brightness must be light, dark or system');
     }
     final agents = <AgentCommand>[];
+    final agentProfiles = <String, Profile>{};
+    final agentTables = <String, Object?>{};
     final rawAgents = data['agents'];
     if (rawAgents != null) {
       if (rawAgents is! Map) throw const FormatException('Canoa.cfg: agents must be a table of agents');
       for (final entry in rawAgents.entries) {
         final agent = entry.value;
+        if (agent is Map && agent['profile'] != null) {
+          final table = agent['profile'];
+          if (table is! Map) throw FormatException('Canoa.cfg: agents.${entry.key}.profile must be a table');
+          agentProfiles['${entry.key}'] = _profile('agents.${entry.key}.profile', table, LayerKind.agent);
+          agentTables['${entry.key}'] = {'profile': table};
+          if (!agent.containsKey('program') && agent.length == 1) continue;
+        }
         if (agent is! Map || agent['program'] is! String || (agent['program'] as String).isEmpty) {
           throw FormatException('Canoa.cfg: agents.${entry.key} needs a program');
         }
         for (final key in agent.keys) {
-          if (key != 'program' && key != 'args') throw FormatException('Canoa.cfg: agents.${entry.key}: invalid key $key');
+          if (key != 'program' && key != 'args' && key != 'profile') {
+            throw FormatException('Canoa.cfg: agents.${entry.key}: invalid key $key');
+          }
         }
         final args = agent['args'] ?? const <Object>[];
         if (args is! List || args.any((arg) => arg is! String)) {
@@ -236,7 +273,36 @@ final class CanoaConfig {
     if (harnesses is! Map || harnesses.values.any((label) => label is! String || label.trim().isEmpty)) {
       throw const FormatException('Canoa.cfg: harnesses must map each reported agent name to a label');
     }
+    final overlays = <String, OverlaySource>{};
+    final rawOverlays = data['overlays'] ?? const <String, Object?>{};
+    if (rawOverlays is! Map) throw const FormatException('Canoa.cfg: overlays must be a table');
+    for (final MapEntry(:key, :value) in rawOverlays.entries) {
+      if (!isEntryName('$key')) {
+        throw const FormatException('Canoa.cfg: an overlay name has 1 to 64 letters, digits, - or _');
+      }
+      overlays['$key'] = switch (value) {
+        final String spec => () {
+          try {
+            return OverlaySource.parseGit(spec);
+          } on ProfileException {
+            throw FormatException('Canoa.cfg: overlays.$key is not <repository>@<ref>[#<path>] of a source git may fetch');
+          }
+        }(),
+        {'dir': final String dir} when value.length == 1 && dir.isNotEmpty => DirOverlay(dir),
+        _ => throw FormatException('Canoa.cfg: overlays.$key is a git source or { dir = "..." }'),
+      };
+    }
+    final rawProfile = data['profile'];
+    if (rawProfile != null && rawProfile is! Map) throw const FormatException('Canoa.cfg: profile must be a table');
     return CanoaConfig(
+      overlays: overlays,
+      profile: rawProfile == null ? const Profile() : _profile('profile', rawProfile as Map, LayerKind.user),
+      agentProfiles: agentProfiles,
+      tables: {
+        if (data['overlays'] != null) 'overlays': rawOverlays,
+        'profile': ?rawProfile,
+        if (agentTables.isNotEmpty) 'agents': agentTables,
+      },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
       look: look, brightness: brightness,
@@ -280,5 +346,14 @@ ${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
-''').join()}${host == null ? '' : '\n${TomlDocument.fromMap({'host': host})}'}''';
+''').join()}${tables.isEmpty ? '' : '\n${TomlDocument.fromMap(tables)}'}${host == null ? '' : '\n${TomlDocument.fromMap({'host': host})}'}''';
+
+  /// A profile table of Canoa.cfg, its refusal named by [where] and never quoting a value.
+  static Profile _profile(String where, Map<dynamic, dynamic> table, LayerKind kind) {
+    try {
+      return Profile.fromMap(table, kind);
+    } on ProfileException catch (error) {
+      throw FormatException('Canoa.cfg: $where: $error');
+    }
+  }
 }
