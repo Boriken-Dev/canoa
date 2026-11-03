@@ -11,10 +11,16 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
+            bundle: app/build/linux/x64/release/bundle
+            host: canoa-host
           - os: windows-latest
             platform: windows
+            bundle: app/build/windows/x64/runner/Release
+            host: canoa-host.exe
           - os: macos-latest
             platform: macos
+            bundle: app/build/macos/Build/Products/Release/canoa.app/Contents/MacOS
+            host: canoa-host
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +28,15 @@ jobs:
         with:
           channel: stable
           cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Linux native dependencies
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libx11-dev libxi-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libx11-dev libxi-dev xvfb
       - name: Generate platform runner
         working-directory: app
         run: flutter create --org dev.boriken --platforms=${{ matrix.platform }} .
@@ -35,4 +45,28 @@ jobs:
         run: flutter pub get
       - name: Compile native app and tray integration
         working-directory: app
+        # appindicator 0.6 deprecates a call tray_manager makes, and the runner builds with -Werror.
+        env:
+          CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
         run: flutter build ${{ matrix.platform }} --release
+      # The app runs the canoa-host it finds beside its own executable.
+      - name: Build canoa-host and put it beside the app
+        shell: bash
+        run: |
+          cargo build --release -p canoa-host --bin canoa-host
+          cp "target/release/${{ matrix.host }}" "${{ matrix.bundle }}/"
+      - name: The app on a desktop, with its host
+        if: matrix.platform != 'macos'
+        working-directory: app
+        shell: bash
+        env:
+          CANOA_TEST_NODE: node
+          CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
+        run: |
+          cargo build -p canoa-host --bin canoa-host --examples
+          export CANOA_TEST_HOST="$GITHUB_WORKSPACE/target/debug/${{ matrix.host }}" CANOA_TEST_APP="$PWD"
+          if [ "${{ matrix.platform }}" = linux ]; then
+            xvfb-run -a flutter test integration_test/desktop_test.dart -d linux
+          else
+            flutter test integration_test/desktop_test.dart -d windows
+          fi
