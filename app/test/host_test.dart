@@ -4,7 +4,8 @@
 //
 // CANOA_TEST_HOST names a built canoa-host, with its examples (stdio_agent, echo_provider) in examples/ beside it, as
 // `cargo build -p canoa-host --bin canoa-host --examples` leaves them. CANOA_TEST_NODE names Node 22 or later (default
-// `node`). Without CANOA_TEST_HOST the tests are skipped.
+// `node`). CANOA_TEST_METHOD (`noise` or `webcrypto`) is the method the host serves by, its default unless set; the browser
+// proves by the method the host says. Without CANOA_TEST_HOST the tests are skipped.
 @Timeout(Duration(minutes: 2))
 library;
 
@@ -19,22 +20,28 @@ import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/node_peer_bridge.dart';
-import 'fixtures/webcrypto_host.dart';
 
 // Absolute, since the provider's library is named in a Canoa.cfg written to a temporary directory and read from there.
 final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
   final String path => File(path).absolute.path,
   null => null,
 };
+final String? _method = switch (Platform.environment['CANOA_TEST_METHOD']) {
+  final String method when method.isNotEmpty => method,
+  _ => null,
+};
 
 /// `canoa-host serve` on a Canoa.cfg in a directory of its own.
 final class HostUnderTest {
-  HostUnderTest._(this.process, this.dir, this.urls, this.peer);
+  HostUnderTest._(this.process, this.dir, this.urls, this.peer, this.method);
 
   final Process process;
   final Directory dir;
   final Map<String, String> urls;
   final String peer;
+
+  /// The method the host said it proves by, which a browser stores with its pin.
+  final PeerMethod method;
 
   static String _example(String name, {required bool library}) {
     final examples = File(_hostBinary!).parent.uri.resolve('examples/').toFilePath();
@@ -58,22 +65,23 @@ program = ${jsonEncode(_example('stdio_agent', library: false))}
 library = ${jsonEncode(_example('echo_provider', library: true))}
 provider = "echo_provider"
 ''');
-    // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
     final process = await Process.start(
       _hostBinary!,
-      ['serve', '--method', 'webcrypto', '--config', config.path],
+      ['serve', '--config', config.path, if (_method case final method?) ...['--method', method]],
       environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
     );
     process.stderr.transform(utf8.decoder).listen(stderr.write);
     final lines = process.stdout.transform(utf8.decoder).transform(const LineSplitter());
     final urls = <String, String>{};
     String? peer;
+    String? method;
     await for (final line in lines.take(2).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry['url'] as String;
       peer = entry['peer'] as String;
+      method = entry['method'] as String;
     }
-    return HostUnderTest._(process, dir, urls, peer!);
+    return HostUnderTest._(process, dir, urls, peer!, PeerMethod.parse(method!));
   }
 
   Future<ProcessResult> command(List<String> args) => Process.run(
@@ -118,7 +126,7 @@ void main() {
   Future<VerifiedAgent> connect(String entry, {AcpDecider? decider}) => connectVerifiedAcp(
     chatEndpoints(webSocket: host.urls[entry]!),
     expectedPeerId: host.peer,
-    verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+    verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: host.method),
     decider: decider,
   );
 
@@ -136,7 +144,7 @@ void main() {
 
   test('a browser key is turned away until the person accepts it on the host', () async {
     await expectLater(connect('fixture'), throwsA(anything));
-    final browserId = await browser.localId();
+    final browserId = await browser.localId(host.method);
     final listed = await host.command(['peers', '--format', 'json']);
     expect(listed.exitCode, 0);
     final waiting = const LineSplitter()
@@ -188,9 +196,8 @@ void main() {
 [host.agents.fixture]
 program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
 ''');
-      // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
       supervisor = HostSupervisor(
-        WebCryptoHostTool(ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'})),
+        ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'}),
         firstPause: const Duration(milliseconds: 200),
       );
     });
@@ -213,13 +220,16 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       await supervisor.apply(configPath: config.path, hasEntries: true);
       await until(() => supervisor.phase == HostPhase.running, 'the host to run');
       final url = supervisor.listening.single.url;
+      final method = PeerMethod.parse(supervisor.listening.single.method!);
+      // A fresh home's method, which the host chose: the app's own proof runs it, and the turn below shows the two agree.
+      expect(await browser.unreachable(method), isNull, reason: 'the app proves by the method a fresh home serves by');
       final client = connectVerifiedAcp(
         chatEndpoints(webSocket: url),
         expectedPeerId: supervisor.peerId!,
-        verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+        verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: method),
       );
       await expectLater(client, throwsA(anything), reason: 'an unpaired key is turned away');
-      final browserId = await browser.localId();
+      final browserId = await browser.localId(method);
       final waiting = await supervisor.keys();
       expect(waiting.where((key) => !key.accepted).map((key) => key.id), contains(browserId));
       await supervisor.accept(browserId);
@@ -227,7 +237,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       final agent = await connectVerifiedAcp(
         chatEndpoints(webSocket: url),
         expectedPeerId: supervisor.peerId!,
-        verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+        verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: method),
       );
       try {
         final opened = await agent.openSession(cwd: dir.path);
@@ -287,7 +297,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
 
   test('a key the host removes loses its link and cannot come back', () async {
     final client = await connect('echo');
-    final removed = await host.command(['revoke', await browser.localId()]);
+    final removed = await host.command(['revoke', await browser.localId(host.method)]);
     expect(removed.exitCode, 0);
     try {
       final deadline = DateTime.now().add(const Duration(seconds: 5));

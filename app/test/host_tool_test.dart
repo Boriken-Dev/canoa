@@ -3,7 +3,9 @@
 // session store showing what the host says about the tool.
 //
 // CANOA_TEST_HOST names a built canoa-host with its examples beside it, as host_test.dart says. The entry is Pi's, from
-// examples/config/pi.cfg, with the jsonl_tool fixture as its program. Without CANOA_TEST_HOST the tests are skipped.
+// examples/config/pi.cfg, with the jsonl_tool fixture as its program. CANOA_TEST_METHOD (`noise` or `webcrypto`) is the
+// method the host serves by, its default unless set; the browser proves by the method the host says. Without
+// CANOA_TEST_HOST the tests are skipped.
 //
 // A real tool instead: CANOA_TEST_TOOL_CONFIG names a Canoa.cfg and CANOA_TEST_TOOL_ENTRY its [host.tools] entry; the
 // host's environment is this test's. CANOA_TEST_TOOL_PROMPT is the one prompt (a short default otherwise), and
@@ -29,6 +31,10 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
 };
 
 final String? _realConfig = Platform.environment['CANOA_TEST_TOOL_CONFIG'];
+final String? _method = switch (Platform.environment['CANOA_TEST_METHOD']) {
+  final String method when method.isNotEmpty => method,
+  _ => null,
+};
 
 /// The fixture shaped like Pi's command line, built beside the host.
 String _fixture() {
@@ -58,6 +64,7 @@ void main() {
   Process? host;
   late String url;
   late String peer;
+  late PeerMethod method;
   NodePeerBridge? browser;
 
   Future<ProcessResult> command(List<String> args) =>
@@ -72,8 +79,7 @@ void main() {
     await config.writeAsString(real == null ? await _piConfig() : await File(real).readAsString());
     final started = await Process.start(
       _hostBinary!,
-      // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
-      ['serve', '--method', 'webcrypto', '--config', config.path],
+      ['serve', '--config', config.path, if (_method case final method?) ...['--method', method]],
       environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
     );
     host = started;
@@ -85,6 +91,7 @@ void main() {
         if (_realConfig == null) expect(listed['kind'], 'tool');
         url = listed['url'] as String;
         peer = listed['peer'] as String;
+        method = PeerMethod.parse(listed['method'] as String);
         break;
       }
     }
@@ -113,13 +120,13 @@ void main() {
   Future<VerifiedAgent> connect({AcpDecider? decider}) => connectVerifiedAcp(
     chatEndpoints(webSocket: url),
     expectedPeerId: peer,
-    verifyPeer: (channel, expected) => provePeer(browser!, channel, expected),
+    verifyPeer: (channel, expected) => provePeer(browser!, channel, expected, method: method),
     decider: decider,
   );
 
   Future<void> pair() async {
     await expectLater(connect(), throwsA(anything), reason: 'an unpaired key waits');
-    final accepted = await command(['accept', await browser!.localId()]);
+    final accepted = await command(['accept', await browser!.localId(method)]);
     expect(accepted.exitCode, 0, reason: accepted.stderr as String);
   }
 

@@ -2,6 +2,7 @@ import 'package:canoa/acp/agent_commands.dart';
 import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/connect_dialog.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
@@ -165,7 +166,8 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final targets = <ConnectTarget>[];
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-      onPressed: () => showCanoaConnectDialog(context, (target) async => targets.add(target)),
+      onPressed: () => showCanoaConnectDialog(context, (target) async => targets.add(target),
+        methodUnavailable: (_) async => null, localPeerId: (method) async => 'sha256:own-${method.id}'),
       child: const Text('open'),
     ))));
     await tester.tap(find.text('open'));
@@ -178,12 +180,12 @@ void main() {
     expect(find.text('Choose the method the host proves by: canoa-host serve prints it.'), findsOneWidget);
     expect(targets, isEmpty, reason: 'no method is assumed');
 
-    await tester.tap(find.text('webcrypto'));
+    await tester.tap(find.text('WebCrypto'));
     await tester.pump();
     await tester.tap(find.text('Connect'));
     await tester.pump();
     await tester.pump();
-    expect(targets.single.method, 'webcrypto');
+    expect(targets.single.method, PeerMethod.webcrypto);
     expect(targets.single.peerId, 'sha256:${'a' * 64}');
   });
 

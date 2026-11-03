@@ -22,7 +22,6 @@ import 'package:integration_test/integration_test.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../test/fixtures/node_peer_bridge.dart';
-import '../test/fixtures/webcrypto_host.dart';
 
 final String? _hostBinary = Platform.environment['CANOA_TEST_HOST'];
 final String _appDir = Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path;
@@ -110,9 +109,8 @@ void main() {
         listen: '127.0.0.1:0',
       );
       await cfg.writeAsString(config.encode());
-      // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
       final host = HostSupervisor(
-        WebCryptoHostTool(ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'})),
+        ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'}),
       );
       final hosting = ValueNotifier<int>(0);
       final shell = TrayShell();
@@ -162,11 +160,12 @@ void main() {
 
       // A browser's key, with the window closed: turned away, paired by the person, then served.
       final url = host.listening.single.url;
+      final method = PeerMethod.parse(host.listening.single.method!);
       Future<String> browserTurn() async {
         final client = await connectVerifiedAcp(
           chatEndpoints(webSocket: url),
           expectedPeerId: host.peerId!,
-          verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+          verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: method),
         );
         try {
           final opened = await client.openSession(cwd: dir.path);
@@ -182,7 +181,7 @@ void main() {
       }
 
       await expectLater(browserTurn(), throwsA(anything));
-      final browserId = await browser.localId();
+      final browserId = await browser.localId(method);
       await host.accept(browserId);
       expect(await browserTurn(), 'echo: hello');
 

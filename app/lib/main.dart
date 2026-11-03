@@ -242,7 +242,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final wt = target.webTransport.isEmpty ? null : Uri.parse(target.webTransport);
     final pinnedPeerId = target.peerId.toLowerCase();
     final client = await connectBrowserAcp(
-      endpoints, pinnedPeerId: pinnedPeerId,
+      endpoints, pinnedPeerId: pinnedPeerId, method: target.method,
       timeout: Duration(seconds: config.connectTimeout),
       decider: store.askPermission,
     );

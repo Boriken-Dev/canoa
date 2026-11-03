@@ -9,7 +9,7 @@ import 'package:canoa/auth/peer_proof.dart';
 /// Node 22 or later: CANOA_TEST_NODE, else `node`.
 final String nodeProgram = Platform.environment['CANOA_TEST_NODE'] ?? 'node';
 
-/// The page's peer bridge in a Node process: one key for the life of the process.
+/// The page's peer bridge in a Node process: one key of each method for the life of the process.
 final class NodePeerBridge implements PeerBridge {
   NodePeerBridge._(this._process) {
     _process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
@@ -43,13 +43,25 @@ final class NodePeerBridge implements PeerBridge {
 
   Uint8List _bytes(Object? text) => base64Decode(text as String);
 
-  Future<String> localId() async => await _call('localId', []) as String;
   @override
-  Future<String> begin(String expectedPeerId) async => await _call('begin', [expectedPeerId]) as String;
+  Future<String?> unreachable(PeerMethod method) async => await _call('unreachable', [method.id]) as String?;
   @override
-  Future<String> answer(String token, String challenge) async => await _call('answer', [token, challenge]) as String;
+  Future<String> localId(PeerMethod method) async => await _call('localId', [method.id]) as String;
   @override
-  Future<String> finish(String token, String accepted) async => await _call('finish', [token, accepted]) as String;
+  Future<String> begin(PeerMethod method, String expectedPeerId) async =>
+      await _call('begin', [method.id, expectedPeerId]) as String;
+  @override
+  Future<String> pair(String pin) async => await _call('pair', [pin]) as String;
+  @override
+  Future<PeerStep> step(String token, Uint8List? received) async {
+    final step = await _call('step', [token, received == null ? null : base64Encode(received)]) as Map<String, dynamic>;
+    return PeerStep(
+      send: [for (final message in step['send'] as List<dynamic>) _bytes(message)],
+      peerId: step['peerId'] as String?,
+      session: step['session'] as String?,
+    );
+  }
+
   @override
   void abort(String token) => unawaited(_call('abort', [token]));
   @override

@@ -62,8 +62,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_web"
-      ref: "60faa0c8a50d0cd8b5ee49f16289bbce6a461a2b"
-      resolved-ref: "60faa0c8a50d0cd8b5ee49f16289bbce6a461a2b"
+      ref: "e1a5d79c1b5712ef56cdb15a7d66d7658bb87b17"
+      resolved-ref: "e1a5d79c1b5712ef56cdb15a7d66d7658bb87b17"
       url: "https://github.com/Boriken-Dev/coqui-web.git"
     source: git
     version: "0.0.0-alpha.0"

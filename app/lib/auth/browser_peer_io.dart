@@ -1,12 +1,18 @@
 import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
+import 'peer_proof.dart';
 
-Future<VerifiedPeer> verifyBrowserPeer(WebChannel channel, String expectedPeerId) =>
-    Future.error(UnsupportedError(
-      'Browser WebCrypto is unavailable; use a native coqui-peer method',
-    ));
+const _native = 'a native build has no browser WebCrypto to hold its key';
 
-Future<String> localBrowserPeerId() => Future.error(
-  UnsupportedError('Native browser identity is unavailable'),
-);
+Future<String?> browserMethodUnavailable(PeerMethod method) async => _native;
+
+Future<VerifiedPeer> verifyBrowserPeer(WebChannel channel, String expectedPeerId, PeerMethod method) =>
+    Future.error(MethodUnavailable(method, _native));
+
+Future<String> localBrowserPeerId(PeerMethod method) => Future.error(MethodUnavailable(method, _native));
+
+Future<String> pairBrowserByPin(WebChannel channel, String pin) async {
+  await channel.close();
+  throw const MethodUnavailable(PeerMethod.noise, _native);
+}

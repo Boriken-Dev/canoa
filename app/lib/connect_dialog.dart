@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:coqui_acp/page.dart';
 
 import 'acp/agent_commands.dart';
+import 'acp/browser_connect.dart';
 import 'acp/local_agent.dart';
 import 'auth/browser_peer.dart';
 
@@ -14,22 +15,29 @@ class ConnectTarget {
     required this.webSocket,
     required this.webTransport,
     required this.peerId,
-    required this.method,
     required this.cwd,
     required this.title,
+    required this.method,
   });
   final String webSocket;
   final String webTransport;
   final String peerId;
-
-  /// The proof the host runs, one of [proofMethods], as `canoa-host serve` prints it.
-  final String method;
   final String cwd;
   final String title;
+
+  /// The proof the agent's key makes: named by the person, or by the record or host the agent came from; never assumed,
+  /// and never guessed from a connection.
+  final PeerMethod method;
 }
 
-/// The proofs a host can run. None is assumed: the person names the one the host prints.
-const List<String> proofMethods = ['noise', 'webcrypto'];
+/// Why this browser cannot prove by a method, or null.
+typedef MethodCheck = Future<String?> Function(PeerMethod method);
+
+/// This browser's own peer id under a method.
+typedef LocalPeerId = Future<String> Function(PeerMethod method);
+
+/// Pairs this browser's Noise key with the machine waiting at an address, by the PIN it shows, and answers that machine's id.
+typedef PairByPin = Future<String> Function(Uri url, String pin);
 
 /// Runs an agent on this computer, as a child of the app.
 typedef RunLocalAgent = Future<void> Function(AgentCommand command, {required String cwd, required String title});
@@ -45,6 +53,10 @@ Future<void> showCanoaConnectDialog(
   RunLocalAgent? onRunLocalAgent,
   List<AgentCommand> localAgents = agentPresets,
   Future<bool> Function(AgentCommand) checkInstalled = isInstalled,
+  MethodCheck methodUnavailable = browserMethodUnavailable,
+  LocalPeerId localPeerId = localBrowserPeerId,
+  PairByPin pair = pairBrowserAcp,
+  PeerMethod? method,
 }) => showDialog<void>(
   context: context,
   builder: (_) => _ConnectDialog(
@@ -54,18 +66,32 @@ Future<void> showCanoaConnectDialog(
     onRunLocalAgent: onRunLocalAgent,
     localAgents: localAgents,
     checkInstalled: checkInstalled,
+    methodUnavailable: methodUnavailable,
+    localPeerId: localPeerId,
+    pair: pair,
+    method: method,
   ),
 );
 
 class _ConnectDialog extends StatefulWidget {
   const _ConnectDialog({
     required this.onConnect,
+    required this.methodUnavailable,
+    required this.localPeerId,
+    required this.pair,
     this.browserProvider,
     this.onUseBrowserAgents,
     this.onRunLocalAgent,
     this.localAgents = agentPresets,
     this.checkInstalled = isInstalled,
+    this.method,
   });
+
+  /// The method an agent's record or its host named, prefilled; null for an agent typed in by hand.
+  final PeerMethod? method;
+  final MethodCheck methodUnavailable;
+  final LocalPeerId localPeerId;
+  final PairByPin pair;
   final Future<bool> Function(AgentCommand) checkInstalled;
   final RunLocalAgent? onRunLocalAgent;
   final List<AgentCommand> localAgents;
@@ -84,10 +110,37 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   final cwd = TextEditingController(text: '/');
   final title = TextEditingController();
   final command = TextEditingController();
-  late final Future<String> localPeerId = localBrowserPeerId();
-  String? method;
+  final pairUrl = TextEditingController();
+  final pin = TextEditingController();
+  late PeerMethod? method = widget.method;
+  late Future<(String?, String?)>? own = switch (method) {
+    final PeerMethod method => _own(method),
+    null => null,
+  };
+  late final Future<String?> noiseUnavailable = widget.methodUnavailable(PeerMethod.noise);
   bool busy = false;
   String? error;
+  String? paired;
+
+  /// This browser's id under [method], or why it has none: (id, null) or (null, why).
+  Future<(String?, String?)> _own(PeerMethod method) async {
+    final why = await widget.methodUnavailable(method);
+    if (why != null) return (null, why);
+    return (await widget.localPeerId(method), null);
+  }
+
+  /// This page's origin, which `pair-accept` lets in by `--origin`; null where the app is no web page.
+  static String? get _pageOrigin {
+    final base = Uri.base;
+    return base.scheme == 'http' || base.scheme == 'https' || base.scheme == 'chrome-extension'
+        ? '${base.scheme}://${base.authority}'
+        : null;
+  }
+
+  void _choose(PeerMethod? chosen) {
+    method = chosen;
+    own = chosen == null ? null : _own(chosen);
+  }
 
   @override
   void dispose() {
@@ -96,7 +149,37 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     pinned.dispose();
     cwd.dispose();
     title.dispose();
+    pairUrl.dispose();
+    pin.dispose();
     super.dispose();
+  }
+
+  Future<void> _pair() async {
+    if (busy) return;
+    final url = Uri.tryParse(pairUrl.text.trim());
+    final code = pin.text.trim();
+    if (url == null || !url.hasAuthority || code.isEmpty) {
+      setState(() => error = 'Enter the address the other machine pairs on, and the PIN it shows.');
+      return;
+    }
+    setState(() {busy = true; error = null; paired = null;});
+    try {
+      final peer = await widget.pair(url, code);
+      if (!mounted) return;
+      setState(() {
+        pinned.text = peer;
+        _choose(PeerMethod.noise);
+        paired = 'Paired under Noise. Enter its agent\'s endpoint, then connect.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => error = 'Pairing failed: $e. A PIN is good for one try: ask for a new one.');
+    } finally {
+      // Tried once, right or wrong, the PIN is spent.
+      if (mounted) {
+        pin.clear();
+        setState(() => busy = false);
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -115,11 +198,16 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       webSocket: ws.text.trim(),
       webTransport: wt.text.trim(),
       peerId: peer,
-      method: method,
       cwd: cwd.text.trim(),
       title: title.text.trim(),
+      method: method,
     );
     setState(() {busy = true; error = null;});
+    final why = await widget.methodUnavailable(request.method);
+    if (why != null) {
+      if (mounted) setState(() {busy = false; error = '${request.method.label} is unavailable in this browser: $why';});
+      return;
+    }
     try {
       await widget.onConnect(request);
       if (mounted) Navigator.of(context).pop();
@@ -247,17 +335,34 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                     );
                   },
                 ),
-              FutureBuilder<String>(
-                future: localPeerId,
+              Text('Method the host proves by', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 4),
+              SegmentedButton<PeerMethod>(
+                segments: [for (final each in PeerMethod.values) ButtonSegment(value: each, label: Text(each.label))],
+                selected: {?method},
+                emptySelectionAllowed: true,
+                showSelectedIcon: false,
+                onSelectionChanged: busy ? null : (chosen) => setState(() => _choose(chosen.firstOrNull)),
+              ),
+              const SizedBox(height: 8),
+              if (own == null)
+                const Text('Choose the method to see this browser\'s peer ID under it.')
+              else FutureBuilder<(String?, String?)>(
+                key: ValueKey(own),
+                future: own!,
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return Text(snapshot.hasError
                         ? 'Browser identity unavailable: ${snapshot.error}'
                         : 'Loading your browser identity…');
                   }
-                  final peer = snapshot.data!;
+                  final (peer, why) = snapshot.data!;
+                  if (peer == null) {
+                    return Text('${method!.label} is unavailable in this browser: $why',
+                      style: TextStyle(color: Theme.of(context).colorScheme.error));
+                  }
                   return Row(children: [
-                    Expanded(child: SelectableText('Your browser peer ID:\n$peer',
+                    Expanded(child: SelectableText('Your browser peer ID under ${method!.label}:\n$peer',
                       style: Theme.of(context).textTheme.bodySmall)),
                     IconButton(
                       tooltip: 'Copy your peer ID for pairing',
@@ -265,6 +370,41 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                       onPressed: () => Clipboard.setData(ClipboardData(text: peer)),
                     ),
                   ]);
+                },
+              ),
+              FutureBuilder<String?>(
+                future: noiseUnavailable,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) return const SizedBox.shrink();
+                  final why = snapshot.hasError ? '${snapshot.error}' : snapshot.data;
+                  if (why != null) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text('Pairing by PIN needs Noise, which is unavailable in this browser: $why'),
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 12),
+                      const Text('Or pair by the PIN the other machine shows, under Noise:'),
+                      if (_pageOrigin case final origin?)
+                        SelectableText('There, run: coqui-acp-bridge pair-accept --method noise --origin $origin',
+                          style: Theme.of(context).textTheme.bodySmall),
+                      TextField(controller: pairUrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Where it waits to pair',
+                          hintText: 'ws://127.0.0.1:PORT or wss://agent.example/pair',
+                        )),
+                      Row(children: [
+                        Expanded(child: TextField(controller: pin,
+                          decoration: const InputDecoration(labelText: 'PIN'),
+                          onSubmitted: (_) => _pair())),
+                        TextButton(onPressed: busy ? null : _pair, child: const Text('Pair')),
+                      ]),
+                      if (paired != null) Text(paired!),
+                    ],
+                  );
                 },
               ),
               TextField(controller: title,
@@ -284,16 +424,6 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   labelText: 'Pinned server peer ID',
                   hintText: 'sha256:…',
                 )),
-              const SizedBox(height: 12),
-              Text('Method the host proves by', style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 4),
-              SegmentedButton<String>(
-                segments: [for (final name in proofMethods) ButtonSegment(value: name, label: Text(name))],
-                selected: {?method},
-                emptySelectionAllowed: true,
-                showSelectedIcon: false,
-                onSelectionChanged: (chosen) => setState(() => method = chosen.firstOrNull),
-              ),
               TextField(controller: cwd,
                 decoration: const InputDecoration(
                   labelText: 'Agent workspace (absolute path)',
