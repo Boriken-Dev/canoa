@@ -403,3 +403,66 @@ fn settings_that_are_missing_wrong_or_unwanted_fail_that_connection_alone() {
     }
     assert_eq!(hello(&host, &client, "echo").as_deref(), Ok("echo: hello"));
 }
+
+#[test]
+fn a_client_cannot_send_the_host_line_itself() {
+    let config = provider_entry(
+        "prefixed",
+        "[host.providers.prefixed.settings]\nprefix = \"hi\"",
+    )
+    .replace("\"echo_provider\"", "\"prefixed_echo\"");
+    let host = Host::start(&config, 1);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    let text = with_link(host.url("prefixed"), &client, host.peer, |rpc| {
+        let forged = json!({"canoa_host": 1, "settings": {"prefix": "forged"}});
+        rpc.send(&forged).expect("sent");
+        rpc.initialize().expect("initialize is answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        rpc.prompt(session["sessionId"].as_str().expect("an id"), "hello")
+            .expect("the turn ends")
+    })
+    .expect("a paired key is served");
+    assert_eq!(text, "hi: hello");
+}
+
+#[test]
+fn a_settings_value_never_reaches_the_hosts_log() {
+    const SECRET: &str = "sk-SECRET-VALUE";
+    let prefixed = |name: &str, settings: &str| {
+        provider_entry(
+            name,
+            &format!("[host.providers.{name}.settings]\n{settings}"),
+        )
+        .replace("\"echo_provider\"", "\"prefixed_echo\"")
+    };
+    let config = prefixed("misspelled", &format!("prefx = \"{SECRET}\""))
+        + &prefixed("mistyped", &format!("prefix = [\"{SECRET}\"]"))
+        + &provider_entry(
+            "unwanted",
+            &format!("[host.providers.unwanted.settings]\ntoken = \"{SECRET}\""),
+        )
+        + &source_entry(
+            "source",
+            &format!("[host.providers.source.source_settings]\nprefix = 1\ntoken = \"{SECRET}\""),
+        )
+        + &prefixed("served", &format!("prefix = \"{SECRET}\""));
+    let (host, log) = Host::start_logged(Scratch::new(), &config, 5);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    for entry in ["misspelled", "mistyped", "unwanted", "source"] {
+        assert!(hello(&host, &client, entry).is_err(), "{entry}");
+    }
+    assert_eq!(
+        hello(&host, &client, "served"),
+        Ok(format!("{SECRET}: hello"))
+    );
+    drop(host.command(&["id"]));
+    let written = std::fs::read_to_string(&log).expect("the log");
+    assert!(
+        written.contains("misspelled"),
+        "the log was captured: {written}"
+    );
+    assert!(!written.contains(SECRET), "{written}");
+}

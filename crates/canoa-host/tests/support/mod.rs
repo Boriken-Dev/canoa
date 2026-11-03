@@ -102,7 +102,24 @@ impl Host {
             .iter()
             .map(|(name, value)| (*name, std::ffi::OsString::from(value)))
             .collect();
-        Self::launch(Scratch::new(), config, entries, args, &env)
+        Self::launch(
+            Scratch::new(),
+            config,
+            entries,
+            args,
+            &env,
+            Stdio::inherit(),
+        )
+    }
+
+    /// As [`Host::start_in`], with the host's log written to `host.log` in `scratch` rather than the test's own.
+    pub fn start_logged(scratch: Scratch, config: &str, entries: usize) -> (Self, PathBuf) {
+        let log = scratch.0.join("host.log");
+        let file = std::fs::File::create(&log).expect("a log file");
+        (
+            Self::launch(scratch, config, entries, &[], &[], Stdio::from(file)),
+            log,
+        )
     }
 
     /// As [`Host::start`], in `scratch`, with `env` added to the host's environment.
@@ -112,7 +129,7 @@ impl Host {
         entries: usize,
         env: &[(&str, std::ffi::OsString)],
     ) -> Self {
-        Self::launch(scratch, config, entries, &[], env)
+        Self::launch(scratch, config, entries, &[], env, Stdio::inherit())
     }
 
     fn launch(
@@ -121,6 +138,7 @@ impl Host {
         entries: usize,
         args: &[&str],
         env: &[(&str, std::ffi::OsString)],
+        stderr: Stdio,
     ) -> Self {
         let path = scratch.0.join("Canoa.cfg");
         std::fs::write(&path, config).expect("Canoa.cfg is written");
@@ -134,7 +152,7 @@ impl Host {
             .env("CANOA_LOG", "debug")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(stderr)
             .spawn()
             .expect("the host starts");
         let stdin = child.stdin.take();
