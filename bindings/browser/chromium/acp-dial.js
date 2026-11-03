@@ -8,7 +8,7 @@ import { createMux } from "./vendor/coqui-agentic-peer/mux.mjs";
 /** The proof methods, in no order of preference. */
 export const METHODS = Object.freeze(["noise", "webcrypto"]);
 /** What a key made here, or an agent added with none named, proves by. */
-export const DEFAULT_METHOD = "webcrypto";
+export const DEFAULT_METHOD = "noise";
 // Each method's key in a database of its own, so one key is never used by both.
 const STORES = Object.freeze({ webcrypto: "dev.boriken.canoa.peer", noise: "dev.boriken.canoa.peer-noise" });
 const MODULES = Object.freeze({ webcrypto, noise });

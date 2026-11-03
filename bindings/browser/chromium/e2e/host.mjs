@@ -5,7 +5,7 @@
 //   CANOA_E2E_BROWSER=path/to/browser CANOA_E2E_HOST_URL=ws://127.0.0.1:PORT CANOA_E2E_HOST_PEER=sha256:...
 //     [CANOA_E2E_ACCEPT=path/to/canoa-host] [CANOA_E2E_METHOD=noise] node e2e/host.mjs
 //
-// CANOA_E2E_METHOD is the method the host proves by, which the person names adding its entry: `webcrypto` unless set.
+// CANOA_E2E_METHOD is the method the host proves by, which the person names adding its entry: `noise` unless set.
 //
 // The entry must echo a prompt as `echo: TEXT`, as canoa-host's stdio_agent example does. With CANOA_E2E_ACCEPT the key is
 // paired by `canoa-host accept`, under this environment's COQUI_AGENTIC_PEER_HOME; without it the run waits up to five minutes
@@ -26,7 +26,7 @@ const browser = process.env.CANOA_E2E_BROWSER;
 const hostUrl = process.env.CANOA_E2E_HOST_URL;
 const hostPeer = process.env.CANOA_E2E_HOST_PEER;
 const accept = process.env.CANOA_E2E_ACCEPT;
-const METHOD = process.env.CANOA_E2E_METHOD ?? "webcrypto";
+const METHOD = process.env.CANOA_E2E_METHOD ?? "noise";
 if (!browser || !hostUrl || !hostPeer) throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_HOST_URL and CANOA_E2E_HOST_PEER");
 
 const work = mkdtempSync(path.join(tmpdir(), "canoa-e2e-host-"));

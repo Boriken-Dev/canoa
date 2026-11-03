@@ -4,7 +4,7 @@
 //   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] [CANOA_E2E_PAGES=dir] [CANOA_E2E_METHOD=noise]
 //     node e2e/run.mjs
 //
-// CANOA_E2E_METHOD is the method every agent of the run proves by, `webcrypto` unless set: its in-process agent, the bridges it
+// CANOA_E2E_METHOD is the method every agent of the run proves by, `noise` unless set: its in-process agent, the bridges it
 // starts and the agents a person adds by hand.
 //
 // CANOA_E2E_PAGES holds the other languages' pages: wasm/page.js and page_bg.wasm from coqui-acp-page's example through
@@ -33,7 +33,7 @@ const browser = process.env.CANOA_E2E_BROWSER;
 if (!browser) throw new Error("set CANOA_E2E_BROWSER");
 const bridge = process.env.CANOA_E2E_BRIDGE;
 const pages = process.env.CANOA_E2E_PAGES;
-const METHOD = process.env.CANOA_E2E_METHOD ?? "webcrypto";
+const METHOD = process.env.CANOA_E2E_METHOD ?? "noise";
 const { createResponder, generateIdentity } = METHOD === "noise" ? noiseMethod : webcryptoMethod;
 // A handshake message as the method reads it: WebCrypto's are text, Noise's bytes.
 const handshake = (data) => (METHOD === "noise" ? new Uint8Array(data) : data.toString());

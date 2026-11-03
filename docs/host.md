@@ -193,7 +193,8 @@ a home paired before Noise keeps its WebCrypto identity and its paired keys, and
 both. A key is of one method, and a client of the other is refused, which the host's log says. The home records the
 method named last, or its first identity's, so the app's `serve` and `pair`, which name none, use it. **Canoa's app proves
 by WebCrypto today:** a home it reaches must prove by WebCrypto (`canoa-host serve --method webcrypto` once) until the app
-proves by Noise.
+proves by Noise. A home with no identity gets a Noise one; to move a WebCrypto home, run `canoa-host serve --method noise`
+once and pair each browser again: its Noise key is a new key.
 
 A browser pairs by connecting once:
 

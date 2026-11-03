@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- New keys prove by Noise: `canoa-host` on a home with no identity, and the key the extension calls its own. A home or agent made before keeps WebCrypto, and its pairings keep working. To move a host, run `canoa-host serve --method noise` once, which the home then records for the app's own `serve` and `pair`, and pair each browser again, by PIN or by accepting its Noise key: a key of one method is never the other's. Canoa's app reaches such a host by Noise once the person names that method, which `serve` prints and Hosting shows, or pairs by PIN.
+
 ### Added
 
 - `canoa-host serve --key-limit` and `--no-rekey`, and `ServeOptions::with_key_limit` and `with_rekey`; a setting looser than the default is logged. A client of the other method is logged as a method mismatch, never as a key to accept. A home records the method named last, so a host the app runs naming none keeps working after a move.
