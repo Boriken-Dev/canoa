@@ -87,6 +87,15 @@ provider = "echo_provider"
   }
 }
 
+/// Whether process [pid] runs, asked without signalling it: on Windows any signal ends a process.
+Future<bool> _running(int pid) async {
+  if (Platform.isWindows) {
+    final listed = await Process.run('tasklist', ['/FI', 'PID eq $pid', '/NH', '/FO', 'CSV']);
+    return (listed.stdout as String).contains('"$pid"');
+  }
+  return (await Process.run('kill', ['-0', '$pid'])).exitCode == 0;
+}
+
 void main() {
   final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa-host' : null;
   late HostUnderTest host;
@@ -241,7 +250,27 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       expect(supervisor.pid, isNull);
       await Future<void>.delayed(const Duration(seconds: 1));
       expect(supervisor.phase, HostPhase.stopped, reason: 'nothing starts it again');
-      expect(Process.killPid(second), isFalse, reason: 'the host has ended');
+      expect(await _running(second), isFalse, reason: 'the host has ended');
+    }, skip: skip);
+
+    test('a host whose app dies without stopping it ends too', () async {
+      // CANOA_TEST_DART names the Dart that runs the dying app, `dart` by default.
+      final ran = await Process.run(Platform.environment['CANOA_TEST_DART'] ?? 'dart', [
+        'run',
+        'test/fixtures/dying_parent.dart',
+        _hostBinary!,
+        config.path,
+        '${dir.path}/home',
+      ], runInShell: Platform.isWindows);
+      expect(ran.exitCode, 0, reason: '${ran.stderr}');
+      final pid = int.parse((ran.stdout as String).trim().split('\n').last.trim());
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (await _running(pid) && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      final alive = await _running(pid);
+      if (alive) Process.killPid(pid, ProcessSignal.sigkill);
+      expect(alive, isFalse, reason: 'the host outlived the app that started it');
     }, skip: skip);
 
     test('a Canoa.cfg the host refuses is said in its words and not retried', () async {

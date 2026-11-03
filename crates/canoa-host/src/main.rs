@@ -193,7 +193,12 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
             .spawn(move || {
                 // Whatever arrives is not read as anything: only its end matters.
                 let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
-                tracing::info!("standard input closed: ending every agent and the host");
+                // Nothing is logged from here: a parent that died can leave standard error a pipe nobody reads, and on
+                // Windows a write to it then waits for ever. Should ending an agent wait like that, the host ends anyway.
+                std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_secs(5));
+                    std::process::exit(0);
+                });
                 stopper.stop_agents();
                 std::process::exit(0);
             })
