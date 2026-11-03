@@ -8,6 +8,9 @@ loopback WebSocket of its own:
 - **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
   library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
   libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.
+- **A command-line tool with no ACP**: a program that takes a prompt and writes JSON lines, such as Pi. The entry says how
+  a prompt goes in and what each line becomes in ACP; the host has no code for any one tool. See
+  [A command-line tool](#a-command-line-tool).
 
 The API and every setting are in the crate's [API header](https://github.com/Boriken-Dev/canoa/blob/main/crates/canoa-host/AGENTS.md).
 
@@ -73,6 +76,85 @@ A provider that is its own instance refuses `settings`.
 
 Settings are read from Canoa.cfg only, never from a client. They reach the provider's process on its standard input, not
 on its command line, which other users of the machine may be able to read.
+
+### A command-line tool
+
+A tool that has no ACP of its own, and no adapter, is an entry of `[host.tools]`: its program, how it keeps a
+conversation, how a prompt reaches it and a list of rules that turn each JSON line it writes into ACP. Use an ACP agent or
+an adapter when there is one: it knows the tool, and these rules only know the lines.
+
+`examples/config/pi.cfg` is a whole working entry, for [Pi](https://pi.dev) (`@earendil-works/pi-coding-agent`, MIT), the
+one the tests run:
+
+```toml
+[host.tools.pi]
+program = "pi"                              # on Windows pi.cmd, or node with Pi's dist/bundle/cli.js first in args
+args = ["--mode", "rpc", "--no-session", "-e", "/abs/path/to/examples/extensions/permission-gate.ts"]
+runs = "session"                            # one process holds the conversation
+unasked = "Pi runs its read, bash, edit and write tools with your rights. ..."
+prompt = { type = "prompt", message = "{prompt}" }
+cancel = { type = "abort" }
+
+[host.tools.pi.kinds]
+bash = "execute"
+
+[[host.tools.pi.events]]
+when = { type = "message_update", "assistantMessageEvent.type" = "text_delta" }
+send = "text"
+text = "{assistantMessageEvent.delta}"
+
+[[host.tools.pi.events]]
+when = { type = "agent_settled" }
+send = "end"
+
+[[host.tools.pi.events]]
+when = { type = "extension_ui_request", method = "select", "options.0" = "Yes", "options.1" = "No" }
+send = "ask"
+title = "{title}"
+allow = { type = "extension_ui_response", id = "{id}", value = "Yes" }
+reject = { type = "extension_ui_response", id = "{id}", cancelled = true }
+```
+
+- **`runs`**: `session` starts one process when a session opens, and writes each prompt to its standard input as the
+  `prompt` line; `cancel`, when given, is written on `session/cancel`, and a turn not ended `CANCEL_GRACE` (10 s) later
+  has its process ended. Without `cancel`, cancelling ends the process. Either way, once its process ends the session takes
+  no more prompts. `message` starts a process per prompt: the prompt is `{prompt}` in `args`, or else its standard input,
+  which then closes; the turn ends when a rule says so or when the process exits. A `message` tool remembers nothing
+  unless `resume_args` names the session it reported (a `session` rule), put before `args` from the second prompt on.
+- **Rules**: each line the tool writes is taken by the first rule whose `when` paths all hold their values; a line that is
+  not JSON, or that no rule takes, is passed over. `send` is `text` or `thought` (`agent_message_chunk`,
+  `agent_thought_chunk`), `tool` and `tool_done` (`tool_call`, `tool_call_update`), `failure` (the turn, once it ends,
+  fails with this text), `end` (with `stop`, or `error`), `session`, `ask`, `reply` (a line written back at once) or `ignore`.
+  In text, `{path}` is the line's value at a dotted path, such as `{args.command}` or `{result.content.0.text}`. In the
+  JSON of `prompt`, `cancel`, `allow`, `reject` and `line`, a string that is a placeholder alone keeps the value's type,
+  and only values are filled: a prompt cannot add a key or end the line, since it is never parsed as JSON.
+- **The person is told** what they would not otherwise know: every session opens with the notices the entry implies,
+  listed under `_meta["dev.boriken.canoa/notices"]` in the answer to `session/new`, which the app shows in the
+  conversation. One says what the tool does without asking, in the entry's own `unasked` words, which every entry must give;
+  a `message` tool's also says that each message runs it anew.
+- **Permissions**: an `ask` rule sends `session/request_permission` with Allow and Refuse, and writes `allow` back only when
+  the person picks Allow. Anything else, an error or a cancelled request included, writes `reject`; so does a request that
+  comes when no turn is running or 16 are already waiting. What the tool does without such a line is not asked about: the
+  host cannot see it before it happens, only show it as it runs, as a tool call.
+
+**What Pi does without asking.** Pi has no approval of its own: its documentation says it "does not ask for approval before
+every tool call", and runs `read`, `bash`, `edit` and `write` by default with the rights of the account that started it.
+Its RPC protocol lets an extension ask the client a question, and its own example extension `permission-gate.ts` asks
+before a `bash` command holding `rm -rf`, `sudo`, or `chmod` or `chown` with `777`. That question is what reaches the
+person; everything else Pi does, every other command and every file it reads or writes, it does unasked, and the entry's
+notice says so. Without the extension Pi asks nothing.
+
+**What Pi cannot do through this entry**: no images or embedded files in a prompt (text and resource links only); no
+session list or reopening (with `--no-session` nothing is kept, and the entry offers no `session/load`); no model or
+thinking-level choice from the chat, since Pi's are set by its own `--model` and settings; no MCP servers from the
+client; no slash commands listed; and no diff view, since Pi's `edit` result is text. Its model and credentials are Pi's
+own: a `models.json` in `PI_CODING_AGENT_DIR`, whose key it reads from an environment variable the host passes on.
+
+[`pi-acp`](https://www.npmjs.com/package/pi-acp) is an ACP adapter for Pi, MIT, in Zed's ACP registry, which runs `pi
+--mode rpc` itself. Version 0.0.34 with Pi 1.5.0 ran a turn as a `[host.agents]` entry (`program = "npx"`, `args = ["-y",
+"pi-acp@0.0.34"]`), and the app offers it as the **Pi** preset. It offers more of Pi than these rules do (its slash
+commands and usage arrived in that turn; its README also lists diffs for `edit` and reopening sessions) and is the better
+choice; the tool entry is for a Pi, or a tool like it, with no adapter.
 
 `canoa-host serve` reads the same Canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
 prints one JSON line per entry: its name, kind, address and the host's peer id. The app keeps `[host]` as it is when it
@@ -149,6 +231,13 @@ only from a dialog that shows its whole id.
   provider's working directory (Canoa.cfg's) and every directory on `PATH`, in that order: the first `python3.dll` found
   there is the one that loads.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
+- **A tool entry** runs its program with the host's environment, in the session's working directory, with the rights of
+  the account that runs the host. The host takes what the tool writes as untrusted: a title, an id or a failure loses its
+  control and format characters and is cut to 4 KiB, text is split into updates of at most 1 MiB, and a line over 16 MiB
+  ends the process. What the tool does is the tool's: only what its rules turn into `ask` reaches the person first. A
+  process ends with its session's end, its cancel or its connection: on Windows with everything it started, by a job object
+  of its own; on Unix, what it started stays in the host's process group for that connection and ends with the connection,
+  unless it left the group.
 - **A provider gets what a client asks of it**: the facade passes a session's `context`, `model`, `effort` and opaque
   `meta` through, as a provider's own interface defines them.
 

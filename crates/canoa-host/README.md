@@ -21,6 +21,8 @@ store accepts, and every message after that is sealed in the session the proof e
 - The in-band WebCrypto proof only: no connection reaches an agent without a paired key, and a removed key loses its link
   within about a second.
 - Loopback only. A proxy that ends TLS can carry it further, since the proof does not depend on TLS.
+- A command-line tool with no ACP, such as Pi, from one `[host.tools]` entry: rules in Canoa.cfg turn its JSON lines into
+  ACP updates and its questions into permission requests, and each session opens by saying what the tool does unasked.
 - A client cannot have the host start a program: a stdio MCP server in `session/new`, and `_meta`, never reach a stdio agent.
 - Per entry: working roots a session's `cwd` must be under, the paired keys that may use it, and how many at once.
 
