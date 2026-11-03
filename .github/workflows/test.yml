@@ -36,6 +36,12 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
+        env:
+          CANOA_TEST_METHOD: noise
+      # The host again under the other method: a WebCrypto home keeps serving the keys it paired.
+      - run: cargo test -p canoa-host --all-features
+        env:
+          CANOA_TEST_METHOD: webcrypto
       - run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
