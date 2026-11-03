@@ -17,10 +17,10 @@ use std::thread;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_bridge::agent::Agent;
 use coqui_acp_bridge::relay::relay;
-use coqui_agentic_peer::auth::{self, Sealed};
+use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_agentic_peer::link::Prefilled;
 use coqui_agentic_peer::mux;
-use coqui_peer_webcrypto::{Identity, PeerId, Trust, TrustStore, WebCrypto};
+use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel, Failure, Limits};
 
@@ -160,7 +160,7 @@ struct Served {
 
 /// What every connection shares.
 struct Shared {
-    method: WebCrypto,
+    method: Proof,
     store: Arc<TrustStore>,
     registry: Registry,
     unproven: Gate,
@@ -317,8 +317,8 @@ fn tool_args(name: &str, spec: &crate::tool::ToolSpec) -> Vec<OsString> {
 }
 
 impl Serving {
-    /// Binds every entry of `config` on its loopback address, proving peers with `identity` against `store`. Nothing is
-    /// accepted until [`Serving::run`].
+    /// Binds every entry of `config` on its loopback address, proving peers with `identity`, by its method, against `store`.
+    /// Nothing is accepted until [`Serving::run`].
     ///
     /// # Errors
     ///
@@ -334,8 +334,7 @@ impl Serving {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
-        let method =
-            WebCrypto::new(identity).with_initiators(Trust::Store(TrustStore::clone(&store)));
+        let method = Proof::new(identity).with_initiators(Trust::Store(TrustStore::clone(&store)));
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
@@ -428,6 +427,12 @@ impl Serving {
             listeners,
             listening,
         })
+    }
+
+    /// The method every entry proves by: its identity's.
+    #[must_use]
+    pub fn method(&self) -> Method {
+        self.shared.method.method()
     }
 
     /// Where each entry listens, in the configuration's order.
@@ -524,7 +529,7 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         &shared.method,
         channel,
         PROOF_LIMIT,
-        MAX_LINE + auth::RECORD_OVERHEAD,
+        shared.method.method().record_length(MAX_LINE),
     ) {
         Ok(established) => established,
         Err(error) => {

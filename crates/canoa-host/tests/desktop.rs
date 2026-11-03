@@ -13,9 +13,10 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use coqui_agentic_peer::auth::Identity;
 use coqui_agentic_peer::{auth, pairing};
+use coqui_peer_webcrypto::TrustStore;
 use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
-use coqui_peer_webcrypto::{Identity, TrustStore};
 use coqui_web::Dialer as _;
 use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel as _, Kind, Limits};
@@ -35,7 +36,7 @@ type Link = std::thread::JoinHandle<Result<Result<Value, String>, String>>;
 /// agent stays after its own input closes, so only something else ending it can end it.
 fn agent_running(args: &[&str]) -> (Host, u32, Link) {
     let host = Host::start_with(&agent_entry(), 1, args, &[("CANOA_TEST_AGENT_STAYS", "1")]);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let (pids, pid) = mpsc::channel();
     let (url, peer) = (host.url("fixture").to_owned(), host.peer);
@@ -114,7 +115,7 @@ fn provider_running(args: &[&str]) -> (Host, u32, Link) {
         quoted(&example("echo_provider", true).to_string_lossy())
     );
     let host = Host::start_with(&entry, 1, args, &[]);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let (pids, pid) = mpsc::channel();
     let (url, peer) = (host.url("echo").to_owned(), host.peer);
@@ -180,6 +181,7 @@ fn start_pairing(
     let mut child = Command::new(host_binary())
         .arg("pair")
         .args(args)
+        .args(["--method", support::method().name()])
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -242,7 +244,7 @@ fn pair_shows_a_pin_and_accepts_the_key_that_uses_it() {
     let url = shown["url"].as_str().expect("a URL");
     assert!(url.starts_with("ws://127.0.0.1:"), "{shown}");
 
-    let joiner = Identity::generate().expect("a key");
+    let joiner = support::key();
     let joiner_store = TrustStore::open(&scratch.0.join("joiner")).expect("a store");
     let host = join(url, &joiner, pin, &joiner_store).expect("the PIN pairs");
     assert_eq!(host, shown["peer"].as_str().expect("the host's id"));
@@ -261,7 +263,7 @@ fn one_wrong_pin_ends_the_pairing_and_accepts_nobody() {
     let (shown, mut child, _lines) = start_pairing(&home, &["--timeout-seconds", "60"]);
     let pin = shown["pin"].as_str().expect("a PIN");
     let wrong = if pin == "000000" { "111111" } else { "000000" };
-    let joiner = Identity::generate().expect("a key");
+    let joiner = support::key();
     let joiner_store = TrustStore::open(&scratch.0.join("joiner")).expect("a store");
     let url = shown["url"].as_str().expect("a URL");
     assert!(join(url, &joiner, wrong, &joiner_store).is_err());
@@ -310,7 +312,7 @@ fn a_web_page_cannot_reach_pair_and_costs_the_pin_nothing() {
     let opaque = upgrade_status(url, Some("null"));
     assert!(opaque.contains(" 403 "), "{opaque}");
 
-    let joiner = Identity::generate().expect("a key");
+    let joiner = support::key();
     let joiner_store = TrustStore::open(&scratch.0.join("joiner")).expect("a store");
     let pin = shown["pin"].as_str().expect("a PIN");
     join(url, &joiner, pin, &joiner_store).expect("the PIN still pairs a native client");

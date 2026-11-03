@@ -10,7 +10,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use coqui_peer_webcrypto::Identity;
+use coqui_agentic_peer::auth::Identity;
 use serde_json::{Value, json};
 use support::{Host, Scratch, cwd, example, host_binary, log_holding, quoted, with_link};
 
@@ -53,15 +53,24 @@ fn new_session(
     rpc.request("session/new", json!({"cwd": cwd, "mcpServers": []}))
 }
 
+/// Whether a link to a host that does not admit the key gave nothing. WebCrypto's initiator hears the refusal in the proof;
+/// Noise's finishes on its last message and hears it as the link ending before anything is answered.
+fn refused_link<T: core::fmt::Debug>(link: &Result<Result<T, Value>, String>) -> bool {
+    match support::method() {
+        coqui_agentic_peer::auth::Method::WebCrypto => link.is_err(),
+        _ => !matches!(link, Ok(Ok(_))),
+    }
+}
+
 #[test]
 fn an_unpaired_key_waits_until_a_person_accepts_it() {
     let host = Host::start(&agent_entry("fixture", ""), 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     let refused = with_link(host.url("fixture"), &client, host.peer, |rpc| {
         rpc.initialize()
     });
     assert!(
-        refused.is_err(),
+        refused_link(&refused),
         "an unpaired key gets nothing: {refused:?}"
     );
 
@@ -99,7 +108,7 @@ fn an_unpaired_key_waits_until_a_person_accepts_it() {
 #[test]
 fn a_paired_key_reaches_a_guatiao_provider() {
     let host = Host::start(&provider_entry("echo", ""), 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
     let (first, second) = with_link(host.url("echo"), &client, host.peer, |rpc| {
@@ -120,7 +129,7 @@ fn a_paired_key_reaches_a_guatiao_provider() {
 #[test]
 fn a_client_cannot_have_the_host_start_a_program() {
     let host = Host::start(&agent_entry("fixture", ""), 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
     with_link(host.url("fixture"), &client, host.peer, |rpc| {
@@ -154,7 +163,7 @@ fn a_cwd_outside_the_working_roots_is_refused_for_agents_and_providers() {
     let roots = format!("working_roots = [{}]", quoted(&root.to_string_lossy()));
     let config = agent_entry("fixture", &roots) + &provider_entry("echo", &roots);
     let host = Host::start(&config, 2);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let inside = root.join("project").to_string_lossy().into_owned();
     let outside = scratch.0.to_string_lossy().into_owned();
@@ -171,7 +180,7 @@ fn a_cwd_outside_the_working_roots_is_refused_for_agents_and_providers() {
 #[test]
 fn removing_a_key_ends_its_link() {
     let host = Host::start(&agent_entry("fixture", ""), 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     with_link(host.url("fixture"), &client, host.peer, |rpc| {
         rpc.initialize().expect("initialize is answered");
@@ -188,9 +197,9 @@ fn removing_a_key_ends_its_link() {
     })
     .expect("the key was paired when it connected");
     assert!(
-        with_link(host.url("fixture"), &client, host.peer, |rpc| rpc
-            .initialize())
-        .is_err(),
+        refused_link(&with_link(host.url("fixture"), &client, host.peer, |rpc| {
+            rpc.initialize()
+        })),
         "a removed key is refused"
     );
 }
@@ -198,7 +207,7 @@ fn removing_a_key_ends_its_link() {
 #[test]
 fn a_key_removed_before_its_first_message_never_reaches_an_agent() {
     let host = Host::start(&agent_entry("fixture", ""), 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let answered = with_link(host.url("fixture"), &client, host.peer, |rpc| {
         let removed = host.command(&["revoke", &client.peer_id().to_string()]);
@@ -216,8 +225,8 @@ fn a_key_removed_before_its_first_message_never_reaches_an_agent() {
 
 #[test]
 fn an_entry_that_lists_its_peers_turns_away_other_paired_keys() {
-    let listed = Identity::generate().expect("a key");
-    let other = Identity::generate().expect("a key");
+    let listed = support::key();
+    let other = support::key();
     let peers = format!("peers = [\"{}\"]", listed.peer_id());
     let host = Host::start(&agent_entry("fixture", &peers), 1);
     host.pair(&listed);
@@ -236,9 +245,9 @@ fn an_entry_that_lists_its_peers_turns_away_other_paired_keys() {
 #[test]
 fn a_client_pinning_another_host_key_is_refused_before_any_message() {
     let host = Host::start(&agent_entry("fixture", ""), 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
-    let impostor = Identity::generate().expect("a key").peer_id();
+    let impostor = support::key().peer_id();
     assert!(with_link(host.url("fixture"), &client, impostor, |_| ()).is_err());
 }
 
@@ -313,7 +322,7 @@ fn a_provider_library_that_offers_nothing_by_that_id_fails_the_connection_alone(
     let config = provider_entry("echo", "")
         + &provider_entry("wrong", "").replace("\"echo_provider\"", "\"nobody\"");
     let host = Host::start(&config, 2);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let failed = with_link(host.url("wrong"), &client, host.peer, |rpc| {
         rpc.initialize()
@@ -335,7 +344,7 @@ fn a_source_entry_serves_the_provider_its_settings_describe() {
         ),
         1,
     );
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     assert_eq!(
         hello(&host, &client, "source").as_deref(),
@@ -352,7 +361,7 @@ fn a_relative_path_in_source_settings_is_taken_from_the_configs_directory() {
         "[host.providers.source.source_settings]\nprefix_file = \"prefix.txt\"",
     );
     let host = Host::start_in(scratch, &config, 1, &[]);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     assert_eq!(
         hello(&host, &client, "source").as_deref(),
@@ -368,7 +377,7 @@ fn a_provider_built_from_settings_answers_with_them() {
     )
     .replace("\"echo_provider\"", "\"prefixed_echo\"");
     let host = Host::start(&config, 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     assert_eq!(
         hello(&host, &client, "prefixed").as_deref(),
@@ -395,7 +404,7 @@ fn settings_that_are_missing_wrong_or_unwanted_fail_that_connection_alone() {
         )
         + &provider_entry("echo", "");
     let host = Host::start(&config, 6);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     for entry in ["missing", "misspelled", "mistyped", "refused", "unwanted"] {
         let failed = hello(&host, &client, entry);
@@ -412,7 +421,7 @@ fn a_client_cannot_send_the_host_line_itself() {
     )
     .replace("\"echo_provider\"", "\"prefixed_echo\"");
     let host = Host::start(&config, 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
     let text = with_link(host.url("prefixed"), &client, host.peer, |rpc| {
@@ -449,7 +458,7 @@ fn a_settings_value_never_reaches_the_hosts_log() {
         )
         + &prefixed("served", &format!("prefix = \"{SECRET}\""));
     let (host, log) = Host::start_logged(Scratch::new(), &config, 5, &[]);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     for entry in ["misspelled", "mistyped", "unwanted", "source"] {
         assert!(hello(&host, &client, entry).is_err(), "{entry}");
@@ -471,7 +480,7 @@ fn a_settings_value_never_reaches_the_hosts_log() {
 fn what_a_provider_prints_goes_to_the_hosts_log_and_never_to_the_client() {
     let config = provider_entry("noisy", "").replace("\"echo_provider\"", "\"noisy_echo\"");
     let (host, log) = Host::start_logged(Scratch::new(), &config, 1, &[]);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     assert_eq!(
         hello(&host, &client, "noisy").as_deref(),
@@ -494,4 +503,91 @@ fn what_a_provider_prints_goes_to_the_hosts_log_and_never_to_the_client() {
             "{printed} is in the log: {written}"
         );
     }
+}
+
+#[test]
+fn a_client_of_the_other_method_is_refused_and_the_host_says_why() {
+    use coqui_agentic_peer::auth::Method;
+    let (host, log) = Host::start_logged(Scratch::new(), &agent_entry("fixture", ""), 1, &[]);
+    let other = Method::ALL
+        .into_iter()
+        .find(|method| *method != support::method())
+        .expect("another method");
+    let client = Identity::generate(other).expect("a key");
+    host.pair(&client);
+    let refused = with_link(host.url("fixture"), &client, host.peer, |rpc| {
+        rpc.initialize()
+    });
+    assert!(!matches!(refused, Ok(Ok(_))), "{refused:?}");
+    let said = format!(
+        "the peer proves by {other}, and this endpoint only by {}",
+        support::method()
+    );
+    let written = log_holding(&log, &[&said]);
+    assert!(written.contains(&said), "{written}");
+}
+
+#[test]
+fn a_home_with_an_identity_of_each_method_names_the_one_to_use() {
+    use coqui_agentic_peer::auth::Method;
+    let host = Host::start(&agent_entry("fixture", ""), 1);
+    let other = Method::ALL
+        .into_iter()
+        .find(|method| *method != support::method())
+        .expect("another method");
+    let theirs = std::process::Command::new(host_binary())
+        .args(["id", "--method", other.name()])
+        .env("COQUI_AGENTIC_PEER_HOME", host.home())
+        .output()
+        .expect("id runs");
+    assert!(theirs.status.success());
+    // A key of its own: one key is never used by both methods.
+    assert_ne!(
+        String::from_utf8_lossy(&theirs.stdout).trim(),
+        host.peer.to_string()
+    );
+    let neither = std::process::Command::new(host_binary())
+        .arg("id")
+        .env("COQUI_AGENTIC_PEER_HOME", host.home())
+        .output()
+        .expect("id runs");
+    assert_eq!(neither.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&neither.stderr).contains("an identity of each method"),
+        "{neither:?}"
+    );
+    let ours = host.command(&["id"]);
+    assert_eq!(
+        String::from_utf8_lossy(&ours.stdout).trim(),
+        host.peer.to_string()
+    );
+}
+
+#[test]
+fn a_fresh_home_serves_by_the_default_method() {
+    let scratch = Scratch::new();
+    let config = scratch.0.join("Canoa.cfg");
+    std::fs::write(&config, agent_entry("fixture", "")).expect("Canoa.cfg is written");
+    let mut child = std::process::Command::new(host_binary())
+        .args(["serve", "--config"])
+        .arg(&config)
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the host starts");
+    let mut line = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(child.stdout.take().expect("its output")),
+        &mut line,
+    )
+    .expect("a line per entry");
+    let _ = child.kill();
+    let _ = child.wait();
+    let value: Value = serde_json::from_str(&line).expect("JSON");
+    assert_eq!(
+        value["method"],
+        coqui_agentic_peer::auth::Method::DEFAULT.name()
+    );
 }

@@ -24,7 +24,7 @@ mod with_python {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use coqui_peer_webcrypto::Identity;
+    use coqui_agentic_peer::auth::Identity;
     use serde_json::{Value, json};
 
     use crate::support::{Host, Scratch, cwd, log_holding, quoted, with_link};
@@ -234,7 +234,7 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
             &[coqui_acp.join("examples/provider-python/echo")],
         );
         let host = Host::start_in(Scratch::new(), &config, 1, &environment(&python));
-        let client = Identity::generate().expect("a key");
+        let client = crate::support::key();
         host.pair(&client);
         assert_eq!(
             turns(&host, &client, &["hello", "again"]),
@@ -248,7 +248,7 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/python/printing");
         let config = source_entry(&python, "printing_echo_echo", &[fixture]);
         let (host, log) = Host::start_logged(Scratch::new(), &config, 1, &environment(&python));
-        let client = Identity::generate().expect("a key");
+        let client = crate::support::key();
         host.pair(&client);
         assert_eq!(
             turns(&host, &client, &["hello", "flood", "again"]),

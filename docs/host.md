@@ -164,7 +164,7 @@ commands and usage arrived in that turn; its README also lists diffs for `edit` 
 choice; the tool entry is for a Pi, or a tool like it, with no adapter.
 
 `canoa-host serve` reads the same Canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
-prints one JSON line per entry: its name, kind, address and the host's peer id. The app keeps `[host]` as it is when it
+prints one JSON line per entry: its name, kind, address, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
 saves its own settings.
 
 ## In the desktop app
@@ -187,8 +187,10 @@ a program to pair with.
 
 ## Pairing
 
-The host proves itself and its clients with the same WebCrypto method as every Canoa connection, using this user's
-`coqui-agentic-peer` identity and trust store, the ones `coqui-acp-bridge serve --paired` uses.
+The host proves itself and its clients by the method of this user's `coqui-agentic-peer` identity, Noise or WebCrypto,
+with the trust store `coqui-acp-bridge serve --paired` uses. A home keeps each method's identity in a file of its own:
+a home paired before Noise keeps its WebCrypto identity and its paired keys, and `--method` names one when a home has
+both. A key is of one method, and a client of the other is refused, which the host's log says.
 
 A browser pairs by connecting once:
 
@@ -202,7 +204,9 @@ A browser pairs by connecting once:
 
 A program with a native key, such as `coqui-acp-bridge`, can pair by PIN instead: **Show a PIN** in Hosting, or
 `canoa-host pair`, shows six digits and an address, and `coqui-acp-bridge pair-dial ADDRESS` with those digits pairs it.
-One wrong try ends the PIN. A browser cannot pair by PIN: the WebCrypto module has no PIN exchange.
+One wrong try ends the PIN, and it pairs by the host's method. `canoa-host pair` refuses a browser, so a page cannot spend
+the PIN; a browser pairs with it by connecting once. The extension pairs by PIN with `coqui-acp-bridge pair-accept
+--method noise`.
 
 A key's first use is always the person's decision: nothing is accepted automatically, and the app pairs or removes a key
 only from a dialog that shows its whole id.

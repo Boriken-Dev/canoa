@@ -19,6 +19,7 @@ use canoa_host::{
     Config, HostLine, Origin, PeerState, ProviderOptions, ServeOptions, Serving, peers,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use coqui_agentic_peer::auth::Method;
 use coqui_agentic_peer::{auth, home, pairing};
 use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel as _, Failure, Limits};
@@ -47,7 +48,10 @@ enum Command {
     /// Check Canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
     /// Print this host's peer id, which a client pins.
-    Id,
+    Id {
+        #[command(flatten)]
+        method: MethodArg,
+    },
     /// List paired keys, then keys waiting to be paired.
     Peers {
         /// How to print them.
@@ -76,6 +80,8 @@ enum Command {
         /// End, the PIN unused, when standard input closes: for a program that runs this as its child.
         #[arg(long)]
         until_stdin_closes: bool,
+        #[command(flatten)]
+        method: MethodArg,
     },
     /// Serve one Guatiao agent provider as an ACP agent on standard input and output.
     Provider {
@@ -116,10 +122,27 @@ enum Command {
     },
 }
 
+/// Which proof this host runs, chosen here and never negotiated on a connection.
+#[derive(Clone, Copy, Debug, Args)]
+struct MethodArg {
+    /// `noise`, or `webcrypto` for a browser whose WebCrypto has no X25519. This user's identity of that method, made when
+    /// absent. Without it, the identity this user has, or a new one of the default method; with one of each, name one.
+    #[arg(long, value_name = "METHOD")]
+    method: Option<Method>,
+}
+
+impl MethodArg {
+    fn identity(self) -> Result<auth::Identity, Failed> {
+        home::identity(None, self.method).map_err(Failed::run)
+    }
+}
+
 #[derive(Debug, Args)]
 struct ServeArgs {
     #[command(flatten)]
     config: ConfigArgs,
+    #[command(flatten)]
+    method: MethodArg,
     /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
     #[arg(long)]
     until_stdin_closes: bool,
@@ -194,7 +217,7 @@ fn print(line: &str) -> Result<(), Failed> {
 
 fn serve(args: &ServeArgs) -> Result<(), Failed> {
     let config = load(&args.config)?;
-    let identity = home::identity(None).map_err(Failed::run)?;
+    let identity = args.method.identity()?;
     let peer = identity.peer_id().to_string();
     let program = std::env::current_exe()
         .map_err(|error| Failed::run(format!("this program cannot find itself: {error}")))?;
@@ -210,6 +233,7 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
             "kind": listening.kind,
             "url": listening.url,
             "peer": peer,
+            "method": serving.method().name(),
         });
         print(&line.to_string())?;
     }
@@ -249,11 +273,16 @@ fn end_with_input(code: i32, before: impl FnOnce() + Send + 'static) -> Result<(
 /// No browser sends this as its `Origin`, so the pairing listener takes only clients that send none: native programs.
 const NO_BROWSER: &str = "-";
 
-fn pair(listen: SocketAddr, timeout: Duration, until_stdin_closes: bool) -> Result<(), Failed> {
+fn pair(
+    listen: SocketAddr,
+    timeout: Duration,
+    until_stdin_closes: bool,
+    method: MethodArg,
+) -> Result<(), Failed> {
     if !listen.ip().is_loopback() {
         return Err(Failed::usage("pair listens only on loopback"));
     }
-    let identity = Arc::new(home::identity(None).map_err(Failed::run)?);
+    let identity = Arc::new(method.identity()?);
     let store = Arc::new(store()?);
     let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
@@ -275,6 +304,7 @@ fn pair(listen: SocketAddr, timeout: Duration, until_stdin_closes: bool) -> Resu
         &serde_json::json!({
             "pin": shown.pin.as_str(),
             "peer": identity.peer_id().to_string(),
+            "method": identity.method().name(),
             "url": format!("ws://{bound}"),
         })
         .to_string(),
@@ -391,21 +421,18 @@ fn run(cli: Cli) -> Result<(), Failed> {
     match cli.command {
         Command::Serve(args) => serve(&args),
         Command::Check(args) => check(&args),
-        Command::Id => print(
-            &home::identity(None)
-                .map_err(Failed::run)?
-                .peer_id()
-                .to_string(),
-        ),
+        Command::Id { method } => print(&method.identity()?.peer_id().to_string()),
         Command::Peers { format } => list_peers(format),
         Command::Pair {
             listen,
             timeout_seconds,
             until_stdin_closes,
+            method,
         } => pair(
             listen,
             Duration::from_secs(timeout_seconds),
             until_stdin_closes,
+            method,
         ),
         Command::Accept { peer } => {
             let id = peers::accept(&store()?, &peer).map_err(peers_failure)?;

@@ -18,7 +18,7 @@ store accepts, and every message after that is sealed in the session the proof e
 - A provider written in Python, Lua, JavaScript, Rhai or WebAssembly through its Guatiao source, and a provider built from
   a `settings` table checked against its schema. Settings reach the provider's process on its standard input, never its
   command line.
-- The in-band WebCrypto proof only: no connection reaches an agent without a paired key, and a removed key loses its link
+- The in-band proof only, by Noise or WebCrypto, the method of this user's identity: no connection reaches an agent without a paired key, and a removed key loses its link
   within about a second.
 - Loopback only. A proxy that ends TLS can carry it further, since the proof does not depend on TLS.
 - A command-line tool with no ACP, such as Pi, from one `[host.tools]` entry: rules in Canoa.cfg turn its JSON lines into
@@ -60,7 +60,7 @@ paths = ["python/guatiao", "python/coqui_acp_provider"]
 ```
 
 ```sh
-canoa-host serve            # one JSON line per entry: name, kind, url, and this host's peer id
+canoa-host serve            # one JSON line per entry: name, kind, url, this host's peer id and its method
 canoa-host peers            # a client that connected once is waiting
 canoa-host accept <PEER>    # pair it, after comparing the id with the one the client shows
 ```
@@ -79,20 +79,21 @@ assert_eq!(config.entries[0].name, "echo");
 ## Command line
 
 ```text
-canoa-host serve [--config FILE] [--until-stdin-closes]
+canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto]
 canoa-host check [--config FILE] [--format text|json]
-canoa-host id
+canoa-host id [--method noise|webcrypto]
 canoa-host peers [--format text|json]
 canoa-host accept PEER
 canoa-host revoke PEER
-canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes]
+canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto]
 canoa-host provider (--library FILE | --source FILE) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin]
 ```
 
 `serve --until-stdin-closes` is for a program running the host as its child, such as Canoa's desktop app: when its input
 closes, the host ends every agent it started, then itself. `pair` shows a PIN that a native client, such as
-`coqui-acp-bridge pair-dial`, uses to pair; a browser has no PIN exchange, and pairs by connecting once and being accepted.
+`coqui-acp-bridge pair-dial`, uses to pair; it refuses a browser, which pairs by connecting once and being accepted. `--method` names
+the identity's method; without it, the one this user has, or the default for a new one.
 
 Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg was wrong.
 

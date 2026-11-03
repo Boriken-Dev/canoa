@@ -11,7 +11,7 @@ mod support;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use coqui_peer_webcrypto::Identity;
+use coqui_agentic_peer::auth::Identity;
 use coqui_web::websocket::Channel;
 use serde_json::{Value, json};
 use support::{Host, Rpc, Scratch, WAIT, cwd, example, quoted, running, with_link};
@@ -156,7 +156,7 @@ fn open(rpc: &Rpc<'_, Channel>, dir: &str) -> (String, Value) {
 
 fn paired(config: &str) -> (Host, Identity) {
     let host = Host::start(config, 1);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     (host, client)
 }
@@ -479,7 +479,7 @@ fn a_tool_run_per_message_says_so_and_resumes_the_session_it_reported() {
         "resume_args = [\"--session-id\", \"{session}\"]",
     ) + &message_entry("forgetful", &["--mode", "json"], "");
     let host = Host::start(&config, 2);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
     with_link(host.url("once"), &client, host.peer, |rpc| {
@@ -557,7 +557,7 @@ fn a_session_takes_no_mcp_server_and_a_tool_that_cannot_start_says_so() {
     let config = pi_config(&["--mode", "rpc"], "")
         + "\n[host.tools.missing]\nprogram = \"canoa-host-test-no-such-program\"\nruns = \"session\"\nunasked = \"x\"\nprompt = { type = \"prompt\", message = \"{prompt}\" }\n";
     let host = Host::start(&config, 2);
-    let client = Identity::generate().expect("a key");
+    let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
     with_link(host.url("pi"), &client, host.peer, |rpc| {

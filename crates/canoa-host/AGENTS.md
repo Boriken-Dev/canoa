@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `d64ea1a`), `coqui-agentic-peer`, `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `2dd3266`), `coqui-agentic-peer` (`a4c1e01`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
 The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `config`, `peers`, `provider`, `serve`, `tool`.
 
@@ -97,7 +97,8 @@ pub const START_LIMIT: Duration = 30 s;        // for a provider's process to co
 #[non_exhaustive] pub struct ServeOptions { pub provider_program: PathBuf }
 pub fn ServeOptions::new(provider_program: impl Into<PathBuf>) -> ServeOptions
 
-pub fn Serving::bind(config: &Config, identity: Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
+pub fn Serving::bind(config: &Config, identity: coqui_agentic_peer::auth::Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
+pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the identity's: every entry proves by it
 pub fn Serving::listening(&self) -> &[Listening]
 pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another thread
 pub fn Serving::run(self)                      // takes connections until the process ends
@@ -108,7 +109,7 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 - `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound: end the process to free them.
 
 - `bind` binds every entry before any is served, so a failure leaves none listening. A plain socket beyond loopback is refused by `coqui-web` too.
-- Each connection: the WebSocket handshake, then the `coqui-peer-webcrypto` proof within `PROOF_LIMIT`, with the trust store deciding (a stranger that proved its key is recorded as waiting). Then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
+- Each connection: the WebSocket handshake, then the proof of the identity's method, Noise (`coqui-peer-noise`) or WebCrypto (`coqui-peer-webcrypto`), within `PROOF_LIMIT`; a client of the other method fails it, and the log names both methods. Then the trust store decides (a stranger that proved its key is recorded as waiting), then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
 - The first message must be plain ACP: a link of streams (`coqui_agentic_peer::mux`) is refused. Then a fresh process serves that connection, relayed by `coqui_acp_bridge::relay`, and is stopped with its process tree when either side ends.
 - An agent entry runs `program args`. Every message from the client to it is parsed and the host's own serialization forwarded: `params` other than an object is answered `-32602`, since a list would fill a request's fields in order; `_meta` is removed at every depth; a request whose `params.mcpServers` holds anything but `http` or `sse` over `https`, or `acp`, is answered `-32602` and never reaches the agent; with `working_roots`, so is one whose `cwd` or `additionalDirectories` is outside them; what is not one JSON object is answered `-32700` or `-32600`. A refused notification is dropped.
 - A tool entry is served as an agent entry whose program is `provider_program` itself: `provider_program tool --name NAME --spec JSON`, the entry as `ToolSpec` serializes it. So the scope above applies to its clients, and the process, with every tool process it starts, ends with the connection.
@@ -199,21 +200,22 @@ A key is paired when the store accepts it. `accept` takes only a key that is wai
 ## Command line
 
 ```text
-canoa-host serve [--config FILE] [--until-stdin-closes]
+canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto]
 canoa-host check [--config FILE] [--format text|json]
-canoa-host id
+canoa-host id [--method noise|webcrypto]
 canoa-host peers [--format text|json]
 canoa-host accept PEER
 canoa-host revoke PEER
-canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes]
+canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto]
 canoa-host provider (--library FILE | --source FILE) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin [--connect ADDRESS]]
 canoa-host tool --name NAME --spec JSON
 ```
 
-- `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer"}`, `peer` being this host's id, once every entry is bound; then it serves until stopped. It logs on standard error.
+- `--method` names the proof: this user's identity of that method, made when absent. Without it, the identity this user has, or a new one of the default method, WebCrypto; a home holding one of each refuses (status 1) until one is named. An identity never changes method.
+- `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound; then it serves until stopped. It logs on standard error.
 - `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every agent is ended (`Stopper::stop_agents`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
-- `pair` (`--listen` default `127.0.0.1:0`, loopback only, else status 2; `--timeout-seconds` default 300) prints `{"pin", "peer", "url"}`, a six-digit PIN, this host's id and the address to dial; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.
+- `pair` (`--listen` default `127.0.0.1:0`, loopback only, else status 2; `--timeout-seconds` default 300) prints `{"pin", "peer", "method", "url"}`, a six-digit PIN, this host's id, its method and the address to dial, and pairs by that method; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.
 - On `serve --until-stdin-closes` and `pair --until-stdin-closes`, nothing is logged between the input closing and the exit, and the process exits within 5 s whatever is left: a parent that died can leave standard error a pipe a write to which never returns (seen on Windows under a Dart parent).
 - `accept` and `revoke` take `--` before the id.
 - `tool` serves one tool entry on standard input and output, `JSON` being the entry as `ToolSpec` serializes it (without `listen`, `working_roots`, `peers`, `max_peers`): what `serve` runs per connection. A `JSON` that is not one, or that `check` refuses, is status 2.
@@ -229,11 +231,12 @@ canoa-host tool --name NAME --spec JSON
 | --- | --- | --- |
 | `CANOA_CONFIG` | Canoa.cfg to read, below `--config` | the platform's place, above |
 | `CANOA_LOG` | what to log, a `tracing` filter | `info` |
-| `COQUI_AGENTIC_PEER_HOME` | the directory of the identity (`identity`) and trust store (`peers/`) | `coqui-agentic-peer` under `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME` or `~/.config` |
+| `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `coqui-agentic-peer` under `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME` or `~/.config` |
 | `NO_COLOR` | no colour in the log | colour on a terminal |
 
 ## Gotchas
 
+- Under Noise a client's handshake ends before the host decides, so a client the host refuses sees its link end rather than a failed proof.
 - The identity and trust store are the ones `coqui-acp-bridge serve --paired` uses: a key paired for one is paired for the other, and `canoa-host revoke` removes it from both.
 - A stdio agent inherits the host's environment and working directory. An agent can still start whatever its own tools start when the client allows them; the host stops only what a client could start without the agent asking.
 - A paired key reaches every session an agent keeps for this user: `session/list` and `session/load` pass to a stdio agent unchanged.

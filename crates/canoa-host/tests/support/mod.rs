@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
-use coqui_agentic_peer::auth::{self, Sealed};
-use coqui_peer_webcrypto::{Identity, PeerId, Trust, TrustStore, WebCrypto};
+use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
+use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_web::Dialer as _;
 use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel, Kind, Limits};
@@ -24,6 +24,23 @@ use serde_json::{Value, json};
 
 pub const WAIT: Duration = Duration::from_secs(20);
 const MAX: usize = 16 * 1024 * 1024;
+
+/// The proof method a run of these tests uses: `CANOA_TEST_METHOD`, `noise` or `webcrypto`, else the default method. The
+/// suite runs once per method.
+pub fn method() -> Method {
+    std::env::var("CANOA_TEST_METHOD")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .map_or(Method::DEFAULT, |name| {
+            name.parse()
+                .expect("CANOA_TEST_METHOD is noise or webcrypto")
+        })
+}
+
+/// A new client key of this run's method.
+pub fn key() -> Identity {
+    Identity::generate(method()).expect("a key")
+}
 
 pub fn host_binary() -> &'static str {
     env!("CARGO_BIN_EXE_canoa-host")
@@ -152,6 +169,7 @@ impl Host {
             .arg("--config")
             .arg(&path)
             .args(args)
+            .args(["--method", method().name()])
             .envs(env.iter().map(|(name, value)| (name, value)))
             .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
             .env("CANOA_LOG", "debug")
@@ -178,6 +196,7 @@ impl Host {
                 .recv_timeout(WAIT)
                 .expect("the host says where each entry listens");
             let value: Value = serde_json::from_str(&line).expect("one JSON object per line");
+            assert_eq!(value["method"], method().name(), "the method it proves by");
             urls.insert(
                 value["name"].as_str().expect("a name").to_owned(),
                 value["url"].as_str().expect("a url").to_owned(),
@@ -234,8 +253,11 @@ impl Host {
 
     /// Another `canoa-host` command on this host's home.
     pub fn command(&self, args: &[&str]) -> Output {
+        let named = ["--method", method().name()];
+        let takes_method = matches!(args.first(), Some(&"id" | &"pair"));
         Command::new(host_binary())
             .args(args)
+            .args(if takes_method { &named[..] } else { &[] })
             .env("COQUI_AGENTIC_PEER_HOME", self.home())
             .output()
             .expect("the command runs")
@@ -359,11 +381,11 @@ pub fn with_link<R>(
     let url = url::Url::parse(url).map_err(|error| error.to_string())?;
     let channel = websocket::Dialer::new()
         .with_frames(Frames::Binary)
-        .with_limits(Limits::default().with_max_message(MAX + auth::RECORD_OVERHEAD))
+        .with_limits(Limits::default().with_max_message(method().record_length(MAX)))
         .dial(Kind::WebSocket, &url, WAIT)
         .map_err(|failure| failure.to_string())?;
-    let method = WebCrypto::new(identity.clone()).with_responders(Trust::pinned([host]));
-    let established = auth::prove_out(&method, &channel, WAIT, MAX + auth::RECORD_OVERHEAD)
+    let proof = Proof::new(identity.clone()).with_responders(Trust::pinned([host]));
+    let established = auth::prove_out(&proof, &channel, WAIT, method().record_length(MAX))
         .map_err(|error| error.to_string())?;
     let sealed = Sealed::new(&channel, established.session);
     let rpc = Rpc {
