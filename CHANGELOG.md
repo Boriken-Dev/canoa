@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- The app builds on `coqui_acp` `2b83200`. A turn the agent ends as cancelled shows "Stopped." and ends; a permission request the app cannot read is answered cancelled and said in the conversation, while the turn goes on; output a bridge dropped while nobody was connected is said as a notice; and a client takes only the traffic of the sessions it opened.
-- `canoa-host` builds on coqui-acp `2b83200`, whose bridge stops an agent with everything it started: by job object on Windows, by process group on Unix.
+- The app builds on `coqui_acp` `d64ea1a`. A turn the agent ends as cancelled shows "Stopped." and ends; a permission request the app cannot read is answered cancelled and said in the conversation, while the turn goes on; output a bridge dropped while nobody was connected is said as a notice; and a client takes only the traffic of the sessions it opened.
+- `canoa-host` builds on coqui-acp `d64ea1a`, whose bridge stops an agent with everything it started: by job object on Windows, by process group on Unix.
 - Text files are LF on every platform (`* text=auto eol=lf`). A Windows checkout made
   before this needs `git add --renormalize .` or a fresh clone.

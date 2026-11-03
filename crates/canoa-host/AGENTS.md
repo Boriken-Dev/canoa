@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `2b83200`), `coqui-agentic-peer`, `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `d64ea1a`), `coqui-agentic-peer`, `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
 The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Peer`, `PeerState`, `PeersError`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving` and `Stopper`. Public modules: `config`, `peers`, `provider`, `serve`.
 
