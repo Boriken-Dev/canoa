@@ -3,7 +3,9 @@
 // the host, and a whole turn then runs through the host to its agent.
 //
 //   CANOA_E2E_BROWSER=path/to/browser CANOA_E2E_HOST_URL=ws://127.0.0.1:PORT CANOA_E2E_HOST_PEER=sha256:...
-//     [CANOA_E2E_ACCEPT=path/to/canoa-host] node e2e/host.mjs
+//     [CANOA_E2E_ACCEPT=path/to/canoa-host] [CANOA_E2E_METHOD=noise] node e2e/host.mjs
+//
+// CANOA_E2E_METHOD is the method the host proves by, which the person names adding its entry: `webcrypto` unless set.
 //
 // The entry must echo a prompt as `echo: TEXT`, as canoa-host's stdio_agent example does. With CANOA_E2E_ACCEPT the key is
 // paired by `canoa-host accept`, under this environment's COQUI_AGENTIC_PEER_HOME; without it the run waits up to five minutes
@@ -24,6 +26,7 @@ const browser = process.env.CANOA_E2E_BROWSER;
 const hostUrl = process.env.CANOA_E2E_HOST_URL;
 const hostPeer = process.env.CANOA_E2E_HOST_PEER;
 const accept = process.env.CANOA_E2E_ACCEPT;
+const METHOD = process.env.CANOA_E2E_METHOD ?? "webcrypto";
 if (!browser || !hostUrl || !hostPeer) throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_HOST_URL and CANOA_E2E_HOST_PEER");
 
 const work = mkdtempSync(path.join(tmpdir(), "canoa-e2e-host-"));
@@ -101,8 +104,8 @@ try {
 
   // The browser's own id, as its permissions page shows it to the person.
   const permissions = await openTab(`chrome-extension://${new URL(worker.url).hostname}/permissions.html`);
-  const shown = await waitFor("the browser's id", () => permissions.run("document.querySelector('#standing-command')?.textContent ?? ''"));
-  const browserId = shown.split(" ").at(-1);
+  // The key of the host's method, which is the one that connects to it: each method has a key of its own.
+  const browserId = await waitFor("the browser's id", () => permissions.run(`import("./acp-dial.js").then((dial) => dial.ownPeerId("${METHOD}"))`));
   assert.match(browserId, /^sha256:[0-9a-f]{64}$/);
   step(`the browser's key is ${browserId}`);
 
@@ -117,6 +120,7 @@ try {
   await view.run(`(() => {
       const inputs = [...document.querySelectorAll('input[type=text]')];
       inputs[0].value = 'Canoa host'; inputs[1].value = ${JSON.stringify(hostUrl)}; inputs[2].value = ${JSON.stringify(hostPeer)};
+      [...document.querySelectorAll('fieldset')].find((set) => set.querySelector('legend')?.textContent === 'Add one by hand').querySelector('select').value = '${METHOD}';
       [...document.querySelectorAll('button')].find((b) => b.textContent === 'Add this agent').click();
     })()`);
   await waitFor("the added agent", () => view.run("document.querySelectorAll('input[type=checkbox]:checked').length >= 1"));

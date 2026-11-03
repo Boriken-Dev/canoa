@@ -1,14 +1,25 @@
-// A proven channel to an agent: the WebCrypto handshake on WebTransport or a WebSocket, then every message sealed. Its code ships
-// with the extension, so nothing on the path can replace it.
-import { createInitiator, loadOrCreateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
+// A proven channel to an agent: the handshake of the agent's method on WebTransport or a WebSocket, then every message sealed.
+// Its code ships with the extension, so nothing on the path can replace it. The method is the one stored with the agent's key,
+// never one a connection suggests.
+import * as webcrypto from "./vendor/coqui-peer-webcrypto.mjs";
+import * as noise from "./vendor/coqui-peer-noise.mjs";
 import { createMux } from "./vendor/coqui-agentic-peer/mux.mjs";
 
-const STORE = "dev.boriken.canoa.peer";
+/** The proof methods, in no order of preference. */
+export const METHODS = Object.freeze(["noise", "webcrypto"]);
+/** What a key made here, or an agent added with none named, proves by. */
+export const DEFAULT_METHOD = "webcrypto";
+// Each method's key in a database of its own, so one key is never used by both.
+const STORES = Object.freeze({ webcrypto: "dev.boriken.canoa.peer", noise: "dev.boriken.canoa.peer-noise" });
+const MODULES = Object.freeze({ webcrypto, noise });
 const PROOF_MS = 15_000;
+// A pairing waits for the person at the other end only as long as its PIN does.
+const PAIR_MS = 120_000;
 // A path that drops QUIC shows only as silence, and the WebSocket is still worth trying within the proof's time.
 const WEBTRANSPORT_OPEN_MS = 5_000;
-// What coqui-acp-bridge takes: a 16 MiB line and a record's overhead.
-const MAX_MESSAGE = 16 * 1024 * 1024 + 64;
+// What coqui-acp-bridge takes: a 16 MiB line, as a record of each method.
+const MAX_LINE = 16 * 1024 * 1024;
+const MAX_MESSAGE = Math.max(MAX_LINE + 64, noise.recordLength(MAX_LINE));
 // Nobody has proved anything yet, so nobody gets to send much: the same limit the bridge holds a peer to.
 const MAX_PROOF_MESSAGE = 3072;
 const MAX_PROOF_WAITING = 8;
@@ -224,9 +235,91 @@ async function acpOverLink(proven) {
   };
 }
 
-/** This browser's own peer id, which an agent's machine allows and which names it in what `coqui-acp-bridge mcp-config` prints. */
-export async function ownPeerId() {
-  return (await loadOrCreateIdentity(STORE)).peerId;
+/** The method an agent proves by: one stored before agents named a method is WebCrypto's, the only method then. */
+export function methodOf(agent) {
+  return agent?.method === undefined ? "webcrypto" : agent.method;
+}
+
+/**
+ * Why this browser cannot reach an agent of `method`, or null. It asks only the local runtime, before any connection, so nothing on
+ * the network can change the answer; and a false answer never selects another method.
+ */
+export async function unreachable(method) {
+  if (method === "webcrypto") return null;
+  if (method === "noise") return (await noise.supported()) ? null : "this browser's WebCrypto has no X25519, which the Noise method needs";
+  return "this browser cannot run that method";
+}
+
+async function localIdentity(method) {
+  const why = await unreachable(method);
+  if (why !== null) throw new Error(`unreachable from this browser: ${why}`);
+  return MODULES[method].loadOrCreateIdentity(STORES[method]);
+}
+
+/**
+ * This browser's own peer id under `method`, which an agent's machine allows and which names it in what `coqui-acp-bridge mcp-config`
+ * prints; null where this browser cannot run the method.
+ */
+export async function ownPeerId(method = DEFAULT_METHOD) {
+  if ((await unreachable(method)) !== null) return null;
+  return (await localIdentity(method)).peerId;
+}
+
+/** Messages on a socket in order; `next` answers null once it closed. Throws on what no unproven peer may send. */
+function queue(socket) {
+  const inbox = [];
+  let waiter;
+  let closed = false;
+  socket.addEventListener("message", (event) => {
+    if ((event.data.byteLength ?? event.data.length) > MAX_PROOF_MESSAGE || inbox.length >= MAX_PROOF_WAITING) {
+      socket.close();
+    } else if (waiter !== undefined) {
+      const take = waiter;
+      waiter = undefined;
+      take(event.data);
+    } else {
+      inbox.push(event.data);
+    }
+  });
+  socket.addEventListener("close", () => {
+    closed = true;
+    waiter?.(null);
+    waiter = undefined;
+  });
+  return () => new Promise((resolve) => {
+    if (inbox.length > 0) resolve(inbox.shift());
+    else if (closed) resolve(null);
+    else waiter = resolve;
+  });
+}
+
+/**
+ * Pairs this browser's Noise key with the agent's machine at `url`, a `coqui-acp-bridge pair-accept --method noise`, by the PIN it
+ * shows, and answers the key that machine proved. A wrong PIN is spent: never try it again, and ask for a new one.
+ */
+export async function pairWithPin({ url, pin }, { identity: given, WebSocketClass = globalThis.WebSocket } = {}) {
+  const identity = given ?? (await localIdentity("noise"));
+  const socket = new WebSocketClass(url);
+  socket.binaryType = "arraybuffer";
+  await within(new Promise((resolve, reject) => {
+    socket.addEventListener("open", resolve, { once: true });
+    socket.addEventListener("error", () => reject(new Error("the connection failed")), { once: true });
+  }), PROOF_MS, "the WebSocket did not open");
+  const next = queue(socket);
+  const bytes = (data) => (data === null ? null : new Uint8Array(data));
+  try {
+    const near = await noise.createPairingInitiator(identity);
+    socket.send(await near.hello());
+    const answered = await within(next(), PROOF_MS, "no answer in time");
+    if (answered === null) throw new Error("the connection closed during the proof");
+    const { reply, pairing } = await near.answer(bytes(answered));
+    socket.send(reply);
+    const transport = { send: async (message) => socket.send(message), recv: async () => bytes(await next()) };
+    const { peerId } = await within(pairing.join(String(pin), transport), PAIR_MS, "the pairing did not finish in time");
+    return peerId;
+  } finally {
+    socket.close();
+  }
 }
 
 /**
@@ -242,8 +335,10 @@ export async function dialAgent(agent, {
   WebTransportClass = globalThis.WebTransport,
 } = {}) {
   if (typeof agent.peer !== "string") return dialUnproven(agent, WebSocketClass);
-  const local = identity ?? (await loadOrCreateIdentity(STORE));
-  const proof = await createInitiator(local, agent.peer);
+  const method = methodOf(agent);
+  const local = identity ?? (await localIdentity(method));
+  if (local.method !== method) throw new Error(`a ${local.method} key cannot prove a ${method} agent`);
+  const proof = await MODULES[method].createInitiator(local, agent.peer);
   const socket = await openLink(agent, { WebSocketClass, WebTransportClass });
   const inbox = [];
   let waiter;
@@ -283,12 +378,19 @@ export async function dialAgent(agent, {
     cut = reject;
   });
   try {
-    const exchange = (async () => {
-      await socket.send(proof.hello());
-      const answer = await proof.answer(asText(await next()));
-      await socket.send(answer);
-      ({ session } = await proof.finish(asText(await next())));
-    })();
+    const exchange = method === "noise"
+      ? (async () => {
+        await socket.send(await proof.hello());
+        const proved = await proof.answer(new Uint8Array(await next()));
+        await socket.send(proved.reply);
+        ({ session } = proved);
+      })()
+      : (async () => {
+        await socket.send(proof.hello());
+        const answer = await proof.answer(asText(await next()));
+        await socket.send(answer);
+        ({ session } = await proof.finish(asText(await next())));
+      })();
     await within(exchange, PROOF_MS, "no proof in time");
     socket.proven?.();
   } catch (error) {

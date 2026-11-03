@@ -9,7 +9,7 @@ const good = { label: "Mine", url: "wss://10.0.0.5:8765/acp", peer: KEY, source:
 const withTransport = { ...good, webtransport: 8766, webtransportHash: OTHER };
 
 test("a good candidate comes through with what it claims", () => {
-  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, webtransport: undefined, offers: [], sameKeyAs: undefined, sameNameAs: undefined }]);
+  assert.deepEqual(readCandidates({ candidates: [good] }), [{ ...good, method: "webcrypto", webtransport: undefined, offers: [], sameKeyAs: undefined, sameNameAs: undefined }]);
 });
 
 test("nothing usable in a bad reply", () => {

@@ -12,7 +12,7 @@ The extension implements [ACP in the browser](https://boriken-dev.github.io/coqu
 - `acp-content.js` sits between it and the service worker, and adds what the page cannot forge: whether the person has just acted.
 - `acp-gateway.js` decides: grants, per-origin ids, and coqui-acp's scope on every message. It trusts only the origin the browser reports.
 - `acp-provider.js` puts that on Chrome's APIs, and `acp-request.html` is the window that asks the person, where a page cannot draw over it.
-- `acp-dial.js` opens a proven, sealed WebSocket. Agents are added by hand, or chosen from what `acp-discovery.js` reads out of coqui-acp-bridge's companion when the person asks to look nearby. What it finds is a claim: nothing is ticked for the person, and a key it named is tested only by the proof at connect.
+- `acp-dial.js` opens a proven, sealed WebSocket, by the method stored with the agent's key: Noise, or WebCrypto for an agent stored before methods or named so. Each method has a key of its own in IndexedDB. Nothing falls back: a failed proof is a failure, and a browser whose WebCrypto has no X25519 shows a Noise agent as unreachable with the reason (Chrome and Edge 133, Firefox 130 and Safari 18.4 have it, by Apple's 18.4 notes; MDN's data says Safari 17). `pairWithPin` pairs by the PIN `coqui-acp-bridge pair-accept --method noise` shows. Agents are added by hand, paired with a code, or chosen from what `acp-discovery.js` reads out of coqui-acp-bridge's companion when the person asks to look nearby. What it finds is a claim: nothing is ticked for the person, and a key it named is tested only by the proof at connect.
 
 Right-click the toolbar icon for **Let this site ask for my agents** and **Canoa agents**.
 

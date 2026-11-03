@@ -30,6 +30,6 @@ Canoa's confirmed repository documentation currently uses [GitHub Pages](https:/
 
 ## Browser peer authentication
 
-The reusable browser method is [`coqui-peer-webcrypto`](https://github.com/Boriken-Dev/coqui-peer-webcrypto), using the profile `dev.boriken.coqui.peer-webcrypto/v1`. The Canoa-specific browser private-key store is named `dev.boriken.canoa.peer`; another application must use its **own** isolated store name rather than share that identity implicitly.
+The reusable browser methods are [`coqui-peer-noise`](https://github.com/Boriken-Dev/coqui-peer-noise), profile `dev.boriken.coqui.peer-noise/v1`, and [`coqui-peer-webcrypto`](https://github.com/Boriken-Dev/coqui-peer-webcrypto), profile `dev.boriken.coqui.peer-webcrypto/v1`. The Canoa-specific browser private-key stores are named `dev.boriken.canoa.peer-noise` and `dev.boriken.canoa.peer`, one per method; another application must use its **own** isolated store name rather than share that identity implicitly.
 
 The method's experimental JavaScript module is bundled locally into Canoa as a Git-blob-pinned vendor artifact to comply with offline/MV3 constraints.

@@ -208,5 +208,9 @@ test("the vendored modules are the recorded ones, and match the app's", () => {
   };
   const meta = JSON.parse(readFileSync(new URL("./vendor/coqui-acp/SOURCE.json", import.meta.url), "utf8"));
   for (const [name, sha] of Object.entries(meta.files)) assert.equal(blob(`./vendor/coqui-acp/${name}`), sha, name);
-  assert.equal(blob("./vendor/coqui-peer-webcrypto.mjs"), blob("../../../app/web/vendor/coqui-peer-webcrypto.mjs"));
+  const methods = JSON.parse(readFileSync(new URL("../../../app/web/vendor/COQUI-SOURCE.json", import.meta.url), "utf8"));
+  for (const [name, source] of Object.entries(methods)) {
+    assert.equal(blob(`./vendor/${name}`), source.git_blob_sha1, name);
+    assert.equal(blob(`./vendor/${name}`), blob(`../../../app/web/vendor/${name}`), name);
+  }
 });

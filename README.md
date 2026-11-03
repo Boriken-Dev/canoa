@@ -34,7 +34,7 @@
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
 | `crates/canoa-host/` | `canoa-host`: serves the agents and providers Canoa.cfg names to paired keys, on loopback |
-| `app/web/vendor/` | Pinned browser WebCrypto method sourced from `coqui-peer` |
+| `app/web/vendor/` | Pinned browser methods, Noise and WebCrypto, from `coqui-peer-noise` and `coqui-peer-webcrypto` |
 | `app/` | Canonical Flutter chat, Canoa.cfg settings and desktop tray UI |
 | `examples/acp-echo/` | Paired WSS ACP v2 echo test endpoint and integration tests |
 | `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |

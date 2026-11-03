@@ -1,5 +1,5 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
-import { dialAgent, ownPeerId } from "./acp-dial.js";
+import { DEFAULT_METHOD, METHODS, dialAgent, methodOf, ownPeerId, pairWithPin, unreachable } from "./acp-dial.js";
 import { COMPANION, offersOf, readCandidates } from "./acp-discovery.js";
 import { createGateway, dialRecord } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
@@ -87,11 +87,11 @@ const store = {
   },
 };
 
-async function addAgent({ label, url, peer, source, webtransport, offers }) {
+async function addAgent({ label, url, peer, method, source, webtransport, offers }) {
     const agents = await store.agents();
     // The same key at a new address is the same agent, whose grants carry over and whose name stays the person's. Anyone can
     // name a public key, so nothing counts as shown until a proof there, and the old address is kept until then.
-    const held = peer ? agents.find((agent) => agent.peer === peer) : undefined;
+    const held = peer ? agents.find((agent) => agent.peer === peer && methodOf(agent) === (METHODS.includes(method) ? method : DEFAULT_METHOD)) : undefined;
     if (held !== undefined) {
       const previous = held.previous ?? { url: held.url, webtransport: held.webtransport, proven: held.proven };
       const moved = { ...held, url: String(url), webtransport, offers: offersOf({ offers }), proven: false, previous };
@@ -99,7 +99,11 @@ async function addAgent({ label, url, peer, source, webtransport, offers }) {
       return moved;
     }
     const agent = { key: crypto.randomUUID(), label: String(label).slice(0, 80), url: String(url), source: FOUND.includes(source) ? source : "manual" };
-    if (peer) agent.peer = String(peer);
+    if (peer) {
+      agent.peer = String(peer);
+      // Stored with the key and never changed: the proof runs by this method or not at all.
+      agent.method = METHODS.includes(method) ? method : DEFAULT_METHOD;
+    }
     if (webtransport) agent.webtransport = { url: String(webtransport.url), hash: String(webtransport.hash) };
     agent.offers = offersOf({ offers });
     await write("local", AGENTS, [...agents, agent]);
@@ -240,7 +244,9 @@ const standing = createStanding({
 async function standingView() {
   const agents = await store.agents();
   const peer = await ownPeerId();
+  const ids = Object.fromEntries(await Promise.all(METHODS.map(async (method) => [method, await ownPeerId(method)])));
   return {
+    ids,
     on: await read("local", STANDING, null),
     status: await read("session", STANDING_STATUS, { state: "off" }),
     browser: peer,
@@ -397,6 +403,16 @@ export function installProvider() {
       return true;
     } else if (message.acp === "add") {
       store.addAgent(message.agent).then((agent) => reply(agent));
+      return true;
+    } else if (message.acp === "pair") {
+      // The person typed the PIN their agent's machine shows: pairing proves that machine's key, which the agent is added with.
+      const { label, url, pairUrl, pin } = message.pairing ?? {};
+      pairWithPin({ url: pairUrl, pin })
+        .then((peer) => store.addAgent({ label, url, peer, method: "noise" }))
+        .then((agent) => reply({ agent }), (error) => reply({ error: error.refusal ?? error.message }));
+      return true;
+    } else if (message.acp === "reachable") {
+      Promise.all(METHODS.map(async (method) => [method, await unreachable(method)])).then((pairs) => reply(Object.fromEntries(pairs)));
       return true;
     } else if (message.acp === "remove") {
       read("local", STANDING, null)

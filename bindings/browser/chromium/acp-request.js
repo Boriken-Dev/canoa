@@ -50,18 +50,51 @@ function agentForm(onAdd) {
   const label = element("input", { type: "text", placeholder: "Name" });
   const url = element("input", { type: "text", placeholder: "wss://host/path or ws://127.0.0.1:8765" });
   const peer = element("input", { type: "text", placeholder: "sha256:… (empty: nothing proves who answers)" });
+  // The method the agent's key proves by, which its owner says with the key; never guessed from a connection.
+  const method = element("select", {}, element("option", { value: "webcrypto", textContent: "WebCrypto" }), element("option", { value: "noise", textContent: "Noise" }));
   const status = element("p", { className: "warn" });
   const add = element("button", { type: "button", className: "quiet", textContent: "Add this agent" });
   add.addEventListener("click", async () => {
     const problem = validAgent(label.value, url.value.trim(), peer.value.trim());
     status.textContent = problem ?? "";
     if (problem !== null) return;
-    await onAdd({ label: label.value.trim(), url: url.value.trim(), peer: peer.value.trim() });
+    await onAdd({ label: label.value.trim(), url: url.value.trim(), peer: peer.value.trim(), method: method.value });
     label.value = url.value = peer.value = "";
   });
   return element("fieldset", {}, element("legend", { textContent: "Add one by hand" }),
     element("label", { textContent: "Name" }), label, element("label", { textContent: "Address" }), url,
-    element("label", { textContent: "Peer id" }), peer, add, status);
+    element("label", { textContent: "Peer id" }), peer, element("label", { textContent: "Method" }), method, add, status);
+}
+
+/** Pairing by a PIN the agent's machine shows: the PIN proves that machine's key, under the Noise method. */
+function pairForm(onPaired) {
+  const label = element("input", { type: "text", placeholder: "Name" });
+  const url = element("input", { type: "text", placeholder: "wss://host/path or ws://127.0.0.1:8765" });
+  const pairUrl = element("input", { type: "text", placeholder: "where coqui-acp-bridge pair-accept --method noise waits" });
+  const pin = element("input", { type: "text", placeholder: "the six digits it shows", autocomplete: "off" });
+  const status = element("p", { className: "warn" });
+  const pair = element("button", { type: "button", className: "quiet", textContent: "Pair" });
+  pair.addEventListener("click", async () => {
+    const problem = validAgent(label.value, url.value.trim(), "") ?? validAgent(label.value, pairUrl.value.trim(), "");
+    status.textContent = problem ?? "";
+    if (problem !== null) return;
+    pair.disabled = true;
+    status.textContent = "Pairing…";
+    const answer = await send({ acp: "pair", pairing: { label: label.value.trim(), url: url.value.trim(), pairUrl: pairUrl.value.trim(), pin: pin.value.trim() } });
+    pair.disabled = false;
+    // A PIN is spent once tried, right or wrong: the next try needs a new one.
+    pin.value = "";
+    if (answer?.error) {
+      status.textContent = `Not paired: ${answer.error}. Ask the machine for a new PIN.`;
+      return;
+    }
+    status.textContent = "";
+    label.value = url.value = pairUrl.value = "";
+    onPaired(answer.agent);
+  });
+  return element("fieldset", {}, element("legend", { textContent: "Pair with a code" }),
+    element("label", { textContent: "Name" }), label, element("label", { textContent: "Address" }), url,
+    element("label", { textContent: "Pairing address" }), pairUrl, element("label", { textContent: "PIN" }), pin, pair, status);
 }
 
 /** Searching is the person's choice, each time: it starts a program and listens on the network. */
@@ -91,6 +124,8 @@ function describeAgent(agent) {
     : [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
   if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
   lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
+  if (agent.peer) lines.push(` (${agent.method ?? "webcrypto"})`);
+  if (agent.unreachable) lines.push(element("br"), element("span", { className: "warn", textContent: `Unreachable from this browser: ${agent.unreachable}` }));
   if (agent.offers?.length > 0) {
     lines.push(element("br"), `Says it serves: ${agent.offers.join(", ")}`);
   }
@@ -242,13 +277,17 @@ function browserView(details) {
 
 async function manageView() {
   const { agents, grants } = await send({ acp: "manage" });
+  const reasons = await send({ acp: "reachable" });
   const agentRows = agents.map((agent) => {
     const remove = element("button", { type: "button", className: "quiet", textContent: "Remove" });
     remove.addEventListener("click", async () => {
       await send({ acp: "remove", key: agent.key });
       manageView();
     });
-    return element("li", {}, element("strong", { textContent: agent.label }), " ", element("code", { textContent: `${agent.url} ${agent.peer ?? "no peer id"}` }), element("br"), remove);
+    const method = agent.peer ? ` (${agent.method ?? "webcrypto"})` : "";
+    const why = agent.peer ? reasons?.[agent.method ?? "webcrypto"] : null;
+    const unreachable = why ? [element("br"), element("span", { className: "warn", textContent: `Unreachable from this browser: ${why}` })] : [];
+    return element("li", {}, element("strong", { textContent: agent.label }), " ", element("code", { textContent: `${agent.url} ${agent.peer ?? "no peer id"}` }), method, ...unreachable, element("br"), remove);
   });
   const grantRows = grants.map((grant) => {
     const label = agents.find((agent) => agent.key === grant.agent)?.label ?? grant.agent;
@@ -276,6 +315,7 @@ async function manageView() {
       await send({ acp: "add", agent });
       manageView();
     }),
+    pairForm(() => manageView()),
     element("h2", { textContent: "Sites" }),
     grantRows.length > 0 ? element("ul", {}, ...grantRows) : element("p", { textContent: "No site has been allowed." }));
 }

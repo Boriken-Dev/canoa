@@ -48,7 +48,7 @@ The [ACP client](lib/acp/client.dart) and [connection orchestrator](lib/acp/conn
 
 ## Shared dependencies
 
-The browser cryptographic method is owned by [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto) and vendored in `app/web/vendor` at the exact recorded Git blob in `COQUI-SOURCE.json`. Browser-side UI code never implements its own ECDSA handshake. The early-message handoff is provided by `coqui_web` as a local Dart package, not a Canoa authentication class.
+The browser cryptographic methods are owned by [coqui-peer-noise](https://github.com/Boriken-Dev/coqui-peer-noise) and [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto) and vendored in `app/web/vendor` at the exact recorded Git blobs in `COQUI-SOURCE.json`, one entry per file. The app proves by WebCrypto; the extension by either. Browser-side UI code never implements its own ECDSA handshake. The early-message handoff is provided by `coqui_web` as a local Dart package, not a Canoa authentication class.
 
 To upgrade the browser method, update its canonical Coqui source and tests first, then replace the exact vendored source and source metadata together; the vendor tests will reject an unrecorded change.
 

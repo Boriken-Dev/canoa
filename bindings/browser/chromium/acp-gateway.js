@@ -84,7 +84,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       identity: {
         peer: agent.peer ?? null,
         verified: agent.proven === true,
-        method: agent.proven === true ? "dev.boriken.coqui.peer-webcrypto/v1" : null,
+        method: agent.proven === true ? (agent.method === "noise" ? "dev.boriken.coqui.peer-noise/v1" : "dev.boriken.coqui.peer-webcrypto/v1") : null,
       },
       offers: { acpVersions: agent.acpVersions ?? [], transports: agent.webtransport ? ["webtransport", "websocket"] : ["websocket"] },
       status: "unknown",

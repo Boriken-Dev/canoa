@@ -1,7 +1,11 @@
 // The provider in a real browser: a real page under a strict CSP, the real extension, and an agent on a real socket proving
 // itself with the real handshake. Drives the browser over its DevTools protocol, with the person's window clicked by script.
 //
-//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] [CANOA_E2E_PAGES=dir] node e2e/run.mjs
+//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] [CANOA_E2E_PAGES=dir] [CANOA_E2E_METHOD=noise]
+//     node e2e/run.mjs
+//
+// CANOA_E2E_METHOD is the method every agent of the run proves by, `webcrypto` unless set: its in-process agent, the bridges it
+// starts and the agents a person adds by hand.
 //
 // CANOA_E2E_PAGES holds the other languages' pages: wasm/page.js and page_bg.wasm from coqui-acp-page's example through
 // wasm-bindgen --target web, and dart/page.js from app/tool/provider_page.dart through dart compile js.
@@ -18,7 +22,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createResponder, generateIdentity } from "../vendor/coqui-peer-webcrypto.mjs";
+import * as noiseMethod from "../vendor/coqui-peer-noise.mjs";
+import * as webcryptoMethod from "../vendor/coqui-peer-webcrypto.mjs";
 import { lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +33,10 @@ const browser = process.env.CANOA_E2E_BROWSER;
 if (!browser) throw new Error("set CANOA_E2E_BROWSER");
 const bridge = process.env.CANOA_E2E_BRIDGE;
 const pages = process.env.CANOA_E2E_PAGES;
+const METHOD = process.env.CANOA_E2E_METHOD ?? "webcrypto";
+const { createResponder, generateIdentity } = METHOD === "noise" ? noiseMethod : webcryptoMethod;
+// A handshake message as the method reads it: WebCrypto's are text, Noise's bytes.
+const handshake = (data) => (METHOD === "noise" ? new Uint8Array(data) : data.toString());
 
 const work = mkdtempSync(path.join(tmpdir(), "canoa-e2e-"));
 const profile = path.join(work, "profile");
@@ -71,11 +80,12 @@ wss.on("connection", (socket, request) => {
           browserPeer = peer;
           return true;
         } });
-        socket.send(await auth.challenge(data.toString()));
+        socket.send(await auth.challenge(handshake(data)));
       } else if (!session) {
-        const accepted = await auth.accept(data.toString());
+        const accepted = await auth.accept(handshake(data));
         session = accepted.session;
-        socket.send(accepted.reply);
+        // Noise's responder finishes on the initiator's last message, with nothing more to send.
+        if (accepted.reply !== undefined) socket.send(accepted.reply);
       } else {
         assert.ok(binary, "after the proof every message is a record");
         const opened = await session.open(new Uint8Array(data));
@@ -273,6 +283,7 @@ try {
       const inputs = [...document.querySelectorAll('input[type=text]')];
       const set = (input, value) => { input.value = value; };
       set(inputs[0], 'Test agent'); set(inputs[1], '${agentUrl}'); set(inputs[2], '${peer}');
+      [...document.querySelectorAll('fieldset')].find((set) => set.querySelector('legend')?.textContent === 'Add one by hand').querySelector('select').value = '${METHOD}';
       [...document.querySelectorAll('button')].find((b) => b.textContent === 'Add this agent').click();
     })()`;
 
@@ -467,7 +478,7 @@ try {
         process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
       });`);
     const bridgeKey = path.join(work, "bridge.key");
-    const bridgePeer = execFileSync(bridge, ["keygen", bridgeKey], { encoding: "utf8" }).trim();
+    const bridgePeer = execFileSync(bridge, ["keygen", bridgeKey, "--method", METHOD], { encoding: "utf8" }).trim();
     const startBridge = async ({ key = bridgeKey, label = "Real bridge", flags, extra = [], program = [agentProgram] } = {}) => {
       const port = await freeForBoth();
       const transport = flags ?? ["--tls-short-lived", "--webtransport-port", String(port)];
@@ -490,7 +501,7 @@ try {
     })()`.replace("page_open()", open);
     await check("websocket: a whole exchange over a WebSocket, through the real bridge, to a real stdio agent", async () => {
       const plainKey = path.join(work, "plain.key");
-      const plainPeer = execFileSync(bridge, ["keygen", plainKey], { encoding: "utf8" }).trim();
+      const plainPeer = execFileSync(bridge, ["keygen", plainKey, "--method", METHOD], { encoding: "utf8" }).trim();
       await startBridge({ key: plainKey, label: "Plain bridge", flags: [] });
       await requested();
       const view = await prompt();
@@ -650,7 +661,7 @@ try {
     };
 
     await check("tools: Canoa's own chat dials a link and its session gets a stdio server whose token is not in its arguments", async () => {
-      execFileSync(bridge, ["keygen", path.join(work, "tools.key")], { encoding: "utf8" });
+      execFileSync(bridge, ["keygen", path.join(work, "tools.key"), "--method", METHOD], { encoding: "utf8" });
       await startBridge({ key: path.join(work, "tools.key"), label: "Tool bridge", extra: ["--mcp-offers"], program: [toolAgent, toolLog] });
       await own.run(`window.asked = document.acp.request({ purpose: "Chat with it in Canoa" }).then((agents) => { window.agent = agents[0]; return agents.length; }, (e) => e.name); window.nextId = 10; true`, { gesture: true });
       const view = await prompt();
@@ -745,7 +756,7 @@ try {
       await waitFor("the shim to exit", () => toolEntries().some((entry) => entry.shimExited));
     });
     await check("tools: the same over a plain WebSocket, for an agent with no WebTransport", async () => {
-      execFileSync(bridge, ["keygen", path.join(work, "plain-tools.key")], { encoding: "utf8" });
+      execFileSync(bridge, ["keygen", path.join(work, "plain-tools.key"), "--method", METHOD], { encoding: "utf8" });
       await startBridge({ key: path.join(work, "plain-tools.key"), label: "Plain tool bridge", flags: [], extra: ["--mcp-offers"], program: [toolAgent, toolLog] });
       await own.run(`window.asked = document.acp.request({}).then((agents) => { window.agent = agents[0]; return agents.length; }, (e) => e.name); true`, { gesture: true });
       const view = await prompt();
@@ -765,7 +776,7 @@ try {
         const cwd = path.join(work, "real-agent");
         mkdirSync(cwd);
         const key = path.join(work, "real.key");
-        execFileSync(bridge, ["keygen", key], { encoding: "utf8" });
+        execFileSync(bridge, ["keygen", key, "--method", METHOD], { encoding: "utf8" });
         const npx = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npx-cli.js");
         await startBridge({ key, label: "Real Claude", flags: [], extra: ["--mcp-offers"], program: [npx, "-y", "@agentclientprotocol/claude-agent-acp@0.99.1"] });
         await own.run(`window.asked = document.acp.request({}).then((agents) => { window.agent = agents[0]; return agents.length; }, (e) => e.name); true`, { gesture: true });

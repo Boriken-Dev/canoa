@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The extension proves an agent by the method stored with its key, Noise or WebCrypto, and pairs with a machine by the PIN it shows under Noise (**Pair with a code**). Each method has a key of its own. An agent stored before methods is WebCrypto's; a browser whose WebCrypto has no X25519 shows a Noise agent as unreachable, and says why, rather than trying another method. Discovered agents carry the method their record names.
+- `app/web/vendor` holds `coqui-peer-noise` beside `coqui-peer-webcrypto`, each pinned by blob in `COQUI-SOURCE.json`, now one entry per file.
+
 - `canoa-host` proves by Noise or by WebCrypto, the method of this user's identity: `serve`, `id` and `pair` take `--method noise|webcrypto`, and `serve` and `pair` print the method beside the peer id. A home keeps each method's identity in a file of its own and keeps the method it has; one with both has to name one. A client of the other method is refused, and the log says why.
 
 - An MCP client outside any ACP session, such as an IDE or a CLI agent, can ask for a browser tab: a person turns this on for one paired machine under **Canoa browser permissions**, and `coqui-acp-bridge mcp-config` prints one stable entry for it. Off by default, and out of a page's reach.

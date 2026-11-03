@@ -9,6 +9,7 @@ const MAX_LABEL = 80;
 const MAX_URL = 512;
 const SOURCES = ["dns-sd", "local"];
 const MAX_OFFERS = 16;
+const METHODS = ["noise", "webcrypto"];
 const OFFER = /^[\x21-\x7e]{1,64}$/;
 
 /** Where WebTransport is, if the candidate gave both a port and a certificate hash to pin. */
@@ -57,6 +58,9 @@ export function readCandidates(reply, known = []) {
     const url = parsed(item.url);
     if (label === "" || url === null) continue;
     const peer = typeof item.peer === "string" && PEER.test(item.peer) ? item.peer : undefined;
+    // A record naming no method is WebCrypto's, the only method before records named one; one this browser does not know is unusable.
+    const method = item.method === undefined || item.method === null ? "webcrypto" : item.method;
+    if (!METHODS.includes(method)) continue;
     const source = SOURCES.includes(item.source) ? item.source : "dns-sd";
     if (source === "local" ? !LOOPBACK.includes(url.hostname) : pointsHome(url.hostname) || peer === undefined) continue;
     const webtransport = webTransportOf(item);
@@ -66,6 +70,7 @@ export function readCandidates(reply, known = []) {
       label: label.slice(0, MAX_LABEL),
       url: item.url,
       peer,
+      method,
       source,
       webtransport,
       offers: offersOf(item),

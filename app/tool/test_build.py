@@ -53,15 +53,19 @@ class PackagingTests(unittest.TestCase):
 
 
 
-    def test_pinned_coqui_peer_method_matches_git_blob(self):
+    def test_pinned_coqui_peer_methods_match_their_git_blobs(self):
         import hashlib
         import json
-        source = (Path(__file__).resolve().parents[1] / "web" / "vendor" / "coqui-peer-webcrypto.mjs").read_bytes()
-        meta = json.loads((Path(__file__).resolve().parents[1] / "web" / "vendor" / "COQUI-SOURCE.json").read_text())
-        self.assertEqual(
-            hashlib.sha1(f"blob {len(source)}\0".encode() + source).hexdigest(),
-            meta["git_blob_sha1"],
-        )
+        vendor = Path(__file__).resolve().parents[1] / "web" / "vendor"
+        meta = json.loads((vendor / "COQUI-SOURCE.json").read_text())
+        self.assertEqual(sorted(meta), ["coqui-peer-noise.mjs", "coqui-peer-webcrypto.mjs"])
+        for name, pinned in meta.items():
+            source = (vendor / name).read_bytes()
+            self.assertEqual(
+                hashlib.sha1(f"blob {len(source)}\0".encode() + source).hexdigest(),
+                pinned["git_blob_sha1"],
+                name,
+            )
 
 if __name__ == "__main__":
     unittest.main()
