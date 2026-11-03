@@ -83,13 +83,17 @@ Future<void> _project(Directory dir) async {
   }
 }
 
-/// What `node --test` says in [dir]: its exit code and the passing count.
-Future<(int, int)> _nodeTest(Directory dir) async {
-  final ran = await Process.run('node', ['--test', '--test-timeout=60000'], workingDirectory: dir.path, runInShell: true)
-      .timeout(const Duration(minutes: 2));
-  // `# pass N` from the TAP reporter, `ℹ pass N` from the spec reporter Node 24 uses.
-  final passed = RegExp(r'^(?:#|ℹ) pass (\d+)', multiLine: true).firstMatch('${ran.stdout}')?.group(1);
-  return (ran.exitCode, int.tryParse(passed ?? '') ?? 0);
+/// What `node --test` says in [dir]: its exit code and the passing and failing counts, or -1 for a count it did not give.
+Future<(int, int, int)> _nodeTest(Directory dir) async {
+  // TAP's summary is ASCII: the default reporter's `ℹ` does not survive Windows decoding a child's output in its code page.
+  final ran = await Process.run(
+    'node',
+    ['--test', '--test-reporter=tap', '--test-timeout=60000'],
+    workingDirectory: dir.path,
+    runInShell: true,
+  ).timeout(const Duration(minutes: 2));
+  int count(String what) => int.tryParse(RegExp('^# $what (\\d+)', multiLine: true).firstMatch('${ran.stdout}')?.group(1) ?? '') ?? -1;
+  return (ran.exitCode, count('pass'), count('fail'));
 }
 
 /// Files under [dir], outside `.git` and `.claude`, that mention [word].
@@ -217,7 +221,8 @@ void main() {
       for (var drags = 0; drags < 20; drags++) {
         final position = tester.state<ScrollableState>(list).position;
         if (position.pixels >= position.maxScrollExtent) break;
-        await tester.drag(list, const Offset(0, -2000));
+        // From the list's right edge, past the cards: an expanded card's own output would take a drag in the middle.
+        await tester.dragFrom(tester.getTopRight(list) + const Offset(-12, 200), const Offset(0, -2000));
         await tester.pumpAndSettle();
       }
     }
@@ -331,12 +336,12 @@ void main() {
     final askedOutside = fixed.outside + stopped.outside + continued.outside + attached.outside;
     debugPrint('USAGE ${usage ?? 'none said'}; outside the directory: $askedOutside asked and refused, $ranOutside ran');
 
-    final (exitCode, passing) = await _nodeTest(repo);
+    final (exitCode, passing, failing) = await _nodeTest(repo);
     final oldName = _mentioning(repo, 'addNumbers');
     final newName = _mentioning(repo, 'sum(');
     final maintainer = File('${repo.path}/README.md').readAsStringSync().contains('Maintainer: Ana Rivera');
     final kept = File('${repo.path}/obsolete.txt').existsSync();
-    debugPrint('DISK node --test exit $exitCode passing $passing; old name in ${oldName.length} files, new in ${newName.length}; '
+    debugPrint('DISK node --test exit $exitCode passing $passing failing $failing; old name in ${oldName.length} files, new in ${newName.length}; '
         'maintainer $maintainer; obsolete.txt kept $kept');
 
     final closedAt = DateTime.now();
