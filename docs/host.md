@@ -197,8 +197,9 @@ proves by Noise.
 
 A browser pairs by connecting once:
 
-1. In the browser, give the entry's address (`ws://127.0.0.1:7801`) and the host's peer id, which Hosting shows (and
-   `canoa-host id` prints): in Canoa's web connect dialog, or by adding the agent by hand in the extension's window.
+1. In the browser, give the entry's address (`ws://127.0.0.1:7801`), the host's peer id, which Hosting shows (and
+   `canoa-host id` prints), and the method it proves by, which `serve` prints: in Canoa's web connect dialog, or by
+   adding the agent by hand in the extension's window.
 2. The first connection is turned away, and the browser's key waits on the host.
 3. Hosting lists it as waiting, as does `canoa-host peers`. Compare its whole id with the one the browser shows (Canoa's
    connect dialog, or the extension's permissions page), then pair it: **Pair…** and **Pair** in Hosting, or
@@ -208,8 +209,8 @@ A browser pairs by connecting once:
 A program with a native key, such as `coqui-acp-bridge`, can pair by PIN instead: **Show a PIN** in Hosting, or
 `canoa-host pair`, shows six digits and an address, and `coqui-acp-bridge pair-dial ADDRESS` with those digits pairs it.
 One wrong try ends the PIN, and it pairs by the host's method. `canoa-host pair` refuses a browser, so a page cannot spend
-the PIN; a browser pairs with it by connecting once. The extension pairs by PIN with `coqui-acp-bridge pair-accept
---method noise`.
+the PIN; a browser pairs with it by connecting once. The extension and Canoa's web connect dialog pair by PIN with
+`coqui-acp-bridge pair-accept --method noise --origin ORIGIN`, the origin each of them shows.
 
 A key's first use is always the person's decision: nothing is accepted automatically, and the app pairs or removes a key
 only from a dialog that shows its whole id.
