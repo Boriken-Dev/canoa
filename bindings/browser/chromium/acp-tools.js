@@ -33,7 +33,7 @@ export function createTools({ mux, handle }) {
   const bySession = new Map();
   const opening = new Map();
 
-  function serve(stream) {
+  function serve(stream, onEnd) {
     // Until its answer has gone: an agent that keeps asking and never reads must not grow what is waiting here.
     let running = 0;
     const answer = async (request) => {
@@ -72,6 +72,7 @@ export function createTools({ mux, handle }) {
     } finally {
       streams.delete(stream);
       stream.close();
+      onEnd?.();
     }
     };
     pump();
@@ -125,6 +126,12 @@ export function createTools({ mux, handle }) {
       else stream.close();
     },
 
+    /** Serves MCP on a stream someone else opened, until it ends, which `onEnd` hears. */
+    adopt(stream, onEnd) {
+      streams.add(stream);
+      serve(stream, onEnd);
+    },
+
     /** Tells every agent here to read its tool list again. Dropped for a stream that is full: its next call sees the truth anyway. */
     changed() {
       for (const stream of streams) {
@@ -136,8 +143,16 @@ export function createTools({ mux, handle }) {
       }
     },
 
-    end() {
-      for (const stream of [...streams]) stream.close();
+    /** `goodbye` is the last thing each hears, if it has room. */
+    end(goodbye) {
+      for (const stream of [...streams]) {
+        try {
+          if (goodbye !== undefined) stream.trySend(goodbye);
+        } catch {
+          // Already ending.
+        }
+        stream.close();
+      }
       streams.clear();
     },
   };

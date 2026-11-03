@@ -179,8 +179,8 @@ async function dialUnproven(agent, WebSocketClass) {
   };
 }
 
-/** ACP on one stream of a link whose other streams `mux` opens. Refused or ended, it closes as any channel does. */
-async function acpOverLink(proven) {
+/** Streams on a proven link. `heartbeat` asks now and then and notices silence, off unless set. */
+function bareLink(proven, heartbeat) {
   const closing = [];
   const mux = createMux({
     send: (bytes) => proven.sendBytes(bytes),
@@ -189,7 +189,20 @@ async function acpOverLink(proven) {
       listen();
       for (const close of closing) close();
     }),
-  }, { side: "dialed" });
+  }, { side: "dialed", limits: { heartbeat } });
+  return {
+    proven: true,
+    mux,
+    onClose(handler) {
+      closing.push(handler);
+    },
+    close: () => proven.close(),
+  };
+}
+
+/** ACP on one stream of a link whose other streams `mux` opens. Refused or ended, it closes as any channel does. */
+async function acpOverLink(proven) {
+  const { mux, onClose } = bareLink(proven);
   const stream = await mux.open("acp/1");
   return {
     proven: true,
@@ -205,17 +218,25 @@ async function acpOverLink(proven) {
         }
       })().catch(() => {}).finally(() => proven.close());
     },
-    onClose(handler) {
-      closing.push(handler);
-    },
+    onClose,
     close: () => proven.close(),
   };
 }
 
-/** `link` runs ACP on a stream of a link, for an agent that says it serves one: anything else would read the first frame as ACP. */
+/** This browser's own peer id, which an agent's machine allows and which names it in what `coqui-acp-bridge mcp-config` prints. */
+export async function ownPeerId() {
+  return (await loadOrCreateIdentity(STORE)).peerId;
+}
+
+/**
+ * `link` runs ACP on a stream of a link, for an agent that says it serves one: anything else would read the first frame as ACP. `bare`
+ * is such a link with nothing on it yet.
+ */
 export async function dialAgent(agent, {
   identity,
   link = false,
+  bare = false,
+  heartbeat,
   WebSocketClass = globalThis.WebSocket,
   WebTransportClass = globalThis.WebTransport,
 } = {}) {
@@ -298,5 +319,6 @@ export async function dialAgent(agent, {
       });
     },
   };
+  if (bare) return bareLink(proven, heartbeat);
   return link ? acpOverLink(proven) : proven;
 }

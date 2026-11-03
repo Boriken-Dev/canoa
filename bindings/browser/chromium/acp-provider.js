@@ -1,12 +1,14 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
-import { dialAgent } from "./acp-dial.js";
+import { dialAgent, ownPeerId } from "./acp-dial.js";
 import { COMPANION, offersOf, readCandidates } from "./acp-discovery.js";
-import { createGateway } from "./acp-gateway.js";
-import { createTools } from "./acp-tools.js";
+import { createGateway, dialRecord } from "./acp-gateway.js";
+import { createStanding, fromPermissionsPage } from "./acp-standing.js";
+import { createTools, OFFER } from "./acp-tools.js";
 import { dispatchBrowserTool } from "./browser-tools.js";
 import { onGrantsChanged, readGrants, updateGrants } from "./browser-grants.js";
 import { handleMcpRequest } from "./mcp.js";
 import { askableCapabilities, createAccess } from "./mcp-access.js";
+import { revokePeer } from "./permissions.js";
 
 const AGENTS = "canoa_acp_agents";
 const GRANTS = "canoa_acp_grants";
@@ -16,6 +18,13 @@ const PORT_NAME = "canoa-acp";
 const ASK_MS = 120_000;
 const TOOL_MS = 30_000;
 const SEARCH_SECONDS = 3;
+const STANDING = "canoa_standing";
+const STANDING_STATUS = "canoa_standing_status";
+const STANDING_ALARM = "canoa-standing";
+// A browser ends an idle worker after 30 seconds, and with it the socket: this traffic is what counts as not idle.
+const HEARTBEAT = { interval: 20_000, misses: 3 };
+// Wakes a worker that ended anyway and finds the link gone. 30 seconds is the least an alarm may be set for.
+const ALARM_MINUTES = 0.5;
 const FOUND = ["dns-sd", "local"];
 
 const read = async (area, key, fallback) => (await chrome.storage[area].get(key))[key] ?? fallback;
@@ -150,8 +159,11 @@ const within = (run, ms) => (details) => {
   return Promise.race([run(details), limit]).finally(() => clearTimeout(timer));
 };
 
-/** The browser's tools for one proven link. Each call is decided from the grants as they are then. */
-function offerTools({ mux, peer, label }) {
+/**
+ * The browser's tools for one proven link. Each call is decided from the grants as they are then. `via` says a program with no session
+ * is behind it, and `still` whether that is still turned on.
+ */
+function offerTools({ mux, peer, label, via, still }) {
   const capabilities = askableCapabilities(debuggerBuild());
   const tools = createTools({
     mux,
@@ -163,16 +175,17 @@ function offerTools({ mux, peer, label }) {
       dispatch: within(dispatchBrowserTool, TOOL_MS),
       access: {
         capabilities,
-        request: ({ capability, reason }) => requestAccess({ peer, label, capability, reason }),
+        logs: via !== undefined,
+        request: ({ capability, reason }) => requestAccess({ peer, label, capability, reason, via, still }),
       },
     }),
   });
   toolHosts.add(tools);
   return {
     ...tools,
-    end() {
+    end(goodbye) {
       toolHosts.delete(tools);
-      tools.end();
+      tools.end(goodbye);
     },
   };
 }
@@ -185,6 +198,55 @@ const gateway = createGateway({
   ownOrigin: OWN_ORIGIN,
   offerTools,
 });
+
+const standing = createStanding({
+  setting: () => read("local", STANDING, null),
+  agentOf: async (key) => (await store.agents()).find((agent) => agent.key === key),
+  dial: (agent) => dialRecord(store, dialAgent, agent, { bare: true, heartbeat: HEARTBEAT }),
+  toolsFor: ({ mux, agent }) => offerTools({
+    mux,
+    peer: agent.peer,
+    label: agent.label,
+    via: "program",
+    still: async () => (await read("local", STANDING, null)) === agent.key,
+  }),
+  onStatus: (status) => {
+    write("session", STANDING_STATUS, status).catch(() => {});
+  },
+});
+
+/** What the permissions page shows: every agent that has a key to prove, whether it says it can do this, and how it is going. */
+async function standingView() {
+  const agents = await store.agents();
+  const peer = await ownPeerId();
+  return {
+    on: await read("local", STANDING, null),
+    status: await read("session", STANDING_STATUS, { state: "off" }),
+    browser: peer,
+    machines: agents.filter((agent) => typeof agent.peer === "string").map(({ key, label, peer: id, offers }) => ({ key, label, peer: id, serves: offers?.includes(OFFER) === true })),
+  };
+}
+
+/** Turns it on for one agent, or off with null. What was given to the one it was on for goes too: a person turning this off means it. */
+async function setStanding(key) {
+  const agents = await store.agents();
+  if (key !== null) {
+    const agent = agents.find((candidate) => candidate.key === key);
+    if (typeof agent?.peer !== "string" || agent.offers?.includes(OFFER) !== true) throw new Error("That machine cannot do this.");
+  }
+  const before = await read("local", STANDING, null);
+  await write("local", STANDING, key);
+  if (key === null) await chrome.alarms.clear(STANDING_ALARM);
+  else await chrome.alarms.create(STANDING_ALARM, { periodInMinutes: ALARM_MINUTES });
+  const peer = agents.find((agent) => agent.key === before)?.peer;
+  if (before !== null && before !== key && peer !== undefined) {
+    for (const entry of asking.values()) {
+      if (entry.details.kind === "browser" && entry.details.peer === peer) entry.done(null);
+    }
+    await updateGrants((grants) => revokePeer(grants, peer));
+  }
+  await standing.changed();
+}
 
 function secureOrigin(origin) {
   try {
@@ -218,6 +280,29 @@ export async function forgetSite(origin) {
 }
 
 export function installProvider() {
+  // Without this, a content script could read the agents' secret and turn on what only the person may.
+  chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
+
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === STANDING_ALARM) standing.ensure().catch(() => {});
+  });
+  // A browser that starts wakes this worker for this listener, and any wake-up looks at the setting just below.
+  chrome.runtime.onStartup.addListener(() => {});
+  // A restart can clear an alarm, and setting one again would put off the next by its whole period.
+  read("local", STANDING, null).then(async (on) => {
+    if (on !== null && (await chrome.alarms.get(STANDING_ALARM)) === undefined) await chrome.alarms.create(STANDING_ALARM, { periodInMinutes: ALARM_MINUTES });
+  }).catch(() => {});
+  standing.ensure().catch(() => {});
+
+  chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    if ((message?.type !== "canoa.standing.get" && message?.type !== "canoa.standing.set") || !fromPermissionsPage(sender, chrome.runtime)) return false;
+    const answer = message.type === "canoa.standing.get"
+      ? standingView()
+      : setStanding(typeof message.agent === "string" ? message.agent : null).then(standingView);
+    answer.then(reply, (error) => reply({ error: String(error.message ?? error) }));
+    return true;
+  });
+
   // Closing the window is a refusal, there and then.
   chrome.windows.onRemoved.addListener((windowId) => {
     for (const entry of asking.values()) {
@@ -265,7 +350,10 @@ export function installProvider() {
       store.addAgent(message.agent).then((agent) => reply(agent));
       return true;
     } else if (message.acp === "remove") {
-      gateway.removeByPerson(message.key).then(() => reply(true));
+      read("local", STANDING, null)
+        .then((on) => (on === message.key ? setStanding(null) : undefined))
+        .then(() => gateway.removeByPerson(message.key))
+        .then(() => reply(true));
       return true;
     } else if (message.acp === "revoke") {
       gateway.revokeByPerson(message.grant).then(() => reply(true));

@@ -41,6 +41,17 @@
   <p role="status" id="status"></p>
   <h2>Current grants</h2>
   <ul id="grants"></ul>
+  <h2>Programs on a paired machine</h2>
+  <p>Off unless you turn it on, for one machine. An editor or a command-line agent there can then ask you for a tab, as an agent in
+    Canoa's chat does, with nothing listening in this browser. Canoa cannot tell which program asks: it shows you the machine, and
+    what you allow is shared by whatever runs as you there.</p>
+  <label for="machine">Machine</label>
+  <select id="machine"></select>
+  <button type="button" id="standing-toggle">Turn on</button>
+  <p role="status" id="standing-status"></p>
+  <p>On that machine, where <code>coqui-acp-bridge serve --mcp-offers</code> allows this browser, this prints what to paste into the
+    program's MCP settings:</p>
+  <p><code id="standing-command"></code></p>
 </main>
 <script type="module" src="permissions-ui.js"></script>
 </body>

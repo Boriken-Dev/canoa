@@ -29,7 +29,8 @@ function cleanReason(reason) {
 export function createAccess({ tabs, ask, updateGrants, debuggerBuild = false, now = Date.now }) {
   const held = new Map();
 
-  return async function requestAccess({ peer, label, capability, reason }) {
+  /** `via` says who is asking, for the window. `still` is asked as the grant is stored: whether what asked is still allowed to. */
+  return async function requestAccess({ peer, label, capability, reason, via, still }) {
     if (!askableCapabilities(debuggerBuild).includes(capability)) return { allowed: false, why: "That cannot be asked for here." };
     const state = held.get(peer) ?? { asking: false, notBefore: 0 };
     held.set(peer, state);
@@ -41,6 +42,7 @@ export function createAccess({ tabs, ask, updateGrants, debuggerBuild = false, n
       const answer = await ask({
         label,
         peer,
+        via,
         capability,
         reason: cleanReason(reason),
         tabs: open.map(({ id, title, url, active }) => ({ id, title: cleanReason(title).slice(0, 120), origin: new URL(url).origin, active: active === true })),
@@ -59,7 +61,13 @@ export function createAccess({ tabs, ask, updateGrants, debuggerBuild = false, n
         capability,
         expiresAt: now() + answer.minutes * 60_000,
       });
-      await updateGrants((grants) => [...grants, grant].slice(-250));
+      let stored = false;
+      // Inside the change, which runs in turn with whatever takes grants away, so a person turning this off cannot be overtaken.
+      await updateGrants(async (grants) => {
+        stored = still === undefined || (await still());
+        return stored ? [...grants, grant].slice(-250) : grants;
+      });
+      if (!stored) return { allowed: false, why: "This was turned off meanwhile." };
       return { allowed: true, tabId: tab.id, origin: grant.origin, capability, expiresAt: grant.expiresAt };
     } finally {
       state.asking = false;

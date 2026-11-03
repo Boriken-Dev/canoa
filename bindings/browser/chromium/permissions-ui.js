@@ -66,9 +66,49 @@ form.addEventListener('submit',async event=>{
     await refresh();
   }catch(e){show(e.message);}
 });
+const machine=document.querySelector('#machine');
+const standingToggle=document.querySelector('#standing-toggle');
+const standingStatus=document.querySelector('#standing-status');
+const standingCommand=document.querySelector('#standing-command');
+const STANDING_SAYS={
+  off:'Off.',
+  connecting:'Connecting to that machine.',
+  connected:'On. Programs on that machine can ask for a tab.',
+  unreachable:'On, but that machine cannot be reached yet, or did not prove its key. This keeps trying.',
+  refused:'On, but that machine refused: it needs coqui-acp-bridge serve --mcp-offers, allowing this browser.',
+};
+let standingOn=null;
+async function refreshStanding(){
+  const view=await request({type:'canoa.standing.get'});
+  standingOn=view.on;
+  const chosen=view.on ?? machine.value;
+  machine.replaceChildren(...view.machines.map(({key,label,peer,serves})=>{
+    const item=document.createElement('option');
+    item.value=key;
+    item.disabled=!serves;
+    item.textContent=label.slice(0,80)+' — '+peer.slice(0,20)+'…'+(serves?'':' (does not say it can do this)');
+    return item;
+  }));
+  if (view.machines.some(({key})=>key===chosen)) machine.value=chosen;
+  machine.disabled=view.on!==null;
+  standingToggle.textContent=view.on===null?'Turn on':'Turn off';
+  standingToggle.disabled=view.on===null && !view.machines.some(({serves})=>serves);
+  standingStatus.textContent=view.machines.length===0?'No paired machine yet: add an agent under Canoa agents first.':STANDING_SAYS[view.status.state]??'';
+  standingCommand.textContent='coqui-acp-bridge mcp-config --peer '+view.browser;
+}
+standingToggle.addEventListener('click',async()=>{
+  try{
+    await request({type:'canoa.standing.set',agent:standingOn===null?machine.value:null});
+    await refreshStanding();
+  }catch(e){standingStatus.textContent=e.message;}
+});
 // Grants change behind this page: a tab closes, a navigation ends one, an agent is given another.
 chrome.storage.onChanged.addListener((_,area)=>{
-  if (area==='session') refresh().catch(error=>show(error.message));
+  if (area==='session'){
+    refresh().catch(error=>show(error.message));
+    refreshStanding().catch(error=>{standingStatus.textContent=error.message;});
+  }
 });
 await tabs().catch(error=>show(error.message));
 await refresh().catch(error=>show(error.message));
+await refreshStanding().catch(error=>{standingStatus.textContent=error.message;});

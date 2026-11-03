@@ -37,6 +37,27 @@ async function hash(textValue) {
 }
 
 /**
+ * Whoever said an agent moved did not hold the key, or is not there, when that address fails: it goes back to where it last was. A proof
+ * at the new address settles the move.
+ */
+export async function dialRecord(store, dial, agent, options) {
+  try {
+    const channel = await dial(agent, options);
+    if (agent.previous) await store.settleMove(agent.key);
+    return channel;
+  } catch {
+    if (!agent.previous) throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
+    try {
+      const channel = await dial({ ...agent, ...agent.previous }, options);
+      await store.revertMove(agent.key);
+      return channel;
+    } catch {
+      throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
+    }
+  }
+}
+
+/**
  * @param store agents(), addAgent(agent), markProven(key), grants(origin), saveGrant(grant), deleteGrant(grant), secret()
  * @param dial (agent) => a proven channel: { send(text), onMessage(fn), onClose(fn), close() }
  * @param askPerson (details) => { allow: agent keys, add: new agents, cwd, permissions, lifetime } or null, in the provider's window
@@ -155,20 +176,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       const { grant, agent } = await find(origin, id);
       // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
       const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
-      let channel;
-      try {
-        channel = await dial(agent, options);
-        if (agent.previous) await store.settleMove(agent.key);
-      } catch {
-        // Whoever said it moved did not hold the key, or is not there: it goes back to where it last was.
-        if (!agent.previous) throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
-        try {
-          channel = await dial({ ...agent, ...agent.previous }, options);
-          await store.revertMove(agent.key);
-        } catch {
-          throw refuse("NetworkError", "the agent could not be reached or did not prove itself");
-        }
-      }
+      const channel = await dialRecord(store, dial, agent, options);
       if (channel.proven) await store.markProven(agent.key);
       const sessions = new Set(grant.sessions ?? []);
       const scope = new Scope({ ...grant, sessions }, origin);

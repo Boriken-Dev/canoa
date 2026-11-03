@@ -75,11 +75,13 @@ export async function handleMcpRequest({
     // The client decides whether it can use the version a server answers with, so one it does not know is no error here.
     return result(id, {
       protocolVersion:versions.has(params.protocolVersion) ? params.protocolVersion : LATEST,
-      capabilities:{tools:{listChanged:access !== undefined}},
+      capabilities:{tools:{listChanged:access !== undefined}, ...(access?.logs ? {logging:{}} : {})},
       serverInfo:{name:'dev.boriken.canoa.browser', version:'0.0.1'},
     });
   }
   if (method === 'ping') return result(id, {});
+  // The one message sent is the one saying this server is ending, whatever level is asked for.
+  if (method === 'logging/setLevel' && access?.logs) return result(id, {});
   if (method === 'tools/list') return result(id, {
     tools: [
       ...(access === undefined ? [] : [requestAccessTool(access.capabilities)]),

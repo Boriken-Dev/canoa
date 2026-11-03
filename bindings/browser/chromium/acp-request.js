@@ -225,8 +225,13 @@ function browserView(details) {
     send({ acp: "answer", ask: askId, answer: { tabId: Number(chosen.value), minutes: Number(minutes.value) } });
   });
   refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  const who = details.via === "program"
+    ? [element("p", {}, element("strong", { textContent: `A program on ${details.label}` }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
+      element("p", { className: "warn", textContent: "Canoa cannot tell which program: whatever runs as you on that machine can ask here, and shares what you allow." }),
+      element("p", {}, element("code", { textContent: details.peer }))]
+    : [element("p", {}, element("strong", { textContent: details.label }), ` asks to ${WHAT[details.capability] ?? details.capability}.`)];
   main.replaceChildren(
-    element("p", {}, element("strong", { textContent: details.label }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
+    ...who,
     element("p", { className: "theirs", textContent: details.reason ? `In its own words: ${details.reason}` : "It gave no reason." }),
     ...(details.capability === "browser.debug" ? [element("p", { className: "warn", textContent: "The debugger can read this site's cookies and anything else on the page, and act as you there." })] : []),
     element("p", { textContent: "What it reads there can try to talk it into things. Share only what you would show it yourself." }),
