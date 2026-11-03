@@ -5,13 +5,13 @@ import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
+import 'acp/connect.dart' show chatEndpoints;
 import 'acp/provider_connect.dart';
 import 'acp/agent_commands.dart';
 import 'acp/client.dart';
 import 'acp/local_agent.dart';
 import 'package:coqui_acp/page.dart';
 import 'connect_dialog.dart';
-import 'package:coqui_web/coqui_web.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
@@ -154,13 +154,13 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   Future<void> _connect(ConnectTarget target) async {
-    final ws = Uri.parse(target.webSocket);
-    final wt = target.webTransport.isEmpty
-        ? null : Uri.parse(target.webTransport);
-    final endpoints = WebEndpoints(
-      webTransport: config.preferWebTransport ? wt : null,
-      webSocket: ws,
+    final endpoints = chatEndpoints(
+      webSocket: target.webSocket,
+      webTransport: target.webTransport,
+      preferWebTransport: config.preferWebTransport,
     );
+    final ws = endpoints.webSocket!;
+    final wt = target.webTransport.isEmpty ? null : Uri.parse(target.webTransport);
     final pinnedPeerId = target.peerId.toLowerCase();
     final client = await connectBrowserAcp(
       endpoints, pinnedPeerId: pinnedPeerId,

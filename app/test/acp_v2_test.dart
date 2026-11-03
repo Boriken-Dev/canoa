@@ -319,4 +319,24 @@ void main() {
     expect(channel.sent, isEmpty);
   });
 
+  test('the chat dials a host on this machine over plain WebSocket, and nowhere else', () {
+    final local = chatEndpoints(webSocket: 'ws://127.0.0.1:7801');
+    expect(local.webSocket, Uri.parse('ws://127.0.0.1:7801'));
+    expect(chatEndpoints(webSocket: 'ws://[::1]:7801').webSocket?.port, 7801);
+    expect(() => chatEndpoints(webSocket: 'ws://10.7.0.1:7801'), throwsArgumentError);
+    expect(() => chatEndpoints(webSocket: 'ws://agent.example/acp'), throwsArgumentError);
+    final both = chatEndpoints(
+      webSocket: 'wss://agent.example/acp',
+      webTransport: 'https://agent.example:4433/acp',
+    );
+    expect(both.webTransport, isNotNull);
+    expect(
+      chatEndpoints(
+        webSocket: 'wss://agent.example/acp',
+        webTransport: 'https://agent.example:4433/acp',
+        preferWebTransport: false,
+      ).webTransport,
+      isNull,
+    );
+  });
 }

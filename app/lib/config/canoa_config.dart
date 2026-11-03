@@ -19,6 +19,7 @@ final class CanoaConfig {
     this.look = LookId.bubbles,
     this.brightness = 'dark',
     this.agents = const [],
+    this.host,
   });
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
@@ -27,6 +28,9 @@ final class CanoaConfig {
 
   /// Agents this person added, offered beside the presets when what they need is installed.
   final List<AgentCommand> agents;
+
+  /// The `[host]` table, which `canoa-host` reads: kept as it was read, so saving settings never loses it.
+  final Map<String, dynamic>? host;
 
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
@@ -50,6 +54,7 @@ final class CanoaConfig {
         look: look ?? this.look,
         brightness: brightness ?? this.brightness,
         agents: agents,
+        host: host,
       );
 
   factory CanoaConfig.parse(String source) {
@@ -57,7 +62,7 @@ final class CanoaConfig {
         ? source.substring(source.indexOf('\n') + 1) : source;
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
-      if (!{'desktop', 'network', 'assets', 'appearance', 'agents'}.contains(name)) {
+      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host'}.contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
     }
@@ -117,8 +122,11 @@ final class CanoaConfig {
         agents.add(AgentCommand(label: '${entry.key}', program: agent['program'] as String, args: args.cast<String>()));
       }
     }
+    final host = data['host'];
+    if (host != null && host is! Map) throw const FormatException('Canoa.cfg: host must be a table');
     return CanoaConfig(
       agents: agents,
+      host: host == null ? null : Map<String, dynamic>.from(host as Map),
       look: look, brightness: brightness,
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
@@ -149,5 +157,5 @@ ${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
-''').join()}''';
+''').join()}${host == null ? '' : '\n${TomlDocument.fromMap({'host': host})}'}''';
 }

@@ -1,6 +1,18 @@
 import 'package:coqui_web/coqui_web.dart';
 import 'client.dart';
 
+/// The endpoints the chat dials for an agent it pins. Plain WebSocket is taken on loopback only, where `canoa-host` listens:
+/// the peer proof does not depend on the transport, and every message after it is sealed in the session it ends in.
+WebEndpoints chatEndpoints({
+  required String webSocket,
+  String webTransport = '',
+  bool preferWebTransport = true,
+}) => WebEndpoints(
+  webTransport: preferWebTransport && webTransport.isNotEmpty ? Uri.parse(webTransport) : null,
+  webSocket: Uri.parse(webSocket),
+  allowLocalPlainWebSocket: true,
+);
+
 /// Opens the preferred network transport, then proves the SAME expected peer
 /// identity on that selected transport before sending any ACP message.
 ///
