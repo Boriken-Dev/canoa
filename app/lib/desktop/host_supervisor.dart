@@ -26,8 +26,8 @@ enum HostPhase {
 /// The most of the host's standard error kept, for saying why it ended.
 const int maxHostLog = 16 * 1024;
 
-/// How long the host waits after its input closes before it is killed.
-const Duration hostLeaving = Duration(seconds: 3);
+/// How long the host has to end after its input closes before it is killed: longer than the host gives its agents.
+const Duration hostLeaving = Duration(seconds: 8);
 
 /// A `canoa-host` command that did not succeed, in its words.
 final class HostCommandFailed implements Exception {
@@ -293,10 +293,10 @@ class HostSupervisor extends ChangeNotifier {
   }
 
   /// Pairs a waiting key. Only a person's choice calls this: nothing is accepted by itself.
-  Future<void> accept(String id) => _command(['accept', id]);
+  Future<void> accept(String id) => _command(['accept', '--', id]);
 
   /// Removes a key, paired or waiting. A link it holds ends within about a second.
-  Future<void> revoke(String id) => _command(['revoke', id]);
+  Future<void> revoke(String id) => _command(['revoke', '--', id]);
 
   /// What is wrong with Canoa.cfg at [configPath] for the host, in its words, or null when nothing is.
   Future<String?> check(String configPath) async {
@@ -310,7 +310,7 @@ class HostSupervisor extends ChangeNotifier {
   Future<HostPairing> pair() async {
     final tool = this.tool;
     if (tool == null) throw const HostCommandFailed('canoa-host is not installed');
-    return HostPairing._start(await tool.start(['pair']));
+    return HostPairing._start(await tool.start(['pair', '--until-stdin-closes']));
   }
 
   Future<HostOutput> _command(List<String> args) async {

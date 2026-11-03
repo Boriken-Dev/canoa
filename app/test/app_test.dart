@@ -7,6 +7,8 @@ import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -18,6 +20,7 @@ final class _FakeProvider implements AcpPage {
 }
 
 void main() {
+  _staleDialogs();
   testWidgets('shows Canoa multi-session chat shell', (tester) async {
     final store = SessionStore();
     await tester.pumpWidget(CanoaApp(store: store));
@@ -207,6 +210,81 @@ void main() {
   });
 }
 
+void _staleDialogs() {
+  testWidgets('a dialog left open never saves back what another one changed meanwhile', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('canoa-stale');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final tool = FakeTool();
+    final host = HostSupervisor(tool);
+    final settings = ValueNotifier<int>(0);
+    final hosting = ValueNotifier<int>(0);
+    final written = <CanoaConfig>[];
+    await tester.binding.setSurfaceSize(const Size(1200, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final config = const CanoaConfig().withHostAgent(name: 'old', program: 'agent', listen: '127.0.0.1:7801');
+    await tester.pumpWidget(CanoaApp(
+      store: SessionStore(includePreview: false),
+      config: config,
+      shell: _FakeShell(),
+      host: host,
+      settingsSignal: settings,
+      hostingSignal: hosting,
+      configPath: '${dir.path}/Canoa.cfg',
+      writeConfig: (changed) async => written.add(changed),
+    ));
+
+    // Settings from the tray, then Hosting over it: the agent removed there stays removed when Settings is saved.
+    settings.value++;
+    await tester.pumpAndSettle();
+    hosting.value++;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Stop hosting old'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Stop hosting'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(written.last.hostEntries, isEmpty);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(written.last.hostEntries, isEmpty, reason: 'Settings saved its own copy of [host] back');
+
+    // Hosting open, then Settings over it: a look chosen there stays when Hosting adds an agent.
+    hosting.value++;
+    await tester.pumpAndSettle();
+    settings.value++;
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Light').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(written.last.brightness, 'light');
+    await tester.tap(find.text('Add an agent'));
+    await tester.pumpAndSettle();
+    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
+    await tester.enterText(fields.at(0), 'new');
+    await tester.enterText(fields.at(1), 'agent');
+    final before = written.length;
+    await tester.tap(find.text('Add'));
+    // The port and the check are real input and output, which run only outside the test's clock.
+    for (var turn = 0; turn < 40 && written.length == before; turn++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(written.last.hostEntries.map((entry) => entry.name), ['new']);
+    expect(written.last.brightness, 'light', reason: 'Hosting saved its own copy of the look back');
+
+    // One Hosting at a time.
+    hosting.value++;
+    await tester.pumpAndSettle();
+    expect(find.text('Agents this computer hosts'), findsOneWidget);
+  });
+}
+
 final class _FakeShell implements DesktopShell {
   @override
   Future<void> Function()? beforeQuit;
@@ -214,6 +292,8 @@ final class _FakeShell implements DesktopShell {
   bool get isDesktop => true;
   @override
   Future<void> quit() async {}
+  @override
+  Future<void> update(CanoaConfig config) async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

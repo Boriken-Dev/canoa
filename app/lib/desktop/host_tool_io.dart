@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'host_tool.dart';
 
@@ -24,8 +25,19 @@ Future<int> freeLoopbackPort() async {
 Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String file) use) async {
   final directory = File(path).parent;
   await directory.create(recursive: true);
-  final file = File('${directory.path}${Platform.pathSeparator}.Canoa.cfg.$pid.check');
-  await file.writeAsString(text, flush: true);
+  // A name of its own, created only if nothing is there: in a shared directory someone else could have put a file or a
+  // link at a name known in advance.
+  final random = Random.secure();
+  final suffix = List.generate(16, (_) => random.nextInt(16).toRadixString(16)).join();
+  final file = File('${directory.path}${Platform.pathSeparator}.Canoa.cfg.$suffix.check');
+  await file.create(exclusive: true);
+  final writing = await file.open(mode: FileMode.writeOnlyAppend);
+  try {
+    await writing.writeString(text);
+    await writing.flush();
+  } finally {
+    await writing.close();
+  }
   try {
     return await use(file.path);
   } finally {

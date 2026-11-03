@@ -78,7 +78,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Pair'));
     await tester.pumpAndSettle();
     expect(host.ranWith('accept'), [
-      ['accept', _waiting],
+      ['accept', '--', _waiting],
     ]);
   });
 
@@ -97,7 +97,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
     await tester.pumpAndSettle();
     expect(host.ranWith('revoke'), [
-      ['revoke', _paired],
+      ['revoke', '--', _paired],
     ]);
   });
 

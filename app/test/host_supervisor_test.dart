@@ -172,8 +172,8 @@ void main() {
     await supervisor.revoke('sha256:a');
     expect(tool.ran, [
       ['peers', '--format', 'json'],
-      ['accept', 'sha256:w'],
-      ['revoke', 'sha256:a'],
+      ['accept', '--', 'sha256:w'],
+      ['revoke', '--', 'sha256:a'],
     ]);
   });
 
@@ -183,7 +183,7 @@ void main() {
     final starting = supervisor.pair();
     await Future<void>.delayed(Duration.zero);
     final child = tool.children.single;
-    expect(tool.started.single, ['pair']);
+    expect(tool.started.single, ['pair', '--until-stdin-closes']);
     child.out.add('{"pin":"123456","peer":"sha256:host","url":"ws://127.0.0.1:9"}');
     final pairing = await starting;
     expect((pairing.pin, pairing.hostId, pairing.url), ('123456', 'sha256:host', 'ws://127.0.0.1:9'));

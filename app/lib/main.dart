@@ -48,6 +48,7 @@ class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
+    this.configPath, this.writeConfig,
   });
 
   final SessionStore? store;
@@ -59,6 +60,12 @@ class CanoaApp extends StatefulWidget {
   final HostSupervisor? host;
   final ValueNotifier<int>? hostingSignal;
 
+  /// Where Canoa.cfg is and how it is written; by default the platform's place.
+  @visibleForTesting
+  final String? configPath;
+  @visibleForTesting
+  final Future<void> Function(CanoaConfig)? writeConfig;
+
   @override
   State<CanoaApp> createState() => _CanoaAppState();
 }
@@ -67,40 +74,48 @@ class _CanoaAppState extends State<CanoaApp> {
   late final SessionStore store;
   late final bool ownsStore;
   late CanoaConfig config;
-  void _requestSettings() {
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _showSettings();
-    });
-  }
-  void _requestHosting() {
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_showHosting());
-    });
-  }
+  // The tray asks between frames, and a frame may not come by itself while the window is hidden.
+  void _requestSettings() => scheduleMicrotask(() {
+    if (mounted) unawaited(_showSettings());
+  });
+  void _requestHosting() => scheduleMicrotask(() {
+    if (mounted) unawaited(_showHosting());
+  });
+
+  String? get _configPath => widget.configPath ?? desktopConfigPath();
+  Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? saveConfig)(changed);
+
+  // One of each at a time: a second copy would hold a configuration the first one changes.
+  bool _hostingOpen = false, _settingsOpen = false;
 
   Future<void> _showHosting() async {
     final host = widget.host;
-    if (host == null) return;
+    if (host == null || _hostingOpen) return;
     final above = _navigator.currentContext;
     if (above == null) return;
-    await showDialog<void>(
-      context: above,
-      builder: (_) => HostingDialog(supervisor: host, config: config, onSave: _saveHosting),
-    );
+    _hostingOpen = true;
+    try {
+      await showDialog<void>(
+        context: above,
+        builder: (_) => HostingDialog(supervisor: host, config: config, onSave: _saveHosting),
+      );
+    } finally {
+      _hostingOpen = false;
+    }
   }
 
   /// Saves Canoa.cfg once canoa-host finds nothing wrong with it, then serves it.
-  Future<String?> _saveHosting(CanoaConfig changed) async {
+  /// Only [host] comes from the dialog: the rest is what the app has now, which Settings may have changed meanwhile.
+  Future<String?> _saveHosting(CanoaConfig fromDialog) async {
     final host = widget.host;
-    final path = desktopConfigPath();
+    final path = _configPath;
     if (host == null || path == null) return 'Canoa.cfg has no place on this computer';
+    final changed = config.withHost(fromDialog.host);
     if (changed.hostEntries.isNotEmpty) {
       final problem = await withFileBeside(path, changed.encode(), host.check);
       if (problem != null) return problem;
     }
-    await saveConfig(changed);
+    await _write(changed);
     if (mounted) setState(() => config = changed);
     await host.apply(configPath: path, hasEntries: changed.hostEntries.isNotEmpty);
     return null;
@@ -109,16 +124,24 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _showSettings() async {
     final shell = widget.shell;
     final above = _navigator.currentContext;
-    if (above == null) return;
-    final changed = await showDialog<CanoaConfig>(
-      context: above,
-      builder: (_) => SettingsDialog(config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null),
-    );
-    if (changed == null || !mounted) return;
+    if (above == null || _settingsOpen) return;
+    _settingsOpen = true;
+    final CanoaConfig? fromDialog;
+    try {
+      fromDialog = await showDialog<CanoaConfig>(
+        context: above,
+        builder: (_) => SettingsDialog(config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null),
+      );
+    } finally {
+      _settingsOpen = false;
+    }
+    if (fromDialog == null || !mounted) return;
+    // [host] stays as the app has it now: Hosting may have changed it while Settings was open.
+    final changed = fromDialog.withHost(config.host);
     setState(() => config = changed);
     await widget.shell?.update(changed);
     try {
-      await saveConfig(changed);
+      await _write(changed);
     } on UnsupportedError {
       // Canoa.cfg in web/PWA deployments is read-only.
     } catch (error) {
@@ -205,7 +228,8 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _endAgents() async {
     final ending = [for (final client in _ownedClients) client.close(), ?widget.host?.stop()];
     _ownedClients.clear();
-    await Future.wait(ending).timeout(const Duration(seconds: 5), onTimeout: () => const []);
+    // Longer than the host has to end its agents.
+    await Future.wait(ending).timeout(const Duration(seconds: 10), onTimeout: () => const []);
   }
 
   Future<void> _connect(ConnectTarget target) async {
