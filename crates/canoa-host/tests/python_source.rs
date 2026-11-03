@@ -171,9 +171,11 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
             )
         };
         let mut dirs = vec![dir];
-        dirs.extend(std::env::split_paths(
-            &std::env::var_os(name).unwrap_or_default(),
-        ));
+        // An empty entry would name the working directory to the loader.
+        dirs.extend(
+            std::env::split_paths(&std::env::var_os(name).unwrap_or_default())
+                .filter(|dir| !dir.as_os_str().is_empty()),
+        );
         vec![
             (name, std::env::join_paths(dirs).expect("paths join")),
             ("PYTHONDONTWRITEBYTECODE", OsString::from("1")),
