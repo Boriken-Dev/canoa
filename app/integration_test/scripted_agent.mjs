@@ -4,7 +4,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-const statePath = process.argv.find((arg) => arg.startsWith('--state='))?.slice('--state='.length);
+const option = (name) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+const statePath = option('state');
+// What it says of itself, so one script can stand in for several harnesses: `agentInfo` only when named, and with
+// --no-reopen neither session/load nor session/list.
+const agentInfo = option('name') ? { name: option('name'), version: option('version') ?? '0.0.0' } : undefined;
+const reopens = !process.argv.includes('--no-reopen');
 const load = () => (statePath && existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : {});
 const save = (state) => statePath && writeFileSync(statePath, JSON.stringify(state));
 
@@ -59,6 +64,10 @@ async function prompt(sessionId, blocks) {
   const text = blocks.filter((block) => block.type === 'text').map((block) => block.text).join(' ');
   const attached = blocks.filter((block) => block.type === 'resource').map((block) => block.resource?.uri ?? 'a file');
   remember(sessionId, 'user', text);
+  if (/^Say /.test(text)) {
+    say(sessionId, text.slice('Say '.length));
+    return 'end_turn';
+  }
   update(sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Looking at the repository.' } });
   update(sessionId, {
     sessionUpdate: 'plan',
@@ -109,7 +118,10 @@ for await (const line of createInterface({ input: process.stdin })) {
   } else if (method === 'initialize') {
     send({ id, result: {
       protocolVersion: 1,
-      agentCapabilities: { loadSession: true, promptCapabilities: { embeddedContext: true }, sessionCapabilities: { list: {} } },
+      agentCapabilities: reopens
+        ? { loadSession: true, promptCapabilities: { embeddedContext: true }, sessionCapabilities: { list: {} } }
+        : { promptCapabilities: { embeddedContext: true } },
+      agentInfo,
     } });
   } else if (method === 'session/new') {
     const state = load();
