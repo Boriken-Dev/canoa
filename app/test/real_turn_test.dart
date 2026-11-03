@@ -114,7 +114,7 @@ void main() {
     final dir = Directory.systemTemp.createTempSync('canoa-turn-');
     final settings = File('${dir.path}${Platform.pathSeparator}.claude${Platform.pathSeparator}settings.json');
     settings.parent.createSync();
-    settings.writeAsStringSync('{"permissions": {"ask": ["Write", "Edit", "Bash"]}}');
+    settings.writeAsStringSync('{"permissions": {"ask": ["Write", "Edit", "Bash", "PowerShell"]}}');
     final allow = Platform.environment['CANOA_TEST_REAL_TURN_ANSWER'] != 'refuse';
     final store = SessionStore(includePreview: false);
     final client = await startLocalAgent(command, decider: store.askPermission, workingDirectory: dir.path);

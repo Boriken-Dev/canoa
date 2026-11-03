@@ -1,12 +1,13 @@
 // What an agent sends, shaped as a real one sends it, through the store and into the conversation, in every look.
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Directory;
+import 'dart:io' show Directory, File;
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/chat/diff.dart';
 import 'package:canoa/chat/transcript.dart';
+import 'package:canoa/chat/update_record.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/main.dart';
@@ -106,8 +107,8 @@ final class FakeAgent {
   }
 }
 
-Future<(FakeAgent, ChatSession, SessionStore)> _fed(WidgetTester tester) async {
-  final store = SessionStore(includePreview: false);
+Future<(FakeAgent, ChatSession, SessionStore)> _fed(WidgetTester tester, {UpdateRecorder? recorder}) async {
+  final store = SessionStore(includePreview: false, recorder: recorder);
   final agent = FakeAgent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   return (agent, session, store);
@@ -523,6 +524,91 @@ void main() {
           await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/${look.name}_$label.png'));
         });
       }
+    }
+  });
+
+  group('a real coding task', () {
+    // Each distinct kind and shape of update a real agent sent in integration_test/coding_task_test.dart, as the app recorded it.
+    final fixture = [
+      for (final line in File('test/fixtures/coding_task_updates.jsonl').readAsLinesSync())
+        if (line.trim().isNotEmpty) jsonDecode(line) as Map<String, dynamic>,
+    ];
+
+    // A shape made an update again, with a stand-in for each value.
+    Object? filled(Object? shape) => switch (shape) {
+      'string' => 'x',
+      'int' => 1,
+      'double' => 0.5,
+      'bool' => true,
+      'null' => null,
+      final Map<dynamic, dynamic> map => {for (final entry in map.entries) '${entry.key}': filled(entry.value)},
+      final List<dynamic> list => [for (final item in list) filled(item)],
+      _ => shape,
+    };
+
+    testWidgets('every update it sent has a rendering of its own, and draws', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 2000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final recorder = UpdateRecorder();
+      final (agent, _, store) = await _fed(tester, recorder: recorder);
+      await tester.pumpWidget(CanoaApp(store: store));
+      for (final seen in fixture) {
+        agent.update(filled(seen['shape'])! as Map<String, Object?>);
+      }
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(recorder.seen.map((seen) => seen.kind).toSet(), {for (final seen in fixture) seen['kind']});
+      expect(recorder.unshown, isEmpty, reason: 'these kinds reached the fallback, which shows nothing');
+    });
+
+    // Its kinds that the looks' goldens leave out: the person's message, the agent's name for the conversation, a turn waiting on
+    // a question with Stop, a tool with text output, a cancelled one and a patch, as the real agent shaped them.
+    for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
+      testWidgets('a turn waiting on a question draws at $label width with nothing overflowing', (tester) async {
+        await tester.binding.setSurfaceSize(size);
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final (agent, session, store) = await _fed(tester);
+        session.agentNames = true;
+        await tester.pumpWidget(CanoaApp(store: store));
+        agent.update({'sessionUpdate': 'config_option_update', 'configOptions': [
+          {'configId': 'mode', 'name': 'Mode', 'type': 'select', 'currentValue': 'ask', 'options': [
+            {'value': 'ask', 'name': 'Ask first'},
+            {'value': 'edits', 'name': 'Accept edits'},
+          ]},
+        ]});
+        agent.update({'sessionUpdate': 'user_message', 'messageId': 'u1', 'content': [
+          {'type': 'text', 'text': 'The test fails. Find out why and fix the code.'},
+        ]});
+        agent.update({'sessionUpdate': 'state_update', 'state': 'running'});
+        agent.update({'sessionUpdate': 'session_info_update', 'title': 'Fix the failing test', 'updatedAt': '2026-11-03T00:00:00Z'});
+        agent.update({'sessionUpdate': 'agent_message_chunk', 'messageId': 'a1', 'content': {'type': 'text', 'text': '`addNumbers` subtracts.'}});
+        agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'r', 'title': 'Read src/calc.js', 'kind': 'read', 'status': 'completed',
+          'content': [{'type': 'content', 'content': {'type': 'text', 'text': 'export function addNumbers(a, b) {\n  return a - b;\n}'}}]});
+        agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'c', 'title': 'Edit README.md', 'kind': 'edit', 'status': 'cancelled'});
+        agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'p', 'title': 'Edit src/calc.js', 'kind': 'edit', 'status': 'pending',
+          'content': [{'type': 'diff', 'changes': [{'operation': 'update', 'path': 'src/calc.js', 'fileType': 'file'}],
+            'patch': {'format': 'unified', 'text': '@@ -1,3 +1,3 @@\n export function addNumbers(a, b) {\n-  return a - b;\n+  return a + b;\n }'}}]});
+        agent.update({'sessionUpdate': 'usage_update', 'used': 16000, 'size': 200000});
+        agent.incoming.add(jsonEncode({
+          'jsonrpc': '2.0', 'id': 91, 'method': 'session/request_permission',
+          'params': {
+            'sessionId': 's1',
+            'title': 'Edit src/calc.js',
+            'subject': {'type': 'tool_call', 'toolCall': {'toolCallId': 'p', 'rawInput': {'file_path': 'src/calc.js', 'old_string': 'a - b', 'new_string': 'a + b'}}},
+            'options': [{'optionId': 'no', 'name': 'No', 'kind': 'reject_once'}, {'optionId': 'yes', 'name': 'Yes', 'kind': 'allow_once'}],
+          },
+        }));
+        await _settle(tester);
+        await tester.tap(find.text('Edit src/calc.js').first);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byTooltip('Stop'), findsOneWidget);
+        expect(find.text('Allow'), findsOneWidget);
+        expect(find.text('Fix the failing test'), findsWidgets);
+        // At phone width the turn has scrolled past it.
+        if (label == 'desktop') expect(find.byTooltip('cancelled'), findsOneWidget);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/coding_task_$label.png'));
+      });
     }
   });
 }
