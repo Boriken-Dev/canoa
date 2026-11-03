@@ -13,8 +13,10 @@ final class FakeChild implements HostChild {
   final _exit = Completer<int>();
   bool inputClosed = false, killed = false;
 
-  void end(int code) {
+  /// Ends it with [code]. Its standard error closes with it unless [closeErrors] is false, for a test to say more first.
+  void end(int code, {bool closeErrors = true}) {
     if (!_exit.isCompleted) _exit.complete(code);
+    if (closeErrors && !err.isClosed) unawaited(err.close());
   }
 
   @override

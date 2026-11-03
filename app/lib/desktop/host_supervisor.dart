@@ -114,6 +114,7 @@ class HostSupervisor extends ChangeNotifier {
     this.firstPause = const Duration(seconds: 1),
     this.longestPause = const Duration(minutes: 1),
     this.steady = const Duration(seconds: 30),
+    this.errorDrain = const Duration(seconds: 2),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -125,6 +126,9 @@ class HostSupervisor extends ChangeNotifier {
 
   /// How long a run must last for the next end to count as a first one again.
   final Duration steady;
+
+  /// How long, after the host ends, its standard error may take to close, so its last words reach the reason shown.
+  final Duration errorDrain;
   final DateTime Function() _clock;
 
   HostPhase _phase = HostPhase.stopped;
@@ -223,7 +227,13 @@ class HostSupervisor extends ChangeNotifier {
     }
     _child = child;
     _startedAt = _clock();
-    child.errors.listen(_keep);
+    final errorsDone = Completer<void>();
+    child.errors.listen(
+      _keep,
+      onDone: () {
+        if (!errorsDone.isCompleted) errorsDone.complete();
+      },
+    );
     child.lines.listen((line) {
       if (generation != _generation) return;
       final entry = HostListening.parse(line);
@@ -234,7 +244,13 @@ class HostSupervisor extends ChangeNotifier {
       _phase = HostPhase.running;
       notifyListeners();
     });
-    unawaited(child.exitCode.then((code) => _ended(generation, code)));
+    // Its status can come before its last line on standard error, which says why: wait for that to close, within a bound.
+    unawaited(
+      child.exitCode.then((code) async {
+        await errorsDone.future.timeout(errorDrain, onTimeout: () {});
+        _ended(generation, code);
+      }),
+    );
   }
 
   void _keep(String line) {

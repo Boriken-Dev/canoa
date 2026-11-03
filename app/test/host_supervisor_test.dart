@@ -199,4 +199,36 @@ void main() {
     expect(tool.children.last.killed, isTrue);
     await expectLater(cancelled.paired, throwsA(isA<HostCommandFailed>()));
   });
+
+  test("a host whose exit comes before its last words is reported in those words", () {
+    fakeAsync((async) {
+      final tool = FakeTool();
+      final supervisor = HostSupervisor(tool);
+      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      async.flushMicrotasks();
+      // A real process's status can arrive before the line it wrote last on standard error.
+      tool.children.last.end(2, closeErrors: false);
+      async.elapse(const Duration(milliseconds: 100));
+      tool.children.last.err.add('canoa-host: the configuration is malformed at line 2');
+      unawaited(tool.children.last.err.close());
+      async.flushMicrotasks();
+      expect(supervisor.phase, HostPhase.failed);
+      expect(supervisor.problem, 'the configuration is malformed at line 2');
+    });
+  });
+
+  test("a host whose standard error never closes is still reported, after a bound", () {
+    fakeAsync((async) {
+      final tool = FakeTool();
+      final supervisor = HostSupervisor(tool, errorDrain: const Duration(seconds: 2));
+      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      async.flushMicrotasks();
+      tool.children.last.end(2, closeErrors: false);
+      async.elapse(const Duration(milliseconds: 1999));
+      expect(supervisor.phase, isNot(HostPhase.failed));
+      async.elapse(const Duration(milliseconds: 1));
+      expect(supervisor.phase, HostPhase.failed);
+      expect(supervisor.problem, 'canoa-host ended with status 2');
+    });
+  });
 }

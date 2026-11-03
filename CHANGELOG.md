@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `canoa-host serve --key-limit` and `--no-rekey`, and `ServeOptions::with_key_limit` and `with_rekey`; a setting looser than the default is logged. A client of the other method is logged as a method mismatch, never as a key to accept. A home records the method named last, so a host the app runs naming none keeps working after a move.
 - Hosting shows the method beside the host's id, and the app's and the extension's add-by-hand forms ask for the agent's method instead of assuming one.
+- Hosting reports a host that refused Canoa.cfg in the host's own words: it waits, up to `errorDrain` (2 s), for the host's standard error to close after its exit, which can come first.
 - A Noise agent that turns the extension's key away fails the page's connect with a network error instead of leaving it waiting: the dial waits briefly after the handshake for the agent to end the connection, and a link that ended before its close callback was set still reports it.
 - The extension reports a link that ends without the agent's close record as cut, sizes its frame limit for the longest record a Noise sender can make, refuses a known key named under another method, shows `mcp-config` with its key for the chosen machine's method, and says the `pair-accept --origin` its own origin needs.
 
