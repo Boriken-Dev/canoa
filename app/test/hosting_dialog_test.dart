@@ -14,6 +14,9 @@ import 'fixtures/fake_host.dart';
 const _waiting = 'sha256:1111111111111111111111111111111111111111111111111111111111111111';
 const _paired = 'sha256:2222222222222222222222222222222222222222222222222222222222222222';
 
+/// A method as the dialog shows it beside a host id.
+final _methodShown = RegExp(r'^ \(\w+\)$');
+
 final class _Harness {
   final tool = FakeTool();
   late final supervisor = HostSupervisor(tool);
@@ -170,6 +173,7 @@ void main() {
     await tester.pump();
     expect(find.text('482913'), findsOneWidget);
     expect(find.text('Dial ws://127.0.0.1:9100'), findsOneWidget);
+    expect(find.textContaining(_methodShown), findsNothing, reason: 'a host that does not say its method shows none');
     host.tool.children.single.out.add('{"paired":"$_paired"}');
     await tester.pump();
     await tester.pump();
@@ -198,5 +202,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Hosting, on this computer only.'), findsOneWidget);
     expect(find.text(_paired), findsNWidgets(2), reason: 'the host id, and the same key listed as paired');
+    expect(find.textContaining(_methodShown), findsNothing, reason: 'a host that does not say its method shows none');
+  });
+
+  testWidgets('the method the host proves by is shown beside its id', (tester) async {
+    final host = _Harness();
+    unawaited(host.supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+    await host.show(tester);
+    host.tool.children.single.out.add(
+      '{"name":"claude","kind":"agent","url":"ws://127.0.0.1:7801","peer":"$_paired","method":"noise"}',
+    );
+    await tester.pumpAndSettle();
+    expect(host.supervisor.peerMethod, 'noise');
+    expect(find.text(' (noise)'), findsOneWidget);
+  });
+
+  testWidgets('a PIN shows the method the host proves by', (tester) async {
+    final host = _Harness();
+    await host.show(tester);
+    await tester.tap(find.text('Show a PIN'));
+    await tester.pump();
+    host.tool.children.single.out.add(
+      '{"pin":"482913","peer":"sha256:host","method":"webcrypto","url":"ws://127.0.0.1:9100"}',
+    );
+    // The waiting spinner never settles.
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('sha256:host'), findsOneWidget);
+    expect(find.text(' (webcrypto)'), findsOneWidget);
   });
 }

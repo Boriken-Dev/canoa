@@ -19,6 +19,7 @@ import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/node_peer_bridge.dart';
+import 'fixtures/webcrypto_host.dart';
 
 // Absolute, since the provider's library is named in a Canoa.cfg written to a temporary directory and read from there.
 final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
@@ -57,9 +58,10 @@ program = ${jsonEncode(_example('stdio_agent', library: false))}
 library = ${jsonEncode(_example('echo_provider', library: true))}
 provider = "echo_provider"
 ''');
+    // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
     final process = await Process.start(
       _hostBinary!,
-      ['serve', '--config', config.path],
+      ['serve', '--method', 'webcrypto', '--config', config.path],
       environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
     );
     process.stderr.transform(utf8.decoder).listen(stderr.write);
@@ -186,8 +188,9 @@ void main() {
 [host.agents.fixture]
 program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
 ''');
+      // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
       supervisor = HostSupervisor(
-        ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'}),
+        WebCryptoHostTool(ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'})),
         firstPause: const Duration(milliseconds: 200),
       );
     });

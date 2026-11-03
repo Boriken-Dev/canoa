@@ -36,6 +36,7 @@ void main() {
     expect(supervisor.phase, HostPhase.running);
     expect(supervisor.listening.single.url, 'ws://127.0.0.1:7801');
     expect(supervisor.peerId, 'sha256:aa');
+    expect(supervisor.peerMethod, isNull, reason: 'a host that does not say its method');
   });
 
   test('an end of its own starts it again after a pause that doubles, up to a ceiling', () {

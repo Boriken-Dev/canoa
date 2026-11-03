@@ -72,7 +72,8 @@ void main() {
     await config.writeAsString(real == null ? await _piConfig() : await File(real).readAsString());
     final started = await Process.start(
       _hostBinary!,
-      ['serve', '--config', config.path],
+      // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
+      ['serve', '--method', 'webcrypto', '--config', config.path],
       environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
     );
     host = started;

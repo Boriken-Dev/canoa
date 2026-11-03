@@ -328,7 +328,12 @@ class _HostingDialogState extends State<HostingDialog> {
           SelectableText('Dial ${running.url}', style: text.bodySmall),
           const SizedBox(height: 4),
           const Text('The other side shows this host as:'),
-          _Id(running.hostId),
+          Row(
+            children: [
+              Expanded(child: _Id(running.hostId)),
+              ?_method(running.method),
+            ],
+          ),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -354,6 +359,9 @@ class _HostingDialogState extends State<HostingDialog> {
     );
   }
 }
+
+/// The proof a host runs, shown beside its id, or nothing from a host that does not say.
+Widget? _method(String? method) => method == null ? null : Text(' ($method)');
 
 /// A peer id whole, as text that can be selected and compared.
 class _Id extends StatelessWidget {
@@ -398,6 +406,7 @@ class _Status extends StatelessWidget {
           Row(
             children: [
               Expanded(child: _Id(peer)),
+              ?_method(supervisor.peerMethod),
               IconButton(
                 tooltip: 'Copy the host id',
                 icon: const Icon(Icons.copy),

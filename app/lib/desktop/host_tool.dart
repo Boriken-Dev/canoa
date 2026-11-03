@@ -4,7 +4,7 @@ import 'host_tool_stub.dart' if (dart.library.io) 'host_tool_io.dart' as platfor
 
 /// What `canoa-host serve` printed for one entry it serves.
 final class HostListening {
-  const HostListening({required this.name, required this.kind, required this.url, required this.peer});
+  const HostListening({required this.name, required this.kind, required this.url, required this.peer, this.method});
 
   final String name;
 
@@ -15,6 +15,9 @@ final class HostListening {
   /// The host's own peer id, which a client pins.
   final String peer;
 
+  /// The proof the host runs, `noise` or `webcrypto`; null from a host that does not say.
+  final String? method;
+
   /// One line of `serve`'s output, or null for anything else.
   static HostListening? parse(String line) {
     try {
@@ -22,7 +25,8 @@ final class HostListening {
       if (value is! Map) return null;
       final [name, kind, url, peer] = [value['name'], value['kind'], value['url'], value['peer']];
       if (name is! String || kind is! String || url is! String || peer is! String) return null;
-      return HostListening(name: name, kind: kind, url: url, peer: peer);
+      final method = value['method'];
+      return HostListening(name: name, kind: kind, url: url, peer: peer, method: method is String ? method : null);
     } on FormatException {
       return null;
     }

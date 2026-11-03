@@ -160,6 +160,33 @@ void main() {
     });
   });
 
+  testWidgets('an agent added by hand connects only once the person names the method its host proves by', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final targets = <ConnectTarget>[];
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
+      onPressed: () => showCanoaConnectDialog(context, (target) async => targets.add(target)),
+      child: const Text('open'),
+    ))));
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'WebSocket WSS endpoint'), 'wss://agent.example/acp');
+    await tester.enterText(find.widgetWithText(TextField, 'Pinned server peer ID'), 'sha256:${'a' * 64}');
+    await tester.tap(find.text('Connect'));
+    await tester.pump();
+    expect(find.text('Choose the method the host proves by: canoa-host serve prints it.'), findsOneWidget);
+    expect(targets, isEmpty, reason: 'no method is assumed');
+
+    await tester.tap(find.text('webcrypto'));
+    await tester.pump();
+    await tester.tap(find.text('Connect'));
+    await tester.pump();
+    await tester.pump();
+    expect(targets.single.method, 'webcrypto');
+    expect(targets.single.peerId, 'sha256:${'a' * 64}');
+  });
+
   group('agents in Canoa.cfg', () {
     test('survive a round trip, with names that need quoting', () {
       const config = CanoaConfig(agents: [AgentCommand(label: 'My "agent"', program: r'C:\tools\agent.exe', args: ['--acp', 'a b'])]);

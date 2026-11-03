@@ -22,6 +22,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../test/fixtures/node_peer_bridge.dart';
+import '../test/fixtures/webcrypto_host.dart';
 
 final String? _hostBinary = Platform.environment['CANOA_TEST_HOST'];
 final String _appDir = Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path;
@@ -109,8 +110,9 @@ void main() {
         listen: '127.0.0.1:0',
       );
       await cfg.writeAsString(config.encode());
+      // The app's browser proof is WebCrypto only, and a new home would prove by Noise.
       final host = HostSupervisor(
-        ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'}),
+        WebCryptoHostTool(ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'})),
       );
       final hosting = ValueNotifier<int>(0);
       final shell = TrayShell();

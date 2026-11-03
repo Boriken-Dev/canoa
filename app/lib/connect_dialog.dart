@@ -14,15 +14,22 @@ class ConnectTarget {
     required this.webSocket,
     required this.webTransport,
     required this.peerId,
+    required this.method,
     required this.cwd,
     required this.title,
   });
   final String webSocket;
   final String webTransport;
   final String peerId;
+
+  /// The proof the host runs, one of [proofMethods], as `canoa-host serve` prints it.
+  final String method;
   final String cwd;
   final String title;
 }
+
+/// The proofs a host can run. None is assumed: the person names the one the host prints.
+const List<String> proofMethods = ['noise', 'webcrypto'];
 
 /// Runs an agent on this computer, as a child of the app.
 typedef RunLocalAgent = Future<void> Function(AgentCommand command, {required String cwd, required String title});
@@ -78,6 +85,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   final title = TextEditingController();
   final command = TextEditingController();
   late final Future<String> localPeerId = localBrowserPeerId();
+  String? method;
   bool busy = false;
   String? error;
 
@@ -98,10 +106,16 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       setState(() => error = 'Enter the verified server peer ID (sha256:64 hex).');
       return;
     }
+    final method = this.method;
+    if (method == null) {
+      setState(() => error = 'Choose the method the host proves by: canoa-host serve prints it.');
+      return;
+    }
     final request = ConnectTarget(
       webSocket: ws.text.trim(),
       webTransport: wt.text.trim(),
       peerId: peer,
+      method: method,
       cwd: cwd.text.trim(),
       title: title.text.trim(),
     );
@@ -270,6 +284,16 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   labelText: 'Pinned server peer ID',
                   hintText: 'sha256:…',
                 )),
+              const SizedBox(height: 12),
+              Text('Method the host proves by', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 4),
+              SegmentedButton<String>(
+                segments: [for (final name in proofMethods) ButtonSegment(value: name, label: Text(name))],
+                selected: {?method},
+                emptySelectionAllowed: true,
+                showSelectedIcon: false,
+                onSelectionChanged: (chosen) => setState(() => method = chosen.firstOrNull),
+              ),
               TextField(controller: cwd,
                 decoration: const InputDecoration(
                   labelText: 'Agent workspace (absolute path)',

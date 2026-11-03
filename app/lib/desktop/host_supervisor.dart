@@ -39,13 +39,16 @@ final class HostCommandFailed implements Exception {
 
 /// `canoa-host pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
 final class HostPairing {
-  HostPairing._(this._child, this.pin, this.hostId, this.url, this.paired);
+  HostPairing._(this._child, this.pin, this.hostId, this.method, this.url, this.paired);
 
   final HostChild _child;
   final String pin;
 
   /// The host's peer id, which the other side shows once it has paired.
   final String hostId;
+
+  /// The proof the host runs, `noise` or `webcrypto`; null from a host that does not say.
+  final String? method;
 
   /// Where the other side dials.
   final String url;
@@ -95,7 +98,8 @@ final class HostPairing {
     }
     // Nobody may be waiting on it when it is cancelled.
     unawaited(paired.future.then((_) {}, onError: (Object _) {}));
-    return HostPairing._(child, pin, hostId, url, paired.future);
+    final method = first['method'];
+    return HostPairing._(child, pin, hostId, method is String ? method : null, url, paired.future);
   }
 
   /// Ends the pairing; the PIN can no longer be used.
@@ -133,6 +137,10 @@ class HostSupervisor extends ChangeNotifier {
   /// The host's peer id, once it has said it.
   String? get peerId => _listening.isEmpty ? _peerId : _listening.first.peer;
   String? _peerId;
+
+  /// The proof the host runs, `noise` or `webcrypto`, once it has said it.
+  String? get peerMethod => _listening.isEmpty ? _peerMethod : _listening.first.method;
+  String? _peerMethod;
 
   /// Why it last ended or could not start, in its own words.
   String? get problem => _problem;
@@ -222,6 +230,7 @@ class HostSupervisor extends ChangeNotifier {
       if (entry == null) return;
       _listening.add(entry);
       _peerId = entry.peer;
+      _peerMethod = entry.method;
       _phase = HostPhase.running;
       notifyListeners();
     });
