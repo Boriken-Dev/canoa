@@ -43,7 +43,7 @@ Rendering renderingOf(AcpSessionUpdate update) => switch (update.kind) {
     update.text == null ? Rendering.unshown : Rendering.message,
   'agent_thought' || 'agent_thought_chunk' => update.text == null ? Rendering.unshown : Rendering.thought,
   'tool_call' || 'tool_call_update' => Rendering.toolCard,
-  'terminal_update' => Rendering.terminal,
+  'terminal_update' || 'terminal_output_chunk' => Rendering.terminal,
   'plan' => Rendering.plan,
   'available_commands_update' => Rendering.commands,
   'usage_update' => Rendering.usage,

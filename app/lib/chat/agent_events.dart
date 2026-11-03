@@ -28,13 +28,15 @@ String boundedTail(String text, int limit) => text.length > limit ? text.substri
 
 String boundedHead(String text, int limit) => text.length > limit ? '${text.substring(0, limit)}\n…' : text;
 
-enum ToolStatus { pending, running, done, failed }
+/// [cancelled] is ACP v2's: a tool a stopped turn never ran.
+enum ToolStatus { pending, running, done, failed, cancelled }
 
 ToolStatus? _toolStatus(Object? value) => switch (value) {
   'pending' => ToolStatus.pending,
   'in_progress' => ToolStatus.running,
   'completed' => ToolStatus.done,
   'failed' => ToolStatus.failed,
+  'cancelled' => ToolStatus.cancelled,
   _ => null,
 };
 
@@ -129,17 +131,30 @@ final class ToolCall {
   }
 }
 
+/// Terminal output as ACP v2 sends it, base64-encoded bytes, as text. What is not base64 is shown as it came.
+String terminalText(String data) {
+  try {
+    return utf8.decode(base64.decode(data), allowMalformed: true);
+  } on FormatException {
+    return data;
+  }
+}
+
 /// A command the agent ran, as it reports it. The output keeps its end, which is where a failure says why.
 final class TerminalView {
   String? command;
   String output = '';
   int? exitCode;
 
+  /// A `terminal_update`, whose output replaces what came before, or a `terminal_output_chunk`, which adds to it.
   void apply(Map<String, dynamic> raw) {
     command = shortText(raw['command']) ?? command;
     final said = raw['output'];
     if (said is Map && said['data'] is String) {
-      output = boundedTail(output + (said['data'] as String), maxTerminalOutput);
+      output = boundedTail(terminalText(said['data'] as String), maxTerminalOutput);
+    }
+    if (raw['sessionUpdate'] == 'terminal_output_chunk' && raw['data'] is String) {
+      output = boundedTail(output + terminalText(raw['data'] as String), maxTerminalOutput);
     }
     final exit = raw['exitStatus'];
     if (exit is Map && exit['exitCode'] is int) exitCode = exit['exitCode'] as int;

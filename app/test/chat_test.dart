@@ -87,7 +87,7 @@ final class FakeAgent {
     ]});
     update({'sessionUpdate': 'tool_call_update', 'toolCallId': 't1', 'name': 'Bash', 'rawInput': <String, Object?>{}, 'status': 'pending', 'title': 'Run a command', 'kind': 'execute', 'locations': <Object>[], 'content': [{'type': 'terminal', 'terminalId': 'term1'}]});
     update({'sessionUpdate': 'terminal_update', 'terminalId': 'term1', 'command': 'echo hi'});
-    update({'sessionUpdate': 'terminal_update', 'terminalId': 'term1', 'output': {'data': 'hi\n'}});
+    update({'sessionUpdate': 'terminal_update', 'terminalId': 'term1', 'output': {'data': base64Encode(utf8.encode('hi\n'))}});
     update({'sessionUpdate': 'terminal_update', 'terminalId': 'term1', 'exitStatus': {'exitCode': 3}});
     update({'sessionUpdate': 'tool_call_update', 'toolCallId': 't1', 'status': 'failed', 'rawOutput': 'no'});
     update({'sessionUpdate': 'tool_call_update', 'toolCallId': 't2', 'title': 'Edit hello.txt', 'kind': 'edit', 'status': 'completed', 'locations': [{'path': 'hello.txt', 'line': 4}], 'content': [{'type': 'diff', 'path': 'hello.txt', 'oldText': 'hello\n', 'newText': 'bye\n'}]});
@@ -281,6 +281,28 @@ void main() {
       expect(session.messages.last.text, contains('cannot read'));
     });
 
+    testWidgets('a tool cancelled by a stop says so, rather than waiting for ever', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final (agent, _, store) = await _fed(tester);
+      await tester.pumpWidget(CanoaApp(store: store));
+      agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'e', 'title': 'Edit src/calc.js', 'kind': 'edit', 'status': 'pending'});
+      agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'e', 'status': 'cancelled'});
+      await _settle(tester);
+      expect(find.byTooltip('cancelled'), findsOneWidget);
+      expect(find.byTooltip('waiting'), findsNothing);
+    });
+
+    testWidgets('terminal output is decoded from base64: a snapshot replaces it, and a chunk adds to it', (tester) async {
+      final (agent, session, _) = await _fed(tester);
+      String bytes(String text) => base64Encode(utf8.encode(text));
+      agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': bytes('Exit code 2\n')}});
+      agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': bytes('one\n')}});
+      agent.update({'sessionUpdate': 'terminal_output_chunk', 'terminalId': 't', 'data': bytes('two ✓\n')});
+      await _settle(tester);
+      expect(session.terminals['t']!.output, 'one\ntwo ✓\n');
+    });
+
     testWidgets('output a bridge dropped while nobody was connected is said in the conversation', (tester) async {
       final (agent, session, _) = await _fed(tester);
       agent.update({'sessionUpdate': 'agent_message_chunk', 'messageId': 'm1', 'content': {'type': 'text', 'text': 'before'}});
@@ -354,9 +376,9 @@ void main() {
       agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'a', 'title': 'safe\u202Etxt.exe\nsecond line'});
       final huge = 'x' * (maxMessageText + 10);
       agent.update({'sessionUpdate': 'agent_message_chunk', 'messageId': 'big', 'content': {'type': 'text', 'text': huge}});
-      agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': 'y' * (maxTerminalOutput * 2)}});
+      agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': base64Encode(utf8.encode('y' * (maxTerminalOutput * 2)))}});
       for (var i = 0; i < 20; i++) {
-        agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': 'z' * 1024}});
+        agent.update({'sessionUpdate': 'terminal_output_chunk', 'terminalId': 't', 'data': base64Encode(utf8.encode('z' * 1024))});
       }
       await _settle(tester);
       expect(session.messages.first.tool!.title, 'safe txt.exe second line');

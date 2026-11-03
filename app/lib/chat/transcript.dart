@@ -161,6 +161,7 @@ class ToolCard extends StatelessWidget {
       ToolStatus.running => (Icons.autorenew, look.accent, 'running'),
       ToolStatus.done => (Icons.check_circle_outline, look.accent, 'done'),
       ToolStatus.failed => (Icons.error_outline, Theme.of(context).colorScheme.error, 'failed'),
+      ToolStatus.cancelled => (Icons.block, look.muted, 'cancelled'),
     };
     final hasDetail = tool.blocks.isNotEmpty || tool.locations.isNotEmpty;
     final header = Row(children: [
