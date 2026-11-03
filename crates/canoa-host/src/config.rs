@@ -360,12 +360,17 @@ fn check_unique(entries: &[Entry]) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Absolute, with no `.` or `..`: such a path is compared as written, so one of those could step outside it.
+/// Absolute, with no `.` or `..`: such a path is compared as written, so one of those could step outside it. The text is
+/// checked as well as the components, since a Unix path's components drop a `.` in the middle.
 pub(crate) fn plain_absolute(path: &Path) -> bool {
     path.is_absolute()
         && path
             .components()
             .all(|component| !matches!(component, Component::CurDir | Component::ParentDir))
+        && !path
+            .to_string_lossy()
+            .split(['/', '\\'])
+            .any(|segment| segment == "." || segment == "..")
 }
 
 /// The 1-based line and column of byte `offset`.

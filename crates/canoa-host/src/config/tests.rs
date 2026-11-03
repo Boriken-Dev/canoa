@@ -163,8 +163,18 @@ fn a_working_root_is_absolute_and_plain() {
         parse(&good).expect("parses").entries[0].working_roots,
         core::slice::from_ref(&root)
     );
-    for bad in ["relative", "/a/../b", "/a/./b"] {
-        let text = format!("[host.agents.a]\nprogram = \"x\"\nworking_roots = [\"{bad}\"]\n");
+    let under = root.to_string_lossy();
+    for bad in [
+        "relative".to_owned(),
+        format!("{under}/a/../b"),
+        format!("{under}/a/./b"),
+        format!("{under}/a/."),
+        format!("{under}\\a\\.\\b"),
+    ] {
+        let text = format!(
+            "[host.agents.a]\nprogram = \"x\"\nworking_roots = [{}]\n",
+            serde_json::to_string(&bad).expect("JSON")
+        );
         assert!(parse(&text).is_err(), "{bad}");
     }
 }

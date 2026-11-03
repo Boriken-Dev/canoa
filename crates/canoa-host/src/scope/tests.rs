@@ -172,10 +172,12 @@ fn a_working_directory_outside_the_roots_is_refused() {
     let outside = std::env::temp_dir().join("elsewhere");
     let climbing = root.join("..").join("elsewhere");
     let sibling = format!("{}-sibling", root.to_string_lossy());
+    let dotted = format!("{}/./project", root.to_string_lossy());
     for cwd in [
         outside.to_string_lossy().as_ref(),
         climbing.to_string_lossy().as_ref(),
         &sibling,
+        &dotted,
         "relative",
     ] {
         assert!(refused(&scope, &message(cwd)).is_some(), "{cwd}");
