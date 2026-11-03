@@ -56,3 +56,7 @@
 {"kind":"tool_call_update","rendering":"toolCard","shape":{"locations":"null","rawOutput":"null","toolCallId":"string","name":"string","rawInput":{"pattern":"string","path":"string","output_mode":"string"},"status":"pending","title":"string","kind":"search","content":[],"sessionUpdate":"tool_call_update","_meta":"null"}}
 {"kind":"agent_thought","rendering":"thought","shape":{"messageId":"string","content":[],"sessionUpdate":"agent_thought"}}
 {"kind":"state_update","rendering":"status","shape":{"sessionUpdate":"state_update","state":"idle"}}
+{"kind":"tool_call_update","rendering":"toolCard","shape":{"toolCallId":"string","rawInput":{"pattern":"string","output_mode":"string"},"sessionUpdate":"tool_call_update"}}
+{"kind":"tool_call_update","rendering":"toolCard","shape":{"toolCallId":"string","rawInput":{"command":"string","description":"string"},"title":"string","sessionUpdate":"tool_call_update"}}
+{"kind":"tool_call_update","rendering":"toolCard","shape":{"locations":"null","rawOutput":"null","toolCallId":"string","name":"string","rawInput":{"pattern":"string","output_mode":"string"},"status":"pending","title":"string","kind":"search","content":[],"sessionUpdate":"tool_call_update","_meta":"null"}}
+{"kind":"tool_call_update","rendering":"toolCard","shape":{"rawOutput":"null","toolCallId":"string","name":"string","rawInput":{"file_path":"string","content":"string"},"status":"pending","title":"string","kind":"edit","locations":[{"path":"string"}],"content":[],"sessionUpdate":"tool_call_update","_meta":"null"}}
