@@ -316,10 +316,14 @@ impl Config {
                     ));
                 }
                 (Some(library), None, None) => Origin::Library(file(library)?),
-                (None, Some(source), settings) => Origin::Source {
-                    file: file(source)?,
-                    settings: settings_of(&name, settings.unwrap_or_default())?,
-                },
+                (None, Some(source), settings) => {
+                    let mut settings = settings_of(&name, settings.unwrap_or_default())?;
+                    absolute_paths(&name, &directory, &mut settings)?;
+                    Origin::Source {
+                        file: file(source)?,
+                        settings,
+                    }
+                }
             };
             let settings = provider
                 .settings
@@ -381,6 +385,34 @@ fn settings_of(name: &str, table: toml::Table) -> Result<Settings, ConfigError> 
             "a setting holds a date, or a float that is not a number, which a provider cannot be given",
         )
     })
+}
+
+/// The source settings read as lists of paths: `dirs` and `manifests` by every Guatiao bridge source, `paths` by Python's.
+/// A source may resolve a relative one against whatever working directory it has later, so each is made absolute here.
+const PATH_LISTS: [&str; 3] = ["dirs", "manifests", "paths"];
+
+fn absolute_paths(
+    name: &str,
+    directory: &Path,
+    settings: &mut Settings,
+) -> Result<(), ConfigError> {
+    for key in PATH_LISTS {
+        let Some(serde_json::Value::Array(items)) = settings.0.get_mut(key) else {
+            continue;
+        };
+        for item in items {
+            let serde_json::Value::String(text) = item else {
+                continue;
+            };
+            let path = directory.join(&*text);
+            let path = std::path::absolute(&path).unwrap_or(path);
+            *text = path
+                .to_str()
+                .ok_or_else(|| invalid(name, "Canoa.cfg's directory is not Unicode, so a relative path cannot be made absolute"))?
+                .to_owned();
+        }
+    }
+    Ok(())
 }
 
 fn object_of(table: toml::Table) -> Option<serde_json::Map<String, serde_json::Value>> {

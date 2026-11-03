@@ -112,9 +112,15 @@ nested = { depth = 2, ratio = 0.5, on = true, list = [1, "two"] }
         file,
         std::path::absolute(base().join("guatiao_source_py.dll")).expect("absolute")
     );
+    let absolute = |path: &str| {
+        std::path::absolute(base().join(path))
+            .expect("absolute")
+            .to_string_lossy()
+            .into_owned()
+    };
     assert_eq!(
         serde_json::Value::Object(source.as_map().clone()),
-        serde_json::json!({"dirs": ["python"], "paths": ["/opt/guatiao", "kinds"]})
+        serde_json::json!({"dirs": [absolute("python")], "paths": [absolute("/opt/guatiao"), absolute("kinds")]})
     );
     assert_eq!(
         serde_json::Value::Object(settings.expect("settings").as_map().clone()),
@@ -366,4 +372,28 @@ fn any_text_gives_a_value_or_an_error() {
             .collect();
         let _ = parse(&text);
     }
+}
+
+#[test]
+fn relative_paths_a_source_reads_are_made_absolute_against_the_configs_directory() {
+    let (origin, _) = provider_kind(
+        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n[host.providers.p.source_settings]\ndirs = [\"python/echo\"]\nmanifests = [\"one.guatiao.toml\"]\npaths = [\"python/guatiao\"]\nprefix_file = \"stays.txt\"\n",
+    );
+    let Origin::Source { settings, .. } = origin else {
+        panic!("a source");
+    };
+    let absolute = |relative: &str| {
+        serde_json::json!([std::path::absolute(base().join(relative))
+            .expect("absolute")
+            .to_str()
+            .expect("UTF-8")])
+    };
+    let map = settings.as_map();
+    assert_eq!(map["dirs"], absolute("python/echo"));
+    assert_eq!(map["manifests"], absolute("one.guatiao.toml"));
+    assert_eq!(map["paths"], absolute("python/guatiao"));
+    assert_eq!(
+        map["prefix_file"], "stays.txt",
+        "a key no source reads as a path list is passed as written"
+    );
 }
