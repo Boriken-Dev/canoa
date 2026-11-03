@@ -18,7 +18,19 @@ finish() {
   rm -rf "$work"
 }
 trap finish EXIT
-free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+# A free port below the range Windows reserves for Hyper-V and its own dynamic ports, which WSL cannot forward to Windows.
+free_port() {
+  python3 -c '
+import random, socket
+while True:
+    port = random.randrange(20000, 30000)
+    try:
+        socket.socket().bind(("127.0.0.1", port))
+        print(port)
+        break
+    except OSError:
+        pass'
+}
 export COQUI_AGENTIC_PEER_HOME=$work/home
 
 pair_port=$(free_port)
@@ -47,6 +59,7 @@ if [ -n "$nginx" ]; then
   cat > "$work/nginx/nginx.conf" <<CONF
 daemon off;
 worker_processes 1;
+worker_shutdown_timeout 5s;
 pid $work/nginx/nginx.pid;
 error_log $work/nginx/logs/error.log;
 events { worker_connections 64; }
@@ -73,8 +86,9 @@ http {
   }
 }
 CONF
-  "$nginx" -p "$work/nginx" -c "$work/nginx/nginx.conf" &
-  pids+=($!)
+  "$nginx" -e "$work/nginx/logs/error.log" -p "$work/nginx" -c "$work/nginx/nginx.conf" &
+  nginx_pid=$!
+  pids+=($nginx_pid)
   scheme=wss
   front_pair=127.0.0.1:$front/pair
   front_noise=127.0.0.1:$front/noise
@@ -97,6 +111,9 @@ while read -r command peer; do
 done
 # What reached nginx, for the run to check every connection was upgraded through it.
 if [ -n "$nginx" ]; then
+  # nginx logs a WebSocket when it ends: stop it gracefully, within its shutdown timeout, so each is in the log.
+  kill -QUIT "$nginx_pid" 2>/dev/null || true
+  wait "$nginx_pid" 2>/dev/null || true
   printf '{"access":%s}\n' "$(python3 -c 'import json,sys; print(json.dumps(open(sys.argv[1]).read()))' "$work/nginx/logs/access.log")"
 fi
 grep -h -E 'proving by|pairing by|paired with|refused' "$work"/*.err >&2 || true

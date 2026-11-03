@@ -8,7 +8,8 @@
 // With CANOA_E2E_WSL the bridge, the agent and nginx are Linux paths run in that WSL distribution, and the browser reaches
 // them through WSL's forwarding of loopback ports.
 import { spawn } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { connect } from "node:net";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -26,6 +27,10 @@ const work = mkdtempSync(path.join(tmpdir(), "canoa-noise-e2e-"));
 const profile = path.join(work, "profile");
 const unpacked = path.join(work, "extension");
 cpSync(extension, unpacked, { recursive: true, filter: (from) => !/(node_modules|[/\\]e2e|[/\\]ui|\.test\.mjs)/.test(path.relative(extension, from) || "x") });
+// As run.mjs does: a side panel keeps the extension from loading in a headless browser.
+const manifest = JSON.parse(readFileSync(path.join(unpacked, "manifest.json"), "utf8"));
+delete manifest.side_panel;
+writeFileSync(path.join(unpacked, "manifest.json"), JSON.stringify(manifest));
 
 // The agent side, which says what it serves one JSON line at a time.
 const script = path.join(here, "noise-side.sh");
@@ -35,6 +40,19 @@ const side = wsl
   : spawn("bash", [script, bridge, agent, ...(nginx ? [nginx] : [])], { stdio: ["pipe", "pipe", "inherit"] });
 const said = readline.createInterface({ input: side.stdout })[Symbol.asyncIterator]();
 const hear = async () => JSON.parse((await said.next()).value);
+// WSL forwards a loopback port to Windows only some time after it starts listening, so wait until a connection gets through.
+async function reachable(url) {
+  const { hostname, port } = new URL(url);
+  const until = Date.now() + 20_000;
+  while (!(await new Promise((resolve) => {
+    const socket = connect(Number(port), hostname, () => resolve(true));
+    socket.on("error", () => resolve(false));
+    socket.setTimeout(2000, () => resolve(false));
+  }).finally(() => {}))) {
+    if (Date.now() > until) throw new Error(`${url} never became reachable`);
+    await sleep(250);
+  }
+}
 
 const results = [];
 async function check(name, run) {
@@ -57,6 +75,8 @@ const watchdog = setTimeout(() => {
 }, 240_000);
 try {
   const noiseSide = await hear();
+  await reachable(noiseSide.pairUrl);
+  await reachable(noiseSide.noiseUrl);
   const flags = noiseSide.spki ? [`--ignore-certificate-errors-spki-list=${noiseSide.spki}`] : [];
   chrome = spawn(browser, [
     "--headless=new", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
@@ -130,6 +150,7 @@ try {
     const own = await page.run(`import("./acp-dial.js").then((dial) => dial.ownPeerId("webcrypto"))`);
     side.stdin.write(`allow ${own}\n`);
     const webcryptoSide = await hear();
+    await reachable(webcryptoSide.webcryptoUrl);
     await page.run(`chrome.runtime.sendMessage({ acp: "add", agent: { label: "webcrypto agent", url: ${JSON.stringify(webcryptoSide.webcryptoUrl)}, peer: ${JSON.stringify(webcryptoSide.webcryptoPeer)}, method: "webcrypto" } })`);
     const ran = await turn("webcrypto agent");
     if (ran.method !== "webcrypto" || ran.stop !== "end_turn" || !ran.echoed.includes("hello from webcrypto agent")) throw new Error(JSON.stringify(ran));
@@ -147,7 +168,7 @@ try {
       const { access } = await hear();
       const lines = access.trim().split("\n");
       for (const location of ["/pair", "/noise", "/webcrypto"]) {
-        if (!lines.some((line) => line.includes(`GET ${location}`) && line.includes('" 101 '))) throw new Error(`no upgrade of ${location}: ${access}`);
+        if (!lines.some((line) => line.includes(`GET ${location}`) && line.includes('" 101 '))) throw new Error(`no upgrade of ${location}: ${lines.map((line) => line.split("\"")[1] + " " + line.split("\"")[2]).join("; ")}`);
       }
       console.log(`nginx upgraded ${lines.filter((line) => line.includes('" 101 ')).length} connections`);
     });
