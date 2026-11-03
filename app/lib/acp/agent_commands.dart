@@ -69,4 +69,5 @@ const List<AgentCommand> agentPresets = [
     requires: ['codex'],
   ),
   AgentCommand(label: 'Gemini', program: 'gemini', args: ['--acp']),
+  AgentCommand(label: 'Pi', program: 'npx', args: ['-y', 'pi-acp@0.0.34'], requires: ['pi']),
 ];
