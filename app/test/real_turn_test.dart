@@ -28,6 +28,23 @@ Future<void> _idle(ChatSession session) async {
   }
 }
 
+/// The processes whose working directory is [dir] or below it, by `/proc`, which only Linux has in this form.
+List<String> _workingIn(Directory dir) {
+  final root = dir.resolveSymbolicLinksSync();
+  final found = <String>[];
+  for (final entry in Directory('/proc').listSync(followLinks: false)) {
+    final pid = entry.uri.pathSegments.lastWhere((part) => part.isNotEmpty);
+    if (int.tryParse(pid) == null) continue;
+    try {
+      final cwd = Link('/proc/$pid/cwd').targetSync();
+      if (cwd == root || cwd.startsWith('$root/')) found.add(pid);
+    } on FileSystemException {
+      // Gone already, or another user's.
+    }
+  }
+  return found;
+}
+
 String _said(ChatSession session) =>
     session.messages.where((message) => message.role == MessageRole.agent).map((message) => message.text).join(' ').toLowerCase();
 
@@ -135,8 +152,22 @@ void main() {
     await client.close();
     expect(answered, greaterThan(0), reason: 'the agent has to have asked');
     expect(written.existsSync(), allow, reason: 'a refusal has to stop it');
-    // Windows holds a directory for as long as a process has it as its working directory, so this says when the last one left.
     final closed = DateTime.now();
+    // Linux lets a directory go while a process still works in it, so ask /proc who is there.
+    if (Platform.isLinux) {
+      while (true) {
+        final left = _workingIn(dir);
+        if (left.isEmpty) {
+          stdout.writeln('NO PROCESS LEFT AFTER ${DateTime.now().difference(closed).inMilliseconds} ms');
+          break;
+        }
+        if (DateTime.now().difference(closed) > const Duration(seconds: 30)) {
+          fail('still running there: $left');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
+    // Windows holds a directory for as long as a process has it as its working directory, so this says when the last one left.
     while (true) {
       try {
         dir.deleteSync(recursive: true);
