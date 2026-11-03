@@ -83,8 +83,10 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _showHosting() async {
     final host = widget.host;
     if (host == null) return;
+    final above = _navigator.currentContext;
+    if (above == null) return;
     await showDialog<void>(
-      context: context,
+      context: above,
       builder: (_) => HostingDialog(supervisor: host, config: config, onSave: _saveHosting),
     );
   }
@@ -106,8 +108,10 @@ class _CanoaAppState extends State<CanoaApp> {
 
   Future<void> _showSettings() async {
     final shell = widget.shell;
+    final above = _navigator.currentContext;
+    if (above == null) return;
     final changed = await showDialog<CanoaConfig>(
-      context: context,
+      context: above,
       builder: (_) => SettingsDialog(config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null),
     );
     if (changed == null || !mounted) return;
@@ -119,12 +123,15 @@ class _CanoaAppState extends State<CanoaApp> {
       // Canoa.cfg in web/PWA deployments is read-only.
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _messenger.currentState?.showSnackBar(
           SnackBar(content: Text('Could not save Canoa.cfg: $error')),
         );
       }
     }
   }
+  /// This state sits above the app's Navigator, so its dialogs open in the Navigator's context.
+  final _navigator = GlobalKey<NavigatorState>();
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
   Timer? _contextTimer;
   final List<VerifiedAgent> _ownedClients = [];
   bool _claimingContext = false;
@@ -275,6 +282,8 @@ class _CanoaAppState extends State<CanoaApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigator,
+      scaffoldMessengerKey: _messenger,
       title: 'Canoa',
       debugShowCheckedModeBanner: false,
       theme: themeFor(config.look, Brightness.light),

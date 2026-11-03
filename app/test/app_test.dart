@@ -4,10 +4,13 @@ import 'package:coqui_acp/page.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/connect_dialog.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
+import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/fake_host.dart';
 
 final class _FakeProvider implements AcpPage {
   @override
@@ -179,11 +182,38 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     expect(shell.beforeQuit, isNull);
   });
+
+  testWidgets('the rail opens settings and hosting, and quitting stops the host', (tester) async {
+    final tool = FakeTool();
+    final host = HostSupervisor(tool);
+    final shell = _FakeShell();
+    await tester.binding.setSurfaceSize(const Size(1200, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(CanoaApp(store: SessionStore(includePreview: false), shell: shell, host: host));
+    await tester.tap(find.byTooltip('Canoa settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Look'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Hosting'));
+    await tester.pumpAndSettle();
+    expect(find.text('Agents this computer hosts'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    await host.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
+    await shell.beforeQuit!();
+    expect(tool.children.single.inputClosed, isTrue, reason: 'the host and its agents end with the app');
+  });
 }
 
 final class _FakeShell implements DesktopShell {
   @override
   Future<void> Function()? beforeQuit;
+  @override
+  bool get isDesktop => true;
+  @override
+  Future<void> quit() async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
