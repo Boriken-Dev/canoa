@@ -54,10 +54,11 @@ void main() {
   final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa-host' : null;
   final entry = _realConfig == null ? 'pi' : Platform.environment['CANOA_TEST_TOOL_ENTRY'] ?? 'pi';
   late Directory dir;
-  late Process host;
+  // Nullable, so a setUpAll that fails partway still has what it started ended.
+  Process? host;
   late String url;
   late String peer;
-  late NodePeerBridge browser;
+  NodePeerBridge? browser;
 
   Future<ProcessResult> command(List<String> args) =>
       Process.run(_hostBinary!, args, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'});
@@ -69,13 +70,14 @@ void main() {
     final config = File('${dir.path}/Canoa.cfg');
     final real = _realConfig;
     await config.writeAsString(real == null ? await _piConfig() : await File(real).readAsString());
-    host = await Process.start(
+    final started = await Process.start(
       _hostBinary!,
       ['serve', '--config', config.path],
       environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
     );
-    host.stderr.transform(utf8.decoder).listen(stderr.write);
-    final lines = host.stdout.transform(utf8.decoder).transform(const LineSplitter());
+    host = started;
+    started.stderr.transform(utf8.decoder).listen(stderr.write);
+    final lines = started.stdout.transform(utf8.decoder).transform(const LineSplitter());
     await for (final line in lines.timeout(const Duration(seconds: 30))) {
       final listed = jsonDecode(line) as Map<String, dynamic>;
       if (listed['name'] == entry) {
@@ -90,9 +92,11 @@ void main() {
 
   tearDownAll(() async {
     if (skip != null) return;
-    browser.kill();
-    host.kill();
-    await host.exitCode;
+    browser?.kill();
+    final started = host;
+    if (started == null) return;
+    started.kill();
+    await started.exitCode;
     // The system ends the host's tools with it, a moment later on Windows: until then one holds its directory.
     for (var tries = 0;; tries++) {
       try {
@@ -108,13 +112,13 @@ void main() {
   Future<VerifiedAgent> connect({AcpDecider? decider}) => connectVerifiedAcp(
     chatEndpoints(webSocket: url),
     expectedPeerId: peer,
-    verifyPeer: (channel, expected) => provePeer(browser, channel, expected),
+    verifyPeer: (channel, expected) => provePeer(browser!, channel, expected),
     decider: decider,
   );
 
   Future<void> pair() async {
     await expectLater(connect(), throwsA(anything), reason: 'an unpaired key waits');
-    final accepted = await command(['accept', await browser.localId()]);
+    final accepted = await command(['accept', await browser!.localId()]);
     expect(accepted.exitCode, 0, reason: accepted.stderr as String);
   }
 
