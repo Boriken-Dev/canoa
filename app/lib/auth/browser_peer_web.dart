@@ -1,10 +1,10 @@
-import 'dart:convert';
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
-import '../acp/sealed_channel.dart';
+import 'peer_proof.dart';
 
 @JS('canoaPeer')
 external JSObject? get _bridge;
@@ -34,46 +34,31 @@ external JSPromise<JSUint8Array> _closeRecord(JSString session);
 @JS('canoaPeer.closeSession')
 external void _closeSession(JSString session);
 
-Future<VerifiedPeer> verifyBrowserPeer(WebChannel channel, String expectedPeerId) async {
-  if (channel is! StagedChannel) {
-    throw StateError('A staged transport connection is required');
-  }
-  if (_bridge == null) {
-    throw StateError('Canoa WebCrypto peer bridge has not loaded');
-  }
-  String? token;
-  try {
-    final raw = (await _begin(expectedPeerId.toJS).toDart).toDart;
-    final start = jsonDecode(raw);
-    if (start is! Map || start['token'] is! String ||
-        start['hello'] is! String) {
-      throw const FormatException('Invalid browser identity handshake');
-    }
-    token = start['token'] as String;
-    final first = channel.nextSetupMessage();
-    await channel.send(start['hello'] as String);
-    final challenge = await first.timeout(const Duration(seconds: 15));
-    final proof = (await _answer(token.toJS, challenge.toJS).toDart).toDart;
+/// `web/canoa_peer_bridge.mjs`, loaded by the page.
+final class _PageBridge implements PeerBridge {
+  const _PageBridge();
 
-    final second = channel.nextSetupMessage();
-    await channel.send(proof);
-    final accepted = await second.timeout(const Duration(seconds: 15));
-    final finished = jsonDecode((await _finish(token.toJS, accepted.toJS).toDart).toDart);
-    if (finished is! Map || finished['peerId'] is! String || finished['session'] is! String) {
-      throw const FormatException('Invalid browser identity result');
-    }
-    final session = (finished['session'] as String).toJS;
-    return VerifiedPeer(
-      finished['peerId'] as String,
-      SealedChannel(
-        channel,
-        seal: (message) async => (await _seal(session, message.toJS).toDart).toDart,
-        open: (record) async => (await _open(session, record.toJS).toDart)?.toDart,
-        closeRecord: () async => (await _closeRecord(session).toDart).toDart,
-        release: () => _closeSession(session),
-      ),
-    );
-  } finally {
-    if (token != null) _abort(token.toJS);
+  @override
+  Future<String> begin(String expectedPeerId) async => (await _begin(expectedPeerId.toJS).toDart).toDart;
+  @override
+  Future<String> answer(String token, String challenge) async => (await _answer(token.toJS, challenge.toJS).toDart).toDart;
+  @override
+  Future<String> finish(String token, String accepted) async => (await _finish(token.toJS, accepted.toJS).toDart).toDart;
+  @override
+  void abort(String token) => _abort(token.toJS);
+  @override
+  Future<Uint8List> seal(String session, Uint8List message) async => (await _seal(session.toJS, message.toJS).toDart).toDart;
+  @override
+  Future<Uint8List?> open(String session, Uint8List record) async => (await _open(session.toJS, record.toJS).toDart)?.toDart;
+  @override
+  Future<Uint8List> closeRecord(String session) async => (await _closeRecord(session.toJS).toDart).toDart;
+  @override
+  void closeSession(String session) => _closeSession(session.toJS);
+}
+
+Future<VerifiedPeer> verifyBrowserPeer(WebChannel channel, String expectedPeerId) {
+  if (_bridge == null) {
+    return Future.error(StateError('Canoa WebCrypto peer bridge has not loaded'));
   }
+  return provePeer(const _PageBridge(), channel, expectedPeerId);
 }
