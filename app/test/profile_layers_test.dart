@@ -1,5 +1,6 @@
 // Overlays installed and synced from a local bare git repository, project trust, and every layer merged from where it
 // really lives. Needs git on PATH; skipped without it.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
@@ -66,6 +67,51 @@ final class Upstream {
     git(work.path, ['commit', '--quiet', '-m', message]);
     git(work.path, ['push', '--quiet', bare, 'HEAD:refs/heads/main']);
     return git(work.path, ['rev-parse', 'HEAD']);
+  }
+}
+
+/// A bare repository whose trees are written object by object, so they can hold what `git add` refuses: a `.git`
+/// directory, names that differ only in case, or a tree repeated a million times.
+final class Crafted {
+  Crafted(this.dir) {
+    git(Directory.systemTemp.path, ['init', '--quiet', '--bare', dir]);
+  }
+  final String dir;
+
+  Future<String> _object(List<String> args, String input) async {
+    final process = await Process.start('git', ['--git-dir=$dir', ...args]);
+    process.stdin.write(input);
+    await process.stdin.close();
+    final out = await process.stdout.transform(utf8.decoder).join();
+    expect(await process.exitCode, 0, reason: 'git ${args.join(' ')}');
+    return out.trim();
+  }
+
+  Future<String> blob(String text) => _object(['hash-object', '-w', '--stdin'], text);
+
+  /// [entries]: a name to a blob's text, a nested map, or a tree id given as `tree:<id>`.
+  Future<String> tree(Map<String, Object> entries) async {
+    final lines = StringBuffer();
+    for (final MapEntry(:key, :value) in entries.entries) {
+      final line = switch (value) {
+        final String text when text.startsWith('tree:') => '040000 tree ${text.substring(5)}\t$key',
+        final String text => '100644 blob ${await blob(text)}\t$key',
+        final Map<String, Object> inner => '040000 tree ${await tree(inner)}\t$key',
+        _ => throw ArgumentError(value),
+      };
+      lines.write('$line\u0000');
+    }
+    return _object(['mktree', '-z', '--missing'], '$lines');
+  }
+
+  /// Commits [tree] as [branch]'s head; the commit's id.
+  Future<String> commit(String tree, {String branch = 'main', String? parent}) async {
+    final id = await _object([
+      '-c', 'user.name=Canoa Test', '-c', 'user.email=test@canoa.invalid',
+      'commit-tree', tree, if (parent != null) ...['-p', parent], '-m', 'crafted',
+    ], '');
+    git(Directory.systemTemp.path, ['--git-dir=$dir', 'update-ref', 'refs/heads/$branch', id]);
+    return id;
   }
 }
 
@@ -151,6 +197,70 @@ void main() {
     });
   });
 
+  group('a hostile overlay source', skip: hasGit ? false : 'git is not on PATH', () {
+    late Crafted source;
+    late OverlayStore store;
+    setUp(() {
+      source = Crafted('${temp.path}/source.git');
+      store = OverlayStore('${temp.path}/overlays');
+    });
+    GitOverlay at(String reference) => GitOverlay(repo: source.dir, reference: reference);
+
+    for (final (what, entries) in <(String, Map<String, Object>)>[
+      ('a .git directory', {'.git': {'config': '[core]\n\tfsmonitor = "touch pwned #"\n', 'HEAD': 'ref: refs/heads/x\n'}}),
+      ('a .git directory in another case, deeper', {'skills': {'.GIT': {'config': 'x'}}}),
+      ('the short name Windows gives .git', {'git~1': {'config': 'x'}}),
+      ('two names that differ only in case', {'CONTEXT.md': 'benign', 'context.md': 'evil'}),
+      ('a short name Windows could give another file', {'1234567890.md': 'benign', '123456~1.MD': 'evil'}),
+      ('a character Windows refuses in a name', {'a|b.md': 'x'}),
+      ('a wildcard Windows refuses in a name', {'what?.md': 'x'}),
+    ]) {
+      test('$what refuses the whole overlay', () async {
+        await source.commit(await source.tree({'profile.toml': 'model = "m"\n', ...entries}));
+        await expectLater(store.check('o', at('main')), throwsA(isA<OverlayException>()));
+      });
+    }
+
+    test('a commit id pins that commit, whatever branch or tag carries its name', () async {
+      final pinned = await source.commit(await source.tree({'profile.toml': 'model = "pinned"\n'}));
+      final other = await source.commit(await source.tree({'profile.toml': 'model = "other"\n'}), parent: pinned);
+      await source.commit(await source.tree({'profile.toml': 'model = "other"\n'}), branch: pinned, parent: other);
+      expect((await store.check('o', at(pinned))).commit, pinned);
+      await expectLater(store.check('o', at(pinned.substring(0, 7))), throwsA(isA<OverlayException>()),
+          reason: 'a short id names no commit: a branch could take its name');
+    });
+
+    test('moving the pin to the commit installed changes the source, so applying is offered', () async {
+      final first = await source.commit(await source.tree({'profile.toml': 'model = "m"\n'}));
+      await store.apply(await store.check('o', at('main')));
+      final repinned = await store.check('o', at(first));
+      expect(repinned.commit, first);
+      expect(repinned.changesNothing, isFalse);
+      await store.apply(repinned);
+      expect(store.installed('o')!.source, at(first).spec);
+    });
+
+    test('an update carries the profile it installs, for the person to read first', () async {
+      await source.commit(await source.tree({'profile.toml': 'model = "shown"\n'}));
+      expect((await store.check('o', at('main'))).profile, 'model = "shown"\n');
+    });
+
+    test('a tree of a million paths is refused as soon as it passes the limit', () async {
+      var level = await source.tree({'f': 'x'});
+      for (var depth = 0; depth < 6; depth++) {
+        level = await source.tree({for (var i = 0; i < 10; i++) 'd$i': 'tree:$level'});
+      }
+      await source.commit(await source.tree({'profile.toml': 'model = "m"\n', 'bomb': 'tree:$level'}));
+      final clock = Stopwatch()..start();
+      await expectLater(store.check('o', at('main')), throwsA(isA<OverlayException>()));
+      expect(clock.elapsed, lessThan(const Duration(seconds: 15)));
+    });
+
+    test('git is run by its full path, never by a name the current directory could answer', () {
+      expect(isAbsolutePath(store.gitPath), isTrue, reason: store.gitPath);
+    });
+  });
+
   group('every layer', skip: hasGit ? false : 'git is not on PATH', () {
     test('merges from where each lives; a project profile counts only while trusted as it is', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
@@ -174,6 +284,7 @@ url = "https://docs.example/mcp"
 [overlays]
 team = "${upstream.bare.replaceAll(r'\', '/')}@main#profiles/team"
 [profile]
+share_env = ["GITHUB_TOKEN"]
 effort = "high"
 [profile.env.RUST_LOG]
 value = "info"
@@ -321,5 +432,29 @@ path = "/skills/s"
     expect(() => CanoaConfig.parse('[overlays]\nx = { dir = "" }\n'), throwsFormatException);
     expect(() => CanoaConfig.parse('[profile]\ncolour = "red"\n'), throwsFormatException);
     expect(() => CanoaConfig.parse('[agents.a.profile.env.A]\nvalue = "1"\nfrom_env = "B"\n'), throwsFormatException);
+  });
+
+  test('a secret file is a regular file of at most maxSecretFile bytes, less one final line break only', () async {
+    final dir = Directory('${temp.path}/user')..createSync();
+    File('${dir.path}/big').writeAsBytesSync(List.filled(maxSecretFile + 1, 0x78));
+    File('${dir.path}/fits').writeAsBytesSync(List.filled(maxSecretFile, 0x78));
+    Directory('${dir.path}/a-directory').createSync();
+    File('${dir.path}/carriage').writeAsStringSync('value\r');
+    final home = IoProfileHome('${temp.path}/config');
+    Future<String?> resolve(String name) async {
+      final effective = mergeProfiles([
+        Layer(const LayerId(LayerKind.user), Profile.parse('[env.A]\nfrom_file = "$name"\n', LayerKind.user),
+            dir: dir.path),
+      ]);
+      try {
+        return (await effective.environment(lookup: (_) => null, readFile: home.readSecret))['A']!.expose();
+      } on ProfileException {
+        return null;
+      }
+    }
+    expect(await resolve('big') == null, isTrue, reason: 'over the limit');
+    expect(await resolve('a-directory'), isNull);
+    expect((await resolve('fits'))!.length, maxSecretFile);
+    expect(await resolve('carriage'), 'value\r', reason: 'as canoa-host reads it');
   });
 }

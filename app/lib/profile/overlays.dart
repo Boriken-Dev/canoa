@@ -40,16 +40,24 @@ final class InstalledOverlay {
 /// What installing or syncing an overlay would change, from the commit installed (none for a first install) to [commit].
 final class OverlayUpdate {
   const OverlayUpdate({required this.name, required this.source, required this.from, required this.commit,
-      required this.files, required this.skipped, required this.added, required this.changed, required this.removed});
+      required this.files, required this.skipped, required this.added, required this.changed, required this.removed,
+      this.fromSource,
+      this.profile});
 
   final String name;
   final GitOverlay source;
   final String? from;
+
+  /// The source the installed commit came from, as its record has it.
+  final String? fromSource;
   final String commit;
   final OverlayFiles files;
   final List<String> skipped, added, changed, removed;
 
-  bool get changesNothing => from == commit && added.isEmpty && changed.isEmpty && removed.isEmpty;
+  /// The overlay's profile.toml at [commit], or null when it has none.
+  final String? profile;
+
+  bool get changesNothing => from == commit && fromSource == source.spec && added.isEmpty && changed.isEmpty && removed.isEmpty;
 }
 
 /// A git operation or an overlay's content that was refused. Never quotes a file's content.
