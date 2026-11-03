@@ -98,7 +98,8 @@ class ProfilesDialogState extends State<ProfilesDialog> {
             Text('${project.directory}\n\nIts $projectProfileFile, which agents started there will use as it is now. '
                 'If it changes, it is ignored until you trust it again.'),
             const SizedBox(height: 12),
-            SelectableText(utf8.decode(bytes, allowMalformed: true), style: const TextStyle(fontFamily: 'monospace')),
+            SelectableText(visible(utf8.decode(bytes, allowMalformed: true)),
+                style: const TextStyle(fontFamily: 'monospace')),
           ],
         ))),
         actions: [
@@ -222,6 +223,13 @@ class ProfilesDialogState extends State<ProfilesDialog> {
   }
 }
 
+/// [text] with every control, format or bidirectional character but a line break or tab shown as `<U+XXXX>`, so what
+/// a person reads is what the file says.
+String visible(String text) => text.replaceAllMapped(
+  RegExp('[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]'),
+  (match) => '<U+${match[0]!.codeUnitAt(0).toRadixString(16).toUpperCase().padLeft(4, '0')}>',
+);
+
 /// What installing or syncing an overlay changes, shown before anything is: the commits and every file.
 class OverlayUpdateDialog extends StatelessWidget {
   const OverlayUpdateDialog({super.key, required this.update});
@@ -244,6 +252,11 @@ class OverlayUpdateDialog extends StatelessWidget {
           files('Changed', update.changed),
           files('Removed', update.removed),
           files('Left out: links and submodules are never installed', update.skipped),
+          if (update.profile case final profile?) ...[
+            const Text('Its profile.toml, which reaches agents once applied:'),
+            SelectableText(visible(profile), style: const TextStyle(fontFamily: 'monospace')),
+          ] else
+            const Text('It has no profile.toml, so it sets nothing.'),
           const Text('Nothing from it runs now. Its profile reaches agents started after this.'),
         ],
       ))),
@@ -264,6 +277,18 @@ class EffectiveTable extends StatelessWidget {
   const EffectiveTable({super.key, required this.effective});
   final EffectiveProfile effective;
 
+  /// Each of [values] with where it comes from: `NAME from $VAR`, `NAME from the file P`, `NAME = text`.
+  static String _reads(String what, Map<String, EnvValue> values) => values.isEmpty
+      ? ''
+      : '; $what ${[
+          for (final MapEntry(:key, :value) in values.entries)
+            switch (value) {
+              EnvFromEnv(:final name) => '$key from \$$name',
+              EnvFromFile(:final path) => '$key from the file $path',
+              EnvLiteral(:final value) => '$key = $value',
+            },
+        ].join(', ')}';
+
   static String describe(Object? value) => switch (value) {
     EnvLiteral(:final value) => value,
     EnvFromEnv(:final name) => 'from the environment variable $name',
@@ -272,9 +297,8 @@ class EffectiveTable extends StatelessWidget {
     ProfileContext(:final file?) => 'the file $file',
     Skill(:final path) => path,
     McpStdio(:final command, :final args, :final env) =>
-      'runs $command${args.isEmpty ? '' : ' ${args.join(' ')}'}${env.isEmpty ? '' : ', with ${env.keys.join(', ')}'}',
-    McpHttp(:final url, :final sse, :final headers) =>
-      '${sse ? 'SSE' : 'HTTP'} $url${headers.isEmpty ? '' : ', with ${headers.keys.join(', ')}'}',
+      'runs $command${args.isEmpty ? '' : ' ${args.join(' ')}'}${_reads('environment', env)}',
+    McpHttp(:final url, :final sse, :final headers) => '${sse ? 'SSE' : 'HTTP'} $url${_reads('headers', headers)}',
     _ => '$value',
   };
 
@@ -290,6 +314,10 @@ class EffectiveTable extends StatelessWidget {
         ('skills.$key', describe(value.value), '${value.layer}'),
       for (final MapEntry(:key, :value) in effective.mcp.entries) ('mcp.$key', describe(value.value), '${value.layer}'),
       for (final removed in effective.removed) (removed.key, 'removed, was ${removed.was}', '${removed.layer}'),
+      for (final refused in effective.refused)
+        (refused.key, 'left out: reads \$${refused.reads}, which none of your layers shares', '${refused.layer}'),
+      for (final MapEntry(:key, :value) in effective.shareEnv.entries)
+        ('share_env.$key', 'overlays and projects may read it', '$value'),
     ];
     if (rows.isEmpty) return const Text('Nothing is set: the agent starts with its own defaults.');
     return Table(
