@@ -26,6 +26,67 @@ import '../test/fixtures/node_peer_bridge.dart';
 final String? _hostBinary = Platform.environment['CANOA_TEST_HOST'];
 final String _appDir = Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path;
 
+/// `gdbus call` on the session bus, its output.
+Future<String> _gdbus(List<String> args) async {
+  final ran = await Process.run('gdbus', ['call', '--session', ...args]);
+  if (ran.exitCode != 0) throw StateError('gdbus ${args.join(' ')}: ${ran.stderr}');
+  return ran.stdout as String;
+}
+
+/// Picks [label] in this app's tray menu as a StatusNotifier host does on a click: the item the watcher lists, its
+/// dbusmenu, and that entry's `clicked` event.
+Future<void> pickFromTrayMenu(String label) async {
+  final listed = await _gdbus([
+    '--dest',
+    'org.kde.StatusNotifierWatcher',
+    '--object-path',
+    '/StatusNotifierWatcher',
+    '--method',
+    'org.freedesktop.DBus.Properties.Get',
+    'org.kde.StatusNotifierWatcher',
+    'RegisteredStatusNotifierItems',
+  ]);
+  final item = RegExp(r"'(:[0-9.]+)(/[^']+)'").allMatches(listed).last;
+  final menu = RegExp(r"objectpath '([^']+)'")
+      .firstMatch(
+        await _gdbus([
+          '--dest',
+          item.group(1)!,
+          '--object-path',
+          item.group(2)!,
+          '--method',
+          'org.freedesktop.DBus.Properties.Get',
+          'org.kde.StatusNotifierItem',
+          'Menu',
+        ]),
+      )!
+      .group(1)!;
+  final layout = await _gdbus([
+    '--dest',
+    item.group(1)!,
+    '--object-path',
+    menu,
+    '--method',
+    'com.canonical.dbusmenu.GetLayout',
+    '0',
+    '-1',
+    '[]',
+  ]);
+  final id = RegExp(r"\((\d+), \{[^}]*'label': <'${RegExp.escape(label)}'>").firstMatch(layout)!.group(1)!;
+  await _gdbus([
+    '--dest',
+    item.group(1)!,
+    '--object-path',
+    menu,
+    '--method',
+    'com.canonical.dbusmenu.Event',
+    id,
+    'clicked',
+    '<0>',
+    '0',
+  ]);
+}
+
 String _example(String name) {
   final examples = File(_hostBinary!).absolute.parent.uri.resolve('examples/').toFilePath();
   return '$examples${Platform.isWindows ? '$name.exe' : name}';
@@ -87,7 +148,9 @@ void main() {
       if (shell.hasTray) {
         await until(() async => !await windowManager.isVisible(), 'the window to go to the tray');
       } else {
-        await until(() => windowManager.isMinimized(), 'the window to be minimized, with no tray to hide in');
+        // Minimized, which not every desktop reports: what matters is that it is not hidden where nothing brings it back.
+        await tester.pump(const Duration(seconds: 1));
+        expect(await windowManager.isVisible(), isTrue, reason: 'with no tray, closing does not hide the window');
       }
       expect(host.phase, HostPhase.running);
       expect(host.pid, hostPid, reason: 'closing the window does not touch the host');
@@ -118,8 +181,11 @@ void main() {
       await host.accept(browserId);
       expect(await browserTurn(), 'echo: hello');
 
-      // Back: a double click on the tray icon, or the taskbar where there is no tray.
-      if (shell.hasTray) {
+      // Back: the tray menu's Open on Linux, picked over the StatusNotifier protocol as a panel does; a double click on the
+      // icon elsewhere; the taskbar where there is no tray.
+      if (shell.hasTray && Platform.isLinux) {
+        await pickFromTrayMenu('Open Canoa');
+      } else if (shell.hasTray) {
         shell.onTrayIconMouseDown();
         shell.onTrayIconMouseDown();
       } else {
