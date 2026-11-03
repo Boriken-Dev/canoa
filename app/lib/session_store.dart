@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import 'chat/agent_events.dart';
+import 'chat/update_record.dart';
 
 /// Canoa's local view of an agent-issued session. The agent session id is
 /// separate from the local view id and is absent from offline previews.
@@ -108,7 +109,7 @@ class ChatSession {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true}) {
+  SessionStore({bool includePreview = true, this.recorder}) {
     if (includePreview) {
       final first = createPreviewSession(title: 'Getting started', agent: 'Canoa preview');
       first.messages.addAll([
@@ -127,6 +128,9 @@ class SessionStore extends ChangeNotifier {
       select(first.id);
     }
   }
+
+  /// Told the kind and shape of each update this store applies, for a test or the `CANOA_EVENT_LOG` setting.
+  final UpdateRecorder? recorder;
 
   final List<ChatSession> _sessions = [];
   final Map<String, VerifiedAgent> _verifiedClients = {};
@@ -424,78 +428,78 @@ class SessionStore extends ChangeNotifier {
   }
 
   void _applyUpdate(ChatSession session, AcpSessionUpdate update) {
-    switch (update.kind) {
-      case 'tool_call' || 'tool_call_update':
+    final rendering = renderingOf(update);
+    recorder?.record(update, rendering);
+    switch (rendering) {
+      case Rendering.toolCard:
         _applyTool(session, update.raw);
-      case 'terminal_update':
+      case Rendering.terminal:
         _applyTerminal(session, update.raw);
-      case 'plan':
+      case Rendering.plan:
         session.plan = parsePlan(update.raw['entries']) ?? session.plan;
-      case 'available_commands_update':
+      case Rendering.commands:
         session.commands = parseCommands(update.raw['availableCommands']) ?? session.commands;
-      case 'usage_update':
+      case Rendering.usage:
         session.usage = session.usage.applied(update.raw);
-      case 'config_option_update':
+      case Rendering.choices when update.kind == 'config_option_update':
         _setOptions(session, update.raw['configOptions'], null);
-      case 'current_mode_update':
+      case Rendering.choices:
         if (update.raw['currentModeId'] case final String mode) {
           for (final option in session.options) {
             if (option.isMode) _setCurrent(session, option.id, mode);
           }
         }
-      case 'session_info_update':
+      case Rendering.title:
         final title = shortText(update.raw['title']);
         if (title != null && session.agentNames) session.title = title;
-    }
-    if (update.kind == 'state_update') {
-      if (update.state == 'running' || update.state == 'requires_action') {
-        session.status = SessionStatus.working;
-      } else if (update.state == 'idle') {
-        session.status = SessionStatus.connected;
-        if (update.reason == 'cancelled') {
-          _note(session, 'Stopped.');
-        } else if (update.reason == 'error') {
-          session.messages.add(ChatMessage(
-            role: MessageRole.notice,
-            text: 'Agent reported an operation failure.',
-            at: DateTime.now(),
-          ));
-        }
-      }
-    } else if (const [
-      'user_message', 'agent_message', 'user_message_chunk',
-      'agent_message_chunk', 'agent_thought_chunk', 'agent_thought',
-    ].contains(update.kind)) {
-      final text = update.text;
-      if (text != null) {
-        final role = update.kind.startsWith('user')
-            ? MessageRole.user
-            : update.kind.startsWith('agent_thought') ? MessageRole.thought : MessageRole.agent;
-        ChatMessage? existing;
-        if (update.messageId != null) {
-          for (final message in session.messages) {
-            if (message.messageId == update.messageId) {
-              existing = message;
-              break;
-            }
+      case Rendering.status:
+        if (update.state == 'running' || update.state == 'requires_action') {
+          session.status = SessionStatus.working;
+        } else if (update.state == 'idle') {
+          session.status = SessionStatus.connected;
+          if (update.reason == 'cancelled') {
+            _note(session, 'Stopped.');
+          } else if (update.reason == 'error') {
+            session.messages.add(ChatMessage(
+              role: MessageRole.notice,
+              text: 'Agent reported an operation failure.',
+              at: DateTime.now(),
+            ));
           }
         }
-        // A v1 chunk carries no message id: it continues the last message of its role.
-        if (existing == null && update.messageId == null && update.kind.endsWith('_chunk') &&
-            session.messages.isNotEmpty && session.messages.last.role == role &&
-            session.messages.last.messageId == null) {
-          existing = session.messages.last;
+      case Rendering.message || Rendering.thought:
+        final text = update.text;
+        if (text != null) {
+          final role = update.kind.startsWith('user')
+              ? MessageRole.user
+              : rendering == Rendering.thought ? MessageRole.thought : MessageRole.agent;
+          ChatMessage? existing;
+          if (update.messageId != null) {
+            for (final message in session.messages) {
+              if (message.messageId == update.messageId) {
+                existing = message;
+                break;
+              }
+            }
+          }
+          // A v1 chunk carries no message id: it continues the last message of its role.
+          if (existing == null && update.messageId == null && update.kind.endsWith('_chunk') &&
+              session.messages.isNotEmpty && session.messages.last.role == role &&
+              session.messages.last.messageId == null) {
+            existing = session.messages.last;
+          }
+          if (existing != null) {
+            existing.text = boundedHead(update.kind.endsWith('_chunk')
+                ? existing.text + text : text, maxMessageText);
+          } else {
+            session.messages.add(ChatMessage(
+              role: role, text: boundedHead(text, maxMessageText),
+              at: DateTime.now(), messageId: update.messageId,
+            ));
+          }
         }
-        if (existing != null) {
-          existing.text = boundedHead(update.kind.endsWith('_chunk')
-              ? existing.text + text : text, maxMessageText);
-        } else {
-          session.messages.add(ChatMessage(
-            role: role, text: boundedHead(text, maxMessageText),
-            at: DateTime.now(), messageId: update.messageId,
-          ));
-        }
-      }
+      case Rendering.unshown:
+        break;
     }
     _trim(session);
     notifyListeners();

@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 
 import 'chat/agent_events.dart' show AgentCommandInfo, isLongToApprove;
 import 'chat/transcript.dart';
+import 'chat/update_log.dart';
 import 'session_store.dart';
 import 'theme/look.dart';
 
@@ -275,7 +276,7 @@ class _CanoaAppState extends State<CanoaApp> {
     config = widget.config;
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
-    store = widget.store ?? SessionStore();
+    store = widget.store ?? SessionStore(recorder: updateRecorderFromEnvironment());
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     unawaited(_claimContext());
