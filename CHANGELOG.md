@@ -25,5 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `canoa-host` builds on coqui-acp `2b83200`, whose bridge stops an agent with everything it started: by job object on Windows, by process group on Unix.
 - Text files are LF on every platform (`* text=auto eol=lf`). A Windows checkout made
   before this needs `git add --renormalize .` or a fresh clone.

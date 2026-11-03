@@ -22,9 +22,9 @@ serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "ansi"] }
 # The stdio relay and the provider facade, on coqui-acp's main at one revision. Not published yet.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b5974a25e7b15c998c79b24ce574a19f86ed70f" }
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b5974a25e7b15c998c79b24ce574a19f86ed70f" }
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b5974a25e7b15c998c79b24ce574a19f86ed70f" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "2b832006df8ee65c2972b0f97f5961d4b98843bf" }
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "2b832006df8ee65c2972b0f97f5961d4b98843bf" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "2b832006df8ee65c2972b0f97f5961d4b98843bf" }
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.
 coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "33be56624cd44f0948468ab2e0c1fb53b5ea5de1" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "1f00bfe6319f64e7ec038a7003746f4f031d538c" }
