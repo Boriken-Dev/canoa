@@ -18,7 +18,11 @@ import 'package:canoa/acp/connect.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final String? _hostBinary = Platform.environment['CANOA_TEST_HOST'];
+// Absolute, since the provider's library is named in a Canoa.cfg written to a temporary directory and read from there.
+final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
+  final String path => File(path).absolute.path,
+  null => null,
+};
 final String _node = Platform.environment['CANOA_TEST_NODE'] ?? 'node';
 
 /// The page's peer bridge in a Node process: one key for the life of the process.
