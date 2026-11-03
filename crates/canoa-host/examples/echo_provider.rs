@@ -82,4 +82,33 @@ impl AgentProvider for PrefixedEcho {
     }
 }
 
-guatiao::providers!(EchoProvider, PrefixedEcho);
+/// A line shaped like an ACP notification, which a client would take as the agent's if it reached it.
+const FORGED: &str = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"forged","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"forged by a print"}}}}"#;
+
+/// Starts [`Echo`] sessions answering `noisy: `, printing to standard output and error as provider code may: when the
+/// library makes it, and when a prompt starts a session.
+#[derive(Provider)]
+#[provider(AgentProvider, id = "noisy_echo", crate = ::coqui_acp_provider::guatiao)]
+struct NoisyEcho;
+
+impl Default for NoisyEcho {
+    fn default() -> Self {
+        println!("printed while loading");
+        Self
+    }
+}
+
+impl AgentProvider for NoisyEcho {
+    fn start(&self, request: StartRequest) -> Result<Object<dyn AgentSession>, ProviderError> {
+        println!("printed during a prompt");
+        println!("{FORGED}");
+        eprintln!("printed to standard error");
+        Ok(Echo::new("noisy-0".to_owned(), "noisy", &request.prompt).into_object())
+    }
+
+    fn resume(&self, _request: ResumeRequest) -> Result<Object<dyn AgentSession>, ProviderError> {
+        Err(no_resume())
+    }
+}
+
+guatiao::providers!(EchoProvider, PrefixedEcho, NoisyEcho);

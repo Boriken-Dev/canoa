@@ -1,0 +1,5 @@
+# An echo provider that prints to standard output and standard error: the host test's Python fixture.
+type = "python"
+module = "printing_echo"
+kinds = ["agent_provider"]
+paths = ["."]

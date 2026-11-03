@@ -100,6 +100,10 @@ enum Command {
         /// Read the settings from the first line of standard input, as `canoa-host serve` writes them.
         #[arg(long)]
         settings_on_stdin: bool,
+        /// Serve ACP on the loopback socket `canoa-host serve` listens on, proving the token its first line gives, instead
+        /// of on standard input and output.
+        #[arg(long, requires = "settings_on_stdin")]
+        connect: Option<std::net::SocketAddr>,
     },
 }
 
@@ -412,6 +416,7 @@ fn run(cli: Cli) -> Result<(), Failed> {
             max_sessions,
             directory,
             settings_on_stdin,
+            connect,
         } => {
             // A file named on the command line is taken from where the command was given.
             let absolute = |path: PathBuf| std::path::absolute(&path).unwrap_or(path);
@@ -439,7 +444,16 @@ fn run(cli: Cli) -> Result<(), Failed> {
             options.settings = line.settings;
             options.working_roots = working_roots;
             options.max_sessions = max_sessions;
-            canoa_host::serve_stdio(&options).map_err(Failed::run)
+            match (connect, line.token) {
+                (Some(address), Some(token)) => {
+                    canoa_host::provider::serve_connected(&options, address, &token)
+                }
+                (Some(_), None) => {
+                    return Err(Failed::usage("--connect needs a token in the settings"));
+                }
+                (None, _) => canoa_host::serve_stdio(&options),
+            }
+            .map_err(Failed::run)
         }
     }
 }

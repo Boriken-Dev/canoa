@@ -27,7 +27,7 @@ mod with_python {
     use coqui_peer_webcrypto::Identity;
     use serde_json::{Value, json};
 
-    use crate::support::{Host, Scratch, cwd, quoted, with_link};
+    use crate::support::{Host, Scratch, cwd, log_holding, quoted, with_link};
 
     /// Where the interpreter is and what a host needs to find its shared library.
     struct Python {
@@ -182,12 +182,11 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         ]
     }
 
-    #[test]
-    fn a_python_provider_answers_through_one_source_entry() {
-        let python = python();
+    /// A Canoa.cfg entry `python` serving `provider` from the manifests in `dirs`, with the source built against `python`.
+    fn source_entry(python: &Python, provider: &str, dirs: &[PathBuf]) -> String {
         let guatiao = checkout("guatiao");
         let coqui_acp = checkout("coqui-acp-provider");
-        let source = build_source(&python, &guatiao);
+        let source = build_source(python, &guatiao);
         let list = |paths: &[PathBuf]| {
             let quoted: Vec<String> = paths
                 .iter()
@@ -195,33 +194,83 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
                 .collect();
             format!("[{}]", quoted.join(", "))
         };
-        let config = format!(
-            "[host.providers.python]\nsource = {}\nprovider = \"acp_echo_echo\"\n\
+        format!(
+            "[host.providers.python]\nsource = {}\nprovider = {}\n\
              [host.providers.python.source_settings]\ndirs = {}\npaths = {}\n",
             quoted(&source.to_string_lossy()),
-            list(&[coqui_acp.join("examples/provider-python/echo")]),
+            quoted(provider),
+            list(dirs),
             list(&[
                 guatiao.join("bindings/python/guatiao/src"),
                 coqui_acp.join("crates/coqui-acp-provider/python"),
             ]),
-        );
-        let host = Host::start_in(Scratch::new(), &config, 1, &environment(&python));
-        let client = Identity::generate().expect("a key");
-        host.pair(&client);
+        )
+    }
+
+    /// The text of each prompt's turn, in one session.
+    fn turns(host: &Host, client: &Identity, prompts: &[&str]) -> Vec<String> {
         let dir = cwd(&host.scratch);
-        let (first, second) = with_link(host.url("python"), &client, host.peer, |rpc| {
+        with_link(host.url("python"), client, host.peer, |rpc| {
             rpc.initialize().expect("initialize is answered");
             let session = rpc
                 .request("session/new", json!({"cwd": dir, "mcpServers": []}))
                 .expect("a session opens");
             let id = session["sessionId"].as_str().expect("an id").to_owned();
-            (
-                rpc.prompt(&id, "hello").expect("the first turn ends"),
-                rpc.prompt(&id, "again").expect("the second turn ends"),
-            )
+            prompts
+                .iter()
+                .map(|prompt| rpc.prompt(&id, prompt).expect("the turn ends"))
+                .collect()
         })
-        .expect("a paired key is served");
-        assert_eq!(first, "echo: hello");
-        assert_eq!(second, "echo: again");
+        .expect("a paired key is served")
+    }
+
+    #[test]
+    fn a_python_provider_answers_through_one_source_entry() {
+        let python = python();
+        let coqui_acp = checkout("coqui-acp-provider");
+        let config = source_entry(
+            &python,
+            "acp_echo_echo",
+            &[coqui_acp.join("examples/provider-python/echo")],
+        );
+        let host = Host::start_in(Scratch::new(), &config, 1, &environment(&python));
+        let client = Identity::generate().expect("a key");
+        host.pair(&client);
+        assert_eq!(
+            turns(&host, &client, &["hello", "again"]),
+            ["echo: hello", "echo: again"]
+        );
+    }
+
+    #[test]
+    fn what_a_python_provider_prints_goes_to_the_hosts_log_bounded_and_never_to_the_client() {
+        let python = python();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/python/printing");
+        let config = source_entry(&python, "printing_echo_echo", &[fixture]);
+        let (host, log) = Host::start_logged(Scratch::new(), &config, 1, &environment(&python));
+        let client = Identity::generate().expect("a key");
+        host.pair(&client);
+        assert_eq!(
+            turns(&host, &client, &["hello", "flood", "again"]),
+            ["printing: hello", "printing: flood", "printing: again"]
+        );
+        let printed = [
+            "printed while importing",
+            "printed while starting",
+            "printed during a prompt",
+            "forged by a print",
+            "written to file descriptor 1",
+            "printed to standard error",
+            "the rest is dropped",
+        ];
+        let written = log_holding(&log, &printed);
+        for printed in printed {
+            assert!(written.contains(printed), "{printed} is in the log");
+        }
+        assert!(
+            written.len() < 2 * 1024 * 1024,
+            "the host kept {} bytes of a 4 MiB flood",
+            written.len()
+        );
     }
 }

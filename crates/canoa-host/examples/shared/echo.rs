@@ -1,6 +1,7 @@
 //! A conversation that answers each message with its text after a prefix: what the provider fixtures serve.
 
 use std::collections::VecDeque;
+use std::process::{Command, Stdio};
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -29,7 +30,30 @@ impl Echo {
 
     fn answer(&self, text: &str) {
         let mut events = self.events.lock().unwrap_or_else(PoisonError::into_inner);
-        let answer = format!("{}: {text}", self.prefix);
+        // `spawn` starts a process that outlives a minute unless something ends it, and is answered with its id: what a
+        // test checks the host ends with the provider.
+        let answer = if text == "spawn" {
+            let mut command = if cfg!(windows) {
+                let mut ping = Command::new("ping");
+                ping.args(["-n", "61", "127.0.0.1"]);
+                ping
+            } else {
+                let mut sleep = Command::new("sleep");
+                sleep.arg("60");
+                sleep
+            };
+            let started = command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            match started {
+                Ok(child) => format!("{}: {}", self.prefix, child.id()),
+                Err(error) => format!("{}: not started: {error}", self.prefix),
+            }
+        } else {
+            format!("{}: {text}", self.prefix)
+        };
         events.push_back(AgentEvent::new(TEXT_EVENT, Some(answer)));
         events.push_back(AgentEvent::new(COMPLETED_EVENT, None));
         self.ready.notify_all();

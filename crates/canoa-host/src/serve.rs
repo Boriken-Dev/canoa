@@ -24,6 +24,7 @@ use coqui_peer_webcrypto::{Identity, PeerId, Trust, TrustStore, WebCrypto};
 use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel, Failure, Limits};
 
+use crate::child::{self, Running};
 use crate::config::{Config, Entry, EntryKind, Origin};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
@@ -38,6 +39,7 @@ pub const PROOF_LIMIT: Duration = Duration::from_secs(15);
 pub const FIRST_MESSAGE: Duration = Duration::from_secs(60);
 /// Messages an unproven peer may have queued.
 const UNPROVEN_PENDING: usize = 8;
+pub use crate::child::{OUTPUT_LIMIT, START_LIMIT};
 /// What a peer is granted on an entry, in [`Registry`] terms.
 pub const ACP_CAPABILITY: &str = "acp/1";
 
@@ -170,7 +172,25 @@ struct Shared {
 struct Agents {
     stopping: bool,
     next: u64,
-    running: BTreeMap<u64, Arc<Agent>>,
+    running: BTreeMap<u64, Process>,
+}
+
+/// A process the host started for one connection.
+enum Process {
+    Agent(Arc<Agent>),
+    Provider(Arc<Running>),
+}
+
+impl Process {
+    /// Ends it and what it started.
+    fn stop(&self) {
+        match self {
+            Self::Agent(agent) => {
+                let _ = agent.stop();
+            }
+            Self::Provider(running) => running.stop(),
+        }
+    }
 }
 
 impl Shared {
@@ -181,15 +201,26 @@ impl Shared {
         program: &OsString,
         args: &[OsString],
     ) -> std::io::Result<Option<(u64, Arc<Agent>)>> {
+        self.record(|| {
+            let agent = Arc::new(Agent::spawn(program, args, MAX_LINE)?);
+            Ok((Process::Agent(Arc::clone(&agent)), agent))
+        })
+    }
+
+    /// Starts a process with `spawn` and records it, as [`Shared::start`] does.
+    fn record<T>(
+        &self,
+        spawn: impl FnOnce() -> std::io::Result<(Process, T)>,
+    ) -> std::io::Result<Option<(u64, T)>> {
         let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
         if agents.stopping {
             return Ok(None);
         }
-        let agent = Arc::new(Agent::spawn(program, args, MAX_LINE)?);
+        let (process, started) = spawn()?;
         agents.next += 1;
         let key = agents.next;
-        agents.running.insert(key, Arc::clone(&agent));
-        Ok(Some((key, agent)))
+        agents.running.insert(key, process);
+        Ok(Some((key, started)))
     }
 
     fn forget(&self, key: u64) {
@@ -220,8 +251,8 @@ impl Stopper {
             agents.stopping = true;
             core::mem::take(&mut agents.running)
         };
-        for agent in running.values() {
-            let _ = agent.stop();
+        for process in running.values() {
+            process.stop();
         }
     }
 }
@@ -508,8 +539,17 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
 }
 
 fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &PeerId) {
-    let (program, args) = match &served.run {
-        Run::Agent { program, args, .. } | Run::Provider { program, args, .. } => (program, args),
+    let (program, args, scope) = match &served.run {
+        Run::Agent {
+            program,
+            args,
+            scope,
+        } => (program, args, scope),
+        Run::Provider {
+            program,
+            args,
+            line,
+        } => return give_provider(shared, served, channel, peer, (program, args), line),
     };
     // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
     let (key, agent) = match shared.start(program, args) {
@@ -519,14 +559,43 @@ fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &
             return tracing::warn!(entry = served.name, "the agent could not start: {error}");
         }
     };
-    let end = match &served.run {
-        Run::Agent { scope, .. } => relay(&Scoped::new(channel, scope), &agent),
-        // The host's settings reach the provider before anything the client sent.
-        Run::Provider { line, .. } => relay(&Prefilled::new(channel, line.to_line()), &agent),
-    };
+    let end = relay(&Scoped::new(channel, scope), &agent);
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
     let _ = agent.stop();
+}
+
+/// Serves one connection with a provider process of its own, which [`Stopper::stop_agents`] ends like any agent.
+fn give_provider<C: Channel>(
+    shared: &Shared,
+    served: &Served,
+    channel: &C,
+    peer: &PeerId,
+    (program, args): (&OsString, &[OsString]),
+    line: &HostLine,
+) {
+    let mut prepared = match child::prepare(program, args) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return tracing::warn!(entry = served.name, "the provider could not start: {error}");
+        }
+    };
+    let started = shared.record(|| {
+        let (running, streams) = prepared.start()?;
+        let running = Arc::new(running);
+        Ok((Process::Provider(Arc::clone(&running)), (running, streams)))
+    });
+    let (key, (running, streams)) = match started {
+        Ok(Some(started)) => started,
+        Ok(None) => return,
+        Err(error) => {
+            return tracing::warn!(entry = served.name, "the provider could not start: {error}");
+        }
+    };
+    let end = child::serve(&served.name, prepared, &running, streams, line, channel);
+    tracing::info!(entry = served.name, %peer, "left: {end}");
+    shared.forget(key);
+    running.stop();
 }
 
 #[cfg(test)]

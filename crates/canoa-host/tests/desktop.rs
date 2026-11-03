@@ -106,6 +106,72 @@ fn without_the_flag_closing_its_input_leaves_the_host_serving() {
     );
 }
 
+/// A host serving the echo provider with `args`, a paired link to it held open, and the pid of a process the provider started.
+/// The provider's own process ends when its link to the host does; what it starts ends only if the host ends it.
+fn provider_running(args: &[&str]) -> (Host, u32, Link) {
+    let entry = format!(
+        "[host.providers.echo]\nlibrary = {}\nprovider = \"echo_provider\"\n",
+        quoted(&example("echo_provider", true).to_string_lossy())
+    );
+    let host = Host::start_with(&entry, 1, args, &[]);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    let (pids, pid) = mpsc::channel();
+    let (url, peer) = (host.url("echo").to_owned(), host.peer);
+    let dir = support::cwd(&host.scratch);
+    let link = std::thread::spawn(move || {
+        with_link(&url, &client, peer, |rpc| {
+            rpc.initialize().expect("initialize is answered");
+            let session = rpc
+                .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+            let said = rpc
+                .prompt(session["sessionId"].as_str().expect("an id"), "spawn")
+                .expect("the turn ends");
+            let pid = said.strip_prefix("echo: ").expect("the echo's answer");
+            pids.send(pid.parse::<u64>().expect("a pid"))
+                .expect("the test waits");
+            // Held until the host ends it.
+            rpc.next_message(Duration::from_secs(30))
+        })
+    });
+    let pid =
+        u32::try_from(pid.recv_timeout(WAIT).expect("the started process's pid")).expect("a pid");
+    assert!(
+        running(pid),
+        "what the provider started runs while the host does"
+    );
+    (host, pid, link)
+}
+
+#[test]
+fn closing_its_input_ends_the_host_and_what_each_provider_started() {
+    let (mut host, pid, link) = provider_running(&["--until-stdin-closes"]);
+    host.close_input();
+    let status = host
+        .ended_within(Duration::from_secs(10))
+        .expect("the host ends when its input closes");
+    assert!(status.success(), "{status:?}");
+    let _ = link.join();
+    assert!(
+        ends_within_five_seconds(pid),
+        "what the provider started ended with the host"
+    );
+}
+
+/// On Windows each provider process is in a job object the host holds, as each agent is.
+#[cfg(windows)]
+#[test]
+fn killing_the_host_on_windows_ends_what_its_providers_started() {
+    let (mut host, pid, link) = provider_running(&[]);
+    host.kill();
+    let _ = link.join();
+    assert!(
+        ends_within_five_seconds(pid),
+        "what the provider started ended with the host"
+    );
+}
+
 /// `canoa-host pair` on a home of its own: what it printed first, and the process.
 fn start_pairing(
     home: &std::path::Path,

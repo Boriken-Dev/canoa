@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use coqui_peer_webcrypto::Identity;
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, host_binary, quoted, with_link};
+use support::{Host, Scratch, cwd, example, host_binary, log_holding, quoted, with_link};
 
 fn agent_entry(name: &str, extra: &str) -> String {
     format!(
@@ -448,7 +448,7 @@ fn a_settings_value_never_reaches_the_hosts_log() {
             &format!("[host.providers.source.source_settings]\nprefix = 1\ntoken = \"{SECRET}\""),
         )
         + &prefixed("served", &format!("prefix = \"{SECRET}\""));
-    let (host, log) = Host::start_logged(Scratch::new(), &config, 5);
+    let (host, log) = Host::start_logged(Scratch::new(), &config, 5, &[]);
     let client = Identity::generate().expect("a key");
     host.pair(&client);
     for entry in ["misspelled", "mistyped", "unwanted", "source"] {
@@ -465,4 +465,33 @@ fn a_settings_value_never_reaches_the_hosts_log() {
         "the log was captured: {written}"
     );
     assert!(!written.contains(SECRET), "{written}");
+}
+
+#[test]
+fn what_a_provider_prints_goes_to_the_hosts_log_and_never_to_the_client() {
+    let config = provider_entry("noisy", "").replace("\"echo_provider\"", "\"noisy_echo\"");
+    let (host, log) = Host::start_logged(Scratch::new(), &config, 1, &[]);
+    let client = Identity::generate().expect("a key");
+    host.pair(&client);
+    assert_eq!(
+        hello(&host, &client, "noisy").as_deref(),
+        Ok("noisy: hello")
+    );
+    assert_eq!(
+        hello(&host, &client, "noisy").as_deref(),
+        Ok("noisy: hello")
+    );
+    let printed = [
+        "printed while loading",
+        "printed during a prompt",
+        "forged by a print",
+        "printed to standard error",
+    ];
+    let written = log_holding(&log, &printed);
+    for printed in printed {
+        assert!(
+            written.contains(printed),
+            "{printed} is in the log: {written}"
+        );
+    }
 }

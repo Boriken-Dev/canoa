@@ -113,11 +113,16 @@ impl Host {
     }
 
     /// As [`Host::start_in`], with the host's log written to `host.log` in `scratch` rather than the test's own.
-    pub fn start_logged(scratch: Scratch, config: &str, entries: usize) -> (Self, PathBuf) {
+    pub fn start_logged(
+        scratch: Scratch,
+        config: &str,
+        entries: usize,
+        env: &[(&str, std::ffi::OsString)],
+    ) -> (Self, PathBuf) {
         let log = scratch.0.join("host.log");
         let file = std::fs::File::create(&log).expect("a log file");
         (
-            Self::launch(scratch, config, entries, &[], &[], Stdio::from(file)),
+            Self::launch(scratch, config, entries, &[], env, Stdio::from(file)),
             log,
         )
     }
@@ -249,6 +254,19 @@ impl Drop for Host {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// The host's log once it holds every one of `expected`, or as it is after [`WAIT`]: what a provider printed reaches it
+/// from a thread of the host's own, a moment after the turn.
+pub fn log_holding(log: &Path, expected: &[&str]) -> String {
+    let until = Instant::now() + WAIT;
+    loop {
+        let written = std::fs::read_to_string(log).unwrap_or_default();
+        if Instant::now() >= until || expected.iter().all(|text| written.contains(text)) {
+            return written;
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 

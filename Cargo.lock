@@ -310,15 +310,18 @@ dependencies = [
  "coqui-peer",
  "coqui-peer-webcrypto",
  "coqui-web",
+ "getrandom 0.4.3",
  "guatiao",
  "guatiao-serde",
  "indexmap 2.14.2",
+ "rustix",
  "serde",
  "serde_json",
  "toml",
  "tracing",
  "tracing-subscriber",
  "url",
+ "win32job",
 ]
 
 [[package]]

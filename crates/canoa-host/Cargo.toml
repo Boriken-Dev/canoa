@@ -27,6 +27,8 @@ coqui-agentic-peer.workspace = true
 coqui-peer.workspace = true
 coqui-peer-webcrypto.workspace = true
 coqui-web.workspace = true
+# The one-time token a provider's process proves its socket with.
+getrandom = "0.4"
 guatiao.workspace = true
 guatiao-serde.workspace = true
 indexmap.workspace = true
@@ -35,6 +37,14 @@ serde_json.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# Ends a provider's process group, through a safe call.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
+
+# A job object per provider process, which ends everything in it.
+[target.'cfg(windows)'.dependencies]
+win32job = "2.0.3"
 
 [dev-dependencies]
 # The address a test client dials; already in the graph through coqui-web.

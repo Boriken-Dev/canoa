@@ -5,7 +5,9 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
-use std::io::{BufRead, Read as _};
+use core::net::SocketAddr;
+use std::io::{BufRead, Read as _, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
 
 use coqui_acp::lines;
@@ -48,14 +50,26 @@ impl ProviderOptions {
 }
 
 /// The settings `canoa-host serve` gives a provider process as the first line of its standard input, so that no value is
-/// on a command line, which other users of the machine may read.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// on a command line, which other users of the machine may read. `Debug` shows no setting's value and no token.
+#[derive(Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HostLine {
     /// What a source is added with.
     pub source_settings: Option<Settings>,
     /// The provider's configuration.
     pub settings: Option<Settings>,
+    /// What the process sends first on the socket it serves ACP on, proving it is the process the host started.
+    pub token: Option<String>,
+}
+
+impl fmt::Debug for HostLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HostLine")
+            .field("source_settings", &self.source_settings)
+            .field("settings", &self.settings)
+            .field("token", &self.token.as_ref().map(|_| "…"))
+            .finish()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -66,6 +80,8 @@ struct Line {
     source_settings: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     settings: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    token: Option<String>,
 }
 
 /// What [`Line::canoa_host`] holds: a client's ACP message never has the field, so one is never read as settings.
@@ -79,6 +95,7 @@ impl HostLine {
             canoa_host: LINE_VERSION,
             source_settings: self.source_settings.as_ref().map(|s| s.as_map().clone()),
             settings: self.settings.as_ref().map(|s| s.as_map().clone()),
+            token: self.token.clone(),
         };
         serde_json::to_vec(&line).unwrap_or_default()
     }
@@ -112,6 +129,7 @@ impl HostLine {
         Ok(Self {
             source_settings: line.source_settings.map(Settings::new),
             settings: line.settings.map(Settings::new),
+            token: line.token,
         })
     }
 }
@@ -187,18 +205,47 @@ impl core::error::Error for ProviderError {
 /// [`ProviderError`] for a library or source that does not load, a provider it does not offer or settings it refuses, and
 /// for a transport or facade failure.
 pub fn serve_stdio(options: &ProviderOptions) -> Result<(), ProviderError> {
+    serve_on(options, std::io::stdin(), std::io::stdout())
+}
+
+/// As [`serve_stdio`], on the socket `canoa-host serve` listens on at `address`, after sending it `token`. The process's
+/// standard input, output and error are then the provider's alone: none of them is the transport.
+///
+/// # Errors
+///
+/// [`ProviderError::Transport`] for an address that is not loopback or a socket that does not connect, and as
+/// [`serve_stdio`].
+pub fn serve_connected(
+    options: &ProviderOptions,
+    address: SocketAddr,
+    token: &str,
+) -> Result<(), ProviderError> {
+    if !address.ip().is_loopback() {
+        return Err(ProviderError::Transport(std::io::Error::other(
+            "the host's socket is on loopback",
+        )));
+    }
+    let mut stream = TcpStream::connect(address).map_err(ProviderError::Transport)?;
+    let _ = stream.set_nodelay(true);
+    stream
+        .write_all(format!("{token}\n").as_bytes())
+        .map_err(ProviderError::Transport)?;
+    let reader = stream.try_clone().map_err(ProviderError::Transport)?;
+    serve_on(options, reader, stream)
+}
+
+fn serve_on(
+    options: &ProviderOptions,
+    input: impl std::io::Read + Send + 'static,
+    output: impl Write + Send + 'static,
+) -> Result<(), ProviderError> {
     // What the provider hands out points into the library, so the registry and its mapping outlive the facade.
     let (_registry, provider) = load(options)?;
     let mut settings = FacadeSettings::default();
     settings.working_roots.clone_from(&options.working_roots);
     settings.max_sessions = options.max_sessions;
-    let (transport, _diagnostics) = lines::over_io(
-        std::io::stdin(),
-        std::io::stdout(),
-        0,
-        lines::DEFAULT_MAX_LINE,
-    )
-    .map_err(ProviderError::Transport)?;
+    let (transport, _diagnostics) = lines::over_io(input, output, 0, lines::DEFAULT_MAX_LINE)
+        .map_err(ProviderError::Transport)?;
     AcpFacade::new(provider)
         .with_settings(settings)
         .with_agent_info("canoa-host", env!("CARGO_PKG_VERSION"))
@@ -283,6 +330,7 @@ mod tests {
         let line = HostLine {
             source_settings: Some(settings(serde_json::json!({"dirs": ["a\nb"], "paths": []}))),
             settings: Some(settings(serde_json::json!({"key": "x\ry"}))),
+            token: Some("00ff".to_owned()),
         };
         let bytes = line.to_line();
         assert!(!bytes.iter().any(|byte| matches!(byte, b'\n' | b'\r')));
@@ -341,6 +389,7 @@ mod tests {
             HostLine {
                 source_settings: None,
                 settings: Some(settings(serde_json::json!({"token": "sk-SECRET"}))),
+                token: Some("TOKEN-SECRET".to_owned()),
             }
         );
         assert!(!shown.contains("SECRET"), "{shown}");
