@@ -68,11 +68,14 @@ Future<void> pickFromTrayMenu(String label) async {
     menu,
     '--method',
     'com.canonical.dbusmenu.GetLayout',
+    // GOption would read -1 as an option.
+    '--',
     '0',
     '-1',
     '[]',
   ]);
-  final id = RegExp(r"\((\d+), \{[^}]*'label': <'${RegExp.escape(label)}'>").firstMatch(layout)!.group(1)!;
+  final id = RegExp("\\((\\d+), \\{[^}]*'label': <'${RegExp.escape(label)}'>").firstMatch(layout)?.group(1);
+  if (id == null) throw StateError('no $label in the tray menu: $layout');
   await _gdbus([
     '--dest',
     item.group(1)!,
