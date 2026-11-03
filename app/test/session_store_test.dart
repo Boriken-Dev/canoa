@@ -37,9 +37,10 @@ void main() {
     }));
     final notices = session.messages.where((message) => message.role == MessageRole.notice).map((m) => m.text).toList();
     expect(notices, hasLength(3), reason: 'four taken, one of them not text');
-    expect(notices[0], 'pi runs bash  without asking');
-    expect(notices[1], 'Each message runs pi anew.');
-    expect(notices[2].length, lessThanOrEqualTo(513));
+    // Any agent can send these, so each says it is the agent's, never Canoa's own.
+    expect(notices[0], 'The agent says: pi runs bash  without asking');
+    expect(notices[1], 'The agent says: Each message runs pi anew.');
+    expect(notices[2].length, lessThanOrEqualTo(513 + 'The agent says: '.length));
 
     final plain = store.addProviderSession(
       title: 'agent', agent: 'agent', peerId: 'sha256:example', remoteSessionId: 's2',

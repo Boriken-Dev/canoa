@@ -336,9 +336,10 @@ class SessionStore extends ChangeNotifier {
     session.commands = parseCommands(opened.raw['availableCommands']) ?? session.commands;
     final meta = opened.raw['_meta'];
     if (meta is Map && meta[hostNoticesKey] is List) {
+      // Any agent can send these, not only the host, so each is shown as the agent's word, never as Canoa's.
       for (final notice in (meta[hostNoticesKey] as List).take(maxHostNotices)) {
         final text = shortText(notice);
-        if (text != null) _note(session, text);
+        if (text != null) _note(session, 'The agent says: $text');
       }
     }
     notifyListeners();

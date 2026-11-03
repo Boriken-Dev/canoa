@@ -1,7 +1,8 @@
 //! A test fixture shaped like Pi's command line: `--mode rpc` reads JSON commands on standard input and writes JSON events,
 //! as Pi's RPC mode does; `--mode json` answers one prompt, from after `--` or from standard input, and exits. The prompt
 //! picks what it does: `run COMMAND` asks leave as Pi's permission-gate extension does, `wait` waits for `abort`,
-//! `remember` repeats the prompt before, `fail` reports a model failure, `exit` ends the process mid-turn.
+//! `stubborn` takes no notice of it, `remember` repeats the prompt before, `fail` reports a model failure, `exit` ends the
+//! process mid-turn.
 //!
 //! It appends its process id to `tool.pid` in its working directory, so a test can see whether it still runs.
 #![allow(
@@ -104,6 +105,11 @@ fn rpc() {
                     }
                 }
             }
+        } else if message == "stubborn" {
+            // Takes no notice of abort, as a tool stuck in a command would.
+            while next(&mut lines).is_some() {}
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            return;
         } else if message == "remember" {
             text(&format!("you said before: {before}"));
             settled(false);

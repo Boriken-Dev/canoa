@@ -93,7 +93,16 @@ void main() {
     browser.kill();
     host.kill();
     await host.exitCode;
-    await dir.delete(recursive: true);
+    // The system ends the host's tools with it, a moment later on Windows: until then one holds its directory.
+    for (var tries = 0;; tries++) {
+      try {
+        await dir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (tries >= 50) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
   });
 
   Future<VerifiedAgent> connect({AcpDecider? decider}) => connectVerifiedAcp(

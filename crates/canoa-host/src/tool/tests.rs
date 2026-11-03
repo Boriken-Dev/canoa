@@ -196,3 +196,44 @@ fn an_entry_survives_its_trip_through_json() {
     let back: ToolSpec = serde_json::from_str(&json).expect("reads back");
     assert_eq!(back, spec);
 }
+
+#[test]
+fn a_line_written_holds_no_character_a_reader_could_split_it_at() {
+    let value = json!({"message": "one\u{2028}two\u{2029}three\r\nfour"});
+    let line = super::run::line_of(&value);
+    assert_eq!(line.last(), Some(&b'\n'));
+    let body = &line[..line.len() - 1];
+    let text = core::str::from_utf8(body).expect("UTF-8");
+    assert!(
+        !text.contains(['\u{2028}', '\u{2029}', '\n', '\r']),
+        "{text}"
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(body).expect("JSON"),
+        value
+    );
+}
+
+#[test]
+fn an_entry_fits_a_command_line() {
+    let error =
+        spec(&format!("{SESSION}max_sessions = 2\n").replace("read, bash", r"read\u0000bash"))
+            .expect_err("a NUL");
+    assert!(error.contains("NUL"), "{error}");
+    let long = "x".repeat(MAX_SPEC);
+    let error = spec(&SESSION.replace("read, bash, edit and write", &long)).expect_err("too long");
+    assert!(error.contains("bytes"), "{error}");
+}
+
+#[test]
+fn a_prompt_alone_in_the_arguments_comes_after_a_double_dash() {
+    let message = |args: &str| {
+        spec(&format!(
+            "program = \"t\"\nruns = \"message\"\nunasked = \"x\"\nargs = {args}\n"
+        ))
+    };
+    let error = message("[\"--json\", \"{prompt}\"]").expect_err("could be read as an option");
+    assert!(error.contains("--"), "{error}");
+    message("[\"--json\", \"--\", \"{prompt}\"]").expect("after --");
+    message("[\"--message={prompt}\"]").expect("inside an option");
+}

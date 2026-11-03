@@ -28,6 +28,9 @@ pub const MAX_TEXT: usize = 1024 * 1024;
 pub const MAX_LABEL: usize = 4096;
 /// Permission requests one process may have waiting; past it, a request is refused at once.
 pub const MAX_ASKS: usize = 16;
+/// The most an entry takes as JSON, since `serve` gives it to `canoa-host tool` on a command line, which Windows caps at
+/// 32,767 characters.
+pub const MAX_SPEC: usize = 16 * 1024;
 
 /// How a tool keeps a conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -328,7 +331,27 @@ impl ToolSpec {
                 if self.prompt.is_some() || self.cancel.is_some() {
                     return Err("prompt and cancel go with runs = \"session\"".to_owned());
                 }
+                // A prompt beginning with - would otherwise be read as an option of the tool's.
+                for (at, arg) in self.args.iter().enumerate() {
+                    if arg == "{prompt}" && (at == 0 || self.args[at - 1] != "--") {
+                        return Err(
+                            "an argument that is {prompt} alone comes right after --, or the prompt goes on standard input"
+                                .to_owned(),
+                        );
+                    }
+                }
             }
+        }
+        let json = serde_json::to_string(self).unwrap_or_default();
+        if json.contains("\\u0000") {
+            return Err(
+                "a setting holds a NUL character, which no command line can carry".to_owned(),
+            );
+        }
+        if json.len() > MAX_SPEC {
+            return Err(format!(
+                "the entry is over {MAX_SPEC} bytes as JSON, more than its command line can carry"
+            ));
         }
         for (name, kind) in &self.kinds {
             if name.is_empty() || !TOOL_KINDS.contains(&kind.as_str()) {

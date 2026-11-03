@@ -108,8 +108,7 @@ struct Out(Arc<Mutex<Box<dyn Write + Send>>>);
 
 impl Out {
     fn send(&self, message: &Value) {
-        let mut line = serde_json::to_vec(message).unwrap_or_default();
-        line.push(b'\n');
+        let line = line_of(message);
         let mut out = lock(&self.0);
         // A client that has gone ends the connection by its input; nothing here waits on it.
         let _ = out.write_all(&line).and_then(|()| out.flush());
@@ -138,6 +137,7 @@ impl Out {
 struct Ask {
     session: String,
     generation: u64,
+    turn: u64,
     allow: Value,
     reject: Value,
 }
@@ -175,6 +175,10 @@ struct State {
     ended: Option<String>,
     /// Permission requests of the latest process still waiting.
     asks: usize,
+    /// A cancelled turn's number and when its process is ended unless the turn has ended by then.
+    deadline: Option<(u64, Instant)>,
+    /// Whether a thread is waiting on `deadline`: one per session, however often a client cancels.
+    timer: bool,
 }
 
 struct Turn {
@@ -269,6 +273,12 @@ impl Link {
             None | Some(Value::Null) => {}
             Some(Value::Array(servers)) if servers.is_empty() => {}
             Some(_) => return Err(invalid("this agent takes no MCP servers")),
+        }
+        // Looking at a share would reach that machine with this user's credentials, before any check.
+        if !local(&cwd) {
+            return Err(invalid(
+                "cwd on a network share or device namespace is refused: it would reach another machine",
+            ));
         }
         if !cwd.is_dir() {
             return Err(invalid("cwd is not a directory"));
@@ -418,17 +428,20 @@ impl Link {
         }
         turn.cancelled = true;
         let number = turn.number;
+        // A question this turn still has waiting is answered no now: the person can no longer be asked it.
+        self.reject_waiting(&session.id, &mut state);
         let Some(process) = state.process.clone() else {
             return self.finish(session, &mut state, Outcome::Stop(Stop::Cancelled));
         };
         if let (Runs::Session, Some(cancel)) = (self.spec.runs, &self.spec.cancel)
             && process.write(line_of(cancel)).is_ok()
         {
-            let (link, session) = (Arc::clone(self), Arc::clone(session));
-            thread::spawn(move || {
-                thread::sleep(CANCEL_GRACE);
-                link.cancel_late(&session, number);
-            });
+            state.deadline = Some((number, Instant::now() + CANCEL_GRACE));
+            if !state.timer {
+                state.timer = true;
+                let (link, session) = (Arc::clone(self), Arc::clone(session));
+                thread::spawn(move || link.cancel_timer(&session));
+            }
             return;
         }
         // Ended, its output closes and the turn ends as cancelled from there.
@@ -442,9 +455,28 @@ impl Link {
         process.stop();
     }
 
-    /// A turn asked to stop that has not after [`CANCEL_GRACE`]: its process is ended, and the session with it.
-    fn cancel_late(self: &Arc<Self>, session: &Arc<Session>, number: u64) {
+    /// Waits on the session's deadline: a turn asked to stop that has not after [`CANCEL_GRACE`] has its process ended,
+    /// and the session with it.
+    fn cancel_timer(self: &Arc<Self>, session: &Arc<Session>) {
         let mut state = lock(&session.state);
+        let number = loop {
+            match state.deadline {
+                None => {
+                    state.timer = false;
+                    return;
+                }
+                Some((number, at)) if Instant::now() >= at => {
+                    state.deadline = None;
+                    state.timer = false;
+                    break number;
+                }
+                Some((_, at)) => {
+                    drop(state);
+                    thread::sleep(at.saturating_duration_since(Instant::now()));
+                    state = lock(&session.state);
+                }
+            }
+        };
         if state.turn.as_ref().is_none_or(|turn| turn.number != number) {
             return;
         }
@@ -465,6 +497,8 @@ impl Link {
         let Some(turn) = state.turn.take() else {
             return;
         };
+        state.deadline = None;
+        self.reject_waiting(&session.id, state);
         let outcome = match (turn.cancelled, outcome, turn.failure) {
             (true, _, _) => Outcome::Stop(Stop::Cancelled),
             (false, Outcome::Stop(Stop::EndTurn), Some(failure)) => Outcome::Error(failure),
@@ -669,31 +703,59 @@ impl Link {
             Ask {
                 session: session.id.clone(),
                 generation: process.generation,
+                turn: state.turn.as_ref().map_or(0, |turn| turn.number),
                 allow,
                 reject,
             },
         );
         drop(state);
-        let title = label(
-            &rule
-                .title
-                .as_deref()
-                .map(|title| render(title, event))
-                .unwrap_or_default(),
-        );
+        let question = rule
+            .title
+            .as_deref()
+            .map(|title| render(title, event))
+            .unwrap_or_default();
         self.out.send(&json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": "session/request_permission",
             "params": {
                 "sessionId": session.id,
-                "toolCall": {"toolCallId": format!("ask-{id}"), "title": title, "status": "pending"},
+                // The title is shown cut short, so the whole question goes as the call's input too.
+                "toolCall": {
+                    "toolCallId": format!("canoa-host-ask-{id}"),
+                    "title": label(&question),
+                    "status": "pending",
+                    "rawInput": {"text": cut(&question, MAX_TEXT)},
+                },
                 "options": [
                     {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
                     {"optionId": "reject", "name": "Refuse", "kind": "reject_once"},
                 ],
             },
         }));
+    }
+
+    /// Writes `reject` for every question of `session` still waiting, and forgets them: their turn has ended or is
+    /// cancelled, so a later answer reaches nothing.
+    fn reject_waiting(&self, session: &str, state: &mut State) {
+        let waiting: Vec<Ask> = {
+            let mut asks = lock(&self.asks);
+            let ids: Vec<u64> = asks
+                .iter()
+                .filter(|(_, ask)| ask.session == session)
+                .map(|(id, _)| *id)
+                .collect();
+            ids.iter().filter_map(|id| asks.remove(id)).collect()
+        };
+        state.asks = 0;
+        let Some(process) = state.process.clone() else {
+            return;
+        };
+        for ask in waiting {
+            if ask.generation == process.generation {
+                let _ = process.write(line_of(&ask.reject));
+            }
+        }
     }
 
     /// The client's answer to a permission request: `allow` only for the allow option selected, `reject` for anything else.
@@ -712,7 +774,13 @@ impl Link {
             return;
         };
         let mut state = lock(&session.state);
-        if state.generation != ask.generation {
+        // Only to the turn that asked, still running: an ended or cancelled one had its answer written already.
+        let current = state.generation == ask.generation
+            && state
+                .turn
+                .as_ref()
+                .is_some_and(|turn| turn.number == ask.turn && !turn.cancelled);
+        if !current {
             return;
         }
         state.asks = state.asks.saturating_sub(1);
@@ -796,11 +864,31 @@ fn prompt_text(prompt: Option<&Value>) -> Result<String, &'static str> {
     Ok(parts.join("\n"))
 }
 
-/// `value` as one line, with its line break.
-fn line_of(value: &Value) -> Vec<u8> {
-    let mut line = serde_json::to_vec(value).unwrap_or_default();
+/// `value` as one line, with its line break. U+2028 and U+2029, which JSON allows raw in a string, are escaped: some
+/// line readers, Node's `readline` among them, split a line at either.
+pub(super) fn line_of(value: &Value) -> Vec<u8> {
+    let text = serde_json::to_string(value).unwrap_or_default();
+    let mut line = if text.contains(['\u{2028}', '\u{2029}']) {
+        text.replace('\u{2028}', "\\u2028")
+            .replace('\u{2029}', "\\u2029")
+            .into_bytes()
+    } else {
+        text.into_bytes()
+    };
     line.push(b'\n');
     line
+}
+
+/// Whether `path` names this machine's file system: on Windows a drive, not a share (`\\server\share`, `\\?\UNC\`) or a
+/// device namespace (`\\.\`, `\\?\Volume{…}`). Elsewhere every path does.
+fn local(path: &Path) -> bool {
+    match path.components().next() {
+        Some(std::path::Component::Prefix(prefix)) => matches!(
+            prefix.kind(),
+            std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)
+        ),
+        _ => true,
+    }
 }
 
 /// The largest char boundary in `text` at or below `max`.
@@ -887,13 +975,18 @@ impl Process {
         cwd: &Path,
         generation: u64,
     ) -> io::Result<(Self, ChildStdout, ChildStderr)> {
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+            .stderr(Stdio::piped());
+        // The session's directory is the client's choice: cmd.exe, which runs a .cmd tool such as npm's shims, would
+        // otherwise look there first for every program the script names bare.
+        #[cfg(windows)]
+        command.env("NoDefaultCurrentDirectoryInExePath", "1");
+        let mut child = command.spawn()?;
         let streams = (child.stdin.take(), child.stdout.take(), child.stderr.take());
         let (Some(mut stdin), Some(stdout), Some(stderr)) = streams else {
             let _ = child.kill();
