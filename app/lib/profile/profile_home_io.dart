@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'overlay_store_io.dart';
 import 'overlays.dart';
+import 'profile.dart';
 import 'profile_home.dart';
 import 'project_trust.dart';
 
@@ -59,17 +60,24 @@ final class IoProfileHome implements ProfileHome {
   @override
   Future<String?> readSecret(String path, {String? within}) async {
     try {
-      final file = File(path);
+      // The path checked is the path read: links resolved once, then never followed again.
+      final resolved = File(path).resolveSymbolicLinksSync();
       if (within != null) {
         final root = Directory(within).resolveSymbolicLinksSync();
-        final resolved = file.resolveSymbolicLinksSync();
         final prefix = root.endsWith(Platform.pathSeparator) ? root : '$root${Platform.pathSeparator}';
         final inside = Platform.isWindows || Platform.isMacOS
             ? resolved.toLowerCase().startsWith(prefix.toLowerCase())
             : resolved.startsWith(prefix);
         if (!inside) return null;
       }
-      return utf8.decode(await file.readAsBytes());
+      if (FileSystemEntity.typeSync(resolved, followLinks: false) != FileSystemEntityType.file) return null;
+      final file = await File(resolved).open();
+      try {
+        final bytes = await file.read(maxSecretFile + 1);
+        return bytes.length > maxSecretFile ? null : utf8.decode(bytes);
+      } finally {
+        await file.close();
+      }
     } on Object {
       return null;
     }

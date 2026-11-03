@@ -91,3 +91,20 @@ fn every_source_vector_parses_or_is_refused() {
         assert_eq!(case["path"], path.as_str(), "{source}");
     }
 }
+
+#[test]
+fn the_reserved_variables_are_the_vectors_list() {
+    use canoa_host::profile::{RESERVED_ENV, RESERVED_ENV_PREFIXES, RESERVED_ENV_SUFFIXES};
+    let vectors = vectors();
+    let list = |key: &str| -> Vec<String> {
+        vectors["reserved_env"][key]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|name| name.as_str().expect("text").to_owned())
+            .collect()
+    };
+    assert_eq!(list("names"), RESERVED_ENV);
+    assert_eq!(list("prefixes"), RESERVED_ENV_PREFIXES);
+    assert_eq!(list("suffixes"), RESERVED_ENV_SUFFIXES);
+}

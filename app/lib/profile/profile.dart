@@ -10,6 +10,33 @@ const int maxProfileName = 64;
 /// The longest environment variable name.
 const int maxEnvName = 128;
 
+/// The largest file a `from_file` reference reads, in bytes.
+const int maxSecretFile = 1024 * 1024;
+
+/// Environment variables an overlay or a project may not set, compared without case: they decide what a process runs or
+/// loads, where an agent's own requests go, where a harness keeps its configuration, or which certificates are trusted.
+const reservedEnv = [
+  'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'TMP',
+  'TEMP', 'TMPDIR', 'COMSPEC', 'SHELL', 'BASH_ENV', 'ENV', 'PROMPT_COMMAND', 'NODE_OPTIONS', 'NODE_PATH',
+  'NODE_EXTRA_CA_CERTS', 'PERL5OPT', 'PERL5LIB', 'RUBYOPT', 'RUBYLIB', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS',
+  'JDK_JAVA_OPTIONS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_EXECUTABLE', 'CODEX_HOME', 'CODEX_CONFIG', 'GEMINI_CLI_HOME', 'GEMINI_SYSTEM_MD', 'PI_CODING_AGENT_DIR',
+  'PI_ACP_PI_COMMAND', 'GROK_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT',
+];
+
+/// Prefixes of [reservedEnv]'s kind, compared without case.
+const reservedEnvPrefixes = ['LD_', 'DYLD_', 'PYTHON', 'GIT_', 'NPM_CONFIG_', 'CANOA_', 'COQUI_'];
+
+/// Suffixes of [reservedEnv]'s kind, compared without case.
+const reservedEnvSuffixes = ['_BASE_URL', '_PROXY'];
+
+/// Whether an overlay or a project may not set [name].
+bool isReservedEnv(String name) {
+  final upper = name.toUpperCase();
+  return reservedEnv.contains(upper) || reservedEnvPrefixes.any(upper.startsWith) ||
+      reservedEnvSuffixes.any(upper.endsWith);
+}
+
 /// Where a layer comes from, lowest first.
 enum LayerKind {
   builtIn('built-in'),
@@ -152,6 +179,7 @@ final class ProfileException implements Exception {
     'path' => 'Profile $key: a path is empty, or leaves the directory of a layer that comes from elsewhere',
     'form' => 'Profile $key: takes exactly one of its forms',
     'value' => 'Profile $key: a value is empty, holds a control character, or is not an HTTP URL',
+    'reserved' => 'Profile $key: a layer from elsewhere may not set this variable',
     _ => 'Profile $key: the reference cannot be resolved',
   };
 }
@@ -164,6 +192,7 @@ final class Profile {
     this.mode,
     this.context,
     this.unset = const [],
+    this.shareEnv = const [],
     this.env = const {},
     this.skills = const {},
     this.mcp = const {},
@@ -174,6 +203,9 @@ final class Profile {
 
   /// `model`, `effort`, `mode` or `context`: values of lower layers this one takes back.
   final List<String> unset;
+
+  /// Variables of this process that overlays and projects may read with `from_env`; only in the person's own layers.
+  final List<String> shareEnv;
   final Map<String, EnvValue?> env;
   final Map<String, Skill?> skills;
   final Map<String, McpServer?> mcp;
@@ -181,7 +213,7 @@ final class Profile {
   static const scalars = ['model', 'effort', 'mode', 'context'];
 
   bool get isEmpty =>
-      model == null && effort == null && mode == null && context == null && unset.isEmpty && env.isEmpty &&
+      model == null && effort == null && mode == null && context == null && unset.isEmpty && shareEnv.isEmpty && env.isEmpty &&
       skills.isEmpty && mcp.isEmpty;
 
   /// Parses a profile document for a layer of [kind]. Touches no file.
@@ -202,7 +234,7 @@ final class Profile {
   }
 }
 
-const _top = {'model', 'effort', 'mode', 'context', 'unset', 'env', 'skills', 'mcp'};
+const _top = {'model', 'effort', 'mode', 'context', 'unset', 'share_env', 'env', 'skills', 'mcp'};
 const _envKeys = {'value', 'from_env', 'from_file', 'remove'};
 const _mcpKeys = {'type', 'command', 'args', 'env', 'url', 'headers', 'remove'};
 
@@ -230,9 +262,10 @@ void _shape(Map<dynamic, dynamic> map) {
     _optional<String>(context, 'text');
     _optional<String>(context, 'file');
   }
-  if (map.containsKey('unset')) {
-    final unset = map['unset'];
-    if (unset is! List || unset.any((item) => item is! String)) _parseError();
+  for (final key in ['unset', 'share_env']) {
+    if (!map.containsKey(key)) continue;
+    final list = map[key];
+    if (list is! List || list.any((item) => item is! String)) _parseError();
   }
   void values(Object? table) {
     for (final entry in _tableOf(table).values) {
@@ -326,14 +359,19 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     if (scalar.containsKey(name) || (name == 'context' && context != null)) _invalid('form', name as String);
     if (!unset.contains(name)) unset.add(name as String);
   }
+  final shareEnv = <String>[];
+  for (final name in ((map['share_env'] as List<dynamic>?) ?? const []).cast<String>()) {
+    if (confined) _invalid('form', 'share_env');
+    if (!isEnvName(name)) _invalid('name', 'share_env');
+    if (!shareEnv.contains(name)) shareEnv.add(name);
+  }
   final env = <String, EnvValue?>{};
   for (final MapEntry(:key, :value) in ((map['env'] as Map<dynamic, dynamic>?) ?? const {}).entries) {
     final name = key as String;
     if (!isEnvName(name)) _invalid('name', 'env');
     final raw = value as Map<dynamic, dynamic>;
-    env[name] = raw.containsKey('remove')
-        ? _removal('env.$name', raw)
-        : _envValue('env.$name', raw, confined);
+    env[name] = raw.containsKey('remove') ? _removal('env.$name', raw) : _reserved(
+      'env.$name', name, _envValue('env.$name', raw, confined), confined);
   }
   final skills = <String, Skill?>{};
   for (final MapEntry(:key, :value) in ((map['skills'] as Map<dynamic, dynamic>?) ?? const {}).entries) {
@@ -359,6 +397,7 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     mode: scalar['mode'],
     context: context,
     unset: List.unmodifiable(unset),
+    shareEnv: List.unmodifiable(shareEnv),
     env: Map.unmodifiable(env),
     skills: Map.unmodifiable(skills),
     mcp: Map.unmodifiable(mcp),
@@ -385,7 +424,7 @@ McpServer _mcpServer(String key, Map<dynamic, dynamic> raw, bool confined) {
       if (command is! String) _invalid('form', key);
       final args = [for (final arg in (raw['args'] as List<dynamic>?) ?? const []) arg as String];
       if (!_plain(command) || args.any((arg) => arg.contains('\u0000'))) _invalid('value', key);
-      return McpStdio(command: command, args: List.unmodifiable(args), env: _entries('$key.env', raw['env'], isEnvName, confined));
+      return McpStdio(command: command, args: List.unmodifiable(args), env: _entries('$key.env', raw['env'], true, confined));
     case final String type when type == 'http' || type == 'sse':
       if (raw.containsKey('command') || raw.containsKey('args') || raw.containsKey('env')) _invalid('form', key);
       final url = raw['url'];
@@ -394,19 +433,26 @@ McpServer _mcpServer(String key, Map<dynamic, dynamic> raw, bool confined) {
           url.runes.any((rune) => _isControl(rune) || _isSpace(rune))) {
         _invalid('value', key);
       }
-      return McpHttp(url: url, headers: _entries('$key.headers', raw['headers'], isEntryName, confined), sse: type == 'sse');
+      return McpHttp(url: url, headers: _entries('$key.headers', raw['headers'], false, confined), sse: type == 'sse');
     default:
       _invalid('form', key);
   }
 }
 
-Map<String, EnvValue> _entries(String key, Object? table, bool Function(String) names, bool confined) {
+/// A confined layer's [value] for [name] unless [name] is reserved.
+EnvValue _reserved(String key, String name, EnvValue value, bool confined) =>
+    confined && isReservedEnv(name) ? _invalid('reserved', key) : value;
+
+/// A server's `env` ([variables]) or `headers`; a confined layer's variables may not be reserved ones.
+Map<String, EnvValue> _entries(String key, Object? table, bool variables, bool confined) {
+  final names = variables ? isEnvName : isEntryName;
   final out = <String, EnvValue>{};
   for (final MapEntry(key: name, :value) in ((table as Map<dynamic, dynamic>?) ?? const {}).entries) {
     if (!names(name as String)) _invalid('name', key);
     final raw = value as Map<dynamic, dynamic>;
     if (raw.containsKey('remove')) _invalid('form', '$key.$name');
-    out[name] = _envValue('$key.$name', raw, confined);
+    final entry = _envValue('$key.$name', raw, confined);
+    out[name] = variables ? _reserved('$key.$name', name, entry, confined) : entry;
   }
   return Map.unmodifiable(out);
 }
@@ -436,6 +482,14 @@ final class Removed {
   final LayerId layer, was;
 }
 
+/// An entry of an overlay or a project left out because it [reads] a variable no layer of the person's own shares.
+final class Refused {
+  const Refused(this.key, this.layer, this.reads);
+  final String key;
+  final LayerId layer;
+  final String reads;
+}
+
 /// The profile every layer adds up to, each value with its layer.
 final class EffectiveProfile {
   Sourced<String>? model, effort, mode;
@@ -444,6 +498,12 @@ final class EffectiveProfile {
   final skills = <String, Sourced<Skill>>{};
   final mcp = <String, Sourced<McpServer>>{};
   final removed = <Removed>[];
+
+  /// The variables overlays and projects may read, each with the first layer that shared it.
+  final shareEnv = <String, LayerId>{};
+
+  /// What overlays and projects set that reads a variable not shared, and was left out.
+  final refused = <Refused>[];
 
   /// The view the settings show and the vectors hold: every value with its layer, references as written.
   Map<String, Object?> view() {
@@ -461,6 +521,10 @@ final class EffectiveProfile {
       'mcp': entries(mcp, (server) => server.toJson()),
       'removed': [
         for (final removed in this.removed) {'key': removed.key, 'layer': '${removed.layer}', 'was': '${removed.was}'},
+      ],
+      'share_env': [for (final MapEntry(:key, :value) in shareEnv.entries) {'name': key, 'layer': '$value'}],
+      'refused': [
+        for (final refused in this.refused) {'key': refused.key, 'layer': '${refused.layer}', 'reads': refused.reads},
       ],
     };
   }
@@ -512,7 +576,8 @@ Future<Secret> resolveValue(
       if ((!absolute || confined) && dir == null) throw ProfileException('resolve', key: key);
       final text = await readFile(absolute ? path : '$dir/$path', within: confined ? dir : null);
       if (text == null) throw ProfileException('resolve', key: key);
-      final trimmed = text.endsWith('\n') ? text.substring(0, text.length - 1) : text;
+      if (!text.endsWith('\n')) return Secret(text);
+      final trimmed = text.substring(0, text.length - 1);
       return Secret(trimmed.endsWith('\r') ? trimmed.substring(0, trimmed.length - 1) : trimmed);
   }
 }
@@ -522,9 +587,21 @@ bool isAbsolutePath(String path) =>
     path.startsWith('/') || path.startsWith('\\') || RegExp(r'^[A-Za-z]:[/\\]').hasMatch(path);
 
 /// Merges [layers], lowest first. A later layer's value replaces a lower one's; a named entry is replaced whole and keeps
-/// its place; an entry removed and set again later comes last.
+/// its place; an entry removed and set again later comes last. An overlay's or a project's entry that reads a variable
+/// no other layer lists in `share_env` is left out, and the lower layer's entry stays.
 EffectiveProfile mergeProfiles(List<Layer> layers) {
   final out = EffectiveProfile();
+  for (final layer in layers.where((layer) => !layer.id.kind.confined)) {
+    for (final name in layer.profile.shareEnv) {
+      out.shareEnv.putIfAbsent(name, () => layer.id);
+    }
+  }
+  String? unshared(Object value) => switch (value) {
+    EnvFromEnv(:final name) when !out.shareEnv.containsKey(name) => name,
+    McpStdio(:final env) => env.values.map(unshared).nonNulls.firstOrNull,
+    McpHttp(:final headers) => headers.values.map(unshared).nonNulls.firstOrNull,
+    _ => null,
+  };
   for (final layer in layers) {
     final profile = layer.profile;
     Sourced<T> sourced<T>(T value) => Sourced(value, layer.id, layer.dir);
@@ -553,6 +630,11 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
     void entries<T extends Object>(Map<String, Sourced<T>> into, Map<String, T?> changes, String table) {
       for (final MapEntry(:key, :value) in changes.entries) {
         if (value != null) {
+          final reads = layer.id.kind.confined ? unshared(value) : null;
+          if (reads != null) {
+            out.refused.add(Refused('$table.$key', layer.id, reads));
+            continue;
+          }
           into[key] = sourced(value);
         } else if (into.remove(key) case final was?) {
           out.removed.add(Removed('$table.$key', layer.id, was.layer));
@@ -571,7 +653,8 @@ sealed class OverlaySource {
   const OverlaySource();
 
   /// Parses `<repository>@<ref>[#<path>]`, as dotagents writes it: the ref follows the last `@`, the path the last `#`.
-  /// Throws [ProfileException] with key `overlays` for what canoa-host refuses too.
+  /// Throws [ProfileException] with key `overlays` for what canoa-host refuses too, among it a plaintext `http` or
+  /// `git` transport at anything but a full commit id, and another host's share.
   static GitOverlay parseGit(String source) {
     Never refused() => throw const ProfileException('value', key: 'overlays');
     var rest = source;
@@ -594,14 +677,26 @@ sealed class OverlaySource {
       refused();
     }
     final scheme = repo.indexOf('://');
-    if (scheme >= 0 && !const {'https', 'http', 'ssh', 'git', 'file'}.contains(repo.substring(0, scheme))) refused();
-    if (!_gitRef(reference)) refused();
+    if (scheme >= 0) {
+      final name = repo.substring(0, scheme);
+      if (!const {'https', 'http', 'ssh', 'git', 'file'}.contains(name) ||
+          (name == 'file' && !repo.substring(scheme + 3).startsWith('/')) ||
+          ((name == 'http' || name == 'git') && !isFullCommitId(reference))) {
+        refused();
+      }
+    }
+    if (repo.startsWith(r'\\') || repo.startsWith('//') || !_gitRef(reference)) refused();
     while (path.endsWith('/')) {
       path = path.substring(0, path.length - 1);
     }
     return GitOverlay(repo: repo, reference: reference, path: path);
   }
 }
+
+/// A whole commit id, SHA-1 or SHA-256, in lower-case hex: what a plaintext transport needs, since only the id checks
+/// what arrives.
+bool isFullCommitId(String reference) =>
+    (reference.length == 40 || reference.length == 64) && RegExp(r'^[0-9a-f]+$').hasMatch(reference);
 
 /// A git repository at a ref, and the overlay's directory inside it (empty for its root).
 final class GitOverlay extends OverlaySource {

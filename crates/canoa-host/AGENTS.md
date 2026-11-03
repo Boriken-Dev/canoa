@@ -189,6 +189,7 @@ The schema of a profile, what an agent is launched with, and its merge in layers
 model = "m"                      # effort, mode likewise: text, not empty, no control character
 context = { text = "..." }       # or { file = "CONTEXT.md" }: exactly one
 unset = ["model"]                # model, effort, mode or context of a lower layer; not beside that key
+share_env = ["GITHUB_TOKEN"]     # variables overlays and projects may read; refused in those layers themselves
 [env.NAME]                       # NAME: a letter or _, then letters, digits or _, up to 128
 value = "v"                      # exactly one of value, from_env (a variable's name), from_file (a path), remove = true
 [skills.NAME]                    # NAME, and mcp's and headers': 1 to 64 letters, digits, - or _
@@ -201,6 +202,12 @@ command = "npx"                  # or remove = true alone
 ```rust
 pub const MAX_NAME: usize = 64;
 pub const MAX_ENV_NAME: usize = 128;
+pub const MAX_SECRET_FILE: u64 = 1024 * 1024;
+pub const RESERVED_ENV: &[&str];            // PATH, HOME, NODE_OPTIONS, CLAUDE_CONFIG_DIR, ...: 42 names
+pub const RESERVED_ENV_PREFIXES: &[&str];   // LD_, DYLD_, PYTHON, GIT_, NPM_CONFIG_, CANOA_, COQUI_
+pub const RESERVED_ENV_SUFFIXES: &[&str];   // _BASE_URL, _PROXY
+pub fn is_reserved_env(name: &str) -> bool  // any of those, without case
+pub fn full_commit_id(reference: &str) -> bool   // 40 or 64 lower-case hex digits
 
 #[non_exhaustive] pub enum LayerKind { BuiltIn, Overlay, User, Project, Agent, Session }   // Copy, Ord: lowest first
 pub const fn LayerKind::as_str(self) -> &'static str      // "built-in", "overlay", "user", "project", "agent", "session"
@@ -208,7 +215,7 @@ pub const fn LayerKind::is_confined(self) -> bool         // Overlay and Project
 pub struct LayerId { pub kind: LayerKind, pub name: String }   // Display: "user", "overlay:team", "agent:Claude"
 pub fn LayerId::new(kind: LayerKind, name: impl Into<String>) -> LayerId
 
-#[non_exhaustive] pub struct Profile { pub model, effort, mode: Option<String>, pub context: Option<Context>, pub unset: Vec<Scalar>, pub env: IndexMap<String, Change<EnvValue>>, pub skills: IndexMap<String, Change<Skill>>, pub mcp: IndexMap<String, Change<McpServer>> }   // Default
+#[non_exhaustive] pub struct Profile { pub model, effort, mode: Option<String>, pub context: Option<Context>, pub unset: Vec<Scalar>, pub share_env: Vec<String>, pub env: IndexMap<String, Change<EnvValue>>, pub skills: IndexMap<String, Change<Skill>>, pub mcp: IndexMap<String, Change<McpServer>> }   // Default
 pub fn Profile::from_str(text: &str, kind: LayerKind) -> Result<Profile, ProfileError>    // touches no file, reads no variable
 pub fn Profile::from_table(table: toml::Table, kind: LayerKind) -> Result<Profile, ProfileError>
 #[non_exhaustive] pub enum EnvValue { Value(String), FromEnv(String), FromFile(String) }   // Debug never shows a Value's text
@@ -221,7 +228,8 @@ pub fn Profile::from_table(table: toml::Table, kind: LayerKind) -> Result<Profil
 #[non_exhaustive] pub struct Layer { pub id: LayerId, pub dir: Option<PathBuf>, pub profile: Profile }
 pub fn Layer::new(id: LayerId, dir: Option<PathBuf>, profile: Profile) -> Layer
 pub fn merge(layers: &[Layer]) -> Effective
-#[non_exhaustive] pub struct Effective { pub model, effort, mode: Option<Sourced<String>>, pub context: Option<Sourced<Context>>, pub env, skills, mcp: IndexMap<String, Sourced<_>>, pub removed: Vec<Removed> }
+#[non_exhaustive] pub struct Effective { pub model, effort, mode: Option<Sourced<String>>, pub context: Option<Sourced<Context>>, pub env, skills, mcp: IndexMap<String, Sourced<_>>, pub removed: Vec<Removed>, pub share_env: IndexMap<String, LayerId>, pub refused: Vec<Refused> }
+#[non_exhaustive] pub struct Refused { pub key: String, pub layer: LayerId, pub reads: String }
 #[non_exhaustive] pub struct Sourced<T> { pub value: T, pub layer: LayerId, pub dir: Option<PathBuf> }
 #[non_exhaustive] pub struct Removed { pub key: String, pub layer: LayerId, pub was: LayerId }
 pub fn Effective::view(&self) -> serde_json::Value          // references as written, never resolved
@@ -233,15 +241,17 @@ pub struct Secret(..)   pub fn Secret::expose(&self) -> &str   // Debug "Secret(
 pub fn OverlaySource::parse_git(source: &str) -> Result<OverlaySource, ProfileError>   // <repository>@<ref>[#<path>]
 
 #[non_exhaustive] pub enum ProfileError { Parse { line, column }, Invalid { key: String, rule: Rule }, Resolve { key: String, what: &'static str } }
-#[non_exhaustive] pub enum Rule { Name, Path, Form, Value }
-pub const fn ProfileError::code(&self) -> &'static str     // "parse", "name", "path", "form", "value", "resolve"
+#[non_exhaustive] pub enum Rule { Name, Path, Form, Value, Reserved }
+pub const fn ProfileError::code(&self) -> &'static str     // "parse", "name", "path", "form", "value", "reserved", "resolve"
 ```
 
 - **Merge**: lowest first. A scalar a later layer sets replaces the lower one; `unset` takes it away first. A named entry a later layer sets replaces the lower one whole and keeps its place; `Change::Remove` takes it out, and set again later it comes last. `removed` lists only what was there to remove, in order.
+- **Layers from elsewhere** (`is_confined`: overlay, project) read only shared variables: `share_env` of every other layer, wherever it sits, makes `Effective::share_env` (each name with the first layer naming it). An env entry of a confined layer whose `FromEnv` names a variable not shared, or an MCP server of one with such a value in its `env` or `headers`, is not merged: it goes to `refused` with the first such variable, and the lower layer's entry stays. A confined layer that sets a variable `is_reserved_env` names, in `env` or a stdio server's `env`, is refused at parse time (`Rule::Reserved`, key `env.NAME` or `mcp.NAME.env.NAME`); removing one is allowed. `share_env` in a confined layer is `Rule::Form`.
+- **The view** has `model`, `effort`, `mode`, `context` when set, and always `env`, `skills`, `mcp`, `removed`, `share_env` (`{"name", "layer"}`) and `refused` (`{"key", "layer", "reads"}`).
 - **Paths** are judged on the text, the same on every platform. In a confined layer (overlay, project) a path is relative and stays below its directory: no leading `/`, `\` or `~`, no `:`, no `..` segment. Elsewhere any non-empty path without NUL.
 - **Errors** never quote a value: `Invalid.key` names the setting (`env.A`, `mcp.a.headers.T`), or for a refused name the table holding it (`env`, `mcp.a.env`). The first refusal in a document is, in order: anything serde refuses (an unknown key, a wrong type, a key twice) as `Parse`; then `model`, `effort`, `mode`, `context`, `unset`, then `env`, `skills` and `mcp` entries in the document's order.
-- **`resolve`** reads `FromEnv` through `lookup` and `FromFile` from `dir` (an absolute path only outside a confined layer), less one final `\n` or `\r\n`. For a confined layer the file and `dir` are canonicalized and the file must be under `dir`, so a link out of the project is refused. Call it only when a session starts.
-- **`parse_git`**: the ref follows the last `@`, the path the last `#`. Refused: no ref; a repository that opens with `-`, holds a space or control character, names a transport helper (`::`), or a scheme other than `https`, `http`, `ssh`, `git`, `file`; a ref `git check-ref-format` refuses, or one opening with `-`; a path empty after `#`, absolute, holding `\` or `:`, or with a `..` segment. `Dir` is never parsed here.
+- **`resolve`** reads `FromEnv` through `lookup` and `FromFile` from `dir` (an absolute path only outside a confined layer), less one final `\n` or `\r\n`. The path is canonicalized and that path is what is read; for a confined layer it must be under `dir` canonicalized, so a link out of the project is refused. It must be a regular file of at most `MAX_SECRET_FILE` bytes, UTF-8. Call it only when a session starts.
+- **`parse_git`**: the ref follows the last `@`, the path the last `#`. Refused: no ref; a repository that opens with `-`, holds a space or control character, names a transport helper (`::`), or a scheme other than `https`, `http`, `ssh`, `git`, `file`; `file://` with a host, or a path opening with `\\` or `//` (another host's share); `http://` or `git://` at a ref that is not a `full_commit_id`, since nothing else checks what a plaintext transport carries; a ref `git check-ref-format` refuses, or one opening with `-`; a path empty after `#`, absolute, holding `\` or `:`, or with a `..` segment. `Dir` is never parsed here.
 
 ## Pairing (`canoa_host::peers`)
 

@@ -56,4 +56,11 @@ void main() {
       expect((parsed.repo, parsed.reference, parsed.path), (vector['repo'], vector['ref'], vector['path']));
     });
   }
+
+  test('the reserved variables are the vectors\' list', () {
+    final reserved = vectors['reserved_env'] as Map;
+    expect(reservedEnv, reserved['names']);
+    expect(reservedEnvPrefixes, reserved['prefixes']);
+    expect(reservedEnvSuffixes, reserved['suffixes']);
+  });
 }

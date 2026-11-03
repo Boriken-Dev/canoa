@@ -17,6 +17,80 @@ use serde_json::{Map, Value, json};
 pub const MAX_NAME: usize = 64;
 /// The longest environment variable name.
 pub const MAX_ENV_NAME: usize = 128;
+/// The largest file a `from_file` reference reads, in bytes.
+pub const MAX_SECRET_FILE: u64 = 1024 * 1024;
+
+/// Environment variables an overlay or a project may not set, compared without case: they decide what a process runs or
+/// loads, where an agent's own requests go, where a harness keeps its configuration, or which certificates are trusted.
+pub const RESERVED_ENV: &[&str] = &[
+    "PATH",
+    "PATHEXT",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "TMP",
+    "TEMP",
+    "TMPDIR",
+    "COMSPEC",
+    "SHELL",
+    "BASH_ENV",
+    "ENV",
+    "PROMPT_COMMAND",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NODE_EXTRA_CA_CERTS",
+    "PERL5OPT",
+    "PERL5LIB",
+    "RUBYOPT",
+    "RUBYLIB",
+    "JAVA_TOOL_OPTIONS",
+    "_JAVA_OPTIONS",
+    "JDK_JAVA_OPTIONS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_EXECUTABLE",
+    "CODEX_HOME",
+    "CODEX_CONFIG",
+    "GEMINI_CLI_HOME",
+    "GEMINI_SYSTEM_MD",
+    "PI_CODING_AGENT_DIR",
+    "PI_ACP_PI_COMMAND",
+    "GROK_HOME",
+    "OPENCODE_CONFIG",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_CONFIG_CONTENT",
+];
+/// Prefixes of [`RESERVED_ENV`]'s kind, compared without case.
+pub const RESERVED_ENV_PREFIXES: &[&str] = &[
+    "LD_",
+    "DYLD_",
+    "PYTHON",
+    "GIT_",
+    "NPM_CONFIG_",
+    "CANOA_",
+    "COQUI_",
+];
+/// Suffixes of [`RESERVED_ENV`]'s kind, compared without case.
+pub const RESERVED_ENV_SUFFIXES: &[&str] = &["_BASE_URL", "_PROXY"];
+
+/// Whether an overlay or a project may not set `name`.
+#[must_use]
+pub fn is_reserved_env(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    RESERVED_ENV.contains(&upper.as_str())
+        || RESERVED_ENV_PREFIXES
+            .iter()
+            .any(|prefix| upper.starts_with(prefix))
+        || RESERVED_ENV_SUFFIXES
+            .iter()
+            .any(|suffix| upper.ends_with(suffix))
+}
 
 /// Where a layer comes from, lowest first. The order of a merge is the caller's; this is the order Canoa uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -218,6 +292,8 @@ pub struct Profile {
     pub context: Option<Context>,
     /// Values of lower layers this one takes back.
     pub unset: Vec<Scalar>,
+    /// Variables of this process that overlays and projects may read with `from_env`; only in the person's own layers.
+    pub share_env: Vec<String>,
     /// Environment variables, by name.
     pub env: IndexMap<String, Change<EnvValue>>,
     /// Skills, by name.
@@ -288,10 +364,12 @@ pub enum Rule {
     Form,
     /// A value that is empty or holds a control character, or an MCP URL that is not HTTP.
     Value,
+    /// An environment variable an overlay or a project may not set ([`is_reserved_env`]).
+    Reserved,
 }
 
 impl ProfileError {
-    /// A stable code: `parse`, `name`, `path`, `form`, `value` or `resolve`.
+    /// A stable code: `parse`, `name`, `path`, `form`, `value`, `reserved` or `resolve`.
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
@@ -301,6 +379,7 @@ impl ProfileError {
                 Rule::Path => "path",
                 Rule::Form => "form",
                 Rule::Value => "value",
+                Rule::Reserved => "reserved",
             },
             Self::Resolve { .. } => "resolve",
         }
@@ -324,6 +403,7 @@ impl fmt::Display for ProfileError {
                     Rule::Value => {
                         "a value is empty, holds a control character, or is not an HTTP URL"
                     }
+                    Rule::Reserved => "a layer from elsewhere may not set this variable",
                 };
                 write!(f, "profile {key}: {what}")
             }
@@ -343,6 +423,8 @@ struct RawProfile {
     context: Option<RawContext>,
     #[serde(default)]
     unset: Vec<String>,
+    #[serde(default)]
+    share_env: Vec<String>,
     #[serde(default)]
     env: IndexMap<String, RawEnv>,
     #[serde(default)]
@@ -462,6 +544,17 @@ impl Profile {
                 profile.unset.push(scalar);
             }
         }
+        for name in raw.share_env {
+            if confined {
+                return Err(invalid("share_env", Rule::Form));
+            }
+            if !env_name(&name) {
+                return Err(invalid("share_env", Rule::Name));
+            }
+            if !profile.share_env.contains(&name) {
+                profile.share_env.push(name);
+            }
+        }
         for (name, raw) in raw.env {
             if !env_name(&name) {
                 return Err(invalid("env", Rule::Name));
@@ -478,7 +571,11 @@ impl Profile {
                     ],
                 )?
             } else {
-                Change::Set(env_value(&key, raw, confined)?)
+                let value = env_value(&key, raw, confined)?;
+                if confined && is_reserved_env(&name) {
+                    return Err(invalid(&key, Rule::Reserved));
+                }
+                Change::Set(value)
             };
             profile.env.insert(name, change);
         }
@@ -560,12 +657,14 @@ fn env_value(key: &str, raw: RawEnv, confined: bool) -> Result<EnvValue, Profile
     }
 }
 
+/// A server's `env` (`variables`) or `headers`; a confined layer's variables may not be reserved ones.
 fn values(
     key: &str,
     table: Option<IndexMap<String, RawEnv>>,
-    names: fn(&str) -> bool,
+    variables: bool,
     confined: bool,
 ) -> Result<IndexMap<String, EnvValue>, ProfileError> {
+    let names: fn(&str) -> bool = if variables { env_name } else { entry_name };
     let mut out = IndexMap::new();
     for (name, raw) in table.unwrap_or_default() {
         if !names(&name) {
@@ -575,7 +674,11 @@ fn values(
         if raw.remove.is_some() {
             return Err(invalid(&entry, Rule::Form));
         }
-        out.insert(name, env_value(&entry, raw, confined)?);
+        let value = env_value(&entry, raw, confined)?;
+        if variables && confined && is_reserved_env(&name) {
+            return Err(invalid(&entry, Rule::Reserved));
+        }
+        out.insert(name, value);
     }
     Ok(out)
 }
@@ -592,7 +695,7 @@ fn mcp_server(key: &str, raw: RawMcp, confined: bool) -> Result<McpServer, Profi
             if !plain(&command) || args.iter().any(|arg| arg.contains('\0')) {
                 return Err(invalid(key, Rule::Value));
             }
-            let env = values(&format!("{key}.env"), raw.env, env_name, confined)?;
+            let env = values(&format!("{key}.env"), raw.env, true, confined)?;
             Ok(McpServer::Stdio { command, args, env })
         }
         Some(kind @ ("http" | "sse")) => {
@@ -605,7 +708,7 @@ fn mcp_server(key: &str, raw: RawMcp, confined: bool) -> Result<McpServer, Profi
             {
                 return Err(invalid(key, Rule::Value));
             }
-            let headers = values(&format!("{key}.headers"), raw.headers, entry_name, confined)?;
+            let headers = values(&format!("{key}.headers"), raw.headers, false, confined)?;
             Ok(if kind == "http" {
                 McpServer::Http { url, headers }
             } else {
@@ -686,6 +789,18 @@ pub struct Removed {
     pub was: LayerId,
 }
 
+/// An entry of an overlay or a project left out because it reads a variable no layer of the person's own shares.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Refused {
+    /// `env.NAME` or `mcp.NAME`.
+    pub key: String,
+    /// The layer whose entry it was.
+    pub layer: LayerId,
+    /// The first variable it reads that is not shared.
+    pub reads: String,
+}
+
 /// The profile every layer adds up to, each value with its layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -706,13 +821,36 @@ pub struct Effective {
     pub mcp: IndexMap<String, Sourced<McpServer>>,
     /// What layers removed, in the order they did.
     pub removed: Vec<Removed>,
+    /// The variables overlays and projects may read, each with the first layer that shared it.
+    pub share_env: IndexMap<String, LayerId>,
+    /// What overlays and projects set that reads a variable not shared, and was left out.
+    pub refused: Vec<Refused>,
 }
 
 /// Merges `layers`, lowest first. A later layer's value replaces a lower one's; a named entry is replaced whole and keeps
-/// its place; an entry removed and set again later comes last.
+/// its place; an entry removed and set again later comes last. An overlay's or a project's entry that reads a variable
+/// no other layer lists in `share_env` is left out, and the lower layer's entry stays.
 #[must_use]
 pub fn merge(layers: &[Layer]) -> Effective {
     let mut out = Effective::default();
+    for layer in layers.iter().filter(|layer| !layer.id.kind.is_confined()) {
+        for name in &layer.profile.share_env {
+            out.share_env
+                .entry(name.clone())
+                .or_insert_with(|| layer.id.clone());
+        }
+    }
+    let shared = out.share_env.clone();
+    let unshared = |value: &EnvValue| match value {
+        EnvValue::FromEnv(name) if !shared.contains_key(name) => Some(name.clone()),
+        _ => None,
+    };
+    let server_unshared = |server: &McpServer| match server {
+        McpServer::Stdio { env, .. } => env.values().find_map(unshared),
+        McpServer::Http { headers, .. } | McpServer::Sse { headers, .. } => {
+            headers.values().find_map(unshared)
+        }
+    };
     for layer in layers {
         let sourced = |value| Sourced {
             value,
@@ -751,29 +889,60 @@ pub fn merge(layers: &[Layer]) -> Effective {
                 dir: layer.dir.clone(),
             });
         }
-        merge_entries(&mut out.env, &profile.env, layer, "env", &mut out.removed);
+        let mut log = Log {
+            layer,
+            removed: &mut out.removed,
+            refused: &mut out.refused,
+        };
+        merge_entries(&mut out.env, &profile.env, "env", &mut log, &unshared);
         merge_entries(
             &mut out.skills,
             &profile.skills,
-            layer,
             "skills",
-            &mut out.removed,
+            &mut log,
+            &|_| None,
         );
-        merge_entries(&mut out.mcp, &profile.mcp, layer, "mcp", &mut out.removed);
+        merge_entries(
+            &mut out.mcp,
+            &profile.mcp,
+            "mcp",
+            &mut log,
+            &server_unshared,
+        );
     }
     out
 }
 
+/// What one layer's merge records.
+struct Log<'a> {
+    layer: &'a Layer,
+    removed: &'a mut Vec<Removed>,
+    refused: &'a mut Vec<Refused>,
+}
+
+/// `unshared` names the first variable an entry reads that is not shared; it counts only in a confined layer.
 fn merge_entries<T: Clone>(
     into: &mut IndexMap<String, Sourced<T>>,
     changes: &IndexMap<String, Change<T>>,
-    layer: &Layer,
     table: &str,
-    removed: &mut Vec<Removed>,
+    log: &mut Log<'_>,
+    unshared: &dyn Fn(&T) -> Option<String>,
 ) {
+    let layer = log.layer;
+    let removed = &mut *log.removed;
     for (name, change) in changes {
         match change {
             Change::Set(value) => {
+                if layer.id.kind.is_confined()
+                    && let Some(reads) = unshared(value)
+                {
+                    log.refused.push(Refused {
+                        key: format!("{table}.{name}"),
+                        layer: layer.id.clone(),
+                        reads,
+                    });
+                    continue;
+                }
                 let value = Sourced {
                     value: value.clone(),
                     layer: layer.id.clone(),
@@ -832,6 +1001,26 @@ impl Effective {
             entries(&self.skills, |skill| json!({"path": skill.path})),
         );
         out.insert("mcp".to_owned(), entries(&self.mcp, mcp_json));
+        out.insert(
+            "share_env".to_owned(),
+            Value::Array(
+                self.share_env
+                    .iter()
+                    .map(|(name, layer)| json!({"name": name, "layer": layer.to_string()}))
+                    .collect(),
+            ),
+        );
+        out.insert(
+            "refused".to_owned(),
+            Value::Array(
+                self.refused
+                    .iter()
+                    .map(|refused| {
+                        json!({"key": refused.key, "layer": refused.layer.to_string(), "reads": refused.reads})
+                    })
+                    .collect(),
+            ),
+        );
         out.insert(
             "removed".to_owned(),
             Value::Array(
@@ -966,19 +1155,37 @@ pub fn resolve(
                 dir.ok_or_else(|| fail("a relative file in a layer with no directory"))?
                     .join(path)
             };
-            if confined {
-                let inside = dir
+            let unreadable = || {
+                fail(
+                    "the file it names cannot be read as UTF-8 text of at most MAX_SECRET_FILE bytes",
+                )
+            };
+            let path = path.canonicalize().map_err(|_| unreadable())?;
+            if confined
+                && !dir
                     .and_then(|dir| dir.canonicalize().ok())
-                    .zip(path.canonicalize().ok())
-                    .is_some_and(|(dir, path)| path.starts_with(dir));
-                if !inside {
-                    return Err(fail(
-                        "the file it names is outside its layer's directory once links are followed",
-                    ));
-                }
+                    .is_some_and(|dir| path.starts_with(dir))
+            {
+                return Err(fail(
+                    "the file it names is outside its layer's directory once links are followed",
+                ));
             }
-            let text = std::fs::read_to_string(&path)
-                .map_err(|_| fail("the file it names cannot be read as UTF-8 text"))?;
+            if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+                return Err(unreadable());
+            }
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)
+                .and_then(|file| {
+                    std::io::Read::read_to_end(
+                        &mut std::io::Read::take(file, MAX_SECRET_FILE + 1),
+                        &mut bytes,
+                    )
+                })
+                .map_err(|_| unreadable())?;
+            if bytes.len() as u64 > MAX_SECRET_FILE {
+                return Err(unreadable());
+            }
+            let text = String::from_utf8(bytes).map_err(|_| unreadable())?;
             let text = text.strip_suffix('\n').map_or(text.as_str(), |rest| {
                 rest.strip_suffix('\r').unwrap_or(rest)
             });
@@ -1010,8 +1217,9 @@ impl OverlaySource {
     /// # Errors
     ///
     /// [`ProfileError::Invalid`] with key `overlays` for a source with no ref; a repository that opens with `-`, holds a
-    /// space or control character, names a transport helper (`ext::`) or a scheme other than those above; a ref git would
-    /// refuse; or a path that is empty after `#`, absolute, or steps out with `..`.
+    /// space or control character, names a transport helper (`ext::`) or a scheme other than those above, another host's
+    /// share (`file://host/`, `\\host\`, `//host/`), or a plaintext `http` or `git` transport at anything but a
+    /// [`full_commit_id`]; a ref git would refuse; or a path that is empty after `#`, absolute, or steps out with `..`.
     pub fn parse_git(source: &str) -> Result<Self, ProfileError> {
         let refused = || invalid("overlays", Rule::Value);
         let (rest, path) = match source.rsplit_once('#') {
@@ -1035,12 +1243,14 @@ impl OverlaySource {
         {
             return Err(refused());
         }
-        if let Some((scheme, _)) = repo.split_once("://")
-            && !["https", "http", "ssh", "git", "file"].contains(&scheme)
+        if let Some((scheme, rest)) = repo.split_once("://")
+            && (!["https", "http", "ssh", "git", "file"].contains(&scheme)
+                || (scheme == "file" && !rest.starts_with('/'))
+                || (["http", "git"].contains(&scheme) && !full_commit_id(reference)))
         {
             return Err(refused());
         }
-        if !git_ref(reference) {
+        if repo.starts_with("\\\\") || repo.starts_with("//") || !git_ref(reference) {
             return Err(refused());
         }
         Ok(Self::Git {
@@ -1049,6 +1259,16 @@ impl OverlaySource {
             path: path.trim_end_matches('/').to_owned(),
         })
     }
+}
+
+/// A whole commit id, SHA-1 or SHA-256, in lower-case hex: what a plaintext transport needs, since only the id checks
+/// what arrives.
+#[must_use]
+pub fn full_commit_id(reference: &str) -> bool {
+    matches!(reference.len(), 40 | 64)
+        && reference
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// The ref names `git check-ref-format` takes, without its options, plus a commit id; never one that opens with `-`.

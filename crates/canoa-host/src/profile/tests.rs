@@ -121,3 +121,19 @@ fn a_project_secret_file_is_read_only_inside_the_project_links_followed() {
     }
     std::fs::remove_dir_all(&root).expect("cleaned");
 }
+
+#[test]
+fn a_secret_file_over_the_limit_or_not_a_file_does_not_resolve() {
+    let dir = std::env::temp_dir().join(format!("canoa-profile-big-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("a-directory")).expect("a directory");
+    let limit = usize::try_from(MAX_SECRET_FILE).expect("fits");
+    std::fs::write(dir.join("big"), vec![b'x'; limit + 1]).expect("a file");
+    std::fs::write(dir.join("fits"), vec![b'x'; limit]).expect("a file");
+    for (name, ok) in [("big", false), ("a-directory", false), ("fits", true)] {
+        let text = format!("[env.A]\nfrom_file = \"{name}\"\n");
+        let resolved =
+            merge(&[layer(LayerKind::User, Some(dir.clone()), &text)]).environment(|_| None);
+        assert_eq!(resolved.is_ok(), ok, "{name}");
+    }
+    std::fs::remove_dir_all(&dir).expect("cleaned");
+}
