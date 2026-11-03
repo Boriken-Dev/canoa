@@ -74,13 +74,15 @@ The desktop app runs `canoa-host` as its child (`lib/desktop/host_supervisor.dar
 
 ## A coding task, end to end
 
-`integration_test/coding_task_test.dart` does what a person would, in the desktop window and through its widgets only: it makes a throwaway Node project with a failing test, runs an agent there, has it fix the test, add one and rename a function, allows every question but one, stops a turn and continues it, attaches a file, closes the conversation and opens it again from **Earlier conversations**. Then it checks the project on disk, and that every kind of update the agent sent has a rendering of its own. A question reaching outside the project's temporary directory, which a person's own agent settings can ask for, is refused.
+`integration_test/coding_task_test.dart` does what a person would, in the desktop window and through its widgets only: it makes a throwaway Node project with a failing test, runs an agent there, has it fix the test, add one and rename a function, allows every question but one, stops a turn and continues it, attaches a file, closes the conversation and opens it again from **Earlier conversations**. Then it checks the project on disk, and that every kind of update the agent sent has a rendering of its own. Anything reaching outside the project's temporary directory fails the test: a question about it is refused and counted, and a tool that ran there unasked is counted too.
 
 ```sh
 cd app
 flutter test integration_test/coding_task_test.dart -d windows                              # scripted agent, nothing spent
-CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart -d windows  # the Claude preset, on your sign-in
+CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart -d windows  # Claude, on your sign-in
 ```
+
+With `Claude`, the test runs the preset's adapter through `integration_test/without_user_settings.mjs`, which sets `_meta.claudeCode.options.settingSources` to project and local on each session it opens: Claude Code then starts without your user-level settings, `~/.claude/CLAUDE.md` and user skills, while your login still applies. The preset people use is unchanged.
 
 `node` has to be on PATH. `CANOA_TEST_SHOTS=<dir>` keeps a screenshot of each step, and `CANOA_TEST_UPDATES=<file>` the kind and shape of each distinct update. The file dialog is the one thing the test answers for the person: it picks the attached file itself. Conversations are not kept across an app restart yet, so reopening is done after closing a conversation, not after quitting.
 

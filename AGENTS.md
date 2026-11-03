@@ -67,7 +67,7 @@ close and reopen from Earlier conversations), then checked on disk. It needs `no
 
 ```sh
 (cd app && flutter test integration_test/coding_task_test.dart -d windows)   # a scripted agent, nothing spent
-(cd app && CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart -d windows)   # spends the subscription
+(cd app && CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart -d windows)   # spends the subscription, no user settings
 ```
 
 `CANOA_EVENT_LOG=<file>` makes the app append the kind, shape and rendering of each distinct ACP update it receives, never its
