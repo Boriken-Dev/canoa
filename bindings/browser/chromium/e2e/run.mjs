@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createResponder, generateIdentity } from "../vendor/coqui-peer-webcrypto.mjs";
+import { lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
@@ -160,48 +161,6 @@ const chrome = spawn(browser, [
   "--disable-features=DisableLoadExtensionCommandLineSwitch", "about:blank",
 ], { stdio: "ignore", env: { ...process.env, COQUI_ACP_DESCRIPTORS: descriptors } });
 
-// What a run was doing when it stopped, for a watchdog's report.
-let lastCall = "";
-
-class Session {
-  constructor(url) {
-    this.socket = new WebSocket(url);
-    this.pending = new Map();
-    this.next = 1;
-    this.opened = new Promise((resolve, reject) => {
-      this.socket.onopen = resolve;
-      this.socket.onerror = reject;
-    });
-    // A click can close the window it was in, and then no answer comes.
-    this.socket.onclose = () => {
-      for (const waiting of this.pending.values()) waiting.reject(new Error("the target closed"));
-      this.pending.clear();
-    };
-    this.socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      const waiting = this.pending.get(message.id);
-      if (!waiting) return;
-      this.pending.delete(message.id);
-      if (message.error) waiting.reject(new Error(message.error.message));
-      else waiting.resolve(message.result);
-    };
-  }
-  async call(method, params = {}) {
-    lastCall = `${method} ${String(params.expression ?? "").slice(0, 120)}`;
-    await this.opened;
-    const id = this.next++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
-    });
-  }
-  async run(expression, { gesture = false } = {}) {
-    const reply = await this.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, userGesture: gesture });
-    if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description ?? reply.exceptionDetails.text);
-    return reply.result.value;
-  }
-}
-
 let debug;
 const targets = async () => (await fetch(`http://127.0.0.1:${debug}/json/list`)).json();
 async function waitFor(what, test, ms = 15_000) {
@@ -245,7 +204,7 @@ let exitCode = 1;
 let companionInstalled = false;
 const bridges = [];
 const watchdog = setTimeout(() => {
-  console.log(`FAILED: the run took too long, at: ${lastCall}`);
+  console.log(`FAILED: the run took too long, at: ${lastCall()}`);
   chrome.kill();
   process.exit(1);
 }, process.env.CANOA_E2E_REAL_AGENT ? 600_000 : 300_000);

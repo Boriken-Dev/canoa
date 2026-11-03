@@ -1,0 +1,10 @@
+{
+  "name": "@boriken/canoa-chromium-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "What the real-browser runs need beyond the extension, which itself has no dependencies.",
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}
