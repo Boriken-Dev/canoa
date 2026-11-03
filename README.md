@@ -33,6 +33,7 @@
 | Path | Responsibility |
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
+| `crates/canoa-host/` | `canoa-host`: serves the agents and providers Canoa.cfg names to paired keys, on loopback |
 | `app/web/vendor/` | Pinned browser WebCrypto method sourced from `coqui-peer` |
 | `app/` | Canonical Flutter chat, Canoa.cfg settings and desktop tray UI |
 | `examples/acp-echo/` | Paired WSS ACP v2 echo test endpoint and integration tests |
@@ -62,6 +63,10 @@ The [project naming convention](https://boriken-dev.github.io/canoa/naming/) use
 The desktop app supports the AI6-style [Canoa.cfg](https://boriken-dev.github.io/canoa/configuration/) TOML file with a tray context menu (Open, Settings, Hide, Exit). On Windows and macOS two icon clicks open the app; Linux systems that do not forward tray clicks use **Open Canoa** in the menu. The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/canoa/actions/workflows/deps.yml).
 
 The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/canoa/browser-mcp/). An agent of Canoa's own chat, and with a person's say an MCP client on a paired machine, reach those tools over a proven link with nothing listening in the browser: see [browser integration](https://boriken-dev.github.io/canoa/browser/).
+
+## The host
+
+`canoa-host serve` offers each `[host]` entry of Canoa.cfg, a stdio ACP agent or a Guatiao provider, to keys you paired, on loopback only. See [the host](https://boriken-dev.github.io/canoa/host/).
 
 ## Development
 

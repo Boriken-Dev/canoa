@@ -12,7 +12,7 @@ Canoa and associated Coqui libraries are published under **[Boriken Dev](https:/
 | Chrome native messaging host | lowercase dotted identifier | `dev.boriken.canoa` |
 | Optional future native helper | child of base identifier | `dev.boriken.canoa.host` |
 | Related Java / Kotlin library | `dev.boriken.coqui.*` | `dev.boriken.coqui.web` |
-| Rust crates | ecosystem-standard lowercase kebab-case | `canoa`, `coqui-web`, `coqui-acp`, `coqui-peer` |
+| Rust crates | ecosystem-standard lowercase kebab-case | `canoa`, `canoa-host`, `coqui-web`, `coqui-acp`, `coqui-peer` |
 | Dart / Flutter pub package | lowercase snake_case | `canoa` |
 | Python distribution | PyPI-compatible project name | `coqui-web` only if available |
 | npm package | verified account/scope, ecosystem naming | `@boriken/canoa-chromium` is currently private; availability must be verified before publication |

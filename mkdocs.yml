@@ -33,6 +33,7 @@ nav:
   - Transport selection: transport.md
   - Namespaces and identifiers: naming.md
   - Desktop and configuration: configuration.md
+  - The host: host.md
   - Offline deps branch: offline-deps.md
   - Browser MCP and DevTools: browser-mcp.md
   - Browser integration: browser.md

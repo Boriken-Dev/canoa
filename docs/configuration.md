@@ -17,6 +17,7 @@ Configuration tables:
 - [desktop] start_hidden, close_to_tray, minimize_to_tray
 - [network] prefer_webtransport, connect_timeout (seconds, between 1 and 120)
 - [assets] cdn = "none" or "local" (deployment option; font hosting remains a separate build concern)
+- [host] what `canoa-host` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
 
 Do not store identity private keys, tokens or passwords in Canoa.cfg.
 

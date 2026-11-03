@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - An MCP client outside any ACP session, such as an IDE or a CLI agent, can ask for a browser tab: a person turns this on for one paired machine under **Canoa browser permissions**, and `coqui-acp-bridge mcp-config` prints one stable entry for it. Off by default, and out of a page's reach.
+- `canoa-host`, a new crate and command: serves each `[host]` entry of Canoa.cfg, a stdio ACP agent or a Guatiao agent provider, to keys you paired, on loopback only. `peers`, `accept` and `revoke` manage the keys; a removed key loses its link within about a second. A client cannot have it start a program: a stdio MCP server in a request and `_meta` never reach a stdio agent.
+- The chat dials `ws://` on loopback, where the host listens. Everything after the peer proof is sealed, so the transport carries nothing it could read.
+- The app keeps Canoa.cfg's `[host]` table when it saves its settings.
 
 ### Changed
 

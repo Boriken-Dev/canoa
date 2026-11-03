@@ -5,13 +5,15 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | Shipped header | Covers |
 | --- | --- |
 | [`crates/canoa/AGENTS.md`](crates/canoa/AGENTS.md) | the `canoa` crate's public API |
+| [`crates/canoa-host/AGENTS.md`](crates/canoa-host/AGENTS.md) | `canoa-host`: Canoa.cfg's `[host]`, its command line and library |
 
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
-| `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, for a planned native host |
+| `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
+| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from Canoa.cfg to paired keys, on loopback |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
 | `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
@@ -45,6 +47,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 (cd app && flutter analyze && flutter test)
+# the chat's connection code against the real host; needs Node 22 or later
+cargo build -p canoa-host --bin canoa-host --examples
+(cd app && CANOA_TEST_HOST=../target/debug/canoa-host CANOA_TEST_NODE=node flutter test test/host_test.dart)
 (cd bindings/browser/chromium && npm test)
 (cd examples/acp-echo && npm install && npm test)   # needs OpenSSL
 mkdocs build --strict
