@@ -1,5 +1,5 @@
 {
-  "about": "Profile documents, their merge and the effective view, read by canoa-host (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names.",
+  "about": "Profile documents, their merge and the effective view, read by canoa-host (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal.",
   "merges": [
     {
       "name": "all six layers: a later layer wins per key, lists merge by name, a layer removes an entry",
@@ -1381,9 +1381,7 @@
     },
     {
       "source": "ssh://git@host/x.git@feature/profiles#team",
-      "repo": "ssh://git@host/x.git",
-      "ref": "feature/profiles",
-      "path": "team"
+      "refused": true
     },
     {
       "source": "https://x/y.git",
@@ -1410,8 +1408,10 @@
       "refused": true
     },
     {
-      "source": "https://x/y.git@main#/abs",
-      "refused": true
+      "source": "https://x/y.git@main#/abs/",
+      "repo": "https://x/y.git",
+      "ref": "main",
+      "path": "abs"
     },
     {
       "source": "https://x/y.git@main#a\\b",
@@ -1419,6 +1419,18 @@
     },
     {
       "source": "https://x/y.git@main#",
+      "repo": "https://x/y.git",
+      "ref": "main",
+      "path": ""
+    },
+    {
+      "source": "git+https://x/y@main#team",
+      "repo": "https://x/y",
+      "ref": "main",
+      "path": "team"
+    },
+    {
+      "source": "HTTPS://x/y.git@main",
       "refused": true
     },
     {
@@ -1490,6 +1502,739 @@
       "repo": "file:///srv/p.git",
       "ref": "main",
       "path": ""
+    }
+  ],
+  "overlays": [
+    {
+      "name": "no manifest: the root variable, a skill and CONTEXT.md; bin/ is reported, not applied",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "CONTEXT.md": "# Team\n",
+            "skills/review/SKILL.md": "---\nname: review\n---\n",
+            "bin/tool": "#!/bin/sh\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [
+          {
+            "name": "review",
+            "value": {
+              "path": "skills/review"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "file": "CONTEXT.md"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:9b8afdc89cebcb810242341bc2e48c7a21fd7625d0dd5e6a15ce15bc7b9a417b",
+            "not_applied": [
+              "paths: bin/ on PATH, which a layer from elsewhere may not change"
+            ],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team"
+      }
+    },
+    {
+      "name": "an env file, env, a path addition and MCP servers, under a user layer that shares two variables",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "docs",
+          "root": "/ov/docs",
+          "pinned": false,
+          "files": {
+            "overlay.cfg": "priority = 300\n\n[env]\nTOOL_MODE = \"read-only\"\nTOOL_CONFIG = { path = \"conf/tool.toml\" }\nTOOL_TOKEN = { provider = \"env\", key = \"TOOL_TOKEN\", optional = true }\nTOOL_URL = \"${TOOL_HOME}/api\"\n\n[[paths]]\nvariable = \"MANPATH\"\npath = \"man\"\n\n[[mcp.servers]]\nname = \"docs\"\ntransport = \"stdio\"\ncommand = \"tools/server\"\nargs = [\"--quiet\"]\nenv = { MODE = \"x\", KEY = { provider = \"env\", key = \"DOCS_KEY\" } }\nenv_passthrough = [\"HOME_DIR\"]\ntimeout = 30\n\n[[mcp.servers]]\nname = \"remote\"\ntransport = \"streamable-http\"\nurl = \"http://docs.example/mcp\"\nheaders_env = { Authorization = \"DOCS_AUTH\" }\n",
+            "env": "TOOL_HOME=${AOS_OVERLAY_ROOT}/tool\nTOOL_LOG='$HOME'\n",
+            "man/tool.1": "x\n",
+            "tools/server": "x\n"
+          }
+        }
+      ],
+      "user": "share_env = [\"TOOL_TOKEN\", \"DOCS_AUTH\"]\n[env.TOOL_MODE]\nvalue = \"write\"\n",
+      "host": {
+        "TOOL_TOKEN": "t0k",
+        "HOME": "/home/u",
+        "DOCS_AUTH": "a",
+        "MANPATH": "/usr/share/man"
+      },
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "DOCS_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/docs"
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "TOOL_HOME",
+            "value": {
+              "text": "${AOS_OVERLAY_ROOT}/tool"
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "TOOL_LOG",
+            "value": {
+              "value": "$HOME"
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "TOOL_CONFIG",
+            "value": {
+              "path": "conf/tool.toml"
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "TOOL_MODE",
+            "value": {
+              "value": "write"
+            },
+            "layer": "user"
+          },
+          {
+            "name": "TOOL_TOKEN",
+            "value": {
+              "reference": "env:TOOL_TOKEN",
+              "optional": true
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "TOOL_URL",
+            "value": {
+              "text": "${TOOL_HOME}/api"
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "MANPATH",
+            "value": {
+              "paths": [
+                {
+                  "path": "man",
+                  "position": "prepend"
+                }
+              ]
+            },
+            "layer": "overlay:docs"
+          }
+        ],
+        "skills": [],
+        "mcp": [
+          {
+            "name": "docs",
+            "value": {
+              "type": "stdio",
+              "command": "/ov/docs/tools/server",
+              "args": [
+                "--quiet"
+              ],
+              "env": {
+                "KEY": {
+                  "reference": "env:DOCS_KEY",
+                  "optional": false
+                },
+                "MODE": {
+                  "text": "x"
+                },
+                "HOME_DIR": {
+                  "reference": "env:HOME_DIR",
+                  "optional": true
+                }
+              }
+            },
+            "layer": "overlay:docs"
+          },
+          {
+            "name": "remote",
+            "value": {
+              "type": "http",
+              "url": "http://docs.example/mcp",
+              "headers": {}
+            },
+            "layer": "overlay:docs"
+          }
+        ],
+        "share_env": [
+          {
+            "name": "TOOL_TOKEN",
+            "layer": "user"
+          },
+          {
+            "name": "DOCS_AUTH",
+            "layer": "user"
+          }
+        ],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:docs",
+            "digest": "sha256:3fcda4c413f2905aedb0a9f4773aef83d81f7a334f51dcde0c3f81c2724a1e03",
+            "not_applied": [
+              "mcp.docs.timeout",
+              "mcp.docs: it runs in the overlay's root, which Canoa does not set yet",
+              "mcp.remote.headers_env.Authorization: never sent over plain http to another host"
+            ],
+            "ungranted": [
+              "env:DOCS_KEY",
+              "env:HOME_DIR"
+            ],
+            "unresolved": [],
+            "weakenings": [
+              [
+                "insecure-transport",
+                "remote"
+              ],
+              [
+                "unpinned",
+                ""
+              ]
+            ]
+          }
+        ]
+      },
+      "environment": {
+        "DOCS_OVERLAY_ROOT": "/ov/docs",
+        "TOOL_HOME": "/ov/docs/tool",
+        "TOOL_LOG": "$HOME",
+        "TOOL_CONFIG": "/ov/docs/conf/tool.toml",
+        "TOOL_MODE": "write",
+        "TOOL_TOKEN": "t0k",
+        "TOOL_URL": "/ov/docs/tool/api",
+        "MANPATH": "/ov/docs/man:/usr/share/man"
+      }
+    },
+    {
+      "name": "an overlay that sets a variable Canoa reserves is left out whole, and the others stay",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "bad",
+          "root": "/ov/bad",
+          "pinned": true,
+          "files": {
+            "env": "NODE_OPTIONS=--require ./x.js\n"
+          }
+        },
+        {
+          "identity": "good",
+          "root": "/ov/good",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "[env]\nMODE = \"on\"\n"
+          }
+        }
+      ],
+      "refused": [
+        {
+          "identity": "bad",
+          "code": "reserved",
+          "subject": "NODE_OPTIONS"
+        }
+      ],
+      "view": {
+        "env": [
+          {
+            "name": "GOOD_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/good"
+            },
+            "layer": "overlay:good"
+          },
+          {
+            "name": "MODE",
+            "value": {
+              "text": "on"
+            },
+            "layer": "overlay:good"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:good",
+            "digest": "sha256:3c859cba3b547c3758ac47c075f06e6f4c65e01f19815e525066247325c69820",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment": {
+        "GOOD_OVERLAY_ROOT": "/ov/good",
+        "MODE": "on"
+      }
+    },
+    {
+      "name": "an overlay.cfg that is not valid is left out, naming the pointer",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "x",
+          "root": "/ov/x",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "priority = \"high\"\n"
+          }
+        }
+      ],
+      "refused": [
+        {
+          "identity": "x",
+          "code": "invalid",
+          "subject": "/priority schema"
+        }
+      ],
+      "view": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": []
+      },
+      "environment": {}
+    },
+    {
+      "name": "what Canoa does not apply is listed, and the hints of the agent's own harness apply",
+      "os": "linux",
+      "harness": "claude-code",
+      "overlays": [
+        {
+          "identity": "tools",
+          "root": "/ov/tools",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "routing = [\"- Releases: read $TOOLS_OVERLAY_ROOT/kb/release.md\"]\n\n[scripts]\ncheck = \"bin/check.py\"\nold = false\n\n[runtime]\nos = [\"linux\", \"windows\"]\n\n[[setup]]\ninterpreter = \"sh\"\npath = \"setup/install.sh\"\n\n[harness.claude-code]\nmodel = \"claude-opus-4-1\"\neffort = \"high\"\ncontext = [\"kb/claude.md\"]\nskills = false\npermissions = \"all\"\n\n[harness.codex]\neffort = \"low\"\n",
+            "env.py": "print('{}')\n",
+            "setup.sh": "true\n",
+            "setup/install.sh": "true\n",
+            "lib/python/requirements.txt": "requests==2.32.3\n",
+            "lib/python/tools.py": "x\n",
+            "bin/check.py": "x\n",
+            "kb/claude.md": "Claude notes\n",
+            "kb/release.md": "x\n",
+            "rules/always.md": "- **Always** test.\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TOOLS_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/tools"
+            },
+            "layer": "overlay:tools"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "model": {
+          "value": "claude-opus-4-1",
+          "layer": "overlay:tools"
+        },
+        "effort": {
+          "value": "high",
+          "layer": "overlay:tools"
+        },
+        "contexts": [
+          {
+            "value": {
+              "file": "rules/always.md"
+            },
+            "layer": "overlay:tools"
+          },
+          {
+            "value": {
+              "text": "- Releases: read $TOOLS_OVERLAY_ROOT/kb/release.md"
+            },
+            "layer": "overlay:tools"
+          },
+          {
+            "value": {
+              "file": "kb/claude.md"
+            },
+            "layer": "overlay:tools"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:tools",
+            "digest": "sha256:37d0e0443d2ed2f90bd26af618a66eabace7d1e7a1bddc28b39ba606167c7fb2",
+            "not_applied": [
+              "paths: bin/ on PATH, which a layer from elsewhere may not change",
+              "paths: lib/python/ on PYTHONPATH, which a layer from elsewhere may not change",
+              "harness.claude-code.permissions: the harness's own setting",
+              "harness.claude-code.skills: delivery by routing line",
+              "harness.codex: hints for another harness",
+              "env_scripts: env.py",
+              "setup: setup.sh",
+              "setup: setup/install.sh",
+              "dependencies: lib/python/requirements.txt",
+              "runtime.os",
+              "scripts.check"
+            ],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment": {
+        "TOOLS_OVERLAY_ROOT": "/ov/tools"
+      }
+    },
+    {
+      "name": "a required reference none of your layers shares is listed, and no session can start",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "keys",
+          "root": "/ov/keys",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "[env]\nTOKEN = { provider = \"env\", key = \"TOKEN\" }\n"
+          }
+        }
+      ],
+      "host": {
+        "TOKEN": "t"
+      },
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "KEYS_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/keys"
+            },
+            "layer": "overlay:keys"
+          },
+          {
+            "name": "TOKEN",
+            "value": {
+              "reference": "env:TOKEN",
+              "optional": false
+            },
+            "layer": "overlay:keys"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:keys",
+            "digest": "sha256:d2679045b7fb6c23dad4f72827e8ccdba281c4213ce5d51077d9230abb432cfd",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [
+              "TOKEN: env:TOKEN"
+            ],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment_error": {
+        "code": "resolve",
+        "key": "overlay:keys.env.TOKEN"
+      }
+    },
+    {
+      "name": "a placeholder cannot read a variable of this computer none of your layers shares",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "home",
+          "root": "/ov/home",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "[env]\nA = \"${HOME}/a\"\n"
+          }
+        }
+      ],
+      "host": {
+        "HOME": "/home/u"
+      },
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "HOME_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/home"
+            },
+            "layer": "overlay:home"
+          },
+          {
+            "name": "A",
+            "value": {
+              "text": "${HOME}/a"
+            },
+            "layer": "overlay:home"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:home",
+            "digest": "sha256:96f4d5822e4e1a1f2dad40a00212047d65273ebfcdf63488701367d8be490c52",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment_error": {
+        "code": "resolve",
+        "key": "overlay:home.env.A"
+      }
+    },
+    {
+      "name": "a placeholder reads a variable your layer shares",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "home",
+          "root": "/ov/home",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "[env]\nA = \"${HOME}/a\"\n"
+          }
+        }
+      ],
+      "user": "share_env = [\"HOME\"]\n",
+      "host": {
+        "HOME": "/home/u"
+      },
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "HOME_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/home"
+            },
+            "layer": "overlay:home"
+          },
+          {
+            "name": "A",
+            "value": {
+              "text": "${HOME}/a"
+            },
+            "layer": "overlay:home"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [
+          {
+            "name": "HOME",
+            "layer": "user"
+          }
+        ],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:home",
+            "digest": "sha256:96f4d5822e4e1a1f2dad40a00212047d65273ebfcdf63488701367d8be490c52",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment": {
+        "HOME_OVERLAY_ROOT": "/ov/home",
+        "A": "/home/u/a"
+      }
+    },
+    {
+      "name": "overlays in composition order: the higher priority wins, and its placeholders see what the lower one set",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "a",
+          "root": "/ov/a",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "priority = 900\n[env]\nMODE = \"${MODE}-a\"\n"
+          }
+        },
+        {
+          "identity": "b",
+          "root": "/ov/b",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "priority = 100\n[env]\nMODE = \"b\"\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "B_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/b"
+            },
+            "layer": "overlay:b"
+          },
+          {
+            "name": "MODE",
+            "value": {
+              "text": "${MODE}-a"
+            },
+            "layer": "overlay:a"
+          },
+          {
+            "name": "A_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/a"
+            },
+            "layer": "overlay:a"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:b",
+            "digest": "sha256:ea115ef4cdc98168194b6b6f1bcffa85e988680c35f5d0b7225924858ee0d31b",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          },
+          {
+            "layer": "overlay:a",
+            "digest": "sha256:ff308b83f15f62d41ef1e5264f68bce78e515a164b2f8959c856a7e31c6f908d",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment": {
+        "B_OVERLAY_ROOT": "/ov/b",
+        "MODE": "b-a",
+        "A_OVERLAY_ROOT": "/ov/a"
+      }
+    },
+    {
+      "name": "problems under [about] never stop an overlay, and Canoa applies nothing of it",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "meta",
+          "root": "/ov/meta",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "[about]\nsummary = \"One\\nTwo\"\nicon = \"icon.svg\"\nversion = \"1.0\"\n\n[env]\nMODE = \"on\"\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "META_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/meta"
+            },
+            "layer": "overlay:meta"
+          },
+          {
+            "name": "MODE",
+            "value": {
+              "text": "on"
+            },
+            "layer": "overlay:meta"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "overlays": [
+          {
+            "layer": "overlay:meta",
+            "digest": "sha256:7f939ac7b1ed8920cb4c370b81733d626c0e2eb430f4c847643d8b2935371a9a",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "weakenings": []
+          }
+        ]
+      },
+      "environment": {
+        "META_OVERLAY_ROOT": "/ov/meta",
+        "MODE": "on"
+      }
     }
   ],
   "reserved_env": {

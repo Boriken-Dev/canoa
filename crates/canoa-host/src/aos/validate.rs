@@ -131,6 +131,120 @@ fn is_mcp_url(text: &str) -> bool {
         && !tail.chars().any(char::is_whitespace)
 }
 
+/// One line of display text: not empty, with no control character, line or paragraph separator, or bidirectional
+/// embedding, override or isolate.
+pub(crate) fn is_line(text: &str) -> bool {
+    !text.is_empty()
+        && !text.chars().any(|c| {
+            matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}')
+                || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+}
+
+/// An `https` URL with a host and no user information, white space or control character.
+fn is_web_url(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix("https://") else {
+        return false;
+    };
+    let bad = |c: char| matches!(c, '\u{0}'..='\u{20}' | '\u{7f}'..='\u{9f}');
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (host, tail) = rest.split_at(end);
+    !host.is_empty()
+        && !host.chars().any(|c| bad(c) || matches!(c, '@' | '\\'))
+        && !tail.chars().any(bad)
+}
+
+/// A relative path ending in `.png` or `.webp`, in any ASCII case.
+pub(crate) fn is_icon_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    is_relative_path(path) && (lower.ends_with(".png") || lower.ends_with(".webp"))
+}
+
+fn is_tag(text: &str) -> bool {
+    text.len() <= 32
+        && text.split('-').all(|run| {
+            !run.is_empty()
+                && run
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+}
+
+/// An SPDX license expression: identifiers (with an optional `+`) and `LicenseRef-` references, `WITH` an exception,
+/// joined by `AND` and `OR` with parentheses; the operators in upper case.
+fn is_license(text: &str) -> bool {
+    if text.is_empty()
+        || !text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b".+:() -".contains(&byte))
+    {
+        return false;
+    }
+    let spaced = text.replace('(', " ( ").replace(')', " ) ");
+    let tokens: Vec<&str> = spaced
+        .split(' ')
+        .filter(|token| !token.is_empty())
+        .collect();
+    let identifier = |token: &str| {
+        let body = token.strip_suffix('+').unwrap_or(token);
+        !body.is_empty()
+            && !["AND", "OR", "WITH"].contains(&body)
+            && body
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':'))
+    };
+    // or := and ("OR" and)*; and := with ("AND" with)*; with := primary ("WITH" id)?; primary := id | "(" or ")"
+    fn or(tokens: &[&str], at: &mut usize, id: &dyn Fn(&str) -> bool) -> bool {
+        and(tokens, at, id) && {
+            while tokens.get(*at) == Some(&"OR") {
+                *at += 1;
+                if !and(tokens, at, id) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+    fn and(tokens: &[&str], at: &mut usize, id: &dyn Fn(&str) -> bool) -> bool {
+        with(tokens, at, id) && {
+            while tokens.get(*at) == Some(&"AND") {
+                *at += 1;
+                if !with(tokens, at, id) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+    fn with(tokens: &[&str], at: &mut usize, id: &dyn Fn(&str) -> bool) -> bool {
+        let primary = match tokens.get(*at) {
+            Some(&"(") => {
+                *at += 1;
+                let inner = or(tokens, at, id);
+                let closed = tokens.get(*at) == Some(&")");
+                *at += 1;
+                inner && closed
+            }
+            Some(token) if id(token) => {
+                *at += 1;
+                true
+            }
+            _ => false,
+        };
+        if primary && tokens.get(*at) == Some(&"WITH") {
+            *at += 1;
+            let exception = tokens
+                .get(*at)
+                .is_some_and(|token| id(token) && !token.ends_with('+'));
+            *at += 1;
+            return exception;
+        }
+        primary
+    }
+    let mut at = 0;
+    or(&tokens, &mut at, &identifier) && at == tokens.len()
+}
+
 fn is_header_name(text: &str) -> bool {
     !text.is_empty()
         && text
@@ -484,6 +598,38 @@ impl Check {
         }
     }
 
+    fn about(&mut self, value: &Value, at: &str) {
+        let keys = [
+            "summary",
+            "icon",
+            "homepage",
+            "repository",
+            "license",
+            "authors",
+            "tags",
+        ];
+        let Some(map) = self.object(value, at, &keys) else {
+            return;
+        };
+        for (key, item) in map {
+            let here = join(at, key);
+            match key.as_str() {
+                "summary" => self.string_where(item, &here, is_line),
+                "icon" => self.string_where(item, &here, is_icon_path),
+                "homepage" | "repository" => self.string_where(item, &here, is_web_url),
+                "license" => self.string_where(item, &here, is_license),
+                "authors" => self.strings_where(item, &here, is_line),
+                "tags" => {
+                    self.strings_where(item, &here, is_tag);
+                    if let Some(items) = item.as_array() {
+                        self.unique(items, &here);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn harness(&mut self, value: &Value, at: &str) {
         let Some(map) = value.as_object() else {
             self.schema(at);
@@ -778,6 +924,7 @@ pub fn validate(doc: &Map<String, Value>, files: Option<&BTreeSet<String>>) -> V
             "scripts" => check.scripts(value, &at),
             "mcp" => check.mcp(value, &at),
             "harness" => check.harness(value, &at),
+            "about" => check.about(value, &at),
             _ => {}
         }
     }
@@ -810,6 +957,15 @@ pub fn validate(doc: &Map<String, Value>, files: Option<&BTreeSet<String>>) -> V
                 }
             }
         }
+        if let Some(icon) = doc
+            .get("about")
+            .and_then(|about| about.get("icon"))
+            .and_then(Value::as_str)
+            && is_icon_path(icon)
+            && !files.contains(icon)
+        {
+            check.push("missing-file", "/about/icon");
+        }
         if let Some(links) = doc
             .get("mcp")
             .and_then(|mcp| mcp.get("skills"))
@@ -828,6 +984,15 @@ pub fn validate(doc: &Map<String, Value>, files: Option<&BTreeSet<String>>) -> V
     issues.sort_by(|a, b| (&a.at, a.code).cmp(&(&b.at, b.code)));
     issues.dedup();
     issues
+}
+
+/// Whether a manifest with these problems still applies: `about` is informational, so problems under `/about` alone
+/// never stop it.
+#[must_use]
+pub fn applies(issues: &[Issue]) -> bool {
+    issues
+        .iter()
+        .all(|issue| issue.at == "/about" || issue.at.starts_with("/about/"))
 }
 
 /// Every file a field requires to exist, with the pointer of the field naming it.

@@ -1,5 +1,5 @@
 {
-  "description": "Validating a data model value. 'files', when present, lists the overlay's files and every file a field names must be among them. An invalid case names the pointer of the offending value ('at'); an implementation reports a problem there or inside it.",
+  "description": "Validating a data model value. 'files', when present, lists the overlay's files and every file a field names must be among them. An invalid case names the pointer of the offending value ('at'); an implementation reports a problem there or inside it. A case whose document writes 'about' also states whether the manifest still 'applies': a problem under /about never stops it.",
   "spec": "spec/v0/manifest.md#validation",
   "cases": [
     {
@@ -473,6 +473,95 @@
       ],
       "expect": {
         "valid": true
+      }
+    },
+    {
+      "id": "about-every-field",
+      "description": "Every informational field, its icon among the files.",
+      "document": {
+        "name": "release-notes",
+        "description": "Long text.\nSecond line.",
+        "about": {
+          "summary": "Release notes and changelogs, written the same way everywhere.",
+          "icon": "icon.webp",
+          "homepage": "https://example.org/overlays/release-notes",
+          "repository": "https://github.com/example/overlays",
+          "license": "MIT OR Apache-2.0",
+          "authors": [
+            "Example Docs Team <docs@example.org>",
+            "Ana Pérez"
+          ],
+          "tags": [
+            "documentation",
+            "release",
+            "changelog-2"
+          ]
+        }
+      },
+      "files": [
+        "icon.webp"
+      ],
+      "expect": {
+        "valid": true,
+        "applies": true
+      }
+    },
+    {
+      "id": "about-forms",
+      "description": "A WebP or PNG in any ASCII case, an SPDX expression with WITH, + and LicenseRef-, empty lists.",
+      "document": {
+        "about": {
+          "icon": "img/Icon.PNG",
+          "license": "(GPL-2.0+ WITH Classpath-exception-2.0 OR LicenseRef-team) AND MIT",
+          "authors": [],
+          "tags": []
+        }
+      },
+      "expect": {
+        "valid": true,
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-about-icon-svg",
+      "description": "tests/fixtures/invalid/about-icon-svg.cfg",
+      "document": {
+        "about": {
+          "icon": "icon.svg"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-about-license-expression",
+      "description": "tests/fixtures/invalid/about-license-expression.cfg",
+      "document": {
+        "about": {
+          "license": "MIT or Apache-2.0"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "fixture-about-unknown-key",
+      "description": "tests/fixtures/invalid/about-unknown-key.cfg",
+      "document": {
+        "about": {
+          "licence": "MIT"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
       }
     },
     {
@@ -2046,6 +2135,330 @@
       "expect": {
         "valid": false,
         "at": "/defaults"
+      }
+    },
+    {
+      "id": "about-icon-missing",
+      "description": "The icon is a file of the overlay.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "icon.png"
+        }
+      },
+      "files": [
+        "kb/a.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-icon-escape",
+      "description": "The icon is a relative path under the root.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "../icon.png"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-icon-gif",
+      "description": "PNG and WebP only.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "icon.gif"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-icon-url",
+      "description": "An icon is never a URL.",
+      "document": {
+        "name": "x",
+        "about": {
+          "icon": "https://example.org/icon.png"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/icon",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-summary-two-lines",
+      "description": "A summary is one line.",
+      "document": {
+        "name": "x",
+        "about": {
+          "summary": "One\nTwo"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/summary",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-summary-empty",
+      "description": "A summary is not empty.",
+      "document": {
+        "name": "x",
+        "about": {
+          "summary": ""
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/summary",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-summary-bidi",
+      "description": "No bidirectional override in a line.",
+      "document": {
+        "name": "x",
+        "about": {
+          "summary": "safe ‮gnp.exe"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/summary",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-homepage-http",
+      "description": "A link is https.",
+      "document": {
+        "name": "x",
+        "about": {
+          "homepage": "http://example.org/x"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/homepage",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-repository-userinfo",
+      "description": "A link holds no user information.",
+      "document": {
+        "name": "x",
+        "about": {
+          "repository": "https://user:token@example.org/x.git"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/repository",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-repository-git",
+      "description": "A repository link is a page to open, not a Git source.",
+      "document": {
+        "name": "x",
+        "about": {
+          "repository": "git@github.com:example/overlays.git"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/repository",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-license-dangling",
+      "description": "An operator needs both sides.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "MIT AND"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-license-unbalanced",
+      "description": "Parentheses balance.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "(MIT OR Apache-2.0"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-license-text",
+      "description": "A license is an expression, not prose.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "MIT, see LICENSE"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-authors-string",
+      "description": "authors is a list.",
+      "document": {
+        "name": "x",
+        "about": {
+          "authors": "Example Team"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/authors",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-tags-case",
+      "description": "A tag is lowercase letters, digits and single hyphens.",
+      "document": {
+        "name": "x",
+        "about": {
+          "tags": [
+            "Docs"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/tags/0",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-tags-duplicate",
+      "description": "Tags are unique.",
+      "document": {
+        "name": "x",
+        "about": {
+          "tags": [
+            "docs",
+            "docs"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/tags",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-tags-long",
+      "description": "A tag is at most 32 characters.",
+      "document": {
+        "name": "x",
+        "about": {
+          "tags": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/tags/0",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-keywords",
+      "description": "keywords is not a field: tags are what a store filters and searches.",
+      "document": {
+        "name": "x",
+        "about": {
+          "keywords": [
+            "docs"
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-version",
+      "description": "No version field: the source's ref and the tree digest say which overlay it is.",
+      "document": {
+        "name": "x",
+        "about": {
+          "version": "1.2.0"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-not-a-table",
+      "description": "about is a table.",
+      "document": {
+        "about": "Release notes"
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about",
+        "applies": true
+      }
+    },
+    {
+      "id": "about-and-another-problem",
+      "description": "A problem outside about still stops the manifest from applying.",
+      "document": {
+        "priority": "high",
+        "about": {
+          "summary": "One\nTwo"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/priority",
+        "applies": false
       }
     }
   ]

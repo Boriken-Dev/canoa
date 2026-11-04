@@ -1,5 +1,5 @@
 {
-  "description": "Reading documents: format selection, the data model, static reading, limits, the dotenv grammar and substitution. Input is 'text' (UTF-8) or 'base64'; 'format' is 'aos' (overlay.cfg rules), 'dotenv', or 'env-script' (an env script's output, whose data maps a variable to a string, or to null to unset it). A dotenv case may give 'env' (the environment before the file; absent, empty), 'os' ('windows' compares names without regard to ASCII case; absent, another OS) and 'secret_variables' (the names in 'env' whose value came from a secret reference); its data is what each line sets, substituted against the environment the earlier lines left. 'expect' is the data, or an error class (a list when either class is right); with both 'data' and 'error', either outcome is right.",
+  "description": "Reading documents: format selection, the data model, static reading, limits, the dotenv grammar and substitution. Input is 'text' (UTF-8) or 'base64'; 'format' is 'aos' (overlay.cfg rules), 'dotenv', 'env-script' (an env script's output, whose data maps a variable to a string, or to null to unset it), or 'catalog' (a catalog document, whose file 'name' selects its format by extension). A dotenv case may give 'env' (the environment before the file; absent, empty), 'os' ('windows' compares names without regard to ASCII case; absent, another OS) and 'secret_variables' (the names in 'env' whose value came from a secret reference); its data is what each line sets, substituted against the environment the earlier lines left. 'expect' is the data, or an error class (a list when either class is right); with both 'data' and 'error', either outcome is right.",
   "spec": "spec/v0/manifest.md#reading-overlaycfg",
   "cases": [
     {
@@ -2013,6 +2013,180 @@
       "text": "A=1\n",
       "expect": {
         "error": "parse-error"
+      }
+    },
+    {
+      "id": "catalog-json",
+      "description": "'.json' names JSON; no format line is needed.",
+      "format": "catalog",
+      "name": "registry.json",
+      "text": "{\"overlays\": {\"engineering\": \"../engineering\"}}\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-toml",
+      "description": "'.toml' names TOML.",
+      "format": "catalog",
+      "name": "registry.toml",
+      "text": "[overlays]\nengineering = \"../engineering\"\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-yaml",
+      "description": "'.yaml' names YAML, read with the core schema: yes is a string.",
+      "format": "catalog",
+      "name": "registry.yaml",
+      "text": "overlays:\n  engineering: ../engineering\n  yes: ../yes\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering",
+            "yes": "../yes"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-yml-case",
+      "description": "'.YML' names YAML: the extension ignores ASCII case.",
+      "format": "catalog",
+      "name": "CATALOG.YML",
+      "text": "overlays: {engineering: ../engineering}\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-extension-wins",
+      "description": "The extension decides: '#!yaml' in a '.toml' file is a TOML comment.",
+      "format": "catalog",
+      "name": "catalog.toml",
+      "text": "#!yaml\n[overlays]\nengineering = \"../engineering\"\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-json-no-format-line",
+      "description": "In a '.json' file a format line is not removed, and is not JSON.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "#!json\n{\"overlays\": {}}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "catalog-cfg-format-line",
+      "description": "Another extension follows the manifest's rule: a format line names the format.",
+      "format": "catalog",
+      "name": "catalog.cfg",
+      "text": "#!json\n{\"overlays\": {\"engineering\": \"../engineering\"}}\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-no-extension",
+      "description": "No extension: the manifest's rule, TOML by default.",
+      "format": "catalog",
+      "name": "catalog",
+      "text": "[overlays]\nengineering = \"../engineering\"\n",
+      "expect": {
+        "data": {
+          "overlays": {
+            "engineering": "../engineering"
+          }
+        }
+      }
+    },
+    {
+      "id": "catalog-no-guessing",
+      "description": "No extension and JSON content: read as TOML, and fails.",
+      "format": "catalog",
+      "name": "catalog",
+      "text": "{\"overlays\": {}}\n",
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "catalog-bom-json",
+      "description": "One byte-order mark is dropped before JSON too.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "﻿{\"overlays\": {}}\n",
+      "expect": {
+        "data": {
+          "overlays": {}
+        }
+      }
+    },
+    {
+      "id": "catalog-json-duplicate",
+      "description": "The data model holds: a duplicate JSON key is refused.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "{\"overlays\": {\"a\": \"x\", \"a\": \"y\"}}\n",
+      "expect": {
+        "error": "duplicate-key"
+      }
+    },
+    {
+      "id": "catalog-yaml-tag",
+      "description": "Static reading holds: a YAML tag is refused.",
+      "format": "catalog",
+      "name": "catalog.yaml",
+      "text": "overlays: !include more.yaml\n",
+      "expect": {
+        "error": "yaml-tag"
+      }
+    },
+    {
+      "id": "catalog-null",
+      "description": "A null is refused, as in a manifest.",
+      "format": "catalog",
+      "name": "catalog.json",
+      "text": "{\"overlays\": {\"a\": null}}\n",
+      "expect": {
+        "error": "null-value"
+      }
+    },
+    {
+      "id": "catalog-size-limit",
+      "description": "A catalog over the consumer's size limit.",
+      "format": "catalog",
+      "name": "catalog.toml",
+      "text": "[overlays]\nengineering = \"../engineering\"\n",
+      "limits": {
+        "max_bytes": 16
+      },
+      "expect": {
+        "error": "too-large"
       }
     }
   ]

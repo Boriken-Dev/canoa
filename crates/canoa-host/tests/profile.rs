@@ -1,4 +1,9 @@
-//! The profile vectors the app is held to as well: each merge's view or first refusal, and each overlay source.
+//! The profile vectors the app is held to as well: each merge's view or first refusal, each overlay source, and each
+//! AOS overlay's layer.
+#![allow(
+    clippy::std_instead_of_alloc,
+    reason = "tests name what they use from std"
+)]
 
 use canoa_host::profile::{Layer, LayerId, LayerKind, OverlaySource, Profile, ProfileError, merge};
 use serde_json::Value;
@@ -89,6 +94,101 @@ fn every_source_vector_parses_or_is_refused() {
         assert_eq!(case["repo"], repo.as_str(), "{source}");
         assert_eq!(case["ref"], reference.as_str(), "{source}");
         assert_eq!(case["path"], path.as_str(), "{source}");
+    }
+}
+
+/// The overlays of a case as layers, in composition order, and the refusals; a manifest's `requires` and `priority`
+/// order them as `canoa_host::aos` composes them.
+fn overlay_layers(case: &Value) -> (Vec<Layer>, Vec<Value>) {
+    use canoa_host::aos::{self, EntryKind, TreeEntry};
+    use canoa_host::profile::{OverlayInput, overlay_layer};
+    let os = case["os"].as_str().expect("os");
+    let mut layers = std::collections::BTreeMap::new();
+    let mut manifests = std::collections::BTreeMap::new();
+    let mut refused = Vec::new();
+    for overlay in case["overlays"].as_array().expect("overlays") {
+        let identity = overlay["identity"].as_str().expect("identity");
+        let tree: Vec<TreeEntry> = overlay["files"]
+            .as_object()
+            .expect("files")
+            .iter()
+            .map(|(path, text)| TreeEntry {
+                components: path
+                    .split('/')
+                    .map(|name| name.as_bytes().to_vec())
+                    .collect(),
+                kind: EntryKind::File,
+                data: text.as_str().expect("text").as_bytes().to_vec(),
+            })
+            .collect();
+        let mut input =
+            OverlayInput::new(identity, overlay["root"].as_str().expect("root"), os, &tree);
+        input.harness = case["harness"].as_str();
+        input.pinned = overlay["pinned"] == true;
+        match overlay_layer(&input) {
+            Ok(layer) => {
+                let manifest = layer.aos.as_ref().expect("an AOS layer").manifest.clone();
+                manifests.insert(aos::normalize_name(identity), manifest);
+                layers.insert(aos::normalize_name(identity), layer);
+            }
+            Err(refusal) => refused.push(serde_json::json!({
+                "identity": identity, "code": refusal.code, "subject": refusal.subject
+            })),
+        }
+    }
+    let requested: Vec<String> = manifests.keys().cloned().collect();
+    let (visited, _) = aos::resolve(&manifests, &requested).expect("no cycle");
+    let order = aos::composition_order(&manifests, &visited);
+    let mut out: Vec<Layer> = order
+        .iter()
+        .filter_map(|identity| layers.remove(identity))
+        .collect();
+    if let Some(user) = case["user"].as_str() {
+        let profile = Profile::from_str(user, LayerKind::User).expect("the user layer parses");
+        out.push(Layer::new(LayerId::new(LayerKind::User, ""), None, profile));
+    }
+    (out, refused)
+}
+
+#[test]
+fn every_overlay_vector_gives_its_view_refusals_and_environment() {
+    let vectors = vectors();
+    let cases = vectors["overlays"].as_array().expect("overlays");
+    assert!(cases.len() >= 6, "the overlay vectors are all there");
+    for case in cases {
+        let name = case["name"].as_str().expect("name");
+        let (layers, refused) = overlay_layers(case);
+        assert_eq!(
+            Value::Array(refused),
+            case["refused"].clone(),
+            "{name}: refused"
+        );
+        let effective = merge(&layers);
+        assert_eq!(effective.view(), case["view"], "{name}: view");
+        let host = case["host"].as_object().cloned().unwrap_or_default();
+        let lookup = |variable: &str| {
+            host.get(variable)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        match (effective.environment(lookup), case.get("environment")) {
+            (Ok(found), Some(expected)) => {
+                let found: serde_json::Map<String, Value> = found
+                    .into_iter()
+                    .map(|(variable, value)| (variable, Value::String(value.expose().to_owned())))
+                    .collect();
+                assert_eq!(&Value::Object(found), expected, "{name}: environment");
+            }
+            (Err(error), None) => {
+                let expected = &case["environment_error"];
+                assert_eq!(expected["code"], error.code(), "{name}: {error}");
+                if let ProfileError::Resolve { key, .. } = &error {
+                    assert_eq!(expected["key"], key.as_str(), "{name}");
+                }
+            }
+            (Ok(_), None) => panic!("{name}: the environment builds, and the vector refuses it"),
+            (Err(error), Some(_)) => panic!("{name}: the environment is refused ({error})"),
+        }
     }
 }
 

@@ -15,23 +15,46 @@ use super::subst::substitute;
 use super::validate::validate;
 use super::{AosError, is_relative_path, is_reserved_variable, is_sensitive, normalize_name};
 
-/// An environment being built: variables in the order they were first set. On Windows names compare without regard to
-/// ASCII case, and setting one keeps the name it already has. A variable whose value came from a secret reference is
-/// never read by a placeholder.
-#[derive(Clone, Debug, Default)]
-pub struct Environment {
+/// The environment a build starts from, read one variable at a time: its value, and whether a placeholder may read it.
+pub type Base<'a> = &'a dyn Fn(&str) -> Option<(String, bool)>;
+
+/// An environment being built: variables in the order they were first set, over a base it was started from. On Windows
+/// names compare without regard to ASCII case, and setting one keeps the name it already has. A variable whose value
+/// came from a secret reference, or a base variable marked unreadable, is never read by a placeholder.
+#[derive(Clone, Default)]
+pub struct Environment<'a> {
     windows: bool,
     values: IndexMap<String, String>,
     secret: BTreeSet<String>,
     extra: Vec<(String, String)>,
+    base: Option<Base<'a>>,
 }
 
-impl Environment {
+impl core::fmt::Debug for Environment<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Environment")
+            .field("windows", &self.windows)
+            .field("names", &self.values.keys().collect::<Vec<_>>())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> Environment<'a> {
     /// An empty environment; `windows` compares names as Windows does.
     #[must_use]
     pub fn new(windows: bool) -> Self {
         Self {
             windows,
+            ..Self::default()
+        }
+    }
+
+    /// An environment over `base`, whose variables are seen until one is set and are never in [`Environment::values`].
+    #[must_use]
+    pub fn with_base(windows: bool, base: Base<'a>) -> Self {
+        Self {
+            windows,
+            base: Some(base),
             ..Self::default()
         }
     }
@@ -50,18 +73,27 @@ impl Environment {
         None
     }
 
-    /// A variable's value.
-    #[must_use]
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.key(name)
-            .and_then(|key| self.values.get(&key))
-            .map(String::as_str)
+    fn base_value(&self, name: &str) -> Option<(String, bool)> {
+        self.base.and_then(|base| base(name))
     }
 
-    /// Whether the variable's value came from a secret reference, or was marked so.
+    /// A variable's value, set or from the base.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<String> {
+        match self.key(name) {
+            Some(key) => self.values.get(&key).cloned(),
+            None => self.base_value(name).map(|(value, _)| value),
+        }
+    }
+
+    /// Whether a placeholder may not read the variable: its value came from a secret reference, or from a base
+    /// variable marked so.
     #[must_use]
     pub fn is_secret(&self, name: &str) -> bool {
-        self.key(name).is_some_and(|key| self.secret.contains(&key))
+        match self.key(name) {
+            Some(key) => self.secret.contains(&key),
+            None => self.base_value(name).is_some_and(|(_, readable)| !readable),
+        }
     }
 
     /// What a placeholder reads: an overlay's own `AOS_OVERLAY_*` first, then the variable.
@@ -75,13 +107,10 @@ impl Environment {
                 return Ok(Some(value.clone()));
             }
         }
-        let Some(key) = self.key(name) else {
-            return Ok(None);
-        };
-        if self.secret.contains(&key) {
+        if self.is_secret(name) {
             return Err(AosError::new("secret-placeholder", name));
         }
-        Ok(self.values.get(&key).cloned())
+        Ok(self.get(name))
     }
 
     /// Sets a variable; `secret` marks a value no placeholder may read, and setting it from anything else clears that.
@@ -95,7 +124,7 @@ impl Environment {
         }
     }
 
-    /// Every variable, in the order first set.
+    /// Every variable set, in the order first set; none from the base.
     #[must_use]
     pub fn values(&self) -> &IndexMap<String, String> {
         &self.values
@@ -471,7 +500,7 @@ fn secret_value(
             for (name, value) in &facts.host_env {
                 host.set(name, value, false);
             }
-            host.get(key).map(str::to_owned)
+            host.get(key)
         }
         "file" => facts
             .secret_files
@@ -591,7 +620,7 @@ fn apply_paths(
                 prepend.push(resolved);
             }
         }
-        let current = env.get(&variable).unwrap_or("").to_owned();
+        let current = env.get(&variable).unwrap_or_default();
         let kept = current
             .split(separator)
             .filter(|component| !component.is_empty() && !seen.contains(*component))

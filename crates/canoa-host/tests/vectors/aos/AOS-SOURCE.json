@@ -1,16 +1,17 @@
 {
   "about": "The Agent Overlay Specification's conformance vectors, copied byte for byte. Copy them again from a later revision, and change the commit and every digest, to move Canoa to it.",
   "repository": "https://github.com/Boriken-Dev/agent-overlay-spec",
-  "commit": "146db97a12d3d27d09503a754b403c493fdd25db",
+  "commit": "061b8f5534fff36926fd06c3d3b510f0513f29e9",
   "path": "tests/vectors",
   "edition": "0.1.0-draft",
   "files": {
+    "catalog.json": "sha256:9f85142579dff078628ea0075df019511e4eef3387cd2a8ba70eb08c74d8a4b0",
     "compose.json": "sha256:ba40e96f2c4d254cf8d2a5673ee1cb1b5827ef6351493490849f11059769d117",
     "digest.json": "sha256:0f4cb90875bf0fe0696959226d46f2bc5093d6ee3a775fbcb759a17ae737ca59",
     "effective.json": "sha256:6fbac06fae4e5af20d03c6f07da84c61de6a7dbd68b19ea72c607fd9a8674da0",
     "names.json": "sha256:15eb458747132c15bcba7c75a648bdd654a21f7e1ce4658b02888d80554c52c5",
-    "reading.json": "sha256:4589a1ca91fb3afd5d8d87280774bec4a39cba992d0370f2a9cbcb1c19044faf",
+    "reading.json": "sha256:722c75dc6941e2f5fdd1f30ffe302c57b14f8bb606b7abb253dce07f8dc7e931",
     "source.json": "sha256:3dfda4b712361bd3bc5c08981551290ecb2531a2c6dc569f5a716fe3f67e826c",
-    "validation.json": "sha256:6b48f32fac94eb9b833c18ca036cc34042d1c5fe42b202732b2d8057648bfc43"
+    "validation.json": "sha256:aa5eed8c800d2cf83a33044627546384d4f8b72f0b81f70d991acf62e5e67050"
   }
 }

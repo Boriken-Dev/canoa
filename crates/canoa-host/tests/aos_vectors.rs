@@ -83,7 +83,7 @@ fn strings(value: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn environment(values: &Value, windows: bool, secret: &[String]) -> Environment {
+fn environment(values: &Value, windows: bool, secret: &[String]) -> Environment<'static> {
     let mut env = Environment::new(windows);
     for (name, value) in values.as_object().into_iter().flatten() {
         env.set(
@@ -134,6 +134,10 @@ fn reading() {
                     id,
                     "Canoa runs no env script, so reads no env script output",
                 ));
+                continue;
+            }
+            "catalog" => {
+                skipped.push((id, "a catalog, which canoa-host does not read"));
                 continue;
             }
             "aos" if yaml => {
@@ -200,6 +204,13 @@ fn validation() {
             .get("files")
             .map(|files| strings(files).into_iter().collect());
         let issues = aos::validate(document, files.as_ref());
+        if let Some(applies) = case["expect"]["applies"].as_bool() {
+            assert_eq!(
+                aos::applies(&issues),
+                applies,
+                "{id}: applies, found {issues:?}"
+            );
+        }
         if case["expect"]["valid"] == true {
             assert!(issues.is_empty(), "{id}: valid, found {issues:?}");
         } else {
@@ -214,6 +225,21 @@ fn validation() {
         ran += 1;
     }
     report("validation", ran, &[]);
+}
+
+#[test]
+fn catalogs_are_not_read_by_canoa_host() {
+    let cases = vectors("catalog");
+    let skipped: Vec<(String, &str)> = cases
+        .iter()
+        .map(|case| {
+            (
+                id(case).to_owned(),
+                "catalogs and icons: canoa-host is no store, and reads neither",
+            )
+        })
+        .collect();
+    report("catalog", 0, &skipped);
 }
 
 #[test]

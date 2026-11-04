@@ -5,7 +5,8 @@
 //!
 //! Canoa claims the manifest reader (TOML and JSON; YAML is refused as an unsupported format), validator, integrity,
 //! resolver and environment classes. It runs no env script, no setup and no package manager: those declarations are
-//! read and validated, and [`crate::profile`] reports them as not applied. Every function here is static: it reads no
+//! read and validated, and [`crate::profile`] reports them as not applied. `[about]`, store metadata, is validated and
+//! never read otherwise: a problem in it never stops an overlay ([`applies`]). Every function here is static: it reads no
 //! file, runs nothing and consults no environment, except [`read_tree`], which lists and reads a directory, and the
 //! callbacks a caller passes.
 
@@ -17,8 +18,9 @@ mod validate;
 
 use alloc::string::String;
 
+pub(crate) use apply::default_paths;
 pub use apply::{
-    EnvFile, Environment, Facts, Missing, Overlay, PathAddition, Resolved, Weakening,
+    Base, EnvFile, Environment, Facts, Missing, Overlay, PathAddition, Resolved, Weakening,
     apply_overlay, composition_order, context_of, env_files_of, grants_report, os_matches,
     paths_of, resolve, rules_of, skills_of,
 };
@@ -27,7 +29,7 @@ pub use digest::{
 };
 pub use read::{DotenvLine, Limits, parse_dotenv, read_document, read_dotenv};
 pub use subst::substitute;
-pub use validate::{Issue, validate};
+pub use validate::{Issue, applies, validate};
 
 /// A refusal, by the class the specification's conformance vectors name it (`parse-error`, `undefined-variable`,
 /// `symlink`, ...), and what it is about: a variable, a path, a format or an overlay, never a value.

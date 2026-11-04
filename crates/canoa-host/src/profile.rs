@@ -79,11 +79,13 @@ pub const RESERVED_ENV_PREFIXES: &[&str] = &[
 /// Suffixes of [`RESERVED_ENV`]'s kind, compared without case.
 pub const RESERVED_ENV_SUFFIXES: &[&str] = &["_BASE_URL", "_PROXY"];
 
-/// Whether an overlay or a project may not set `name`.
+/// Whether an overlay or a project may not set `name`: [`RESERVED_ENV`] and its prefixes and suffixes, and every
+/// variable the AOS specification names sensitive ([`crate::aos::is_sensitive`]).
 #[must_use]
 pub fn is_reserved_env(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    RESERVED_ENV.contains(&upper.as_str())
+    crate::aos::is_sensitive(name)
+        || RESERVED_ENV.contains(&upper.as_str())
         || RESERVED_ENV_PREFIXES
             .iter()
             .any(|prefix| upper.starts_with(prefix))
@@ -162,7 +164,8 @@ impl fmt::Display for LayerId {
 }
 
 /// A value an environment variable or a header takes. `from_env` and `from_file` are references, resolved only when a
-/// session starts; a literal `value` is for what is not secret.
+/// session starts; a literal `value` is for what is not secret. The last four come only from an AOS overlay, as its
+/// manifest or env file wrote them, and are worked out when a session starts, in the overlays' order of application.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EnvValue {
@@ -172,6 +175,21 @@ pub enum EnvValue {
     FromEnv(String),
     /// The contents of a file, relative to its layer's directory, without one final line break.
     FromFile(String),
+    /// AOS text, whose `${NAME}` placeholders are substituted when a session starts.
+    Text(String),
+    /// An AOS path, relative to the overlay's root, which becomes absolute.
+    Path(String),
+    /// An AOS secret reference, as `<provider>:<key>` or `secret:<name>`; an optional one is left unset when it cannot
+    /// be resolved.
+    Reference {
+        /// What it reads.
+        reference: String,
+        /// Whether it may stay unset.
+        optional: bool,
+    },
+    /// AOS path additions to a list variable: each directory, relative to the overlay's root, and whether it is
+    /// appended rather than prepended.
+    Paths(Vec<(String, bool)>),
 }
 
 impl fmt::Debug for EnvValue {
@@ -180,6 +198,10 @@ impl fmt::Debug for EnvValue {
             Self::Value(_) => f.write_str("Value(..)"),
             Self::FromEnv(name) => write!(f, "FromEnv({name:?})"),
             Self::FromFile(path) => write!(f, "FromFile({path:?})"),
+            Self::Text(_) => f.write_str("Text(..)"),
+            Self::Path(path) => write!(f, "Path({path:?})"),
+            Self::Reference { reference, .. } => write!(f, "Reference({reference:?})"),
+            Self::Paths(paths) => write!(f, "Paths({paths:?})"),
         }
     }
 }
@@ -300,6 +322,9 @@ pub struct Profile {
     pub skills: IndexMap<String, Change<Skill>>,
     /// MCP servers, by name.
     pub mcp: IndexMap<String, Change<McpServer>>,
+    /// What an AOS overlay adds to the initial context, in order: its rules, routing lines, context files and the
+    /// harness's own. Every layer's adds up, and `unset = ["context"]` takes them back with `context`.
+    pub contexts: Vec<Context>,
 }
 
 /// One layer: a profile, where it comes from, and the directory its relative paths are read from.
@@ -312,13 +337,20 @@ pub struct Layer {
     pub dir: Option<PathBuf>,
     /// What it sets.
     pub profile: Profile,
+    /// For an AOS overlay, what building its environment needs and what Canoa does not apply.
+    pub aos: Option<Box<AosLayer>>,
 }
 
 impl Layer {
     /// A layer holding `profile`.
     #[must_use]
     pub fn new(id: LayerId, dir: Option<PathBuf>, profile: Profile) -> Self {
-        Self { id, dir, profile }
+        Self {
+            id,
+            dir,
+            profile,
+            aos: None,
+        }
     }
 }
 
@@ -825,6 +857,12 @@ pub struct Effective {
     pub share_env: IndexMap<String, LayerId>,
     /// What overlays and projects set that reads a variable not shared, and was left out.
     pub refused: Vec<Refused>,
+    /// What AOS overlays add to the initial context, in their order, each with its layer.
+    pub contexts: Vec<Sourced<Context>>,
+    /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its weakenings.
+    pub overlays: Vec<OverlayReport>,
+    /// The AOS overlays, lowest first, whose environment is built when a session starts.
+    pub aos: Vec<AosLayer>,
 }
 
 /// Merges `layers`, lowest first. A later layer's value replaces a lower one's; a named entry is replaced whole and keeps
@@ -865,7 +903,11 @@ pub fn merge(layers: &[Layer]) -> Effective {
                 Scalar::Mode => out.mode.take().map(|value| value.layer),
                 Scalar::Context => out.context.take().map(|value| value.layer),
             };
-            if let Some(was) = was {
+            let mut taken: Vec<LayerId> = was.into_iter().collect();
+            if *scalar == Scalar::Context {
+                taken.extend(out.contexts.drain(..).map(|value| value.layer));
+            }
+            for was in taken {
                 out.removed.push(Removed {
                     key: scalar.as_str().to_owned(),
                     layer: layer.id.clone(),
@@ -873,6 +915,12 @@ pub fn merge(layers: &[Layer]) -> Effective {
                 });
             }
         }
+        out.contexts
+            .extend(profile.contexts.iter().map(|context| Sourced {
+                value: context.clone(),
+                layer: layer.id.clone(),
+                dir: layer.dir.clone(),
+            }));
         if let Some(model) = &profile.model {
             out.model = Some(sourced(model.clone()));
         }
@@ -909,6 +957,12 @@ pub fn merge(layers: &[Layer]) -> Effective {
             &mut log,
             &server_unshared,
         );
+    }
+    for layer in layers {
+        if let Some(aos) = &layer.aos {
+            out.overlays.push(overlay::report(&layer.id, aos, &shared));
+            out.aos.push((**aos).clone());
+        }
     }
     out
 }
@@ -986,13 +1040,9 @@ impl Effective {
             }
         }
         if let Some(context) = &self.context {
-            let value = match &context.value {
-                Context::Text(text) => json!({"text": text}),
-                Context::File(file) => json!({"file": file}),
-            };
             out.insert(
                 "context".to_owned(),
-                json!({"value": value, "layer": context.layer.to_string()}),
+                json!({"value": context_json(&context.value), "layer": context.layer.to_string()}),
             );
         }
         out.insert("env".to_owned(), entries(&self.env, env_json));
@@ -1032,6 +1082,23 @@ impl Effective {
                     .collect(),
             ),
         );
+        if !self.contexts.is_empty() {
+            out.insert(
+                "contexts".to_owned(),
+                Value::Array(
+                    self.contexts
+                        .iter()
+                        .map(|context| json!({"value": context_json(&context.value), "layer": context.layer.to_string()}))
+                        .collect(),
+                ),
+            );
+        }
+        if !self.overlays.is_empty() {
+            out.insert(
+                "overlays".to_owned(),
+                Value::Array(self.overlays.iter().map(OverlayReport::view).collect()),
+            );
+        }
         Value::Object(out)
     }
 
@@ -1046,20 +1113,39 @@ impl Effective {
         &self,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Vec<(String, Secret)>, ProfileError> {
-        self.env
-            .iter()
-            .map(|(name, value)| {
-                let key = format!("env.{name}");
-                resolve(
-                    &key,
-                    &value.value,
-                    value.dir.as_deref(),
-                    value.layer.kind.is_confined(),
-                    &lookup,
-                )
-                .map(|secret| (name.clone(), secret))
-            })
-            .collect()
+        let windows = self.aos.first().is_some_and(|aos| aos.os == "windows");
+        let lookup: &dyn Fn(&str) -> Option<String> = &lookup;
+        let base = overlay::base_of(&self.share_env, windows, lookup);
+        let built = overlay::build(&self.aos, &self.share_env, &base)?;
+        let mut out = Vec::new();
+        for (name, value) in &self.env {
+            let from_overlay = value.layer.kind == LayerKind::Overlay
+                && self.aos.iter().any(|aos| aos.identity == value.layer.name);
+            if from_overlay {
+                // An optional reference that could not be resolved leaves its variable unset.
+                if let Some(found) = built.values().get(name) {
+                    out.push((name.clone(), Secret(found.clone())));
+                }
+                continue;
+            }
+            let key = format!("env.{name}");
+            let secret = resolve(
+                &key,
+                &value.value,
+                value.dir.as_deref(),
+                value.layer.kind.is_confined(),
+                lookup,
+            )?;
+            out.push((name.clone(), secret));
+        }
+        Ok(out)
+    }
+}
+
+fn context_json(context: &Context) -> Value {
+    match context {
+        Context::Text(text) => json!({"text": text}),
+        Context::File(file) => json!({"file": file}),
     }
 }
 
@@ -1076,6 +1162,18 @@ fn env_json(value: &EnvValue) -> Value {
         EnvValue::Value(text) => json!({"value": text}),
         EnvValue::FromEnv(name) => json!({"from_env": name}),
         EnvValue::FromFile(path) => json!({"from_file": path}),
+        EnvValue::Text(text) => json!({"text": text}),
+        EnvValue::Path(path) => json!({"path": path}),
+        EnvValue::Reference {
+            reference,
+            optional,
+        } => json!({"reference": reference, "optional": optional}),
+        EnvValue::Paths(paths) => json!({
+            "paths": paths
+                .iter()
+                .map(|(path, append)| json!({"path": path, "position": if *append { "append" } else { "prepend" }}))
+                .collect::<Vec<_>>()
+        }),
     }
 }
 
@@ -1191,6 +1289,9 @@ pub fn resolve(
             });
             Ok(Secret(text.to_owned()))
         }
+        EnvValue::Text(_) | EnvValue::Path(_) | EnvValue::Reference { .. } | EnvValue::Paths(_) => {
+            Err(fail("only an AOS overlay's environment gives this value"))
+        }
     }
 }
 
@@ -1212,51 +1313,40 @@ pub enum OverlaySource {
 }
 
 impl OverlaySource {
-    /// Parses `<repository>@<ref>[#<path>]`. The ref is what follows the last `@`, the path what follows the last `#`.
+    /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [`crate::aos::parse_source`] does, and holds
+    /// it to what Canoa fetches: a Git repository at a named ref. The path is what follows the first `#`, without
+    /// leading or trailing `/`.
     ///
     /// # Errors
     ///
-    /// [`ProfileError::Invalid`] with key `overlays` for a source with no ref; a repository that opens with `-`, holds a
-    /// space or control character, names a transport helper (`ext::`) or a scheme other than those above, another host's
-    /// share (`file://host/`, `\\host\`, `//host/`), or a plaintext `http` or `git` transport at anything but a
-    /// [`full_commit_id`]; a ref git would refuse; or a path that is empty after `#`, absolute, or steps out with `..`.
+    /// [`ProfileError::Invalid`] with key `overlays` for what the specification refuses, a source that is not Git or
+    /// names no ref; a repository that holds a space or control character, names a scheme other than those above in
+    /// lowercase, another host's share (`file://host/`, `\\host\`, `//host/`), or a plaintext `http` or `git` transport
+    /// at anything but a [`full_commit_id`]; and a ref git would refuse.
     pub fn parse_git(source: &str) -> Result<Self, ProfileError> {
         let refused = || invalid("overlays", Rule::Value);
-        let (rest, path) = match source.rsplit_once('#') {
-            Some((rest, path)) => {
-                if path.is_empty()
-                    || path.starts_with('/')
-                    || path.contains(['\\', ':', '\0'])
-                    || path.split('/').any(|segment| segment == "..")
-                {
-                    return Err(refused());
-                }
-                (rest, path)
-            }
-            None => (source, ""),
+        let parsed = crate::aos::parse_source(source).map_err(|_| refused())?;
+        let (crate::aos::SourceKind::Git, Some(reference)) = (parsed.kind, parsed.reference) else {
+            return Err(refused());
         };
-        let (repo, reference) = rest.rsplit_once('@').ok_or_else(refused)?;
-        if repo.is_empty()
-            || repo.starts_with('-')
-            || repo.contains("::")
-            || repo.chars().any(|c| c.is_control() || c.is_whitespace())
-        {
+        let repo = parsed.location;
+        if repo.chars().any(|c| c.is_control() || c.is_whitespace()) {
             return Err(refused());
         }
         if let Some((scheme, rest)) = repo.split_once("://")
             && (!["https", "http", "ssh", "git", "file"].contains(&scheme)
                 || (scheme == "file" && !rest.starts_with('/'))
-                || (["http", "git"].contains(&scheme) && !full_commit_id(reference)))
+                || (["http", "git"].contains(&scheme) && !full_commit_id(&reference)))
         {
             return Err(refused());
         }
-        if repo.starts_with("\\\\") || repo.starts_with("//") || !git_ref(reference) {
+        if repo.starts_with("\\\\") || repo.starts_with("//") || !git_ref(&reference) {
             return Err(refused());
         }
         Ok(Self::Git {
-            repo: repo.to_owned(),
-            reference: reference.to_owned(),
-            path: path.trim_end_matches('/').to_owned(),
+            repo,
+            reference,
+            path: parsed.path.unwrap_or_default(),
         })
     }
 }
@@ -1298,6 +1388,10 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
         + 1;
     (line, column)
 }
+
+mod overlay;
+
+pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
 
 #[cfg(test)]
 mod tests;
