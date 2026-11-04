@@ -193,6 +193,53 @@ choice; the tool entry is for a Pi, or a tool like it, with no adapter.
 prints one JSON line per entry: its name, kind, address, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
 saves its own settings.
 
+## Profiles
+
+A stdio agent entry can be launched with a profile, the same schema as the app's `[profile]` (see
+[Desktop and Canoa.cfg](configuration.md)): environment variables, an initial context, skills, MCP servers and model,
+effort and mode defaults.
+
+```toml
+[host.agents.claude]
+program = "npx"
+args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+profiles = ["review", "plain"]        # a client chooses among these; the first when it names none
+
+[host.profiles.review]
+context = { text = "Review before you change anything." }
+share_env = ["GITHUB_TOKEN"]          # what the overlays below may read
+overlays = ["team"]                   # installed by the app in overlays/ beside Canoa.cfg
+allow_mcp = { team = "sha256:…" }     # an overlay's MCP server, at the digest of its definition
+
+[host.profiles.review.env.GITHUB_TOKEN]
+from_env = "GITHUB_TOKEN"             # read from the host's own environment when the agent starts
+
+[host.profiles.review.mcp.lint]
+type = "stdio"
+command = "/usr/local/bin/lint-mcp"
+
+[host.profiles.plain]
+```
+
+- **A client chooses only by name, only among the entry's `profiles`.** It names one in `initialize`'s
+  `_meta["dev.boriken.canoa/profile"]`; anything else there, a name the entry does not offer, or a choice in any later
+  message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A client never sends a
+  profile's contents: every value comes from Canoa.cfg.
+- **The environment** reaches the agent's process when it starts, on the first line of its standard input through
+  `canoa-host launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
+  environment and files when the connection starts; one that cannot be read starts no agent.
+- **Context, skills and MCP servers** go with each `session/new`, `session/load` and `session/resume`, where the
+  agent's harness takes them, as the app does: the context through ACP `systemPrompt` (before a client's own), skills as the
+  Claude Code plugin `canoa-profile` or a directory Codex reads, MCP servers through `mcpServers`. A client's MCP server
+  may not take one of the profile's names.
+- **An overlay's MCP server stays off** until `allow_mcp` names it at the digest of its definition; a changed definition
+  is off again. The report, and the host's log, give the digest of each server that is off. A client cannot turn one on.
+  An overlay is read from the copy the app installed and checked against its record's digest; a changed copy is left out.
+- **The client is told what applied.** The answer to `initialize` and to each session request carries, under
+  `_meta["dev.boriken.canoa/profile"]`, the profile's name, the harness, a one-line summary and each part with its layer,
+  `applied`, `not supported`, `off` or `refused`, and why: names only, never a value.
+- The host reads no project's `.canoa/profile.toml`: the directory is the client's to name.
+
 ## In the desktop app
 
 Canoa's desktop app runs the host as its own child, so nothing else has to be started:
@@ -254,6 +301,8 @@ only from a dialog that shows its whole id.
   which an agent may read as launch options, is removed. A provider's facade takes no MCP server at all.
 - **Only the working roots it names**, when an entry names any, compared as written: a link inside a root that points
   outside it is followed.
+- **Only the profiles an entry offers, by name.** What a profile holds, its secrets and its MCP servers included, comes
+  from Canoa.cfg alone; see [Profiles](#profiles).
 
 ## What it trusts
 
@@ -275,7 +324,10 @@ only from a dialog that shows its whole id.
   directory, and logged as weakened), the Windows directory, the provider's working directory (Canoa.cfg's) and every
   directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
   opened with the narrow search again, so its other imports come from where they did.
-- **A stdio agent** is the program the file names, with the host's environment and working directory.
+- **A stdio agent** is the program the file names, with the host's environment and working directory, and its profile's
+  variables. A profile's stdio MCP server is a program the agent starts as it is told, with the variables the profile
+  gives it: the values reach the agent, which can show them to whoever drives it, so give a profile only secrets you
+  would give that agent's clients the use of.
 - **A tool entry** runs its program with the host's environment, in the session's working directory, with the rights of
   the account that runs the host. The client names that directory: set `working_roots` on a tool entry, or any directory
   of this user's will do. A network share or device path is refused, since even looking at one reaches another machine

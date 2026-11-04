@@ -19,6 +19,12 @@ origins = ["https://canoa.example"]  # optional: browser origins that may connec
 [host.agents.NAME]                    # a program speaking ACP on its standard streams
 program = "npx"                       # required; found as the OS finds a command
 args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+profiles = ["review", "plain"]        # optional: [host.profiles] a client may choose among, the first by default
+
+[host.profiles.NAME]                  # a profile (see Profiles below), read as the person's own layer
+overlays = ["team"]                   # optional: AOS overlays the app installed in overlays/ beside this file
+allow_mcp = { team = "sha256:…" }     # optional: an overlay's MCP server and the definition digest it may start at
+context = { text = "..." }            # and every key of the profile schema
 
 [host.providers.NAME]                 # a Guatiao agent_provider, from a library or a source
 library = "echo_provider.dll"         # a library file, relative to the file's directory; or:
@@ -67,13 +73,14 @@ pub const DEFAULT_MAX_PEERS: usize = 4;
 pub const DEFAULT_MAX_SESSIONS: usize = 8;
 pub const MAX_NAME: usize = 64;
 
-#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry> }   // Default, Clone, Eq
+#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile> }   // Default, Clone, Eq
 pub fn Config::load(path: &Path) -> Result<Config, ConfigError>
 pub fn Config::from_str_in(text: &str, base: &Path) -> Result<Config, ConfigError>   // touches no file
 pub fn Config::entry(&self, name: &str) -> Option<&Entry>
 
+#[non_exhaustive] pub struct HostProfile { pub profile: Profile, pub overlays: Vec<String>, pub allow_mcp: BTreeMap<String, String>, pub directory: PathBuf }
 #[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: SocketAddr, pub working_roots: Vec<PathBuf>, pub peers: Option<Vec<PeerId>>, pub max_peers: usize }
-#[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
+#[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
 #[non_exhaustive] pub enum Origin { Library(PathBuf), Source { file: PathBuf, settings: Settings, import_search: ImportSearch } }   // paths absolute
 #[non_exhaustive] pub enum ImportSearch { Library, Path }   // Copy
 pub const fn ImportSearch::as_str(self) -> &'static str     // "library", "path"
@@ -85,6 +92,7 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 ```
 
 - `entries` keeps the file's order, every agent before every provider, every provider before every tool. A file with no `[host]` gives no entries.
+- `[host.profiles.NAME]`: a name as an entry's; `overlays` valid AOS overlay names; `allow_mcp` values `sha256:` and 64 lower-case hex digits; the rest `Profile::from_table` as `LayerKind::User`, its relative paths from the file's directory. An agent's `profiles` must name profiles the file holds, each once. Errors say `profile NAME:` and a setting, never a value.
 - A tool entry's `listen`, `working_roots`, `peers` and `max_peers` are read as in the other tables; the rest is a `ToolSpec`, refused as a whole when `ToolSpec::check` refuses it. Its errors name a setting and a rule's index, never a value.
 - `library` and `source` are made absolute against `base` (the file's directory for `load`); `directory` is `base` made absolute, where the provider's process runs.
 - In `source_settings`, every text in a `dirs`, `manifests`, `paths` or `import_dirs` list, and `home` when it is text, is made absolute against the directory, since a source may otherwise resolve it against a later working directory or its own file's; other keys, `isolation` included, pass as written, for the source to refuse.
@@ -122,6 +130,7 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 - Each connection: the WebSocket handshake, then the proof of the identity's method, Noise (`coqui-peer-noise`) or WebCrypto (`coqui-peer-webcrypto`), within `PROOF_LIMIT`; a client of the other method fails it, and the log names both methods. Then the trust store decides (a stranger that proved its key is recorded as waiting), then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
 - The first message must be plain ACP: a link of streams (`coqui_agentic_peer::mux`) is refused. Then a fresh process serves that connection, relayed by `coqui_acp_bridge::relay`, and is stopped with its process tree when either side ends.
 - An agent entry runs `program args`. Every message from the client to it is parsed and the host's own serialization forwarded: `params` other than an object is answered `-32602`, since a list would fill a request's fields in order; `_meta` is removed at every depth; a request whose `params.mcpServers` holds anything but `http` or `sse` over `https`, or `acp`, is answered `-32602` and never reaches the agent; with `working_roots`, so is one whose `cwd` or `additionalDirectories` is outside them; what is not one JSON object is answered `-32700` or `-32600`. A refused notification is dropped.
+- **An agent entry with `profiles`** runs `provider_program launch -- PROGRAM ARGS...` instead, whose first line of standard input the host writes: the profile's environment (see `profile::launch`). The client chooses a profile by name in its first message, `initialize`, under `params._meta["dev.boriken.canoa/profile"]` (`profile::PROFILE_META`); none takes the first. A name the entry does not offer, a value that is not text, or a choice in a first message that is not `initialize` is answered `-32602`, logged, and no process starts; a choice in any later message is answered `-32602` and logged. A reference that cannot be resolved (`from_env` unset, `from_file` unreadable) answers `-32603` and starts nothing. Each overlay the profile names is read from `overlays/NAME` beside Canoa.cfg (4096 files, 64 MiB at most), with no link or excluded name, and must have the digest `overlays/NAME.json` records; else it is left out and reported. The agent's `initialize` answer decides the harness (from `agentInfo.name`, else an entry named `Claude`, `Codex`, `Gemini` or `Pi`) and what it takes (`systemPrompt`, `additionalDirectories`, MCP transports, by ACP v1 or v2 capability paths); then every `session/new`, `session/load` and `session/resume`, after the scope above, gets the context as `systemPrompt` (`append`, before a client's own blocks), the MCP servers in `mcpServers` (v1's stdio form untyped; a client's server of a name the profile holds, started or not, is `-32602`), skills written once per connection to a private temporary directory (removed after the agent ends) as the Claude plugin `canoa-profile` in `_meta.claudeCode.options.plugins` or a directory Codex reads (`.agents/skills` inside) in `additionalDirectories`. A session request before `initialize` is answered `-32600`. An overlay's MCP server starts only when `allow_mcp` names it at its digest (`sha256` of `{"layer", "server"}` as the view writes them); off, it is logged with that digest. The answer to `initialize` and to each session request carries `_meta[PROFILE_META]` = `{"name", "harness", "summary", "items": [{"key", "layer", "state", "how", "digest"?}]}`, `state` being `applied`, `not supported`, `off` or `refused`: names, never values. No project profile is read.
 - A tool entry is served as an agent entry whose program is `provider_program` itself: `provider_program tool --name NAME --spec JSON`, the entry as `ToolSpec` serializes it. So the scope above applies to its clients, and the process, with every tool process it starts, ends with the connection.
 - A provider entry is not filtered: its facade reads the client's `_meta` launch values (`context`, `model`, `effort`, an opaque `meta`) and hands them to the provider, and refuses an environment name. What a provider does with them is the provider's.
 - A provider entry runs `provider_program provider (--library L | --source S) --provider ID --max-sessions N --directory D --settings-on-stdin [--import-search library|path] [--working-root R]... --connect A`, so a library or source is loaded only in that connection's process, which runs in `D`. The command line holds paths, names and the address only. For each connection the host listens on a loopback port of its own, `A`; writes the entry's `source_settings` and `settings` and a one-time token of 32 random bytes as the first line of the process's standard input (`HostLine`), then closes it; and takes the first connection to `A` that sends the token within `START_LIMIT`, up to 8 that do not. ACP runs on that socket alone. What the process writes to standard output or error goes to the host's standard error, `OUTPUT_LIMIT` bytes per connection in all, the rest read and dropped after one warning; none of it reaches the client. The process and what it starts are ended with the connection, by job object on Windows and process group elsewhere. Its facade refuses any `mcpServers` and checks `working_roots` itself.
@@ -199,7 +208,14 @@ pub fn serve_stdio(spec: ToolSpec, name: &str) -> Result<(), ToolError>
 
 ## Profiles (`canoa_host::profile`)
 
-The schema of a profile, what an agent is launched with, and its merge in layers. The app reads the same schema; `tests/vectors/profile.json` holds both to the same views and refusals. `serve` does not apply profiles yet.
+The schema of a profile, what an agent is launched with, and its merge in layers. The app reads the same schema; `tests/vectors/profile.json` holds both to the same views and refusals. `serve` applies a `[host.profiles]` profile to an agent entry that offers it (see Serving).
+
+```rust
+pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
+pub fn launch(program: &OsStr, args: &[OsString], max: usize) -> io::Error
+```
+
+`launch` reads one line of at most `max` bytes, `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...]}`, runs `program` with those variables added, passes the rest of standard input to it, and exits this process with its status (1 for a signal); it returns only an error: `InvalidData` for a line of another form, or why the program did not start. It is `canoa-host launch`.
 
 ```toml
 model = "m"                      # effort, mode likewise: text, not empty, no control character
@@ -341,7 +357,10 @@ canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--
 canoa-host provider (--library FILE | --source FILE [--import-search library|path]) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin [--connect ADDRESS]]
 canoa-host tool --name NAME --spec JSON
+canoa-host launch PROGRAM [ARGS]...
 ```
+
+- `launch` is what `serve` runs for an agent entry with profiles: the environment on the first line of standard input, the rest to `PROGRAM`, whose status it exits with; a first line of another form is status 2.
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound; then it serves until stopped. It logs on standard error.
@@ -370,6 +389,7 @@ canoa-host tool --name NAME --spec JSON
 - Under Noise a client's handshake ends before the host decides, so a client the host refuses sees its link end rather than a failed proof.
 - The identity and trust store are the ones `coqui-acp-bridge serve --paired` uses: a key paired for one is paired for the other, and `canoa-host revoke` removes it from both.
 - A stdio agent inherits the host's environment and working directory. An agent can still start whatever its own tools start when the client allows them; the host stops only what a client could start without the agent asking.
+- A profile's variable and MCP server values never reach the client from the host, but they reach the agent, which acts for that client and may show them: give a profile only what that entry's clients may use.
 - A paired key reaches every session an agent keeps for this user: `session/list` and `session/load` pass to a stdio agent unchanged.
 - `working_roots` compare paths as written: a link inside a root that points outside it is followed by the agent.
 - If the host itself is killed, on Windows the system ends its agents with it (each is in a job object closed with the host); on Unix each sees its standard input close, and most then exit. `serve --until-stdin-closes` ends them on every platform when the parent goes.
