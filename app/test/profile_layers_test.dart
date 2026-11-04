@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/profile/aos.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
@@ -123,7 +124,7 @@ void main() {
   group('an overlay from git', skip: hasGit ? false : 'git is not on PATH', () {
     test('installs at a commit, shows what a sync changes, and changes nothing until applied', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
-      upstream.write('team/profile.toml', 'model = "one"\n[skills.review]\npath = "skills/review"\n');
+      upstream.write('team/overlay.cfg', '[harness.claude-code]\nmodel = "one"\n');
       upstream.write('team/skills/review/SKILL.md', '# Review\n');
       upstream.write('team/old.md', 'old\n');
       upstream.write('elsewhere/secret.txt', 'not part of the overlay\n');
@@ -135,44 +136,51 @@ void main() {
       final install = await store.check('team', source);
       expect(install.from, isNull);
       expect(install.commit, first);
-      expect(install.added, unorderedEquals(['profile.toml', 'skills/review/SKILL.md', 'old.md']));
+      expect(install.added, unorderedEquals(['overlay.cfg', 'skills/review/SKILL.md', 'old.md']));
       expect(store.installed('team'), isNull, reason: 'checking installs nothing');
       final installed = await store.apply(install);
       expect(installed.commit, first);
+      expect(installed.digest, install.digest, reason: 'the record keeps the tree digest installed');
       final dir = store.directoryOf('team');
-      expect(File('$dir/profile.toml').readAsStringSync(), contains('"one"'));
+      expect(digestEntries(await IoProfileHome('${temp.path}/home').readTree(dir)).digest, install.digest);
+      expect(File('$dir/overlay.cfg').readAsStringSync(), contains('"one"'));
       expect(File('$dir/secret.txt').existsSync(), isFalse);
       expect(File('$dir/../secret.txt').existsSync(), isFalse);
 
-      upstream.write('team/profile.toml', 'model = "two"\n');
+      upstream.write('team/overlay.cfg', '[harness.claude-code]\nmodel = "two"\n');
       upstream.write('team/new.md', 'new\n');
       upstream.delete('team/old.md');
-      upstream.entry('120000', 'team/link', '../../elsewhere/secret.txt');
       final second = upstream.commit('second');
 
       final sync = await store.check('team', source);
       expect((sync.from, sync.commit), (first, second));
       expect(sync.added, ['new.md']);
-      expect(sync.changed, ['profile.toml']);
+      expect(sync.changed, ['overlay.cfg']);
       expect(sync.removed, ['old.md']);
-      expect(sync.skipped, ['link'], reason: 'a link is never installed');
+      expect(sync.digest, isNot(install.digest));
       expect(store.installed('team')!.commit, first, reason: 'pinned until the person applies');
-      expect(File('$dir/profile.toml').readAsStringSync(), contains('"one"'));
+      expect(File('$dir/overlay.cfg').readAsStringSync(), contains('"one"'));
 
       await store.apply(sync);
       expect(store.installed('team')!.commit, second);
-      expect(File('$dir/profile.toml').readAsStringSync(), contains('"two"'));
+      expect(File('$dir/overlay.cfg').readAsStringSync(), contains('"two"'));
       expect(File('$dir/old.md').existsSync(), isFalse);
-      expect(FileSystemEntity.typeSync('$dir/link', followLinks: false), FileSystemEntityType.notFound);
 
       final pinned = await store.check('team', GitOverlay(repo: upstream.bare, reference: first, path: 'team'));
       expect(pinned.commit, first, reason: 'a commit id names that commit, wherever main is');
       expect(await store.check('team', source), isA<OverlayUpdate>().having((u) => u.changesNothing, 'nothing', true));
     });
 
-    test('a file name this computer cannot hold safely refuses the whole overlay', () async {
+    test('a link, and a file name this computer cannot hold safely, refuse the whole overlay', () async {
+      final linked = Upstream(Directory('${temp.path}/linked'));
+      linked.write('overlay.cfg', '');
+      linked.entry('120000', 'kb/link', '../../elsewhere/secret.txt');
+      linked.commit('a link');
+      await expectLater(OverlayStore('${temp.path}/linked-home').check('o', GitOverlay(repo: linked.bare, reference: 'main')),
+          throwsA(isA<OverlayException>().having((e) => e.message, 'message', contains('symlink'))));
+
       final upstream = Upstream(Directory('${temp.path}/up'));
-      upstream.write('profile.toml', 'model = "m"\n');
+      upstream.write('overlay.cfg', '');
 
       upstream.entry('100644', 'skills/CON.md', 'device');
       upstream.commit('device name');
@@ -181,9 +189,22 @@ void main() {
           throwsA(isA<OverlayException>()));
     });
 
+    test('a tree whose digest is not the pin Canoa.cfg names is refused before anything is installed', () async {
+      final upstream = Upstream(Directory('${temp.path}/up'));
+      upstream.write('overlay.cfg', '[env]\nMODE = "on"\n');
+      upstream.commit('one');
+      final store = OverlayStore('${temp.path}/overlays');
+      final source = GitOverlay(repo: upstream.bare, reference: 'main');
+      final digest = (await store.check('o', source)).digest;
+      expect((await store.check('o', source.pinnedTo(digest))).digest, digest);
+      await expectLater(store.check('o', source.pinnedTo('sha256:${'0' * 64}')),
+          throwsA(isA<OverlayException>().having((e) => e.message, 'message', contains('not the pin'))));
+      expect(store.installed('o'), isNull);
+    });
+
     test('a ref the source does not have, and a source git must not run, are refused', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
-      upstream.write('profile.toml', 'model = "m"\n');
+      upstream.write('overlay.cfg', '');
       upstream.commit('one');
       final store = OverlayStore('${temp.path}/overlays');
       await expectLater(store.check('o', GitOverlay(repo: upstream.bare, reference: 'nope')),
@@ -207,7 +228,6 @@ void main() {
     GitOverlay at(String reference) => GitOverlay(repo: source.dir, reference: reference);
 
     for (final (what, entries) in <(String, Map<String, Object>)>[
-      ('a .git directory', {'.git': {'config': '[core]\n\tfsmonitor = "touch pwned #"\n', 'HEAD': 'ref: refs/heads/x\n'}}),
       ('a .git directory in another case, deeper', {'skills': {'.GIT': {'config': 'x'}}}),
       ('the short name Windows gives .git', {'git~1': {'config': 'x'}}),
       ('two names that differ only in case', {'CONTEXT.md': 'benign', 'context.md': 'evil'}),
@@ -216,22 +236,37 @@ void main() {
       ('a wildcard Windows refuses in a name', {'what?.md': 'x'}),
     ]) {
       test('$what refuses the whole overlay', () async {
-        await source.commit(await source.tree({'profile.toml': 'model = "m"\n', ...entries}));
+        await source.commit(await source.tree({'overlay.cfg': '', ...entries}));
         await expectLater(store.check('o', at('main')), throwsA(isA<OverlayException>()));
       });
     }
 
+    test('a .git directory, and every excluded name, is no part of an overlay: never installed', () async {
+      await source.commit(await source.tree({
+        'overlay.cfg': '',
+        '.git': {'config': '[core]\n\tfsmonitor = "touch pwned #"\n', 'HEAD': 'ref: refs/heads/x\n'},
+        'lib': {'__pycache__': {'m.cpython-312.pyc': 'x'}, 'node_modules': {'p': {'index.js': 'x'}}},
+      }));
+      final update = await store.check('o', at('main'));
+      expect(update.files.keys, ['overlay.cfg']);
+      expect(update.skipped, unorderedEquals(['.git/HEAD', '.git/config', 'lib/__pycache__/m.cpython-312.pyc',
+          'lib/node_modules/p/index.js']));
+      await store.apply(update);
+      expect(Directory('${store.directoryOf('o')}/.git').existsSync(), isFalse);
+      expect(Directory('${store.directoryOf('o')}/lib').existsSync(), isFalse);
+    });
+
     test('a commit id pins that commit, whatever branch or tag carries its name', () async {
-      final pinned = await source.commit(await source.tree({'profile.toml': 'model = "pinned"\n'}));
-      final other = await source.commit(await source.tree({'profile.toml': 'model = "other"\n'}), parent: pinned);
-      await source.commit(await source.tree({'profile.toml': 'model = "other"\n'}), branch: pinned, parent: other);
+      final pinned = await source.commit(await source.tree({'overlay.cfg': 'name = "pinned"\n'}));
+      final other = await source.commit(await source.tree({'overlay.cfg': 'name = "other"\n'}), parent: pinned);
+      await source.commit(await source.tree({'overlay.cfg': 'name = "other"\n'}), branch: pinned, parent: other);
       expect((await store.check('o', at(pinned))).commit, pinned);
       await expectLater(store.check('o', at(pinned.substring(0, 7))), throwsA(isA<OverlayException>()),
           reason: 'a short id names no commit: a branch could take its name');
     });
 
     test('moving the pin to the commit installed changes the source, so applying is offered', () async {
-      final first = await source.commit(await source.tree({'profile.toml': 'model = "m"\n'}));
+      final first = await source.commit(await source.tree({'overlay.cfg': ''}));
       await store.apply(await store.check('o', at('main')));
       final repinned = await store.check('o', at(first));
       expect(repinned.commit, first);
@@ -240,9 +275,9 @@ void main() {
       expect(store.installed('o')!.source, at(first).spec);
     });
 
-    test('an update carries the profile it installs, for the person to read first', () async {
-      await source.commit(await source.tree({'profile.toml': 'model = "shown"\n'}));
-      expect((await store.check('o', at('main'))).profile, 'model = "shown"\n');
+    test('an update carries the overlay.cfg it installs, for the person to read first', () async {
+      await source.commit(await source.tree({'overlay.cfg': 'name = "shown"\n'}));
+      expect((await store.check('o', at('main'))).manifest, 'name = "shown"\n');
     });
 
     test('a tree of a million paths is refused as soon as it passes the limit', () async {
@@ -250,7 +285,7 @@ void main() {
       for (var depth = 0; depth < 6; depth++) {
         level = await source.tree({for (var i = 0; i < 10; i++) 'd$i': 'tree:$level'});
       }
-      await source.commit(await source.tree({'profile.toml': 'model = "m"\n', 'bomb': 'tree:$level'}));
+      await source.commit(await source.tree({'overlay.cfg': '', 'bomb': 'tree:$level'}));
       final clock = Stopwatch()..start();
       await expectLater(store.check('o', at('main')), throwsA(isA<OverlayException>()));
       expect(clock.elapsed, lessThan(const Duration(seconds: 15)));
@@ -264,19 +299,21 @@ void main() {
   group('every layer', skip: hasGit ? false : 'git is not on PATH', () {
     test('merges from where each lives; a project profile counts only while trusted as it is', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
-      upstream.write('profiles/team/profile.toml', '''
+      upstream.write('profiles/team/overlay.cfg', '''
+[env]
+GITHUB_TOKEN = { provider = "env", key = "GITHUB_TOKEN" }
+
+[harness.claude-code]
 model = "team-model"
 effort = "medium"
-context = { file = "CONTEXT.md" }
-[env.GITHUB_TOKEN]
-from_env = "GITHUB_TOKEN"
-[skills.review]
-path = "skills/review"
-[mcp.docs]
-type = "http"
+
+[[mcp.servers]]
+name = "docs"
+transport = "streamable-http"
 url = "https://docs.example/mcp"
 ''');
       upstream.write('profiles/team/CONTEXT.md', 'Be brief.\n');
+      upstream.write('profiles/team/skills/review/SKILL.md', '# Review\n');
       upstream.commit('team');
 
       final configDir = Directory('${temp.path}/config')..createSync();
@@ -328,7 +365,8 @@ remove = true
       expect(view['mode'], {'value': 'plan', 'layer': 'project'});
       expect(view.containsKey('context'), isFalse);
       expect(view['env'], [
-        {'name': 'GITHUB_TOKEN', 'value': {'from_env': 'GITHUB_TOKEN'}, 'layer': 'overlay:team'},
+        {'name': 'TEAM_OVERLAY_ROOT', 'value': {'value': home.overlays.directoryOf('team')}, 'layer': 'overlay:team'},
+        {'name': 'GITHUB_TOKEN', 'value': {'reference': 'env:GITHUB_TOKEN', 'optional': false}, 'layer': 'overlay:team'},
         {'name': 'RUST_LOG', 'value': {'value': 'debug'}, 'layer': 'project'},
       ]);
       expect(view['skills'], isEmpty);
@@ -359,7 +397,7 @@ remove = true
 
     test('an installed overlay from another source than Canoa.cfg names is left out until synced', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
-      upstream.write('profile.toml', 'model = "m"\n');
+      upstream.write('overlay.cfg', '');
       upstream.commit('one');
       final home = IoProfileHome('${temp.path}/config');
       final source = GitOverlay(repo: upstream.bare, reference: 'main');
@@ -369,7 +407,39 @@ remove = true
       expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'user']);
       expect(result.notes.single.text, contains('not the source Canoa.cfg names'));
     });
-  });
+    test('an installed copy is digested each time it is used: a change leaves it out, a pin ends unpinned', () async {
+      final upstream = Upstream(Directory('${temp.path}/up'));
+      upstream.write('overlay.cfg', '[env]\nMODE = "on"\n');
+      upstream.commit('one');
+      final home = IoProfileHome('${temp.path}/config');
+      var config = CanoaConfig.parse('[overlays]\no = "${upstream.bare.replaceAll(r'\', '/')}@main"\n');
+      final installed = await home.overlays.apply(await home.overlays.check('o', config.overlays['o']! as GitOverlay));
+      Future<ProfileLayers> layers() =>
+          profileLayers(overlays: config.overlays, user: const Profile(), agents: const {}, agent: 'a', home: home);
+
+      var result = await layers();
+      expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'overlay:o', 'user']);
+      List<Object?> weakenings() => ((result.effective.view()['overlays'] as List).single as Map)['weakenings'] as List;
+      expect(weakenings(), [['unpinned', '']]);
+
+      config = CanoaConfig.parse(config.withOverlayPin('o', installed.digest!).encode());
+      expect((config.overlays['o']! as GitOverlay).pin, installed.digest, reason: 'the pin is kept in Canoa.cfg');
+      result = await layers();
+      expect(weakenings(), isEmpty);
+
+      final dir = home.overlays.directoryOf('o');
+      Directory('$dir/.git').createSync();
+      File('$dir/.git/config').writeAsStringSync('[core]\n');
+      result = await layers();
+      expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'user']);
+      expect(result.notes.last.text, contains('no part of an overlay'));
+      Directory('$dir/.git').deleteSync(recursive: true);
+
+      File('$dir/overlay.cfg').writeAsStringSync('[env]\nMODE = "changed"\n');
+      result = await layers();
+      expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'user']);
+      expect(result.notes.last.text, contains('Its files changed'));
+    });  });
 
   test('a secret file of a project layer is read only inside the project, links followed', () async {
     final project = Directory('${temp.path}/project')..createSync();

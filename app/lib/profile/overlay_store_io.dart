@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'aos.dart';
 import 'overlays.dart';
 import 'profile.dart';
 
@@ -54,37 +56,40 @@ final class OverlayStore implements OverlayManager {
   @override
   Future<OverlayUpdate> check(String name, GitOverlay given) async {
     _checkName(name);
-    final source = OverlaySource.parseGit(given.spec);
+    final source = OverlaySource.parseGit(given.spec).pinnedTo(given.pin);
     final cache = _cache(name);
     if (!Directory(cache).existsSync()) {
       await Directory(cache).create(recursive: true);
       await _git(['init', '--quiet', '--bare', '--template=', cache]);
     }
     final commit = await _fetch(cache, source);
-    final (files, skipped) = await _list(cache, commit, source.path);
+    final (files, skipped, digest) = await _list(cache, commit, source.path);
+    if (source.pin case final pin? when !sameDigest(pin, digest)) {
+      throw OverlayException('Its tree digest is $digest, not the pin $pin Canoa.cfg names: nothing was installed');
+    }
     final before = installed(name);
     final old = before?.files ?? const {};
-    final profile = files['profile.toml'];
+    final manifest = files['overlay.cfg'];
     return OverlayUpdate(
       name: name,
       source: source,
       from: before?.commit,
       fromSource: before?.source,
+      fromDigest: before?.digest,
       commit: commit,
+      digest: digest,
       files: files,
       skipped: skipped,
       added: [for (final path in files.keys) if (!old.containsKey(path)) path],
       changed: [for (final MapEntry(:key, :value) in files.entries) if (old[key] case final blob? when blob != value) key],
       removed: [for (final path in old.keys) if (!files.containsKey(path)) path],
-      profile: profile == null
-          ? null
-          : utf8.decode(await _git(['--git-dir=$cache', 'cat-file', 'blob', profile], binary: true) as List<int>,
-              allowMalformed: true),
+      manifest: manifest == null ? null : utf8.decode((await _blobs(cache, [manifest]))[manifest]!, allowMalformed: true),
     );
   }
 
-  /// Installs exactly what [update] showed: the files at its commit, whatever the ref names now. The overlay's directory
-  /// is replaced whole, so a file edited there is lost; the person's own additions belong in their own profile.
+  /// Installs exactly what [update] showed: the files at its commit, whatever the ref names now, checked against its tree
+  /// digest as they are written. The overlay's directory is replaced whole, so a file edited there is lost; the person's
+  /// own additions belong in their own profile.
   @override
   Future<InstalledOverlay> apply(OverlayUpdate update) async {
     final name = update.name;
@@ -94,13 +99,20 @@ final class OverlayStore implements OverlayManager {
     if (staging.existsSync()) await staging.delete(recursive: true);
     await staging.create(recursive: true);
     try {
+      final blobs = await _blobs(cache, update.files.values.toSet().toList());
+      final written = <AosTreeEntry>[];
       for (final MapEntry(key: path, value: blob) in update.files.entries) {
-        final bytes = await _git(['--git-dir=$cache', 'cat-file', 'blob', blob], binary: true) as List<int>;
+        final bytes = blobs[blob]!;
         final file = File('${staging.path}${Platform.pathSeparator}${path.replaceAll('/', Platform.pathSeparator)}');
         await file.parent.create(recursive: true);
         // Exclusive: a name the file system takes for one already written fails the install rather than replacing it.
         await file.create(exclusive: true);
         await file.writeAsBytes(bytes, flush: true);
+        written.add(AosTreeEntry.file(path, bytes));
+      }
+      // The copy used is the copy hashed.
+      if (!sameDigest(digestEntries(written).digest, update.digest)) {
+        throw const OverlayException('The files read do not have the digest shown: nothing was installed');
       }
     } on Object {
       await staging.delete(recursive: true);
@@ -116,6 +128,7 @@ final class OverlayStore implements OverlayManager {
       name: name,
       source: update.source.spec,
       commit: update.commit,
+      digest: update.digest,
       files: update.files,
       skipped: update.skipped,
       installed: DateTime.now(),
@@ -172,41 +185,43 @@ final class OverlayStore implements OverlayManager {
     return (found as String).trim();
   }
 
-  /// Every file under [path] at [commit], read as git lists it and refused as soon as it passes [maxFiles] or
-  /// [maxBytes], before the rest is listed.
-  Future<(OverlayFiles, List<String>)> _list(String cache, String commit, String path) async {
-    final prefix = path.isEmpty ? '' : '$path/';
-    final files = <String, String>{};
-    final skipped = <String>[];
-    final folded = <String, String>{};
-    var bytes = 0;
-    void take(String line) {
-      final tab = line.indexOf('\t');
-      final fields = line.substring(0, tab).split(RegExp(' +'));
-      final full = line.substring(tab + 1);
-      if (!full.startsWith(prefix)) return;
-      final relative = full.substring(prefix.length);
+  /// Every entry under [path] at [commit], read as git lists it and refused as soon as its files pass [maxFiles] or
+  /// [maxBytes], then digested as AOS defines: a link, a submodule, a name that is not a relative path or two names
+  /// equal without ASCII case refuse the whole overlay. Entries under an excluded name are left out, never installed.
+  Future<(OverlayFiles, List<String>, String)> _list(String cache, String commit, String path) async {
+    final prefix = path.isEmpty ? <int>[] : utf8.encode('$path/');
+    final entries = <(AosTreeEntry, String)>[];
+    var count = 0, bytes = 0;
+    void take(List<int> line) {
+      final tab = line.indexOf(0x09);
+      final fields = ascii.decode(line.sublist(0, tab)).split(RegExp(' +'));
+      final full = line.sublist(tab + 1);
+      if (full.length <= prefix.length || compareBytes(full.sublist(0, prefix.length), prefix) != 0) return;
+      final relative = full.sublist(prefix.length);
       final (mode, type, blob) = (fields[0], fields[1], fields[2]);
-      if (type != 'blob' || mode == '120000') {
-        skipped.add(relative);
-        return;
-      }
-      if (!_safeRelative(relative)) {
-        throw const OverlayException('The source holds a file name this computer cannot hold safely');
-      }
-      final segments = relative.split('/');
-      for (var end = 1; end <= segments.length; end++) {
-        final name = segments.take(end).join('/');
-        final other = folded.putIfAbsent(name.toLowerCase(), () => name);
-        if (other != name) {
-          throw const OverlayException('The source holds two names that differ only in case');
+      final kind = mode == '120000'
+          ? AosEntryKind.symlink
+          : type == 'blob'
+          ? AosEntryKind.file
+          : AosEntryKind.special;
+      final components = <List<int>>[[]];
+      for (final byte in relative) {
+        if (byte == 0x2f) {
+          components.add([]);
+        } else {
+          components.last.add(byte);
         }
       }
-      files[relative] = blob;
-      bytes += int.tryParse(fields[3]) ?? 0;
-      if (files.length > maxFiles) throw OverlayException('The overlay holds more than $maxFiles files');
-      if (bytes > maxBytes) throw OverlayException('The overlay holds more than $maxBytes bytes');
+      final entry = AosTreeEntry(components, kind);
+      if (kind == AosEntryKind.file && !entry.isExcluded) {
+        count++;
+        bytes += int.tryParse(fields[3]) ?? 0;
+        if (count > maxFiles) throw OverlayException('The overlay holds more than $maxFiles files');
+        if (bytes > maxBytes) throw OverlayException('The overlay holds more than $maxBytes bytes');
+      }
+      entries.add((entry, blob));
     }
+
     final lister = await _start(['--git-dir=$cache', 'ls-tree', '-r', '-l', '-z', '--full-tree', commit, '--',
         if (path.isNotEmpty) path]);
     unawaited(lister.stderr.drain<void>());
@@ -218,7 +233,7 @@ final class OverlayStore implements OverlayManager {
             pending.add(byte);
             continue;
           }
-          take(utf8.decode(pending));
+          take(pending);
           pending.clear();
         }
       }
@@ -227,8 +242,64 @@ final class OverlayStore implements OverlayManager {
       rethrow;
     }
     if (await lister.exitCode != 0) throw const OverlayException('git ls-tree failed');
-    if (files.isEmpty) throw const OverlayException('The source has no files at that path and commit');
-    return (files, skipped);
+    final members = [
+      for (final (entry, blob) in entries)
+        if (entry.kind == AosEntryKind.file && !entry.isExcluded) (entry, blob),
+    ];
+    if (members.isEmpty) throw const OverlayException('The source has no files at that path and commit');
+    final blobs = await _blobs(cache, {for (final (_, blob) in members) blob}.toList());
+    final String digest;
+    try {
+      digest = digestEntries([
+        for (final (entry, blob) in entries)
+          AosTreeEntry(entry.components, entry.kind,
+              entry.kind == AosEntryKind.file && !entry.isExcluded ? blobs[blob]! : const []),
+      ]).digest;
+    } on AosException catch (error) {
+      throw OverlayException('The source cannot be an overlay (${error.code}: ${error.subject})');
+    }
+    return (
+      {for (final (entry, blob) in members) entry.path: blob},
+      [for (final (entry, _) in entries) if (entry.isExcluded) entry.path],
+      digest,
+    );
+  }
+
+  /// The bytes of each blob in [ids], read from git's object store in one `cat-file --batch`, as stored.
+  Future<Map<String, List<int>>> _blobs(String cache, List<String> ids) async {
+    if (ids.isEmpty) return {};
+    final process = await _start(['--git-dir=$cache', 'cat-file', '--batch']);
+    unawaited(process.stderr.drain<void>());
+    final collected = BytesBuilder(copy: false);
+    final reading = process.stdout.timeout(timeout).listen(collected.add).asFuture<void>();
+    try {
+      for (final id in ids) {
+        process.stdin.add(ascii.encode('$id\n'));
+      }
+      await process.stdin.close();
+      await reading;
+    } on Object {
+      process.kill();
+      rethrow;
+    }
+    if (await process.exitCode != 0) throw const OverlayException('git cat-file failed');
+    final data = collected.takeBytes();
+    final out = <String, List<int>>{};
+    var at = 0;
+    for (final id in ids) {
+      final end = data.indexOf(0x0a, at);
+      if (end < 0) throw const OverlayException('git cat-file answered short');
+      final header = ascii.decode(data.sublist(at, end)).split(' ');
+      if (header.length != 3 || header[0] != id || header[1] != 'blob') {
+        throw const OverlayException('git cat-file did not give a blob it was asked for');
+      }
+      final size = int.parse(header[2]);
+      at = end + 1;
+      if (at + size + 1 > data.length) throw const OverlayException('git cat-file answered short');
+      out[id] = Uint8List.sublistView(data, at, at + size);
+      at += size + 1;
+    }
+    return out;
   }
 
   Future<Object> _git(List<String> args, {bool binary = false}) async {
@@ -288,16 +359,3 @@ String _find(String program) {
   }
   throw OverlayException('$program is not in an absolute directory of PATH');
 }
-
-const _reserved = {'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'};
-
-/// A `/`-separated path that writes below its directory on every platform, and that git and Windows read as written:
-/// no empty, `.` or `..` segment; no `\`, `:`, `"`, `*`, `<`, `>`, `?`, `|` or control character; no `.git` in any
-/// case, no `~` followed by a digit (a Windows short name, such as `git~1`), no character a file system may ignore;
-/// and no segment Windows takes for a device or trims.
-bool _safeRelative(String path) => path.split('/').every((segment) =>
-    segment.isNotEmpty && segment != '.' && segment != '..' && !segment.endsWith('.') && !segment.endsWith(' ') &&
-    segment.toLowerCase() != '.git' && !RegExp(r'~[0-9]').hasMatch(segment) &&
-    !segment.contains(RegExp('[\\\\:"*<>?|\u0000-\u001f\u007f\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]')) &&
-    !_reserved.contains(segment.split('.').first.toUpperCase()));

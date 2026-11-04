@@ -4,6 +4,9 @@ library;
 
 import 'package:toml/toml.dart';
 
+import 'aos.dart' show AosException, AosSource, SourceKind, isSensitive, parseSource;
+import 'overlay_layer.dart';
+
 /// The longest skill, MCP server, header or overlay name.
 const int maxProfileName = 64;
 
@@ -30,10 +33,11 @@ const reservedEnvPrefixes = ['LD_', 'DYLD_', 'PYTHON', 'GIT_', 'NPM_CONFIG_', 'C
 /// Suffixes of [reservedEnv]'s kind, compared without case.
 const reservedEnvSuffixes = ['_BASE_URL', '_PROXY'];
 
-/// Whether an overlay or a project may not set [name].
+/// Whether an overlay or a project may not set [name]: [reservedEnv] and its prefixes and suffixes, and every variable the
+/// AOS specification names sensitive ([isSensitive]).
 bool isReservedEnv(String name) {
   final upper = name.toUpperCase();
-  return reservedEnv.contains(upper) || reservedEnvPrefixes.any(upper.startsWith) ||
+  return isSensitive(name) || reservedEnv.contains(upper) || reservedEnvPrefixes.any(upper.startsWith) ||
       reservedEnvSuffixes.any(upper.endsWith);
 }
 
@@ -109,6 +113,44 @@ final class EnvFromFile extends EnvValue {
   String toString() => 'EnvFromFile($path)';
 }
 
+/// AOS text from an overlay, whose `${NAME}` placeholders are substituted when a session starts.
+final class EnvText extends EnvValue {
+  const EnvText(this.text);
+  final String text;
+  @override
+  Map<String, Object?> toJson() => {'text': text};
+  @override
+  String toString() => 'EnvText(..)';
+}
+
+/// An AOS path, relative to the overlay's root, which becomes absolute.
+final class EnvPath extends EnvValue {
+  const EnvPath(this.path);
+  final String path;
+  @override
+  Map<String, Object?> toJson() => {'path': path};
+}
+
+/// An AOS secret reference, as `<provider>:<key>` or `secret:<name>`; an optional one stays unset when it cannot be
+/// resolved.
+final class EnvReference extends EnvValue {
+  const EnvReference(this.reference, {this.optional = false});
+  final String reference;
+  final bool optional;
+  @override
+  Map<String, Object?> toJson() => {'reference': reference, 'optional': optional};
+}
+
+/// AOS path additions to a list variable: each directory, relative to the overlay's root, and whether it is appended.
+final class EnvPaths extends EnvValue {
+  const EnvPaths(this.paths);
+  final List<(String, bool)> paths;
+  @override
+  Map<String, Object?> toJson() => {
+    'paths': [for (final (path, append) in paths) {'path': path, 'position': append ? 'append' : 'prepend'}],
+  };
+}
+
 /// The initial context: [text], or a [file] relative to its layer's directory. Exactly one is set.
 final class ProfileContext {
   const ProfileContext.text(String this.text) : file = null;
@@ -161,7 +203,7 @@ final class McpHttp extends McpServer {
 
 /// Why a profile document was refused, or a reference could not be resolved. Never quotes a value.
 final class ProfileException implements Exception {
-  const ProfileException(this.code, {this.key, this.line});
+  const ProfileException(this.code, {this.key, this.line, this.reason});
 
   /// `parse`, `name`, `path`, `form`, `value` or `resolve`.
   final String code;
@@ -172,6 +214,9 @@ final class ProfileException implements Exception {
   /// The 1-based line of a parse error, when the parser gives one.
   final int? line;
 
+  /// Why a reference could not be resolved, when it is more than that.
+  final String? reason;
+
   @override
   String toString() => switch (code) {
     'parse' => 'The profile is not TOML of a profile\'s shape${line == null ? '' : ' at line $line'}',
@@ -180,7 +225,7 @@ final class ProfileException implements Exception {
     'form' => 'Profile $key: takes exactly one of its forms',
     'value' => 'Profile $key: a value is empty, holds a control character, or is not an HTTP URL',
     'reserved' => 'Profile $key: a layer from elsewhere may not set this variable',
-    _ => 'Profile $key: the reference cannot be resolved',
+    _ => 'Profile $key: ${reason ?? 'the reference cannot be resolved'}',
   };
 }
 
@@ -196,9 +241,14 @@ final class Profile {
     this.env = const {},
     this.skills = const {},
     this.mcp = const {},
+    this.contexts = const [],
   });
 
   final String? model, effort, mode;
+
+  /// What an AOS overlay adds to the initial context, in order: its rules, routing lines, context files and the
+  /// harness's own. Every layer's adds up, and `unset = ["context"]` takes them back with `context`.
+  final List<ProfileContext> contexts;
   final ProfileContext? context;
 
   /// `model`, `effort`, `mode` or `context`: values of lower layers this one takes back.
@@ -214,7 +264,7 @@ final class Profile {
 
   bool get isEmpty =>
       model == null && effort == null && mode == null && context == null && unset.isEmpty && shareEnv.isEmpty && env.isEmpty &&
-      skills.isEmpty && mcp.isEmpty;
+      skills.isEmpty && mcp.isEmpty && contexts.isEmpty;
 
   /// Parses a profile document for a layer of [kind]. Touches no file.
   static Profile parse(String text, LayerKind kind) {
@@ -459,12 +509,15 @@ Map<String, EnvValue> _entries(String key, Object? table, bool variables, bool c
 
 /// One layer: a profile, where it comes from, and the directory its relative paths are read from.
 final class Layer {
-  const Layer(this.id, this.profile, {this.dir});
+  const Layer(this.id, this.profile, {this.dir, this.aos});
   final LayerId id;
   final Profile profile;
 
   /// Null reads relative paths from nowhere, and resolving one fails.
   final String? dir;
+
+  /// For an AOS overlay, what building its environment needs and what Canoa does not apply.
+  final AosLayer? aos;
 }
 
 /// A value and the layer it came from.
@@ -505,6 +558,15 @@ final class EffectiveProfile {
   /// What overlays and projects set that reads a variable not shared, and was left out.
   final refused = <Refused>[];
 
+  /// What AOS overlays add to the initial context, in their order, each with its layer.
+  final contexts = <Sourced<ProfileContext>>[];
+
+  /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its weakenings.
+  final overlays = <OverlayReport>[];
+
+  /// The AOS overlays, lowest first, whose environment is built when a session starts.
+  final aos = <AosLayer>[];
+
   /// The view the settings show and the vectors hold: every value with its layer, references as written.
   Map<String, Object?> view() {
     Map<String, Object?> one(Object? value, LayerId layer) => {'value': value, 'layer': '$layer'};
@@ -526,6 +588,9 @@ final class EffectiveProfile {
       'refused': [
         for (final refused in this.refused) {'key': refused.key, 'layer': '${refused.layer}', 'reads': refused.reads},
       ],
+      if (contexts.isNotEmpty)
+        'contexts': [for (final context in contexts) one(context.value.toJson(), context.layer)],
+      if (overlays.isNotEmpty) 'overlays': [for (final report in overlays) report.toJson()],
     };
   }
 
@@ -535,11 +600,20 @@ final class EffectiveProfile {
   Future<Map<String, Secret>> environment({
     required String? Function(String name) lookup,
     required Future<String?> Function(String path, {String? within}) readFile,
-  }) async => {
-    for (final MapEntry(:key, :value) in env.entries)
-      key: await resolveValue('env.$key', value.value, value.dir,
-          confined: value.layer.kind.confined, lookup: lookup, readFile: readFile),
-  };
+  }) async {
+    final built = buildOverlayEnvironment(aos, shareEnv, lookup);
+    final out = <String, Secret>{};
+    for (final MapEntry(:key, :value) in env.entries) {
+      if (value.layer.kind == LayerKind.overlay && aos.any((layer) => layer.identity == value.layer.name)) {
+        // An optional reference that could not be resolved leaves its variable unset.
+        if (built.values[key] case final found?) out[key] = Secret(found);
+        continue;
+      }
+      out[key] = await resolveValue('env.$key', value.value, value.dir,
+          confined: value.layer.kind.confined, lookup: lookup, readFile: readFile);
+    }
+    return out;
+  }
 }
 
 /// A resolved value; [toString] never shows it.
@@ -579,6 +653,8 @@ Future<Secret> resolveValue(
       if (!text.endsWith('\n')) return Secret(text);
       final trimmed = text.substring(0, text.length - 1);
       return Secret(trimmed.endsWith('\r') ? trimmed.substring(0, trimmed.length - 1) : trimmed);
+    case EnvText() || EnvPath() || EnvReference() || EnvPaths():
+      throw ProfileException('resolve', key: key, reason: "only an AOS overlay's environment gives this value");
   }
 }
 
@@ -622,7 +698,12 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
           out.context = null;
       }
       if (was != null) out.removed.add(Removed(name, layer.id, was));
+      if (name == 'context') {
+        out.removed.addAll([for (final context in out.contexts) Removed(name, layer.id, context.layer)]);
+        out.contexts.clear();
+      }
     }
+    out.contexts.addAll([for (final context in profile.contexts) Sourced(context, layer.id, layer.dir)]);
     if (profile.model case final model?) out.model = sourced(model);
     if (profile.effort case final effort?) out.effort = sourced(effort);
     if (profile.mode case final mode?) out.mode = sourced(mode);
@@ -645,6 +726,12 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
     entries(out.skills, profile.skills, 'skills');
     entries(out.mcp, profile.mcp, 'mcp');
   }
+  for (final layer in layers) {
+    if (layer.aos case final aos?) {
+      out.overlays.add(overlayReport(layer.id, aos, out.shareEnv));
+      out.aos.add(aos);
+    }
+  }
   return out;
 }
 
@@ -652,30 +739,22 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
 sealed class OverlaySource {
   const OverlaySource();
 
-  /// Parses `<repository>@<ref>[#<path>]`, as dotagents writes it: the ref follows the last `@`, the path the last `#`.
-  /// Throws [ProfileException] with key `overlays` for what canoa-host refuses too, among it a plaintext `http` or
-  /// `git` transport at anything but a full commit id, and another host's share.
+  /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [parseSource] does, and holds it to what Canoa
+  /// fetches: a Git repository at a named ref. Throws [ProfileException] with key `overlays` for what canoa-host refuses
+  /// too: what the specification refuses, a source that is not Git or names no ref, a scheme not in lowercase, a
+  /// plaintext `http` or `git` transport at anything but a full commit id, another host's share, a ref git would refuse.
   static GitOverlay parseGit(String source) {
     Never refused() => throw const ProfileException('value', key: 'overlays');
-    var rest = source;
-    var path = '';
-    final hash = source.lastIndexOf('#');
-    if (hash >= 0) {
-      path = source.substring(hash + 1);
-      rest = source.substring(0, hash);
-      if (path.isEmpty || path.startsWith('/') || path.contains(RegExp(r'[\\:\u0000]')) ||
-          path.split('/').contains('..')) {
-        refused();
-      }
-    }
-    final at = rest.lastIndexOf('@');
-    if (at < 0) refused();
-    final repo = rest.substring(0, at);
-    final reference = rest.substring(at + 1);
-    if (repo.isEmpty || repo.startsWith('-') || repo.contains('::') ||
-        repo.runes.any((rune) => _isControl(rune) || _isSpace(rune))) {
+    final AosSource parsed;
+    try {
+      parsed = parseSource(source);
+    } on AosException {
       refused();
     }
+    final reference = parsed.reference;
+    if (parsed.kind != SourceKind.git || reference == null) refused();
+    final repo = parsed.location;
+    if (repo.runes.any((rune) => _isControl(rune) || _isSpace(rune))) refused();
     final scheme = repo.indexOf('://');
     if (scheme >= 0) {
       final name = repo.substring(0, scheme);
@@ -686,10 +765,7 @@ sealed class OverlaySource {
       }
     }
     if (repo.startsWith(r'\\') || repo.startsWith('//') || !_gitRef(reference)) refused();
-    while (path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
-    }
-    return GitOverlay(repo: repo, reference: reference, path: path);
+    return GitOverlay(repo: repo, reference: reference, path: parsed.path ?? '', written: source);
   }
 }
 
@@ -700,17 +776,28 @@ bool isFullCommitId(String reference) =>
 
 /// A git repository at a ref, and the overlay's directory inside it (empty for its root).
 final class GitOverlay extends OverlaySource {
-  const GitOverlay({required this.repo, required this.reference, this.path = ''});
+  const GitOverlay({required this.repo, required this.reference, this.path = '', this.written, this.pin});
   final String repo, reference, path;
+  final String? written;
+
+  /// The tree digest Canoa.cfg pins it to, `sha256:<hex>`, or null when it names none.
+  final String? pin;
 
   /// The source as Canoa.cfg writes it.
-  String get spec => '$repo@$reference${path.isEmpty ? '' : '#$path'}';
+  String get spec => written ?? '$repo@$reference${path.isEmpty ? '' : '#$path'}';
+
+  /// This source pinned to [digest].
+  GitOverlay pinnedTo(String? digest) =>
+      GitOverlay(repo: repo, reference: reference, path: path, written: written, pin: digest);
 }
 
 /// A directory on this computer, read in place.
 final class DirOverlay extends OverlaySource {
-  const DirOverlay(this.dir);
+  const DirOverlay(this.dir, {this.pin});
   final String dir;
+
+  /// The tree digest Canoa.cfg pins it to, or null.
+  final String? pin;
 }
 
 bool _gitRef(String reference) =>

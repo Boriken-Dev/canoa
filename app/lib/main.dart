@@ -152,8 +152,9 @@ class _CanoaAppState extends State<CanoaApp> {
       _settingsOpen = false;
     }
     if (fromDialog == null || !mounted) return;
-    // [host] stays as the app has it now: Hosting may have changed it while Settings was open.
-    final changed = fromDialog.withHost(config.host);
+    // [host] and the profile tables stay as the app has them now: Hosting may have changed one, and an overlay installed
+    // from Profiles is pinned in [overlays], while Settings was open.
+    final changed = fromDialog.withHost(config.host).withProfilesOf(config);
     setState(() => config = changed);
     store.ledger?.configure(changed.sessions);
     await widget.shell?.update(changed);
@@ -180,6 +181,12 @@ class _CanoaAppState extends State<CanoaApp> {
         agents: {for (final agent in [...agentPresets, ...config.agents]) agent.label, ...config.agentProfiles.keys}
             .toList(),
         home: platformProfileHome(configPath: _configPath),
+        onPin: (name, digest) async {
+          final changed = config.withOverlayPin(name, digest);
+          await _write(changed);
+          if (mounted) setState(() => config = changed);
+          return changed;
+        },
       ),
     );
   }

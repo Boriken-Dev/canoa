@@ -175,6 +175,54 @@ final class CanoaConfig {
     return withHost(copy);
   }
 
+  /// This configuration with the overlay [name] pinned to the tree digest [digest]: its entry becomes
+  /// `{ source = "...", pin = "..." }`, or keeps its `dir` beside the pin.
+  CanoaConfig withOverlayPin(String name, String digest) {
+    final source = overlays[name];
+    if (source == null) throw ArgumentError.value(name, 'name', 'No overlay of that name');
+    final raw = _deepCopy((tables['overlays'] as Map?) ?? const {});
+    raw[name] = switch (source) {
+      GitOverlay() => <String, dynamic>{'source': source.spec, 'pin': digest},
+      DirOverlay(:final dir) => <String, dynamic>{'dir': dir, 'pin': digest},
+    };
+    return withProfileTables(
+      overlays: {
+        for (final MapEntry(:key, :value) in overlays.entries)
+          key: key != name
+              ? value
+              : switch (value) {
+                  GitOverlay() => value.pinnedTo(digest),
+                  DirOverlay(:final dir) => DirOverlay(dir, pin: digest),
+                },
+      },
+      tables: {...tables, 'overlays': raw},
+    );
+  }
+
+  /// This configuration with another's `[overlays]`, `[profile]` and agent profiles, as they are now.
+  CanoaConfig withProfilesOf(CanoaConfig other) =>
+      withProfileTables(overlays: other.overlays, tables: other.tables, profile: other.profile,
+          agentProfiles: other.agentProfiles);
+
+  CanoaConfig withProfileTables({required Map<String, OverlaySource> overlays, required Map<String, Object?> tables,
+      Profile? profile, Map<String, Profile>? agentProfiles}) => CanoaConfig(
+    startHidden: startHidden,
+    closeToTray: closeToTray,
+    minimizeToTray: minimizeToTray,
+    preferWebTransport: preferWebTransport,
+    connectTimeout: connectTimeout,
+    cdn: cdn,
+    look: look,
+    brightness: brightness,
+    agents: agents,
+    host: host,
+    sessions: sessions,
+    overlays: overlays,
+    profile: profile ?? this.profile,
+    agentProfiles: agentProfiles ?? this.agentProfiles,
+    tables: tables,
+  );
+
   static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
     for (final MapEntry(:key, :value) in map.entries)
       '$key': switch (value) {
@@ -280,16 +328,25 @@ final class CanoaConfig {
       if (!isEntryName('$key')) {
         throw const FormatException('Canoa.cfg: an overlay name has 1 to 64 letters, digits, - or _');
       }
+      GitOverlay git(String spec) {
+        try {
+          return OverlaySource.parseGit(spec);
+        } on ProfileException {
+          throw FormatException('Canoa.cfg: overlays.$key is not <repository>@<ref>[#<path>] of a source git may fetch');
+        }
+      }
+      String? pin(Map<dynamic, dynamic> entry) => switch (entry['pin']) {
+        null => null,
+        final String digest when RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(digest) => digest,
+        _ => throw FormatException('Canoa.cfg: overlays.$key.pin is sha256: and 64 hexadecimal digits'),
+      };
       overlays['$key'] = switch (value) {
-        final String spec => () {
-          try {
-            return OverlaySource.parseGit(spec);
-          } on ProfileException {
-            throw FormatException('Canoa.cfg: overlays.$key is not <repository>@<ref>[#<path>] of a source git may fetch');
-          }
-        }(),
-        {'dir': final String dir} when value.length == 1 && dir.isNotEmpty => DirOverlay(dir),
-        _ => throw FormatException('Canoa.cfg: overlays.$key is a git source or { dir = "..." }'),
+        final String spec => git(spec),
+        {'source': final String spec} when value.keys.every(const {'source', 'pin'}.contains) =>
+          git(spec).pinnedTo(pin(value)),
+        {'dir': final String dir} when dir.isNotEmpty && value.keys.every(const {'dir', 'pin'}.contains) =>
+          DirOverlay(dir, pin: pin(value)),
+        _ => throw FormatException('Canoa.cfg: overlays.$key is a git source, { source, pin } or { dir, pin }'),
       };
     }
     final rawProfile = data['profile'];
