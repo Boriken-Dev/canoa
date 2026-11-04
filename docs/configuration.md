@@ -23,6 +23,7 @@ Configuration tables:
 - [permissions] full_access: the agents, by the label the app shows, whose sessions start with full access, such as `full_access = ["Claude"]`. Empty by default. Full access answers each permission request that offers to allow once with that option and no question, and is shown on the conversation and its row while it lasts; see [permission requests in the chat](acp-client.md#permission-requests-in-the-chat).
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
+- [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store).
 
 The session list is `sessions.json` beside Canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session.
 
@@ -171,7 +172,57 @@ source's listing at most 16384 entries; listing stops as soon as it passes any o
 
 An overlay's `[about]` `summary` shows beside it, as plain text. Its `icon`, a PNG or WebP file of the overlay (never
 SVG), shows only after its size (512 KiB) and the dimensions its header gives (1024 by 1024) are checked, before it is
-decoded; otherwise a placeholder shows.
+decoded; otherwise a placeholder shows. Those limits are the `[store]` settings below. An icon is shown as the still
+pixels of its first frame.
+
+### The overlay store
+
+**Store…** in Settings → Profiles lists the overlays of the catalogs `[catalogs]` names, to search, read about and
+install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
+a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
+source, with a summary, an icon, tags and the like for each. Canoa fetches it as it fetches an overlay (git objects at
+the ref named, one commit deep, never checked out, with the same limits), and reads YAML in neither.
+
+```toml
+[catalogs]
+team = "https://github.com/example/overlays.git@main#catalog.toml"   # a label of yours = <repository>@<ref>#<catalog file>
+
+[store]
+catalog_max_bytes = 4194304   # a catalog file's size, 4 MiB
+catalog_max_depth = 64        # how deeply it nests
+icon_max_bytes = 524288       # an icon's size, 512 KiB
+icon_max_width = 1024         # the width and height its header may give
+icon_max_height = 1024
+```
+
+A label is yours, a valid overlay name unique among your catalogs; it never comes from the catalog. Each `[store]`
+limit is a setting with the specification's default and no floor; one set above its default is shown in the store as
+looser than the default.
+
+- **A listing** shows each overlay's icon, name, summary, tags, its catalog's label and its source (with no user
+  information or query). It searches by words and filters by tags. A name two catalogs offer is shown once per catalog,
+  as `label/name`; entries are never merged. A source relative to the catalog is the catalog's repository at its ref;
+  a catalog from a repository may not name a path on this computer, and such an entry is refused. Each refused entry,
+  each field left out and each refused icon is listed under its catalog.
+- **What a catalog says is its author's claim.** An overlay's page shows it under "What the catalog says", with the
+  source and the pin it claims. **Fetch and show what it would do** fetches the overlay, installing nothing, and shows
+  what the overlay itself says (its name, description, `[about]` and icon, from its own files), the commit and tree
+  digest, and what it would do as Settings → Profiles would apply it: its environment, skills, MCP servers and context,
+  what Canoa does not apply (setup, env scripts, dependencies, commands, the `bin`/`lib` defaults), each setup and
+  whether it says it needs the network, the overlays it requires, what none of your layers shares, and its weakenings.
+  A tag or a summary is never taken as evidence of any of it.
+- **A catalog's pin** is checked against the tree fetched: one that does not match is shown as a refusal and the
+  overlay cannot be installed from that entry. An entry with no pin is shown as unpinned.
+- **Install and pin** installs exactly what was shown, through the path **Install…** takes, and names the overlay in
+  `[overlays]` as `{ source, pin }`, pinned to the digest checked. **Update and pin** shows what an update changes first,
+  then the same. **Remove…** takes the overlay out of `[overlays]` and deletes its files and fetched history. An
+  overlay of the same name that Canoa.cfg names from another source is neither installed over nor removed. Nothing of
+  an overlay runs, from the store or otherwise. Catalogs are fetched into `overlays/.catalogs/LABEL.git`.
+
+Only git sources with a branch, tag or commit install: an entry whose source is a directory, a URL that is not git, or
+git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown as text to
+copy, never fetched. A web build lists no catalog.
+
 ### Trusting a project
 
 A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first, every
