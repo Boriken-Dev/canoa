@@ -29,7 +29,10 @@ typedef CatalogIcon = ({List<int>? bytes, String? refused});
 /// One catalog as the store read it, or why it could not.
 final class LoadedCatalog {
   const LoadedCatalog({required this.label, required this.source, this.commit, this.catalog, this.problem,
-      this.icons = const {}});
+      this.icons = const {}, this.leftOut = 0});
+
+  /// How many entries past `[store] catalog_max_entries` were left out.
+  final int leftOut;
 
   final String label;
   final GitOverlay source;
@@ -67,34 +70,50 @@ Future<LoadedCatalog> loadCatalog(OverlayManager overlays, String label, GitOver
     return failed('Its file holds ${file.size} bytes, more than the ${settings.catalogMaxBytes} [store] allows',
         tree.commit);
   }
-  final AosCatalog catalog;
+  final AosCatalog read;
   try {
-    catalog = readCatalog(source.path, bytes,
+    read = readCatalog(source.path, bytes,
         base: AosSource(SourceKind.git, source.repo, source.reference, source.path), limits: settings.catalogLimits);
   } on AosException catch (error) {
     return failed('It is not a catalog Canoa reads (${error.code})', tree.commit);
   }
+  // Entries are in byte order of their names: those past the limit are left out, and counted.
+  final kept = read.entries.keys.take(settings.catalogMaxEntries).toList();
+  final catalog = AosCatalog(form: read.form, name: read.name, description: read.description, homepage: read.homepage,
+      entries: {for (final name in kept) name: read.entries[name]!}, refused: read.refused, ignored: read.ignored);
+  // Each icon file is read once, however many entries name it, and no more files than the limit.
+  final byPath = <String, CatalogIcon>{};
   final icons = <String, CatalogIcon>{};
   final folder = _dirname(source.path);
   for (final entry in catalog.entries.values) {
     final icon = entry.about['icon'];
     if (icon is! String) continue;
     final path = folder.isEmpty ? icon : '$folder/$icon';
-    try {
-      final found = await tree.file(path, maxBytes: settings.iconMaxBytes);
-      if (found == null) {
-        icons[entry.name] = (bytes: null, refused: 'icon-missing');
-      } else if (found.bytes == null) {
-        icons[entry.name] = (bytes: null, refused: 'icon-too-large');
-      } else {
-        checkIcon(path, found.bytes!, limits: settings.iconLimits);
-        icons[entry.name] = (bytes: found.bytes, refused: null);
-      }
-    } on AosException catch (error) {
-      icons[entry.name] = (bytes: null, refused: error.code);
+    if (byPath[path] case final known?) {
+      icons[entry.name] = known;
+      continue;
     }
+    if (byPath.length >= settings.catalogMaxIcons) {
+      icons[entry.name] = (bytes: null, refused: 'icon-limit');
+      continue;
+    }
+    icons[entry.name] = byPath[path] = await _icon(tree, path, settings);
   }
-  return LoadedCatalog(label: label, source: source, commit: tree.commit, catalog: catalog, icons: icons);
+  return LoadedCatalog(label: label, source: source, commit: tree.commit, catalog: catalog, icons: icons,
+      leftOut: read.entries.length - kept.length);
+}
+
+Future<CatalogIcon> _icon(FetchedTree tree, String path, StoreSettings settings) async {
+  try {
+    final found = await tree.file(path, maxBytes: settings.iconMaxBytes);
+    if (found == null) return (bytes: null, refused: 'icon-missing');
+    final bytes = found.bytes;
+    if (bytes == null) return (bytes: null, refused: 'icon-too-large');
+    checkIcon(path, bytes, limits: settings.iconLimits);
+    return (bytes: bytes, refused: null);
+  } on AosException catch (error) {
+    return (bytes: null, refused: error.code);
+  }
 }
 
 /// [source] as a store shows it: without user information or query, which can hold a credential.
@@ -124,8 +143,21 @@ final class StoreListing {
   final List<LoadedCatalog> catalogs;
   final CatalogListing listing;
 
+  /// The [count] tags the most entries carry, the most used first, then by name.
+  List<String> topTags(int count) {
+    final uses = <String, int>{};
+    for (final listed in listing.entries) {
+      for (final tag in _tags(listed.entry).toSet()) {
+        uses.update(tag, (n) => n + 1, ifAbsent: () => 1);
+      }
+    }
+    return (uses.keys.toList()..sort((a, b) => uses[a] != uses[b] ? uses[b]! - uses[a]! : a.compareTo(b)))
+        .take(count)
+        .toList();
+  }
+
   /// Every tag the listed entries carry, sorted.
-  List<String> get tags =>
+  late final List<String> tags =
       {for (final listed in listing.entries) ..._tags(listed.entry)}.toList()..sort();
 
   LoadedCatalog catalogOf(ListedEntry listed) => catalogs.firstWhere((loaded) => loaded.label == listed.label);
@@ -141,7 +173,7 @@ final class StoreListing {
   }
 
   static List<String> _tags(CatalogEntry entry) => [
-    for (final tag in (entry.about['tags'] as List?) ?? const []) '$tag',
+    if (entry.about['tags'] case final List<Object?> tags) for (final tag in tags) '$tag',
   ];
 
   static String _haystack(ListedEntry listed) => [
@@ -173,6 +205,9 @@ GitOverlay installSource(CatalogEntry entry) {
   final reference = source.reference;
   if (reference == null) {
     throw const StoreRefusal('It names no branch, tag or commit, and Canoa fetches only a named one');
+  }
+  if (holdsPassword(source.location)) {
+    throw const StoreRefusal('Its source holds a password, which Canoa.cfg may not: it is not installed from here');
   }
   try {
     return OverlaySource.parseGit('${source.location}@$reference${source.path == null ? '' : '#${source.path}'}');
@@ -242,26 +277,35 @@ final class OverlayPreview {
 
   String get name => update.name;
 
-  List<String> get requires => [for (final item in (manifest['requires'] as List?) ?? const []) '$item'];
+  /// The overlays its manifest requires, as written; none when `requires` is not a list.
+  List<String> get requires => [
+    if (manifest['requires'] case final List<Object?> items) for (final item in items) '$item',
+  ];
 
-  /// Each setup the manifest declares: its path, the OSes it is for, and whether it says it needs the network.
+  /// Each setup the manifest declares: its path, the OSes it is for, and whether it says it needs the network. What is
+  /// not of the form AOS defines is shown as written, never acted on.
   List<(String, List<String>?, bool)> get setup => [
-    for (final entry in (manifest['setup'] as List?) ?? const [])
-      if (entry is Map)
-        ('${entry['path'] ?? ''}', entry['os'] is List ? [for (final os in entry['os'] as List) '$os'] : null,
-            entry['network'] == true),
+    if (manifest['setup'] case final List<Object?> entries)
+      for (final entry in entries)
+        if (entry is Map)
+          ('${entry['path'] ?? ''}', entry['os'] is List ? [for (final os in entry['os'] as List) '$os'] : null,
+              entry['network'] == true),
+  ];
+
+  /// The harnesses its manifest gives hints for.
+  List<String> get harnesses => [
+    if (manifest['harness'] case final Map<Object?, Object?> hints) for (final id in hints.keys) '$id',
   ];
 }
 
 /// Fetches [source] as [name] and computes what installing it would do, touching nothing installed: the manifest and
 /// files are read from the fetched tree, the layer is the one Settings, Profiles would make of it, and the report is
-/// its weakenings and what Canoa does not apply. A catalog's [catalogPin], and [configPin] when Canoa.cfg pins the same
-/// source, must each match the tree fetched, or installing is refused.
+/// its weakenings and what Canoa does not apply. A catalog's [catalogPin] must match the tree fetched, or installing is
+/// refused; Canoa.cfg's own pin is held by [installPreview].
 Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitOverlay source, {
   required String os,
   required Map<String, LayerId> shared,
   String? catalogPin,
-  String? configPin,
   String? harness,
   IconLimits iconLimits = const IconLimits(),
 }) async {
@@ -274,8 +318,6 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   String? pinRefusal;
   if (catalogPin != null && !sameDigest(catalogPin, update.digest)) {
     pinRefusal = 'The catalog pins $catalogPin, and what was fetched is ${update.digest}: refused';
-  } else if (configPin != null && !sameDigest(configPin, update.digest)) {
-    pinRefusal = 'Canoa.cfg pins $configPin, and what was fetched is ${update.digest}';
   }
   Map<String, Object?> manifest = const {};
   if (files['overlay.cfg'] case final bytes?) {
@@ -312,15 +354,32 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
       iconRefused: iconRefused, layer: layer, report: report, refusal: refusal, pinRefusal: pinRefusal);
 }
 
+/// The pin Canoa.cfg gives the overlay [name], when it names one, and the tree [preview] fetched has another digest:
+/// installing it moves that pin, which [installPreview] does only when asked to.
+String? pinMoved(CanoaConfig config, OverlayPreview preview) {
+  final named = namedAs(config, preview.name);
+  if (named == null) return null;
+  return switch (config.overlays[named]) {
+    GitOverlay(:final pin?) when !sameDigest(pin, preview.update.digest) => pin,
+    _ => null,
+  };
+}
+
 /// Installs or updates what [preview] showed, through the same path an overlay named by hand takes: the files at its
-/// commit, checked against its tree digest as written, then the overlay named in Canoa.cfg pinned to that digest.
-Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, OverlayPreview preview) async {
+/// commit, checked against its tree digest as written, then the overlay named in Canoa.cfg pinned to that digest. A
+/// pin Canoa.cfg already gives it holds as it does for a sync from Settings, Profiles: a tree of another digest is
+/// installed only with [movePin], the person's choice to move it.
+Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, OverlayPreview preview,
+    {bool movePin = false}) async {
   if (preview.pinRefusal case final why?) throw StoreRefusal(why);
   if (preview.refusal case final why?) throw StoreRefusal('Canoa would leave it out: $why');
   final name = preview.name;
   final named = namedAs(config, name);
   if (named != null && entryState(config, name, preview.update.source) != EntryState.installed) {
     throw StoreRefusal('Canoa.cfg names $named from another source: remove it there first');
+  }
+  if (pinMoved(config, preview) case final pin? when !movePin) {
+    throw StoreRefusal('Canoa.cfg pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
   }
   final record = await overlays.apply(preview.update);
   return config.withOverlay(named ?? name, preview.update.source.pinnedTo(null), record.digest!);
@@ -337,6 +396,9 @@ Future<CanoaConfig> removeInstalled(OverlayManager overlays, CanoaConfig config,
   await overlays.remove(named);
   return config.withoutOverlay(named);
 }
+
+/// Removes what previewing [name] fetched, when nothing is installed under that name.
+Future<void> discardPreview(OverlayManager overlays, String name) => overlays.discard(name);
 
 /// A tag line for an overlay's `[about]` tags, as plain words.
 String tagLine(Map<String, Object> about) => [for (final tag in (about['tags'] as List?) ?? const []) '$tag'].join(', ');

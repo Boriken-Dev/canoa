@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
@@ -12,6 +14,13 @@ import 'store_icon.dart';
 
 /// Saves a changed Canoa.cfg and gives the configuration saved, or null when it was not.
 typedef SaveConfig = Future<CanoaConfig?> Function(CanoaConfig changed);
+
+/// [text] for a place that holds one line: as [visible] shows it, and a line break or tab named too, so text from a
+/// catalog or a manifest cannot add a line that reads as Canoa's own.
+String oneLine(String text) => visible(text).replaceAll('\n', '<U+000A>').replaceAll('\t', '<U+0009>');
+
+/// How many tags the listing offers as filters: the most used.
+const shownTags = 40;
 
 /// The overlay store: the catalogs of `[catalogs]`, each fetched as overlays are, their entries searched by text and
 /// tag, an entry two catalogs offer shown once per catalog qualified by its label, and each entry's page.
@@ -144,7 +153,7 @@ class StorePageState extends State<StorePage> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Wrap(spacing: 6, runSpacing: 6, children: [
-                    for (final tag in listing.tags)
+                    for (final tag in {...listing.topTags(shownTags), ...tags})
                       FilterChip(
                         key: Key('store-tag-$tag'),
                         label: Text(tag),
@@ -194,12 +203,12 @@ class StorePageState extends State<StorePage> {
       child: ListTile(
         leading: StillIcon(name: entry.name, path: entry.about['icon'] as String?, bytes: icon?.bytes,
             limits: config.store.iconLimits),
-        title: Text(visible(listed.shown)),
+        title: Text(oneLine(listed.shown)),
         subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (summary is String) Text(visible(summary)),
-          Text(visible('${listed.label} · ${displaySource(entry.source)}'),
+          if (summary is String) Text(oneLine(summary)),
+          Text(oneLine('${listed.label} · ${displaySource(entry.source)}'),
               style: Theme.of(context).textTheme.bodySmall),
-          if (tagLine.isNotEmpty) Text(tagLine.join(' · '), style: Theme.of(context).textTheme.bodySmall),
+          if (tagLine.isNotEmpty) Text(oneLine(tagLine.join(' · ')), style: Theme.of(context).textTheme.bodySmall),
           if (status != null) Text(status, style: Theme.of(context).textTheme.labelMedium),
         ]),
         isThreeLine: true,
@@ -225,6 +234,8 @@ class StorePageState extends State<StorePage> {
       if (read != null) ...[
         if (read.name case final name?) 'It calls itself $name',
         '${read.entries.length} listed${read.refused.isEmpty ? '' : ', ${read.refused.length} refused'}',
+        if (catalog.leftOut > 0)
+          '${catalog.leftOut} more left out, past [store] catalog_max_entries = ${config.store.catalogMaxEntries}',
         for (final (name, why) in read.refused) '  refused $name: $why',
         for (final pointer in read.ignored) '  left out $pointer',
         for (final MapEntry(key: name, value: icon) in catalog.icons.entries)
@@ -235,7 +246,7 @@ class StorePageState extends State<StorePage> {
       key: Key('store-catalog-${catalog.label}'),
       contentPadding: EdgeInsets.zero,
       title: Text(catalog.label),
-      subtitle: Text(visible(lines.join('\n'))),
+      subtitle: Text(lines.map(oneLine).join('\n')),
       trailing: TextButton(
         key: Key('store-remove-catalog-${catalog.label}'),
         onPressed: busy != null ? null : () => _removeCatalog(catalog.label),
@@ -315,23 +326,51 @@ class OverlayPageState extends State<OverlayPage> {
     }
   }
 
+  @override
+  void dispose() {
+    _discard();
+    super.dispose();
+  }
+
+  /// What a preview fetched goes when the page closes without installing it.
+  void _discard() {
+    final shown = preview, home = widget.home;
+    if (shown != null && home != null) unawaited(discardPreview(home.overlays, shown.name));
+  }
+
   Future<void> _fetch() => _run('Fetching', () async {
     final home = widget.home!;
     final (name, source) = _target!;
-    final state = entryState(config, name, source);
-    final named = namedAs(config, name);
-    final configured = named == null ? null : config.overlays[named];
-    final configPin = state == EntryState.installed && home.overlays.installed(named!) == null && configured is GitOverlay
-        ? configured.pin
-        : null;
-    final found = await previewOverlay(home.overlays, named ?? name, source,
+    final found = await previewOverlay(home.overlays, namedAs(config, name) ?? name, source,
         os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), config.profile)]).shareEnv,
-        catalogPin: entry.pin, configPin: configPin, iconLimits: config.store.iconLimits);
+        catalogPin: entry.pin, iconLimits: config.store.iconLimits);
     if (mounted) setState(() => preview = found);
   });
 
-  Future<void> _install() => _run('Installing', () async {
-    final changed = await installPreview(widget.home!.overlays, config, preview!);
+  Future<void> _install() async {
+    final shown = preview!;
+    final moved = pinMoved(config, shown);
+    if (moved != null) {
+      final yes = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Move the pin?'),
+          content: Text('Canoa.cfg pins ${shown.name} to $moved. What was fetched is ${shown.update.digest}, '
+              'shown on this page. Installing it moves the pin there.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(key: const Key('store-move-pin'), onPressed: () => Navigator.pop(context, true),
+                child: const Text('Move the pin and install')),
+          ],
+        ),
+      );
+      if (yes != true) return;
+    }
+    await _installing(movePin: moved != null);
+  }
+
+  Future<void> _installing({required bool movePin}) => _run('Installing', () async {
+    final changed = await installPreview(widget.home!.overlays, config, preview!, movePin: movePin);
     final saved = await widget.onSave(changed);
     if (saved != null && mounted) {
       setState(() {
@@ -381,7 +420,7 @@ class OverlayPageState extends State<OverlayPage> {
         if (!didPop) Navigator.of(context).pop(config);
       },
       child: Scaffold(
-        appBar: AppBar(title: Text(visible(widget.listed.shown))),
+        appBar: AppBar(title: Text(oneLine(widget.listed.shown))),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -438,13 +477,12 @@ class OverlayPageState extends State<OverlayPage> {
           StillIcon(name: entry.name, path: about['icon'] as String?, bytes: icon?.bytes, size: 56,
               limits: config.store.iconLimits),
           const SizedBox(width: 12),
-          Expanded(child: Text(visible(widget.listed.shown), style: text.titleLarge)),
+          Expanded(child: Text(oneLine(widget.listed.shown), style: text.titleLarge)),
         ]),
         const SizedBox(height: 8),
         Text('What the catalog ${widget.listed.label} says', style: text.titleMedium),
         _fields({
           'Summary': about['summary'],
-          'Description': entry.description,
           'Homepage': about['homepage'],
           'Repository': about['repository'],
           'License': about['license'],
@@ -454,9 +492,23 @@ class OverlayPageState extends State<OverlayPage> {
         _field('Source', displaySource(entry.source), key: const Key('store-source')),
         _field('Pin', entry.pin ?? 'none: the catalog pins nothing (unpinned), and installing pins what is fetched'),
         if (icon?.refused case final why?) _field('Icon', 'refused ($why): a placeholder shows instead'),
+        if (entry.description case final description?)
+          _quoted('Its description, as the catalog writes it', description, const Key('store-claim-description')),
       ],
     );
   }
+
+  /// Free text of another's, after the fields Canoa vouches for and set apart from them, its lines kept.
+  Widget _quoted(String label, String value, Key key) => Container(
+    key: key,
+    margin: const EdgeInsets.only(top: 8),
+    padding: const EdgeInsets.only(left: 12),
+    decoration: BoxDecoration(border: Border(left: BorderSide(color: Theme.of(context).colorScheme.outline, width: 3))),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: Theme.of(context).textTheme.labelMedium),
+      SelectableText(visible(value), style: const TextStyle(fontStyle: FontStyle.italic)),
+    ]),
+  );
 
   Widget _fields(Map<String, Object?> fields) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -470,7 +522,7 @@ class OverlayPageState extends State<OverlayPage> {
     padding: const EdgeInsets.only(top: 4),
     child: SelectableText.rich(key: key, TextSpan(children: [
       TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w600)),
-      TextSpan(text: visible(value)),
+      TextSpan(text: oneLine(value)),
     ])),
   );
 
@@ -482,8 +534,8 @@ class OverlayPageState extends State<OverlayPage> {
     final manifestName = found.manifest['name'];
     final description = found.manifest['description'];
     final named = config.overlays.keys.map(normalizeName).toSet();
-    final harnessHints = found.manifest['harness'] is Map ? [for (final id in (found.manifest['harness']! as Map).keys) '$id'] : const <String>[];
     final layer = found.layer;
+    final moved = pinMoved(config, found);
     Widget files(String label, List<String> paths) =>
         paths.isEmpty ? const SizedBox.shrink() : _field(label, paths.join(', '));
     return Column(
@@ -494,12 +546,11 @@ class OverlayPageState extends State<OverlayPage> {
           StillIcon(key: const Key('store-own-icon'), name: found.name, path: about['icon'] as String?,
               bytes: found.icon, size: 56, limits: config.store.iconLimits),
           const SizedBox(width: 12),
-          Expanded(child: Text(visible(manifestName is String ? manifestName : found.name), style: text.titleLarge)),
+          Expanded(child: Text(oneLine(manifestName is String ? manifestName : found.name), style: text.titleLarge)),
         ]),
         const SizedBox(height: 8),
         Text('What the overlay itself says', style: text.titleMedium),
         _fields({
-          'Description': description is String ? description : null,
           'Summary': about['summary'],
           'Homepage': about['homepage'],
           'Repository': about['repository'],
@@ -507,14 +558,19 @@ class OverlayPageState extends State<OverlayPage> {
           'Authors': (about['authors'] as List?)?.join(', '),
           'Tags': (about['tags'] as List?)?.join(', '),
         }),
-        _field('Source', update.source.spec),
+        _field('Source', displaySource(parseSource(update.source.spec))),
         _field('Commit', update.commit),
         _field('Tree digest', update.digest, key: const Key('store-digest')),
         if (found.pinRefusal case final why?)
-          Text(visible(why), key: const Key('store-pin-refused'), style: error)
+          Text(oneLine(why), key: const Key('store-pin-refused'), style: error)
         else if (entry.pin != null)
           const Text('The catalog\'s pin matches what was fetched.', key: Key('store-pin-ok')),
+        if (moved != null)
+          Text('Canoa.cfg pins it to $moved: installing this moves the pin, which it asks first.',
+              key: const Key('store-pin-moves'), style: error),
         if (found.iconRefused case final why?) _field('Icon', 'refused ($why): a placeholder shows instead'),
+        if (description is String)
+          _quoted('Its description, as its overlay.cfg writes it', description, const Key('store-own-description')),
         if (update.from != null) ...[
           const SizedBox(height: 8),
           Text('What an update changes', style: text.titleMedium),
@@ -539,15 +595,15 @@ class OverlayPageState extends State<OverlayPage> {
                 if (!line.endsWith('hints for another harness')) line,
             ], report.ungranted, report.unresolved, report.weakenings)),
         ],
-        for (final id in harnessHints) Text('harness.$id: hints for $id agents only', style: text.bodySmall),
+        for (final id in found.harnesses) Text(oneLine('harness.$id: hints for $id agents only'), style: text.bodySmall),
         for (final (path, os, network) in found.setup)
-          Text('setup $path${os == null ? '' : ' on ${os.join(', ')}'}: '
-              '${network ? 'says it needs the network' : 'declares no network'}; Canoa does not run it',
+          Text(oneLine('setup $path${os == null ? '' : ' on ${os.join(', ')}'}: '
+              '${network ? 'says it needs the network' : 'declares no network'}; Canoa does not run it'),
               style: text.bodySmall),
         for (final name in found.requires)
-          Text(named.contains(normalizeName(name))
+          Text(oneLine(named.contains(normalizeName(name))
               ? 'requires $name, which Canoa.cfg names'
-              : 'requires $name, which Canoa.cfg does not name: install it too, or this applies without it',
+              : 'requires $name, which Canoa.cfg does not name: install it too, or this applies without it'),
               style: text.bodySmall),
       ],
     );
@@ -560,11 +616,21 @@ class OverlayPageState extends State<OverlayPage> {
       FilledButton(
         key: const Key('store-install'),
         onPressed: canApply ? _install : null,
-        child: Text(installed ? 'Update and pin ${_short(found.update.digest)}' : 'Install and pin ${_short(found.update.digest)}'),
+        child: Text(pinMoved(config, found) != null
+            ? 'Update and move the pin…'
+            : '${installed ? 'Update' : 'Install'} and pin ${_short(found.update.digest)}'),
       ),
       if (state == EntryState.installed)
         TextButton(key: const Key('store-remove'), onPressed: busy != null ? null : _remove, child: const Text('Remove…')),
-      TextButton(onPressed: busy != null ? null : () => setState(() => preview = null), child: const Text('Close')),
+      TextButton(
+        onPressed: busy != null
+            ? null
+            : () {
+                _discard();
+                setState(() => preview = null);
+              },
+        child: const Text('Close'),
+      ),
     ]);
   }
 

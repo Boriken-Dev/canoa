@@ -108,6 +108,10 @@ abstract interface class OverlayManager {
 
   /// Removes what [fetchCatalog] fetched for [label].
   Future<void> removeCatalog(String label);
+
+  /// Removes what [check] fetched for [name] when nothing is installed under that name: a preview that was not
+  /// installed leaves nothing behind.
+  Future<void> discard(String name);
 }
 
 /// One file of a fetched tree: its size, and its bytes unless it was larger than asked.

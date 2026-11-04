@@ -163,6 +163,14 @@ final class OverlayStore implements OverlayManager {
     return {for (final MapEntry(key: path, value: blob) in update.files.entries) path: blobs[blob]!};
   }
 
+  @override
+  Future<void> discard(String name) async {
+    _checkName(name);
+    if (installed(name) != null) return;
+    final cache = Directory(_cache(name));
+    if (cache.existsSync()) await cache.delete(recursive: true);
+  }
+
   String _catalogCache(String label) =>
       '${_path('.catalogs')}${Platform.pathSeparator}$label.git';
 

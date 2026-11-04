@@ -76,7 +76,20 @@ final class AosCatalog {
 }
 
 final _ref = RegExp(r'^[^-/:\\@#\x00-\x20\x7f][^/:\\@#\x00-\x20\x7f]*$');
+final _space = RegExp(r'\s', unicode: true);
 final _drive = RegExp(r'^[A-Za-z]:');
+
+/// Whether a URL [location] carries a password in its user information (`scheme://user:secret@host`), which a source
+/// Canoa stores or shows may not.
+bool holdsPassword(String location) {
+  final scheme = location.indexOf('://');
+  if (scheme < 0) return false;
+  final rest = location.substring(scheme + 3);
+  final end = rest.indexOf(RegExp(r'[/?#]'));
+  final authority = end < 0 ? rest : rest.substring(0, end);
+  final at = authority.lastIndexOf('@');
+  return at >= 0 && authority.substring(0, at).contains(':');
+}
 final _digest = RegExp(r'^sha256:[0-9a-fA-F]{64}$');
 const _entryKeys = {'source', 'ref', 'pin', 'description', 'about'};
 
@@ -198,7 +211,10 @@ CatalogEntry _entry(String name, Object? value, String at, AosSource? origin, Li
   var source = _resolve(parsed, origin);
   if (fields.containsKey('ref')) {
     final ref = fields['ref'];
-    if (ref is! String || !_ref.hasMatch(ref)) throw const _Refused('invalid-entry');
+    if (ref is! String || !_ref.hasMatch(ref) || ref.runes.any((c) => c >= 0x80 && c <= 0x9f) ||
+        _space.hasMatch(ref)) {
+      throw const _Refused('invalid-entry');
+    }
     if (parsed.kind != SourceKind.git || parsed.reference != null) throw const _Refused('ref-not-allowed');
     source = AosSource(source.kind, source.location, ref, source.path);
   }

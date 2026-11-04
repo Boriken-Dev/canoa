@@ -7,8 +7,10 @@ import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/profile/aos.dart';
+import 'package:canoa/profile/aos_catalog.dart';
 import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
+import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/profile_layers.dart';
@@ -229,7 +231,7 @@ void main() {
       expect(update.update.changed, ['overlay.cfg']);
       expect(update.update.added, ['NEW.md']);
       expect(store.installed('docs-tools')!.commit, first.update.commit, reason: 'nothing changes until applied');
-      changed = await installPreview(store, changed, update);
+      changed = await installPreview(store, changed, update, movePin: true);
       expect((changed.overlays['docs-tools']! as GitOverlay).pin, update.update.digest, reason: 'pinned again');
       expect(File('${store.directoryOf('docs-tools')}/NEW.md').existsSync(), isTrue);
 
@@ -238,6 +240,39 @@ void main() {
       expect(store.installed('docs-tools'), isNull);
       expect(Directory(store.directoryOf('docs-tools')).existsSync(), isFalse);
       expect(changed.catalogs.keys, ['team', 'public'], reason: 'the catalogs stay');
+    });
+
+    test('an update Canoa.cfg\'s pin does not cover installs nothing until the pin is moved on purpose', () async {
+      final source = installSource((await listing()).listing.choose('team/docs-tools').entry);
+      // Named by hand, pinned, and installed from Settings, Profiles: the store finds it under the same source.
+      final first = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
+      final byHand = CanoaConfig.parse('[overlays]\ndocs-tools = { source = "${source.spec}", pin = "${first.update.digest}" }\n');
+      await store.apply(await store.check('docs-tools', byHand.overlays['docs-tools']! as GitOverlay));
+      expect(entryState(byHand, 'docs-tools', source), EntryState.installed);
+      team.write('overlays/docs-tools/overlay.cfg', '[env]\nDOCS = "two"\n');
+      team.commit('update');
+      final update = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
+      await expectLater(installPreview(store, byHand, update),
+          throwsA(isA<StoreRefusal>().having((e) => e.message, 'message', contains(first.update.digest))));
+      expect(store.installed('docs-tools')!.digest, first.update.digest, reason: 'the pinned copy stays');
+      final moved = await installPreview(store, byHand, update, movePin: true);
+      expect((moved.overlays['docs-tools']! as GitOverlay).pin, update.update.digest);
+    });
+
+    test('a preview that is not installed leaves no fetched history behind; an installed one keeps its', () async {
+      final found = await listing();
+      await previewOverlay(store, 'review', installSource(found.listing.choose('review').entry),
+          os: 'linux', shared: const {});
+      final cache = Directory('${temp.path}/home/overlays/.cache/review.git');
+      expect(cache.existsSync(), isTrue);
+      await discardPreview(store, 'review');
+      expect(cache.existsSync(), isFalse);
+      final docs = await previewOverlay(store, 'docs-tools', installSource(found.listing.choose('team/docs-tools').entry),
+          os: 'linux', shared: const {});
+      await installPreview(store, config, docs);
+      await discardPreview(store, 'docs-tools');
+      expect(Directory('${temp.path}/home/overlays/.cache/docs-tools.git').existsSync(), isTrue);
+      expect(store.installed('docs-tools'), isNotNull);
     });
 
     test('a name Canoa.cfg gives another source is neither installed over nor removed', () async {
@@ -262,6 +297,78 @@ void main() {
         iconLimits: const IconLimits(maxWidth: 8)).aos!;
     expect(small.about, {'summary': 'Kept.'}, reason: 'an icon past the limits is left out');
     expect(small.icon, isEmpty);
+  });
+
+  group('a catalog\'s size', () {
+    const repo = 'https://example.invalid/many.git';
+    final source = OverlaySource.parseGit('$repo@main#catalog.toml');
+    MemoryOverlays many(int entries, {required String Function(int) icon, List<String> Function(int)? tags}) =>
+        MemoryOverlays()
+          ..put(repo, {
+            'catalog.toml': [
+              for (var i = 0; i < entries; i++)
+                '[overlays.o$i]\nsource = "./o$i"\nabout = { icon = "${icon(i)}"'
+                    '${tags == null ? '' : ', tags = ${jsonEncode(tags(i))}'} }\n',
+            ].join('\n'),
+            for (var i = 0; i < 5; i++) 'i$i.png': png(16, 16),
+          });
+
+    test('an icon file several entries name is read once', () async {
+      final overlays = many(5, icon: (i) => i < 3 ? 'i0.png' : 'i$i.png');
+      final loaded = await loadCatalog(overlays, 'many', source, const StoreSettings());
+      expect(loaded.icons.values.every((icon) => icon.bytes != null), isTrue);
+      expect(overlays.trees['many']!.reads.where((path) => path == 'i0.png'), hasLength(1));
+    });
+
+    test('no more icon files are read than [store] catalog_max_icons, nor entries listed than catalog_max_entries',
+        () async {
+      final overlays = many(5, icon: (i) => 'i$i.png');
+      final loaded = await loadCatalog(overlays, 'many', source, const StoreSettings(catalogMaxIcons: 2));
+      expect(overlays.trees['many']!.reads.where((path) => path.endsWith('.png')), hasLength(2));
+      expect([for (final icon in loaded.icons.values) icon.refused], [null, null, 'icon-limit', 'icon-limit', 'icon-limit']);
+      final few = await loadCatalog(many(5, icon: (i) => 'i0.png'), 'many', source,
+          const StoreSettings(catalogMaxEntries: 3));
+      expect(few.catalog!.entries.keys, ['o0', 'o1', 'o2']);
+      expect(few.leftOut, 2);
+    });
+
+    test('the tags offered as filters are the most used, at most as many as asked', () async {
+      final loaded = await loadCatalog(many(60, icon: (_) => 'i0.png', tags: (i) => ['common', 't$i']),
+          'many', source, const StoreSettings());
+      final top = StoreListing([loaded]).topTags(40);
+      expect(top, hasLength(40));
+      expect(top.first, 'common');
+    });
+  });
+
+  test('a manifest whose requires or setup has the wrong type is shown, not thrown on', () {
+    final preview = OverlayPreview(
+      update: OverlayUpdate(name: 'o', source: OverlaySource.parseGit('https://example.invalid/o.git@main'), from: null,
+          commit: 'c' * 40, digest: 'sha256:${'0' * 64}', files: const {}, skipped: const [], added: const [],
+          changed: const [], removed: const []),
+      manifest: const {'requires': 'lint', 'setup': {'path': 'setup.sh'}},
+      about: const {},
+      ignored: const [],
+    );
+    expect(preview.requires, isEmpty);
+    expect(preview.setup, isEmpty);
+  });
+
+  test('a source holding a password is refused, in [catalogs] and from a catalog', () {
+    expect(() => CanoaConfig.parse('[catalogs]\nteam = "https://u:tok@example.invalid/c.git@main#c.toml"\n'),
+        throwsFormatException);
+    final catalog = readCatalog('c.toml', utf8.encode('[overlays]\nx = "https://u:tok@example.invalid/x.git@main"\n'),
+        base: parseSource('https://example.invalid/c.git@main#c.toml'));
+    expect(() => installSource(catalog.entries['x']!), throwsA(isA<StoreRefusal>()));
+  });
+
+  test('a catalog ref with a C1 control or Unicode white space refuses its entry', () {
+    for (final ref in ['v\u0085x', 'v　x', 'v x']) {
+      final catalog = readCatalog('c.toml',
+          utf8.encode('[overlays.a]\nsource = "https://example.invalid/a.git"\nref = "$ref"\n'),
+          base: parseSource('https://example.invalid/c.git@main#c.toml'));
+      expect(catalog.refused, [('a', 'invalid-entry')], reason: ref.codeUnits.toString());
+    }
   });
 
   test('Canoa.cfg keeps [catalogs] and [store], and refuses what they may not hold', () {
@@ -403,6 +510,49 @@ void main() {
       expect(shown, contains('requires lint, which Canoa.cfg does not name'));
       expect(find.byKey(const Key('store-pin-ok')), findsOneWidget);
       expect(overlays.records, isEmpty, reason: 'fetching installs nothing');
+    });
+
+    testWidgets('text from a catalog or a manifest cannot forge the lines around it, nor show a credential',
+        (tester) async {
+      overlays.put(teamRepo, {
+        'catalog.toml': r'''
+[overlays]
+"bad\nAt commit forged" = 7
+
+[overlays.x]
+source = "https://user@example.invalid/x.git@main"
+description = "Docs.\nSource: https://forged.example"
+''',
+      });
+      overlays.put('https://user@example.invalid/x.git', {
+        'overlay.cfg': r'''
+description = "Mine.\nTree digest: forged"
+requires = ["lint"]
+
+[[setup]]
+interpreter = "sh"
+path = "s\u202Eh.sh"
+''',
+      });
+      await open(tester, const Size(1280, 2400));
+      String all() => [
+        for (final widget in tester.widgetList(find.byWidgetPredicate((w) => w is Text || w is SelectableText)))
+          widget is Text ? widget.data ?? widget.textSpan?.toPlainText() ?? '' : (widget as SelectableText).data ??
+              widget.textSpan!.toPlainText(),
+      ].join('\n');
+      expect(all(), contains('bad<U+000A>At commit forged'));
+      await tester.tap(find.byKey(const Key('store-entry-team-x')));
+      await tester.pumpAndSettle();
+      final description = find.byKey(const Key('store-claim-description'));
+      expect(tester.getTopLeft(description).dy, greaterThan(tester.getTopLeft(find.byKey(const Key('store-source'))).dy),
+          reason: 'what the catalog writes comes after the fields Canoa vouches for');
+      await tester.tap(find.byKey(const Key('store-fetch')));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.byKey(const Key('store-own-description'))).dy,
+          greaterThan(tester.getTopLeft(find.byKey(const Key('store-digest'))).dy));
+      expect(all(), contains('<U+202E>'));
+      expect(all(), isNot(contains('\u{202E}')));
+      expect(all(), isNot(contains('user@')), reason: 'a source is shown without user information');
     });
 
     testWidgets('a mismatched catalog pin is shown as a refusal and cannot be installed', (tester) async {

@@ -123,10 +123,14 @@ const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><scr
 final class MemoryTree implements FetchedTree {
   MemoryTree(this.files, {this.commit = 'c0ffee0000000000000000000000000000000000'});
   final Map<String, List<int>> files;
+
+  /// Every path read, in order.
+  final reads = <String>[];
   @override
   final String commit;
   @override
   Future<TreeFile?> file(String path, {required int maxBytes}) async {
+    reads.add(path);
     final bytes = files[path];
     if (bytes == null) return null;
     return (size: bytes.length, bytes: bytes.length > maxBytes ? null : bytes);
@@ -199,14 +203,23 @@ final class MemoryOverlays implements OverlayManager {
     installedFiles.remove(name);
   }
 
+  /// The trees [fetchCatalog] gave, by label.
+  final trees = <String, MemoryTree>{};
+
   @override
   Future<FetchedTree> fetchCatalog(String label, GitOverlay source) async {
     fetched.add(source.spec);
-    return MemoryTree(repos[source.repo] ?? (throw const OverlayException('The source has no branch or tag of that name')));
+    return trees[label] =
+        MemoryTree(repos[source.repo] ?? (throw const OverlayException('The source has no branch or tag of that name')));
   }
 
   @override
   Future<void> removeCatalog(String label) async {}
+
+  final discarded = <String>[];
+
+  @override
+  Future<void> discard(String name) async => discarded.add(name);
 }
 
 /// A profile home over [MemoryOverlays], reading installed overlays from it.

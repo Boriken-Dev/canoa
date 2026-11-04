@@ -74,6 +74,9 @@ final class FakeOverlays implements OverlayManager {
 
   @override
   Future<void> removeCatalog(String label) async {}
+
+  @override
+  Future<void> discard(String name) async {}
 }
 
 final class FakeHome implements ProfileHome {

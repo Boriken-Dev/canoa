@@ -6,6 +6,7 @@ import 'package:toml/toml.dart';
 import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
 import '../profile/aos.dart' show normalizeName, validOverlayName;
+import '../profile/aos_catalog.dart' show holdsPassword;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
@@ -266,6 +267,10 @@ final class CanoaConfig {
           'fetch');
     }
     if (source.path.isEmpty) throw FormatException('Canoa.cfg: catalogs.$label names no catalog file after #');
+    if (holdsPassword(source.repo)) {
+      throw FormatException('Canoa.cfg: catalogs.$label holds a password, which Canoa.cfg may not; use a credential '
+          'helper');
+    }
     return source;
   }
 
