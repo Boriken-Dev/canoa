@@ -1,8 +1,9 @@
 import 'package:flutter/widgets.dart';
 
 /// Canoa's mark: a Taíno dugout canoe with a paddle crossing it, drawn from the paths of
-/// `assets/icons/canoa.svg` (a 64 by 64 box). Below [paddleFrom] logical pixels it is the hull alone, and
-/// the spiral carved into the hull shows from [spiralFrom] up, as in the rendered icons.
+/// `assets/icons/canoa.svg` (a 64 by 64 box). Below [paddleFrom] logical pixels it is the hull alone, stroked
+/// [CanoaMarkPainter.smallWeight] units wide so its long, low shape keeps some depth, and the spiral carved
+/// into the hull shows from [spiralFrom] up, as in the rendered icons.
 class CanoaMark extends StatelessWidget {
   const CanoaMark({super.key, this.size = 24, required this.color});
 
@@ -27,15 +28,16 @@ class CanoaMarkPainter extends CustomPainter {
   final Color color;
 
   // The `d` and `stroke-width` attributes of canoa.svg, by id; canoa_mark_test.dart checks they match.
-  static const hull = 'M 3.5 18 C 9 27 17 30 30 30 C 43 30 51 28 55 23 C 58 19 59 13 59.5 6 L 63.5 6 '
-      'C 64.5 27 56 46 32 46 C 15 46 4 37 0 20 Z';
-  static const cut = 'M 34.1 14.8 L 18.2 47.7 L 25 51 L 40.9 18.2 Z';
-  static const spiral = 'M 46.6 36 C 46.7 36.3 46.6 36.9 46 37.1 C 45.4 37.3 44.5 36.9 44.3 36 '
-      'C 44.1 35.1 44.8 33.9 46 33.7 C 47.2 33.5 48.7 34.5 48.9 36 C 49.1 37.5 47.8 39.3 46 39.4 '
-      'C 44.2 39.6 42.2 38.1 42 36 C 41.8 33.9 43.6 31.6 46 31.4';
+  static const hull = 'M 2 23 C 5 27 9 30 15 30 L 49 30 C 55 30 59 27 60.5 17 L 63.5 17 '
+      'C 64.5 31 59 41 49 41.5 C 38 42.5 26 42.5 15 41.5 C 6 40.5 1 32 0 24 Z';
+  static const smallWeight = 3.0;
+  static const cut = 'M 34.1 14.8 L 19.2 45.5 L 26.1 48.8 L 40.9 18.2 Z';
+  static const spiral = 'M 47.1 35.9 C 47.3 36.2 47.1 36.9 46.5 37.1 C 45.9 37.4 44.8 36.9 44.6 35.9 '
+      'C 44.4 34.9 45.2 33.5 46.5 33.3 C 47.8 33.1 49.5 34.2 49.8 35.9 C 50 37.6 48.6 39.6 46.5 39.8 '
+      'C 44.4 40.1 42.1 38.3 41.9 35.9';
   static const spiralWidth = 1.3;
-  static const paddle = 'M 43.3 0.2 L 20.9 46.4 C 19.4 49.6 16.4 48.2 14.8 51.4 C 12.3 56.6 14.7 61.3 15 63 '
-      'C 16.5 62.2 21.7 61.1 24.2 56 C 25.8 52.7 22.8 51.3 24.4 48 L 46.7 1.8 Z';
+  static const paddle = 'M 43.3 0.2 L 21.8 44.5 C 20 48.4 16.6 46.8 14.8 50.6 C 12.1 56.1 14.7 61.3 15 63 '
+      'C 16.5 62.2 22.2 61 24.8 55.5 C 26.7 51.6 23.4 50 25.3 46.2 L 46.7 1.8 Z';
 
   static final Path _hull = parse(hull), _cut = parse(cut), _spiral = parse(spiral), _paddle = parse(paddle);
 
@@ -76,7 +78,15 @@ class CanoaMarkPainter extends CustomPainter {
     canvas
       ..saveLayer(const Rect.fromLTWH(0, 0, 64, 64), Paint())
       ..drawPath(_hull, fill);
-    if (paddled) canvas.drawPath(_cut, clear);
+    if (paddled) {
+      canvas.drawPath(_cut, clear);
+    } else {
+      canvas.drawPath(_hull, Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = smallWeight
+        ..strokeJoin = StrokeJoin.round);
+    }
     if (side >= CanoaMark.spiralFrom) {
       canvas.drawPath(_spiral, Paint()
         ..blendMode = BlendMode.clear

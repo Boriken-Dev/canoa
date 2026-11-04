@@ -18,6 +18,7 @@ void main() {
     }
 
     expect(attribute('hull', 'd'), CanoaMarkPainter.hull);
+    expect(double.parse(attribute('hull', 'data-small-weight')), CanoaMarkPainter.smallWeight);
     expect(attribute('cut', 'd'), CanoaMarkPainter.cut);
     expect(attribute('spiral', 'd'), CanoaMarkPainter.spiral);
     expect(double.parse(attribute('spiral', 'stroke-width')), CanoaMarkPainter.spiralWidth);
