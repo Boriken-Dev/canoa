@@ -236,6 +236,49 @@ final class CanoaConfig {
   /// `[store]`: the store's limits.
   StoreSettings get store => StoreSettings.parse((tables['store'] as Map?) ?? const {});
 
+  /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
+  /// those of an overlay or a project allowed at one definition (its digest, `sha256:...`).
+  Map<String, Map<String, Object>> get agentMcp => _agentMcp(tables['agents']);
+
+  static Map<String, Map<String, Object>> _agentMcp(Object? agents) {
+    final out = <String, Map<String, Object>>{};
+    if (agents is! Map) return out;
+    for (final MapEntry(key: agent, :value) in agents.entries) {
+      final table = value is Map ? value['mcp'] : null;
+      if (table == null) continue;
+      if (table is! Map) throw FormatException('Canoa.cfg: agents.$agent.mcp must be a table');
+      final choices = <String, Object>{};
+      for (final MapEntry(:key, value: choice) in table.entries) {
+        if (!isEntryName('$key') ||
+            !(choice is bool || (choice is String && RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(choice)))) {
+          throw FormatException('Canoa.cfg: agents.$agent.mcp.$key is true, false, or the sha256: digest of what was '
+              'allowed');
+        }
+        choices['$key'] = choice as Object;
+      }
+      out['$agent'] = choices;
+    }
+    return out;
+  }
+
+  /// This configuration with [choices] as `[agents.NAME.mcp]` of [agent], as [agentMcp] reads them.
+  CanoaConfig withAgentMcp(String agent, Map<String, Object> choices) {
+    final raw = _deepCopy((tables['agents'] as Map?) ?? const {});
+    final entry = (raw[agent] as Map<String, dynamic>?) ?? <String, dynamic>{};
+    if (choices.isEmpty) {
+      entry.remove('mcp');
+    } else {
+      entry['mcp'] = <String, dynamic>{...choices};
+    }
+    if (entry.isEmpty) {
+      raw.remove(agent);
+    } else {
+      raw[agent] = entry;
+    }
+    _agentMcp(raw);
+    return _withTable('agents', raw);
+  }
+
   static Map<String, GitOverlay> _catalogs(Object? raw) {
     if (raw == null) return const {};
     if (raw is! Map) throw const FormatException('Canoa.cfg: catalogs must be a table');
@@ -403,18 +446,18 @@ final class CanoaConfig {
       if (rawAgents is! Map) throw const FormatException('Canoa.cfg: agents must be a table of agents');
       for (final entry in rawAgents.entries) {
         final agent = entry.value;
-        if (agent is Map && agent['profile'] != null) {
+        if (agent is Map && (agent['profile'] != null || agent['mcp'] != null)) {
           final table = agent['profile'];
-          if (table is! Map) throw FormatException('Canoa.cfg: agents.${entry.key}.profile must be a table');
-          agentProfiles['${entry.key}'] = _profile('agents.${entry.key}.profile', table, LayerKind.agent);
-          agentTables['${entry.key}'] = {'profile': table};
-          if (!agent.containsKey('program') && agent.length == 1) continue;
+          if (table != null && table is! Map) throw FormatException('Canoa.cfg: agents.${entry.key}.profile must be a table');
+          if (table is Map) agentProfiles['${entry.key}'] = _profile('agents.${entry.key}.profile', table, LayerKind.agent);
+          agentTables['${entry.key}'] = {'profile': ?table, 'mcp': ?agent['mcp']};
+          if (!agent.containsKey('program') && agent.keys.every(const {'profile', 'mcp'}.contains)) continue;
         }
         if (agent is! Map || agent['program'] is! String || (agent['program'] as String).isEmpty) {
           throw FormatException('Canoa.cfg: agents.${entry.key} needs a program');
         }
         for (final key in agent.keys) {
-          if (key != 'program' && key != 'args' && key != 'profile') {
+          if (key != 'program' && key != 'args' && key != 'profile' && key != 'mcp') {
             throw FormatException('Canoa.cfg: agents.${entry.key}: invalid key $key');
           }
         }
@@ -467,6 +510,7 @@ final class CanoaConfig {
     final rawProfile = data['profile'];
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('Canoa.cfg: profile must be a table');
     _catalogs(data['catalogs']);
+    _agentMcp(agentTables);
     final rawStore = data['store'];
     if (rawStore != null && rawStore is! Map) throw const FormatException('Canoa.cfg: store must be a table');
     if (rawStore is Map) StoreSettings.parse(rawStore);

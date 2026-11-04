@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'apply.dart';
 import 'aos.dart';
 import 'overlay_store_io.dart';
 import 'overlays.dart';
@@ -12,7 +13,7 @@ import 'project_trust.dart';
 ProfileHome? platformProfileHome({String? configPath}) =>
     configPath == null ? null : IoProfileHome(File(configPath).parent.path);
 
-final class IoProfileHome implements ProfileHome {
+final class IoProfileHome implements ProfileHome, SessionFiles {
   IoProfileHome(this.configDir, {String git = 'git'})
       : overlays = OverlayStore('$configDir${Platform.pathSeparator}overlays', git: git) {
     final record = File('$configDir${Platform.pathSeparator}trust.json');
@@ -117,5 +118,37 @@ final class IoProfileHome implements ProfileHome {
     } on Object {
       return null;
     }
+  }
+
+  /// In the system's temporary directory, which on Windows and macOS is the person's own and on Linux is made private.
+  @override
+  Future<String> write(Map<String, List<int>> files) async {
+    final dir = await Directory.systemTemp.createTemp('canoa-session-');
+    if (!Platform.isWindows) await Process.run('chmod', ['700', dir.path]);
+    try {
+      for (final MapEntry(:key, :value) in files.entries) {
+        if (!pathAllowed(key, confined: true)) throw ArgumentError.value(key, 'files', 'not a relative path below');
+        final file = File(join(dir.path, key));
+        await file.parent.create(recursive: true);
+        // Created exclusively, so nothing already there, a link included, is written through.
+        await file.create(exclusive: true);
+        final out = await file.open(mode: FileMode.writeOnly);
+        try {
+          await out.writeFrom(value);
+        } finally {
+          await out.close();
+        }
+      }
+    } on Object {
+      await dir.delete(recursive: true);
+      rethrow;
+    }
+    return dir.path;
+  }
+
+  @override
+  Future<void> remove(String directory) async {
+    final dir = Directory(directory);
+    if (await dir.exists()) await dir.delete(recursive: true);
   }
 }

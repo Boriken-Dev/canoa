@@ -33,7 +33,12 @@ import 'auth/peer_proof.dart' show PeerMethod;
 import 'ledger/ledger_backend.dart';
 import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
+import 'profile/apply.dart';
+import 'profile/launch.dart';
+import 'profile/profile_home.dart';
 import 'profile/profile_home_platform.dart';
+import 'profile/profile_layers.dart';
+import 'profile/profile_start_dialog.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
 import 'theme/look.dart';
@@ -289,6 +294,7 @@ class _CanoaAppState extends State<CanoaApp> {
         store.applyOpened(local, opened);
         store.attachVerifiedClient(local.id, client);
         _ownedClients.add(client);
+        if (_hasProfiles) store.noteNoProfile(local);
       } catch (_) {
         await client.close();
         rethrow;
@@ -296,17 +302,61 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// An agent as a child of this app. Its permission requests go to the person, in the conversation.
+  /// Whether Canoa.cfg sets any profile, so an agent given none of it says so.
+  bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
+
+  /// The profile [agent] starts with in [cwd], once the person has seen it and chosen its MCP servers; empty where there
+  /// is none or no profile home. Throws when the person does not start it, or its environment cannot be built.
+  Future<(PreparedProfile, Set<String>, List<LayerNote>)> _prepareProfile(String agent, String? cwd, ProfileHome? home) async {
+    if (home == null) return (PreparedProfile.empty, const <String>{}, const <LayerNote>[]);
+    final layers = await profileLayers(
+      overlays: config.overlays, user: config.profile, agents: config.agentProfiles, agent: agent,
+      home: home, workingDirectory: cwd, iconLimits: config.store.iconLimits,
+    );
+    final prepared = await prepareProfile(layers, home: home, lookup: environmentVariable, findProgram: findProgram);
+    if (prepared.isEmpty) return (prepared, const <String>{}, layers.notes);
+    final above = _navigator.currentContext;
+    if (above == null || !above.mounted) throw StateError('Canoa UI closed');
+    final choice = await showDialog<ProfileStartChoice>(
+      context: above,
+      builder: (_) => ProfileStartDialog(
+        agent: agent, prepared: prepared, harness: presetHarnesses[agent],
+        remembered: config.agentMcp[agent] ?? const {}, notes: layers.notes,
+      ),
+    );
+    if (choice == null) throw StateError('Not started: its profile was not accepted');
+    if (choice.remember) {
+      final changed = config.withAgentMcp(agent, {
+        for (final server in prepared.mcp)
+          server.name: choice.on.contains(server.name) ? (server.confined ? server.digest : true) : false,
+      });
+      try {
+        await _write(changed);
+        if (mounted) setState(() => config = changed);
+      } on UnsupportedError {
+        // Canoa.cfg in web/PWA deployments is read-only.
+      } catch (error) {
+        // The choices still apply to this session; only keeping them failed.
+        _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save Canoa.cfg: $error')));
+      }
+    }
+    // What the dialog showed is what goes: its notes are said once, there.
+    return (prepared, choice.on, const <LayerNote>[]);
+  }
+
+  /// An agent as a child of this app, with its profile. Its permission requests go to the person, in the conversation.
   Future<void> _runLocalAgent(AgentCommand command, {required String cwd, required String title}) async {
     // The dialog's `/` is a remote agent's default. For one on this computer it would be the root of the filesystem.
     final where = cwd.isEmpty || cwd == '/' ? defaultWorkingDirectory() : cwd;
-    final client = await startLocalAgent(
-      command,
+    final home = platformProfileHome(configPath: _configPath);
+    final (prepared, on, notes) = await _prepareProfile(command.label, where ?? cwd, home);
+    final started = await startProfiled(
+      command, cwd: where ?? cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
       decider: store.askPermission, elicitor: store.askQuestion,
-      workingDirectory: where,
     );
+    final client = started.client;
     try {
-      final opened = await client.openSession(cwd: where ?? cwd);
+      final opened = await client.openSession(cwd: where ?? cwd, setup: started.launch.setup);
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? command.label : title,
@@ -319,6 +369,7 @@ class _CanoaAppState extends State<CanoaApp> {
       store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
+      await store.applyProfile(local, started.launch, prepared, harness: started.harness, notes: notes);
     } catch (_) {
       await client.close();
       rethrow;
@@ -336,12 +387,24 @@ class _CanoaAppState extends State<CanoaApp> {
     final why = entry.whyNotReopened;
     if (why != null) throw StateError(why);
     final VerifiedAgent client;
+    ProfiledAgent? started;
+    PreparedProfile? prepared;
+    var notes = const <LayerNote>[];
     switch (entry.place) {
       case SessionPlace.local:
         final command = [...agentPresets, ...config.agents].where((agent) => agent.label == entry.entry).firstOrNull;
         if (command == null) throw StateError('No agent named ${entry.entry} is set up here now');
         if (!canRunLocalAgents) throw StateError('This build cannot run agents on this computer');
-        client = await startLocalAgent(command, decider: store.askPermission, elicitor: store.askQuestion, workingDirectory: entry.cwd);
+        final cwd = entry.cwd;
+        if (cwd == null) throw StateError('Canoa did not note where this session was, which the agent needs to open it');
+        final home = platformProfileHome(configPath: _configPath);
+        final Set<String> on;
+        (prepared, on, notes) = await _prepareProfile(command.label, cwd, home);
+        started = await startProfiled(
+          command, cwd: cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
+          decider: store.askPermission, elicitor: store.askQuestion,
+        );
+        client = started.client;
       case SessionPlace.host || SessionPlace.peer:
         final endpoint = Uri.tryParse(entry.endpoint ?? '');
         final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
@@ -361,7 +424,7 @@ class _CanoaAppState extends State<CanoaApp> {
         throw StateError(why ?? 'Reopen it from Earlier conversations');
     }
     try {
-      await store.reopen(entry, client);
+      await store.reopen(entry, client, launch: started?.launch, prepared: prepared, harness: started?.harness, notes: notes);
       _ownedClients.add(client);
     } catch (_) {
       await client.close();
@@ -411,6 +474,7 @@ class _CanoaAppState extends State<CanoaApp> {
       store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
+      if (_hasProfiles) store.noteNoProfile(local);
     } catch (_) {
       await client.close();
       rethrow;
@@ -977,6 +1041,11 @@ class _ConversationState extends State<_Conversation> {
           if (await confirmFullAccess(context, session)) widget.store.setFullAccess(session, true);
         }),
       if (session != null && changesOf(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
+      if (session?.profile case final report?)
+        ('Profile', Icons.tune, () => unawaited(showDialog<void>(
+          context: context,
+          builder: (_) => ProfileReportDialog(report: report),
+        ))),
     ];
     if (!widget.narrow || actions.length < 2) {
       return [

@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'chat/agent_events.dart';
 import 'chat/update_record.dart';
 import 'ledger/session_ledger.dart';
+import 'profile/apply.dart';
+import 'profile/profile_layers.dart' show LayerNote;
 
 export 'ledger/session_ledger.dart' show SessionPlace;
 
@@ -163,6 +165,12 @@ class ChatSession {
 
   /// The files of the changes pane the person marked viewed, each with the version of it they saw.
   final Map<String, int> viewedChanges = {};
+
+  /// What this session was given of its profile, and what it was not; null where Canoa applied none.
+  ProfileReport? profile;
+
+  /// What the session was opened with, which an earlier conversation opened from it is opened with too.
+  AcpSessionSetup setup = AcpSessionSetup.none;
 
   /// Messages written while a turn ran, oldest first. The first is sent when a turn ends as it should.
   final List<QueuedMessage> queue = [];
@@ -691,11 +699,55 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Finishes applying a profile to [session], just opened with [launch]'s setup: the model, effort and mode are set where
+  /// the agent offers an option with that value, and the report goes on the session and, in one line, into it. [notes]
+  /// are what the person was not shown of the layers, such as one left out, and go into it too.
+  Future<void> applyProfile(ChatSession session, ProfileLaunch launch, PreparedProfile prepared,
+      {required String harness, List<LayerNote> notes = const []}) async {
+    session.setup = launch.setup;
+    for (final note in notes) {
+      _note(session, 'Profile, ${note.layer}: ${note.text}');
+    }
+    if (launch.items.isEmpty) {
+      notifyListeners();
+      return;
+    }
+    final chosen = choicesFor(prepared, [
+      for (final option in session.options)
+        (option.id, option.category, [for (final choice in option.choices) choice.value], option.isMode),
+    ]);
+    final set = <String, String>{};
+    for (final (id, value, key) in chosen) {
+      final option = session.options.firstWhere((option) => option.id == id);
+      await choose(session, option, value);
+      final now = session.options.where((option) => option.id == id).firstOrNull;
+      if (now?.current == value) set[key] = option.isMode ? 'session/set_mode' : 'session/set_config_option $id';
+    }
+    ProfileItem settled(ProfileItem item) {
+      if (!const {'model', 'effort', 'mode'}.contains(item.key)) return item;
+      final how = set[item.key];
+      return how != null
+          ? ProfileItem(item.key, item.layer, ItemState.applied, how)
+          : ProfileItem(item.key, item.layer, ItemState.unsupported, 'the agent offers no ${item.key} option with this value');
+    }
+    session.profile = ProfileReport(harness, [for (final item in launch.items) settled(item)]);
+    _note(session, session.profile!.summary);
+    notifyListeners();
+  }
+
+  /// Says in [session] that its agent, reached elsewhere, was given no profile.
+  void noteNoProfile(ChatSession session) {
+    _note(session, 'Canoa applies a profile only to agents it starts on this computer: this one runs elsewhere and was '
+        'given none of it.');
+    notifyListeners();
+  }
+
   void _setCurrent(ChatSession session, String id, String value) {
     session.options = [
       for (final option in session.options)
         option.id == id
-            ? ConfigOption(id: id, label: option.label, current: value, choices: option.choices, isMode: option.isMode)
+            ? ConfigOption(id: id, label: option.label, current: value, choices: option.choices, isMode: option.isMode,
+                category: option.category)
             : option,
     ];
   }
@@ -1034,9 +1086,13 @@ class SessionStore extends ChangeNotifier {
     );
     // Listening first, since the conversation arrives before the answer does.
     attachVerifiedClient(session.id, client, record: false);
+    session
+      ..setup = from.setup
+      ..profile = from.profile;
     try {
-      final opened = await client.reopenSession(earlier.id, cwd: cwd);
+      final opened = await client.reopenSession(earlier.id, cwd: cwd, setup: from.setup);
       applyOpened(session, opened);
+      if (from.profile case final profile?) _note(session, profile.summary);
       if (!opened.replayed) _note(session, 'The agent resumed this without sending what was said before.');
       session.status = SessionStatus.connected;
       _record(session, client);
@@ -1050,7 +1106,9 @@ class SessionStore extends ChangeNotifier {
 
   /// Opens a session from the ledger again on [client], an agent just started or connected for it, by `session/load` or
   /// `session/resume`, whichever the agent offers. One already open is selected instead, and [client] is left to the caller.
-  Future<ChatSession> reopen(LedgerEntry entry, VerifiedAgent client) async {
+  /// With [launch], the session is opened with its setup and [prepared]'s profile is applied as [applyProfile] does.
+  Future<ChatSession> reopen(LedgerEntry entry, VerifiedAgent client,
+      {ProfileLaunch? launch, PreparedProfile? prepared, String? harness, List<LayerNote> notes = const []}) async {
     for (final session in _sessions) {
       if (session.peerId == entry.peerId && session.remoteSessionId == entry.sessionId) {
         select(session.id);
@@ -1090,8 +1148,11 @@ class SessionStore extends ChangeNotifier {
     ));
     attachVerifiedClient(session.id, client, record: false);
     try {
-      final opened = await client.reopenSession(entry.sessionId, cwd: cwd);
+      final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: launch?.setup ?? AcpSessionSetup.none);
       applyOpened(session, opened);
+      if (launch != null && prepared != null) {
+        await applyProfile(session, launch, prepared, harness: harness ?? entry.harness, notes: notes);
+      }
       if (!opened.replayed) {
         _note(session, 'The agent resumed this without sending what was said before.');
         if (entry.messages.isNotEmpty) {

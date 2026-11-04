@@ -21,11 +21,27 @@ Future<String?> _find(String program) async {
   try {
     final found = await Process.run(finder, [program], runInShell: _useShell);
     if (found.exitCode != 0) return null;
-    final first = LineSplitter.split(found.stdout as String).where((line) => line.trim().isNotEmpty);
-    return first.isEmpty ? null : first.first.trim();
+    final lines = LineSplitter.split(found.stdout as String).map((line) => line.trim()).where((line) => line.isNotEmpty);
+    // `where npx` names the shell script before `npx.cmd`; Windows starts only the second.
+    final runnable = Platform.isWindows
+        ? lines.where((line) => RegExp(r'\.(exe|cmd|bat|com)$', caseSensitive: false).hasMatch(line))
+        : lines;
+    return runnable.firstOrNull ?? lines.firstOrNull;
   } on ProcessException {
     return null;
   }
+}
+
+/// [program]'s absolute path, as PATH finds it, or null.
+Future<String?> findProgram(String program) => _find(program);
+
+/// This process's environment variable [name]; on Windows names compare without case.
+String? environmentVariable(String name) {
+  final environment = Platform.environment;
+  if (environment[name] case final value?) return value;
+  if (!Platform.isWindows) return null;
+  final upper = name.toUpperCase();
+  return environment.entries.where((entry) => entry.key.toUpperCase() == upper).firstOrNull?.value;
 }
 
 /// Where an agent starts when a person names nowhere: their home, and not the root of the filesystem.
@@ -83,14 +99,16 @@ Future<void> _end(Process process) async {
 }
 
 /// Starts an agent as a child of this app, and speaks ACP to it. A child is the person's own program, so there is no peer to prove,
-/// and the client refuses nothing on its behalf: [decider] puts each permission request to the person.
+/// and the client refuses nothing on its behalf: [decider] puts each permission request to the person. [environment] is added to
+/// this app's own, as a profile's is.
 Future<VerifiedAgent> startLocalAgent(
   AgentCommand command, {
   AgentDecider? decider,
   AgentElicitor? elicitor,
   String? workingDirectory,
+  Map<String, String> environment = const {},
 }) async {
-  final environment = <String, String>{};
+  environment = {...environment};
   for (final entry in command.programPaths.entries) {
     final path = await _find(entry.value);
     if (path == null) throw AcpFailure('${entry.value} is not installed');

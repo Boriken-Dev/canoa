@@ -4,7 +4,7 @@ library;
 
 import 'package:toml/toml.dart';
 
-import 'aos.dart' show AosException, AosSource, SourceKind, isSensitive, parseSource;
+import 'aos.dart' show AosEnvironment, AosException, AosSource, SourceKind, isSensitive, parseSource;
 import 'overlay_layer.dart';
 
 /// The longest skill, MCP server, header or overlay name.
@@ -597,11 +597,13 @@ final class EffectiveProfile {
   /// The environment variables, each reference resolved: what a session starts with, and nothing else may hold.
   /// [lookup] reads this process's environment; [readFile] a file's text, or null when it cannot, or when [within] is
   /// given and the file, its links resolved, is outside that directory.
+  /// Into [after] goes each AOS overlay's environment once it applied, as [buildOverlayEnvironment] gives it.
   Future<Map<String, Secret>> environment({
     required String? Function(String name) lookup,
     required Future<String?> Function(String path, {String? within}) readFile,
+    Map<String, AosEnvironment>? after,
   }) async {
-    final built = buildOverlayEnvironment(aos, shareEnv, lookup);
+    final built = buildOverlayEnvironment(aos, shareEnv, lookup, after: after);
     final out = <String, Secret>{};
     for (final MapEntry(:key, :value) in env.entries) {
       if (value.layer.kind == LayerKind.overlay && aos.any((layer) => layer.identity == value.layer.name)) {

@@ -12,7 +12,7 @@ import 'profile.dart';
 final class AosLayer {
   const AosLayer({required this.identity, required this.root, required this.os, required this.digest,
       required this.pinned, required this.manifest, required this.files, required this.texts, required this.references,
-      required this.notApplied, this.about = const {}, this.icon = const {}});
+      required this.notApplied, this.about = const {}, this.icon = const {}, this.blobs = const {}});
 
   /// The name Canoa.cfg gives it, its identity.
   final String identity;
@@ -45,6 +45,10 @@ final class AosLayer {
   /// The icon `[about]` names, by path, as the bytes its digest covered, once its header passed [checkIcon]: what
   /// Settings decodes, never the file read again. Empty when there is none or it was refused.
   final Map<String, List<int>> icon;
+
+  /// The bytes its digest covered of every file under a skill's directory and of every context file, by relative path:
+  /// what a session is given, never the files read again.
+  final Map<String, List<int>> blobs;
 }
 
 /// Why an overlay is left out whole. Never quotes a value.
@@ -354,6 +358,12 @@ Layer overlayLayer({
       notApplied: notApplied,
       about: about,
       icon: icon,
+      blobs: {
+        for (final MapEntry(:key, :value) in members.entries)
+          if (skills.values.any((skill) => key.startsWith('${skill!.path}/')) ||
+              contexts.any((context) => context.file == key))
+            key: value,
+      },
     ),
   );
 }
@@ -399,8 +409,11 @@ String _reason(String code) => switch (code) {
 
 /// Builds the AOS overlays' environment, lowest first, over this process's environment as [lookup] reads it: every
 /// root variable first, then each overlay's env files, `env` and path additions. A placeholder reads only what the
-/// overlays set and the variables the person's own layers share. Throws [ProfileException] `resolve`.
-AosEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, LayerId> shared, String? Function(String) lookup) {
+/// overlays set and the variables the person's own layers share. Into [after], when given, goes each overlay's
+/// environment as it stood once that overlay applied: what its MCP servers' text is substituted against. Throws
+/// [ProfileException] `resolve`.
+AosEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, LayerId> shared, String? Function(String) lookup,
+    {Map<String, AosEnvironment>? after}) {
   if (layers.isEmpty) return AosEnvironment();
   final os = layers.first.os;
   final windows = os == 'windows';
@@ -424,6 +437,10 @@ AosEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, LayerI
     } on AosException catch (error) {
       throw ProfileException('resolve', key: 'overlay:${layer.identity}.env.${error.subject}', reason: _reason(error.code));
     }
+    after?[layer.identity] = env.copy();
   }
   return env;
 }
+
+/// Whether the person's own layers share [name] with overlays and projects; on Windows names compare without case.
+bool isShared(Map<String, LayerId> shared, String name, {required bool windows}) => _shared(shared, name, windows);

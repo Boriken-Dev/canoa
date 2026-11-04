@@ -301,11 +301,15 @@ final class Choice {
 
 /// Something the agent lets a person choose, such as its model.
 final class ConfigOption {
-  const ConfigOption({required this.id, required this.label, required this.current, required this.choices, this.isMode = false});
+  const ConfigOption({required this.id, required this.label, required this.current, required this.choices, this.isMode = false,
+      this.category});
   final String id;
   final String label;
   final String current;
   final List<Choice> choices;
+
+  /// What ACP says it is, such as `model`, `thought_level` or `mode`, when the agent says.
+  final String? category;
 
   /// Set with `session/set_mode` rather than `session/set_config_option`.
   final bool isMode;
@@ -342,6 +346,7 @@ List<ConfigOption>? parseConfigOptions(Object? raw) {
       label: shortText(entry['name']) ?? id,
       current: current,
       choices: choices,
+      category: shortText(entry['category']),
     ));
   }
   return parsed;

@@ -209,8 +209,13 @@ final class VerifiedAgent {
   int? get protocolVersion => _client.protocolVersion;
   Future<void> initialize() => _client.initialize();
   Future<AcpDescription> describe() => _client.describe();
-  Future<String> createSession({required String cwd}) => _client.createSession(cwd: cwd);
-  Future<AcpOpenedSession> openSession({required String cwd}) => _client.openSession(cwd: cwd);
+  Future<String> createSession({required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
+      _client.createSession(cwd: cwd, setup: setup);
+  Future<AcpOpenedSession> openSession({required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
+      _client.openSession(cwd: cwd, setup: setup);
+  bool takesMcp(AcpMcpTransport transport) => _client.takesMcp(transport);
+  bool get takesSystemPrompt => _client.takesSystemPrompt;
+  bool get takesAdditionalDirectories => _client.takesAdditionalDirectories;
   Future<Map<String, dynamic>> setConfigOption(String sessionId, String configId, String value) =>
       _client.setConfigOption(sessionId, configId, value);
   Future<void> setMode(String sessionId, String modeId) => _client.setMode(sessionId, modeId);
@@ -220,10 +225,26 @@ final class VerifiedAgent {
   bool get takesFiles => _client.takesFiles;
   bool get canReopenSessions => _client.canReopenSessions;
   Future<AcpSessionPage> listSessions({String? cwd, String? cursor}) => _client.listSessions(cwd: cwd, cursor: cursor);
-  Future<AcpOpenedSession> reopenSession(String id, {required String cwd}) => _client.reopenSession(id, cwd: cwd);
+  Future<AcpOpenedSession> reopenSession(String id, {required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
+      _client.reopenSession(id, cwd: cwd, setup: setup);
   Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) =>
       _client.prompt(sessionId, text, attachments: attachments);
   Future<void> cancel(String sessionId) => _client.cancel(sessionId);
   Future<void> closeSession(String sessionId) => _client.closeSession(sessionId);
-  Future<void> close() => _client.close();
+  final _afterClose = <Future<void> Function()>[];
+
+  /// Runs [action] once this client is closed, as for files written for its sessions.
+  void afterClose(Future<void> Function() action) => _afterClose.add(action);
+
+  Future<void> close() async {
+    try {
+      await _client.close();
+    } finally {
+      final actions = [..._afterClose];
+      _afterClose.clear();
+      for (final action in actions) {
+        await action();
+      }
+    }
+  }
 }
