@@ -41,21 +41,40 @@ provider = "acp_echo_echo"
 listen = "127.0.0.1:7803"
 
 [host.providers.python.source_settings]
-dirs = ["python/echo"]                                     # directories of *.guatiao.toml manifests
+dirs = ["python/echo"]                                     # directories of manifests, each <name>.guatiao
 paths = ["python/guatiao", "python/coqui_acp_provider"]    # what goes first on sys.path: Guatiao's binding, the kinds
+isolation = "shipped"                                      # optional: shipped (the default), isolated or inherit
+home = "python/runtime"                                    # optional: the Python installation it runs from
+import_dirs = ["python/runtime"]                           # optional, Windows: where python3.dll is found
 ```
 
 `library` and `source` exclude each other, and `source_settings` goes with `source` alone. Relative paths in `library`,
-`source` and the `dirs`, `manifests` and `paths` lists are made absolute from Canoa.cfg's directory when the file is read;
-the provider's process runs in that directory, so any other relative path in `source_settings` is taken from there too.
+`source`, `home` and the `dirs`, `manifests`, `paths` and `import_dirs` lists are made absolute from Canoa.cfg's directory
+when the file is read; the provider's process runs in that directory, so any other relative path in `source_settings` is
+taken from there too. The source reads the rest; it refuses a value it does not take when a connection loads it.
+
+A manifest is named `<name>.guatiao`, or `<name>.guatiao.<major>[.<minor>]`; a file named `*.guatiao.toml` is not read. It
+is TOML unless its first line is `#!json` or `#!yaml`.
+
+`isolation` decides how much the interpreter takes from outside these settings:
+
+| `isolation` | What it reads | What it ignores |
+| --- | --- | --- |
+| `shipped` (the default) | what ships with the program: a `._pth` or `pyvenv.cfg` beside `canoa-host`, on Windows `canoa-host`'s own directory, `home`, the installation's `site-packages`, `paths` | `PYTHONPATH`, `PYTHONHOME` and every other `PYTHON*` variable, the user's own `site-packages` |
+| `isolated` | the standard library of `home` (else of the installation `python3.dll` came from) and `paths`, nothing else | everything beside `canoa-host`, the installation's `site-packages`, the environment |
+| `inherit` | the environment as well, as a `python` started from the host would | nothing |
+
+`inherit` is weaker: whoever sets the host's environment chooses the code a library runs. `canoa-host serve` says so in its
+log when it starts, once per entry: `weakened: host.providers.NAME.source_settings.isolation is inherit, looser than
+shipped`. The first source a process adds decides `isolation` and `home`; each connection is a process of its own.
 
 What a provider prints, to standard output or standard error, goes to the host's log, up to 1 MiB per connection, and
 never to the client: the host and the provider's process speak ACP over a loopback socket of their own, which the process
 proves with a one-time token. Its standard input is closed once the settings are read.
 
-On Windows the Python's `python3.dll` has to be found: put its directory (`sys.base_prefix`) on the host's `PATH`. On
-Linux and macOS the source links that Python's shared library, found where the loader looks, or through
-`LD_LIBRARY_PATH` or `DYLD_FALLBACK_LIBRARY_PATH`.
+On Windows the Python's `python3.dll` has to be found: name its directory (`sys.base_prefix`) in `import_dirs`, or put it
+on the host's `PATH`. On Linux and macOS the source links that Python's shared library, found where the loader looks, or
+through `LD_LIBRARY_PATH` or `DYLD_FALLBACK_LIBRARY_PATH`; `import_dirs` is ignored there.
 
 ### A provider built from settings
 
@@ -237,15 +256,17 @@ only from a dialog that shows its whole id.
   does. It is mapped only in the process serving one connection, so a crash ends that connection alone, but it is
   trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A provider source runs code too, and loads more.** Python's source trusts, besides its own file: the Python whose
-  shared library the system finds; that Python's standard library, `site-packages`, your own site-packages and their
-  `.pth` files; the host's `PYTHONPATH`, `PYTHONHOME` and `GUATIAO_LIBRARY`, which its process inherits; on Windows, a
-  `canoa-host._pth` or `pyvenv.cfg` beside `canoa-host`'s executable; every directory in `paths`; every manifest in `dirs` and the
-  directories it names; and every module those import. Whoever can write any of them runs code as you.
+  shared library `import_dirs` or the system finds; that Python's standard library, and unless `isolation` is
+  `isolated` its `site-packages` and their `.pth` files and, on Windows, `canoa-host`'s own directory with a
+  `canoa-host._pth` or `pyvenv.cfg` there; `GUATIAO_LIBRARY`, which its process inherits; every directory in `paths`;
+  every manifest in `dirs` and the directories it names; and every module those import. With `isolation = "inherit"` it
+  also trusts your own site-packages and the host's `PYTHONPATH` and `PYTHONHOME`. Whoever can write any of them runs code
+  as you.
 - **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
-  and in the system's directories only. For a source, when those leave an import missing, such as `python3.dll`, the source
-  is loaded again and all its imports are looked for in the source's own directory, the system directories, the
-  provider's working directory (Canoa.cfg's) and every directory on `PATH`, in that order: the first `python3.dll` found
-  there is the one that loads.
+  and in the system's directories only. For a source, an import it names itself that those leave missing, such as
+  `python3.dll`, is looked for in `import_dirs`, the Windows directory, the provider's working directory (Canoa.cfg's) and
+  every directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
+  opened with the narrow search again, so its other imports come from where they did.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
 - **A tool entry** runs its program with the host's environment, in the session's working directory, with the rights of
   the account that runs the host. The client names that directory: set `working_roots` on a tool entry, or any directory

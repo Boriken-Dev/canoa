@@ -111,10 +111,11 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 - **A paired key** reaches its entries' agents, which act with this user's rights as far as each agent lets them.
 - **A provider library** is native code: loading it runs it, with this user's rights, in the process serving that
   connection. It is trusted as fully as a program you run, and so is whoever can write it or its directory.
-- **A provider source** runs code and loads more: for Python, the interpreter the system finds, its `site-packages`, the
-  host's `PYTHONPATH`, and every directory and manifest its settings name. On Windows, when the narrow search leaves an
-  import missing, such as `python3.dll`, the source's imports are looked for in the working directory and on `PATH` as
-  well. What it prints goes to the host's log, never to the client.
+- **A provider source** runs code and loads more: for Python, the interpreter the system or `import_dirs` finds, its
+  `site-packages`, and every directory and manifest its settings name; with `isolation = "inherit"`, which `serve` logs
+  as weakened, the host's `PYTHONPATH` too. On Windows, when the narrow search leaves an import the source names missing,
+  such as `python3.dll`, it is looked for in `import_dirs`, the working directory and on `PATH` as well. What it prints
+  goes to the host's log, never to the client.
 - **A stdio agent** is the program the file names, found as the operating system finds a command.
 
 ## Development
