@@ -223,7 +223,8 @@ command = "/usr/local/bin/lint-mcp"
 
 - **A client chooses only by name, only among the entry's `profiles`.** It names one in `initialize`'s
   `_meta["dev.boriken.canoa/profile"]`; anything else there, a name the entry does not offer, or a choice in any later
-  message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A client never sends a
+  message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A first message that is not
+  `initialize` is refused too, before any secret is read or any process starts. A client never sends a
   profile's contents: every value comes from Canoa.cfg.
 - **The environment** reaches the agent's process when it starts, on the first line of its standard input through
   `canoa-host launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
@@ -231,7 +232,8 @@ command = "/usr/local/bin/lint-mcp"
 - **Context, skills and MCP servers** go with each `session/new`, `session/load` and `session/resume`, where the
   agent's harness takes them, as the app does: the context through ACP `systemPrompt` (before a client's own), skills as the
   Claude Code plugin `canoa-profile` or a directory Codex reads, MCP servers through `mcpServers`. A client's MCP server
-  may not take one of the profile's names.
+  may not take one of the profile's names. A stdio server named by a bare command is found on the host's `PATH`, in
+  absolute directories only, and sent to the agent as that absolute path.
 - **An overlay's MCP server stays off** until `allow_mcp` names it at the digest of its definition; a changed definition
   is off again. The report, and the host's log, give the digest of each server that is off. A client cannot turn one on.
   An overlay is read from the copy the app installed and checked against its record's digest; a changed copy is left out.
