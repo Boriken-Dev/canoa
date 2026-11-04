@@ -288,7 +288,9 @@ pub struct Limits { pub max_bytes: usize, pub max_depth: usize }       // Defaul
 pub fn read_document(bytes: &[u8], limits: Limits) -> Result<Map<String, Value>, AosError>
 pub fn parse_dotenv(bytes: &[u8]) -> Result<Vec<DotenvLine>, AosError>     DotenvLine { name, text, literal }
 pub fn read_dotenv(bytes: &[u8], env: &mut Environment) -> Result<IndexMap<String, String>, AosError>
-pub fn substitute(text: &str, lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>) -> Result<String, AosError>
+pub fn substitute(text: &str, lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>) -> Result<String, AosError>   // too-large, too-deep, too-complex past SubstLimits
+pub fn substitute_with(text, lookup, limits: SubstLimits) -> Result<String, AosError>   SubstLimits { max_value: 1 MiB, max_depth: 32, max_steps: 10_000_000 }
+pub fn is_insecure_url(url: &str) -> bool   // plain http to a host other than localhost, [::1] or an IPv4 address in 127.0.0.0/8
 pub fn validate(doc: &Map<String, Value>, files: Option<&BTreeSet<String>>) -> Vec<Issue>   Issue { code, at }   // sorted by pointer
 pub fn applies(issues: &[Issue]) -> bool                // only problems under /about
 pub fn valid_overlay_name, normalize_name, root_variable, state_variable, is_relative_path, is_reserved_variable, is_sensitive, is_env_name
