@@ -21,9 +21,7 @@ dependencies:
       ref: 445007acb04f1b11f8f0f7c9fcf104f694189a2b
   crypto: ^3.0.6
   file_selector: ^1.1.0
-  flutter_local_notifications_linux: ^8.0.1
-  flutter_local_notifications_platform_interface: ^12.1.0
-  flutter_local_notifications_windows: ^3.1.1
+  local_notifier: ^0.1.6
   flutter_markdown_plus: ^1.0.12
   toml: ^0.18.0
   http: ^1.6.0
