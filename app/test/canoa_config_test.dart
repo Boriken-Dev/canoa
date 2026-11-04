@@ -23,6 +23,18 @@ cdn = "local"
     expect(parsed.preferWebTransport, false);
     expect(CanoaConfig.parse(parsed.encode()).cdn, 'local');
   });
+  test('saving Settings or pinning an overlay keeps full access and the notifications', () {
+    final config = CanoaConfig.parse('[permissions]\nfull_access = ["Claude"]\n[notifications]\nfinished = false\n'
+        '[overlays]\nmine = { dir = "mine" }\n');
+    for (final saved in [config.withProfilesOf(config), config.withOverlayPin('mine', 'sha256:${'0' * 64}')]) {
+      expect(saved.fullAccess, {'Claude'});
+      expect(saved.notifications.finished, isFalse);
+      final reread = CanoaConfig.parse(saved.encode());
+      expect(reread.fullAccess, {'Claude'});
+      expect(reread.notifications.finished, isFalse);
+    }
+  });
+
   test('keeps the host table canoa-host reads when settings are saved', () {
     final parsed = CanoaConfig.parse('''
 [desktop]

@@ -327,6 +327,8 @@ final class CanoaConfig {
     profile: profile ?? this.profile,
     agentProfiles: agentProfiles ?? this.agentProfiles,
     tables: tables,
+    fullAccess: fullAccess,
+    notifications: notifications,
   );
 
   static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
