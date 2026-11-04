@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use canoa_host::config::ImportSearch;
 use canoa_host::{
     Config, HostLine, Origin, PeerState, ProviderOptions, ServeOptions, Serving, peers,
 };
@@ -91,6 +92,11 @@ enum Command {
         /// A Guatiao source file, such as guatiao_source_py, and the code it loads: name only files you would run.
         #[arg(long)]
         source: Option<PathBuf>,
+        /// With --source on Windows: library looks for what the source imports itself only in its settings'
+        /// import_dirs; path also in the Windows directory, the working directory and PATH. Without it: library when
+        /// import_dirs names a directory, path otherwise.
+        #[arg(long, requires = "source", value_parser = ["library", "path"])]
+        import_search: Option<String>,
         /// The provider's id.
         #[arg(long)]
         provider: String,
@@ -457,6 +463,7 @@ fn run(cli: Cli) -> Result<(), Failed> {
         Command::Provider {
             library,
             source,
+            import_search,
             provider,
             working_roots,
             max_sessions,
@@ -480,10 +487,18 @@ fn run(cli: Cli) -> Result<(), Failed> {
             };
             let origin = match (library, source) {
                 (Some(library), None) if line.source_settings.is_none() => Origin::Library(library),
-                (None, Some(file)) => Origin::Source {
-                    file,
-                    settings: line.source_settings.unwrap_or_default(),
-                },
+                (None, Some(file)) => {
+                    let settings = line.source_settings.unwrap_or_default();
+                    let import_search = import_search
+                        .as_deref()
+                        .and_then(ImportSearch::named)
+                        .unwrap_or_else(|| ImportSearch::default_for(&settings));
+                    Origin::Source {
+                        file,
+                        settings,
+                        import_search,
+                    }
+                }
                 _ => return Err(Failed::usage("source settings go with --source alone")),
             };
             let mut options = ProviderOptions::new(origin, provider);

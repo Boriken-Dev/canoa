@@ -104,6 +104,7 @@ nested = { depth = 2, ratio = 0.5, on = true, list = [1, "two"] }
     let Origin::Source {
         file,
         settings: source,
+        ..
     } = origin
     else {
         panic!("a source: {origin:?}");
@@ -401,6 +402,49 @@ fn relative_paths_a_source_reads_are_made_absolute_against_the_configs_directory
         map["prefix_file"], "stays.txt",
         "a key no source reads as a path list is passed as written"
     );
+}
+
+#[test]
+fn a_source_names_its_import_search_and_takes_the_narrow_one_where_import_dirs_say_where_to_look() {
+    let search = |extra: &str, settings: &str| {
+        let (origin, _) = provider_kind(&format!(
+            "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n{extra}[host.providers.p.source_settings]\n{settings}"
+        ));
+        let Origin::Source { import_search, .. } = origin else {
+            panic!("a source");
+        };
+        import_search
+    };
+    assert_eq!(
+        search("", ""),
+        ImportSearch::Path,
+        "nothing names where python3.dll is: PATH, as before"
+    );
+    assert_eq!(
+        search("", "import_dirs = [\"python\"]\n"),
+        ImportSearch::Library
+    );
+    assert_eq!(
+        search("import_search = \"library\"\n", ""),
+        ImportSearch::Library
+    );
+    assert_eq!(
+        search("import_search = \"path\"\n", "import_dirs = [\"python\"]\n"),
+        ImportSearch::Path,
+        "a choice is never taken away"
+    );
+    assert_eq!(
+        search("", "import_dirs = []\n"),
+        ImportSearch::Path,
+        "an empty list names nowhere"
+    );
+    for bad in [
+        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\nimport_search = \"everywhere\"\n",
+        "[host.providers.p]\nlibrary = \"l\"\nprovider = \"p\"\nimport_search = \"library\"\n",
+    ] {
+        let error = parse(bad).expect_err("refused");
+        assert!(error.to_string().contains("import_search"), "{error}");
+    }
 }
 
 #[test]

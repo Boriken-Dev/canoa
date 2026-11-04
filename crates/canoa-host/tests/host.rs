@@ -552,6 +552,50 @@ fn the_session_settings_are_the_hosts_to_choose_and_a_looser_one_is_said() {
 }
 
 #[test]
+fn a_source_whose_import_search_reaches_the_working_directory_and_path_is_said_to_be_weakened() {
+    let entry = |name: &str, extra: &str, settings: &str| {
+        format!(
+            "[host.providers.{name}]\nsource = \"guatiao_source_py.dll\"\nprovider = \"p\"\n{extra}[host.providers.{name}.source_settings]\n{settings}"
+        )
+    };
+    let config = [
+        entry("defaulted", "", ""),
+        entry(
+            "chosen",
+            "import_search = \"path\"\n",
+            "import_dirs = [\"python\"]\n",
+        ),
+        entry("listed", "", "import_dirs = [\"python\"]\n"),
+        entry("narrow", "import_search = \"library\"\n", ""),
+    ]
+    .concat();
+    let (_host, log) = Host::start_logged(Scratch::new(), &config, 4, &[]);
+    let said = |name: &str| {
+        format!("weakened: host.providers.{name}.import_search is path, looser than library")
+    };
+    if cfg!(windows) {
+        let written = log_holding(&log, &[&said("defaulted"), &said("chosen")]);
+        assert!(written.contains(&said("defaulted")), "{written}");
+        assert!(
+            written.contains("set import_dirs"),
+            "the log says how to narrow it: {written}"
+        );
+        assert!(written.contains(&said("chosen")), "{written}");
+        for quiet in [
+            "providers.listed.import_search",
+            "providers.narrow.import_search",
+        ] {
+            assert!(!written.contains(quiet), "{written}");
+        }
+    } else {
+        // Only Windows' loader reaches the working directory and PATH for a source's own imports. Every entry is
+        // bound, and anything said of it written, before the host prints where it listens.
+        let written = log_holding(&log, &[]);
+        assert!(!written.contains("import_search"), "{written}");
+    }
+}
+
+#[test]
 fn a_source_that_inherits_the_hosts_environment_is_said_to_be_weakened() {
     let entry = |name: &str, settings: &str| {
         format!(

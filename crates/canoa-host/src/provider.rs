@@ -198,8 +198,8 @@ impl core::error::Error for ProviderError {
 /// loads, which for Python is the interpreter, its environment and every module its settings and manifests reach. Name
 /// only files you would run as a program. A library's imports are found beside it and in the system's directories, not in
 /// the working directory or `PATH`; on Windows an import a source names itself is looked for in its settings' `import_dirs`,
-/// the working directory and on `PATH` too, when those leave it missing. Nothing may print to standard output while this
-/// runs, since that is the transport.
+/// and with [`ImportSearch::Path`](crate::config::ImportSearch::Path) in the working directory and on `PATH` too, when those
+/// leave it missing. Nothing may print to standard output while this runs, since that is the transport.
 ///
 /// # Errors
 ///
@@ -262,9 +262,16 @@ fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>),
                 .load_file(library)
                 .map_err(|error| ProviderError::Load(error.to_string()))?;
         }
-        Origin::Source { file, settings } => {
+        Origin::Source {
+            file,
+            settings,
+            import_search,
+        } => {
             // A language's runtime is often installed elsewhere than the source: Python's python3.dll, on Windows.
-            registry.set_import_search(ImportSearch::Path);
+            registry.set_import_search(match import_search {
+                crate::config::ImportSearch::Path => ImportSearch::Path,
+                _ => ImportSearch::Library,
+            });
             let config = map_of(settings).map_err(ProviderError::Source)?;
             registry
                 .add_source_file(file, &config)

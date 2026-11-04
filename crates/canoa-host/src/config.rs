@@ -92,7 +92,57 @@ pub enum Origin {
         file: PathBuf,
         /// What the source is added with: for Python, the directories of its manifests and its import paths.
         settings: Settings,
+        /// Where Windows looks for what the source imports itself (Python's `python3.dll`) that its own directory, the
+        /// executable's and the system's leave missing.
+        import_search: ImportSearch,
     },
+}
+
+/// Where Windows looks for an import a source names itself (Python's `python3.dll`) that the source's own directory, the
+/// executable's and the system's leave missing: `import_search` on a source entry. Elsewhere the platform's loader
+/// decides, and both are the same.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ImportSearch {
+    /// `library`: the source's `import_dirs` only.
+    Library,
+    /// `path`: `import_dirs`, then the Windows directory, the working directory and `PATH`, so whoever can write any of
+    /// them chooses the code the source loads. A weakening, which `serve` logs.
+    Path,
+}
+
+impl ImportSearch {
+    /// `library` or `path`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Library => "library",
+            Self::Path => "path",
+        }
+    }
+
+    /// The search a source entry takes when it names none: [`ImportSearch::Library`] when its `import_dirs` name at
+    /// least one directory, since they say where to look; [`ImportSearch::Path`] otherwise, so a source that relied on
+    /// `PATH` still loads, and is logged as weakened.
+    #[must_use]
+    pub fn default_for(settings: &Settings) -> Self {
+        let listed = settings
+            .as_map()
+            .get("import_dirs")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|dirs| !dirs.is_empty());
+        if listed { Self::Library } else { Self::Path }
+    }
+
+    /// The search `text` names: `library` or `path`.
+    #[must_use]
+    pub fn named(text: &str) -> Option<Self> {
+        match text {
+            "library" => Some(Self::Library),
+            "path" => Some(Self::Path),
+            _ => None,
+        }
+    }
 }
 
 /// A table of settings from Canoa.cfg, as JSON, the form a provider process receives it in. `Debug` shows its keys,
@@ -223,6 +273,7 @@ struct RawProvider {
     library: Option<String>,
     source: Option<String>,
     source_settings: Option<toml::Table>,
+    import_search: Option<String>,
     settings: Option<toml::Table>,
     provider: String,
     max_sessions: Option<usize>,
@@ -325,13 +376,25 @@ impl Config {
                         "source_settings go with source, not library",
                     ));
                 }
+                (Some(_), None, None) if provider.import_search.is_some() => {
+                    return Err(invalid(
+                        &name,
+                        "import_search goes with source, not library",
+                    ));
+                }
                 (Some(library), None, None) => Origin::Library(file(library)?),
                 (None, Some(source), settings) => {
                     let mut settings = settings_of(&name, settings.unwrap_or_default())?;
                     absolute_paths(&name, &directory, &mut settings)?;
+                    let import_search = match provider.import_search.as_deref() {
+                        None => ImportSearch::default_for(&settings),
+                        Some(text) => ImportSearch::named(text)
+                            .ok_or_else(|| invalid(&name, "import_search is library or path"))?,
+                    };
                     Origin::Source {
                         file: file(source)?,
                         settings,
+                        import_search,
                     }
                 }
             };

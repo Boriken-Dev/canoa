@@ -25,7 +25,7 @@ use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
-use crate::config::{Config, Entry, EntryKind, Origin};
+use crate::config::{Config, Entry, EntryKind, ImportSearch, Origin};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 
@@ -317,6 +317,10 @@ fn provider_args(
         directory.as_os_str().to_owned(),
         OsString::from("--settings-on-stdin"),
     ];
+    if let Origin::Source { import_search, .. } = origin {
+        args.push(OsString::from("--import-search"));
+        args.push(OsString::from(import_search.as_str()));
+    }
     for root in &entry.working_roots {
         args.push(OsString::from("--working-root"));
         args.push(root.as_os_str().to_owned());
@@ -407,7 +411,20 @@ impl Serving {
                 } => {
                     let mut line = HostLine::default();
                     line.settings.clone_from(settings);
-                    if let Origin::Source { settings, .. } = origin {
+                    if let Origin::Source {
+                        settings,
+                        import_search,
+                        ..
+                    } = origin
+                    {
+                        if cfg!(windows) && *import_search == ImportSearch::Path {
+                            tracing::warn!(
+                                "weakened: host.providers.{}.import_search is path, looser than library: python3.dll and \
+                                 what else the source imports itself may come from the working directory or PATH; set \
+                                 import_dirs to where it is, or import_search = \"library\"",
+                                entry.name
+                            );
+                        }
                         // Guatiao's source cannot tell its host which weaker setting it took, so the host says it.
                         if settings
                             .as_map()
