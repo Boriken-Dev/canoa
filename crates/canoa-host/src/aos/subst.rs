@@ -64,7 +64,7 @@ impl Run<'_> {
 ///
 /// `undefined-variable` for an unset name whose value is needed, `invalid-pattern` for a bracket expression with nothing
 /// in it or a range whose end is below its start, and whatever `lookup` refuses (`secret-placeholder`). The subject is
-/// the placeholder's name, or the pattern. Past [`SubstLimits::default`]: `too-large`, `too-deep` and `too-complex`.
+/// the placeholder's name, or the pattern. Past the default [`SubstLimits`]: `too-large`, `too-deep` and `too-complex`.
 pub fn substitute(
     text: &str,
     lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>,

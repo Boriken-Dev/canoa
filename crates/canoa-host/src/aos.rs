@@ -28,7 +28,7 @@ pub use digest::{
     EntryKind, TreeDigest, TreeEntry, digest_entries, read_tree, same_digest, sha256_digest,
 };
 pub use read::{DotenvLine, Limits, parse_dotenv, read_document, read_dotenv};
-pub use subst::substitute;
+pub use subst::{SubstLimits, substitute, substitute_with};
 pub use validate::{Issue, applies, validate};
 
 /// A refusal, by the class the specification's conformance vectors name it (`parse-error`, `undefined-variable`,
