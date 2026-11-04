@@ -70,6 +70,14 @@ the message being written, for the person to send.
 All of it is what the agent sent, never read from disk, and bounded as the transcript is: a change the agent's text was cut
 from says so. A line number counts in the text the agent sent, which is the whole file only when it sent the whole file.
 
+## A queue while the agent works
+
+A message written while a turn runs (Enter, or **Queue** beside Stop) waits in a queue under the conversation, with what goes
+with it, instead of reaching the agent mid-turn: ACP has no way to add to a running turn. Each queued message can be edited or
+removed. When a turn ends as it should, the first is sent, and the next waits for that turn to end. When a turn is stopped or
+fails, the queue is held, not dropped, and says why: **Send next** goes on with it and **Clear queue** removes it. A
+conversation holds at most 20 queued messages.
+
 ## Keyboard and the command palette
 
 Ctrl (⌘ on a Mac) with: **K** the command palette, **N** a new session, **1** to **9** that session in the list, **Tab** and
