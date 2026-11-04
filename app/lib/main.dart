@@ -41,6 +41,7 @@ import 'profile/profile_layers.dart';
 import 'profile/profile_start_dialog.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
+import 'theme/canoa_mark.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'worktree/close_dialog.dart';
@@ -843,7 +844,7 @@ class _SessionRail extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.sailing_rounded, color: context.look.accent),
+                CanoaMark(color: context.look.accent),
                 const SizedBox(width: 10),
                 const Text('Canoa', softWrap: false, style: TextStyle(
                   fontSize: 22, fontWeight: FontWeight.w700,
