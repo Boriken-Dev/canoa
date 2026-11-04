@@ -31,7 +31,31 @@ A verified transport must be produced by a callback that **cryptographically pro
 
 Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The native Rust responder and JavaScript↔Rust handshake tests now live in coqui-peer, with Coqui TrustStore-based acceptance and revocation. Canoa also has a [paired WSS ACP echo fixture](https://github.com/Boriken-Dev/canoa/tree/main/examples/acp-echo) that exercises a real TLS socket, Coqui proof and v2 session messages. Missing production work is agent-host pairing UI, persistent keys/sessions, production agent adapters and real remote MCP tools. The echo fixture does not execute or represent an AI agent.
 
-The client negotiates: it requests v2 and accepts v1, whichever the agent selects. A permission request is refused until Canoa has an approval UI.
+The client negotiates: it requests v2 and accepts v1, whichever the agent selects.
+
+## Permission requests in the chat
+
+A `session/request_permission` shows as a card in its conversation with the tool, what it would run or touch, and one button per
+option the agent offered, under the agent's own name for it: refusals first, then kinds Canoa does not know, then what allows,
+once before always. An option sent without a name is named by its kind. The answer selects that option's `optionId`. What an
+`allow_always` or `reject_always` answer remembers belongs to the agent, which the card says when it offers one: Canoa keeps
+nothing of it and cannot undo it. A request offering no option Canoa can read can only be cancelled, and one whose options repeat
+an id is answered cancelled without being shown, since the agent could take that id for either. A conversation holds at most 64
+questions waiting; the agent's further ones are answered cancelled, and the conversation says so.
+
+**Full access** answers a session's requests without asking. It is off unless the person turns it on, for one conversation (the
+header's **Full access…**, after a dialog that says what it does) or for an agent (Settings, or `[permissions] full_access` in
+Canoa.cfg), whose sessions then start with it. An agent's setting reaches only sessions of the program this app runs under that
+label: a peer, a hosted agent or a browser's agent never gets it by calling itself that, and is given full access per
+conversation instead. A request reaches only the conversation of the connection that sent it, whatever session id the agent
+chose. While it is on, a banner on the conversation and a mark on its row say so, and the
+banner's **Turn off** ends it in one action, for the agent too where the agent's setting turned it on. Each time it is turned on
+is logged as `weakened: full access is on ...` and said in the conversation, and each request it answers is said there too.
+
+It answers only with an `allow_once` option. A request offering none, including one whose only allow is `allow_always`, which the
+agent would keep after full access ends, is shown to the person as before. A request already waiting when it is turned on stays
+for the person. Full access is the chat's answer to the agent's requests and nothing else: it never reaches the browser
+extension's grants for pages, tabs or tools, which stay [their own](acp-permissions.md#independent-browser-grants).
 
 ## Verification
 
