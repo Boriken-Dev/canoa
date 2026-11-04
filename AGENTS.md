@@ -71,8 +71,8 @@ close and reopen from Earlier conversations), then checked on disk. It needs `no
 ```
 
 `CANOA_EVENT_LOG=<file>` makes the app append the kind, shape and rendering of each distinct ACP update it receives, never its
-text. `test/fixtures/coding_task_updates.jsonl` is that record from a real run; `chat_test.dart` fails when any kind in it would
-reach the fallback, which shows nothing.
+text. `test/fixtures/coding_task_updates.jsonl` is that record from a real run, plus the v2 kinds it lacked from a scripted run;
+`chat_test.dart` fails when any kind in it would reach the fallback, which shows nothing.
 
 ## CI and release
 
