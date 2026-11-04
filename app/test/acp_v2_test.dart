@@ -239,17 +239,21 @@ void main() {
       'content': [{'type': 'text', 'text': 'Hello!'}],
     });
     expect(session.messages.single.text, 'Hello!');
+    // Written while the agent works, it waits for the turn to end, and goes then.
     await store.sendText('Question');
+    expect(session.queue.single.text, 'Question');
+    channel.notify('session-1', {
+      'sessionUpdate': 'state_update', 'state': 'idle',
+    });
+    expect(session.status, SessionStatus.connected);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(session.queue, isEmpty);
     expect(session.messages.last.messageId, 'user-1');
     channel.notify('session-1', {
       'sessionUpdate': 'user_message', 'messageId': 'user-1',
       'content': [{'type': 'text', 'text': 'Question'}],
     });
     expect(session.messages, hasLength(2));
-    channel.notify('session-1', {
-      'sessionUpdate': 'state_update', 'state': 'idle',
-    });
-    expect(session.status, SessionStatus.connected);
     await client.close();
     await Future<void>.delayed(Duration.zero);
     expect(session.status, SessionStatus.disconnected);

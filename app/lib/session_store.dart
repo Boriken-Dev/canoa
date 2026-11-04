@@ -893,7 +893,13 @@ class SessionStore extends ChangeNotifier {
   void _turnEnded(ChatSession session, String? held) {
     if (session.queue.isEmpty) return;
     session.queueHeld = held;
-    if (held == null) unawaited(sendQueued(session).catchError((Object error) => _note(session, 'A queued message was not sent: $error')));
+    // After the update that ended the turn has been dispatched: an answer to the next prompt could otherwise arrive inside it.
+    if (held == null) {
+      scheduleMicrotask(() => unawaited(sendQueued(session).catchError((Object error) {
+        _note(session, 'A queued message was not sent: $error');
+        notifyListeners();
+      })));
+    }
   }
 
   /// Sends the first queued message of [session] now, and lets the queue go on after it.
