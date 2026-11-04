@@ -21,6 +21,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'chat/agent_events.dart' show AgentCommandInfo;
+import 'chat/changes.dart';
 import 'chat/permission_card.dart';
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
@@ -701,6 +702,44 @@ class _ConversationState extends State<_Conversation> {
   /// Whether the transcript keeps its end in view as entries arrive: true until the person scrolls away from the end.
   bool _following = true;
 
+  /// Whether the changes pane is beside the conversation, on a wide window.
+  bool _changesOpen = false;
+
+  /// Adds [text] to the message being written, on a line of its own.
+  void _addToComposer(String text) {
+    final had = _input.text;
+    final joined = had.isEmpty || had.endsWith('\n') ? '$had$text' : '$had\n$text';
+    _input.value = TextEditingValue(text: joined, selection: TextSelection.collapsed(offset: joined.length));
+  }
+
+  /// The changes pane: beside the conversation on a wide window, a sheet over it on a narrow one.
+  void _showChanges(ChatSession session) {
+    if (!widget.narrow) {
+      setState(() => _changesOpen = !_changesOpen);
+      return;
+    }
+    unawaited(showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheet) => FractionallySizedBox(
+        heightFactor: 0.9,
+        child: ListenableBuilder(
+          listenable: widget.store,
+          builder: (context, _) => ChangesPane(
+            store: widget.store,
+            session: session,
+            onComment: (text) {
+              _addToComposer(text);
+              Navigator.pop(sheet);
+            },
+            onClose: () => Navigator.pop(sheet),
+          ),
+        ),
+      ),
+    ));
+  }
+
   /// How far from the end, in logical pixels, still counts as at the end.
   static const double _nearEnd = 24;
 
@@ -790,6 +829,7 @@ class _ConversationState extends State<_Conversation> {
         ('Full access…', Icons.gpp_maybe_outlined, () async {
           if (await confirmFullAccess(context, session)) widget.store.setFullAccess(session, true);
         }),
+      if (session != null && changesOf(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
     ];
     if (!widget.narrow || actions.length < 2) {
       return [
@@ -812,7 +852,7 @@ class _ConversationState extends State<_Conversation> {
   Widget build(BuildContext context) {
     final session = widget.store.selected;
 
-    return Column(children: [
+    final conversation = Column(children: [
       Material(
         color: context.look.bar,
         child: Padding(
@@ -935,6 +975,20 @@ class _ConversationState extends State<_Conversation> {
           remote: !canRunLocalAgents || session.place != SessionPlace.local,
         ),
       ],
+    ]);
+    if (widget.narrow || !_changesOpen || session == null || changesOf(session).isEmpty) return conversation;
+    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Expanded(child: conversation),
+      const VerticalDivider(width: 1),
+      SizedBox(
+        width: 420,
+        child: ChangesPane(
+          store: widget.store,
+          session: session,
+          onComment: _addToComposer,
+          onClose: () => setState(() => _changesOpen = false),
+        ),
+      ),
     ]);
   }
 }

@@ -59,8 +59,27 @@ final class ToolDiff extends ToolBlock {
 
 /// A change an agent already wrote as a unified patch.
 final class ToolPatch extends ToolBlock {
-  const ToolPatch(this.text);
+  const ToolPatch(this.text, {this.paths = const []});
   final String text;
+
+  /// The files it changes: those the agent listed with it, or else those its `+++` lines name.
+  final List<String> paths;
+}
+
+/// The files a v2 diff lists in its `changes`, or else those a patch's `+++` lines name (`b/` taken off, `/dev/null` left out).
+List<String> _patchPaths(Object? changes, String text) {
+  if (changes is List) {
+    final listed = [
+      for (final change in changes.take(maxLocations))
+        if (change is Map) ?shortText(change['path']),
+    ];
+    if (listed.isNotEmpty) return listed;
+  }
+  return [
+    for (final line in text.split('\n').where((line) => line.startsWith('+++ ')).take(maxLocations))
+      if (line.substring(4).trim() case final named when named != '/dev/null')
+        ?shortText(named.startsWith('b/') ? named.substring(2) : named),
+  ];
 }
 
 final class ToolTerminal extends ToolBlock {
@@ -90,7 +109,8 @@ ToolBlock? _toolBlock(Object? raw) {
   }
   final patch = raw['patch'];
   if (patch is Map && patch['text'] is String) {
-    return ToolPatch(boundedHead(patch['text'] as String, maxToolText));
+    final text = boundedHead(patch['text'] as String, maxToolText);
+    return ToolPatch(text, paths: _patchPaths(raw['changes'], text));
   }
   return null;
 }

@@ -138,6 +138,9 @@ class ChatSession {
   /// Whether a turn ended here since the person last chose this session.
   bool unread = false;
 
+  /// The files of the changes pane the person marked viewed, each with the version of it they saw.
+  final Map<String, int> viewedChanges = {};
+
   /// Whether something here waits for the person's answer.
   bool get needsYou => pendingPermissions.isNotEmpty;
 
@@ -356,6 +359,16 @@ class SessionStore extends ChangeNotifier {
     if (session.pendingPermissions.isEmpty) return;
     final question = session.pendingPermissions.removeAt(0);
     question._answer.complete(allow ? const AcpAllow() : const AcpDeny('the person refused'));
+    notifyListeners();
+  }
+
+  /// Marks [path] viewed at [version] in [session]'s changes, or not viewed when [version] is null.
+  void markViewed(ChatSession session, String path, int? version) {
+    if (version == null) {
+      session.viewedChanges.remove(path);
+    } else {
+      session.viewedChanges[path] = version;
+    }
     notifyListeners();
   }
 
