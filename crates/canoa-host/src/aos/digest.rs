@@ -1,7 +1,6 @@
 //! The tree digest: one SHA-256 over an overlay's files, the same on every platform, and reading a directory into the
 //! entries it is computed from without following any link.
 
-use alloc::borrow::ToOwned;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write as _;
@@ -199,7 +198,7 @@ fn name_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
     {
         // A name that is not valid Unicode (a lone surrogate on Windows) keeps an invalid byte, so the digest refuses it.
         name.to_str()
-            .map_or_else(|| alloc::vec![0xff], |name| name.as_bytes().to_owned())
+            .map_or_else(|| alloc::vec![0xff], |name| name.as_bytes().to_vec())
     }
 }
 
