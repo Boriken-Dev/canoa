@@ -207,11 +207,10 @@ In the side list, a conversation waiting for an answer is marked **Needs you**, 
 and one whose turn ended since it was last chosen has a dot. The tray says how many conversations wait for an answer: its
 tooltip on Windows, the first item of its menu everywhere.
 
-- **Windows**: a toast, through `flutter_local_notifications_windows`. The first one registers Canoa's app id,
-  `dev.boriken.canoa`, under the current user's registry (`HKEY_CURRENT_USER`), which Windows requires for an unpackaged
-  program; nothing is registered until a notification is shown.
-- **Linux**: a freedesktop notification over D-Bus, through `flutter_local_notifications_linux`, which needs a notification
-  service on the session bus.
+- **Windows**: a toast, through leanflutter's `local_notifier`. The first one creates a Start menu shortcut named Canoa to
+  the running program (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Canoa.lnk`), which Windows requires to show a toast
+  for a program not installed from a package; nothing is created until a notification is shown.
+- **Linux**: a freedesktop notification through libnotify, which needs a notification service on the session bus.
 - **Web, a PWA and the extension**: the browser's Notification API, once the person allows it from Settings → Notifications →
   **Allow notifications**; nothing registers a service worker. A page shows them while it is open.
 
@@ -226,9 +225,10 @@ This repository keeps the canonical Flutter code in app/. Flutter's platform run
 
 On Linux the tray and window packages (leanflutter's `tray_manager` and `window_manager`) link system libraries that no Dart package carries, so a build needs them installed, offline too:
 
-    sudo apt-get install libayatana-appindicator3-dev libgtk-3-dev libx11-dev libxi-dev
+    sudo apt-get install libayatana-appindicator3-dev libgtk-3-dev libx11-dev libxi-dev libnotify-dev
 
-On Fedora the package is `libayatana-appindicator-gtk3-devel`. Its version 0.6 marks a function tray_manager calls as
+`libnotify-dev` is for notifications (`local_notifier`). On Fedora the packages are `libayatana-appindicator-gtk3-devel` and
+`libnotify-devel`. Its version 0.6 marks a function tray_manager calls as
 deprecated, and the generated runner builds with `-Werror`, so build with
 `CXXFLAGS=-Wno-error=deprecated-declarations` there (Fedora 44).
 
