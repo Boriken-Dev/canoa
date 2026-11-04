@@ -1,7 +1,9 @@
-// A person's multi-step coding task, done in the app's own window through its widgets only: an agent fixes a failing test, adds
+// A person's multi-step coding task, done in the app's own window through its widgets only: a new session is opened on the
+// repository with a model and effort chosen beside Send, and starts on its first message; an agent fixes a failing test, adds
 // one, runs them and renames a function; every question is allowed but one, which is refused; one turn is stopped and continued;
 // a file is attached; the conversation is closed and opened again from Earlier conversations. Then the repository on disk says
-// whether it all happened, and the updates the agent sent say whether each kind has a rendering of its own.
+// whether it all happened, and the updates the agent sent say whether each kind has a rendering of its own. With the scripted
+// stand-in, its own record says the model and effort reached it before the first prompt, and a model it refuses is put back.
 //
 //   flutter test integration_test/coding_task_test.dart -d windows   (or -d linux)
 //
@@ -22,6 +24,7 @@ import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/chat/transcript.dart';
 import 'package:canoa/chat/update_record.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
@@ -137,7 +140,8 @@ void main() {
     final updatesFile = _updates == null ? null : File(_updates!);
     updatesFile?.writeAsStringSync('');
     final recorder = UpdateRecorder(write: (line) => updatesFile?.writeAsStringSync('$line\n', mode: FileMode.append));
-    final store = SessionStore(includePreview: false, recorder: recorder);
+    // The ledger holds what the agent offered and took, for the next session to start with.
+    final store = SessionStore(includePreview: false, recorder: recorder, ledger: SessionLedger(MemoryLedgerBackend()));
     final preset = _real == null ? null : agentPresets.firstWhere((preset) => preset.label == _real);
     final agent = switch (preset) {
       null => AgentCommand(
@@ -159,7 +163,8 @@ void main() {
     final screen = GlobalKey();
     await tester.pumpWidget(RepaintBoundary(
       key: screen,
-      child: CanoaApp(store: store, config: CanoaConfig(agents: agent == preset ? const [] : [agent])),
+      // The folder dialog is the operating system's: the test answers it with the repository, as a person would pick it.
+      child: CanoaApp(store: store, config: CanoaConfig(agents: agent == preset ? const [] : [agent]), pickFolder: () async => repo.path),
     ));
     await tester.pumpAndSettle();
 
@@ -188,24 +193,35 @@ void main() {
     }
 
     bool showing(Finder finder) => finder.evaluate().isNotEmpty;
-    final composer = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.hintText == 'Message agent');
+    final composer = find.descendant(of: find.byKey(const Key('composer')), matching: find.byType(TextField));
     final question = find.byType(PermissionCard);
     // The agent's own option of that kind, under whatever name it gave it.
     Finder answer(String kind) =>
         find.descendant(of: question, matching: find.byWidgetPredicate((widget) => widget is PermissionChoice && widget.option.kind == kind));
     final working = find.byTooltip('Stop');
 
-    Future<void> runAgent() async {
-      await tester.tap(find.byTooltip('Connect to verified agent'));
+    /// Picks [choice] from the composer's control [key].
+    Future<void> choose(String key, String choice) async {
+      await tester.tap(find.byKey(Key(key)));
       await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextField, 'Agent workspace (absolute path)'), repo.path);
-      await until(() => showing(find.text('Run $label')), 'the $label preset to be offered', within: const Duration(seconds: 30));
-      // The dialog has to have finished opening, or the tap lands where the button was on its way in.
+      await tester.tap(find.text(choice).last);
       await tester.pumpAndSettle();
-      await shot('connect-dialog');
-      await tester.tap(find.text('Run $label'));
-      await until(() => !showing(find.byType(AlertDialog)), 'the agent to start', within: const Duration(minutes: 4));
+    }
+
+    /// A new session of the agent, in the repository: nothing starts until its first message.
+    Future<void> newSession() async {
+      await tester.tap(find.byTooltip('New session'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('new-session-source')));
+      await until(() => showing(find.byKey(Key('source $label'))), 'the $label source to be offered', within: const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('source $label')).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('new-session-folder')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('new-session-browse')));
+      await tester.pumpAndSettle();
+      await shot('new-session');
     }
 
     bool cardSays(Pattern part) => showing(find.descendant(of: question, matching: find.textContaining(part)));
@@ -238,7 +254,8 @@ void main() {
       if (tester.widget<TextField>(composer).controller?.text != text) fail('the composer did not take the message');
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
-      await until(() => showing(working), 'the turn to start', within: const Duration(minutes: 2));
+      // The first message starts the agent, which an adapter fetched with npx can take minutes to do.
+      await until(() => showing(working), 'the turn to start', within: const Duration(minutes: 4));
       var asked = 0, refused = 0, outside = 0;
       while (showing(working)) {
         if (showing(question)) {
@@ -273,11 +290,27 @@ void main() {
     }
 
     await shot('start');
-    await runAgent();
-    await shot('connected');
+    await newSession();
+    final startedBeforeSend = store.sessions.single.remoteSessionId != null;
+    if (_real == null) {
+      // What the stand-in offered is not known before it first runs: only its default shows, and none is chosen.
+      await choose('option-model', 'Default');
+    }
 
     final fixed = await turn('fix', _fix);
     debugPrint('STEP fix: asked ${fixed.asked}, outside the directory ${fixed.outside}');
+    var setBeforePrompt = <Object?>[];
+    var chosenBeforePrompt = <Object?>[];
+    var refusedKeptModel = true;
+    if (_real == null) {
+      await choose('option-model', 'Fast');
+      await choose('option-effort', 'High');
+      await choose('option-model', 'Refused');
+      await tester.pump(const Duration(milliseconds: 500));
+      refusedKeptModel = showing(find.descendant(of: find.byKey(const Key('option-model')), matching: find.text('Fast'))) &&
+          showing(find.textContaining('The agent did not change Model to Refused'));
+      await shot('model-refused');
+    }
 
     final stopped = await turn('rename', _rename, stop: true);
     final untouched = File('${repo.path}/src/calc.js').readAsStringSync().contains('addNumbers');
@@ -286,8 +319,10 @@ void main() {
     final continued = await turn('go-on', _goOn);
     debugPrint('STEP continue: asked ${continued.asked}, outside the directory ${continued.outside}');
 
-    await tester.tap(find.byTooltip('Attach'));
-    await until(() => showing(find.widgetWithText(InputChip, 'notes.txt')), 'the file to be attached', within: const Duration(seconds: 10));
+    await tester.tap(find.byKey(const Key('composer-plus')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add files or images…'));
+    await until(() => showing(find.byKey(const ValueKey('attachment notes.txt'))), 'the file to be attached', within: const Duration(seconds: 10));
     await shot('attached');
     final attached = await turn('notes', _followNotes, refuse: 'obsolete');
     debugPrint('STEP notes: asked ${attached.asked}, refused ${attached.refused}, outside the directory ${attached.outside}');
@@ -304,7 +339,18 @@ void main() {
     await tester.pumpAndSettle();
     await shot('closed');
     final closedAll = store.sessions.isEmpty;
-    await runAgent();
+    // A new session of the same agent, whose first message starts it, and from which the closed one is opened again.
+    await newSession();
+    // What the agent offered when it ran shows before this one starts, with the last model and effort the agent took.
+    final cachedShown = showing(find.descendant(of: find.byKey(const Key('option-model')), matching: find.text(_real == null ? 'Fast' : 'Default'))) &&
+        showing(find.descendant(of: find.byKey(const Key('option-effort')), matching: find.text(_real == null ? 'High' : 'Default')));
+    await shot('new-session-cached');
+    await tester.tap(composer);
+    await tester.enterText(composer, 'Say ready');
+    await tester.tap(find.byTooltip('Send'));
+    await until(() => store.selected?.messages.any((message) => message.text == 'ready') ?? false, 'the new session to start',
+        within: const Duration(minutes: 4));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Earlier conversations'));
     final listed = find.descendant(of: find.byType(EarlierConversations), matching: find.byType(ListTile));
     await until(() => showing(listed), 'earlier conversations to be listed', within: const Duration(minutes: 1));
@@ -338,6 +384,15 @@ void main() {
     final askedOutside = fixed.outside + stopped.outside + continued.outside + attached.outside;
     debugPrint('USAGE ${usage ?? 'none said'}; outside the directory: $askedOutside asked and refused, $ranOutside ran');
 
+    if (_real == null) {
+      final record = jsonDecode(File('${dir.path}/scripted.json').readAsStringSync()) as Map;
+      final calls = (record['scripted-1'] as Map)['calls'] as List;
+      setBeforePrompt = calls.takeWhile((call) => call != 'session/prompt').toList();
+      final second = ((record['scripted-2'] as Map)['calls'] as List).takeWhile((call) => call != 'session/prompt').toList();
+      chosenBeforePrompt = second;
+      debugPrint('SCRIPTED calls of the first session: ${calls.take(8).join(', ')}; of the second before its prompt: ${second.join(', ')}');
+    }
+
     final (exitCode, passing, failing) = await _nodeTest(repo);
     final oldName = _mentioning(repo, 'addNumbers');
     final newName = _mentioning(repo, 'sum(');
@@ -358,6 +413,7 @@ void main() {
       }
     }
 
+    expect(startedBeforeSend, isFalse, reason: 'nothing started before the first message');
     expect(fixed.asked, greaterThan(0), reason: 'the agent asks before it changes anything');
     expect(stopped.stopped, isTrue);
     expect(untouched, isTrue, reason: 'the stopped turn did not rename');
@@ -372,6 +428,12 @@ void main() {
     expect(recorder.unshown, isEmpty, reason: 'kinds no rendering of their own showed');
     expect(askedOutside, 0, reason: 'the agent asked to reach outside the temporary directory');
     expect(ranOutside, 0, reason: 'a tool reached outside the temporary directory');
+    if (_real == null) {
+      expect(setBeforePrompt, ['session/new'], reason: 'Default sends nothing before the first prompt');
+      expect(cachedShown, isTrue, reason: 'the last run\'s model and effort show before the next session starts');
+      expect(chosenBeforePrompt, ['session/new', 'set model=fast', 'set effort=high'], reason: 'set before the first prompt');
+      expect(refusedKeptModel, isTrue, reason: 'a model the agent refused is put back, with its reason');
+    }
     if (_real != null) {
       expect(exitCode, 0, reason: 'the tests pass');
       expect(passing, greaterThanOrEqualTo(2), reason: 'a second test was added');

@@ -60,7 +60,9 @@ void main() {
     await ledger.load();
     final store = SessionStore(includePreview: false, ledger: ledger);
     final screen = GlobalKey();
-    await tester.pumpWidget(RepaintBoundary(key: screen, child: CanoaApp(store: store, config: config)));
+    // The folder dialog is the operating system's: the test answers it with each agent's workspace in turn.
+    var folder = dir;
+    await tester.pumpWidget(RepaintBoundary(key: screen, child: CanoaApp(store: store, config: config, pickFolder: () async => folder)));
     await tester.pumpAndSettle();
 
     var shotNumber = 0;
@@ -89,7 +91,7 @@ void main() {
 
     bool showing(Finder finder) => finder.evaluate().isNotEmpty;
     bool said(String text) => store.selected?.messages.any((message) => message.text == text) ?? false;
-    final composer = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.hintText == 'Message agent');
+    final composer = find.descendant(of: find.byKey(const Key('composer')), matching: find.byType(TextField));
 
     Future<void> send(String text) async {
       await tester.tap(composer);
@@ -130,14 +132,20 @@ void main() {
     if (_step == 'record') {
       for (final (label, repo) in [(_claude, 'repo-a'), (_pi, 'repo-b'), (_plain, 'repo-c')]) {
         final workspace = Directory('$dir/$repo')..createSync();
-        await tester.tap(find.byTooltip('Connect to verified agent'));
+        folder = workspace.path;
+        // A new session, which starts nothing until its first message.
+        await tester.tap(find.byTooltip('New session'));
         await tester.pumpAndSettle();
-        await until(() => showing(find.text('Run $label')), 'the $label entry to be offered', within: const Duration(seconds: 30));
+        await tester.tap(find.byKey(const Key('new-session-source')));
+        await until(() => showing(find.byKey(Key('source $label'))), 'the $label entry to be offered', within: const Duration(seconds: 30));
         await tester.pumpAndSettle();
-        await tester.enterText(find.widgetWithText(TextField, 'Agent workspace (absolute path)'), workspace.path);
-        await tapReachable(find.text('Run $label'));
-        await until(() => !showing(find.byType(AlertDialog)), 'the $label agent to start');
+        await tester.tap(find.byKey(Key('source $label')).last);
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('new-session-folder')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('new-session-browse')));
+        await tester.pumpAndSettle();
+        expect(ledger.entries.where((entry) => entry.entry == label), isEmpty, reason: 'the ledger keeps a session once it starts');
         await send('Say hello from $label');
       }
       await shot('three-open');

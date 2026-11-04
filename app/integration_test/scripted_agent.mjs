@@ -4,6 +4,8 @@
 // A prompt starting `Ask ` asks a question as a form, when the client takes them, shaped as Claude's adapter asks one.
 // The fix turn also sends v2's plan_update, tool_call_content_chunk, notice and compaction updates, shaped as schema/v2 has
 // them: the app shows them whichever version an agent speaks, and the test records each kind it sees.
+// It offers a mode, a model and an effort as config options with their ACP categories, refuses the model `refuse-me` with
+// -32602, and notes in its state each session request and prompt in order, under the session's `calls`.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -32,6 +34,30 @@ const options = [
   { optionId: 'no-always', name: 'Always reject', kind: 'reject_always' },
 ];
 const remembered = new Map();
+
+// What each session has chosen, by option id.
+const chosen = new Map();
+const configOptions = (sessionId) => {
+  const now = chosen.get(sessionId) ?? { mode: 'ask', model: 'default', effort: 'low' };
+  return [
+    { id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: now.mode, options: [
+      { value: 'ask', name: 'Ask first' }, { value: 'edits', name: 'Accept edits' },
+    ] },
+    { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: now.model, options: [
+      { value: 'default', name: 'Default model' }, { value: 'fast', name: 'Fast' }, { value: 'refuse-me', name: 'Refused' },
+    ] },
+    { id: 'effort', name: 'Effort', category: 'thought_level', type: 'select', currentValue: now.effort, options: [
+      { value: 'low', name: 'Low' }, { value: 'high', name: 'High' },
+    ] },
+  ];
+};
+
+function note(sessionId, call) {
+  const state = load();
+  if (!state[sessionId]) return;
+  (state[sessionId].calls ??= []).push(call);
+  save(state);
+}
 
 // Whether the client said it takes questions as forms, in initialize.
 let forms = false;
@@ -192,18 +218,29 @@ for await (const line of createInterface({ input: process.stdin })) {
     send({ id, result: {
       protocolVersion: 1,
       agentCapabilities: reopens
-        ? { loadSession: true, promptCapabilities: { embeddedContext: true }, sessionCapabilities: { list: {} } }
-        : { promptCapabilities: { embeddedContext: true } },
+        ? { loadSession: true, promptCapabilities: { embeddedContext: true, image: true }, sessionCapabilities: { list: {} } }
+        : { promptCapabilities: { embeddedContext: true, image: true } },
       agentInfo,
     } });
   } else if (method === 'session/new') {
     const state = load();
     const sessionId = `scripted-${Object.keys(state).length + 1}`;
-    state[sessionId] = { cwd: params.cwd, title: 'Fix the failing test', history: [], updatedAt: new Date().toISOString() };
+    state[sessionId] = { cwd: params.cwd, title: 'Fix the failing test', history: [], updatedAt: new Date().toISOString(),
+      calls: ['session/new'] };
     save(state);
-    send({ id, result: { sessionId } });
+    send({ id, result: { sessionId, configOptions: configOptions(sessionId) } });
     update(sessionId, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'review', description: 'Review the change' }] });
+  } else if (method === 'session/set_config_option') {
+    if (params.value === 'refuse-me') {
+      send({ id, error: { code: -32602, message: 'That model is not available' } });
+    } else {
+      chosen.set(params.sessionId, { ...(chosen.get(params.sessionId) ?? { mode: 'ask', model: 'default', effort: 'low' }),
+        [params.configId]: params.value });
+      note(params.sessionId, `set ${params.configId}=${params.value}`);
+      send({ id, result: { configOptions: configOptions(params.sessionId) } });
+    }
   } else if (method === 'session/prompt') {
+    note(params.sessionId, 'session/prompt');
     turn = { id, sessionId: params.sessionId };
     prompt(params.sessionId, params.prompt).then((stopReason) => {
       if (turn?.id === id) send({ id, result: { stopReason } });
