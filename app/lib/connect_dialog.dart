@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -57,6 +58,7 @@ Future<void> showCanoaConnectDialog(
   LocalPeerId localPeerId = localBrowserPeerId,
   PairByPin pair = pairBrowserAcp,
   PeerMethod? method,
+  bool inBrowser = kIsWeb,
 }) => showDialog<void>(
   context: context,
   builder: (_) => _ConnectDialog(
@@ -70,6 +72,7 @@ Future<void> showCanoaConnectDialog(
     localPeerId: localPeerId,
     pair: pair,
     method: method,
+    inBrowser: inBrowser,
   ),
 );
 
@@ -85,7 +88,11 @@ class _ConnectDialog extends StatefulWidget {
     this.localAgents = agentPresets,
     this.checkInstalled = isInstalled,
     this.method,
+    this.inBrowser = kIsWeb,
   });
+
+  /// Whether this app is a web page, whose key and identity are the browser's; otherwise they are this app's own.
+  final bool inBrowser;
 
   /// The method an agent's record or its host named, prefilled; null for an agent typed in by hand.
   final PeerMethod? method;
@@ -205,7 +212,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     setState(() {busy = true; error = null;});
     final why = await widget.methodUnavailable(request.method);
     if (why != null) {
-      if (mounted) setState(() {busy = false; error = '${request.method.label} is unavailable in this browser: $why';});
+      if (mounted) setState(() {busy = false; error = '${request.method.label} is unavailable in $_here: $why';});
       return;
     }
     try {
@@ -263,10 +270,27 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     }
   }
 
+  /// What holds the key a peer pins: the browser for a web page, this app otherwise.
+  String get _here => widget.inBrowser ? 'this browser' : 'this app';
+
   @override
   Widget build(BuildContext context) {
+    // An agent on this computer needs only where it works and a title, so those come first, beside the Run buttons; pairing and
+    // endpoints are about agents elsewhere and follow under their own heading.
+    final local = widget.onRunLocalAgent != null;
+    final intro = Text(
+      'The server must be explicitly paired with $_here. '
+      'Only enter a fingerprint verified out of band. '
+      'Canoa never trusts the first key it sees.',
+    );
+    final titleField = TextField(controller: title,
+      decoration: const InputDecoration(labelText: 'Session title (optional)'));
+    final cwdField = TextField(controller: cwd,
+      decoration: const InputDecoration(
+        labelText: 'Agent workspace (absolute path)',
+      ));
     return AlertDialog(
-      title: const Text('Connect to verified agent'),
+      title: Text(local ? 'Run or connect to an agent' : 'Connect to verified agent'),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
@@ -274,11 +298,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'The server must be explicitly paired with this browser. '
-                'Only enter a fingerprint verified out of band. '
-                'Canoa never trusts the first key it sees.',
-              ),
+              if (local) ...[cwdField, titleField] else intro,
               const SizedBox(height: 12),
               if (widget.onRunLocalAgent != null)
                 FutureBuilder<List<AgentCommand>>(
@@ -335,6 +355,12 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                     );
                   },
                 ),
+              if (local) ...[
+                Text('Or connect to an agent on another machine', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                intro,
+                const SizedBox(height: 12),
+              ],
               Text('Method the host proves by', style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 4),
               SegmentedButton<PeerMethod>(
@@ -346,23 +372,26 @@ class _ConnectDialogState extends State<_ConnectDialog> {
               ),
               const SizedBox(height: 8),
               if (own == null)
-                const Text('Choose the method to see this browser\'s peer ID under it.')
+                Text('Choose the method to see $_here\'s peer ID under it.')
               else FutureBuilder<(String?, String?)>(
                 key: ValueKey(own),
                 future: own!,
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
-                    return Text(snapshot.hasError
-                        ? 'Browser identity unavailable: ${snapshot.error}'
-                        : 'Loading your browser identity…');
+                    return Text(switch ((snapshot.hasError, widget.inBrowser)) {
+                      (true, true) => 'Browser identity unavailable: ${snapshot.error}',
+                      (true, false) => 'This app has no peer ID: ${snapshot.error}',
+                      (false, true) => 'Loading your browser identity…',
+                      (false, false) => 'Loading this app\'s peer ID…',
+                    });
                   }
                   final (peer, why) = snapshot.data!;
                   if (peer == null) {
-                    return Text('${method!.label} is unavailable in this browser: $why',
+                    return Text('${method!.label} is unavailable in $_here: $why',
                       style: TextStyle(color: Theme.of(context).colorScheme.error));
                   }
                   return Row(children: [
-                    Expanded(child: SelectableText('Your browser peer ID under ${method!.label}:\n$peer',
+                    Expanded(child: SelectableText('${widget.inBrowser ? 'Your browser' : 'This app\'s'} peer ID under ${method!.label}:\n$peer',
                       style: Theme.of(context).textTheme.bodySmall)),
                     IconButton(
                       tooltip: 'Copy your peer ID for pairing',
@@ -380,7 +409,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   if (why != null) {
                     return Padding(
                       padding: const EdgeInsets.only(top: 12),
-                      child: Text('Pairing by PIN needs Noise, which is unavailable in this browser: $why'),
+                      child: Text('Pairing by PIN needs Noise, which is unavailable in $_here: $why'),
                     );
                   }
                   return Column(
@@ -407,8 +436,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   );
                 },
               ),
-              TextField(controller: title,
-                decoration: const InputDecoration(labelText: 'Session title (optional)')),
+              if (!local) titleField,
               TextField(controller: wt,
                 decoration: const InputDecoration(
                   labelText: 'WebTransport HTTPS endpoint (optional)',
@@ -424,10 +452,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   labelText: 'Pinned server peer ID',
                   hintText: 'sha256:…',
                 )),
-              TextField(controller: cwd,
-                decoration: const InputDecoration(
-                  labelText: 'Agent workspace (absolute path)',
-                )),
+              if (!local) cwdField,
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),

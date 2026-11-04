@@ -1,4 +1,5 @@
 // The connect dialog: the method an agent's key proves by, the reason one cannot run here, and pairing by PIN under Noise.
+import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/connect_dialog.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ Future<void> _open(
       localPeerId: (method) async => 'sha256:own-${method.id}',
       pair: pair ?? (url, pin) async => throw StateError('no pairing here'),
       method: method,
+      inBrowser: true,
     ),
     child: const Text('open'),
   ))));
@@ -100,6 +102,55 @@ void main() {
     expect(find.widgetWithText(TextField, _peer), findsOneWidget);
     expect(find.textContaining('Paired under Noise'), findsOneWidget);
     expect(find.textContaining('sha256:own-noise'), findsOneWidget, reason: 'Noise is now the method chosen');
+  });
+
+  group('on a desktop that runs agents itself', () {
+    const scripted = AgentCommand(label: 'Scripted', program: 'node');
+
+    Future<void> openLocal(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 720));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
+        onPressed: () => showCanoaConnectDialog(
+          context,
+          (_) async {},
+          onRunLocalAgent: (command, {required cwd, required title}) async {},
+          localAgents: const [scripted],
+          checkInstalled: (_) async => true,
+          methodUnavailable: (method) async => 'this build has no peer key to prove with',
+          localPeerId: (method) async => throw UnsupportedError('no key'),
+          inBrowser: false,
+        ),
+        child: const Text('open'),
+      ))));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the working directory is where the Run buttons are, in sight', (tester) async {
+      await openLocal(tester);
+      final workspace = find.widgetWithText(TextField, 'Agent workspace (absolute path)');
+      expect(tester.getTopLeft(workspace).dy, lessThan(tester.getTopLeft(find.text('Run Scripted')).dy));
+      expect(tester.getBottomLeft(workspace).dy, lessThan(720), reason: 'seen without scrolling the dialog');
+      expect(workspace.hitTestable(), findsOneWidget);
+    });
+
+    testWidgets('nothing in it speaks of a browser, and what is about other machines says so', (tester) async {
+      await openLocal(tester);
+      await _choose(tester, PeerMethod.noise);
+      final said = [
+        for (final element in find.byWidgetPredicate((widget) => widget is Text || widget is SelectableText).evaluate())
+          switch (element.widget) {
+            Text(:final data, :final textSpan) => data ?? textSpan?.toPlainText() ?? '',
+            SelectableText(:final data) => data ?? '',
+            _ => '',
+          },
+      ];
+      expect(said.where((text) => text.toLowerCase().contains('browser')), isEmpty);
+      final remote = find.text('Or connect to an agent on another machine');
+      expect(remote, findsOneWidget);
+      expect(tester.getTopLeft(find.textContaining('fingerprint')).dy, greaterThan(tester.getTopLeft(remote).dy));
+    });
   });
 
   testWidgets('a refused PIN says so and is cleared, since it is spent', (tester) async {

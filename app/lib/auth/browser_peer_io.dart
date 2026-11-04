@@ -3,7 +3,7 @@ import 'package:coqui_web/coqui_web.dart';
 import '../acp/client.dart';
 import 'peer_proof.dart';
 
-const _native = 'a native build has no browser WebCrypto to hold its key';
+const _native = 'this build has no peer key to prove with';
 
 Future<String?> browserMethodUnavailable(PeerMethod method) async => _native;
 
