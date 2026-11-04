@@ -528,7 +528,8 @@ void main() {
   });
 
   group('a real coding task', () {
-    // Each distinct kind and shape of update a real agent sent in integration_test/coding_task_test.dart, as the app recorded it.
+    // Each distinct kind and shape of update a real agent sent in integration_test/coding_task_test.dart, as the app recorded it,
+    // and the v2 kinds it did not send, as the scripted stand-in sends them there.
     final fixture = [
       for (final line in File('test/fixtures/coding_task_updates.jsonl').readAsLinesSync())
         if (line.trim().isNotEmpty) jsonDecode(line) as Map<String, dynamic>,

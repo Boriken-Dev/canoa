@@ -213,18 +213,14 @@ void main() {
         },
     ].join('\n');
 
-    /// Drags the conversation to its end, as a person has to: it does not follow new entries by itself.
-    Future<void> toEnd() async {
+    /// The steps whose screenshot did not show the conversation's end, which it follows by itself while nobody scrolls away.
+    final notAtEnd = <String>[];
+    void atEnd(String step) {
       final entries = find.byType(TranscriptEntry);
       if (!showing(entries)) return;
       final list = find.ancestor(of: entries.first, matching: find.byType(Scrollable)).first;
-      for (var drags = 0; drags < 20; drags++) {
-        final position = tester.state<ScrollableState>(list).position;
-        if (position.pixels >= position.maxScrollExtent) break;
-        // From the list's right edge, past the cards: an expanded card's own output would take a drag in the middle.
-        await tester.dragFrom(tester.getTopRight(list) + const Offset(-12, 200), const Offset(0, -2000));
-        await tester.pumpAndSettle();
-      }
+      final position = tester.state<ScrollableState>(list).position;
+      if (position.maxScrollExtent - position.pixels > 24) notAtEnd.add(step);
     }
 
     /// Sends [text], answers each question, and waits for the turn to end. A question whose card mentions [refuse] is refused, and so
@@ -251,7 +247,7 @@ void main() {
             await tester.tap(working);
             await until(() => !showing(working), 'the turn to stop', within: const Duration(minutes: 2));
             await tester.pumpAndSettle();
-            await toEnd();
+            atEnd('$name-stopped');
             await shot('$name-stopped');
             return (asked: asked, refused: refused, outside: outside, stopped: true);
           }
@@ -267,7 +263,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 200));
       }
       await tester.pumpAndSettle();
-      await toEnd();
+      atEnd('$name-done');
       await shot('$name-done');
       return (asked: asked, refused: refused, outside: outside, stopped: false);
     }
@@ -318,11 +314,13 @@ void main() {
     );
     await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
-    await toEnd();
+    atEnd('reopened');
     await shot('reopened');
     final reopenedEntries = store.selected?.messages.length ?? 0;
     final reopenedUser = store.selected?.messages.where((message) => message.role == MessageRole.user).length ?? 0;
-    debugPrint('STEP reopen: listed $listedCount, entries $reopenedEntries, user messages $reopenedUser');
+    final reopenedAttachment = store.selected?.messages.any((message) => message.text == 'Sent with this: notes.txt') ?? false;
+    debugPrint('STEP reopen: listed $listedCount, entries $reopenedEntries, user messages $reopenedUser, '
+        'attachment named $reopenedAttachment; not at the end in ${notAtEnd.join(', ')}');
 
     // Every conversation closed, which ends the agent.
     while (store.sessions.isNotEmpty) {
@@ -365,6 +363,8 @@ void main() {
     expect(closedAll, isTrue);
     expect(listedCount, greaterThan(0));
     expect(reopenedUser, greaterThanOrEqualTo(3), reason: 'the earlier conversation came back with what was said');
+    expect(reopenedAttachment, isTrue, reason: 'the reopened conversation says what went with a message');
+    expect(notAtEnd, isEmpty, reason: 'the conversation showed its end without being scrolled');
     expect(recorder.unshown, isEmpty, reason: 'kinds no rendering of their own showed');
     expect(askedOutside, 0, reason: 'the agent asked to reach outside the temporary directory');
     expect(ranOutside, 0, reason: 'a tool reached outside the temporary directory');

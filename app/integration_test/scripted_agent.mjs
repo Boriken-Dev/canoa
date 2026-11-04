@@ -1,6 +1,8 @@
 // A stand-in for a coding agent, speaking ACP v1 on its standard streams, so integration_test/coding_task_test.dart can be run
 // without spending a subscription. Each prompt of that test gets one fixed answer: tools asked about, a plan, a stop it obeys.
 // What it changes on disk is not the point; what reaches the screen is. Its conversations live in the file --state= names.
+// The fix turn also sends v2's plan_update, tool_call_content_chunk, notice and compaction updates, shaped as schema/v2 has
+// them: the app shows them whichever version an agent speaks, and the test records each kind it sees.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -40,9 +42,9 @@ function ask(sessionId, toolCall) {
   }));
 }
 
-function remember(sessionId, role, text) {
+function remember(sessionId, role, text, attached = []) {
   const state = load();
-  state[sessionId].history.push({ role, text });
+  state[sessionId].history.push({ role, text, attached });
   state[sessionId].updatedAt = new Date().toISOString();
   save(state);
 }
@@ -63,7 +65,7 @@ async function tool(sessionId, id, title, kind, rawInput, done) {
 async function prompt(sessionId, blocks) {
   const text = blocks.filter((block) => block.type === 'text').map((block) => block.text).join(' ');
   const attached = blocks.filter((block) => block.type === 'resource').map((block) => block.resource?.uri ?? 'a file');
-  remember(sessionId, 'user', text);
+  remember(sessionId, 'user', text, attached);
   if (/^Say /.test(text)) {
     say(sessionId, text.slice('Say '.length));
     return 'end_turn';
@@ -90,6 +92,25 @@ async function prompt(sessionId, blocks) {
       sessionUpdate: 'tool_call', toolCallId: 'read', title: 'Read src/calc.js', kind: 'read', status: 'completed',
       locations: [{ path: 'src/calc.js', line: 1 }],
       content: [{ type: 'content', content: { type: 'text', text: 'return a - b;' } }],
+    });
+    update(sessionId, {
+      sessionUpdate: 'tool_call_content_chunk', toolCallId: 'read',
+      content: { type: 'content', content: { type: 'text', text: '}' } },
+    });
+    update(sessionId, { sessionUpdate: 'notice', severity: 'info', title: 'Using the project\'s own test runner' });
+    update(sessionId, {
+      sessionUpdate: 'compaction_summary_chunk', compactionId: 'c1',
+      content: { type: 'text', text: 'calc.js subtracts where it should add.' },
+    });
+    update(sessionId, { sessionUpdate: 'compaction_update', compactionId: 'c1', status: 'completed' });
+    update(sessionId, {
+      sessionUpdate: 'plan_update',
+      plan: { type: 'items', planId: 'fix', entries: [
+        { content: 'Read the code', status: 'completed', priority: 'high' },
+        { content: 'Change it', status: 'in_progress', priority: 'high' },
+        { content: 'Rewrite the test', status: 'cancelled', priority: 'low' },
+        { content: 'Run the tests', status: 'pending', priority: 'medium' },
+      ] },
     });
     await tool(sessionId, 'fix', 'Edit src/calc.js', 'edit', { file_path: 'src/calc.js' },
       [{ type: 'diff', path: 'src/calc.js', oldText: 'return a - b;\n', newText: 'return a + b;\n' }]);
@@ -153,6 +174,10 @@ for await (const line of createInterface({ input: process.stdin })) {
         sessionUpdate: said.role === 'user' ? 'user_message_chunk' : 'agent_message_chunk',
         content: { type: 'text', text: said.text },
       });
+      // What went with a message comes back as its own chunk, a resource with no text of its own.
+      for (const uri of said.attached ?? []) {
+        update(params.sessionId, { sessionUpdate: 'user_message_chunk', content: { type: 'resource', resource: { uri, text: '' } } });
+      }
     }
     send({ id, result: {} });
   } else if (id !== undefined) {
