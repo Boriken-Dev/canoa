@@ -17,6 +17,11 @@ publish = false
 name = "canoa-host"
 path = "src/main.rs"
 
+[features]
+default = []
+# The web app built in: the site CANOA_WEB_DIST names at build time, served when [host.web] names no directory.
+web = []
+
 [dependencies]
 canoa = { path = "../canoa" }
 clap.workspace = true
@@ -31,7 +36,10 @@ coqui-web.workspace = true
 getrandom = "0.4"
 guatiao.workspace = true
 guatiao-serde.workspace = true
+httparse.workspace = true
 indexmap.workspace = true
+percent-encoding.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # The AOS tree digest, at the version the dependency graph already holds.
@@ -51,6 +59,8 @@ win32job = "2.0.3"
 [dev-dependencies]
 # The address a test client dials; already in the graph through coqui-web.
 url = "2.5"
+# A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 
 # Fixtures the tests run, built by `cargo test` into target/<profile>/examples.
 [[example]]

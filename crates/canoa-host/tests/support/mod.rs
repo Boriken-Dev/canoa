@@ -104,6 +104,7 @@ pub struct Host {
     pub urls: BTreeMap<String, String>,
     pub peer: PeerId,
     pub scratch: Scratch,
+    lines: mpsc::Receiver<String>,
 }
 
 impl Host {
@@ -230,6 +231,7 @@ impl Host {
             urls,
             peer: peer.expect("at least one entry"),
             scratch,
+            lines: received,
         }
     }
 
@@ -256,6 +258,13 @@ impl Host {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// The next line the host prints after its entries'.
+    pub fn next_line(&self) -> String {
+        self.lines
+            .recv_timeout(WAIT)
+            .expect("the host prints another line")
     }
 
     pub fn url(&self, entry: &str) -> &str {

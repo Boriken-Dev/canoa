@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use canoa_host::config::ImportSearch;
 use canoa_host::{
-    Config, HostLine, Origin, PeerState, ProviderOptions, ServeOptions, Serving, peers,
+    Config, HostLine, Origin, PeerState, ProviderOptions, ServeOptions, Serving, WebConfig,
+    WebError, WebServer, peers,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use coqui_agentic_peer::auth::Method;
@@ -167,6 +168,13 @@ struct ServeArgs {
     /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
     #[arg(long)]
     until_stdin_closes: bool,
+    /// Serve the web app too, on [host.web]'s address (default 127.0.0.1:7800): from DIR, else [host.web]'s dir, else the
+    /// site built in (feature `web`).
+    #[arg(long, value_name = "DIR", num_args = 0..=1)]
+    web: Option<Option<PathBuf>>,
+    /// The web app's address, in place of [host.web]'s listen. Beyond loopback it needs [host.web]'s cert and key.
+    #[arg(long, value_name = "ADDRESS")]
+    web_listen: Option<SocketAddr>,
 }
 
 #[derive(Debug, Args)]
@@ -236,8 +244,35 @@ fn print(line: &str) -> Result<(), Failed> {
         .map_err(Failed::run)
 }
 
+/// `[host.web]` with `--web` and `--web-listen` over it; `None` when neither the file nor the command line asks for it.
+fn web_config(config: &Config, args: &ServeArgs) -> Result<Option<WebConfig>, Failed> {
+    let mut web = config.web.clone();
+    if let Some(dir) = &args.web {
+        let web = web.get_or_insert_with(WebConfig::new);
+        if let Some(dir) = dir {
+            web.dir = Some(std::path::absolute(dir).unwrap_or_else(|_| dir.clone()));
+        }
+    }
+    if let Some(listen) = args.web_listen {
+        web.as_mut()
+            .ok_or_else(|| Failed::usage("--web-listen needs --web or [host.web]"))?
+            .listen = listen;
+    }
+    if let Some(web) = web.as_mut() {
+        // The site may hold neither Canoa.cfg nor this user's identity and trust store.
+        let file = args.config.config.clone().or_else(default_config);
+        web.keep_out.extend(
+            file.and_then(|file| std::path::absolute(file).ok())
+                .and_then(|file| file.parent().map(PathBuf::from)),
+        );
+        web.keep_out.extend(home::dir());
+    }
+    Ok(web)
+}
+
 fn serve(args: &ServeArgs) -> Result<(), Failed> {
     let config = load(&args.config)?;
+    let web = web_config(&config, args)?;
     let identity = args.method.identity()?;
     let peer = identity.peer_id().to_string();
     let program = std::env::current_exe()
@@ -251,6 +286,13 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
             canoa_host::ServeError::NothingToServe => Failed::usage(error),
             _ => Failed::run(error),
         })?;
+    let web = web
+        .map(|web| WebServer::bind(&web, &serving))
+        .transpose()
+        .map_err(|error| match error {
+            WebError::Listen { .. } => Failed::run(error),
+            _ => Failed::usage(error),
+        })?;
     for listening in serving.listening() {
         let line = serde_json::json!({
             "name": listening.name,
@@ -261,9 +303,18 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
         });
         print(&line.to_string())?;
     }
+    if let Some(web) = &web {
+        print(&serde_json::json!({ "web": web.url() }).to_string())?;
+    }
     if args.until_stdin_closes {
         let stopper = serving.stopper();
         end_with_input(0, move || stopper.stop_agents())?;
+    }
+    if let Some(web) = web {
+        std::thread::Builder::new()
+            .name("canoa-host-web".to_owned())
+            .spawn(move || web.run())
+            .map_err(Failed::run)?;
     }
     serving.run();
     Ok(())
@@ -584,6 +635,29 @@ mod tests {
         };
         assert_eq!(args.config.config, Some(PathBuf::from("x.cfg")));
         assert!(!args.until_stdin_closes);
+    }
+
+    #[test]
+    fn serve_takes_the_web_app_with_or_without_a_directory() {
+        let parsed = |args: &[&str]| {
+            let cli =
+                Cli::try_parse_from(["canoa-host", "serve"].iter().chain(args)).expect("parses");
+            let Command::Serve(args) = cli.command else {
+                panic!("serve");
+            };
+            (args.web, args.web_listen)
+        };
+        assert_eq!(parsed(&[]), (None, None));
+        assert_eq!(parsed(&["--web"]), (Some(None), None));
+        assert_eq!(parsed(&["--web", "--config", "x.cfg"]), (Some(None), None));
+        assert_eq!(
+            parsed(&["--web", "site", "--web-listen", "127.0.0.1:0"]),
+            (
+                Some(Some(PathBuf::from("site"))),
+                Some("127.0.0.1:0".parse().expect("an address"))
+            )
+        );
+        assert!(Cli::try_parse_from(["canoa-host", "serve", "--web-listen", "nowhere"]).is_err());
     }
 
     #[test]

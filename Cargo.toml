@@ -18,6 +18,11 @@ toml = { version = "0.9", default-features = false, features = ["parse", "serde"
 indexmap = { version = "2", default-features = false, features = ["std", "serde"] }
 # ACP messages a client sends, read to keep a program launch from reaching the agent.
 serde_json = "1"
+# The web app's server: requests parsed by tungstenite's own parser, request paths percent-decoded by url's, TLS by
+# coqui-web's rustls; each already in the graph at these versions.
+httparse = { version = "1.10", default-features = false, features = ["std"] }
+percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # Diagnostics; the subscriber is the binary's.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "ansi"] }

@@ -2,9 +2,15 @@
 
 Header-file-style reference for the `canoa-host` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `ee19118`), `coqui-agentic-peer` (`9b1fee4`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `ee19118`), `coqui-agentic-peer` (`9b1fee4`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `aos`, `config`, `peers`, `profile`, `provider`, `serve`, `tool`.
+| Feature | Adds | Needed for | Default |
+| --- | --- | --- | --- |
+| `web` | the site `CANOA_WEB_DIST` names at build time, built into the binary; `web::BUILT_IN` is `true` | serving the web app with no directory | off |
+
+`CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
+
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `WebConfig`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError` and `WebServer`. Public modules: `aos`, `config`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -65,16 +71,38 @@ working_roots = ["/home/me/src"]      # absolute, no . or ..; a session's cwd mu
 worktrees = true                      # agents and tools: a git worktree per session inside working_roots; see "Worktrees"
 peers = ["sha256:…"]                  # paired keys that may use it; default every paired key
 max_peers = 4                         # connections at once
+
+[host.web]                            # optional: the web app on a listener of its own; see "The web app" below
+dir = "site"                          # the site, relative to the file's directory; without it the site built in (feature web)
+listen = "127.0.0.1:7800"             # the default; beyond loopback only with cert and key
+cert = "web.crt"                      # PEM: the certificate, then any intermediates; with key, HTTPS
+key = "web.key"                       # PEM: its private key
+hosts = ["canoa.example"]             # Host names a request may carry besides localhost and an IP address
+connect = ["https://fonts.gstatic.com"]   # origins the page may connect to besides the entries; each logged as weakened
+max_connections = 64                  # the limits, each at its default; 0 is refused
+max_connections_per_address = 16
+connection_seconds = 600              # a connection's whole life, however busy
+max_request_bytes = 16384
+max_requests = 1000                   # per connection
+request_seconds = 10
+idle_seconds = 30
+send_seconds = 30
+immutable_seconds = 31536000          # how long a hashed file may be kept; 0 allowed
 ```
 
-Names are 1 to 64 letters, digits, `-` or `_`, unique across the three tables. Two entries may not name the same non-zero address.
+Names are 1 to 64 letters, digits, `-` or `_`, unique across the three tables. Two entries may not name the same non-zero address, nor may an entry and `[host.web]`.
 
 ```rust
 pub const DEFAULT_MAX_PEERS: usize = 4;
 pub const DEFAULT_MAX_SESSIONS: usize = 8;
 pub const MAX_NAME: usize = 64;
 
-#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile> }   // Default, Clone, Eq
+#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile>, pub web: Option<WebConfig> }   // Default, Clone, Eq
+#[non_exhaustive] pub struct WebConfig { pub dir: Option<PathBuf>, pub listen: SocketAddr, pub tls: Option<WebTls>, pub hosts: Vec<String>, pub connect: Vec<String>, pub limits: web::Limits, pub keep_out: Vec<PathBuf> }   // Default, Clone, Eq
+pub fn WebConfig::new() -> WebConfig            // the site built in, on web::DEFAULT_LISTEN, plain HTTP, nothing else allowed, default limits
+// keep_out is never read from the file: `serve` fills it with Canoa.cfg's directory and the identity home
+#[non_exhaustive] pub struct WebTls { pub cert: PathBuf, pub key: PathBuf }   // Clone, Eq
+pub fn WebTls::new(cert: impl Into<PathBuf>, key: impl Into<PathBuf>) -> WebTls
 pub fn Config::load(path: &Path) -> Result<Config, ConfigError>
 pub fn Config::from_str_in(text: &str, base: &Path) -> Result<Config, ConfigError>   // touches no file
 pub fn Config::entry(&self, name: &str) -> Option<&Entry>
@@ -99,6 +127,7 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 - In `source_settings`, every text in a `dirs`, `manifests`, `paths` or `import_dirs` list, and `home` when it is text, is made absolute against the directory, since a source may otherwise resolve it against a later working directory or its own file's; other keys, `isolation` included, pass as written, for the source to refuse.
 - `source_settings` and `settings` are TOML tables held as JSON. A date, or a float that is not a number, is refused; nothing checks them further until a connection loads the provider, since checking means loading its code.
 - A leading byte-order mark is ignored; anything else not UTF-8 is a parse error.
+- `[host.web]`: `dir`, `cert` and `key` are made absolute against the directory; `cert` and `key` go together; `listen` beyond loopback without them is refused; `hosts` are names of letters, digits, `-` and `.`, kept in lower case; each `connect` source is `http`, `https`, `ws` or `wss`, `://`, a host of letters, digits, `-` and `.`, an optional port and an optional path of letters, digits, `/`, `-`, `.`, `_` and `~`, nothing else; every limit but `immutable_seconds` must be at least 1. Errors say `[host]: web:` and a setting, never a value. The table read is not checked for a site: `WebServer::bind` does that.
 
 ## Serving (`canoa_host::serve`)
 
@@ -118,6 +147,7 @@ pub const fn ServeOptions::with_rekey(self, rekey: bool) -> ServeOptions
 
 pub fn Serving::bind(config: &Config, identity: coqui_agentic_peer::auth::Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
 pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the identity's: every entry proves by it
+pub fn Serving::peer(&self) -> PeerId          // the identity's id, which a client pins
 pub fn Serving::listening(&self) -> &[Listening]
 pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another thread
 pub fn Serving::run(self)                      // takes connections until the process ends
@@ -143,6 +173,35 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 ```rust
 #[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure } }
 ```
+
+## The web app (`canoa_host::web`)
+
+```rust
+pub const DEFAULT_LISTEN: SocketAddr = 127.0.0.1:7800;
+pub const HOST_INDEX: &str = "/canoa-host.json";
+pub const BUILT_IN: bool;                       // cfg!(feature = "web")
+
+#[non_exhaustive] pub struct Limits { pub max_connections: usize, pub max_connections_per_address: usize, pub connection_time: Duration, pub max_request_bytes: usize, pub max_requests: usize, pub request_time: Duration, pub idle_time: Duration, pub send_time: Duration, pub immutable_age: Duration }   // Copy, Eq, Default
+// Default: 64, 16, 600 s, 16 KiB, 1000, 10 s, 30 s, 30 s, 365 days; each with a const builder:
+pub const fn Limits::with_max_connections(self, count: usize) -> Limits   // and with_max_connections_per_address,
+    // with_connection_time, with_max_request_bytes, with_max_requests, with_request_time, with_idle_time, with_send_time,
+    // with_immutable_age. A time too long for the clock to add counts as a year.
+
+pub fn WebServer::bind(web: &WebConfig, serving: &Serving) -> Result<WebServer, WebError>
+pub const fn WebServer::local_addr(&self) -> SocketAddr
+pub fn WebServer::url(&self) -> String          // http(s)://ADDRESS, or http(s)://hosts[0]:PORT when bound to every interface
+pub fn WebServer::run(self)                     // takes connections until the process ends
+
+#[non_exhaustive] pub enum WebError { NoSite, Site { dir: PathBuf, why: &'static str }, PlainBeyondLoopback(SocketAddr), Limit(&'static str), Connect, Tls { file: PathBuf, why: String }, Listen { address: SocketAddr, source: io::Error } }
+```
+
+- `bind` refuses plain HTTP beyond loopback (`PlainBeyondLoopback`), a zero limit but `immutable_age` (`Limit`, naming the Canoa.cfg setting), a `connect` source of another form than the file allows (`Connect`), a directory that cannot be resolved, holds no `index.html`, or is or holds one of `keep_out` once resolved (`Site`), and no directory in a build without `web` (`NoSite`); reads `cert` (every PEM certificate, in order) and `key` (one PEM private key) into a rustls server configuration with its safe default versions (TLS 1.2 and 1.3), the `ring` provider, ALPN `http/1.1` and no client certificate (`Tls`, naming the file, never its contents); and logs each limit looser than its default as `weakened: host.web.SETTING is V, looser than D`, each `connect` source as `weakened: host.web.connect lets the page connect to SOURCE…`, and on Unix a `key` file others may read as weakened. Then it binds (`Listen`). The site's directory is resolved once, at `bind`.
+- HTTP/1.1 and 1.0, `GET` and `HEAD` only (else 405 with `Allow: GET, HEAD`). Refused with 400: a request with a body (`Transfer-Encoding`, more than one `Content-Length`, or one other than 0), no `Host` or two (HTTP/1.0 included), a target that does not start with `/` (absolute-form included), anything `httparse` refuses. A `Host` that is not `localhost`, an IP address or one of `hosts`, with any port, is refused with 421, which stops a page of another site reaching this one by DNS rebinding. More than 64 headers or `max_request_bytes` is 431; a head not complete within `request_time` is 408. Every refusal closes the connection.
+- **Paths.** The target's path (the query left out) is split at `/` and each segment percent-decoded; refused with 404 is any segment that is empty (but a last one), `.` or `..`, starts or ends with a dot, ends with a space, holds a control character, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>` or `|` once decoded, is not UTF-8, or is a Windows device name with any extension (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `CLOCK$`, `COM` or `LPT` and a digit or `¹`, `²`, `³`). The file is the resolved path (every link followed) under the resolved root, each segment of which, once resolved, must pass the same rules: one that resolves outside the root, or to a name a request could not give (an NTFS short name such as `GIT~1` resolving to `.git`, a link to a dot-name), is refused with 404 and logged, whatever it is, and a directory is never listed. From the site built in, the path is looked up as written.
+- **The app's routes.** A path naming nothing, or a directory, whose last segment has no `.` is answered with the root's `index.html` (200, `no-cache`); any other missing file is 404.
+- **`/canoa-host.json`** (`HOST_INDEX`, the query left out, before any file of that name): `{"peer", "method", "entries": [{"name", "kind", "url"}]}`, the host's id and method and each entry as `serve` prints it, `Cache-Control: no-store`. It names the host for a page to fill in; it proves nothing, and connecting still runs the proof both ways and needs the page's key accepted.
+- **Headers on every answer**: `Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' URL...; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'`, the `connect-src` naming each entry's `url`, then each `connect` source; over HTTPS, to a request naming one of `hosts`, `Strict-Transport-Security: max-age=31536000` (never to `localhost` or an address, which other servers share); `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, `Date`, `Connection`. A file carries `Content-Type` by its extension (`application/octet-stream` when unknown), an `ETag` (weak, of length and modification time, from a directory; of the contents, built in), and `Cache-Control: public, max-age=IMMUTABLE_AGE, immutable` when its name holds a hash (a part of 8 or more hex digits after the first, split at `.`, `-`, `_`: `main.3f9a1b2c.js`), else `no-cache`. `If-None-Match` naming its tag is answered 304. No range, no compression.
+- **Connections**: one thread each, `max_connections` at once and `max_connections_per_address` from one address (past either a new one is closed unanswered), each ended after `connection_time` whatever it is doing; kept alive in HTTP/1.1 unless `Connection: close`, for `max_requests` requests; the first head must arrive within `request_time` of the connection (TLS handshake included), each later one within `idle_time` to start and `request_time` from its first byte; a write that makes no progress for `send_time` ends the connection.
 
 ## One provider on standard streams (`canoa_host::provider`)
 
@@ -364,11 +423,13 @@ A key is paired when the store accepts it. `accept` takes only a key that is wai
 - `ConfigError` (`#[non_exhaustive]`): `Read { path, source }`; `Parse { line, column, what }`, 1-based, `what` in the schema's words; `Invalid { entry, what }`. No variant quotes a value from the file; an entry's name is quoted.
 - `ProviderError` (`#[non_exhaustive]`): `Load(String)`, `Source(String)`, `Missing`, `WrongKind`, `NeedsConfiguration`, `TakesNoSettings`, `Settings(String)` (names a setting, never its value, unless the provider's own words do), `HostLine(&'static str)`, `Transport(io::Error)`, `Facade(String)`.
 - `PeersError` (`#[non_exhaustive]`): `NotAnId`, `NotWaiting`, `AlreadyAccepted`, `Store(String)`.
+- `WebError` (`#[non_exhaustive]`): see "The web app". `source()` is the `io::Error` of `Listen`.
 
 ## Command line
 
 ```text
 canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
+                 [--web [DIR]] [--web-listen ADDRESS]
 canoa-host check [--config FILE] [--format text|json]
 canoa-host id [--method noise|webcrypto]
 canoa-host peers [--format text|json]
@@ -385,6 +446,7 @@ canoa-host launch PROGRAM [ARGS]...
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound; then it serves until stopped. It logs on standard error.
+- `serve --web [DIR]` serves the web app too (see "The web app"): from `DIR` (made absolute from the working directory), else `[host.web]`'s `dir`, else the site built in; on `[host.web]`'s settings, or the defaults without the table. `--web-listen` replaces `listen`, and needs `--web` or `[host.web]` (status 2). After the entries' lines it prints `{"web": URL}`, a line with no `name`. A site that cannot be served, no site, plain HTTP beyond loopback, a zero limit or an unusable certificate is status 2; an address that cannot be bound, status 1.
 - `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every agent is ended (`Stopper::stop_agents`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
 - `pair` (`--listen` default `127.0.0.1:0`, loopback only, else status 2; `--timeout-seconds` default 300) prints `{"pin", "peer", "method", "url"}`, a six-digit PIN, this host's id, its method and the address to dial, and pairs by that method; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.
 - On `serve --until-stdin-closes` and `pair --until-stdin-closes`, nothing is logged between the input closing and the exit, and the process exits within 5 s whatever is left: a parent that died can leave standard error a pipe a write to which never returns (seen on Windows under a Dart parent).
@@ -402,6 +464,7 @@ canoa-host launch PROGRAM [ARGS]...
 | --- | --- | --- |
 | `CANOA_CONFIG` | Canoa.cfg to read, below `--config` | the platform's place, above |
 | `CANOA_LOG` | what to log, a `tracing` filter | `info` |
+| `CANOA_WEB_DIST` | at build time, with feature `web`: the absolute directory of the site built in | none; the build stops without it |
 | `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `coqui-agentic-peer` under `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME` or `~/.config` |
 | `NO_COLOR` | no colour in the log | colour on a terminal |
 
@@ -424,3 +487,7 @@ canoa-host launch PROGRAM [ARGS]...
 - A tool entry is on `canoa-host tool`'s command line as JSON, which other users may read: nothing secret belongs in one.
 - On Unix, what a tool starts in a session of its own (Node's `detached`) leaves the connection's process group and outlives it.
 - Plain WebSocket on loopback carries only the proof and sealed records. Anyone on this machine can connect and make a proven key wait; only an accepted key gets further.
+- The web app's page connects to the entries' addresses, which are loopback: a browser on another machine, opening it over HTTPS beyond loopback, reaches the page but not the entries until a proxy carries them. A non-empty `origins` must list the page's own origin for its connections to be let in.
+- The site's files are served with this user's rights from what the directory holds when asked: whoever can write it chooses the page, and a link swapped in between the check and the open is followed (the check resolves the path, then opens it). Give it a directory only you can write. `serve` refuses a site holding Canoa.cfg's directory or the identity home.
+- The page's key lives in the browser under the page's origin, `http://127.0.0.1:7800` by default. While the host is not running, any program of any user on this machine that binds that port serves its own page in that origin, which can use the key paired with this host. On a machine others use, serve over HTTPS with a certificate the browser trusts and a key only you can read, or use the extension.
+- The policy allows `'wasm-unsafe-eval'` and inline styles, which Flutter's web build needs, and no inline or evaluated script: build the app with `flutter build web --csp --no-web-resources-cdn`, or its code and CanvasKit are refused. That build still fetches its Roboto and Noto fonts from `https://fonts.gstatic.com`, which the policy refuses, and Flutter then draws no text at all, until the app carries its fonts: `connect = ["https://fonts.gstatic.com"]` allows it, and is logged as weakened.

@@ -130,9 +130,10 @@ pub struct Listening {
 
 /// A count of what is running, with a ceiling.
 #[derive(Clone, Debug)]
-struct Gate(Arc<AtomicUsize>, usize);
+pub(crate) struct Gate(Arc<AtomicUsize>, usize);
 
-struct Entered(Arc<AtomicUsize>);
+/// One place in a [`Gate`], given back when dropped.
+pub(crate) struct Entered(Arc<AtomicUsize>);
 
 impl Drop for Entered {
     fn drop(&mut self) {
@@ -141,11 +142,11 @@ impl Drop for Entered {
 }
 
 impl Gate {
-    fn new(ceiling: usize) -> Self {
+    pub(crate) fn new(ceiling: usize) -> Self {
         Self(Arc::new(AtomicUsize::new(0)), ceiling)
     }
 
-    fn enter(&self) -> Option<Entered> {
+    pub(crate) fn enter(&self) -> Option<Entered> {
         let mut running = self.0.load(Ordering::SeqCst);
         while running < self.1 {
             match self
@@ -520,6 +521,12 @@ impl Serving {
     #[must_use]
     pub fn method(&self) -> Method {
         self.shared.method.method()
+    }
+
+    /// This host's peer id, which a client pins: its identity's.
+    #[must_use]
+    pub fn peer(&self) -> PeerId {
+        self.shared.method.peer_id()
     }
 
     /// Where each entry listens, in the configuration's order.

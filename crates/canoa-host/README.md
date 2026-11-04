@@ -25,6 +25,9 @@ store accepts, and every message after that is sealed in the session the proof e
   ACP updates and its questions into permission requests, and each session opens by saying what the tool does unasked.
 - A client cannot have the host start a program: a stdio MCP server in `session/new`, and `_meta`, never reach a stdio agent.
 - Per entry: working roots a session's `cwd` must be under, the paired keys that may use it, and how many at once.
+- Canoa's web app, served beside the entries from a directory or built in: only the site's files, under a
+  Content-Security-Policy that lets the page connect to this host's entries alone, with `/canoa-host.json` naming them
+  for the page to fill in; plain HTTP on loopback, HTTPS beyond it.
 
 ## Installation
 
@@ -34,7 +37,16 @@ Not published: its git dependencies are not released. Build it from the reposito
 cargo build --release -p canoa-host
 ```
 
-There are no Cargo features.
+| Feature | Adds | Needed for | Default |
+| --- | --- | --- | --- |
+| `web` | the site `CANOA_WEB_DIST` names at build time, built into the binary | serving the web app with no directory | off |
+
+```sh
+(cd app && flutter build web --release --csp --no-web-resources-cdn)
+CANOA_WEB_DIST="$PWD/app/build/web" cargo build --release -p canoa-host --features web
+```
+
+`CANOA_WEB_DIST` must be absolute; with `web` on and no site there, the build stops, `--all-features` included.
 
 ## Quick start
 
@@ -79,7 +91,7 @@ assert_eq!(config.entries[0].name, "echo");
 ## Command line
 
 ```text
-canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto]
+canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--web [DIR]] [--web-listen ADDRESS]
 canoa-host check [--config FILE] [--format text|json]
 canoa-host id [--method noise|webcrypto]
 canoa-host peers [--format text|json]
@@ -93,7 +105,9 @@ canoa-host provider (--library FILE | --source FILE) --provider ID [--working-ro
 `serve --until-stdin-closes` is for a program running the host as its child, such as Canoa's desktop app: when its input
 closes, the host ends every agent it started, then itself. `pair` shows a PIN that a native client, such as
 `coqui-acp-bridge pair-dial`, uses to pair; it refuses a browser, which pairs by connecting once and being accepted. `--method` names
-the identity's method; without it, the one this user has, or the default for a new one.
+the identity's method; without it, the one this user has, or the default for a new one. `serve --web` serves the web app
+on `127.0.0.1:7800` too, from `DIR`, `[host.web]`'s `dir` or the site built in, and prints `{"web": URL}` after the
+entries.
 
 Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg was wrong.
 
@@ -105,6 +119,7 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 | `serve` | binding every entry and serving connections |
 | `provider` | one Guatiao provider as an ACP agent on standard input and output |
 | `peers` | listing, accepting and removing keys |
+| `web` | serving the web app and the list of entries |
 
 ## What it trusts
 
@@ -121,6 +136,7 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg wa
 ## Development
 
 ```sh
+export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # the site --all-features builds in
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features

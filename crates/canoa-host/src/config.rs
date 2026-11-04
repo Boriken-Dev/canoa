@@ -5,6 +5,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
+use core::time::Duration;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
@@ -33,6 +34,73 @@ pub struct Config {
     pub entries: Vec<Entry>,
     /// `[host.profiles]`, by name, in the file's order: what an agent entry may be launched with.
     pub profiles: IndexMap<String, HostProfile>,
+    /// `[host.web]`: where the web app is served; `None` when the file has no such table.
+    pub web: Option<WebConfig>,
+}
+
+/// `[host.web]`: the web app on a listener of its own, beside the entries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WebConfig {
+    /// The site's directory, absolute; `None` serves the site built in (feature `web`).
+    pub dir: Option<PathBuf>,
+    /// Where it listens: loopback unless `tls` is given.
+    pub listen: SocketAddr,
+    /// HTTPS, from a certificate and key; plain HTTP without it.
+    pub tls: Option<WebTls>,
+    /// Host names a request may carry besides `localhost` and an IP address, as a proxy or a certificate names the host.
+    pub hosts: Vec<String>,
+    /// Origins the page may connect to besides this host's entries (`https://fonts.gstatic.com`), each one a weakening
+    /// of the policy, which is logged.
+    pub connect: Vec<String>,
+    /// What one connection may take.
+    pub limits: crate::web::Limits,
+    /// Directories the site may not hold, such as Canoa.cfg's and the identity's: a site whose directory is one of them,
+    /// or above one, is refused. Not read from the file.
+    pub keep_out: Vec<PathBuf>,
+}
+
+impl WebConfig {
+    /// The defaults: the site built in, on [`crate::web::DEFAULT_LISTEN`], plain HTTP, no other host name, default limits.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            dir: None,
+            listen: crate::web::DEFAULT_LISTEN,
+            tls: None,
+            hosts: Vec::new(),
+            connect: Vec::new(),
+            limits: crate::web::Limits::default(),
+            keep_out: Vec::new(),
+        }
+    }
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The PEM files HTTPS takes, absolute.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WebTls {
+    /// The certificate, then any intermediates in order.
+    pub cert: PathBuf,
+    /// The certificate's private key.
+    pub key: PathBuf,
+}
+
+impl WebTls {
+    /// The certificate chain at `cert` and its key at `key`.
+    #[must_use]
+    pub fn new(cert: impl Into<PathBuf>, key: impl Into<PathBuf>) -> Self {
+        Self {
+            cert: cert.into(),
+            key: key.into(),
+        }
+    }
 }
 
 /// A profile of `[host.profiles]`: the host's own layer, the overlays below it, and the overlays' MCP servers it allows.
@@ -270,6 +338,29 @@ struct RawHost {
     tools: IndexMap<String, toml::Table>,
     #[serde(default)]
     profiles: IndexMap<String, toml::Table>,
+    web: Option<RawWeb>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWeb {
+    dir: Option<String>,
+    listen: Option<String>,
+    cert: Option<String>,
+    key: Option<String>,
+    #[serde(default)]
+    hosts: Vec<String>,
+    #[serde(default)]
+    connect: Vec<String>,
+    max_connections: Option<usize>,
+    max_connections_per_address: Option<usize>,
+    connection_seconds: Option<u64>,
+    max_request_bytes: Option<usize>,
+    max_requests: Option<usize>,
+    request_seconds: Option<u64>,
+    idle_seconds: Option<u64>,
+    send_seconds: Option<u64>,
+    immutable_seconds: Option<u64>,
 }
 
 /// The settings both tables share. serde does not hold `deny_unknown_fields` across `flatten`, so each table lists them.
@@ -476,10 +567,15 @@ impl Config {
             entries.push(entry(name, EntryKind::Tool { spec }, common)?);
         }
         check_unique(&entries)?;
+        let web = host
+            .web
+            .map(|raw| web_of(raw, &directory, &entries))
+            .transpose()?;
         Ok(Self {
             origins: host.origins,
             entries,
             profiles,
+            web,
         })
     }
 
@@ -781,6 +877,111 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         peers,
         max_peers,
     })
+}
+
+/// `[host.web]`, its paths made absolute from Canoa.cfg's directory. Errors name a setting, never a value.
+fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("web: {what}"),
+    };
+    let path = |text: String, setting: &str| {
+        if text.is_empty() {
+            return Err(refused(&format!("{setting} is empty")));
+        }
+        let path = directory.join(text);
+        Ok(std::path::absolute(&path).unwrap_or(path))
+    };
+    let mut web = WebConfig::new();
+    web.dir = raw.dir.map(|dir| path(dir, "dir")).transpose()?;
+    if let Some(listen) = raw.listen {
+        web.listen = listen
+            .parse()
+            .map_err(|_| refused("listen is not an address and port"))?;
+    }
+    web.tls = match (raw.cert, raw.key) {
+        (Some(cert), Some(key)) => Some(WebTls::new(path(cert, "cert")?, path(key, "key")?)),
+        (None, None) => None,
+        _ => return Err(refused("cert and key go together")),
+    };
+    if web.tls.is_none() && !web.listen.ip().is_loopback() {
+        return Err(refused(
+            "listen is beyond loopback, where plain HTTP is refused: give cert and key",
+        ));
+    }
+    for host in raw.hosts {
+        let plain = !host.is_empty()
+            && host.len() <= 253
+            && host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.');
+        if !plain {
+            return Err(refused(
+                "a host is not a name of letters, digits, hyphens and dots",
+            ));
+        }
+        web.hosts.push(host.to_ascii_lowercase());
+    }
+    for source in raw.connect {
+        if !crate::web::connect_source(&source) {
+            return Err(refused(
+                "a connect source is not http, https, ws or wss and a host, with an optional port and path",
+            ));
+        }
+        web.connect.push(source);
+    }
+    let count = |value: Option<usize>, setting: &str, default: usize| match value {
+        Some(0) => Err(refused(&format!("{setting} must be at least 1"))),
+        Some(value) => Ok(value),
+        None => Ok(default),
+    };
+    let seconds = |value: Option<u64>, setting: &str, default: Duration| match value {
+        Some(0) => Err(refused(&format!("{setting} must be at least 1"))),
+        Some(value) => Ok(Duration::from_secs(value)),
+        None => Ok(default),
+    };
+    let limits = web.limits;
+    web.limits = limits
+        .with_max_connections(count(
+            raw.max_connections,
+            "max_connections",
+            limits.max_connections,
+        )?)
+        .with_max_connections_per_address(count(
+            raw.max_connections_per_address,
+            "max_connections_per_address",
+            limits.max_connections_per_address,
+        )?)
+        .with_connection_time(seconds(
+            raw.connection_seconds,
+            "connection_seconds",
+            limits.connection_time,
+        )?)
+        .with_max_request_bytes(count(
+            raw.max_request_bytes,
+            "max_request_bytes",
+            limits.max_request_bytes,
+        )?)
+        .with_max_requests(count(
+            raw.max_requests,
+            "max_requests",
+            limits.max_requests,
+        )?)
+        .with_request_time(seconds(
+            raw.request_seconds,
+            "request_seconds",
+            limits.request_time,
+        )?)
+        .with_idle_time(seconds(raw.idle_seconds, "idle_seconds", limits.idle_time)?)
+        .with_send_time(seconds(raw.send_seconds, "send_seconds", limits.send_time)?)
+        .with_immutable_age(
+            raw.immutable_seconds
+                .map_or(limits.immutable_age, Duration::from_secs),
+        );
+    if web.listen.port() != 0 && entries.iter().any(|entry| entry.listen == web.listen) {
+        return Err(refused("listen is an entry's address too"));
+    }
+    Ok(web)
 }
 
 fn check_unique(entries: &[Entry]) -> Result<(), ConfigError> {

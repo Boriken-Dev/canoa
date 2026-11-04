@@ -484,3 +484,134 @@ fn worktrees_are_on_for_agents_and_tools_unless_switched_off_and_never_for_provi
         .is_err()
     );
 }
+
+#[test]
+fn a_file_without_a_web_table_serves_no_web_app() {
+    let config = parse("[host.agents.a]\nprogram = \"x\"\n").expect("parses");
+    assert_eq!(config.web, None);
+}
+
+#[test]
+fn the_web_table_takes_its_defaults_and_paths_from_the_files_directory() {
+    let config = parse("[host.agents.a]\nprogram = \"x\"\n[host.web]\n").expect("parses");
+    assert_eq!(config.web, Some(WebConfig::new()));
+    let web = WebConfig::new();
+    assert_eq!(web.listen, "127.0.0.1:7800".parse().expect("an address"));
+    assert_eq!(web.dir, None);
+    assert_eq!(web.tls, None);
+
+    let config = parse(
+        r#"
+[host.agents.a]
+program = "x"
+[host.web]
+dir = "site"
+listen = "0.0.0.0:8443"
+cert = "tls/web.crt"
+key = "tls/web.key"
+hosts = ["canoa.example", "Canoa-Box"]
+connect = ["https://fonts.gstatic.com", "wss://relay.example:8443"]
+max_connections = 8
+max_connections_per_address = 2
+connection_seconds = 120
+max_request_bytes = 4096
+max_requests = 50
+request_seconds = 5
+idle_seconds = 7
+send_seconds = 9
+immutable_seconds = 60
+"#,
+    )
+    .expect("parses");
+    let web = config.web.expect("a web table");
+    let directory = std::path::absolute(base()).expect("absolute");
+    assert_eq!(web.dir, Some(directory.join("site")));
+    assert_eq!(web.listen, "0.0.0.0:8443".parse().expect("an address"));
+    assert_eq!(
+        web.tls,
+        Some(WebTls::new(
+            directory.join("tls").join("web.crt"),
+            directory.join("tls").join("web.key")
+        ))
+    );
+    assert_eq!(web.hosts, ["canoa.example", "canoa-box"]);
+    assert_eq!(
+        web.connect,
+        ["https://fonts.gstatic.com", "wss://relay.example:8443"]
+    );
+    assert_eq!(
+        web.limits,
+        crate::web::Limits::default()
+            .with_max_connections(8)
+            .with_max_connections_per_address(2)
+            .with_connection_time(core::time::Duration::from_secs(120))
+            .with_max_request_bytes(4096)
+            .with_max_requests(50)
+            .with_request_time(core::time::Duration::from_secs(5))
+            .with_idle_time(core::time::Duration::from_secs(7))
+            .with_send_time(core::time::Duration::from_secs(9))
+            .with_immutable_age(core::time::Duration::from_secs(60))
+    );
+}
+
+#[test]
+fn plain_http_beyond_loopback_is_refused() {
+    let refused = parse("[host.web]\nlisten = \"0.0.0.0:7800\"\n").expect_err("refused");
+    assert!(refused.to_string().contains("cert and key"), "{refused}");
+    assert!(parse("[host.web]\nlisten = \"10.0.0.5:7800\"\ncert = \"a.crt\"\n").is_err());
+    assert!(parse("[host.web]\nlisten = \"[::]:7800\"\nkey = \"a.key\"\n").is_err());
+    assert!(parse("[host.web]\nlisten = \"127.0.0.1:7800\"\ncert = \"a.crt\"\n").is_err());
+    assert!(parse("[host.web]\nlisten = \"[::1]:7800\"\n").is_ok());
+    assert!(
+        parse("[host.web]\nlisten = \"0.0.0.0:7800\"\ncert = \"a.crt\"\nkey = \"a.key\"\n").is_ok()
+    );
+}
+
+#[test]
+fn a_web_setting_that_cannot_serve_is_refused_by_name() {
+    for (setting, value) in [
+        ("listen", "\"nowhere\""),
+        ("dir", "\"\""),
+        ("cert", "\"\""),
+        ("hosts", "[\"\"]"),
+        ("hosts", "[\"bad host\"]"),
+        ("hosts", "[\"host:80\"]"),
+        ("hosts", "[\"a/b\"]"),
+        ("connect", "[\"*\"]"),
+        ("connect", "[\"'unsafe-eval'\"]"),
+        ("connect", "[\"https://a.example; script-src *\"]"),
+        ("connect", "[\"https://a.example b.example\"]"),
+        ("connect", "[\"https:\"]"),
+        ("connect", "[\"ftp://a.example\"]"),
+        ("connect", "[\"https://a.example,b\"]"),
+        ("max_connections", "0"),
+        ("max_connections_per_address", "0"),
+        ("connection_seconds", "0"),
+        ("max_request_bytes", "0"),
+        ("max_requests", "0"),
+        ("request_seconds", "0"),
+        ("idle_seconds", "0"),
+        ("send_seconds", "0"),
+        ("unknown", "1"),
+    ] {
+        let text = format!("[host.web]\n{setting} = {value}\n");
+        let refused = parse(&text).expect_err(&text);
+        let said = refused.to_string();
+        assert!(
+            !said.contains("bad host") && !said.contains("nowhere"),
+            "{said}"
+        );
+    }
+    assert!(parse("[host.web]\nimmutable_seconds = 0\n").is_ok());
+}
+
+#[test]
+fn the_web_app_and_an_entry_cannot_share_an_address() {
+    let refused =
+        parse("[host.agents.a]\nprogram = \"x\"\nlisten = \"127.0.0.1:7800\"\n[host.web]\n")
+            .expect_err("refused");
+    assert!(refused.to_string().contains("listen"), "{refused}");
+    assert!(
+        parse("[host.agents.a]\nprogram = \"x\"\nlisten = \"127.0.0.1:0\"\n[host.web]\nlisten = \"127.0.0.1:0\"\n").is_ok()
+    );
+}
