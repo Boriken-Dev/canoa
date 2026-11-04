@@ -7,6 +7,7 @@ import 'package:coqui_acp/page.dart';
 import 'acp/agent_commands.dart';
 import 'acp/browser_connect.dart';
 import 'acp/local_agent.dart';
+import 'acp/served_host.dart';
 import 'auth/browser_peer.dart';
 
 /// Explicit, out-of-band connection configuration for a pinned peer.
@@ -64,6 +65,7 @@ Future<void> showCanoaConnectDialog(
   PairByPin pair = pairBrowserAcp,
   PeerMethod? method,
   bool inBrowser = kIsWeb,
+  Future<ServedHost?> Function() servedHost = loadServedHost,
 }) => showDialog<void>(
   context: context,
   builder: (_) => _ConnectDialog(
@@ -78,8 +80,41 @@ Future<void> showCanoaConnectDialog(
     pair: pair,
     method: method,
     inBrowser: inBrowser,
+    servedHost: servedHost,
   ),
 );
+
+/// The entries the host that served this page lists, one chosen for the endpoint, and what is still needed to connect.
+class _ServedEntries extends StatelessWidget {
+  const _ServedEntries({required this.host, required this.chosen, required this.onChoose});
+
+  final ServedHost host;
+  final String chosen;
+  final ValueChanged<String>? onChoose;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('From the canoa-host that served this page:', style: Theme.of(context).textTheme.bodySmall),
+      Wrap(spacing: 8, children: [
+        for (final entry in host.entries)
+          ChoiceChip(
+            label: Text(entry.name),
+            tooltip: '${entry.kind} at ${entry.url}',
+            selected: entry.url == chosen,
+            onSelected: onChoose == null ? null : (_) => onChoose!(entry.url),
+          ),
+      ]),
+      Text(
+        'The pinned id below is what this page says: compare it with the one canoa-host id prints, or Hosting shows. '
+        'Connecting then proves the host holds it. Until this browser\'s key is accepted there, the host turns it away: '
+        'run canoa-host accept with your id above.',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    ]),
+  );
+}
 
 class _ConnectDialog extends StatefulWidget {
   const _ConnectDialog({
@@ -94,10 +129,14 @@ class _ConnectDialog extends StatefulWidget {
     this.checkInstalled = isInstalled,
     this.method,
     this.inBrowser = kIsWeb,
+    this.servedHost = loadServedHost,
   });
 
   /// Whether this app is a web page, whose key and identity are the browser's; otherwise they are this app's own.
   final bool inBrowser;
+
+  /// What the `canoa-host` that served this page lists, which fills the fields; asked only in a web page.
+  final Future<ServedHost?> Function() servedHost;
 
   /// The method an agent's record or its host named, prefilled; null for an agent typed in by hand.
   final PeerMethod? method;
@@ -155,6 +194,26 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   void _choose(PeerMethod? chosen) {
     method = chosen;
     own = chosen == null ? null : _own(chosen);
+  }
+
+  /// What the host that served this page lists, once read; null until then, and in an app that is no web page.
+  ServedHost? served;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.inBrowser) {
+      widget.servedHost().then((host) {
+        if (!mounted || host == null || host.entries.isEmpty) return;
+        setState(() {
+          served = host;
+          // Only fields the person has not filled, and a method they have not named.
+          if (ws.text.isEmpty) ws.text = host.entries.first.url;
+          if (pinned.text.isEmpty) pinned.text = host.peer;
+          if (method == null) _choose(host.method);
+        });
+      });
+    }
   }
 
   @override
@@ -462,6 +521,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                 },
               ),
               if (!local) titleField,
+              if (served case final host?) _ServedEntries(host: host, chosen: ws.text, onChoose: busy ? null : (url) => setState(() => ws.text = url)),
               TextField(controller: wt,
                 decoration: const InputDecoration(
                   labelText: 'WebTransport HTTPS endpoint (optional)',
