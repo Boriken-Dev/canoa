@@ -62,6 +62,7 @@ text = "{assistantMessageEvent.delta}"
 # Any of the three tables, each optional:
 listen = "127.0.0.1:7801"             # loopback only; default 127.0.0.1:0, any free port
 working_roots = ["/home/me/src"]      # absolute, no . or ..; a session's cwd must be under one; default any
+worktrees = true                      # agents and tools: a git worktree per session inside working_roots; see "Worktrees"
 peers = ["sha256:…"]                  # paired keys that may use it; default every paired key
 max_peers = 4                         # connections at once
 ```
@@ -79,7 +80,7 @@ pub fn Config::from_str_in(text: &str, base: &Path) -> Result<Config, ConfigErro
 pub fn Config::entry(&self, name: &str) -> Option<&Entry>
 
 #[non_exhaustive] pub struct HostProfile { pub profile: Profile, pub overlays: Vec<String>, pub allow_mcp: BTreeMap<String, String>, pub directory: PathBuf }
-#[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: SocketAddr, pub working_roots: Vec<PathBuf>, pub peers: Option<Vec<PeerId>>, pub max_peers: usize }
+#[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: SocketAddr, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize }
 #[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
 #[non_exhaustive] pub enum Origin { Library(PathBuf), Source { file: PathBuf, settings: Settings, import_search: ImportSearch } }   // paths absolute
 #[non_exhaustive] pub enum ImportSearch { Library, Path }   // Copy
@@ -93,7 +94,7 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 
 - `entries` keeps the file's order, every agent before every provider, every provider before every tool. A file with no `[host]` gives no entries.
 - `[host.profiles.NAME]`: a name as an entry's; `overlays` valid AOS overlay names; `allow_mcp` values `sha256:` and 64 lower-case hex digits; the rest `Profile::from_table` as `LayerKind::User`, its relative paths from the file's directory. An agent's `profiles` must name profiles the file holds, each once. Errors say `profile NAME:` and a setting, never a value.
-- A tool entry's `listen`, `working_roots`, `peers` and `max_peers` are read as in the other tables; the rest is a `ToolSpec`, refused as a whole when `ToolSpec::check` refuses it. Its errors name a setting and a rule's index, never a value.
+- A tool entry's `listen`, `working_roots`, `worktrees`, `peers` and `max_peers` are read as in the other tables; the rest is a `ToolSpec`, refused as a whole when `ToolSpec::check` refuses it. Its errors name a setting and a rule's index, never a value.
 - `library` and `source` are made absolute against `base` (the file's directory for `load`); `directory` is `base` made absolute, where the provider's process runs.
 - In `source_settings`, every text in a `dirs`, `manifests`, `paths` or `import_dirs` list, and `home` when it is text, is made absolute against the directory, since a source may otherwise resolve it against a later working directory or its own file's; other keys, `isolation` included, pass as written, for the source to refuse.
 - `source_settings` and `settings` are TOML tables held as JSON. A date, or a float that is not a number, is refused; nothing checks them further until a connection loads the provider, since checking means loading its code.
@@ -128,6 +129,7 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 
 - `bind` binds every entry before any is served, so a failure leaves none listening. A plain socket beyond loopback is refused by `coqui-web` too.
 - Each connection: the WebSocket handshake, then the proof of the identity's method, Noise (`coqui-peer-noise`) or WebCrypto (`coqui-peer-webcrypto`), within `PROOF_LIMIT`; a client of the other method fails it, and the log names both methods. Then the trust store decides (a stranger that proved its key is recorded as waiting), then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
+- On an agent or tool entry, worktree requests (see "Worktrees") are answered by the host before anything else, up to 16 per connection, then the connection ends; once a first other message has come, one is answered `-32600`.
 - The first message must be plain ACP: a link of streams (`coqui_agentic_peer::mux`) is refused. Then a fresh process serves that connection, relayed by `coqui_acp_bridge::relay`, and is stopped with its process tree when either side ends.
 - An agent entry runs `program args`. Every message from the client to it is parsed and the host's own serialization forwarded: `params` other than an object is answered `-32602`, since a list would fill a request's fields in order; `_meta` is removed at every depth; a request whose `params.mcpServers` holds anything but `http` or `sse` over `https`, or `acp`, is answered `-32602` and never reaches the agent; with `working_roots`, so is one whose `cwd` or `additionalDirectories` is outside them; what is not one JSON object is answered `-32700` or `-32600`. A refused notification is dropped.
 - **An agent entry with `profiles`** runs `provider_program launch -- PROGRAM ARGS...` instead, whose first line of standard input the host writes: the profile's environment (see `profile::launch`). The client chooses a profile by name in its first message, `initialize`, under `params._meta["dev.boriken.canoa/profile"]` (`profile::PROFILE_META`); none takes the first. A first message that is not `initialize` is answered `-32600` (`-32602` when it names a profile), a name the entry does not offer or a value that is not text `-32602`, each logged, and then no reference is read and no process starts; a choice in any later message is answered `-32602` and logged. A reference that cannot be resolved (`from_env` unset, `from_file` unreadable) answers `-32603` and starts nothing. Each overlay the profile names is read from `overlays/NAME` beside Canoa.cfg (4096 files, 64 MiB at most), with no link or excluded name, and must have the digest `overlays/NAME.json` records; else it is left out and reported. The agent's `initialize` answer decides the harness (from `agentInfo.name`, else an entry named `Claude`, `Codex`, `Gemini` or `Pi`) and what it takes (`systemPrompt`, `additionalDirectories`, MCP transports, by ACP v1 or v2 capability paths); then every `session/new`, `session/load` and `session/resume`, after the scope above, gets the context as `systemPrompt` (`append`, before a client's own blocks), the MCP servers in `mcpServers` (v1's stdio form untyped; a client's server of a name the profile holds, started or not, is `-32602`), skills written once per connection to a private temporary directory (removed after the agent ends) as the Claude plugin `canoa-profile` in `_meta.claudeCode.options.plugins` or a directory Codex reads (`.agents/skills` inside) in `additionalDirectories`. A session request before `initialize` is answered `-32600`. A stdio server's `command` goes absolute: as written, from its layer's directory when it holds a separator, else the first match on the host's `PATH` (absolute entries only; `PATHEXT` on Windows), refused when none is found. An overlay's MCP server starts only when `allow_mcp` names it at its digest (`sha256` of `{"layer", "server"}` as the view writes them, and `"program"`, the stdio program found); off, it is logged with that digest. The answer to `initialize` and to each session request carries `_meta[PROFILE_META]` = `{"name", "harness", "summary", "items": [{"key", "layer", "state", "how", "digest"?}]}`, `state` being `applied`, `not supported`, `off` or `refused`: names, never values. No project profile is read.
@@ -326,6 +328,23 @@ pub fn grants_report(manifest, facts, weakenings) -> Vec<String>   // not grante
 
 - `[about]` is validated (its own pointer), never applied; Canoa's app shows a valid `summary` and `icon` only.
 - Mapping order carries no meaning: `serde_json::Map` iteration is what a caller gets.
+## Worktrees
+
+No public API: what `serve` answers on an agent or tool entry with `working_roots` and `worktrees` on (the default), before its agent starts. Off, or with no root, each is `-32602`.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `_canoa/worktree/new` | `cwd`, `branch` | `{"path", "branch", "repo"}`: `path` and `repo` written under the root as configured |
+| `_canoa/worktree/status` | `path` | `{"exists": false}`, or `{"exists": true, "branch", "changed", "commits"}` |
+| `_canoa/worktree/remove` | `path`, `discard` (bool, default false) | `{"removed": true, "branch", "branchKept", "commits"}` |
+
+- **A branch** is `canoa/` then runs of `a-z0-9` joined by single hyphens, 70 bytes at most; any other is `-32602` before git runs.
+- **A path** (`cwd`, `path`) must be plain absolute, on a drive on Windows (a share or device path is refused unlooked at), under a root as written, and, resolved by `canonicalize`, under a root resolved the same way. A missing `path` is `{"exists": false}` for `status`.
+- **`new`**: the repository's main worktree (`git worktree list --porcelain -z`, its first entry; a bare one refused) resolved must be under a resolved root, and so must its parent; the worktree goes in `<parent>/<name>.worktrees/<branch less canoa/>`. An existing `.worktrees` that is a link or not a directory, or a worktree already there, is refused. Then `git worktree add -b BRANCH -- PATH HEAD` from `cwd`; a result whose resolved path is not itself is removed again and refused.
+- **`status` and `remove`** take only a worktree `new` would have made: its own top level (`rev-parse --show-toplevel`), not the main worktree, on a branch `new` takes, at the place `new` puts that branch; else `-32602`. `changed` counts what `git status --porcelain -z --untracked-files=all` lists, `commits` what `rev-list BRANCH --not --exclude=BRANCH --branches --remotes --tags` counts. `remove` runs `git worktree remove [--force] -- PATH` (`--force` only with `discard`, so a worktree holding changes or untracked files is git's to refuse), then `git branch -D -- BRANCH` only when `commits` is 0.
+- **Git** is `git` on the host's `PATH`, run as `git -C DIR -c core.hooksPath=NUL|/dev/null -c core.fsmonitor=false ...` with every `GIT_` variable of the host's removed and `GIT_TERMINAL_PROMPT=0`; a failure is `-32603` `git failed: ` and up to 1 KiB of git's own words, control characters made spaces.
+- A request is refused, never forwarded, once the agent runs (`-32600`), and a notification of one is dropped.
+
 ## Pairing (`canoa_host::peers`)
 
 ```rust
@@ -391,7 +410,7 @@ canoa-host launch PROGRAM [ARGS]...
 - A stdio agent inherits the host's environment and working directory. An agent can still start whatever its own tools start when the client allows them; the host stops only what a client could start without the agent asking.
 - A profile's variable and MCP server values never reach the client from the host, but they reach the agent, which acts for that client and may show them: give a profile only what that entry's clients may use.
 - A paired key reaches every session an agent keeps for this user: `session/list` and `session/load` pass to a stdio agent unchanged.
-- `working_roots` compare paths as written: a link inside a root that points outside it is followed by the agent.
+- `working_roots` compare paths as written: a link inside a root that points outside it is followed by the agent. Worktrees are made, read and removed only where every link is resolved, inside the roots resolved too.
 - If the host itself is killed, on Windows the system ends its agents with it (each is in a job object closed with the host); on Unix each sees its standard input close, and most then exit. `serve --until-stdin-closes` ends them on every platform when the parent goes.
 - Each connection is a fresh process, so a turn in progress ends with its link; a later connection resumes a session only if the agent kept it.
 - `peers` is read when the host starts; a key removed from the trust store loses its link within about a second without a restart.

@@ -22,6 +22,7 @@ program = "npx"
 args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
 listen = "127.0.0.1:7801"
 working_roots = ["/home/me/src"]
+worktrees = true                  # a git worktree per session, inside working_roots; see Worktrees
 
 [host.providers.echo]
 library = "echo_provider.dll"
@@ -242,6 +243,44 @@ command = "/usr/local/bin/lint-mcp"
   `applied`, `not supported`, `off` or `refused`, and why: names only, never a value.
 - The host reads no project's `.canoa/profile.toml`: the directory is the client's to name.
 
+## Worktrees
+
+An agent or tool entry with `working_roots` makes a git worktree for a session when a client asks, so two sessions on
+one repository each work on a branch of their own. `worktrees = false` on the entry turns it off; an entry with no
+working root, and a provider, makes none.
+
+```toml
+[host.agents.claude]
+program = "npx"
+args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+working_roots = ["/home/me/src"]   # a repository at /home/me/src/proj gets its worktrees in /home/me/src/proj.worktrees/
+worktrees = true                   # the default
+```
+
+- **The client names a directory and a branch, never where the worktree goes.** The directory must be under a working
+  root as written, and again once every link in it is resolved, against the roots resolved too; so must the repository's
+  main worktree, and the directory beside it that worktrees go in. A `.worktrees` directory that is a link, a branch
+  other than `canoa/` and lower-case words joined by single hyphens, and a share or device path are refused before git
+  runs. A worktree is made on a new branch from the directory's current commit, then checked again where it landed.
+- **A repository that is itself a working root has nowhere beside it** inside the roots: name the directory holding it.
+- **Git runs from an argument list**, never a shell, with `--` before every path, its hooks and fsmonitor off
+  and none of the host's `GIT_` variables, so a repository's hooks do not run for the host. A post-checkout hook such as
+  Git LFS's does not run either.
+- **Only a worktree the host would have made is read or removed**: a linked worktree on a `canoa/` branch, where that
+  branch's worktree goes. Removing one holding changes or untracked files takes the client's `discard`; without it git
+  refuses. Its branch is deleted only when no other branch, tag or remote has a commit of it.
+- **Before the agent starts.** The requests come first on a connection, before `initialize`, and no agent starts for a
+  connection that sends only these; once the agent runs, one is refused. So a worktree is removed with no agent of that
+  connection working in it.
+
+The requests, each answered by the host, never the agent:
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `_canoa/worktree/new` | `cwd`, `branch` | `path` (under the root as written), `branch`, `repo` |
+| `_canoa/worktree/status` | `path` | `{"exists": false}`, or `exists`, `branch`, `changed` (files `git status` lists), `commits` (on the branch alone) |
+| `_canoa/worktree/remove` | `path`, `discard` (default false) | `removed`, `branch`, `branchKept`, `commits` |
+
 ## In the desktop app
 
 Canoa's desktop app runs the host as its own child, so nothing else has to be started:
@@ -302,7 +341,8 @@ only from a dialog that shows its whole id.
   rule to a stdio agent's clients: such an entry is refused whole, an `http` or `sse` server must be `https`, and `_meta`,
   which an agent may read as launch options, is removed. A provider's facade takes no MCP server at all.
 - **Only the working roots it names**, when an entry names any, compared as written: a link inside a root that points
-  outside it is followed.
+  outside it is followed. A worktree is made, read or removed only where links are resolved too; see
+  [Worktrees](#worktrees).
 - **Only the profiles an entry offers, by name.** What a profile holds, its secrets and its MCP servers included, comes
   from Canoa.cfg alone; see [Profiles](#profiles).
 

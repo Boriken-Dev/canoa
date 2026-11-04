@@ -27,6 +27,15 @@ Configuration tables:
 
 The session list is `sessions.json` beside Canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session.
 
+### A worktree per session
+
+**In a new git worktree, on its own branch** in the connect dialog starts the session in a new worktree of the repository holding the workspace, from that directory's current commit. The branch is `canoa/` and the session's title (or its agent's name) in lower-case letters and digits joined by hyphens, then six random hexadecimal digits, such as `canoa/fix-the-tests-3fa91c`; nothing else is taken, so no branch reads as an option, a range or a path step. The worktree goes beside the repository, in `<repository>.worktrees/<branch without canoa/>`, and a `.worktrees` directory already there that is a link is refused. The session list shows the branch, and the session list kept across runs notes the worktree with the session.
+
+- **An agent this app runs**: the app runs `git` itself, with an argument list, as you would in your own repository: its hooks run.
+- **An agent `canoa-host` serves**: the host makes the worktree, only inside its entry's working roots, as [the host](host.md#worktrees) describes; with no working root, or `worktrees = false`, it makes none. The browser's provider makes none.
+
+Closing the session ends its agent first, then asks whether to keep the worktree. Files with changes not committed, untracked ones included, are counted, and removing them is a button of its own that names them; a change made after you were told is told again before anything is deleted. Without that, git refuses to remove a worktree holding changes. Files git ignores go with the worktree. Its branch goes with it only when it holds no commit another branch, tag or remote does not have; otherwise it stays, so no commit is lost. Reopening a session from the list finds its worktree again, or says it is gone and does not start the agent.
+
 Do not store identity private keys, tokens or passwords in Canoa.cfg.
 
 ## Profiles
