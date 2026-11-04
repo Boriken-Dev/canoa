@@ -82,6 +82,48 @@ it is followed. A question counts as needing the person, with its own notificati
 the conversation, or the agent going away answers a waiting question cancelled. URL elicitation is not offered: Canoa opens no
 address an agent names. `coqui_acp` reads the form and checks the answer, as `vectors/elicitation.json` in coqui-acp says.
 
+## A new session, started by its first message
+
+A new session is the conversation's empty view: the folder above the message box, and under it the source, Local or
+Worktree, the agent's mode, model and effort, the overlays, `+` and Send ([a new session](configuration.md#a-new-session)).
+Nothing starts until the first message. Then the app starts the agent, or reaches `canoa-host` for a hosted one, sends
+`initialize`, then `session/new` with the folder, the profile's `systemPrompt`, `additionalDirectories`, `_meta` and MCP
+servers, sets each choice made beforehand with `session/set_config_option`, and sends the message. A choice the agent does not
+offer by then is said in the conversation and not sent. A start that fails leaves the session as it was, with the message.
+
+## Mode, model and effort beside Send
+
+The agent's `configOptions` (v1's `id`, v2's `configId`) are shown by their ACP `category`: `mode`, `model` and `thought_level`
+each have a control under the message, an option without a category is placed by its id (`mode`, `model`, `effort`,
+`reasoning_effort`, `thought_level`), and every other select option is behind **More**; an agent with `modes` and no options
+has its modes there. A change goes to the agent with `session/set_config_option` (in v2 with `type: "id"`, as v2 requires)
+and shows once the agent's answer or a `config_option_update` says so. A value the agent refuses stays as it was, and its
+reason is said in the conversation. A change made while a turn runs is sent before the next prompt, and says so meanwhile.
+Before an agent has started, the controls list what its source's agent offered when it last ran, kept with the session list,
+else only Default. Full access is in the mode control, in red while it is on.
+
+## What goes with a message
+
+`+` adds files or images, a folder reference, or what the clipboard holds; Ctrl+V (⌘V on a Mac) pastes the same way, and
+files dropped on the conversation are added too. An image on the clipboard becomes an image, copied files become files, and
+text stays in the message unless it is longer than `[attachments] paste_as_file`, when it goes as an attachment of its own.
+Each attachment shows as a chip above the message, an image with its thumbnail, with its size and a way to take it back.
+
+An image goes as ACP `image` content when the agent's `promptCapabilities.image` says it takes images; a file goes as an
+embedded `resource` when `embeddedContext` allows it, it is text and no larger than `[attachments] embed_limit`, and as a
+`resource_link` to its `file:` URI otherwise; a folder always goes as a `resource_link`, which ACP has every agent take. An
+image with a file behind it goes as a link to an agent that takes no images. One that cannot go at all, such as a pasted
+image for an agent without images, is refused when it is added, and a chip says how its attachment will go when that is not
+as it is: nothing is left out of a message without saying so.
+
+## Selecting and copying
+
+The conversation is one selection, across messages, tool cards, code and diffs; the plan and the changes pane are selections
+of their own. Ctrl+A (⌘A) in the conversation selects all of it and Ctrl+C copies it, as text in reading order: an agent's
+Markdown as the text it shows, a code block as its code, a folded thought or summary as its heading. The context menu has
+Copy and Select all. Each message and each code block has a copy button. In the message being written, Ctrl+A selects only
+its text, and the text field keeps its own Cut, Copy and Paste.
+
 ## A queue while the agent works
 
 A message written while a turn runs (Enter, or **Queue** beside Stop) waits in a queue under the conversation, with what goes
@@ -92,10 +134,10 @@ conversation holds at most 20 queued messages.
 
 ## Keyboard and the command palette
 
-Ctrl (⌘ on a Mac) with: **K** the command palette, **N** a new session, **1** to **9** that session in the list, **Tab** and
+Ctrl (⌘ on a Mac) with: **K** the command palette, **N** a new session's view, **1** to **9** that session in the list, **Tab** and
 **Shift+Tab** the next and previous session, **L** the message being written, **.** Stop, **Shift+A** and **Shift+R** the
-agent's own allow-once and refuse-once options for the question shown (never an "always" one), **Shift+D** the changes, and
-**/** a sheet of all of these. Up in an empty message brings back the last message sent in that conversation. The palette lists
+agent's own allow-once and refuse-once options for the question shown (never an "always" one), **Shift+D** the changes,
+**A** and **C** select all and copy, **V** pastes into the message, and **/** a sheet of all of these. Up in an empty message brings back the last message sent in that conversation. The palette lists
 what the app can do, the other sessions to go to and the agent's own commands; typing narrows it, and Enter runs the first
 left. A command chosen there is written into the message, not sent.
 
