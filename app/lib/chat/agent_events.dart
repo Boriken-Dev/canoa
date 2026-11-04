@@ -394,6 +394,3 @@ String? describeToolInput(Object? raw) {
 }
 
 const int maxDescribedInput = 4000;
-
-/// Whether what [describeToolInput] gave is more than its box shows at once, which a person has to be told.
-bool isLongToApprove(String detail) => detail.length > 300 || '\n'.allMatches(detail).length > 4;

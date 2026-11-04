@@ -95,11 +95,9 @@ void main() {
       expect(shown, contains('description: harmless'));
       expect(shown, contains('timeout: 5'));
       expect(shown, contains('env: {"A":"b"}'));
-      expect(isLongToApprove(shown), isTrue);
       final bidi = describeToolInput({'command': 'safe${String.fromCharCode(0x202e)}gnp.exe${String.fromCharCode(0x1b)}[2K'})!;
       expect(bidi.contains(String.fromCharCode(0x202e)), isFalse);
       expect(bidi.contains(String.fromCharCode(0x1b)), isFalse);
-      expect(isLongToApprove('ls'), isFalse);
       expect(describeToolInput('not a map'), isNull);
       expect(describeToolInput(<String, Object?>{}), isNull);
     });

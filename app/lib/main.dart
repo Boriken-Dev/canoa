@@ -18,7 +18,7 @@ import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
-import 'chat/agent_events.dart' show AgentCommandInfo, isLongToApprove;
+import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
@@ -477,48 +477,56 @@ class _SessionRail extends StatelessWidget {
       child: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 18, 10, 12),
-          child: Row(children: [
-            Icon(Icons.sailing_rounded, color: context.look.accent),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text('Canoa', style: TextStyle(
-                fontSize: 22, fontWeight: FontWeight.w700,
-              )),
-            ),
-            IconButton(
-              tooltip: 'Canoa settings',
-              onPressed: onSettings,
-              icon: const Icon(Icons.settings_outlined),
-            ),
-            if (onHosting != null)
-              IconButton(
-                tooltip: 'Hosting',
-                onPressed: onHosting,
-                icon: const Icon(Icons.dns_outlined),
-              ),
-            IconButton(
-              tooltip: 'Connect to verified agent',
-              onPressed: () => showCanoaConnectDialog(
-                context,
-                onConnect,
-                browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
-                onUseBrowserAgents: onUseBrowserAgents,
-                onRunLocalAgent: onRunLocalAgent,
-                localAgents: agents,
-              ),
-              icon: const Icon(Icons.link_rounded),
-            ),
-            IconButton(
-              tooltip: 'New session',
-              onPressed: () {
-                store.createPreviewSession();
-                if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
-                  Navigator.pop(context);
-                }
-              },
-              icon: const Icon(Icons.add_comment_outlined),
-            ),
-          ]),
+          // The wordmark never wraps: where it and the buttons do not fit on one line, the buttons go under it. The full width puts
+          // them at the right end when they do fit.
+          child: SizedBox(width: double.infinity, child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.sailing_rounded, color: context.look.accent),
+                const SizedBox(width: 10),
+                const Text('Canoa', softWrap: false, style: TextStyle(
+                  fontSize: 22, fontWeight: FontWeight.w700,
+                )),
+              ]),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  tooltip: 'Canoa settings',
+                  onPressed: onSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                ),
+                if (onHosting != null)
+                  IconButton(
+                    tooltip: 'Hosting',
+                    onPressed: onHosting,
+                    icon: const Icon(Icons.dns_outlined),
+                  ),
+                IconButton(
+                  tooltip: 'Connect to verified agent',
+                  onPressed: () => showCanoaConnectDialog(
+                    context,
+                    onConnect,
+                    browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
+                    onUseBrowserAgents: onUseBrowserAgents,
+                    onRunLocalAgent: onRunLocalAgent,
+                    localAgents: agents,
+                  ),
+                  icon: const Icon(Icons.link_rounded),
+                ),
+                IconButton(
+                  tooltip: 'New session',
+                  onPressed: () {
+                    store.createPreviewSession();
+                    if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+                      Navigator.pop(context);
+                    }
+                  },
+                  icon: const Icon(Icons.add_comment_outlined),
+                ),
+              ]),
+            ],
+          )),
         ),
         const Divider(height: 1),
         Expanded(
@@ -559,7 +567,10 @@ class _SessionRail extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.all(16),
           child: Text(
-            'Agent connections and sync require verified ACP peers.',
+            // An agent this app runs is its own child, and only one elsewhere is reached as a peer.
+            canRunLocalAgents
+                ? 'Agents on other machines need a verified ACP peer.'
+                : 'Agent connections and sync require verified ACP peers.',
             style: TextStyle(color: context.look.muted, fontSize: 12),
           ),
         ),
@@ -583,6 +594,37 @@ class _Conversation extends StatefulWidget {
 class _ConversationState extends State<_Conversation> {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
+
+  /// Whether the transcript keeps its end in view as entries arrive: true until the person scrolls away from the end.
+  bool _following = true;
+
+  /// How far from the end, in logical pixels, still counts as at the end.
+  static const double _nearEnd = 24;
+
+  bool _onScroll(ScrollNotification notification) {
+    // Only the transcript's own scrolling, not a code box's inside an entry.
+    if (notification.depth != 0 || (notification is! ScrollUpdateNotification && notification is! ScrollEndNotification)) {
+      return false;
+    }
+    final atEnd = notification.metrics.extentAfter <= _nearEnd;
+    if (atEnd != _following) setState(() => _following = atEnd);
+    return false;
+  }
+
+  /// The transcript grew or shrank: while following, its end comes into view.
+  bool _onMetrics(ScrollMetricsNotification notification) {
+    if (notification.depth == 0 && _following && notification.metrics.extentAfter > 0) _toEnd();
+    return false;
+  }
+
+  void _toEnd() {
+    if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+  }
+
+  void _jumpToLatest() {
+    setState(() => _following = true);
+    _toEnd();
+  }
 
   @override
   void dispose() {
@@ -632,9 +674,8 @@ class _ConversationState extends State<_Conversation> {
         content: Text('Connect and verify an ACP peer before sending.'),
       ));
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
-    });
+    setState(() => _following = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _toEnd());
   }
 
   @override
@@ -688,17 +729,38 @@ class _ConversationState extends State<_Conversation> {
         const Expanded(child: Center(child: Text('Create a conversation to begin.')))
       else ...[
         Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: EdgeInsets.symmetric(
-              horizontal: widget.narrow ? 12 : 40,
-              vertical: context.look.padding + 10,
+          child: Stack(children: [
+            NotificationListener<ScrollMetricsNotification>(
+              onNotification: _onMetrics,
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScroll,
+                child: ListView.builder(
+                  controller: _scroll,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: widget.narrow ? 12 : 40,
+                    vertical: context.look.padding + 10,
+                  ),
+                  itemCount: session.messages.length,
+                  itemBuilder: (context, index) {
+                    return TranscriptEntry(message: session.messages[index], session: session);
+                  },
+                ),
+              ),
             ),
-            itemCount: session.messages.length,
-            itemBuilder: (context, index) {
-              return TranscriptEntry(message: session.messages[index], session: session);
-            },
-          ),
+            if (!_following)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 12,
+                child: Center(
+                  child: IconButton.filledTonal(
+                    tooltip: 'Jump to latest',
+                    onPressed: _jumpToLatest,
+                    icon: const Icon(Icons.arrow_downward_rounded),
+                  ),
+                ),
+              ),
+          ]),
         ),
         if (session.plan.isNotEmpty) PlanPanel(entries: session.plan),
         if (session.pendingPermissions.isNotEmpty)
@@ -724,6 +786,7 @@ class _ConversationState extends State<_Conversation> {
           attachments: session.attachments,
           onAttach: widget.store.canAttach(session) ? () => unawaited(_attach(session)) : null,
           onRemove: (attachment) => widget.store.removeAttachment(session, attachment),
+          remote: !canRunLocalAgents || session.place != SessionPlace.local,
         ),
       ],
     ]);
@@ -734,8 +797,11 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller, required this.enabled, required this.onSend,
     this.working = false, this.onStop, this.commands = const [],
-    this.attachments = const [], this.onAttach, this.onRemove,
+    this.attachments = const [], this.onAttach, this.onRemove, this.remote = true,
   });
+
+  /// Whether the agent is reached as a peer, which is what the line under the field is about.
+  final bool remote;
 
   final TextEditingController controller;
   final bool enabled;
@@ -811,9 +877,11 @@ class _Composer extends StatelessWidget {
                       ),
               ),
             ),
-            const SizedBox(height: 8),
-            Text('Remote sessions require verified peer authentication',
-              style: TextStyle(fontSize: 11, color: look.muted)),
+            if (remote) ...[
+              const SizedBox(height: 8),
+              Text('Remote sessions require verified peer authentication',
+                style: TextStyle(fontSize: 11, color: look.muted)),
+            ],
           ]),
         ),
       ),
@@ -828,66 +896,104 @@ class _PermissionCard extends StatelessWidget {
   final SessionStore store;
   final ChatSession session;
 
+  /// Narrower than this, the answers go under the question rather than beside it, which would leave its text a thin column.
+  static const double besideFrom = 560;
+
   @override
   Widget build(BuildContext context) {
     final question = session.pendingPermissions.first;
+    final asked = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('${session.agent} wants to use a tool', style: Theme.of(context).textTheme.labelMedium),
+        Text(question.title),
+        if (question.detail?.isNotEmpty ?? false) _ToApprove(detail: question.detail!),
+        if (session.pendingPermissions.length > 1)
+          Text(
+            '${session.pendingPermissions.length - 1} more after this',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+      ],
+    );
+    final answers = [
+      TextButton(
+        onPressed: () => store.answerPermission(session, allow: false),
+        child: const Text('Refuse'),
+      ),
+      const SizedBox(width: 8),
+      FilledButton(
+        onPressed: () => store.answerPermission(session, allow: true),
+        child: const Text('Allow'),
+      ),
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              const Icon(Icons.shield_outlined),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${session.agent} wants to use a tool', style: Theme.of(context).textTheme.labelMedium),
-                    Text(question.title),
-                    if (question.detail?.isNotEmpty ?? false)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 120),
-                          child: SingleChildScrollView(
-                            child: SelectableText(
-                              question.detail!,
-                              style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (question.detail != null && isLongToApprove(question.detail!))
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          'This is long. Scroll to read all of it before you answer.',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    if (session.pendingPermissions.length > 1)
-                      Text(
-                        '${session.pendingPermissions.length - 1} more after this',
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => store.answerPermission(session, allow: false),
-                child: const Text('Refuse'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: () => store.answerPermission(session, allow: true),
-                child: const Text('Allow'),
-              ),
-            ],
-          ),
+          child: LayoutBuilder(builder: (context, constraints) {
+            final beside = constraints.maxWidth >= besideFrom;
+            final top = Row(
+              crossAxisAlignment: beside ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.shield_outlined),
+                const SizedBox(width: 12),
+                Expanded(child: asked),
+                if (beside) ...answers,
+              ],
+            );
+            if (beside) return top;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [top, const SizedBox(height: 8), Row(mainAxisAlignment: MainAxisAlignment.end, children: answers)],
+            );
+          }),
         ),
       ),
+    );
+  }
+}
+
+/// What a tool would do, in a box of a fixed height. Whether it holds more than the box shows is measured at the width it has, so a
+/// short edit spread over a few lines is not called long, and a long one is.
+class _ToApprove extends StatelessWidget {
+  const _ToApprove({required this.detail});
+
+  final String detail;
+
+  static const double shown = 120;
+  static const TextStyle _style = TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: detail, style: DefaultTextStyle.of(context).style.merge(_style)),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final long = painter.height > shown;
+        painter.dispose();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: shown),
+              child: SingleChildScrollView(child: SelectableText(detail, style: _style)),
+            ),
+            if (long)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'This is long. Scroll to read all of it before you answer.',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+          ],
+        );
+      }),
     );
   }
 }
