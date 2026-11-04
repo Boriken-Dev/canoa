@@ -472,7 +472,15 @@ fn worktrees_are_on_for_agents_and_tools_unless_switched_off_and_never_for_provi
     ))
     .expect("parses");
     assert!(off.entries.iter().all(|entry| !entry.worktrees));
-    assert!(parse("[host.providers.p]\nlibrary = \"e.dll\"\nprovider = \"e\"\nworktrees = true\n").is_err());
+    assert!(
+        parse("[host.providers.p]\nlibrary = \"e.dll\"\nprovider = \"e\"\nworktrees = true\n")
+            .is_err()
+    );
     assert!(parse("[host.agents.a]\nprogram = \"x\"\nworktrees = \"no\"\n").is_err());
-    assert!(parse(&format!("[host.tools.t]\nprogram = \"pi\"\nworktrees = 0\n{tool}")).is_err());
+    assert!(
+        parse(&format!(
+            "[host.tools.t]\nprogram = \"pi\"\nworktrees = 0\n{tool}"
+        ))
+        .is_err()
+    );
 }

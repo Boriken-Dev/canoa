@@ -168,9 +168,25 @@ fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
         json!({"path": first_path}),
     )
     .expect("a status");
+    let picked = |status: &Value| {
+        (
+            status["exists"].clone(),
+            status["branch"].clone(),
+            status["detached"].clone(),
+            status["changed"].clone(),
+            status["commits"].clone(),
+        )
+    };
     assert_eq!(
-        status,
-        json!({"exists": true, "branch": "canoa/first-a1b2c3", "changed": 1, "commits": 0})
+        picked(&status),
+        (
+            json!(true),
+            json!("canoa/first-a1b2c3"),
+            json!(false),
+            json!(1),
+            json!(0)
+        ),
+        "{status}"
     );
     let status = ask(
         &host,
@@ -180,8 +196,15 @@ fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
     )
     .expect("a status");
     assert_eq!(
-        status,
-        json!({"exists": true, "branch": "canoa/second-d4e5f6", "changed": 0, "commits": 1})
+        picked(&status),
+        (
+            json!(true),
+            json!("canoa/second-d4e5f6"),
+            json!(false),
+            json!(0),
+            json!(1)
+        ),
+        "{status}"
     );
 
     let kept = ask(
@@ -191,7 +214,7 @@ fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
         json!({"path": first_path}),
     )
     .expect_err("a worktree holding a change is not removed without discard");
-    assert!(message(&kept).starts_with("git failed"), "{kept}");
+    assert_eq!(kept["code"], -32602, "{kept}");
     assert!(first_path.join("draft").exists());
     let removed = ask(
         &host,
@@ -425,4 +448,270 @@ fn hooks_in_the_repository_do_not_run() {
     // The same hook runs for git itself, so its absence above is the host's doing.
     git(&repo, &["worktree", "add", "-q", "-b", "plain", "../plain"]);
     assert!(marker.exists(), "the hook runs for a plain git");
+}
+
+/// A host serving `root`, and a worktree it made of `repo` on `branch`.
+fn host_with_worktree(root: &Path, repo: &Path, branch: &str) -> (Host, PathBuf) {
+    let host = Host::start(&entry("fixture", &[root], ""), 1);
+    let made = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/new",
+        json!({"cwd": repo, "branch": branch}),
+    )
+    .expect("a worktree is made");
+    let path = PathBuf::from(made["path"].as_str().expect("a path"));
+    (host, path)
+}
+
+#[test]
+fn files_git_ignores_are_counted_and_never_removed_unasked() {
+    if !has_git() {
+        return;
+    }
+    let scratch = Scratch::new();
+    let root = scratch.0.join("src");
+    let repo = root.join("proj");
+    repository(&repo);
+    std::fs::write(repo.join(".gitignore"), ".env\nbuild/\n").expect("a file");
+    git(&repo, &["add", ".gitignore"]);
+    git(&repo, &["commit", "-q", "-m", "ignore"]);
+    let (host, path) = host_with_worktree(&root, &repo, "canoa/ignored-a1b2c3");
+    std::fs::write(path.join(".env"), "TOKEN=x\n").expect("a file");
+    std::fs::create_dir_all(path.join("build")).expect("a directory");
+    std::fs::write(path.join("build").join("out"), "").expect("a file");
+    let status = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/status",
+        json!({"path": path}),
+    )
+    .expect("a status");
+    assert_eq!(status["changed"], 2, "{status}");
+    let refused = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/remove",
+        json!({"path": path}),
+    )
+    .expect_err("files git ignores are not removed without discard");
+    assert_eq!(refused["code"], -32602, "{refused}");
+    assert!(path.join(".env").exists());
+    ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/remove",
+        json!({"path": path, "discard": true}),
+    )
+    .expect("removed with discard");
+    assert!(!path.exists());
+}
+
+#[test]
+fn a_repository_whose_own_configuration_runs_programs_is_refused() {
+    if !has_git() {
+        return;
+    }
+    let scratch = Scratch::new();
+    let root = scratch.0.join("src");
+    let repo = root.join("proj");
+    repository(&repo);
+    std::fs::write(repo.join("a.txt"), "text\n").expect("a file");
+    git(&repo, &["add", "a.txt"]);
+    git(&repo, &["commit", "-q", "-m", "text"]);
+    let (host, path) = host_with_worktree(&root, &repo, "canoa/before-a1b2c3");
+    let marker = scratch.0.join("filter-ran");
+    let command = format!(
+        "sh -c 'echo ran > \"{}\"; cat'",
+        marker.to_string_lossy().replace('\\', "/")
+    );
+    std::fs::write(
+        repo.join(".git").join("info").join("attributes"),
+        "*.txt filter=x\n",
+    )
+    .expect("attributes");
+    git(&repo, &["config", "filter.x.smudge", &command]);
+    git(&repo, &["config", "filter.x.clean", &command]);
+    let refused = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/new",
+        json!({"cwd": repo, "branch": "canoa/after-d4e5f6"}),
+    )
+    .expect_err("a filter in the repository's configuration");
+    assert!(message(&refused).contains("configuration"), "{refused}");
+    std::fs::write(path.join("a.txt"), "changed\n").expect("a file");
+    for method in ["_canoa/worktree/status", "_canoa/worktree/remove"] {
+        let refused = ask(&host, "fixture", method, json!({"path": path})).expect_err("refused");
+        assert!(
+            message(&refused).contains("configuration"),
+            "{method}: {refused}"
+        );
+    }
+    git(&repo, &["config", "--unset", "filter.x.smudge"]);
+    git(&repo, &["config", "--unset", "filter.x.clean"]);
+    git(&repo, &["config", "include.path", "elsewhere.cfg"]);
+    let refused = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/new",
+        json!({"cwd": repo, "branch": "canoa/after-d4e5f6"}),
+    )
+    .expect_err("an include in the repository's configuration");
+    assert!(message(&refused).contains("configuration"), "{refused}");
+    assert!(!marker.exists(), "a filter ran");
+}
+
+#[test]
+fn a_submodule_or_a_repository_with_alternates_gets_no_worktree() {
+    if !has_git() {
+        return;
+    }
+    let scratch = Scratch::new();
+    let root = scratch.0.join("src");
+    let repo = root.join("proj");
+    let library = root.join("library");
+    repository(&repo);
+    repository(&library);
+    git(
+        &repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            "../library",
+            "lib",
+        ],
+    );
+    git(&repo, &["commit", "-q", "-m", "submodule"]);
+    let host = Host::start(&entry("fixture", &[&root], ""), 1);
+    let refused = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/new",
+        json!({"cwd": repo.join("lib"), "branch": "canoa/sub-a1b2c3"}),
+    )
+    .expect_err("a submodule's worktree would go in the superproject's .git");
+    assert_eq!(refused["code"], -32602, "{refused}");
+    assert!(
+        !repo
+            .join(".git")
+            .join("modules")
+            .join("lib.worktrees")
+            .exists()
+    );
+
+    let shared = root.join("shared");
+    git(&root, &["clone", "-q", "--shared", "proj", "shared"]);
+    let refused = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/new",
+        json!({"cwd": shared, "branch": "canoa/alt-a1b2c3"}),
+    )
+    .expect_err("objects from another repository");
+    assert!(message(&refused).contains("alternates"), "{refused}");
+}
+
+#[test]
+fn a_detached_head_with_commits_of_its_own_is_found_and_kept() {
+    if !has_git() {
+        return;
+    }
+    let scratch = Scratch::new();
+    let root = scratch.0.join("src");
+    let repo = root.join("proj");
+    repository(&repo);
+    let (host, path) = host_with_worktree(&root, &repo, "canoa/detached-a1b2c3");
+    git(&path, &["checkout", "-q", "--detach"]);
+    std::fs::write(path.join("work"), "x\n").expect("a file");
+    git(&path, &["add", "work"]);
+    git(&path, &["commit", "-q", "-m", "detached work"]);
+    let status = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/status",
+        json!({"path": path}),
+    )
+    .expect("still found");
+    assert_eq!(status["exists"], true, "{status}");
+    assert_eq!(status["detached"], true, "{status}");
+    assert_eq!(status["commits"], 1, "{status}");
+    for discard in [false, true] {
+        let refused = ask(
+            &host,
+            "fixture",
+            "_canoa/worktree/remove",
+            json!({"path": path, "discard": discard}),
+        )
+        .expect_err("a commit only HEAD reaches would be lost");
+        assert_eq!(refused["code"], -32602, "{refused}");
+    }
+    assert!(path.join("work").exists());
+}
+
+#[test]
+fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
+    if !has_git() {
+        return;
+    }
+    let scratch = Scratch::new();
+    let root = scratch.0.join("src");
+    let repo = root.join("proj");
+    repository(&repo);
+    let (host, path) = host_with_worktree(&root, &repo, "canoa/listing-a1b2c3");
+    std::fs::write(path.join("one"), "").expect("a file");
+    let first = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/status",
+        json!({"path": path}),
+    )
+    .expect("a status");
+    std::fs::remove_file(path.join("one")).expect("removed");
+    std::fs::write(path.join("two"), "").expect("a file");
+    let second = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/status",
+        json!({"path": path}),
+    )
+    .expect("a status");
+    assert_eq!(first["changed"], second["changed"]);
+    assert!(first["listing"].is_string(), "{first}");
+    assert_ne!(first["listing"], second["listing"]);
+}
+
+#[test]
+fn a_repository_has_at_most_so_many_worktrees_from_the_host() {
+    if !has_git() {
+        return;
+    }
+    let scratch = Scratch::new();
+    let root = scratch.0.join("src");
+    let repo = root.join("proj");
+    repository(&repo);
+    for index in 0..32 {
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                &format!("../proj.worktrees/w{index}"),
+            ],
+        );
+    }
+    let host = Host::start(&entry("fixture", &[&root], ""), 1);
+    let refused = ask(
+        &host,
+        "fixture",
+        "_canoa/worktree/new",
+        json!({"cwd": repo, "branch": "canoa/one-more"}),
+    )
+    .expect_err("past the bound");
+    assert!(message(&refused).contains("32"), "{refused}");
 }
