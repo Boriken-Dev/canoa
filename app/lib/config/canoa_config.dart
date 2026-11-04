@@ -36,6 +36,20 @@ final class HostEntry {
   final String? listen;
 }
 
+/// `[notifications]`: which kinds of news from a session reach the person outside the window. Each is on by default.
+final class NotificationSettings {
+  const NotificationSettings({this.permission = true, this.question = true, this.finished = true});
+
+  /// A permission request, a question from the agent, and a turn that ended.
+  final bool permission, question, finished;
+
+  NotificationSettings copyWith({bool? permission, bool? question, bool? finished}) => NotificationSettings(
+    permission: permission ?? this.permission,
+    question: question ?? this.question,
+    finished: finished ?? this.finished,
+  );
+}
+
 /// Deployment config uses TOML in Canoa.cfg, consistent with AI6's OO.cfg.
 /// This file must never contain secrets or private keys.
 final class CanoaConfig {
@@ -56,6 +70,7 @@ final class CanoaConfig {
     this.agentProfiles = const {},
     this.tables = const {},
     this.fullAccess = const {},
+    this.notifications = const NotificationSettings(),
   });
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
@@ -87,6 +102,8 @@ final class CanoaConfig {
   /// that offers to allow once with that option and no question. Empty by default.
   final Set<String> fullAccess;
 
+  final NotificationSettings notifications;
+
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
 
@@ -98,7 +115,8 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness, LedgerSettings? sessions, Set<String>? fullAccess}) =>
+      LookId? look, String? brightness, LedgerSettings? sessions, Set<String>? fullAccess,
+      NotificationSettings? notifications}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -116,6 +134,7 @@ final class CanoaConfig {
         agentProfiles: agentProfiles,
         tables: tables,
         fullAccess: fullAccess ?? this.fullAccess,
+        notifications: notifications ?? this.notifications,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -136,6 +155,7 @@ final class CanoaConfig {
     agentProfiles: agentProfiles,
     tables: tables,
     fullAccess: fullAccess,
+    notifications: notifications,
   );
 
   /// What `[host]` names for canoa-host to serve, agents first, as written. canoa-host itself checks each one.
@@ -245,7 +265,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions'}
+            'permissions', 'notifications'}
           .contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
@@ -266,6 +286,7 @@ final class CanoaConfig {
     final appearance = table('appearance', {'look', 'brightness'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages'});
     final permissions = table('permissions', {'full_access'});
+    final notifications = table('notifications', {'permission', 'question', 'finished'});
     final fullAccess = permissions['full_access'] ?? const <Object>[];
     if (fullAccess is! List || fullAccess.any((name) => name is! String || name.trim().isEmpty)) {
       throw const FormatException('Canoa.cfg: permissions.full_access must be a list of agent names');
@@ -382,6 +403,11 @@ final class CanoaConfig {
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
       fullAccess: {for (final name in fullAccess) name as String},
+      notifications: NotificationSettings(
+        permission: flag(notifications, 'permission', true),
+        question: flag(notifications, 'question', true),
+        finished: flag(notifications, 'finished', true),
+      ),
       sessions: LedgerSettings(
         keep: count('keep', LedgerSettings.defaultKeep),
         keepText: flag(sessions, 'keep_text', false),
@@ -413,6 +439,11 @@ brightness = "$brightness"
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}
 text_messages = ${sessions.textMessages}
+
+[notifications]
+permission = ${notifications.permission}
+question = ${notifications.question}
+finished = ${notifications.finished}
 ${fullAccess.isEmpty ? '' : '\n[permissions]\nfull_access = ${jsonEncode(fullAccess.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}

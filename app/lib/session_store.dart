@@ -72,6 +72,9 @@ final class PermissionQuestion {
   final Completer<AcpDecision> _answer = Completer();
 }
 
+/// What a session needs the person for: a permission request, a question, or a turn it finished.
+enum AttentionKind { permission, question, finished }
+
 /// Where a session's full access comes from: turned on for it, or for its agent in Canoa.cfg.
 enum FullAccess { session, agent }
 
@@ -132,6 +135,12 @@ class ChatSession {
   /// the person turned it on, for this session or for its agent.
   FullAccess? fullAccess;
 
+  /// Whether a turn ended here since the person last chose this session.
+  bool unread = false;
+
+  /// Whether something here waits for the person's answer.
+  bool get needsYou => pendingPermissions.isNotEmpty;
+
   final String id;
   String title;
   final String agent;
@@ -184,6 +193,20 @@ class SessionStore extends ChangeNotifier {
   final List<String> weakenings = [];
 
   final Set<String> _fullAccessAgents;
+
+  final _attention = StreamController<(ChatSession, AttentionKind)>.broadcast();
+
+  /// Each time a session comes to need the person: a request or a question put to them, or a turn ended. Whether that reaches
+  /// them outside the window is the app's to decide.
+  Stream<(ChatSession, AttentionKind)> get attention => _attention.stream;
+
+  /// How many sessions wait for the person's answer.
+  int get waiting => _sessions.where((session) => session.needsYou).length;
+
+  void _needs(ChatSession session, AttentionKind kind) {
+    if (kind == AttentionKind.finished && session.id != _selectedId) session.unread = true;
+    if (!_attention.isClosed) _attention.add((session, kind));
+  }
 
   /// The agents, by label, whose sessions start with full access.
   Set<String> get fullAccessAgents => Set.unmodifiable(_fullAccessAgents);
@@ -323,6 +346,7 @@ class SessionStore extends ChangeNotifier {
       fullAccessPassed: target.fullAccess != null,
     );
     target.pendingPermissions.add(question);
+    _needs(target, AttentionKind.permission);
     notifyListeners();
     return question._answer.future;
   }
@@ -483,11 +507,13 @@ class SessionStore extends ChangeNotifier {
       if (event is AcpCompleted || event is AcpCancelled) {
         session.status = SessionStatus.connected;
         if (event is AcpCancelled) _note(session, 'Stopped.');
+        if (event is AcpCompleted) _needs(session, AttentionKind.finished);
         _keepText(session);
         notifyListeners();
       } else if (event is AcpFailed) {
         session.status = SessionStatus.connected;
         session.messages.add(ChatMessage(role: MessageRole.notice, text: event.message, at: DateTime.now()));
+        _needs(session, AttentionKind.finished);
         _keepText(session);
         notifyListeners();
       }
@@ -700,6 +726,8 @@ class SessionStore extends ChangeNotifier {
         if (update.state == 'running' || update.state == 'requires_action') {
           session.status = SessionStatus.working;
         } else if (update.state == 'idle') {
+          // A turn the person stopped is not news to them, and an idle state outside a turn ends nothing.
+          if (session.status == SessionStatus.working && update.reason != 'cancelled') _needs(session, AttentionKind.finished);
           session.status = SessionStatus.connected;
           if (update.reason == 'cancelled') {
             _note(session, 'Stopped.');
@@ -1017,8 +1045,10 @@ class SessionStore extends ChangeNotifier {
   }
 
   void select(String id) {
-    if (!_sessions.any((session) => session.id == id)) return;
+    final chosen = _sessions.where((session) => session.id == id).firstOrNull;
+    if (chosen == null) return;
     _selectedId = id;
+    chosen.unread = false;
     notifyListeners();
   }
 
@@ -1050,6 +1080,7 @@ class SessionStore extends ChangeNotifier {
     }
     _subscriptions.clear();
     _verifiedClients.clear();
+    unawaited(_attention.close());
     super.dispose();
   }
 

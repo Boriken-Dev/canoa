@@ -72,17 +72,34 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
       await trayManager.setIcon('assets/icons/canoa_tray.png');
       // A StatusNotifier icon on Linux has no tooltip, and tray_manager has no such call there.
       if (!Platform.isLinux) await trayManager.setToolTip('Canoa');
-      await trayManager.setContextMenu(menu = Menu(items: [
-        MenuItem(key: 'open', label: 'Open Canoa'),
-        MenuItem(key: 'hosting', label: 'Hosting…'),
-        MenuItem(key: 'settings', label: 'Settings…'),
-        MenuItem(key: 'hide', label: 'Hide to tray'),
-        MenuItem.separator(),
-        MenuItem(key: 'quit', label: 'Exit Canoa'),
-      ]));
+      await trayManager.setContextMenu(menu = _menu(0));
     }
     ready = true;
     if (config.startHidden) await _putAway();
+  }
+
+  /// The tray's menu, whose first item says how many sessions wait for the person.
+  static Menu _menu(int waiting) => Menu(items: [
+    MenuItem(key: 'open', label: waiting == 0 ? 'Open Canoa' : 'Open Canoa ($waiting waiting for you)'),
+    MenuItem(key: 'hosting', label: 'Hosting…'),
+    MenuItem(key: 'settings', label: 'Settings…'),
+    MenuItem(key: 'hide', label: 'Hide to tray'),
+    MenuItem.separator(),
+    MenuItem(key: 'quit', label: 'Exit Canoa'),
+  ]);
+
+  /// How many sessions the tray last said wait for the person.
+  @visibleForTesting
+  int waiting = 0;
+
+  @override
+  Future<void> showWaiting(int count) async {
+    if (count == waiting) return;
+    waiting = count;
+    if (!ready || !_hasTray) return;
+    // A StatusNotifier icon on Linux has no tooltip, so there the menu says it.
+    if (!Platform.isLinux) await trayManager.setToolTip(count == 0 ? 'Canoa' : 'Canoa: $count waiting for you');
+    await trayManager.setContextMenu(menu = _menu(count));
   }
 
   /// Out of the way, where the person can bring it back from: the tray, or the taskbar without one.

@@ -20,4 +20,6 @@ class _NoShell implements DesktopShell {
   bool get isDesktop => false;
   @override
   Future<void> quit() async {}
+  @override
+  Future<void> showWaiting(int count) async {}
 }

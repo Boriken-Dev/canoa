@@ -355,5 +355,7 @@ final class _FakeShell implements DesktopShell {
   @override
   Future<void> update(CanoaConfig config) async {}
   @override
+  Future<void> showWaiting(int count) async {}
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

@@ -4,11 +4,15 @@ import '../ledger/session_ledger.dart';
 import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles, this.agents = const []});
+  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles, this.agents = const [],
+      this.onAllowNotifications});
   final CanoaConfig config;
 
   /// The agents this app offers, by label, each of which full access can be turned on for.
   final List<String> agents;
+
+  /// Asks the browser for leave to notify, where it has to be asked; true when it was given.
+  final Future<bool> Function()? onAllowNotifications;
 
   /// The session list, whose kept text Settings can clear.
   final SessionLedger? ledger;
@@ -108,6 +112,39 @@ class SettingsDialogState extends State<SettingsDialog> {
               if (value != null) setState(() => config = config.copyWith(connectTimeout: value));
             },
           ),
+        ),
+        ExpansionTile(
+          key: const Key('settings-notifications'),
+          title: const Text('Notifications'),
+          subtitle: const Text('When a conversation you are not looking at needs you'),
+          children: [
+            for (final (label, on, set) in <(String, bool, NotificationSettings Function(bool))>[
+              ('It asks leave to use a tool', config.notifications.permission,
+                  (v) => config.notifications.copyWith(permission: v)),
+              ('It has a question for you', config.notifications.question, (v) => config.notifications.copyWith(question: v)),
+              ('It finished its turn', config.notifications.finished, (v) => config.notifications.copyWith(finished: v)),
+            ])
+              SwitchListTile(
+                title: Text(label),
+                value: on,
+                onChanged: (v) => setState(() => config = config.copyWith(notifications: set(v))),
+              ),
+            if (widget.onAllowNotifications != null)
+              ListTile(
+                title: const Text('This browser'),
+                subtitle: const Text('A browser shows them only once you allow it'),
+                trailing: TextButton(
+                  onPressed: () async {
+                    final allowed = await widget.onAllowNotifications!();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+                      content: Text(allowed ? 'This browser shows notifications from Canoa.' : 'This browser did not allow them.'),
+                    ));
+                  },
+                  child: const Text('Allow notifications'),
+                ),
+              ),
+          ],
         ),
         if (widget.agents.isNotEmpty || config.fullAccess.isNotEmpty)
           ExpansionTile(

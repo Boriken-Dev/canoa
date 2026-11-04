@@ -1,3 +1,4 @@
+import 'attention/notifier.dart';
 import 'config/settings_dialog.dart';
 import 'dart:async';
 import 'config/canoa_config.dart';
@@ -16,6 +17,7 @@ import 'acp/local_agent.dart';
 import 'package:coqui_acp/page.dart';
 import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'chat/agent_events.dart' show AgentCommandInfo;
@@ -48,7 +50,7 @@ Future<void> main() async {
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
-    host: host, hostingSignal: hostingSignal, ledger: ledger,
+    host: host, hostingSignal: hostingSignal, ledger: ledger, notifier: platformNotifier(),
   ));
   await host?.apply(configPath: desktopConfigPath(), hasEntries: config.hostEntries.isNotEmpty);
 }
@@ -59,10 +61,13 @@ class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
-    this.configPath, this.writeConfig, this.ledger,
+    this.configPath, this.writeConfig, this.ledger, this.notifier,
   });
 
   final SessionStore? store;
+
+  /// How a session that needs the person reaches them outside the window; none, nothing does.
+  final Notifier? notifier;
 
   /// The list of sessions kept across runs, for a store this app makes; a given [store] brings its own.
   final SessionLedger? ledger;
@@ -147,6 +152,7 @@ class _CanoaAppState extends State<CanoaApp> {
         builder: (_) => SettingsDialog(
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
           onProfiles: _showProfiles, agents: [for (final agent in [...agentPresets, ...config.agents]) agent.label],
+          onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
         ),
       );
     } finally {
@@ -214,7 +220,31 @@ class _CanoaAppState extends State<CanoaApp> {
   final _navigator = GlobalKey<NavigatorState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   Timer? _contextTimer;
+  StreamSubscription<(ChatSession, AttentionKind)>? _attention;
   final List<VerifiedAgent> _ownedClients = [];
+
+  /// Tells the person about [session] outside the window, when its kind is on and they are not looking at it there.
+  Future<void> _notify(ChatSession session, AttentionKind kind) async {
+    final notifier = widget.notifier;
+    final wanted = switch (kind) {
+      AttentionKind.permission => config.notifications.permission,
+      AttentionKind.question => config.notifications.question,
+      AttentionKind.finished => config.notifications.finished,
+    };
+    if (notifier == null || !wanted) return;
+    if (session.id == store.selectedId && await notifier.attended()) return;
+    final text = attentionText(session, kind);
+    await notifier.show(title: text.title, body: text.body, sessionId: session.id);
+  }
+
+  /// The person chose a notification: its conversation, in the window.
+  void _openFromNotification(String sessionId) {
+    if (!mounted) return;
+    store.select(sessionId);
+    unawaited(widget.shell?.open());
+  }
+
+  void _showWaiting() => unawaited(widget.shell?.showWaiting(store.waiting));
   bool _claimingContext = false;
 
   Future<void> _claimContext() async {
@@ -385,6 +415,9 @@ class _CanoaAppState extends State<CanoaApp> {
         SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, fullAccessAgents: config.fullAccess);
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
+    _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
+    unawaited(widget.notifier?.initialize(_openFromNotification));
+    store.addListener(_showWaiting);
     unawaited(_claimContext());
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
@@ -400,6 +433,8 @@ class _CanoaAppState extends State<CanoaApp> {
   @override
   void dispose() {
     _contextTimer?.cancel();
+    unawaited(_attention?.cancel());
+    store.removeListener(_showWaiting);
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
     widget.shell?.beforeQuit = null;
@@ -580,6 +615,7 @@ class _SessionRail extends StatelessWidget {
                       ? const Icon(Icons.chat_bubble_outline, size: 21)
                       : Icon(Icons.gpp_maybe_outlined, size: 21, color: Theme.of(context).colorScheme.error),
                   title: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: _SessionMark(session: session),
                   subtitle: Text(
                     [
                       if (session.fullAccess != null) 'Full access',
@@ -611,6 +647,35 @@ class _SessionRail extends StatelessWidget {
         ),
       ]),
     );
+  }
+}
+
+/// What a session in the list has for the person: something waiting for their answer, a turn running, or a turn that ended
+/// since they last looked.
+class _SessionMark extends StatelessWidget {
+  const _SessionMark({required this.session});
+
+  final ChatSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (session.needsYou) {
+      return Tooltip(message: 'Needs you', child: Icon(Icons.front_hand_outlined, size: 18, color: scheme.error));
+    }
+    if (session.status == SessionStatus.working) {
+      return const Tooltip(
+        message: 'Working',
+        child: SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (session.unread) {
+      return Tooltip(
+        message: 'New since you looked',
+        child: Container(width: 10, height: 10, decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle)),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
 

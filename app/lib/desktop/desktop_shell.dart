@@ -24,5 +24,8 @@ abstract interface class DesktopShell {
 
   /// Runs before the app quits, to end what it started.
   set beforeQuit(Future<void> Function()? ending);
+
+  /// Says on the tray how many sessions wait for the person's answer.
+  Future<void> showWaiting(int count);
 }
 DesktopShell createDesktopShell() => platform.createDesktopShell();
