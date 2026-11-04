@@ -19,12 +19,16 @@ class ConnectTarget {
     required this.cwd,
     required this.title,
     required this.method,
+    this.worktree = false,
   });
   final String webSocket;
   final String webTransport;
   final String peerId;
   final String cwd;
   final String title;
+
+  /// Whether the host makes a new git worktree of [cwd], on a branch of the session's own, for the session to work in.
+  final bool worktree;
 
   /// The proof the agent's key makes: named by the person, or by the record or host the agent came from; never assumed,
   /// and never guessed from a connection.
@@ -40,8 +44,9 @@ typedef LocalPeerId = Future<String> Function(PeerMethod method);
 /// Pairs this browser's Noise key with the machine waiting at an address, by the PIN it shows, and answers that machine's id.
 typedef PairByPin = Future<String> Function(Uri url, String pin);
 
-/// Runs an agent on this computer, as a child of the app.
-typedef RunLocalAgent = Future<void> Function(AgentCommand command, {required String cwd, required String title});
+/// Runs an agent on this computer, as a child of the app; with [worktree], in a new git worktree of [cwd] on its own branch.
+typedef RunLocalAgent = Future<void> Function(AgentCommand command,
+    {required String cwd, required String title, required bool worktree});
 
 /// Uses the agents a person grants through the browser's provider, asking them in the provider's own window.
 typedef UseBrowserAgents = Future<void> Function(AcpPage acp, {required String cwd, required String title});
@@ -129,6 +134,9 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   String? error;
   String? paired;
 
+  /// Whether the session starts in a new git worktree of its workspace, on its own branch.
+  bool worktree = false;
+
   /// This browser's id under [method], or why it has none: (id, null) or (null, why).
   Future<(String?, String?)> _own(PeerMethod method) async {
     final why = await widget.methodUnavailable(method);
@@ -208,6 +216,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       cwd: cwd.text.trim(),
       title: title.text.trim(),
       method: method,
+      worktree: worktree,
     );
     setState(() {busy = true; error = null;});
     final why = await widget.methodUnavailable(request.method);
@@ -246,7 +255,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     if (busy) return;
     setState(() {busy = true; error = null;});
     try {
-      await widget.onRunLocalAgent!(command, cwd: cwd.text.trim(), title: title.text.trim());
+      await widget.onRunLocalAgent!(command, cwd: cwd.text.trim(), title: title.text.trim(), worktree: worktree);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) setState(() => error = '$e');
@@ -258,6 +267,10 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   /// No await before the provider's request: it needs the click's user activation.
   Future<void> _useBrowser(AcpPage acp) async {
     if (busy) return;
+    if (worktree) {
+      setState(() => error = 'A worktree is made on this computer or by canoa-host, not by the browser\'s provider.');
+      return;
+    }
     final asked = widget.onUseBrowserAgents!(acp, cwd: cwd.text.trim(), title: title.text.trim());
     setState(() {busy = true; error = null;});
     try {
@@ -285,10 +298,22 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     );
     final titleField = TextField(controller: title,
       decoration: const InputDecoration(labelText: 'Session title (optional)'));
-    final cwdField = TextField(controller: cwd,
-      decoration: const InputDecoration(
-        labelText: 'Agent workspace (absolute path)',
-      ));
+    final cwdField = Column(mainAxisSize: MainAxisSize.min, children: [
+      TextField(controller: cwd,
+        decoration: const InputDecoration(
+          labelText: 'Agent workspace (absolute path)',
+        )),
+      CheckboxListTile(
+        key: const ValueKey('worktree'),
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        value: worktree,
+        onChanged: busy ? null : (on) => setState(() => worktree = on ?? false),
+        title: const Text('In a new git worktree, on its own branch'),
+        subtitle: const Text('Of the repository at the workspace. Closing the session asks whether to keep it.'),
+      ),
+    ]);
     return AlertDialog(
       title: Text(local ? 'Run or connect to an agent' : 'Connect to verified agent'),
       content: SizedBox(

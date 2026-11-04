@@ -42,6 +42,11 @@ import 'profile/profile_start_dialog.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
 import 'theme/look.dart';
+import 'auth/browser_peer.dart' show verifyBrowserPeer;
+import 'worktree/close_dialog.dart';
+import 'worktree/host.dart';
+import 'worktree/local.dart';
+import 'worktree/worktree.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -344,26 +349,128 @@ class _CanoaAppState extends State<CanoaApp> {
     return (prepared, choice.on, const <LayerNote>[]);
   }
 
-  /// An agent as a child of this app, with its profile. Its permission requests go to the person, in the conversation.
-  Future<void> _runLocalAgent(AgentCommand command, {required String cwd, required String title}) async {
-    // The dialog's `/` is a remote agent's default. For one on this computer it would be the root of the filesystem.
-    final where = cwd.isEmpty || cwd == '/' ? defaultWorkingDirectory() : cwd;
-    final home = platformProfileHome(configPath: _configPath);
-    final (prepared, on, notes) = await _prepareProfile(command.label, where ?? cwd, home);
-    final started = await startProfiled(
-      command, cwd: where ?? cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
-      decider: store.askPermission, elicitor: store.askQuestion,
+  /// Makes, reads and removes worktrees where a session's agent runs: by git here for one this app runs, through the host for
+  /// one it reached at [endpoint]; null where neither can.
+  Worktrees? _worktrees(SessionPlace place, {String? endpoint, String? fallback, String? peerId, String? method}) {
+    if (place == SessionPlace.local) return localWorktrees();
+    if (place != SessionPlace.host && place != SessionPlace.peer) return null;
+    final uri = Uri.tryParse(endpoint ?? '');
+    final proof = PeerMethod.values.where((each) => each.id == method).firstOrNull;
+    if (uri == null || proof == null || peerId == null) return null;
+    final overWebTransport = uri.scheme == 'https';
+    final endpoints = chatEndpoints(
+      webSocket: overWebTransport ? (fallback ?? '') : uri.toString(),
+      webTransport: overWebTransport ? uri.toString() : '',
+      preferWebTransport: config.preferWebTransport,
     );
+    return HostWorktrees((name, params) => hostWorktreeRequest(
+      endpoints, expectedPeerId: peerId, method: name, params: params,
+      verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, proof),
+      timeout: Duration(seconds: config.connectTimeout),
+    ));
+  }
+
+  /// Takes back a worktree made for a session that did not start, which nothing has changed yet.
+  static Future<void> _unmake(Worktrees worktrees, SessionWorktree worktree) async {
+    try {
+      await worktrees.remove(worktree);
+    } on Object catch (error) {
+      debugPrint('Canoa: the worktree made for a session that did not start stays at ${worktree.path}: $error');
+    }
+  }
+
+  /// Ends [session], and when it worked in a worktree of its own asks, once its agent has ended, whether to keep it.
+  Future<void> _closeSession(ChatSession session) async {
+    final worktree = session.worktree;
+    final worktrees = worktree == null
+        ? null
+        : _worktrees(session.place, endpoint: session.endpoint?.toString(), fallback: session.websocketFallback?.toString(),
+            peerId: session.peerId, method: session.method);
+    await store.close(session);
+    if (worktree == null || worktrees == null) return;
+    WorktreeChoice? choice;
+    WorktreeState? shown;
+    do {
+      WorktreeState? state;
+      String? problem;
+      try {
+        state = await worktrees.status(worktree);
+      } on Object catch (error) {
+        problem = '$error';
+      }
+      if (state != null && !state.exists) return;
+      // Changes made after the person was told of them are told again before anything is deleted.
+      if (choice == WorktreeChoice.discard && state != null && shown != null && state.changed == shown.changed) break;
+      final above = _navigator.currentContext;
+      if (above == null || !above.mounted) return;
+      choice = await showDialog<WorktreeChoice>(
+        context: above,
+        builder: (_) => WorktreeCloseDialog(worktree: worktree, state: state, problem: problem),
+      );
+      shown = state;
+    } while (choice == WorktreeChoice.discard);
+    if (choice == null || choice == WorktreeChoice.keep) return;
+    try {
+      final removed = await worktrees.remove(worktree, discard: choice == WorktreeChoice.discard);
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(removed.branchKept
+          ? 'Removed the worktree. Branch ${removed.branch} stays, with ${removed.commits} commit(s) of its own.'
+          : 'Removed the worktree and its branch ${removed.branch}.')));
+    } on Object catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('The worktree stays at ${worktree.path}: $error')));
+    }
+  }
+
+  /// The worktree [entry] worked in, found again, or an error saying it is gone.
+  Future<void> _findWorktree(LedgerEntry entry) async {
+    final worktree = entry.worktree;
+    if (worktree == null) return;
+    final worktrees = _worktrees(entry.place, endpoint: entry.endpoint, fallback: entry.fallback, peerId: entry.peerId,
+        method: entry.method);
+    if (worktrees == null) throw StateError('This session worked in a worktree, which this build cannot reach');
+    final state = await worktrees.status(worktree);
+    if (!state.exists) {
+      throw StateError('The worktree this session worked in is gone: ${worktree.path}, branch ${worktree.branch}');
+    }
+  }
+
+  /// An agent as a child of this app, with its profile. Its permission requests go to the person, in the conversation. With
+  /// [worktree], it works in a new worktree of the repository at [cwd], on a branch of its own.
+  Future<void> _runLocalAgent(AgentCommand command, {required String cwd, required String title, required bool worktree}) async {
+    // The dialog's `/` is a remote agent's default. For one on this computer it would be the root of the filesystem.
+    var where = cwd.isEmpty || cwd == '/' ? defaultWorkingDirectory() : cwd;
+    final worktrees = worktree ? localWorktrees() : null;
+    if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
+    final made = worktrees == null
+        ? null
+        : await worktrees.create(where ?? cwd, worktreeBranch(title.isEmpty ? command.label : title));
+    if (made != null) where = made.path;
+    try {
+      final home = platformProfileHome(configPath: _configPath);
+      final (prepared, on, notes) = await _prepareProfile(command.label, where ?? cwd, home);
+      final started = await startProfiled(
+        command, cwd: where ?? cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
+        decider: store.askPermission, elicitor: store.askQuestion,
+      );
+      await _openLocal(command, started, prepared, notes, cwd: where ?? cwd, title: title, worktree: made);
+    } catch (_) {
+      if (made != null) await _unmake(worktrees!, made);
+      rethrow;
+    }
+  }
+
+  Future<void> _openLocal(AgentCommand command, ProfiledAgent started, PreparedProfile prepared, List<LayerNote> notes,
+      {required String cwd, required String title, SessionWorktree? worktree}) async {
     final client = started.client;
     try {
-      final opened = await client.openSession(cwd: where ?? cwd, setup: started.launch.setup);
+      final opened = await client.openSession(cwd: cwd, setup: started.launch.setup);
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? command.label : title,
         agent: command.label,
-        cwd: where ?? cwd,
+        cwd: cwd,
         peerId: client.peerId,
         remoteSessionId: opened.id,
+        worktree: worktree,
       );
       local.agentNames = title.isEmpty;
       store.applyOpened(local, opened);
@@ -386,6 +493,7 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     final why = entry.whyNotReopened;
     if (why != null) throw StateError(why);
+    await _findWorktree(entry);
     final VerifiedAgent client;
     ProfiledAgent? started;
     PreparedProfile? prepared;
@@ -450,13 +558,30 @@ class _CanoaAppState extends State<CanoaApp> {
     final ws = endpoints.webSocket!;
     final wt = target.webTransport.isEmpty ? null : Uri.parse(target.webTransport);
     final pinnedPeerId = target.peerId.toLowerCase();
-    final client = await connectBrowserAcp(
-      endpoints, pinnedPeerId: pinnedPeerId, method: target.method,
-      timeout: Duration(seconds: config.connectTimeout),
-      decider: store.askPermission, elicitor: store.askQuestion,
-    );
+    final place = widget.host?.peerId?.toLowerCase() == pinnedPeerId ? SessionPlace.host : SessionPlace.peer;
+    // The host makes it inside its working roots, before any agent starts, and says where.
+    final worktrees = target.worktree
+        ? _worktrees(place, endpoint: (wt ?? ws).toString(), fallback: wt == null ? null : ws.toString(),
+            peerId: pinnedPeerId, method: target.method.id)
+        : null;
+    if (target.worktree && worktrees == null) throw StateError('Canoa cannot ask this agent\'s host for a worktree');
+    final made = worktrees == null
+        ? null
+        : await worktrees.create(target.cwd, worktreeBranch(target.title.isEmpty ? 'remote agent' : target.title));
+    final cwd = made?.path ?? target.cwd;
+    final VerifiedAgent client;
     try {
-      final opened = await client.openSession(cwd: target.cwd);
+      client = await connectBrowserAcp(
+        endpoints, pinnedPeerId: pinnedPeerId, method: target.method,
+        timeout: Duration(seconds: config.connectTimeout),
+        decider: store.askPermission, elicitor: store.askQuestion,
+      );
+    } catch (_) {
+      if (made != null) await _unmake(worktrees!, made);
+      rethrow;
+    }
+    try {
+      final opened = await client.openSession(cwd: cwd);
       final remoteId = opened.id;
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addRemoteSession(
@@ -466,9 +591,10 @@ class _CanoaAppState extends State<CanoaApp> {
         remoteSessionId: remoteId,
         endpoint: wt ?? ws,
         websocketFallback: wt == null ? null : ws,
-        place: widget.host?.peerId?.toLowerCase() == pinnedPeerId ? SessionPlace.host : SessionPlace.peer,
+        place: place,
         method: target.method.id,
-        cwd: target.cwd,
+        cwd: cwd,
+        worktree: made,
       );
       local.agentNames = target.title.isEmpty;
       store.applyOpened(local, opened);
@@ -477,6 +603,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (_hasProfiles) store.noteNoProfile(local);
     } catch (_) {
       await client.close();
+      if (made != null) await _unmake(worktrees!, made);
       rethrow;
     }
   }
@@ -492,6 +619,7 @@ class _CanoaAppState extends State<CanoaApp> {
         SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, fullAccessAgents: config.fullAccess);
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
+    _conversation.close = _closeSession;
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
@@ -783,6 +911,7 @@ class _SessionRail extends StatelessWidget {
                     [
                       if (session.fullAccess != null) 'Full access',
                       session.status == SessionStatus.preview ? 'Preview · offline' : session.status.name,
+                      if (session.worktree case final worktree?) worktree.branch,
                     ].join(' · '),
                     maxLines: 1,
                   ),
@@ -847,6 +976,9 @@ final class _ConversationHandle {
   Object? owner;
   VoidCallback? focusComposer, showChanges;
   ValueChanged<String>? insert;
+
+  /// Ends a conversation as the app does, asking after its worktree; set by the app.
+  Future<void> Function(ChatSession)? close;
 }
 
 class _Conversation extends StatefulWidget {
@@ -1095,7 +1227,7 @@ class _ConversationState extends State<_Conversation> {
               IconButton(
                 tooltip: 'Close conversation',
                 icon: const Icon(Icons.close),
-                onPressed: () => unawaited(widget.store.close(session)),
+                onPressed: () => unawaited((widget.handle.close ?? widget.store.close)(session)),
               ),
             // On a phone the state is an icon whose tooltip names it, which leaves the conversation's name room to be read.
             if (widget.narrow)

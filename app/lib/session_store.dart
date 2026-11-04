@@ -9,6 +9,7 @@ import 'chat/update_record.dart';
 import 'ledger/session_ledger.dart';
 import 'profile/apply.dart';
 import 'profile/profile_layers.dart' show LayerNote;
+import 'worktree/worktree.dart';
 
 export 'ledger/session_ledger.dart' show SessionPlace;
 
@@ -118,11 +119,15 @@ class ChatSession {
     this.cwd,
     this.place = SessionPlace.local,
     this.method,
+    this.worktree,
     List<ChatMessage>? messages,
   }) : messages = messages ?? <ChatMessage>[];
 
   /// Where the agent works, on its machine, when this side knows.
   final String? cwd;
+
+  /// The git worktree [cwd] is, on the session's own branch, when it was started in one.
+  final SessionWorktree? worktree;
 
   /// Where the agent runs, as this app reached it.
   final SessionPlace place;
@@ -474,6 +479,7 @@ class SessionStore extends ChangeNotifier {
     required String peerId,
     required String remoteSessionId,
     String? cwd,
+    SessionWorktree? worktree,
   }) {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
@@ -487,6 +493,7 @@ class SessionStore extends ChangeNotifier {
       remoteSessionId: remoteSessionId,
       cwd: cwd,
       place: peerId.startsWith('local:') ? SessionPlace.local : SessionPlace.browser,
+      worktree: worktree,
     ));
   }
 
@@ -509,6 +516,7 @@ class SessionStore extends ChangeNotifier {
     SessionPlace place = SessionPlace.peer,
     String? method,
     String? cwd,
+    SessionWorktree? worktree,
   }) {
     // This records transport locations, not the authentication state. The
     // session stays disconnected until peer proof and ACP are implemented.
@@ -538,6 +546,7 @@ class SessionStore extends ChangeNotifier {
       place: place,
       method: method,
       cwd: cwd,
+      worktree: worktree,
     ));
   }
 
@@ -627,6 +636,7 @@ class SessionStore extends ChangeNotifier {
       endpoint: session.endpoint?.toString(),
       fallback: session.websocketFallback?.toString(),
       method: session.method,
+      worktree: session.worktree,
     );
   }
 
@@ -1145,6 +1155,7 @@ class SessionStore extends ChangeNotifier {
       endpoint: endpoint,
       websocketFallback: entry.fallback == null ? null : Uri.tryParse(entry.fallback!),
       method: entry.method,
+      worktree: entry.worktree,
     ));
     attachVerifiedClient(session.id, client, record: false);
     try {

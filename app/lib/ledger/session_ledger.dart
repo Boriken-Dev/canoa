@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../worktree/worktree.dart';
+
 /// Where a session's agent runs, as the app reached it.
 enum SessionPlace {
   local('on this computer'),
@@ -75,6 +77,7 @@ final class LedgerEntry {
     this.fallback,
     this.method,
     this.reopenBy,
+    this.worktree,
     this.messages = const [],
   });
 
@@ -106,6 +109,9 @@ final class LedgerEntry {
   /// `session/load` or `session/resume`, whichever the agent offered when last opened, or null for neither.
   String? reopenBy;
   List<KeptMessage> messages;
+
+  /// The git worktree the session works in, on its own branch, when it was started in one.
+  SessionWorktree? worktree;
 
   String get key => keyOf(peerId, sessionId);
   static String keyOf(String peerId, String sessionId) => '$peerId\n$sessionId';
@@ -145,6 +151,7 @@ final class LedgerEntry {
     'created': created.toUtc().toIso8601String(),
     'lastUsed': lastUsed.toUtc().toIso8601String(),
     'reopenBy': ?reopenBy,
+    'worktree': ?worktree?.toJson(),
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
   };
 
@@ -174,6 +181,7 @@ final class LedgerEntry {
       fallback: text('fallback'),
       method: text('method'),
       reopenBy: reopenBy == 'session/load' || reopenBy == 'session/resume' ? reopenBy : null,
+      worktree: SessionWorktree.fromJson(json['worktree']),
       messages: [
         if (json['messages'] case final List<dynamic> kept)
           for (final message in kept) ?KeptMessage.fromJson(message),
@@ -331,6 +339,7 @@ class SessionLedger extends ChangeNotifier {
     String? endpoint,
     String? fallback,
     String? method,
+    SessionWorktree? worktree,
   }) {
     if (_settings.keep <= 0) return null;
     final now = _clock();
@@ -358,7 +367,8 @@ class SessionLedger extends ChangeNotifier {
       ..version = version
       ..reopenBy = reopenBy
       ..cwd = cwd ?? found.cwd
-      ..title = title ?? found.title;
+      ..title = title ?? found.title
+      ..worktree = worktree ?? found.worktree;
     _apply();
     _changed();
     return find(peerId, sessionId);

@@ -114,7 +114,7 @@ void main() {
         onPressed: () => showCanoaConnectDialog(
           context,
           (_) async {},
-          onRunLocalAgent: (command, {required cwd, required title}) async {},
+          onRunLocalAgent: (command, {required cwd, required title, required worktree}) async {},
           localAgents: const [scripted],
           checkInstalled: (_) async => true,
           methodUnavailable: (method) async => 'this build has no peer key to prove with',

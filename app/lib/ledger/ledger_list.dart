@@ -129,7 +129,8 @@ class _LedgerListState extends State<LedgerList> {
 
   Widget _tile(BuildContext context, LedgerEntry entry) {
     final why = entry.whyNotReopened;
-    final about = [entry.versionLabel, entry.place.label, entry.cwd, _when(entry.lastUsed)].nonNulls.join(' · ');
+    final branch = entry.worktree == null ? null : 'branch ${entry.worktree!.branch}';
+    final about = [entry.versionLabel, entry.place.label, branch, entry.cwd, _when(entry.lastUsed)].nonNulls.join(' · ');
     return ListTile(
       key: ValueKey('session ${entry.key}'),
       dense: true,

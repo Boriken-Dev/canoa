@@ -17,6 +17,8 @@ import 'package:canoa/acp/connect.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa/worktree/host.dart';
+import 'package:canoa/worktree/worktree.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/node_peer_bridge.dart';
@@ -64,6 +66,10 @@ program = ${jsonEncode(_example('stdio_agent', library: false))}
 [host.providers.echo]
 library = ${jsonEncode(_example('echo_provider', library: true))}
 provider = "echo_provider"
+
+[host.agents.trees]
+program = ${jsonEncode(_example('stdio_agent', library: false))}
+working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
 ''');
     final process = await Process.start(
       _hostBinary!,
@@ -75,7 +81,7 @@ provider = "echo_provider"
     final urls = <String, String>{};
     String? peer;
     String? method;
-    await for (final line in lines.take(2).timeout(const Duration(seconds: 30))) {
+    await for (final line in lines.take(3).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry['url'] as String;
       peer = entry['peer'] as String;
@@ -183,6 +189,41 @@ void main() {
       await client.close();
     }
   }, skip: skip);
+
+  test('two sessions on one repository each work in a worktree the host makes inside its working root', () async {
+    Future<ProcessResult> git(String dir, List<String> args) => Process.run('git',
+        ['-C', dir, '-c', 'user.name=Canoa Test', '-c', 'user.email=test@canoa.invalid', '-c', 'commit.gpgsign=false', ...args]);
+    final repo = '${host.dir.path}/src/proj';
+    await Directory(repo).create(recursive: true);
+    await File('$repo/README').writeAsString('hello\n');
+    for (final args in [['init', '-q'], ['add', '.'], ['commit', '-q', '-m', 'first']]) {
+      expect((await git(repo, args)).exitCode, 0);
+    }
+    final worktrees = HostWorktrees((method, params) => hostWorktreeRequest(
+      chatEndpoints(webSocket: host.urls['trees']!), expectedPeerId: host.peer, method: method, params: params,
+      verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: host.method),
+    ));
+    final first = await worktrees.create(repo, 'canoa/first-a1b2c3');
+    final second = await worktrees.create(repo, 'canoa/second-d4e5f6');
+    expect(first.path.replaceAll(r'\', '/'), endsWith('/src/proj.worktrees/first-a1b2c3'));
+    expect(second.path.replaceAll(r'\', '/'), endsWith('/src/proj.worktrees/second-d4e5f6'));
+    for (final worktree in [first, second]) {
+      final client = await connect('trees');
+      try {
+        await client.openSession(cwd: worktree.path);
+      } finally {
+        await client.close();
+      }
+    }
+    await expectLater(worktrees.create(host.dir.path, 'canoa/outside'), throwsA(isA<WorktreeFailure>()),
+        reason: 'the host directory is outside the root');
+    await File('${first.path}/draft').writeAsString('unsaved\n');
+    expect((await worktrees.status(first)).changed, 1);
+    await expectLater(worktrees.remove(first), throwsA(isA<WorktreeFailure>()));
+    expect((await worktrees.remove(first, discard: true)).branchKept, isFalse);
+    expect((await worktrees.remove(second)).branchKept, isFalse);
+    expect((await worktrees.status(first)).exists, isFalse);
+  }, skip: skip ?? (Process.runSync('git', ['--version']).exitCode == 0 ? null : 'no git on PATH'));
 
   group('the app running the host', () {
     late Directory dir;

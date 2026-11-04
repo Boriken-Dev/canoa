@@ -82,7 +82,7 @@ void main() {
         onPressed: () => showCanoaConnectDialog(
           context,
           (_) async {},
-          onRunLocalAgent: (command, {required cwd, required title}) async => ran = command,
+          onRunLocalAgent: (command, {required cwd, required title, required worktree}) async => ran = command,
           localAgents: const [
             AgentCommand(label: 'Here', program: 'here'),
             AgentCommand(label: 'Missing', program: 'missing'),
@@ -148,7 +148,7 @@ void main() {
         onPressed: () => showCanoaConnectDialog(
           context,
           (_) async {},
-          onRunLocalAgent: (command, {required cwd, required title}) async => ran = command,
+          onRunLocalAgent: (command, {required cwd, required title, required worktree}) async => ran = command,
           localAgents: const [],
           checkInstalled: (_) async => true,
         ),
