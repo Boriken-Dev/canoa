@@ -12,6 +12,7 @@ pub mod provider;
 mod scope;
 pub mod serve;
 pub mod tool;
+mod worktree;
 
 pub use config::{Config, ConfigError, Entry, EntryKind, Origin, Settings};
 pub use peers::{Peer, PeerState, PeersError};

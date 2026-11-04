@@ -456,3 +456,23 @@ fn the_apps_profile_tables_are_left_to_the_app() {
     .expect("parses");
     assert!(config.entries.is_empty());
 }
+
+#[test]
+fn worktrees_are_on_for_agents_and_tools_unless_switched_off_and_never_for_providers() {
+    let tool = "runs = \"session\"\nunasked = \"x\"\nprompt = { type = \"prompt\", message = \"{prompt}\" }\n";
+    let on = parse(&format!(
+        "[host.agents.a]\nprogram = \"x\"\n[host.providers.p]\nlibrary = \"e.dll\"\nprovider = \"e\"\n\
+         [host.tools.t]\nprogram = \"pi\"\n{tool}"
+    ))
+    .expect("parses");
+    let worktrees: Vec<bool> = on.entries.iter().map(|entry| entry.worktrees).collect();
+    assert_eq!(worktrees, [true, false, true]);
+    let off = parse(&format!(
+        "[host.agents.a]\nprogram = \"x\"\nworktrees = false\n[host.tools.t]\nprogram = \"pi\"\nworktrees = false\n{tool}"
+    ))
+    .expect("parses");
+    assert!(off.entries.iter().all(|entry| !entry.worktrees));
+    assert!(parse("[host.providers.p]\nlibrary = \"e.dll\"\nprovider = \"e\"\nworktrees = true\n").is_err());
+    assert!(parse("[host.agents.a]\nprogram = \"x\"\nworktrees = \"no\"\n").is_err());
+    assert!(parse(&format!("[host.tools.t]\nprogram = \"pi\"\nworktrees = 0\n{tool}")).is_err());
+}

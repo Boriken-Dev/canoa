@@ -62,6 +62,9 @@ pub struct Entry {
     pub listen: SocketAddr,
     /// Directories a session's `cwd` must be under. Empty takes any absolute path.
     pub working_roots: Vec<PathBuf>,
+    /// Whether a client may have the host make a git worktree for a session inside `working_roots`; an agent or tool entry
+    /// with no working root gets none either way. On unless the entry sets `worktrees = false`; always off for a provider.
+    pub worktrees: bool,
     /// The paired peers that may use it; `None` lets every paired peer.
     pub peers: Option<Vec<PeerId>>,
     /// Connections served at once; another is turned away while they run.
@@ -273,6 +276,7 @@ struct RawHost {
 struct RawCommon {
     listen: Option<String>,
     working_roots: Vec<String>,
+    worktrees: Option<bool>,
     peers: Option<Vec<String>>,
     max_peers: Option<usize>,
 }
@@ -287,6 +291,7 @@ struct RawAgent {
     listen: Option<String>,
     #[serde(default)]
     working_roots: Vec<String>,
+    worktrees: Option<bool>,
     peers: Option<Vec<String>>,
     max_peers: Option<usize>,
 }
@@ -379,6 +384,7 @@ impl Config {
             let common = RawCommon {
                 listen: agent.listen,
                 working_roots: agent.working_roots,
+                worktrees: agent.worktrees,
                 peers: agent.peers,
                 max_peers: agent.max_peers,
             };
@@ -451,6 +457,7 @@ impl Config {
             let common = RawCommon {
                 listen: provider.listen,
                 working_roots: provider.working_roots,
+                worktrees: Some(false),
                 peers: provider.peers,
                 max_peers: provider.max_peers,
             };
@@ -666,6 +673,11 @@ fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), 
         .map(|value| texts(value, "working_roots"))
         .transpose()?
         .unwrap_or_default();
+    let worktrees = match table.remove("worktrees") {
+        None => None,
+        Some(toml::Value::Boolean(on)) => Some(on),
+        Some(_) => return Err(wrong("worktrees")),
+    };
     let peers = table
         .remove("peers")
         .map(|value| texts(value, "peers"))
@@ -697,6 +709,7 @@ fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), 
     let common = RawCommon {
         listen,
         working_roots,
+        worktrees,
         peers,
         max_peers,
     };
@@ -764,6 +777,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         kind,
         listen,
         working_roots,
+        worktrees: common.worktrees.unwrap_or(true),
         peers,
         max_peers,
     })

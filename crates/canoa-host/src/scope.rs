@@ -14,6 +14,7 @@ use coqui_web::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;
+use crate::worktree::Worktrees;
 
 /// JSON-RPC's code for a message that is not JSON.
 const PARSE_ERROR: i64 = -32700;
@@ -61,6 +62,15 @@ impl Scope {
         strip_meta(object);
         let id = object.get("id").cloned();
         let is_request = object.contains_key("method") && id.is_some();
+        if Worktrees::is_request(message) {
+            return Verdict::Refuse(is_request.then(|| {
+                error(
+                    id.as_ref().unwrap_or(&Value::Null),
+                    INVALID_REQUEST,
+                    "a worktree request comes first on a connection, before the agent starts",
+                )
+            }));
+        }
         // ACP's parameters are always an object. A list would fill a request's fields in order, past every check below.
         let checked = match object.get("params") {
             None => Ok(()),

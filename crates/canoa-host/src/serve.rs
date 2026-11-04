@@ -29,6 +29,10 @@ use crate::config::{Config, Entry, EntryKind, ImportSearch, Origin};
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
+use crate::worktree::Worktrees;
+
+/// Worktree requests one connection may make before its first ACP message.
+const MAX_WORKTREE_REQUESTS: usize = 16;
 
 /// The longest ACP message either way, as one line.
 pub const MAX_LINE: usize = 16 * 1024 * 1024;
@@ -165,6 +169,7 @@ enum Run {
         scope: Scope,
         /// The profiles a client may choose among; `None` starts the program bare.
         offer: Option<Arc<Offer>>,
+        worktrees: Worktrees,
     },
     Provider {
         program: OsString,
@@ -412,6 +417,7 @@ impl Serving {
                             &config.profiles,
                             options.provider_program.as_os_str().to_owned(),
                         ),
+                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },
                 ),
                 EntryKind::Provider {
@@ -468,6 +474,7 @@ impl Serving {
                         args: tool_args(&entry.name, spec),
                         scope: Scope::new(entry.working_roots.clone()),
                         offer: None,
+                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },
                 ),
             };
@@ -641,7 +648,27 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         tracing::info!(entry = served.name, %peer, "turned away: max_peers are running");
         return sealed.close();
     };
-    match sealed.receive(Some(FIRST_MESSAGE)) {
+    let mut first = sealed.receive(Some(FIRST_MESSAGE));
+    // Answered before any agent starts, so a worktree can be removed with no agent of this connection working in it.
+    if let Run::Agent { worktrees, .. } = &served.run {
+        let mut answered = 0;
+        while let Ok(Some(message)) = &first
+            && Worktrees::is_request(message)
+        {
+            if answered == MAX_WORKTREE_REQUESTS {
+                tracing::info!(entry = served.name, %peer, "turned away: too many worktree requests");
+                return sealed.close();
+            }
+            answered += 1;
+            if let Some(reply) = worktrees.answer(message)
+                && sealed.send(&reply).is_err()
+            {
+                return sealed.close();
+            }
+            first = sealed.receive(Some(FIRST_MESSAGE));
+        }
+    }
+    match first {
         Ok(Some(first)) if mux::starts_mux(&first) => {
             tracing::info!(entry = served.name, %peer, "a link of streams was refused: this host serves plain ACP");
         }
@@ -674,6 +701,7 @@ fn give_agent<C: Channel>(
             args,
             scope,
             offer,
+            ..
         } => (program, args, scope, offer),
         Run::Provider {
             program,
