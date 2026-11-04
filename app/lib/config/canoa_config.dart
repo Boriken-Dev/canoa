@@ -5,7 +5,9 @@ import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
+import '../profile/aos.dart' show normalizeName, validOverlayName;
 import '../profile/profile.dart';
+import '../store/store_settings.dart';
 import '../theme/look.dart';
 
 /// One entry of `[host]`, as Canoa.cfg has it.
@@ -226,6 +228,78 @@ final class CanoaConfig {
     );
   }
 
+  /// `[catalogs]`: each catalog the store lists, by the label the person gives it, a git source whose `#path` names the
+  /// catalog file.
+  Map<String, GitOverlay> get catalogs => _catalogs(tables['catalogs']);
+
+  /// `[store]`: the store's limits.
+  StoreSettings get store => StoreSettings.parse((tables['store'] as Map?) ?? const {});
+
+  static Map<String, GitOverlay> _catalogs(Object? raw) {
+    if (raw == null) return const {};
+    if (raw is! Map) throw const FormatException('Canoa.cfg: catalogs must be a table');
+    final out = <String, GitOverlay>{};
+    final normalized = <String>{};
+    for (final MapEntry(:key, :value) in raw.entries) {
+      final label = '$key';
+      if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
+        throw FormatException('Canoa.cfg: catalogs.$label: a label is a letter, then letters, digits, - or _, at most '
+            '64, unique when compared as AOS compares names');
+      }
+      out[label] = switch (value) {
+        final String spec => _catalogSource(label, spec),
+        _ => throw FormatException('Canoa.cfg: catalogs.$label is a git source, <repository>@<ref>#<catalog file>'),
+      };
+    }
+    return out;
+  }
+
+  /// Whether [label] can name a catalog: a valid overlay name that is also a name Canoa gives a directory.
+  static bool isCatalogLabel(String label) => isEntryName(label) && validOverlayName(label);
+
+  static GitOverlay _catalogSource(String label, String spec) {
+    final GitOverlay source;
+    try {
+      source = OverlaySource.parseGit(spec);
+    } on ProfileException {
+      throw FormatException('Canoa.cfg: catalogs.$label is not <repository>@<ref>#<catalog file> of a source git may '
+          'fetch');
+    }
+    if (source.path.isEmpty) throw FormatException('Canoa.cfg: catalogs.$label names no catalog file after #');
+    return source;
+  }
+
+  CanoaConfig _withTable(String name, Map<String, dynamic> table, {Map<String, OverlaySource>? overlays}) =>
+      withProfileTables(overlays: overlays ?? this.overlays, tables: {
+        for (final MapEntry(:key, :value) in tables.entries)
+          if (key != name) key: value,
+        if (table.isNotEmpty) name: table,
+      });
+
+  /// This configuration with the catalog [spec] labelled [label] in `[catalogs]`. Throws [FormatException].
+  CanoaConfig withCatalog(String label, String spec) {
+    final raw = _deepCopy((tables['catalogs'] as Map?) ?? const {})..[label] = spec;
+    _catalogs(raw);
+    return _withTable('catalogs', raw);
+  }
+
+  /// This configuration without the catalog [label].
+  CanoaConfig withoutCatalog(String label) =>
+      _withTable('catalogs', _deepCopy((tables['catalogs'] as Map?) ?? const {})..remove(label));
+
+  /// This configuration with the overlay [name] from [source], pinned to [pin]: `NAME = { source, pin }`.
+  CanoaConfig withOverlay(String name, GitOverlay source, String pin) {
+    if (!isEntryName(name)) throw ArgumentError.value(name, 'name', 'An overlay name has 1 to 64 letters, digits, - or _');
+    final raw = _deepCopy((tables['overlays'] as Map?) ?? const {})
+      ..[name] = <String, dynamic>{'source': source.spec, 'pin': pin};
+    return _withTable('overlays', raw, overlays: {...overlays, name: source.pinnedTo(pin)});
+  }
+
+  /// This configuration without the overlay [name] in `[overlays]`.
+  CanoaConfig withoutOverlay(String name) => _withTable('overlays',
+      _deepCopy((tables['overlays'] as Map?) ?? const {})..remove(name),
+      overlays: {for (final MapEntry(:key, :value) in overlays.entries) if (key != name) key: value});
+
   /// This configuration with another's `[overlays]`, `[profile]` and agent profiles, as they are now.
   CanoaConfig withProfilesOf(CanoaConfig other) =>
       withProfileTables(overlays: other.overlays, tables: other.tables, profile: other.profile,
@@ -265,7 +339,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications'}
+            'permissions', 'notifications', 'catalogs', 'store'}
           .contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
@@ -385,6 +459,10 @@ final class CanoaConfig {
     }
     final rawProfile = data['profile'];
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('Canoa.cfg: profile must be a table');
+    _catalogs(data['catalogs']);
+    final rawStore = data['store'];
+    if (rawStore != null && rawStore is! Map) throw const FormatException('Canoa.cfg: store must be a table');
+    if (rawStore is Map) StoreSettings.parse(rawStore);
     return CanoaConfig(
       overlays: overlays,
       profile: rawProfile == null ? const Profile() : _profile('profile', rawProfile as Map, LayerKind.user),
@@ -393,6 +471,8 @@ final class CanoaConfig {
         if (data['overlays'] != null) 'overlays': rawOverlays,
         'profile': ?rawProfile,
         if (agentTables.isNotEmpty) 'agents': agentTables,
+        'catalogs': ?data['catalogs'],
+        'store': ?rawStore,
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),

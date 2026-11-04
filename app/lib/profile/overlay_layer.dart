@@ -117,7 +117,8 @@ const _defaultScripts = ['.py', '.js', '.mjs', '.cjs', '.ps1', '.bash', '.sh'];
 
 /// Makes the layer of an AOS overlay from its [tree]: its root variable, environment, skills, MCP servers, context, and
 /// the hints for [harness]. The `bin` and `lib` defaults, which change `PATH`, `PYTHONPATH` and `NODE_PATH`, are not
-/// applied and are reported; so is everything Canoa does not run. Throws [OverlayRefusal].
+/// applied and are reported; so is everything Canoa does not run. Its `[about]` icon is kept only within [iconLimits].
+/// Throws [OverlayRefusal].
 Layer overlayLayer({
   required String identity,
   required String root,
@@ -125,6 +126,7 @@ Layer overlayLayer({
   required List<AosTreeEntry> tree,
   String? harness,
   bool pinned = false,
+  IconLimits iconLimits = const IconLimits(),
 }) {
   if (!validOverlayName(identity)) throw OverlayRefusal('name', identity);
   final AosTreeDigest digest;
@@ -314,16 +316,14 @@ Layer overlayLayer({
 
   final about = <String, String>{};
   if (manifest['about'] case final Map<String, Object?> table) {
-    final aboutIssues = validate({'about': table}, files: files);
-    bool valid(String key) => !aboutIssues.any((issue) => issue.at == '/about' || issue.at.startsWith('/about/$key'));
     for (final key in const ['summary', 'icon']) {
-      if (table[key] case final String value when valid(key)) about[key] = value;
+      if (table[key] case final String value when aboutFieldValid(key, value)) about[key] = value;
     }
   }
   final icon = <String, List<int>>{};
   if (about['icon'] case final path?) {
     try {
-      checkIcon(path, members[path]!);
+      checkIcon(path, members[path] ?? (throw const AosException('icon-format')), limits: iconLimits);
       icon[path] = members[path]!;
     } on AosException {
       about.remove('icon');

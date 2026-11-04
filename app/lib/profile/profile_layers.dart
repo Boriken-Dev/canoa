@@ -47,8 +47,8 @@ final class ProfileLayers {
 /// The layers for [agent]: built-in, each AOS overlay of [overlays] in composition order (by `priority`, then name),
 /// the [user]'s own, the project's in [workingDirectory] once trusted, the agent entry's from [agents], then
 /// [session]. An overlay's files are digested each time and checked against its record and its pin; the hints of
-/// [harness] (by default the preset's, from [presetHarnesses]) apply. With no [home], as in a web build, overlays and
-/// projects are left out and say so.
+/// [harness] (by default the preset's, from [presetHarnesses]) apply, and an `[about]` icon is kept within
+/// [iconLimits]. With no [home], as in a web build, overlays and projects are left out and say so.
 Future<ProfileLayers> profileLayers({
   required Map<String, OverlaySource> overlays,
   required Profile user,
@@ -58,6 +58,7 @@ Future<ProfileLayers> profileLayers({
   String? workingDirectory,
   Profile? session,
   String? harness,
+  IconLimits iconLimits = const IconLimits(),
 }) async {
   harness ??= presetHarnesses[agent];
   final layers = <Layer>[const Layer(LayerId(LayerKind.builtIn), builtInProfile)];
@@ -131,7 +132,7 @@ Future<ProfileLayers> profileLayers({
     final Layer layer;
     try {
       layer = overlayLayer(identity: name, root: directory, os: home.os, tree: tree, harness: harness,
-          pinned: switch (source) {
+          iconLimits: iconLimits, pinned: switch (source) {
             GitOverlay(:final pin) => pin != null,
             DirOverlay(:final pin) => pin != null,
           });

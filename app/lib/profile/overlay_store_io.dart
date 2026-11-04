@@ -156,6 +156,40 @@ final class OverlayStore implements OverlayManager {
     if (record.existsSync()) await record.delete();
   }
 
+  @override
+  Future<Map<String, List<int>>> read(OverlayUpdate update) async {
+    _checkName(update.name);
+    final blobs = await _blobs(_cache(update.name), update.files.values.toSet().toList());
+    return {for (final MapEntry(key: path, value: blob) in update.files.entries) path: blobs[blob]!};
+  }
+
+  String _catalogCache(String label) =>
+      '${_path('.catalogs')}${Platform.pathSeparator}$label.git';
+
+  void _checkLabel(String label) {
+    if (!isEntryName(label) || !validOverlayName(label)) {
+      throw const OverlayException('A catalog label is a valid overlay name of at most 64 letters, digits, - or _');
+    }
+  }
+
+  @override
+  Future<FetchedTree> fetchCatalog(String label, GitOverlay source) async {
+    _checkLabel(label);
+    final cache = _catalogCache(label);
+    if (!Directory(cache).existsSync()) {
+      await Directory(cache).create(recursive: true);
+      await _git(['init', '--quiet', '--bare', '--template=', cache]);
+    }
+    return _GitTree(this, cache, await _fetch(cache, source));
+  }
+
+  @override
+  Future<void> removeCatalog(String label) async {
+    _checkLabel(label);
+    final cache = Directory(_catalogCache(label));
+    if (cache.existsSync()) await cache.delete(recursive: true);
+  }
+
   void _checkName(String name) {
     if (!isEntryName(name)) throw const OverlayException('An overlay name has 1 to 64 letters, digits, - or _');
   }
@@ -386,6 +420,38 @@ final class OverlayStore implements OverlayManager {
       timer.cancel();
       watch?.cancel();
     }
+  }
+}
+
+/// A fetched catalog repository at one commit. A path is looked up as git lists it, literally, and only a regular file
+/// is read: a link, a submodule or a directory is no file.
+final class _GitTree implements FetchedTree {
+  _GitTree(this._store, this._cache, this.commit);
+  final OverlayStore _store;
+  final String _cache;
+  @override
+  final String commit;
+
+  @override
+  Future<TreeFile?> file(String path, {required int maxBytes}) async {
+    if (!isRelativePath(path)) return null;
+    final listed = await _store._run(['--git-dir=$_cache', 'ls-tree', '-l', '-z', '--full-tree', commit, '--', path],
+        binary: true);
+    if (listed.exitCode != 0) throw const OverlayException('git ls-tree failed');
+    final records = [
+      for (final record in utf8.decode(listed.stdout as List<int>, allowMalformed: true).split('\u0000'))
+        if (record.isNotEmpty) record,
+    ];
+    if (records.length != 1) return null;
+    final tab = records.single.indexOf('\t');
+    if (tab < 0 || records.single.substring(tab + 1) != path) return null;
+    final fields = records.single.substring(0, tab).split(RegExp(' +'));
+    if (fields.length != 4 || fields[1] != 'blob' || (fields[0] != '100644' && fields[0] != '100755')) return null;
+    final size = int.tryParse(fields[3]);
+    if (size == null) return null;
+    if (size > maxBytes) return (size: size, bytes: null);
+    final bytes = (await _store._blobs(_cache, [fields[2]]))[fields[2]]!;
+    return (size: size, bytes: bytes.length > maxBytes ? null : bytes);
   }
 }
 

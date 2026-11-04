@@ -64,6 +64,16 @@ final class FakeOverlays implements OverlayManager {
 
   @override
   Future<void> remove(String name) async => records.remove(name);
+
+  @override
+  Future<Map<String, List<int>>> read(OverlayUpdate update) async =>
+      {for (final MapEntry(:key, :value) in teamFiles.entries) key: utf8.encode(value)};
+
+  @override
+  Future<FetchedTree> fetchCatalog(String label, GitOverlay source) => throw UnimplementedError();
+
+  @override
+  Future<void> removeCatalog(String label) async {}
 }
 
 final class FakeHome implements ProfileHome {

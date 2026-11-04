@@ -217,6 +217,11 @@ class _CanoaAppState extends State<CanoaApp> {
           if (mounted) setState(() => config = changed);
           return changed;
         },
+        onSave: (changed) async {
+          await _write(changed);
+          if (mounted) setState(() => config = changed);
+          return changed;
+        },
       ),
     );
   }

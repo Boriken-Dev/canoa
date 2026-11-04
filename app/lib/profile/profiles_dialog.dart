@@ -1,9 +1,10 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../store/store_icon.dart';
+import '../store/store_page.dart';
 import 'aos.dart';
 import 'overlay_layer.dart';
 import 'overlays.dart';
@@ -16,7 +17,7 @@ import 'project_trust.dart';
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
 class ProfilesDialog extends StatefulWidget {
   const ProfilesDialog({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
-      this.onPin});
+      this.onPin, this.onSave});
 
   final CanoaConfig config;
 
@@ -31,6 +32,9 @@ class ProfilesDialog extends StatefulWidget {
 
   /// Pins the overlay [name] in Canoa.cfg to the tree digest just installed, and gives the configuration saved.
   final Future<CanoaConfig?> Function(String name, String digest)? onPin;
+
+  /// Saves Canoa.cfg as the overlay store changed it, and gives the configuration saved; without it there is no store.
+  final SaveConfig? onSave;
 
   @override
   State<ProfilesDialog> createState() => ProfilesDialogState();
@@ -64,6 +68,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
       agent: agent,
       home: widget.home,
       workingDirectory: dir.isEmpty ? null : dir,
+      iconLimits: config.store.iconLimits,
     );
     await widget.home?.trust.load();
     if (mounted) setState(() => layers = found);
@@ -162,7 +167,21 @@ class ProfilesDialogState extends State<ProfilesDialog> {
           for (final note in found?.notes ?? const <LayerNote>[])
             Text(visible('${note.layer}: ${note.text}'), style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 12),
-          Text('Overlays', style: Theme.of(context).textTheme.titleMedium),
+          Row(children: [
+            Expanded(child: Text('Overlays', style: Theme.of(context).textTheme.titleMedium)),
+            if (widget.onSave case final save?)
+              TextButton(
+                key: const Key('profile-store'),
+                onPressed: busy != null
+                    ? null
+                    : () async {
+                        final left = await showStore(context, config: config, home: home, onSave: save);
+                        if (left != null && mounted) setState(() => config = left);
+                        await _load();
+                      },
+                child: const Text('Store…'),
+              ),
+          ]),
           if (config.overlays.isEmpty) const Text('None: add one to [overlays] in Canoa.cfg.'),
           for (final MapEntry(key: name, value: source) in config.overlays.entries) _overlayRow(name, source),
           for (final report in found?.effective.overlays ?? const <OverlayReport>[]) OverlayReportView(report: report),
@@ -197,7 +216,9 @@ class ProfilesDialogState extends State<ProfilesDialog> {
     final aos = _aos(name);
     final path = aos?.about['icon'];
     final bytes = path == null ? null : aos?.icon[path];
-    return path == null || bytes == null ? null : OverlayIcon(path: path, bytes: bytes);
+    return path == null || bytes == null
+        ? null
+        : OverlayIcon(name: name, path: path, bytes: bytes, limits: config.store.iconLimits);
   }
 
   Widget _projectRow(ProjectLayer project) {
@@ -395,31 +416,16 @@ class OverlayReportView extends StatelessWidget {
   }
 }
 
-/// An overlay's `[about]` icon, from the bytes its tree digest covered: PNG or WebP only, its size and the dimensions in
-/// its header checked against the specification's limits before it is decoded, shown as pixels only; anything refused or
-/// undecodable shows a placeholder, never another image.
+/// An overlay's `[about]` icon, from the bytes its tree digest covered, shown as [StillIcon] shows one: within [limits],
+/// the still pixels of its first frame, or a placeholder drawn from its name.
 class OverlayIcon extends StatelessWidget {
-  const OverlayIcon({super.key, required this.path, required this.bytes});
+  const OverlayIcon({super.key, required this.name, required this.path, required this.bytes,
+      this.limits = const IconLimits()});
+  final String name;
   final String path;
   final List<int> bytes;
-
-  static const placeholder = Icon(Icons.extension, size: 32);
+  final IconLimits limits;
 
   @override
-  Widget build(BuildContext context) {
-    try {
-      final header = checkIcon(path, bytes);
-      return Image.memory(
-        Uint8List.fromList(bytes),
-        width: 32,
-        height: 32,
-        fit: BoxFit.contain,
-        cacheWidth: header.width > 64 ? 64 : null,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) => placeholder,
-      );
-    } on AosException {
-      return placeholder;
-    }
-  }
+  Widget build(BuildContext context) => StillIcon(name: name, path: path, bytes: bytes, size: 32, limits: limits);
 }

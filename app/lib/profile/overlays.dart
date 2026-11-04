@@ -97,4 +97,27 @@ abstract interface class OverlayManager {
 
   /// Removes what [name] installed and fetched.
   Future<void> remove(String name);
+
+  /// The bytes of every file [update] lists, read from what [check] fetched, without installing anything: what a store
+  /// shows an overlay would do is computed from these.
+  Future<Map<String, List<int>>> read(OverlayUpdate update);
+
+  /// Fetches the repository of the catalog labelled [label] at [source]'s ref, as [check] fetches an overlay, and gives
+  /// its files at that commit to read one by one.
+  Future<FetchedTree> fetchCatalog(String label, GitOverlay source);
+
+  /// Removes what [fetchCatalog] fetched for [label].
+  Future<void> removeCatalog(String label);
+}
+
+/// One file of a fetched tree: its size, and its bytes unless it was larger than asked.
+typedef TreeFile = ({int size, List<int>? bytes});
+
+/// A repository's files at one fetched commit, read from git's objects, never checked out.
+abstract interface class FetchedTree {
+  String get commit;
+
+  /// The regular file at [path], `/`-separated from the repository's root, or null when there is none (a directory, a
+  /// link or a submodule is none). Its bytes are read only when it holds at most [maxBytes].
+  Future<TreeFile?> file(String path, {required int maxBytes});
 }
