@@ -188,6 +188,21 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         ]
     }
 
+    /// On Windows, `PATH` with no directory that holds `python3.dll`, so the source finds it only through `import_dirs`;
+    /// elsewhere, as [`environment`].
+    fn environment_without_python_on_path(python: &Python) -> Vec<(&'static str, OsString)> {
+        if !cfg!(windows) {
+            return environment(python);
+        }
+        let dirs = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .filter(|dir| !dir.as_os_str().is_empty() && !dir.join("python3.dll").is_file())
+            .collect::<Vec<_>>();
+        vec![
+            ("PATH", std::env::join_paths(dirs).expect("paths join")),
+            ("PYTHONDONTWRITEBYTECODE", OsString::from("1")),
+        ]
+    }
+
     /// A Canoa.cfg entry `python` serving `provider` from the manifests in `dirs`, with the source built against `python`.
     fn source_entry(python: &Python, provider: &str, dirs: &[PathBuf]) -> String {
         let guatiao = checkout("guatiao");
@@ -246,6 +261,30 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
             turns(&host, &client, &["hello", "again"]),
             ["echo: hello", "echo: again"]
         );
+    }
+
+    #[test]
+    fn an_isolated_python_that_import_dirs_names_answers() {
+        let python = python();
+        let coqui_acp = checkout("coqui-acp-provider");
+        let mut config = source_entry(
+            &python,
+            "acp_echo_echo",
+            &[coqui_acp.join("examples/provider-python/echo")],
+        );
+        config.push_str(&format!(
+            "isolation = \"isolated\"\nimport_dirs = [{}]\n",
+            quoted(&python.prefix.to_string_lossy())
+        ));
+        let host = Host::start_in(
+            Scratch::new(),
+            &config,
+            1,
+            &environment_without_python_on_path(&python),
+        );
+        let client = crate::support::key();
+        host.pair(&client);
+        assert_eq!(turns(&host, &client, &["hello"]), ["echo: hello"]);
     }
 
     #[test]

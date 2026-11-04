@@ -408,6 +408,18 @@ impl Serving {
                     let mut line = HostLine::default();
                     line.settings.clone_from(settings);
                     if let Origin::Source { settings, .. } = origin {
+                        // Guatiao's source cannot tell its host which weaker setting it took, so the host says it.
+                        if settings
+                            .as_map()
+                            .get("isolation")
+                            .and_then(|value| value.as_str())
+                            == Some("inherit")
+                        {
+                            tracing::warn!(
+                                "weakened: host.providers.{}.source_settings.isolation is inherit, looser than shipped",
+                                entry.name
+                            );
+                        }
                         line.source_settings = Some(settings.clone());
                     }
                     (

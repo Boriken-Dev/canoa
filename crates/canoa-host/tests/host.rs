@@ -552,6 +552,29 @@ fn the_session_settings_are_the_hosts_to_choose_and_a_looser_one_is_said() {
 }
 
 #[test]
+fn a_source_that_inherits_the_hosts_environment_is_said_to_be_weakened() {
+    let entry = |name: &str, settings: &str| {
+        format!(
+            "[host.providers.{name}]\nsource = \"guatiao_source_py.dll\"\nprovider = \"p\"\n[host.providers.{name}.source_settings]\n{settings}"
+        )
+    };
+    let config = [
+        entry("inherits", "isolation = \"inherit\"\n"),
+        entry("isolated", "isolation = \"isolated\"\n"),
+        entry("shipped", ""),
+    ]
+    .concat();
+    let (_host, log) = Host::start_logged(Scratch::new(), &config, 3, &[]);
+    let said = "weakened: host.providers.inherits.source_settings.isolation is inherit, looser than shipped";
+    let written = log_holding(&log, &[said]);
+    assert!(written.contains(said), "{written}");
+    // Every entry is bound, and so said, before the host prints where it listens.
+    for quiet in ["providers.isolated", "providers.shipped"] {
+        assert!(!written.contains(quiet), "{written}");
+    }
+}
+
+#[test]
 fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
     use coqui_agentic_peer::auth::Method;
     let host = Host::start(&agent_entry("fixture", ""), 1);

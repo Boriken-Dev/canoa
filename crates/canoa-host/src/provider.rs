@@ -197,8 +197,9 @@ impl core::error::Error for ProviderError {
 /// **Loading runs code** with this process's rights, before any check: a library's, or a source's and then whatever it
 /// loads, which for Python is the interpreter, its environment and every module its settings and manifests reach. Name
 /// only files you would run as a program. A library's imports are found beside it and in the system's directories, not in
-/// the working directory or `PATH`; on Windows a source's imports are looked for in the working directory and on `PATH`
-/// too, when those leave one missing. Nothing may print to standard output while this runs, since that is the transport.
+/// the working directory or `PATH`; on Windows an import a source names itself is looked for in its settings' `import_dirs`,
+/// the working directory and on `PATH` too, when those leave it missing. Nothing may print to standard output while this
+/// runs, since that is the transport.
 ///
 /// # Errors
 ///

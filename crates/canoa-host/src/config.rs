@@ -402,29 +402,41 @@ fn settings_of(name: &str, table: toml::Table) -> Result<Settings, ConfigError> 
     })
 }
 
-/// The source settings read as lists of paths: `dirs` and `manifests` by every Guatiao bridge source, `paths` by Python's.
-/// A source may resolve a relative one against whatever working directory it has later, so each is made absolute here.
-const PATH_LISTS: [&str; 3] = ["dirs", "manifests", "paths"];
+/// The source settings read as lists of paths: `dirs` and `manifests` by every Guatiao bridge source, `paths` by Python's,
+/// `import_dirs` by the registry. A source may resolve a relative one against whatever working directory it has later, or
+/// against its own file's, so each is made absolute here.
+const PATH_LISTS: [&str; 4] = ["dirs", "manifests", "paths", "import_dirs"];
+
+/// The source settings read as one path: `home`, the Python installation Python's source runs from.
+const PATHS: [&str; 1] = ["home"];
 
 fn absolute_paths(
     name: &str,
     directory: &Path,
     settings: &mut Settings,
 ) -> Result<(), ConfigError> {
+    let absolute = |text: &mut String| -> Result<(), ConfigError> {
+        let path = directory.join(&*text);
+        let path = std::path::absolute(&path).unwrap_or(path);
+        *text = path
+            .to_str()
+            .ok_or_else(|| invalid(name, "Canoa.cfg's directory is not Unicode, so a relative path cannot be made absolute"))?
+            .to_owned();
+        Ok(())
+    };
     for key in PATH_LISTS {
         let Some(serde_json::Value::Array(items)) = settings.0.get_mut(key) else {
             continue;
         };
         for item in items {
-            let serde_json::Value::String(text) = item else {
-                continue;
-            };
-            let path = directory.join(&*text);
-            let path = std::path::absolute(&path).unwrap_or(path);
-            *text = path
-                .to_str()
-                .ok_or_else(|| invalid(name, "Canoa.cfg's directory is not Unicode, so a relative path cannot be made absolute"))?
-                .to_owned();
+            if let serde_json::Value::String(text) = item {
+                absolute(text)?;
+            }
+        }
+    }
+    for key in PATHS {
+        if let Some(serde_json::Value::String(text)) = settings.0.get_mut(key) {
+            absolute(text)?;
         }
     }
     Ok(())

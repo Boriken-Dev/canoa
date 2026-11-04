@@ -377,21 +377,26 @@ fn any_text_gives_a_value_or_an_error() {
 #[test]
 fn relative_paths_a_source_reads_are_made_absolute_against_the_configs_directory() {
     let (origin, _) = provider_kind(
-        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n[host.providers.p.source_settings]\ndirs = [\"python/echo\"]\nmanifests = [\"one.guatiao.toml\"]\npaths = [\"python/guatiao\"]\nprefix_file = \"stays.txt\"\n",
+        "[host.providers.p]\nsource = \"s\"\nprovider = \"p\"\n[host.providers.p.source_settings]\ndirs = [\"python/echo\"]\nmanifests = [\"one.guatiao\"]\npaths = [\"python/guatiao\"]\nimport_dirs = [\"python\"]\nhome = \"python/home\"\nisolation = \"isolated\"\nprefix_file = \"stays.txt\"\n",
     );
     let Origin::Source { settings, .. } = origin else {
         panic!("a source");
     };
-    let absolute = |relative: &str| {
-        serde_json::json!([std::path::absolute(base().join(relative))
+    let absolute_one = |relative: &str| {
+        std::path::absolute(base().join(relative))
             .expect("absolute")
             .to_str()
-            .expect("UTF-8")])
+            .expect("UTF-8")
+            .to_owned()
     };
+    let absolute = |relative: &str| serde_json::json!([absolute_one(relative)]);
     let map = settings.as_map();
     assert_eq!(map["dirs"], absolute("python/echo"));
-    assert_eq!(map["manifests"], absolute("one.guatiao.toml"));
+    assert_eq!(map["manifests"], absolute("one.guatiao"));
     assert_eq!(map["paths"], absolute("python/guatiao"));
+    assert_eq!(map["import_dirs"], absolute("python"));
+    assert_eq!(map["home"], absolute_one("python/home"));
+    assert_eq!(map["isolation"], "isolated", "not a path, so as written");
     assert_eq!(
         map["prefix_file"], "stays.txt",
         "a key no source reads as a path list is passed as written"
