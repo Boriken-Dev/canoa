@@ -25,6 +25,7 @@ import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/changes.dart';
 import 'chat/palette.dart';
 import 'chat/queue_panel.dart';
+import 'chat/question_card.dart';
 import 'chat/permission_card.dart';
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
@@ -269,7 +270,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _useBrowserAgents(AcpPage acp, {required String cwd, required String title}) async {
     final agents = await acp.request(purpose: 'Chat with it in Canoa');
     for (final agent in agents) {
-      final client = await connectProviderAgent(acp, agent, decider: store.askPermission);
+      final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
       try {
         final opened = await client.openSession(cwd: cwd);
         if (!mounted) throw StateError('Canoa UI closed');
@@ -296,7 +297,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final where = cwd.isEmpty || cwd == '/' ? defaultWorkingDirectory() : cwd;
     final client = await startLocalAgent(
       command,
-      decider: store.askPermission,
+      decider: store.askPermission, elicitor: store.askQuestion,
       workingDirectory: where,
     );
     try {
@@ -335,7 +336,7 @@ class _CanoaAppState extends State<CanoaApp> {
         final command = [...agentPresets, ...config.agents].where((agent) => agent.label == entry.entry).firstOrNull;
         if (command == null) throw StateError('No agent named ${entry.entry} is set up here now');
         if (!canRunLocalAgents) throw StateError('This build cannot run agents on this computer');
-        client = await startLocalAgent(command, decider: store.askPermission, workingDirectory: entry.cwd);
+        client = await startLocalAgent(command, decider: store.askPermission, elicitor: store.askQuestion, workingDirectory: entry.cwd);
       case SessionPlace.host || SessionPlace.peer:
         final endpoint = Uri.tryParse(entry.endpoint ?? '');
         final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
@@ -349,7 +350,7 @@ class _CanoaAppState extends State<CanoaApp> {
           ),
           pinnedPeerId: entry.peerId, method: method,
           timeout: Duration(seconds: config.connectTimeout),
-          decider: store.askPermission,
+          decider: store.askPermission, elicitor: store.askQuestion,
         );
       case SessionPlace.browser:
         throw StateError(why ?? 'Reopen it from Earlier conversations');
@@ -384,7 +385,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final client = await connectBrowserAcp(
       endpoints, pinnedPeerId: pinnedPeerId, method: target.method,
       timeout: Duration(seconds: config.connectTimeout),
-      decider: store.askPermission,
+      decider: store.askPermission, elicitor: store.askQuestion,
     );
     try {
       final opened = await client.openSession(cwd: target.cwd);
@@ -1093,6 +1094,7 @@ class _ConversationState extends State<_Conversation> {
         if (session.queue.isNotEmpty) QueuePanel(store: widget.store, session: session),
         if (session.pendingPermissions.isNotEmpty)
           PermissionCard(store: widget.store, session: session),
+        if (session.pendingQuestions.isNotEmpty) QuestionCard(store: widget.store, session: session),
         SessionControls(
           session: session,
           onChoose: (option, value) => unawaited(widget.store.choose(session, option, value)),

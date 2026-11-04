@@ -8,8 +8,9 @@ Future<VerifiedAgent> connectProviderAgent(
   AcpPage acp,
   AcpPageAgent agent, {
   AgentDecider? decider,
+  AgentElicitor? elicitor,
 }) async {
-  final client = await VerifiedAgent.fromProvider(await acp.connect(agent), decider: decider);
+  final client = await VerifiedAgent.fromProvider(await acp.connect(agent), decider: decider, elicitor: elicitor);
   try {
     await client.initialize();
     return client;

@@ -87,6 +87,7 @@ Future<void> _end(Process process) async {
 Future<VerifiedAgent> startLocalAgent(
   AgentCommand command, {
   AgentDecider? decider,
+  AgentElicitor? elicitor,
   String? workingDirectory,
 }) async {
   final environment = <String, String>{};
@@ -131,6 +132,7 @@ Future<VerifiedAgent> startLocalAgent(
       await _end(process);
     },
     decider: decider,
+    elicitor: elicitor,
   );
   try {
     await client.initialize();

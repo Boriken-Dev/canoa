@@ -26,6 +26,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
   WebDialer? webTransportDialer,
   WebDialer? webSocketDialer,
   AgentDecider? decider,
+  AgentElicitor? elicitor,
 }) async {
   final source = await connectWebChannel(
     endpoints,
@@ -40,6 +41,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
     verifyPeer: verifyPeer,
     verificationTimeout: timeout,
     decider: decider,
+    elicitor: elicitor,
   );
   try {
     connection.allowApplicationMessages();

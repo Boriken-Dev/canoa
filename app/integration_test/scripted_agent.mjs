@@ -1,6 +1,7 @@
 // A stand-in for a coding agent, speaking ACP v1 on its standard streams, so integration_test/coding_task_test.dart can be run
 // without spending a subscription. Each prompt of that test gets one fixed answer: tools asked about, a plan, a stop it obeys.
 // What it changes on disk is not the point; what reaches the screen is. Its conversations live in the file --state= names.
+// A prompt starting `Ask ` asks a question as a form, when the client takes them, shaped as Claude's adapter asks one.
 // The fix turn also sends v2's plan_update, tool_call_content_chunk, notice and compaction updates, shaped as schema/v2 has
 // them: the app shows them whichever version an agent speaks, and the test records each kind it sees.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -31,6 +32,38 @@ const options = [
   { optionId: 'no-always', name: 'Always reject', kind: 'reject_always' },
 ];
 const remembered = new Map();
+
+// Whether the client said it takes questions as forms, in initialize.
+let forms = false;
+
+// A question as Claude's adapter shapes its AskUserQuestion tool: one choice with a header, and a free-text "Other" beside it.
+function question(sessionId, text) {
+  const id = nextId++;
+  send({
+    id,
+    method: 'elicitation/create',
+    params: {
+      mode: 'form',
+      sessionId,
+      message: text,
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          q0: {
+            type: 'string',
+            title: 'Runner',
+            oneOf: [
+              { const: 'node', title: 'node --test', description: 'The runner package.json names' },
+              { const: 'npm', title: 'npm test' },
+            ],
+          },
+          q0_custom: { type: 'string', title: 'Other', description: 'Type your own answer, or add a note to the option you chose above (optional).' },
+        },
+      },
+    },
+  });
+  return new Promise((resolve) => waiting.set(id, (answer) => resolve(answer.result ?? { action: 'cancel' })));
+}
 
 function ask(sessionId, toolCall) {
   const always = remembered.get(`${sessionId} ${toolCall.kind}`);
@@ -73,6 +106,18 @@ async function prompt(sessionId, blocks) {
   remember(sessionId, 'user', text, attached);
   if (/^Say /.test(text)) {
     say(sessionId, text.slice('Say '.length));
+    return 'end_turn';
+  }
+  if (/^Ask /.test(text)) {
+    if (!forms) {
+      say(sessionId, 'I cannot ask: this client takes no forms.');
+      return 'end_turn';
+    }
+    const answer = await question(sessionId, text.slice('Ask '.length));
+    const chosen = answer.content ?? {};
+    say(sessionId, answer.action === 'accept'
+      ? `You chose ${chosen.q0 ?? 'nothing'}${chosen.q0_custom ? ` (${chosen.q0_custom})` : ''}.`
+      : answer.action === 'decline' ? 'You declined to answer.' : 'The question was cancelled.');
     return 'end_turn';
   }
   update(sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Looking at the repository.' } });
@@ -142,6 +187,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     waiting.get(id)?.(message);
     waiting.delete(id);
   } else if (method === 'initialize') {
+    // A client offering v2 says it under capabilities, and v1's under clientCapabilities.
+    forms = (params?.capabilities ?? params?.clientCapabilities)?.elicitation?.form !== undefined;
     send({ id, result: {
       protocolVersion: 1,
       agentCapabilities: reopens

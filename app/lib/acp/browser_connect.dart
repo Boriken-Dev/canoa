@@ -11,13 +11,14 @@ Future<VerifiedAgent> connectBrowserAcp(
   required PeerMethod method,
   Duration timeout = const Duration(seconds: 10),
   AgentDecider? decider,
+  AgentElicitor? elicitor,
 }) async {
   final why = await browserMethodUnavailable(method);
   if (why != null) throw MethodUnavailable(method, why);
   return connectVerifiedAcp(
     endpoints, expectedPeerId: pinnedPeerId,
     verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, method),
-    timeout: timeout, decider: decider,
+    timeout: timeout, decider: decider, elicitor: elicitor,
   );
 }
 

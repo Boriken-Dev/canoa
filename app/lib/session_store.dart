@@ -72,6 +72,16 @@ final class PermissionQuestion {
   final Completer<AcpDecision> _answer = Completer();
 }
 
+/// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
+const int maxPendingQuestions = 16;
+
+/// An agent's question, waiting on the person. Nothing answers it for them; full access is for permission requests only.
+final class AgentQuestion {
+  AgentQuestion(this.request);
+  final AcpElicitation request;
+  final Completer<AcpElicitationAnswer> _answer = Completer();
+}
+
 /// The most messages one conversation holds waiting for its turn to end.
 const int maxQueued = 20;
 
@@ -124,6 +134,9 @@ class ChatSession {
   /// What the agent is waiting for the person to answer, oldest first.
   final List<PermissionQuestion> pendingPermissions = [];
 
+  /// The agent's questions waiting for the person, oldest first.
+  final List<AgentQuestion> pendingQuestions = [];
+
   /// What the agent lets a person choose, its plan, its commands and what it has used, each as it last said.
   List<ConfigOption> options = const [];
   List<PlanEntry> plan = const [];
@@ -158,7 +171,7 @@ class ChatSession {
   String? queueHeld;
 
   /// Whether something here waits for the person's answer.
-  bool get needsYou => pendingPermissions.isNotEmpty;
+  bool get needsYou => pendingPermissions.isNotEmpty || pendingQuestions.isNotEmpty;
 
   final String id;
   String title;
@@ -370,6 +383,34 @@ class SessionStore extends ChangeNotifier {
     return question._answer.future;
   }
 
+  /// Puts an agent's question to the person, in the conversation the client [from] serves under its session id. A question about
+  /// no session here is cancelled, and so is one past [maxPendingQuestions].
+  Future<AcpElicitationAnswer> askQuestion(AcpElicitation request, VerifiedAgent from) {
+    ChatSession? target;
+    for (final session in _sessions) {
+      if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
+    }
+    if (target == null) return Future.value(const AcpElicitCancel());
+    if (target.pendingQuestions.length >= maxPendingQuestions) {
+      _note(target, 'The agent asked more questions than the $maxPendingQuestions a conversation holds waiting, so the rest '
+          'were answered cancelled.');
+      notifyListeners();
+      return Future.value(const AcpElicitCancel());
+    }
+    final question = AgentQuestion(request);
+    target.pendingQuestions.add(question);
+    _needs(target, AttentionKind.question);
+    notifyListeners();
+    return question._answer.future;
+  }
+
+  /// The person's answer to the oldest of [session]'s questions.
+  void answerQuestion(ChatSession session, AcpElicitationAnswer answer) {
+    if (session.pendingQuestions.isEmpty) return;
+    session.pendingQuestions.removeAt(0)._answer.complete(answer);
+    notifyListeners();
+  }
+
   /// The person's answer to the oldest question in [session]: the agent's first option that allows once, or refuses once.
   void answerPermission(ChatSession session, {required bool allow}) {
     if (session.pendingPermissions.isEmpty) return;
@@ -406,11 +447,16 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Answers everything still waiting in [session]: its permission requests with [answer], and its questions cancelled.
   void _endWaiting(ChatSession session, AcpDecision answer) {
     for (final question in session.pendingPermissions) {
       question._answer.complete(answer);
     }
     session.pendingPermissions.clear();
+    for (final question in session.pendingQuestions) {
+      question._answer.complete(const AcpElicitCancel());
+    }
+    session.pendingQuestions.clear();
   }
 
   /// A session over a browser provider's connection, which has no endpoint of Canoa's own.
