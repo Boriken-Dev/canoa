@@ -13,7 +13,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | --- | --- |
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
-| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from Canoa.cfg to paired keys, on loopback |
+| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from Canoa.cfg to paired keys, on loopback, and the web app |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
 | `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
@@ -42,6 +42,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 ## Commands
 
 ```sh
+export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # --all-features builds canoa-host's web feature, which needs a site
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features

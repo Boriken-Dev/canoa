@@ -344,10 +344,61 @@ the PIN; a browser pairs with it by connecting once. The extension and Canoa's w
 A key's first use is always the person's decision: nothing is accepted automatically, and the app pairs or removes a key
 only from a dialog that shows its whole id.
 
+## The web app
+
+The host can serve Canoa's web build itself, so a browser on this machine opens the chat with no other web server:
+
+```sh
+canoa-host serve --web app/build/web     # a directory, or [host.web] dir in Canoa.cfg
+canoa-host serve --web                   # the site built in, in a build with the web feature
+```
+
+```toml
+[host.web]
+dir = "site"                 # relative to Canoa.cfg; without it, the site built in
+listen = "127.0.0.1:7800"    # the default
+```
+
+`serve` prints `{"web": "http://127.0.0.1:7800"}` after its entries. Open that address: the connect dialog starts filled
+with the host's first entry, its peer id and its method, read from `/canoa-host.json`, and lists its other entries to
+choose from. That is only a filling. Connecting still proves the host holds that id's key, and the host turns the
+browser away until its key is paired, as in [Pairing](#pairing): connect once, then accept the browser's id in Hosting
+or with `canoa-host accept`.
+
+What it serves and refuses:
+
+- **Only the site's files.** A path that could step outside the directory (`..`, an encoded separator, a Windows drive
+  or device name, a name starting with a dot) is refused, and so is a file a link leads to outside it. A directory is
+  never listed. A path with no extension that names no file is one of the app's routes, answered with `index.html`.
+- **A strict Content-Security-Policy** on every answer: scripts, styles, images and fonts from the site alone, and
+  connections to the site and the host's entries alone. Inline and evaluated script are refused, so the site must be
+  built with `flutter build web --csp --no-web-resources-cdn`. That build still fetches its fonts from
+  `https://fonts.gstatic.com`, and without them Flutter draws no text: until the app carries its own fonts, add
+  `connect = ["https://fonts.gstatic.com"]` to `[host.web]`, which the host logs as a weakening.
+- **Not the host's own files.** A site directory that holds Canoa.cfg's directory or the host's identity and trust store
+  is refused.
+- **Requests for this host only.** A request whose `Host` is not `localhost`, an IP address or a name in `[host.web]
+  hosts` is refused, so another site cannot reach this one by pointing a name of its own at this machine.
+- **Plain HTTP on loopback only.** Beyond loopback it serves HTTPS, from `cert` and `key` (PEM files) in `[host.web]`,
+  and refuses to start without them. The page it serves still connects to the entries' loopback addresses, so a browser
+  on another machine needs a proxy carrying those as well.
+- **Limits**: connections at once and from one address, how long a connection lasts, the size and time of a request,
+  requests per connection, how long a write may stall, each a setting of `[host.web]` with a default; a looser one than
+  the default is logged as weakened. A file whose name holds a hash is cached for a year, any other file is checked
+  each time.
+
+**On a machine others use**, the browser keeps the page's key under the page's origin, `http://127.0.0.1:7800` by
+default. While the host is not running, anyone on the machine can listen on that port and serve a page of their own in
+that origin, which can then use the key you paired. Serve over HTTPS there, with a certificate the browser trusts and a key only
+you can read, or reach the host from the browser extension.
+
+The API header lists every setting.
+
 ## What the host allows
 
-- **Nothing beyond loopback.** An address that is not loopback is refused. The proof does not depend on TLS, so a proxy
-  that ends TLS can carry a connection further and can neither read nor change it.
+- **Nothing beyond loopback.** An entry's address that is not loopback is refused, and so is the web app's, unless it
+  serves HTTPS. The proof does not depend on TLS, so a proxy that ends TLS can carry a connection further and can neither
+  read nor change it.
 - **Nothing without a paired, proven key.** Every message after the proof is sealed in the session it ended in. An
   entry's `peers` narrows it to some paired keys.
 - **No program a client names.** ACP's `session/new` can list a stdio MCP server, which an agent starts as a program
