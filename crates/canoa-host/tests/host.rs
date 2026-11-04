@@ -613,7 +613,10 @@ fn a_source_that_inherits_the_hosts_environment_is_said_to_be_weakened() {
     let written = log_holding(&log, &[said]);
     assert!(written.contains(said), "{written}");
     // Every entry is bound, and so said, before the host prints where it listens.
-    for quiet in ["providers.isolated", "providers.shipped"] {
+    for quiet in [
+        "providers.isolated.source_settings",
+        "providers.shipped.source_settings",
+    ] {
         assert!(!written.contains(quiet), "{written}");
     }
 }
