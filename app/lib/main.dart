@@ -766,7 +766,7 @@ class _ConversationState extends State<_Conversation> {
                   fontSize: 17, fontWeight: FontWeight.w600,
                 ), maxLines: 1, overflow: TextOverflow.ellipsis),
                 Text(session?.agent ?? 'Multi-session agent chat',
-                  style: Theme.of(context).textTheme.bodySmall),
+                  style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             )),
             ..._headerActions(session),
@@ -776,12 +776,19 @@ class _ConversationState extends State<_Conversation> {
                 icon: const Icon(Icons.close),
                 onPressed: () => unawaited(widget.store.close(session)),
               ),
-            Chip(
-              avatar: const Icon(Icons.hub_outlined, size: 16),
-              label: Text(session?.status == SessionStatus.preview
-                  ? 'Preview' : (session?.status.name ?? 'Offline')),
-              visualDensity: VisualDensity.compact,
-            ),
+            // On a phone the state is an icon whose tooltip names it, which leaves the conversation's name room to be read.
+            if (widget.narrow)
+              Tooltip(
+                message: session?.status == SessionStatus.preview ? 'Preview' : (session?.status.name ?? 'Offline'),
+                child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)),
+              )
+            else
+              Chip(
+                avatar: const Icon(Icons.hub_outlined, size: 16),
+                label: Text(session?.status == SessionStatus.preview
+                    ? 'Preview' : (session?.status.name ?? 'Offline')),
+                visualDensity: VisualDensity.compact,
+              ),
           ]),
         ),
       ),
