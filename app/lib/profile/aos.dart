@@ -227,6 +227,19 @@ Map<String, Object> readDocument(List<int> bytes, {AosLimits limits = const AosL
   if (format != 'toml' && format != 'json') {
     throw AosException('unsupported-format', RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(format) ? format : '(not shown)');
   }
+  return _parse(format, payload, limits.maxDepth);
+}
+
+/// Reads [bytes] as [format], `toml` or `json`, chosen by something other than a format line, as a catalog's file name
+/// chooses it: one leading byte-order mark is dropped and the rest is parsed whole, with the data model's refusals.
+Map<String, Object> readDocumentAs(String format, List<int> bytes, {AosLimits limits = const AosLimits()}) {
+  if (bytes.length > limits.maxBytes) throw _error('too-large');
+  if (format != 'toml' && format != 'json') throw AosException('unsupported-format', format);
+  final hasMark = bytes.length >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf;
+  return _parse(format, hasMark ? bytes.sublist(3) : bytes, limits.maxDepth);
+}
+
+Map<String, Object> _parse(String format, List<int> payload, int maxDepth) {
   final String text;
   try {
     text = utf8.decode(payload);
@@ -244,12 +257,12 @@ Map<String, Object> readDocument(List<int> bytes, {AosLimits limits = const AosL
     } on Object {
       throw _error('parse-error');
     }
-    value = _fromToml(map, 1, limits.maxDepth);
+    value = _fromToml(map, 1, maxDepth);
   } else {
-    value = _Json(text, limits.maxDepth).document();
+    value = _Json(text, maxDepth).document();
   }
   if (value is! Map<String, Object?>) throw _error('not-a-mapping');
-  _checkModel(value, 1, limits.maxDepth);
+  _checkModel(value, 1, maxDepth);
   return value.cast<String, Object>();
 }
 
@@ -1102,6 +1115,21 @@ bool isIconPath(String path) {
   return isRelativePath(path) && (lower.endsWith('.png') || lower.endsWith('.webp'));
 }
 
+/// The fields of `[about]`, the informational table only a store reads.
+const aboutFields = {'summary', 'icon', 'homepage', 'repository', 'license', 'authors', 'tags'};
+
+/// Whether one `[about]` field is valid on its own; a field `[about]` does not define is not. A store leaves out each
+/// field this refuses and shows the rest.
+bool aboutFieldValid(String field, Object? value) {
+  if (!aboutFields.contains(field)) return false;
+  final check = _Check()..about(<String, Object?>{field: value}, '');
+  return check.issues.isEmpty;
+}
+
+/// Whether [text] is an https URL as `[about]` and catalogs take one: a host, and no user information, white space or
+/// control character.
+bool isWebUrl(String text) => _isWebUrl(text);
+
 bool _isLicense(String text) {
   if (!RegExp(r'^[A-Za-z0-9.+:() -]+$').hasMatch(text)) return false;
   final tokens = text.replaceAll('(', ' ( ').replaceAll(')', ' ) ').split(' ').where((t) => t.isNotEmpty).toList();
@@ -1416,7 +1444,7 @@ final class _Check {
   }
 
   void about(Object? value, String at) {
-    final map = object(value, at, {'summary', 'icon', 'homepage', 'repository', 'license', 'authors', 'tags'});
+    final map = object(value, at, aboutFields);
     if (map == null) return;
     for (final MapEntry(:key, value: item) in map.entries) {
       final here = '$at/$key';

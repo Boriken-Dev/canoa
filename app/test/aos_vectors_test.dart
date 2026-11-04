@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/profile/aos.dart';
+import 'package:canoa/profile/aos_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 List<Map<String, dynamic>> _vectors(String name) =>
@@ -98,7 +99,27 @@ void main() {
         continue;
       }
       if (format == 'catalog') {
-        _skip('reading', id, 'a catalog: the store reads catalogs');
+        final name = vector['name'] as String;
+        final yaml = RegExp(r'\.ya?ml$', caseSensitive: false).hasMatch(name);
+        test(id, () {
+          final limits = vector['limits'] as Map?;
+          try {
+            final data = readCatalogDocument(name, bytes,
+                limits: AosLimits(maxBytes: (limits?['max_bytes'] as int?) ?? defaultCatalogLimits.maxBytes,
+                    maxDepth: (limits?['max_depth'] as int?) ?? defaultCatalogLimits.maxDepth));
+            expect(yaml, isFalse, reason: 'YAML is refused');
+            expect(expect_.containsKey('data'), isTrue, reason: 'read, and the vector refuses it');
+            expect(_same(data, expect_['data']), isTrue, reason: 'read $data; expected ${expect_['data']}');
+          } on AosException catch (refusal) {
+            if (yaml && expect_['error'] != 'too-large') {
+              expect(refusal.code, 'unsupported-format', reason: 'YAML is refused');
+            } else {
+              expect(_classMatches(expect_['error'], refusal.code), isTrue,
+                  reason: 'refused as ${refusal.code}; expected $expect_');
+            }
+          }
+        });
+        if (yaml) _skip('reading', id, 'YAML, which Canoa refuses as an unsupported format');
         continue;
       }
       final firstLine = utf8.decode(bytes, allowMalformed: true).replaceFirst('\u{feff}', '').split('\n').first;
@@ -337,13 +358,66 @@ void main() {
     for (final vector in _vectors('catalog')) {
       final id = vector['id'] as String;
       final icon = vector['icon'] as Map?;
+      final expected = vector['expect'] as Map;
+      if (vector['catalog'] case final Map<dynamic, dynamic> item) {
+        final name = item['name'] as String;
+        if (RegExp(r'\.ya?ml$', caseSensitive: false).hasMatch(name)) {
+          test(id, () {
+            expect(() => readCatalog(name, utf8.encode(item['text'] as String)),
+                throwsA(isA<AosException>().having((e) => e.code, 'code', 'unsupported-format')));
+          });
+          _skip('catalog', id, 'YAML, which Canoa refuses as an unsupported format');
+          continue;
+        }
+        test(id, () {
+          try {
+            final catalog = readCatalog(name, utf8.encode(item['text'] as String), base: _base(item));
+            expect(expected.containsKey('error'), isFalse, reason: 'read, and the vector refuses it');
+            expect(_catalogJson(catalog), expected);
+          } on AosException catch (refusal) {
+            expect(refusal.code, expected['error']);
+          }
+        });
+        continue;
+      }
+      if (vector['catalogs'] case final List<dynamic> items) {
+        test(id, () {
+          final CatalogListing listing;
+          try {
+            listing = listCatalogs([
+              for (final item in items.cast<Map<dynamic, dynamic>>())
+                (item['label'] as String,
+                    readCatalog(item['name'] as String, utf8.encode(item['text'] as String), base: _base(item))),
+            ]);
+          } on AosException catch (refusal) {
+            expect(refusal.code, expected['error']);
+            return;
+          }
+          expect(expected.containsKey('error'), isFalse, reason: 'listed, and the vector refuses it');
+          expect([
+            for (final listed in listing.entries)
+              {'catalog': listed.label, 'name': listed.entry.name, 'identity': listed.identity, 'shown': listed.shown},
+          ], expected['entries']);
+          expect(listing.collisions, expected['collisions']);
+          final chosen = <String, Object>{};
+          for (final requested in _strings(vector['choose'])) {
+            try {
+              final listed = listing.choose(requested);
+              chosen[requested] = {'catalog': listed.label, 'name': listed.entry.name};
+            } on AosException catch (refusal) {
+              chosen[requested] = {'error': refusal.code};
+            }
+          }
+          expect(chosen, expected['chosen']);
+        });
+        continue;
+      }
       if (icon == null) {
-        _skip('catalog', id, 'a catalog: the store reads catalogs');
+        _skip('catalog', id, 'a case of a kind this test does not know');
         continue;
       }
       test(id, () {
         final limits = icon['limits'] as Map?;
-        final expected = vector['expect'] as Map;
         try {
           final header = checkIcon(icon['name'] as String, base64Decode(icon['base64'] as String),
               limits: IconLimits(
@@ -359,6 +433,30 @@ void main() {
     }
   });
 }
+
+AosSource? _base(Map<dynamic, dynamic> item) => item['base'] is String ? parseSource(item['base'] as String) : null;
+
+Map<String, Object?> _sourceJson(AosSource source) =>
+    {'kind': source.kind.name, 'location': source.location, 'ref': source.reference, 'path': source.path};
+
+/// A catalog as the vectors write one.
+Map<String, Object?> _catalogJson(AosCatalog catalog) => {
+  'form': catalog.form.name,
+  'name': ?catalog.name,
+  'description': ?catalog.description,
+  'homepage': ?catalog.homepage,
+  'entries': {
+    for (final MapEntry(:key, value: entry) in catalog.entries.entries)
+      key: {
+        'source': _sourceJson(entry.source),
+        'pin': ?entry.pin,
+        'description': ?entry.description,
+        if (entry.about.isNotEmpty) 'about': entry.about,
+      },
+  },
+  'refused': [for (final (name, code) in catalog.refused) [name, code]],
+  'ignored': catalog.ignored,
+};
 
 List<List<int>> _split(List<int> path) {
   final out = <List<int>>[[]];
