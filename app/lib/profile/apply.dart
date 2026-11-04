@@ -23,8 +23,7 @@ const int maxSkillFiles = 1024;
 const int maxSkillBytes = 16 * 1024 * 1024;
 
 /// Where Codex reads skills inside each directory given as ACP `additionalDirectories`: the Agent Skills directory.
-/// Its two parts are written apart so that the dot directory's name never stands alone in this repository.
-const codexSkillsPath = '.' 'agents/skills';
+const codexSkillsPath = '.agents/skills';
 
 /// The plugin Canoa gives Claude Code a profile's skills in; its skills are named `canoa-profile:<skill>`.
 const claudePluginName = 'canoa-profile';
