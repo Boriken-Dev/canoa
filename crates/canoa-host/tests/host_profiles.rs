@@ -180,6 +180,22 @@ fn a_client_picks_only_among_the_profiles_its_entry_offers() {
         assert!(written.contains(logged), "{written}");
     }
 
+    // A first message that is not `initialize` starts nothing: no secret is read, no agent runs.
+    let after = with_link(host.url("profiled"), &client, host.peer, |rpc| {
+        let refused = rpc
+            .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect_err("refused");
+        assert_eq!(refused["code"], -32600, "{refused}");
+        rpc.next_message(std::time::Duration::from_secs(5))
+    })
+    .expect("served");
+    assert!(after.is_err(), "the link ends with no agent: {after:?}");
+    let written = log_holding(&log, &["first message was not initialize"]);
+    assert!(
+        written.contains("first message was not initialize"),
+        "{written}"
+    );
+
     with_link(host.url("profiled"), &client, host.peer, |rpc| {
         rpc.initialize().expect("the default profile");
         let refused = rpc

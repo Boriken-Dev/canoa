@@ -131,8 +131,9 @@ fn error(id: &Value, code: i64, message: &str) -> Vec<u8> {
     .unwrap_or_default()
 }
 
-/// The profile `first` names in `initialize`'s `_meta`, by its index in `offer`; the first when it names none. Anything
-/// but the name of one the entry offers, or a choice in a message other than `initialize`, is refused.
+/// The profile `first` names in `initialize`'s `_meta`, by its index in `offer`; the first when it names none. A first
+/// message other than `initialize`, and anything but the name of a profile the entry offers, is refused, before any
+/// reference is read or any process starts.
 pub(crate) fn choose(offer: &Offer, first: &[u8]) -> Result<usize, Refusal> {
     let message: Value = serde_json::from_slice(first).unwrap_or(Value::Null);
     let id = message.get("id").cloned();
@@ -140,19 +141,28 @@ pub(crate) fn choose(offer: &Offer, first: &[u8]) -> Result<usize, Refusal> {
         .get("params")
         .and_then(|params| params.get("_meta"))
         .and_then(|meta| meta.get(PROFILE_META));
-    let Some(choice) = choice else {
-        return Ok(0);
-    };
-    let refuse = |message: &str, log: &'static str| Refusal {
-        answer: id.as_ref().map(|id| error(id, INVALID_PARAMS, message)),
+    let refuse = |code: i64, message: &str, log: &'static str| Refusal {
+        answer: id.as_ref().map(|id| error(id, code, message)),
         log,
     };
     if message.get("method").and_then(Value::as_str) != Some("initialize") {
-        return Err(refuse(
-            "a profile is chosen in initialize",
-            "a client named a profile outside initialize, which was refused",
-        ));
+        return Err(match choice {
+            Some(_) => refuse(
+                INVALID_PARAMS,
+                "a profile is chosen in initialize",
+                "a client named a profile outside initialize, which was refused",
+            ),
+            None => refuse(
+                INVALID_REQUEST,
+                "initialize comes first on an entry with a profile",
+                "a client's first message was not initialize, which was refused",
+            ),
+        });
     }
+    let Some(choice) = choice else {
+        return Ok(0);
+    };
+    let refuse = |message: &str, log: &'static str| refuse(INVALID_PARAMS, message, log);
     let Some(name) = choice.as_str() else {
         return Err(refuse(
             "a profile is chosen by its name, among those this entry offers",
@@ -618,11 +628,65 @@ struct ReadyMcp {
 }
 
 /// The digest an `allow_mcp` entry names: of the layer and the server as the profile's view writes it.
-fn mcp_digest(layer: &LayerId, server: &McpServer) -> String {
-    let definition = json!({"layer": layer.to_string(), "server": super::mcp_json(server)});
+/// A stdio server's `program` as found is part of it, so another program found by the same name is off again.
+fn mcp_digest(layer: &LayerId, server: &McpServer, program: Option<&str>) -> String {
+    let mut definition = json!({"layer": layer.to_string(), "server": super::mcp_json(server)});
+    if let Some(program) = program {
+        definition["program"] = json!(program);
+    }
     let hash = Sha256::digest(serde_json::to_vec(&definition).unwrap_or_default());
     let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
     format!("sha256:{hex}")
+}
+
+/// The program a stdio server's `command` names, absolute: as written when absolute, from its layer's directory when it
+/// holds a separator, else the first match on the host's `PATH` (with `PATHEXT` on Windows), where only absolute entries
+/// count, since a relative one would name whatever directory the agent runs in.
+fn program_of(
+    command: &str,
+    dir: Option<&Path>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    if Path::new(command).is_absolute() {
+        return Ok(command.to_owned());
+    }
+    if command.contains(['/', '\\']) {
+        return dir
+            .map(|dir| dir.join(command).to_string_lossy().into_owned())
+            .ok_or_else(|| format!("{command} is relative, and its layer has no directory"));
+    }
+    let not_found = || format!("{command} is not found on the host's PATH");
+    let path = lookup("PATH").ok_or_else(not_found)?;
+    let extensions: Vec<String> = if cfg!(windows) && Path::new(command).extension().is_none() {
+        lookup("PATHEXT")
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned())
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(str::to_owned)
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    for directory in std::env::split_paths(&path).filter(|directory| directory.is_absolute()) {
+        for extension in &extensions {
+            let candidate = directory.join(format!("{command}{extension}"));
+            if runnable(&candidate) {
+                return Ok(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+    Err(not_found())
+}
+
+/// A regular file, executable by someone on Unix.
+fn runnable(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| {
+        #[cfg(unix)]
+        let executable = std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0;
+        #[cfg(not(unix))]
+        let executable = true;
+        meta.is_file() && executable
+    })
 }
 
 /// Each overlay's environment as it stood once that overlay applied, by identity: what its MCP servers' text reads.
@@ -728,21 +792,12 @@ fn ready_mcp(
     };
     let acp = match server {
         McpServer::Stdio { command, args, env } => {
-            resolved(name, "env", env, &mut value).map(|env| {
-                let program = if Path::new(command).is_absolute() || !command.contains(['/', '\\'])
-                {
-                    command.clone()
-                } else {
-                    sourced.dir.as_ref().map_or_else(
-                        || command.clone(),
-                        |dir| dir.join(command).to_string_lossy().into_owned(),
-                    )
-                };
-                Acp {
+            program_of(command, sourced.dir.as_deref(), lookup).and_then(|program| {
+                resolved(name, "env", env, &mut value).map(|env| Acp {
                     target: program,
                     pairs: env,
                     args: json!(args),
-                }
+                })
             })
         }
         McpServer::Http { url, headers } | McpServer::Sse { url, headers } => {
@@ -759,7 +814,13 @@ fn ready_mcp(
     };
     ReadyMcp {
         name: name.to_owned(),
-        digest: mcp_digest(&layer, server),
+        digest: mcp_digest(
+            &layer,
+            server,
+            acp.as_ref()
+                .filter(|_| transport == "stdio")
+                .map(|acp| acp.target.as_str()),
+        ),
         layer,
         transport,
         acp,

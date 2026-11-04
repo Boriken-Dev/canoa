@@ -34,8 +34,43 @@ impl Drop for Temp {
 
 const SECRET: &str = "s3cret-value-never-shown";
 
+std::thread_local! {
+    /// The host's `PATH` as this thread's test sets it.
+    static BIN: core::cell::RefCell<Option<String>> = const { core::cell::RefCell::new(None) };
+}
+
 fn lookup(name: &str) -> Option<String> {
-    (name == "HOST_SECRET").then(|| SECRET.to_owned())
+    match name {
+        "HOST_SECRET" => Some(SECRET.to_owned()),
+        "PATH" => BIN.with(|bin| bin.borrow().clone()),
+        "PATHEXT" => Some(".COM;.EXE".to_owned()),
+        _ => None,
+    }
+}
+
+/// A program's file name on this platform.
+fn program(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
+}
+
+/// Puts programs `probe` and `node` in `bin/` and makes that directory the only one on `PATH`.
+fn with_programs(temp: &Temp) {
+    for name in ["probe", "node"] {
+        let path = format!("bin/{}", program(name));
+        temp.write(&path, "");
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            temp.0.join(&path),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("executable");
+    }
+    let bin = temp.0.join("bin").to_string_lossy().into_owned();
+    BIN.with(|path| *path.borrow_mut() = Some(bin));
 }
 
 fn offer_of(temp: &Temp, text: &str) -> Offer {
@@ -66,6 +101,7 @@ fn temp_with_skill() -> Temp {
         "---\nname: review\n---\nReview it.\n",
     );
     temp.write("skills/review/notes/more.md", "More.\n");
+    with_programs(&temp);
     temp
 }
 
@@ -123,6 +159,48 @@ fn a_client_chooses_only_among_the_profiles_its_entry_offers() {
         choose(&offer, &elsewhere).is_err(),
         "a choice outside initialize"
     );
+    // Nothing is prepared or started for a first message that is not `initialize`, choice or none.
+    for first in [
+        json!({"jsonrpc": "2.0", "id": 4, "method": "session/new", "params": {"cwd": "/x", "mcpServers": []}}),
+        json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {}}),
+        json!([1]),
+    ] {
+        let refused =
+            choose(&offer, &serde_json::to_vec(&first).expect("JSON")).expect_err("not initialize");
+        if first.get("id").is_some() {
+            let answer: Value =
+                serde_json::from_slice(&refused.answer.expect("answered")).expect("JSON");
+            assert_eq!(answer["error"]["code"], INVALID_REQUEST, "{answer}");
+        }
+    }
+}
+
+#[test]
+fn a_bare_mcp_command_is_found_on_the_hosts_path_and_never_through_a_relative_entry() {
+    let temp = temp_with_skill();
+    let offer = offer_of(&temp, &config_with(""));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    let command = parts.servers[0]["command"].as_str().expect("a command");
+    let expected = temp.0.join("bin").join(program("probe"));
+    let expected = expected.to_string_lossy();
+    // Windows finds `probe` as `probe` and a `PATHEXT` extension in whatever case `PATHEXT` gives it.
+    assert!(
+        command == expected || cfg!(windows) && command.eq_ignore_ascii_case(&expected),
+        "{command}: {}",
+        parts.report
+    );
+
+    // A relative PATH entry names whatever directory a process runs in: never searched, so nothing is found.
+    BIN.with(|path| *path.borrow_mut() = Some(".".to_owned()));
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    assert_eq!(
+        item(&parts.report, "mcp.probe")["state"],
+        "refused",
+        "{}",
+        parts.report
+    );
+    assert!(parts.servers.is_empty());
 }
 
 #[test]
