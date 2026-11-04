@@ -34,11 +34,16 @@ final class SessionWorktree {
 
   Map<String, Object?> toJson() => {'path': path, 'branch': branch, 'repo': repo};
 
-  /// Null for anything but a whole record with a branch Canoa would make.
+  /// Null for anything but a whole record with a branch Canoa would make, its path where Canoa puts that branch beside
+  /// that repository.
   static SessionWorktree? fromJson(Object? json) {
     if (json is! Map) return null;
     final path = json['path'], branch = json['branch'], repo = json['repo'];
     if (path is! String || path.isEmpty || repo is! String || repo.isEmpty || branch is! String || !safeWorktreeBranch(branch)) {
+      return null;
+    }
+    final slashed = repo.replaceAll(r'\', '/').replaceAll(RegExp(r'/+$'), '');
+    if (!slashed.contains('/') || path.replaceAll(r'\', '/').replaceAll(RegExp(r'/+$'), '') != worktreeLocation(repo, branch)) {
       return null;
     }
     return SessionWorktree(path: path, branch: branch, repo: repo);
@@ -47,11 +52,23 @@ final class SessionWorktree {
 
 /// What a worktree holds now.
 final class WorktreeState {
-  const WorktreeState.gone() : exists = false, branch = null, changed = 0, commits = 0;
-  const WorktreeState({required this.branch, required this.changed, required this.commits}) : exists = true;
+  const WorktreeState.gone() : exists = false, branch = null, changed = 0, commits = 0, detached = false, listing = '';
+  const WorktreeState({
+    required this.branch,
+    required this.changed,
+    required this.commits,
+    this.detached = false,
+    this.listing = '',
+  }) : exists = true;
 
   final bool exists;
+
+  /// The branch checked out there now; null when its HEAD is detached.
   final String? branch;
+  final bool detached;
+
+  /// Stands for the whole list of what [changed] counts: two states with the same listing list the same files.
+  final String listing;
 
   /// Files `git status` lists, untracked ones included: what removing it deletes.
   final int changed;

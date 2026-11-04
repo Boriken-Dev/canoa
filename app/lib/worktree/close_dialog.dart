@@ -31,6 +31,9 @@ class WorktreeCloseDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = this.state;
     final error = Theme.of(context).colorScheme.error;
+    // Commits only a detached HEAD reaches would be lost with the worktree, so it is not offered.
+    final stranded = state != null && state.detached && state.commits > 0;
+    final removable = state != null && !stranded;
     return AlertDialog(
       title: const Text('Keep this session\'s worktree?'),
       content: SizedBox(
@@ -47,29 +50,36 @@ class WorktreeCloseDialog extends StatelessWidget {
             else ...[
               if (state.changed > 0)
                 Text(
-                  '${_files(state.changed)} there ${state.changed == 1 ? 'has' : 'have'} changes not committed. Removing the '
-                  'worktree deletes them.',
+                  '${_files(state.changed)} there ${state.changed == 1 ? 'is' : 'are'} in no commit: changed, new, or ignored '
+                  'by git. Removing the worktree deletes them.',
                   key: const ValueKey('worktree changes'),
                   style: TextStyle(color: error, fontWeight: FontWeight.w600),
                 )
               else
                 const Text('Nothing there is left uncommitted.'),
               const SizedBox(height: 4),
-              Text(state.commits > 0
-                  ? 'Branch ${worktree.branch} holds ${_commits(state.commits)} no other branch has, so it stays either way.'
-                  : 'Branch ${worktree.branch} holds nothing of its own, so it goes with the worktree.'),
+              if (stranded)
+                Text(
+                  'Its HEAD is detached at ${_commits(state.commits)} no branch holds, which removing it would lose, so it '
+                  'is kept until they are on a branch.',
+                  style: TextStyle(color: error, fontWeight: FontWeight.w600),
+                )
+              else
+                Text(state.commits > 0
+                    ? 'Branch ${worktree.branch} holds ${_commits(state.commits)} no other branch has, so it stays either way.'
+                    : 'Branch ${worktree.branch} holds nothing of its own, so it goes with the worktree.'),
             ],
           ],
         ),
       ),
       actions: [
-        if (state != null && state.changed > 0)
+        if (removable && state.changed > 0)
           TextButton(
             onPressed: () => Navigator.pop(context, WorktreeChoice.discard),
             style: TextButton.styleFrom(foregroundColor: error),
             child: Text('Delete ${_files(state.changed)} and remove'),
           )
-        else if (state != null)
+        else if (removable)
           TextButton(onPressed: () => Navigator.pop(context, WorktreeChoice.remove), child: const Text('Remove worktree')),
         FilledButton(onPressed: () => Navigator.pop(context, WorktreeChoice.keep), child: const Text('Keep worktree')),
       ],

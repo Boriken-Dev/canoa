@@ -38,10 +38,13 @@ final class HostWorktrees implements Worktrees {
   Future<WorktreeState> status(SessionWorktree worktree) async {
     final state = await call('_canoa/worktree/status', {'path': worktree.path});
     if (state['exists'] != true) return const WorktreeState.gone();
+    final detached = state['detached'] == true;
     return WorktreeState(
-      branch: _text(state, 'branch'),
+      branch: detached ? null : _text(state, 'branch'),
+      detached: detached,
       changed: _count(state, 'changed'),
       commits: _count(state, 'commits'),
+      listing: _text(state, 'listing'),
     );
   }
 

@@ -398,9 +398,12 @@ class _CanoaAppState extends State<CanoaApp> {
       } on Object catch (error) {
         problem = '$error';
       }
-      if (state != null && !state.exists) return;
+      if (state != null && !state.exists) {
+        _messenger.currentState?.showSnackBar(SnackBar(content: Text('Its worktree ${worktree.path} was already gone.')));
+        return;
+      }
       // Changes made after the person was told of them are told again before anything is deleted.
-      if (choice == WorktreeChoice.discard && state != null && shown != null && state.changed == shown.changed) break;
+      if (choice == WorktreeChoice.discard && state != null && shown != null && state.listing == shown.listing) break;
       final above = _navigator.currentContext;
       if (above == null || !above.mounted) return;
       choice = await showDialog<WorktreeChoice>(
