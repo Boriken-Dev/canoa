@@ -57,6 +57,19 @@ agent would keep after full access ends, is shown to the person as before. A req
 for the person. Full access is the chat's answer to the agent's requests and nothing else: it never reaches the browser
 extension's grants for pages, tabs or tools, which stay [their own](acp-permissions.md#independent-browser-grants).
 
+## The changes pane
+
+**Changes** in a conversation's header, once a tool has changed a file, lists every file the session's completed tools
+changed, each once, in the order it was first changed: beside the conversation on a wide window, as a sheet on a phone. A file
+changed by before-and-after text shows the change from the first text the agent showed to the last; a patch is shown as it
+came, numbered from its hunks, under the file its `changes` (ACP v2) or `+++` line names. A refused, failed or cancelled tool
+changed nothing and is left out. Each file has its additions and removals, and a mark of **viewed** that holds until the file
+changes again; a viewed file starts folded. Choosing a line asks for a comment and adds `path:line`, the line and the comment to
+the message being written, for the person to send.
+
+All of it is what the agent sent, never read from disk, and bounded as the transcript is: a change the agent's text was cut
+from says so. A line number counts in the text the agent sent, which is the whole file only when it sent the whole file.
+
 ## Verification
 
 ```sh
