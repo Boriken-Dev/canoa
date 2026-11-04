@@ -110,7 +110,11 @@ final class ToolCall {
     kind = shortText(raw['kind']) ?? kind;
     status = _toolStatus(raw['status']) ?? status;
     final content = raw['content'];
-    if (content is List) {
+    if (raw['sessionUpdate'] == 'tool_call_content_chunk') {
+      // One more item after what came before; past the limit the oldest goes.
+      final block = _toolBlock(content);
+      if (block != null) blocks = [...blocks.skip(blocks.length >= maxToolBlocks ? 1 : 0), block];
+    } else if (content is List) {
       final parsed = content.take(maxToolBlocks).map(_toolBlock).whereType<ToolBlock>().toList();
       // An update with an empty list is how one starts, not a request to forget what came before.
       if (parsed.isNotEmpty) blocks = parsed;
@@ -161,7 +165,7 @@ final class TerminalView {
   }
 }
 
-enum PlanStatus { pending, running, done }
+enum PlanStatus { pending, running, done, cancelled }
 
 final class PlanEntry {
   const PlanEntry(this.content, this.status);
@@ -180,12 +184,74 @@ List<PlanEntry>? parsePlan(Object? raw) {
         final status = switch (entry['status']) {
           'in_progress' => PlanStatus.running,
           'completed' => PlanStatus.done,
+          'cancelled' => PlanStatus.cancelled,
           _ => PlanStatus.pending,
         };
         return PlanEntry(content, status);
       })
       .whereType<PlanEntry>()
       .toList();
+}
+
+enum CompactionStatus { running, done, failed, cancelled }
+
+/// The entries of a v2 `plan_update`'s plan, when it is a list of items; null for a plan content type this client does not know.
+Object? planItems(Object? plan) => plan is Map && plan['type'] == 'items' ? plan['entries'] : null;
+
+String _texts(Iterable<Object?> blocks) =>
+    blocks.whereType<Map>().where((block) => block['type'] == 'text' && block['text'] is String).map((block) => block['text']).join();
+
+/// One compaction of the agent's context, built up from its `compaction_update`s and `compaction_summary_chunk`s.
+final class Compaction {
+  Compaction(this.id);
+  final String id;
+  CompactionStatus status = CompactionStatus.running;
+  String summary = '';
+  String? error;
+
+  void apply(Map<String, dynamic> raw) {
+    if (raw['sessionUpdate'] == 'compaction_summary_chunk') {
+      summary = boundedHead(summary + _texts([raw['content']]), maxToolText);
+      return;
+    }
+    final now = switch (raw['status']) {
+      'in_progress' => CompactionStatus.running,
+      'completed' => CompactionStatus.done,
+      'failed' => CompactionStatus.failed,
+      'cancelled' => CompactionStatus.cancelled,
+      _ => null,
+    };
+    status = now ?? status;
+    // Both are patches: a field left out keeps its value, and null clears it.
+    if (raw.containsKey('summary')) {
+      final said = raw['summary'];
+      summary = said is List ? boundedHead(_texts(said), maxToolText) : '';
+    }
+    if (raw.containsKey('error')) error = shortText(raw['error']);
+  }
+}
+
+/// The names of what went with a person's message, from its content: one block, as a chunk has, or a list of them.
+List<String> attachedNames(Object? content) {
+  final blocks = content is List ? content.take(maxToolBlocks) : [content];
+  return [
+    for (final block in blocks.whereType<Map>())
+      ?switch (block['type']) {
+        'resource' => _nameOf(block['resource'] is Map ? (block['resource'] as Map)['uri'] : null) ?? 'a file',
+        'resource_link' => shortText(block['name']) ?? _nameOf(block['uri']) ?? 'a file',
+        'image' => _nameOf(block['uri']) ?? 'an image',
+        'audio' => 'a recording',
+        _ => null,
+      },
+  ];
+}
+
+/// The last part of [uri]'s path, which is the file's name for `attachment:notes.txt` and `file:///work/notes.txt` alike.
+String? _nameOf(Object? uri) {
+  if (uri is! String) return null;
+  final parsed = Uri.tryParse(uri);
+  final segments = parsed?.pathSegments.where((segment) => segment.isNotEmpty) ?? const <String>[];
+  return shortText(segments.isEmpty ? uri : segments.last);
 }
 
 final class AgentCommandInfo {

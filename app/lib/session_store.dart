@@ -14,7 +14,7 @@ export 'ledger/session_ledger.dart' show SessionPlace;
 /// separate from the local view id and is absent from offline previews.
 enum SessionStatus { preview, disconnected, connecting, connected, working }
 
-enum MessageRole { user, agent, notice, thought, tool }
+enum MessageRole { user, agent, notice, thought, tool, compaction }
 
 /// The most a conversation keeps. An agent's turn can run a very long time, and the oldest entries are what go.
 const int maxEntries = 5000;
@@ -41,13 +41,14 @@ String? imageTypeOf(String name, String? mimeType) {
 }
 
 class ChatMessage {
-  ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool});
+  ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool, this.compaction});
 
   final MessageRole role;
   String text;
   final DateTime at;
   final String? messageId;
   final ToolCall? tool;
+  final Compaction? compaction;
 }
 
 /// A tool an agent wants to use, waiting on the person. Nothing answers it for them.
@@ -101,6 +102,10 @@ class ChatSession {
   /// Commands the agent ran, which a tool's card shows.
   final Map<String, TerminalView> terminals = {};
   final Map<String, ChatMessage> toolEntries = {};
+  final Map<String, ChatMessage> compactions = {};
+
+  /// The person's messages whose attachments the conversation has named, so a message sent here and echoed back is named once.
+  final Set<String> attachmentsNamed = {};
 
   /// Whether the agent may name the conversation, which it may until the person has.
   bool agentNames = false;
@@ -461,6 +466,7 @@ class SessionStore extends ChangeNotifier {
     if (over <= 0) return;
     for (final gone in session.messages.take(over)) {
       if (gone.tool != null) session.toolEntries.remove(gone.tool!.id);
+      if (gone.compaction != null) session.compactions.remove(gone.compaction!.id);
     }
     session.messages.removeRange(0, over);
   }
@@ -486,6 +492,25 @@ class SessionStore extends ChangeNotifier {
     (session.terminals[id] ??= TerminalView()).apply(raw);
   }
 
+  /// A compaction's entry stays where its first update put it, and later ones change it there.
+  void _applyCompaction(ChatSession session, Map<String, dynamic> raw) {
+    final id = raw['compactionId'];
+    if (id is! String || id.isEmpty) return;
+    var entry = session.compactions[id];
+    if (entry == null) {
+      entry = ChatMessage(role: MessageRole.compaction, text: '', at: DateTime.now(), compaction: Compaction(id));
+      session.compactions[id] = entry;
+      session.messages.add(entry);
+    }
+    entry.compaction!.apply(raw);
+  }
+
+  /// Names what went with a person's message, once per message.
+  void _nameAttachments(ChatSession session, String? messageId, List<String> names) {
+    if (names.isEmpty || (messageId != null && !session.attachmentsNamed.add(messageId))) return;
+    _note(session, 'Sent with this: ${names.join(', ')}');
+  }
+
   void _applyUpdate(ChatSession session, AcpSessionUpdate update) {
     final rendering = renderingOf(update);
     recorder?.record(update, rendering);
@@ -495,7 +520,22 @@ class SessionStore extends ChangeNotifier {
       case Rendering.terminal:
         _applyTerminal(session, update.raw);
       case Rendering.plan:
-        session.plan = parsePlan(update.raw['entries']) ?? session.plan;
+        final entries = update.kind == 'plan_update' ? planItems(update.raw['plan']) : update.raw['entries'];
+        session.plan = parsePlan(entries) ?? session.plan;
+      case Rendering.notice:
+        final title = shortText(update.raw['title']);
+        if (title != null) {
+          // Any agent can send these, so each is shown as the agent's word, never as Canoa's.
+          final from = switch (update.raw['severity']) {
+            'warning' => 'Warning from the agent',
+            'error' => 'Error from the agent',
+            _ => 'From the agent',
+          };
+          final detail = shortText(update.raw['description']);
+          _note(session, '$from: $title${detail == null ? '' : '\n$detail'}');
+        }
+      case Rendering.compaction:
+        _applyCompaction(session, update.raw);
       case Rendering.commands:
         session.commands = parseCommands(update.raw['availableCommands']) ?? session.commands;
       case Rendering.usage:
@@ -533,11 +573,13 @@ class SessionStore extends ChangeNotifier {
           _keepText(session);
         }
       case Rendering.message || Rendering.thought:
-        final text = update.text;
+        final chunk = update.kind.endsWith('_chunk');
+        // A v2 message or thought without content patches its other fields and keeps its text; null content clears it.
+        final text = !chunk && !update.raw.containsKey('content') ? null : update.text ?? '';
+        final role = update.kind.startsWith('user')
+            ? MessageRole.user
+            : rendering == Rendering.thought ? MessageRole.thought : MessageRole.agent;
         if (text != null) {
-          final role = update.kind.startsWith('user')
-              ? MessageRole.user
-              : rendering == Rendering.thought ? MessageRole.thought : MessageRole.agent;
           ChatMessage? existing;
           if (update.messageId != null) {
             for (final message in session.messages) {
@@ -548,21 +590,22 @@ class SessionStore extends ChangeNotifier {
             }
           }
           // A v1 chunk carries no message id: it continues the last message of its role.
-          if (existing == null && update.messageId == null && update.kind.endsWith('_chunk') &&
+          if (existing == null && update.messageId == null && chunk &&
               session.messages.isNotEmpty && session.messages.last.role == role &&
               session.messages.last.messageId == null) {
             existing = session.messages.last;
           }
           if (existing != null) {
-            existing.text = boundedHead(update.kind.endsWith('_chunk')
-                ? existing.text + text : text, maxMessageText);
-          } else {
+            existing.text = boundedHead(chunk ? existing.text + text : text, maxMessageText);
+          } else if (text.isNotEmpty) {
             session.messages.add(ChatMessage(
               role: role, text: boundedHead(text, maxMessageText),
               at: DateTime.now(), messageId: update.messageId,
             ));
           }
         }
+        // A replayed message carries its attachments as content blocks, which have no text of their own.
+        if (role == MessageRole.user) _nameAttachments(session, update.messageId, attachedNames(update.raw['content']));
       case Rendering.unshown:
         break;
     }
@@ -604,7 +647,7 @@ class SessionStore extends ChangeNotifier {
         text: text, at: DateTime.now(), messageId: messageId,
       ));
     }
-    if (sent != null) _note(session, sent);
+    _nameAttachments(session, messageId, [for (final item in attachments) item.name]);
     notifyListeners();
   }
 

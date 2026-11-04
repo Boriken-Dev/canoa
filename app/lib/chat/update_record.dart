@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:coqui_acp/coqui_acp.dart' show AcpSessionUpdate;
 
+import 'agent_events.dart' show attachedNames;
+
 /// Where the conversation shows one `session/update`. [unshown] is the fallback: nothing on screen changes for it.
 enum Rendering {
   /// A user's or the agent's message.
@@ -34,17 +36,29 @@ enum Rendering {
   /// Working or idle: the Stop button, the status chip and the notice a cancelled or failed turn leaves.
   status,
 
+  /// Something the agent tells the person outside the conversation's history, as a notice in it.
+  notice,
+
+  /// The agent compacting its context: one entry per compaction, with its summary folded away.
+  compaction,
+
   unshown,
 }
 
-/// How [update] is shown. A message whose content carries no text, such as an image, is [Rendering.unshown].
+/// How [update] is shown. An agent's chunk whose content carries no text, such as an image, is [Rendering.unshown]. A v2 message
+/// or thought without content is a patch to one already shown, and keeps its rendering.
 Rendering renderingOf(AcpSessionUpdate update) => switch (update.kind) {
-  'user_message' || 'user_message_chunk' || 'agent_message' || 'agent_message_chunk' =>
-    update.text == null ? Rendering.unshown : Rendering.message,
-  'agent_thought' || 'agent_thought_chunk' => update.text == null ? Rendering.unshown : Rendering.thought,
-  'tool_call' || 'tool_call_update' => Rendering.toolCard,
+  'user_message' || 'agent_message' => Rendering.message,
+  'agent_thought' => Rendering.thought,
+  'user_message_chunk' =>
+    update.text == null && attachedNames(update.raw['content']).isEmpty ? Rendering.unshown : Rendering.message,
+  'agent_message_chunk' => update.text == null ? Rendering.unshown : Rendering.message,
+  'agent_thought_chunk' => update.text == null ? Rendering.unshown : Rendering.thought,
+  'tool_call' || 'tool_call_update' || 'tool_call_content_chunk' => Rendering.toolCard,
   'terminal_update' || 'terminal_output_chunk' => Rendering.terminal,
-  'plan' => Rendering.plan,
+  'plan' || 'plan_update' => Rendering.plan,
+  'notice' => Rendering.notice,
+  'compaction_update' || 'compaction_summary_chunk' => Rendering.compaction,
   'available_commands_update' => Rendering.commands,
   'usage_update' => Rendering.usage,
   'config_option_update' || 'current_mode_update' => Rendering.choices,

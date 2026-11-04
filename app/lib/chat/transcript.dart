@@ -62,6 +62,8 @@ class TranscriptEntry extends StatelessWidget {
     final body = switch (message.role) {
       MessageRole.tool => message.tool == null ? const SizedBox.shrink() : ToolCard(tool: message.tool!, session: session),
       MessageRole.thought => _Thought(text: message.text),
+      MessageRole.compaction =>
+        message.compaction == null ? const SizedBox.shrink() : _CompactionView(compaction: message.compaction!),
       MessageRole.agent => _Message(color: look.agent, inBubble: look.agentInBubble, child: AgentMarkdown(text: message.text)),
       MessageRole.user => _Message(
         color: look.user,
@@ -126,6 +128,47 @@ class _Thought extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: SelectableText(text, style: TextStyle(color: look.muted, fontSize: look.bodySize - 1, height: 1.4)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The agent making room in its context. What it kept, its summary, is folded away like a thought.
+class _CompactionView extends StatelessWidget {
+  const _CompactionView({required this.compaction});
+
+  final Compaction compaction;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.look;
+    final said = switch (compaction.status) {
+      CompactionStatus.running => 'Compacting the context…',
+      CompactionStatus.done => 'Context compacted',
+      CompactionStatus.failed => 'Compacting the context failed${compaction.error == null ? '' : ': ${compaction.error}'}',
+      CompactionStatus.cancelled => 'Compacting the context was stopped',
+    };
+    final icon = Icon(Icons.compress, size: 18, color: look.muted);
+    final title = Text(said, style: TextStyle(color: look.muted, fontSize: look.bodySize - 2));
+    if (compaction.summary.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(children: [icon, const SizedBox(width: 16), Expanded(child: title)]),
+      );
+    }
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        dense: true,
+        tilePadding: EdgeInsets.zero,
+        leading: icon,
+        title: title,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SelectableText(compaction.summary, style: TextStyle(color: look.muted, fontSize: look.bodySize - 1, height: 1.4)),
           ),
         ],
       ),
@@ -370,6 +413,7 @@ class PlanPanel extends StatelessWidget {
                         PlanStatus.done => Icons.check_circle_outline,
                         PlanStatus.running => Icons.play_circle_outline,
                         PlanStatus.pending => Icons.radio_button_unchecked,
+                        PlanStatus.cancelled => Icons.block,
                       },
                       size: 16,
                       color: entry.status == PlanStatus.pending ? look.muted : look.accent,

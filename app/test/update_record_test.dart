@@ -76,6 +76,45 @@ void main() {
     );
   });
 
+  test('every kind ACP v2 names has a rendering, in the shapes its schema gives', () {
+    // Each `sessionUpdate` value of SessionUpdate in `@agentclientprotocol/sdk` schema/v2/schema.json, with its required fields.
+    const text = {'type': 'text', 'text': 'hi'};
+    final v2 = <Map<String, Object?>>[
+      {'sessionUpdate': 'user_message_chunk', 'messageId': 'm', 'content': text},
+      {'sessionUpdate': 'user_message', 'messageId': 'm'},
+      {'sessionUpdate': 'agent_message_chunk', 'messageId': 'm', 'content': text},
+      {'sessionUpdate': 'agent_message', 'messageId': 'm'},
+      {'sessionUpdate': 'agent_thought_chunk', 'messageId': 'm', 'content': text},
+      {'sessionUpdate': 'agent_thought', 'messageId': 'm'},
+      {'sessionUpdate': 'state_update', 'state': 'idle'},
+      {'sessionUpdate': 'tool_call_content_chunk', 'toolCallId': 't', 'content': {'type': 'content', 'content': text}},
+      {'sessionUpdate': 'tool_call_update', 'toolCallId': 't'},
+      {'sessionUpdate': 'terminal_update', 'terminalId': 'x'},
+      {'sessionUpdate': 'terminal_output_chunk', 'terminalId': 'x', 'data': 'aGk='},
+      {'sessionUpdate': 'plan_update', 'plan': {'type': 'items', 'planId': 'p', 'entries': <Object>[]}},
+      {'sessionUpdate': 'available_commands_update', 'availableCommands': <Object>[]},
+      {'sessionUpdate': 'config_option_update', 'configOptions': <Object>[]},
+      {'sessionUpdate': 'session_info_update'},
+      {'sessionUpdate': 'usage_update', 'used': 1, 'size': 2},
+      {'sessionUpdate': 'notice', 'severity': 'info', 'title': 'hi'},
+      {'sessionUpdate': 'compaction_update', 'compactionId': 'c', 'status': 'in_progress'},
+      {'sessionUpdate': 'compaction_summary_chunk', 'compactionId': 'c', 'content': text},
+    ];
+    for (final raw in v2) {
+      expect(renderingOf(_update(raw)), isNot(Rendering.unshown), reason: '${raw['sessionUpdate']}');
+    }
+    expect(renderingOf(_update(v2[7])), Rendering.toolCard);
+    expect(renderingOf(_update(v2[11])), Rendering.plan);
+    expect(renderingOf(_update(v2[16])), Rendering.notice);
+    expect(renderingOf(_update(v2[17])), Rendering.compaction);
+    expect(renderingOf(_update(v2[18])), Rendering.compaction);
+    expect(
+      renderingOf(_update({'sessionUpdate': 'user_message_chunk', 'content': {'type': 'resource', 'resource': {'uri': 'attachment:a.txt', 'text': 'a'}}})),
+      Rendering.message,
+      reason: 'a replayed attachment is said in the conversation',
+    );
+  });
+
   test('each distinct update is written once, and counted every time', () {
     final lines = <String>[];
     final recorder = UpdateRecorder(write: lines.add);
