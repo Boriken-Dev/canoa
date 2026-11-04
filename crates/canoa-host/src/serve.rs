@@ -26,6 +26,7 @@ use coqui_web::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
 use crate::config::{Config, Entry, EntryKind, ImportSearch, Origin};
+use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 
@@ -162,6 +163,8 @@ enum Run {
         program: OsString,
         args: Vec<OsString>,
         scope: Scope,
+        /// The profiles a client may choose among; `None` starts the program bare.
+        offer: Option<Arc<Offer>>,
     },
     Provider {
         program: OsString,
@@ -394,12 +397,21 @@ impl Serving {
                 .with_origins(config.origins.clone());
             let url = url_of(bound);
             let (kind, run) = match &entry.kind {
-                EntryKind::Agent { program, args } => (
+                EntryKind::Agent {
+                    program,
+                    args,
+                    profiles,
+                } => (
                     "agent",
                     Run::Agent {
                         program: program.clone(),
                         args: args.clone(),
                         scope: Scope::new(entry.working_roots.clone()),
+                        offer: hosted::offer(
+                            profiles,
+                            &config.profiles,
+                            options.provider_program.as_os_str().to_owned(),
+                        ),
                     },
                 ),
                 EntryKind::Provider {
@@ -455,6 +467,7 @@ impl Serving {
                         program: options.provider_program.as_os_str().to_owned(),
                         args: tool_args(&entry.name, spec),
                         scope: Scope::new(entry.working_roots.clone()),
+                        offer: None,
                     },
                 ),
             };
@@ -634,38 +647,105 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         }
         Ok(Some(first)) => {
             tracing::info!(entry = served.name, %peer, "proven");
-            give_agent(shared, served, &Prefilled::new(&sealed, first), &peer);
+            let copy = first.clone();
+            give_agent(
+                shared,
+                served,
+                &Prefilled::new(&sealed, first),
+                &copy,
+                &peer,
+            );
         }
         Ok(None) | Err(_) => {}
     }
     sealed.close();
 }
 
-fn give_agent<C: Channel>(shared: &Shared, served: &Served, channel: &C, peer: &PeerId) {
-    let (program, args, scope) = match &served.run {
+fn give_agent<C: Channel>(
+    shared: &Shared,
+    served: &Served,
+    channel: &C,
+    first: &[u8],
+    peer: &PeerId,
+) {
+    let (program, args, scope, offer) = match &served.run {
         Run::Agent {
             program,
             args,
             scope,
-        } => (program, args, scope),
+            offer,
+        } => (program, args, scope, offer),
         Run::Provider {
             program,
             args,
             line,
         } => return give_provider(shared, served, channel, peer, (program, args), line),
     };
-    // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
-    let (key, agent) = match shared.start(program, args) {
+    let Some(offer) = offer else {
+        // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
+        let (key, agent) = match shared.start(program, args) {
+            Ok(Some(started)) => started,
+            Ok(None) => return,
+            Err(error) => {
+                return tracing::warn!(entry = served.name, "the agent could not start: {error}");
+            }
+        };
+        let end = relay(&Scoped::new(channel, scope), &agent);
+        tracing::info!(entry = served.name, %peer, "left: {end:?}");
+        shared.forget(key);
+        let _ = agent.stop();
+        return;
+    };
+    let refuse = |answer: Option<Vec<u8>>, log: &str| {
+        if let Some(answer) = answer {
+            let _ = channel.send(&answer);
+        }
+        tracing::info!(entry = served.name, %peer, "{log}");
+    };
+    let index = match hosted::choose(offer, first) {
+        Ok(index) => index,
+        Err(refusal) => return refuse(refusal.answer, refusal.log),
+    };
+    let lookup = |name: &str| std::env::var(name).ok();
+    let connection = match Connection::prepare(offer, index, &served.name, &lookup) {
+        Ok(connection) => connection,
+        Err(why) => {
+            let id = serde_json::from_slice::<serde_json::Value>(first)
+                .ok()
+                .and_then(|message| message.get("id").cloned());
+            let answer = id.map(|id| {
+                serde_json::to_vec(&serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {
+                    "code": -32603, "message": "the host's profile for this entry cannot be applied",
+                }}))
+                .unwrap_or_default()
+            });
+            return refuse(
+                answer,
+                &format!("the profile could not be applied, so no agent started: {why}"),
+            );
+        }
+    };
+    // The agent's environment reaches it on `launch`'s first line, never on a command line.
+    let mut launched = vec![
+        OsString::from("launch"),
+        OsString::from("--"),
+        program.clone(),
+    ];
+    launched.extend(args.iter().cloned());
+    let (key, agent) = match shared.start(&offer.launcher, &launched) {
         Ok(Some(started)) => started,
         Ok(None) => return,
         Err(error) => {
             return tracing::warn!(entry = served.name, "the agent could not start: {error}");
         }
     };
-    let end = relay(&Scoped::new(channel, scope), &agent);
+    let hosted = Hosted::new(channel, scope, &connection);
+    let end = relay(&hosted, &agent);
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
     let _ = agent.stop();
+    // What was written for its sessions goes once the agent has.
+    drop(hosted);
 }
 
 /// Serves one connection with a provider process of its own, which [`Stopper::stop_agents`] ends like any agent.

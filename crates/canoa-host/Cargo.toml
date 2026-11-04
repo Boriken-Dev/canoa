@@ -64,6 +64,12 @@ crate-type = ["cdylib"]
 [[example]]
 name = "stdio_agent"
 
+[[example]]
+name = "profile_agent"
+
+[[example]]
+name = "mcp_server"
+
 [lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"

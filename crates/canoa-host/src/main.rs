@@ -126,6 +126,15 @@ enum Command {
         #[arg(long)]
         spec: String,
     },
+    /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
+    /// with profiles. The rest of standard input goes to the agent.
+    Launch {
+        /// The agent's program.
+        program: std::ffi::OsString,
+        /// Its arguments.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<std::ffi::OsString>,
+    },
 }
 
 /// Which proof this host runs, chosen here and never negotiated on a connection.
@@ -521,6 +530,13 @@ fn run(cli: Cli) -> Result<(), Failed> {
                 .map_err(|_| Failed::usage("--spec is not a tool entry of this version"))?;
             canoa_host::tool::serve_stdio(spec, &name).map_err(|error| match error {
                 canoa_host::tool::ToolError::Spec(_) => Failed::usage(error),
+                _ => Failed::run(error),
+            })
+        }
+        Command::Launch { program, args } => {
+            let error = canoa_host::profile::launch(&program, &args, canoa_host::serve::MAX_LINE);
+            Err(match error.kind() {
+                std::io::ErrorKind::InvalidData => Failed::usage(error),
                 _ => Failed::run(error),
             })
         }

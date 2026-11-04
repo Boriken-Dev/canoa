@@ -180,7 +180,7 @@ fn env_value(value: &Value) -> EnvValue {
     }
 }
 
-fn resolve_path(root: &str, relative: &str, windows: bool) -> String {
+pub(crate) fn resolve_path(root: &str, relative: &str, windows: bool) -> String {
     let separator = if windows { "\\" } else { "/" };
     format!(
         "{}{separator}{}",
@@ -564,7 +564,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
     Ok(layer)
 }
 
-fn granted(shared: &IndexMap<String, LayerId>, name: &str, windows: bool) -> bool {
+pub(crate) fn granted(shared: &IndexMap<String, LayerId>, name: &str, windows: bool) -> bool {
     shared
         .keys()
         .any(|shared| shared == name || windows && shared.eq_ignore_ascii_case(name))

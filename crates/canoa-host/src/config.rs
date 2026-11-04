@@ -1,5 +1,6 @@
 //! The `[host]` table of Canoa.cfg: what the host serves, and to whom. The other tables belong to the app and are not read.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -11,6 +12,7 @@ use coqui_peer_webcrypto::PeerId;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use crate::profile::{LayerKind, Profile};
 use crate::tool::ToolSpec;
 
 /// Connections an entry serves at once when the file does not say.
@@ -29,6 +31,23 @@ pub struct Config {
     pub origins: Vec<String>,
     /// The entries.
     pub entries: Vec<Entry>,
+    /// `[host.profiles]`, by name, in the file's order: what an agent entry may be launched with.
+    pub profiles: IndexMap<String, HostProfile>,
+}
+
+/// A profile of `[host.profiles]`: the host's own layer, the overlays below it, and the overlays' MCP servers it allows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HostProfile {
+    /// The profile document, read as the person's own layer: its relative paths are taken from `directory`.
+    pub profile: Profile,
+    /// AOS overlays the app installed in `overlays/` beside Canoa.cfg, by name, applied below the profile.
+    pub overlays: Vec<String>,
+    /// An overlay's MCP server name and the definition digest (`sha256:` and 64 hex digits) it may start at. No other
+    /// overlay server starts.
+    pub allow_mcp: BTreeMap<String, String>,
+    /// Canoa.cfg's directory, absolute.
+    pub directory: PathBuf,
 }
 
 /// One agent the host offers on an address of its own.
@@ -59,6 +78,8 @@ pub enum EntryKind {
         program: OsString,
         /// Its arguments.
         args: Vec<OsString>,
+        /// The `[host.profiles]` a client may choose among, the first when it names none; empty launches it bare.
+        profiles: Vec<String>,
     },
     /// A Guatiao `agent_provider`, from a library or a source, served through the ACP facade in a process of its own.
     Provider {
@@ -244,6 +265,8 @@ struct RawHost {
     providers: IndexMap<String, RawProvider>,
     #[serde(default)]
     tools: IndexMap<String, toml::Table>,
+    #[serde(default)]
+    profiles: IndexMap<String, toml::Table>,
 }
 
 /// The settings both tables share. serde does not hold `deny_unknown_fields` across `flatten`, so each table lists them.
@@ -260,6 +283,7 @@ struct RawAgent {
     program: String,
     #[serde(default)]
     args: Vec<String>,
+    profiles: Option<Vec<String>>,
     listen: Option<String>,
     #[serde(default)]
     working_roots: Vec<String>,
@@ -328,11 +352,29 @@ impl Config {
                 });
             }
         }
+        let directory = directory_of(base);
+        let mut profiles = IndexMap::new();
+        for (name, table) in host.profiles {
+            let profile = profile_of(&name, table, &directory)?;
+            profiles.insert(name, profile);
+        }
         let mut entries = Vec::new();
         for (name, agent) in host.agents {
             check_name(&name)?;
             if agent.program.is_empty() {
                 return Err(invalid(&name, "program is empty"));
+            }
+            let offered = agent.profiles.unwrap_or_default();
+            for (index, profile) in offered.iter().enumerate() {
+                if !profiles.contains_key(profile) {
+                    return Err(invalid(
+                        &name,
+                        "profiles names a profile [host.profiles] does not hold",
+                    ));
+                }
+                if offered[..index].contains(profile) {
+                    return Err(invalid(&name, "profiles names a profile twice"));
+                }
             }
             let common = RawCommon {
                 listen: agent.listen,
@@ -343,10 +385,10 @@ impl Config {
             let kind = EntryKind::Agent {
                 program: OsString::from(agent.program),
                 args: agent.args.into_iter().map(OsString::from).collect(),
+                profiles: offered,
             };
             entries.push(entry(name, kind, common)?);
         }
-        let directory = directory_of(base);
         for (name, provider) in host.providers {
             check_name(&name)?;
             if provider.provider.is_empty() {
@@ -430,6 +472,7 @@ impl Config {
         Ok(Self {
             origins: host.origins,
             entries,
+            profiles,
         })
     }
 
@@ -462,6 +505,81 @@ fn settings_of(name: &str, table: toml::Table) -> Result<Settings, ConfigError> 
             name,
             "a setting holds a date, or a float that is not a number, which a provider cannot be given",
         )
+    })
+}
+
+/// A `[host.profiles]` table: `overlays` and `allow_mcp` taken out, the rest a profile of the person's own layer. Errors
+/// name the profile and a setting, never a value.
+fn profile_of(
+    name: &str,
+    mut table: toml::Table,
+    directory: &Path,
+) -> Result<HostProfile, ConfigError> {
+    let refused = |what: String| ConfigError::Invalid {
+        entry: None,
+        what: format!("profile {name}: {what}"),
+    };
+    if check_name(name).is_err() {
+        return Err(ConfigError::Invalid {
+            entry: None,
+            what: format!(
+                "a profile name has 1 to {MAX_NAME} letters, digits, hyphens or underscores"
+            ),
+        });
+    }
+    let overlays = match table.remove("overlays") {
+        None => Vec::new(),
+        Some(toml::Value::Array(items)) => items
+            .into_iter()
+            .map(|item| match item {
+                toml::Value::String(text) if crate::aos::valid_overlay_name(&text) => Ok(text),
+                _ => Err(refused(
+                    "overlays holds a name that is not an overlay's".to_owned(),
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(_) => return Err(refused("overlays has the wrong type".to_owned())),
+    };
+    let mut allow_mcp = BTreeMap::new();
+    match table.remove("allow_mcp") {
+        None => {}
+        Some(toml::Value::Table(allowed)) => {
+            for (server, digest) in allowed {
+                let digest = match digest {
+                    toml::Value::String(text) if is_digest(&text) => text,
+                    _ => {
+                        return Err(refused(format!(
+                            "allow_mcp.{server} is not sha256: and 64 hex digits"
+                        )));
+                    }
+                };
+                if check_name(&server).is_err() {
+                    return Err(refused(
+                        "allow_mcp names a server that is not a server's name".to_owned(),
+                    ));
+                }
+                allow_mcp.insert(server, digest);
+            }
+        }
+        Some(_) => return Err(refused("allow_mcp has the wrong type".to_owned())),
+    }
+    let profile =
+        Profile::from_table(table, LayerKind::User).map_err(|error| refused(error.to_string()))?;
+    Ok(HostProfile {
+        profile,
+        overlays,
+        allow_mcp,
+        directory: directory.to_owned(),
+    })
+}
+
+/// `sha256:` and 64 lower-case hex digits.
+fn is_digest(text: &str) -> bool {
+    text.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
     })
 }
 

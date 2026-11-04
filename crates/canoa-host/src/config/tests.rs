@@ -54,6 +54,7 @@ listen = "127.0.0.1:7801"
         EntryKind::Agent {
             program: "node".into(),
             args: vec!["agent.mjs".into()],
+            profiles: Vec::new(),
         }
     );
     let EntryKind::Provider {

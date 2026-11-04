@@ -1185,7 +1185,7 @@ fn env_map(map: &IndexMap<String, EnvValue>) -> Value {
     )
 }
 
-fn mcp_json(server: &McpServer) -> Value {
+pub(crate) fn mcp_json(server: &McpServer) -> Value {
     match server {
         McpServer::Stdio { command, args, env } => {
             json!({"type": "stdio", "command": command, "args": args, "env": env_map(env)})
@@ -1389,8 +1389,12 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
+pub(crate) mod hosted;
+mod launch;
 mod overlay;
 
+pub use hosted::PROFILE_META;
+pub use launch::launch;
 pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
 
 #[cfg(test)]
