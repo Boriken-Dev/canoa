@@ -76,33 +76,6 @@ void main() {
   });
 
   group('agents on this computer', () {
-    testWidgets('only what is installed is offered, and running one closes the dialog', (tester) async {
-      AgentCommand? ran;
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () => showCanoaConnectDialog(
-          context,
-          (_) async {},
-          onRunLocalAgent: (command, {required cwd, required title, required worktree}) async => ran = command,
-          localAgents: const [
-            AgentCommand(label: 'Here', program: 'here'),
-            AgentCommand(label: 'Missing', program: 'missing'),
-          ],
-          checkInstalled: (command) async => command.label == 'Here',
-        ),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
-      await tester.pump();
-      await tester.pump();
-      expect(find.text('Run Here'), findsOneWidget);
-      expect(find.text('Run Missing'), findsNothing);
-      await tester.tap(find.text('Run Here'));
-      await tester.pump();
-      await tester.pump();
-      expect(ran?.label, 'Here');
-      expect(find.text('Run Here'), findsNothing);
-    });
-
     testWidgets('a permission waits in the conversation until the person answers', (tester) async {
       final store = SessionStore(includePreview: false);
       final session = store.addProviderSession(title: 'T', agent: 'Agent', peerId: 'local:a', remoteSessionId: 'r');
@@ -138,36 +111,6 @@ void main() {
       expect(parseCommand('   '), isNull);
       expect(parseCommand('"open quote'), isNull);
       expect(parseCommand('""'), isNull);
-    });
-
-    testWidgets('typed in the dialog runs, and a bad one says so', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(900, 1200));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      AgentCommand? ran;
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () => showCanoaConnectDialog(
-          context,
-          (_) async {},
-          onRunLocalAgent: (command, {required cwd, required title, required worktree}) async => ran = command,
-          localAgents: const [],
-          checkInstalled: (_) async => true,
-        ),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
-      await tester.pump();
-      await tester.pump();
-      final field = find.widgetWithText(TextField, 'Or run any ACP agent, by its command');
-      await tester.enterText(field, '"oops');
-      await tester.tap(find.byTooltip('Run this command'));
-      await tester.pump();
-      expect(find.textContaining('check its quotes'), findsOneWidget);
-      expect(ran, isNull);
-      await tester.enterText(field, 'my-agent --acp');
-      await tester.tap(find.byTooltip('Run this command'));
-      await tester.pump();
-      await tester.pump();
-      expect(ran?.args, ['--acp']);
     });
   });
 

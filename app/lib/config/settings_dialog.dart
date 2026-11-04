@@ -1,12 +1,26 @@
 import 'package:flutter/material.dart';
 import 'canoa_config.dart';
+import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
+import '../sources/sources.dart';
 import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles, this.agents = const [],
-      this.onAllowNotifications});
+      this.onAllowNotifications, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
   final CanoaConfig config;
+
+  /// The built-in sources, which can be hidden from a new session but not changed.
+  final List<AgentCommand> presets;
+
+  /// The agent entries of the canoa-host this app runs, which Hosting changes.
+  final List<String> hosted;
+
+  /// What a source needs and whether it is here.
+  final Future<SourceCheck> Function(AgentSource source)? checkSource;
+
+  /// Whether the dialog opens with its sources shown.
+  final bool openSources;
 
   /// The agents this app offers, by label, each of which full access can be turned on for.
   final List<String> agents;
@@ -27,6 +41,116 @@ class SettingsDialog extends StatefulWidget {
 }
 class SettingsDialogState extends State<SettingsDialog> {
   late CanoaConfig config = widget.config;
+  final _sourceName = TextEditingController();
+  final _sourceCommand = TextEditingController();
+  String? _sourceProblem;
+  final Map<AgentSource, Future<SourceCheck>> _checks = {};
+
+  @override
+  void dispose() {
+    _sourceName.dispose();
+    _sourceCommand.dispose();
+    super.dispose();
+  }
+
+  Future<SourceCheck> _check(AgentSource source) =>
+      _checks[source] ??= widget.checkSource?.call(source) ?? Future.value(const SourceCheck());
+
+  /// A source's state in a line: where its programs are, or what it needs and how to put that right.
+  Widget _state(AgentSource source) => FutureBuilder<SourceCheck>(
+    future: _check(source),
+    builder: (context, snapshot) {
+      final check = snapshot.data;
+      if (check == null) return const Text('Looking for what it needs…');
+      final problem = check.describe(source.label, needs: source.command == null ? const [] : commandNeeds(source.command!));
+      if (problem != null) return Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error));
+      return Text(check.found.isEmpty ? 'Ready' : check.found.entries.map((found) => '${found.key}: ${found.value}').join('\n'));
+    },
+  );
+
+  void _addSource() {
+    final name = _sourceName.text.trim();
+    final command = parseCommand(_sourceCommand.text);
+    final taken = {for (final preset in widget.presets) preset.label, for (final agent in config.agents) agent.label};
+    final problem = name.isEmpty
+        ? 'Name it.'
+        : taken.contains(name)
+        ? 'Another source is called $name.'
+        : command == null
+        ? 'That is not a command: check its quotes.'
+        : null;
+    if (problem != null) {
+      setState(() => _sourceProblem = problem);
+      return;
+    }
+    setState(() {
+      _sourceProblem = null;
+      config = config.copyWith(agents: [
+        ...config.agents,
+        AgentCommand(label: name, program: command!.program, args: command.args),
+      ]);
+      _sourceName.clear();
+      _sourceCommand.clear();
+    });
+  }
+
+  Widget _sources(BuildContext context) => ExpansionTile(
+    key: const Key('settings-sources'),
+    initiallyExpanded: widget.openSources,
+    title: const Text('Sources'),
+    subtitle: const Text('Where a new session\'s agent comes from'),
+    expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final preset in widget.presets)
+        SwitchListTile(
+          key: Key('source-offered ${preset.label}'),
+          title: Text(preset.label),
+          subtitle: _state(AgentSource.preset(preset)),
+          value: !config.hiddenSources.contains(preset.label),
+          onChanged: (on) => setState(() {
+            final hidden = {...config.hiddenSources};
+            on ? hidden.remove(preset.label) : hidden.add(preset.label);
+            config = config.copyWith(hiddenSources: hidden);
+          }),
+        ),
+      for (final agent in config.agents)
+        ListTile(
+          key: Key('source ${agent.label}'),
+          title: Text(agent.label),
+          subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text([agent.program, ...agent.args].join(' '), style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12)),
+            _state(AgentSource.command(agent)),
+          ]),
+          trailing: IconButton(
+            tooltip: 'Remove ${agent.label}',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => setState(() =>
+                config = config.copyWith(agents: [for (final each in config.agents) if (each != agent) each])),
+          ),
+        ),
+      for (final name in widget.hosted)
+        ListTile(title: Text(name), subtitle: const Text('Served by canoa-host: Hosting changes it')),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          TextField(key: const Key('source-name'), controller: _sourceName,
+              decoration: const InputDecoration(labelText: 'Name of a source to add')),
+          TextField(key: const Key('source-command'), controller: _sourceCommand,
+              decoration: const InputDecoration(labelText: 'Its command, an ACP agent on standard streams'),
+              onSubmitted: (_) => _addSource()),
+          if (_sourceProblem != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(_sourceProblem!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(key: const Key('source-add'), onPressed: _addSource, child: const Text('Add')),
+          ),
+        ]),
+      ),
+    ],
+  );
 
   LedgerSettings _sessions({int? keep, bool? keepText}) => LedgerSettings(
     keep: keep ?? config.sessions.keep,
@@ -146,6 +270,7 @@ class SettingsDialogState extends State<SettingsDialog> {
               ),
           ],
         ),
+        if (widget.presets.isNotEmpty || config.agents.isNotEmpty || widget.hosted.isNotEmpty) _sources(context),
         if (widget.agents.isNotEmpty || config.fullAccess.isNotEmpty)
           ExpansionTile(
             key: const Key('settings-full-access'),

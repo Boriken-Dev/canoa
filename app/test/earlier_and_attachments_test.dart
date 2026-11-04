@@ -245,9 +245,15 @@ void main() {
       expect((lastPrompt(agent)['params']['prompt'] as List<dynamic>).length, 1);
     });
 
-    test('an agent that takes nothing has no way to attach', () async {
-      final (store, session, _, _) = await _open(with_: _Agent(images: false, files: false));
-      expect(store.canAttach(session), isFalse);
+    test('an agent that takes nothing is given a file or folder on this computer by a link, and nothing else', () async {
+      final (store, session, agent, _) = await _open(with_: _Agent(images: false, files: false));
+      expect(store.canAttach(session), isTrue);
+      expect(store.addAttachment(session, 'notes.txt', utf8.encode('hello')), contains('does not take files'));
+      expect(store.addFile(session, 'big.log', '/w/big.log', 10), isNull);
+      expect(store.addFolder(session, 'w', '/w'), isNull);
+      await store.sendText('look');
+      final prompt = lastPrompt(agent)['params']['prompt'] as List<dynamic>;
+      expect(prompt.map((block) => block['type']), ['text', 'resource_link', 'resource_link']);
     });
   });
 }

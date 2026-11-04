@@ -162,7 +162,10 @@ void main() {
 
     testWidgets('turned on for a conversation, after saying what it does, answers allow once with no card', (tester) async {
       final (agent, session, store) = await _shown(tester);
-      await tester.tap(find.byTooltip('Full access…'));
+      // Full access is beside the agent's mode, under the message.
+      await tester.tap(find.byKey(const Key('option-mode')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Full access…'));
       await tester.pumpAndSettle();
       expect(find.textContaining('without asking you'), findsOneWidget);
       await tester.tap(find.text('Turn on full access'));

@@ -15,6 +15,7 @@ import 'acp/agent_commands.dart';
 import 'acp/client.dart';
 import 'acp/local_agent.dart';
 import 'package:coqui_acp/page.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -23,6 +24,10 @@ import 'package:flutter/services.dart' show KeyDownEvent, KeyRepeatEvent, Logica
 
 import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/changes.dart';
+import 'chat/clipboard.dart';
+import 'chat/composer.dart';
+import 'chat/new_session_view.dart';
+import 'chat/session_options.dart' show OptionRole;
 import 'chat/palette.dart';
 import 'chat/queue_panel.dart';
 import 'chat/question_card.dart';
@@ -35,12 +40,16 @@ import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
 import 'profile/apply.dart';
 import 'profile/launch.dart';
+import 'profile/profile.dart' show OverlaySource;
 import 'profile/profile_home.dart';
 import 'profile/profile_home_platform.dart';
 import 'profile/profile_layers.dart';
 import 'profile/profile_start_dialog.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
+import 'sources/sources.dart';
+import 'drafts/draft_backend.dart';
+import 'drafts/draft_store.dart';
 import 'theme/canoa_mark.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
@@ -55,6 +64,7 @@ Future<void> main() async {
   // Beside Canoa.cfg on a desktop, in this origin's IndexedDB on the web.
   final ledger = SessionLedger(platformLedgerBackend(configPath: desktopConfigPath()), settings: config.sessions);
   await ledger.load();
+  final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
   final shell = createDesktopShell();
   final settingsSignal = ValueNotifier<int>(0);
   final hostingSignal = ValueNotifier<int>(0);
@@ -66,7 +76,7 @@ Future<void> main() async {
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
-    host: host, hostingSignal: hostingSignal, ledger: ledger, notifier: platformNotifier(),
+    host: host, hostingSignal: hostingSignal, ledger: ledger, notifier: platformNotifier(), drafts: drafts,
   ));
   await host?.apply(configPath: desktopConfigPath(), hasEntries: config.hostEntries.isNotEmpty);
 }
@@ -77,8 +87,37 @@ class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
-    this.configPath, this.writeConfig, this.ledger, this.notifier,
+    this.configPath, this.writeConfig, this.ledger, this.notifier, this.drafts,
+    this.checkSource, this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard, this.startAgent,
+    this.worktrees,
   });
+
+  /// Where sessions not yet started are kept between runs, for a store this app makes.
+  final DraftKeeper? drafts;
+
+  /// What a source needs and whether it is here; by default its programs are looked for on PATH.
+  @visibleForTesting
+  final Future<SourceCheck> Function(AgentSource source)? checkSource;
+
+  /// The folder, file and clipboard services the composer uses, each the platform's by default.
+  @visibleForTesting
+  final bool Function(String folder)? isGitRepository;
+  @visibleForTesting
+  final Future<String?> Function()? pickFolder;
+  @visibleForTesting
+  final Future<List<XFile>> Function()? pickFiles;
+  @visibleForTesting
+  final Future<int?> Function(String path)? statFile;
+  @visibleForTesting
+  final ClipboardReader? clipboard;
+
+  /// Starts an agent on this computer; by default as a child of this app.
+  @visibleForTesting
+  final StartAgent? startAgent;
+
+  /// Makes worktrees for agents on this computer; by default by git.
+  @visibleForTesting
+  final Worktrees? Function()? worktrees;
 
   final SessionStore? store;
 
@@ -156,7 +195,7 @@ class _CanoaAppState extends State<CanoaApp> {
     return null;
   }
 
-  Future<void> _showSettings() async {
+  Future<void> _showSettings({bool sources = false}) async {
     final shell = widget.shell;
     final above = _navigator.currentContext;
     if (above == null || _settingsOpen) return;
@@ -169,6 +208,14 @@ class _CanoaAppState extends State<CanoaApp> {
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
           onProfiles: _showProfiles, agents: [for (final agent in [...agentPresets, ...config.agents]) agent.label],
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
+          presets: canRunLocalAgents ? agentPresets : const [],
+          hosted: [
+            if (widget.host != null)
+              for (final entry in config.hostEntries)
+                if (entry.kind == 'agent') entry.name,
+          ],
+          checkSource: _check,
+          openSources: sources,
         ),
       );
     } finally {
@@ -179,6 +226,8 @@ class _CanoaAppState extends State<CanoaApp> {
     // from Profiles is pinned in [overlays], while Settings was open.
     final changed = fromDialog.withHost(config.host).withProfilesOf(config);
     setState(() => config = changed);
+    store.embedLimit = changed.embedLimit;
+    if (_checked) unawaited(_checkSources());
     store.ledger?.configure(changed.sessions);
     for (final agent in {...store.fullAccessAgents, ...changed.fullAccess}) {
       store.setAgentFullAccess(agent, changed.fullAccess.contains(agent));
@@ -311,16 +360,21 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Whether Canoa.cfg sets any profile, so an agent given none of it says so.
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
-  /// The profile [agent] starts with in [cwd], once the person has seen it and chosen its MCP servers; empty where there
-  /// is none or no profile home. Throws when the person does not start it, or its environment cannot be built.
-  Future<(PreparedProfile, Set<String>, List<LayerNote>)> _prepareProfile(String agent, String? cwd, ProfileHome? home) async {
+  /// The profile [agent] starts with in [cwd], from [overlays] (by default all of Canoa.cfg's), once the person has seen it and
+  /// chosen its MCP servers; empty where there is none or no profile home. The dialog is shown only for a profile with more
+  /// than a model, effort or mode, which are chosen beside Send. Throws when the person does not start it, or its environment
+  /// cannot be built.
+  Future<(PreparedProfile, Set<String>, List<LayerNote>)> _prepareProfile(String agent, String? cwd, ProfileHome? home,
+      {Map<String, OverlaySource>? overlays}) async {
     if (home == null) return (PreparedProfile.empty, const <String>{}, const <LayerNote>[]);
     final layers = await profileLayers(
-      overlays: config.overlays, user: config.profile, agents: config.agentProfiles, agent: agent,
+      overlays: overlays ?? config.overlays, user: config.profile, agents: config.agentProfiles, agent: agent,
       home: home, workingDirectory: cwd, iconLimits: config.store.iconLimits,
     );
     final prepared = await prepareProfile(layers, home: home, lookup: environmentVariable, findProgram: findProgram);
-    if (prepared.isEmpty) return (prepared, const <String>{}, layers.notes);
+    final approve = prepared.environment.isNotEmpty || prepared.contexts.isNotEmpty || prepared.skills.isNotEmpty ||
+        prepared.mcp.isNotEmpty || prepared.problems.isNotEmpty;
+    if (!approve) return (prepared, const <String>{}, layers.notes);
     final above = _navigator.currentContext;
     if (above == null || !above.mounted) throw StateError('Canoa UI closed');
     final choice = await showDialog<ProfileStartChoice>(
@@ -330,7 +384,7 @@ class _CanoaAppState extends State<CanoaApp> {
         remembered: config.agentMcp[agent] ?? const {}, notes: layers.notes,
       ),
     );
-    if (choice == null) throw StateError('Not started: its profile was not accepted');
+    if (choice == null) throw StateError('its profile was not accepted');
     if (choice.remember) {
       final changed = config.withAgentMcp(agent, {
         for (final server in prepared.mcp)
@@ -437,54 +491,244 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// An agent as a child of this app, with its profile. Its permission requests go to the person, in the conversation. With
-  /// [worktree], it works in a new worktree of the repository at [cwd], on a branch of its own.
-  Future<void> _runLocalAgent(AgentCommand command, {required String cwd, required String title, required bool worktree}) async {
-    // The dialog's `/` is a remote agent's default. For one on this computer it would be the root of the filesystem.
-    var where = cwd.isEmpty || cwd == '/' ? defaultWorkingDirectory() : cwd;
-    final worktrees = worktree ? localWorktrees() : null;
-    if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
-    final made = worktrees == null
-        ? null
-        : await worktrees.create(where ?? cwd, worktreeBranch(title.isEmpty ? command.label : title));
-    if (made != null) where = made.path;
+  /// The sources Settings has: the presets it does not hide, Canoa.cfg's `[agents.NAME]` commands, and the agent entries of
+  /// the canoa-host this app runs.
+  List<AgentSource> get _sources => [
+    for (final preset in agentPresets)
+      if (!config.hiddenSources.contains(preset.label)) AgentSource.preset(preset),
+    for (final command in config.agents) AgentSource.command(command),
+    if (widget.host != null)
+      for (final entry in config.hostEntries)
+        if (entry.kind == 'agent') AgentSource.hosted(entry.name),
+  ];
+
+  /// What each source needs and whether it is here, as last checked.
+  Map<AgentSource, SourceCheck> _checks = const {};
+
+  Future<SourceCheck> _check(AgentSource source) async {
+    if (widget.checkSource case final check?) return check(source);
+    if (source.command case final command?) return checkCommand(command, findProgram);
+    final host = widget.host;
+    final serving = host?.listening.any((listening) => listening.name == source.hostEntry) ?? false;
+    return serving
+        ? const SourceCheck()
+        : SourceCheck(problem: 'canoa-host is not serving ${source.label} now: open Hosting to see why.');
+  }
+
+  /// Whether the sources have been looked for: only once a new session or Settings needs them, since each runs a lookup.
+  bool _checked = false;
+
+  Future<void> _checkSources() async {
+    _checked = true;
+    final sources = _sources;
+    final checks = {for (final source in sources) source: await _check(source)};
+    if (mounted) setState(() => _checks = checks);
+  }
+
+  /// The source and folder chosen last, which a new session starts with.
+  AgentSource? _lastSource;
+  String? _lastFolder;
+
+  void _noteLast() {
+    final session = store.selected;
+    if (session != null && session.isDraft && !_checked) unawaited(_checkSources());
+    if (session == null || session.source == null) return;
+    _lastSource = session.source;
+    if (session.isDraft && session.cwd != null) _lastFolder = session.cwd;
+    if (session.isDraft) _hint(session);
+  }
+
+  /// Folders sessions worked in, the last chosen first: a worktree's stands for its repository.
+  List<String> get _recentFolders => {
+    ?_lastFolder,
+    for (final session in store.sessions)
+      if (session.source != null && session.cwd != null) session.worktree?.repo ?? session.cwd!,
+    for (final entry in store.ledger?.entries ?? const <LedgerEntry>[])
+      if (entry.place == SessionPlace.local || entry.place == SessionPlace.host)
+        ?(entry.worktree?.repo ?? entry.cwd),
+  }.take(8).toList();
+
+  /// A new session with nothing started, from the source and folder chosen last; one already waiting untouched is shown
+  /// instead of another.
+  void _newSession() {
+    if (!canRunLocalAgents && widget.host == null) {
+      store.createPreviewSession();
+      return;
+    }
+    for (final session in store.sessions) {
+      if (session.status == SessionStatus.draft && session.messages.isEmpty && session.draftText.trim().isEmpty &&
+          session.attachments.isEmpty) {
+        store.select(session.id);
+        return;
+      }
+    }
+    if (!_checked) unawaited(_checkSources());
+    final sources = _sources;
+    final source = sources.contains(_lastSource)
+        ? _lastSource
+        : sources.where((source) => _checks[source]?.ready ?? false).firstOrNull ?? sources.firstOrNull;
+    final draft = store.createDraft(source: source, cwd: _lastFolder ?? _recentFolders.firstOrNull ?? defaultWorkingDirectory());
+    _hint(draft);
+  }
+
+  /// The draft and source each draft's profile defaults were last worked out for.
+  final Map<String, AgentSource?> _hinted = {};
+
+  /// Puts the profile's model, effort and mode as [draft]'s defaults, where it has them.
+  void _hint(ChatSession draft) {
+    final source = draft.source;
+    if (_hinted.containsKey(draft.id) && _hinted[draft.id] == source) return;
+    _hinted[draft.id] = source;
+    if (source == null) return;
+    // A hosted agent is given none of the profile, so its defaults are only the person's last choices.
+    if (source.kind == SourceKind.hosted) {
+      store.defaultChoices(draft);
+      return;
+    }
+    unawaited(() async {
+      try {
+        final layers = await profileLayers(
+          overlays: _overlaysFor(draft), user: config.profile, agents: config.agentProfiles, agent: source.label,
+          home: platformProfileHome(configPath: _configPath), workingDirectory: draft.cwd, iconLimits: config.store.iconLimits,
+        );
+        // The person may have chosen another source meanwhile, whose own defaults are on their way.
+        if (draft.source != source) return;
+        final effective = layers.effective;
+        store.defaultChoices(draft, hints: {
+          if (effective.model case final model?) OptionRole.model: model.value,
+          if (effective.effort case final effort?) OptionRole.effort: effort.value,
+          if (effective.mode case final mode?) OptionRole.mode: mode.value,
+        });
+      } on Object catch (error) {
+        debugPrint('Canoa: no profile defaults for ${source.label}: $error');
+        if (draft.source == source) store.defaultChoices(draft);
+      }
+    }());
+  }
+
+  /// Canoa.cfg's overlays that [session] starts with.
+  Map<String, OverlaySource> _overlaysFor(ChatSession session) {
+    final chosen = session.overlays;
+    return chosen == null
+        ? config.overlays
+        : {for (final MapEntry(:key, :value) in config.overlays.entries) if (chosen.contains(key)) key: value};
+  }
+
+  /// Starts [draft]'s agent on its first message: the worktree is made, the profile prepared and shown where it has something
+  /// to approve, the agent started and its session opened, and the draft bound to it. Anything made is taken back when it
+  /// fails, and the draft stays as it was.
+  Future<void> _startDraft(ChatSession draft) async {
+    final source = draft.source;
+    if (source == null) throw StateError('Choose where its agent comes from first');
+    final check = _checks[source] ?? await _check(source);
+    if (!check.ready) {
+      throw StateError(check.describe(source.label, needs: source.command == null ? const [] : commandNeeds(source.command!))!);
+    }
+    final folder = draft.cwd == null || draft.cwd!.isEmpty ? defaultWorkingDirectory() : draft.cwd;
+    if (folder == null) throw StateError('Choose its folder first');
+    // Worktree shows, and applies, only for a folder in a git repository.
+    final worktree = draft.wantsWorktree && (widget.isGitRepository ?? inGitRepository)(folder);
+    final starting = _Starting();
+    _inFlight.add(starting);
     try {
-      final home = platformProfileHome(configPath: _configPath);
-      final (prepared, on, notes) = await _prepareProfile(command.label, where ?? cwd, home);
-      final started = await startProfiled(
-        command, cwd: where ?? cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
-        decider: store.askPermission, elicitor: store.askQuestion,
-      );
-      await _openLocal(command, started, prepared, notes, cwd: where ?? cwd, title: title, worktree: made);
-    } catch (_) {
-      if (made != null) await _unmake(worktrees!, made);
-      rethrow;
+      if (source.command case final command?) {
+        await _startLocal(draft, command, folder, worktree, starting);
+      } else {
+        await _startHosted(draft, source.hostEntry!, folder, worktree, starting);
+      }
+    } finally {
+      _inFlight.remove(starting);
     }
   }
 
-  Future<void> _openLocal(AgentCommand command, ProfiledAgent started, PreparedProfile prepared, List<LayerNote> notes,
-      {required String cwd, required String title, SessionWorktree? worktree}) async {
-    final client = started.client;
+  /// Starts under way, whose worktree and agent quitting takes back.
+  final Set<_Starting> _inFlight = {};
+  bool _quitting = false;
+
+  /// Quitting during a start: what it made so far goes, and it goes no further.
+  Future<void> _endStarts() async {
+    _quitting = true;
+    for (final starting in [..._inFlight]) {
+      await starting.client?.close();
+      if (starting.made case final made?) await _unmake(starting.worktrees!, made);
+    }
+  }
+
+  Future<void> _startLocal(ChatSession draft, AgentCommand command, String folder, bool worktree, _Starting starting) async {
+    final worktrees = worktree ? (widget.worktrees ?? localWorktrees)() : null;
+    if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
+    // Named after the source: a branch is kept in the session list, which keeps no words of a message.
+    final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(command.label));
+    starting
+      ..worktrees = worktrees
+      ..made = made;
+    if (_quitting) throw StateError('Canoa is quitting');
+    final where = made?.path ?? folder;
+    VerifiedAgent? client;
+    final ProfiledAgent started;
+    final PreparedProfile prepared;
+    final List<LayerNote> notes;
     try {
-      final opened = await client.openSession(cwd: cwd, setup: started.launch.setup);
-      if (!mounted) throw StateError('Canoa UI closed');
-      final local = store.addProviderSession(
-        title: title.isEmpty ? command.label : title,
-        agent: command.label,
-        cwd: cwd,
-        peerId: client.peerId,
-        remoteSessionId: opened.id,
-        worktree: worktree,
+      final home = platformProfileHome(configPath: _configPath);
+      final Set<String> on;
+      (prepared, on, notes) = await _prepareProfile(command.label, where, home, overlays: _overlaysFor(draft));
+      started = await startProfiled(
+        command, cwd: where, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
+        decider: store.askPermission, elicitor: store.askQuestion, start: widget.startAgent ?? startLocalAgent,
       );
-      local.agentNames = title.isEmpty;
-      store.applyOpened(local, opened);
-      store.attachVerifiedClient(local.id, client);
+      client = started.client;
+      starting.client = client;
+      if (_quitting) throw StateError('Canoa is quitting');
+      final opened = await client.openSession(cwd: where, setup: started.launch.setup);
+      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      store.bindDraft(draft, client, opened, cwd: where, worktree: made);
       _ownedClients.add(client);
-      await store.applyProfile(local, started.launch, prepared, harness: started.harness, notes: notes);
     } catch (_) {
-      await client.close();
+      await client?.close();
+      if (made != null) await _unmake(worktrees!, made);
       rethrow;
     }
+    await store.applyProfile(draft, started.launch, prepared, harness: started.harness, notes: notes);
+  }
+
+  Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
+    final host = widget.host;
+    final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
+    if (host == null || listening == null) throw StateError('canoa-host is not serving $name now: open Hosting to see why');
+    final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
+    if (method == null) throw StateError('canoa-host did not say which method it proves by');
+    final endpoint = Uri.parse(listening.url);
+    final worktrees = worktree
+        ? _worktrees(SessionPlace.host, endpoint: listening.url, peerId: listening.peer, method: method.id)
+        : null;
+    if (worktree && worktrees == null) throw StateError('Canoa cannot ask canoa-host for a worktree');
+    final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(name));
+    starting
+      ..worktrees = worktrees
+      ..made = made;
+    if (_quitting) throw StateError('Canoa is quitting');
+    final where = made?.path ?? folder;
+    VerifiedAgent? client;
+    try {
+      client = await connectBrowserAcp(
+        chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
+        pinnedPeerId: listening.peer, method: method,
+        timeout: Duration(seconds: config.connectTimeout),
+        decider: store.askPermission, elicitor: store.askQuestion,
+      );
+      starting.client = client;
+      if (_quitting) throw StateError('Canoa is quitting');
+      final opened = await client.openSession(cwd: where);
+      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      store.bindDraft(draft, client, opened, cwd: where, worktree: made, place: SessionPlace.host, endpoint: endpoint,
+          method: method.id);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client?.close();
+      if (made != null) await _unmake(worktrees!, made);
+      rethrow;
+    }
+    if (_hasProfiles) store.noteNoProfile(draft);
   }
 
   /// Opens a session from the list again: its agent is started or reached again, then asked to open it.
@@ -544,9 +788,20 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// The host's entries come and go as it starts and ends, and a hosted source can run only while it serves one.
+  int _serving = -1;
+  void _hostChanged() {
+    final serving = widget.host?.listening.length ?? 0;
+    if (serving == _serving) return;
+    _serving = serving;
+    if (_checked) unawaited(_checkSources());
+  }
+
   /// Ends every agent this app started, and the host with the agents it started.
   Future<void> _endAgents() async {
+    await _endStarts();
     await store.ledger?.flush();
+    await store.drafts?.flush();
     final ending = [for (final client in _ownedClients) client.close(), ?widget.host?.stop()];
     _ownedClients.clear();
     // Longer than the host has to end its agents.
@@ -620,7 +875,13 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
     store = widget.store ??
-        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, fullAccessAgents: config.fullAccess);
+        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, fullAccessAgents: config.fullAccess,
+            drafts: widget.drafts, embedLimit: config.embedLimit);
+    store.starter = _startDraft;
+    store.addListener(_noteLast);
+    widget.host?.addListener(_hostChanged);
+    unawaited(store.restoreDrafts((kind, label) =>
+        _sources.where((source) => source.kind.name == kind && source.label == label).firstOrNull));
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     _conversation.close = _closeSession;
@@ -644,6 +905,9 @@ class _CanoaAppState extends State<CanoaApp> {
     _contextTimer?.cancel();
     unawaited(_attention?.cancel());
     store.removeListener(_showWaiting);
+    store.removeListener(_noteLast);
+    if (identical(store.starter, _startDraft)) store.starter = null;
+    widget.host?.removeListener(_hostChanged);
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
     widget.shell?.beforeQuit = null;
@@ -653,6 +917,38 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     super.dispose();
   }
+
+  /// What the composer offers, from this app's sources, folders, files and clipboard.
+  ComposerKit get _kit => ComposerKit(
+    sources: _sources,
+    checks: _checks,
+    recentFolders: _recentFolders,
+    inGitRepository: widget.isGitRepository ?? inGitRepository,
+    pickFolder: widget.pickFolder ?? (canRunLocalAgents ? () => getDirectoryPath() : null),
+    pickFiles: widget.pickFiles ?? () => openFiles(),
+    statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
+    clipboard: widget.clipboard ?? const SystemClipboard(),
+    overlays: config.overlays.keys.toList(),
+    pasteAsFile: config.pasteAsFile,
+    onSourceSettings: () => unawaited(_showSettings(sources: true)),
+    onFullAccess: (session) async {
+      final above = _navigator.currentContext;
+      if (above != null && above.mounted && await confirmFullAccess(above, session)) store.setFullAccess(session, true);
+    },
+    onEndFullAccess: (session) {
+      if (session.fullAccess == FullAccess.agent) {
+        unawaited(_endAgentFullAccess(session.agent));
+      } else {
+        store.setFullAccess(session, false);
+      }
+    },
+    onProfile: (session) {
+      final above = _navigator.currentContext;
+      final report = session.profile;
+      if (above == null || report == null) return;
+      unawaited(showDialog<void>(context: above, builder: (_) => ProfileReportDialog(report: report)));
+    },
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -667,11 +963,11 @@ class _CanoaAppState extends State<CanoaApp> {
       home: AnimatedBuilder(
         animation: store,
         builder: (context, _) => _CanoaHome(
-          store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onRunLocalAgent: canRunLocalAgents ? _runLocalAgent : null, onSettings: _showSettings,
+          store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
           onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
-          agents: [...agentPresets, ...config.agents],
           onEndAgentFullAccess: _endAgentFullAccess,
           conversation: _conversation,
+          kit: _kit,
         ),
       ),
     );
@@ -680,16 +976,17 @@ class _CanoaAppState extends State<CanoaApp> {
 
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
-    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets, this.onHosting, this.onReopen, this.onEndAgentFullAccess, required this.conversation,
+    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
+    this.onHosting, this.onReopen, this.onEndAgentFullAccess, required this.conversation, this.kit = const ComposerKit(),
   });
-
-  final List<AgentCommand> agents;
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
   final UseBrowserAgents onUseBrowserAgents;
-  final RunLocalAgent? onRunLocalAgent;
+
+  /// Opens a new session's empty view.
+  final VoidCallback onNewSession;
+  final ComposerKit kit;
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
@@ -701,8 +998,6 @@ class _CanoaHome extends StatelessWidget {
     onConnect,
     browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
     onUseBrowserAgents: onUseBrowserAgents,
-    onRunLocalAgent: onRunLocalAgent,
-    localAgents: agents,
   ));
 
   /// The session [step] places from the one chosen, going round the list.
@@ -732,7 +1027,7 @@ class _CanoaHome extends StatelessWidget {
     return showDialog<void>(
       context: context,
       builder: (_) => CommandPalette(items: [
-        PaletteItem('New session', store.createPreviewSession, icon: Icons.add_comment_outlined),
+        PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
         PaletteItem('Connect to an agent', () => _connect(context), icon: Icons.link_rounded),
         if (session != null && conversation.showChanges != null && changesOf(session).isNotEmpty)
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
@@ -753,7 +1048,7 @@ class _CanoaHome extends StatelessWidget {
   /// The keyboard's shortcuts, wherever focus is in the window.
   Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
     chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
-    chord(LogicalKeyboardKey.keyN): store.createPreviewSession,
+    chord(LogicalKeyboardKey.keyN): onNewSession,
     for (final (index, key) in const [
       LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3,
       LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5, LogicalKeyboardKey.digit6,
@@ -787,7 +1082,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen, agents: agents)))
+            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen)))
             : null,
         body: SafeArea(
           child: Row(
@@ -795,7 +1090,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: context.look.railWidth,
-                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onRunLocalAgent: onRunLocalAgent, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen, agents: agents),
+                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen),
                 ),
               Expanded(
                 child: _Conversation(
@@ -804,6 +1099,7 @@ class _CanoaHome extends StatelessWidget {
                   narrow: narrow,
                   onEndAgentFullAccess: onEndAgentFullAccess,
                   handle: conversation,
+                  kit: kit,
                 ),
               ),
             ],
@@ -816,16 +1112,14 @@ class _CanoaHome extends StatelessWidget {
 
 class _SessionRail extends StatelessWidget {
   const _SessionRail({
-    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets, this.onHosting, this.onReopen,
+    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
+    this.onHosting, this.onReopen,
   });
-
-  final List<AgentCommand> agents;
 
   final SessionStore store;
   final Future<void> Function(ConnectTarget) onConnect;
   final UseBrowserAgents onUseBrowserAgents;
-  final RunLocalAgent? onRunLocalAgent;
+  final VoidCallback onNewSession;
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
@@ -869,15 +1163,13 @@ class _SessionRail extends StatelessWidget {
                     onConnect,
                     browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
                     onUseBrowserAgents: onUseBrowserAgents,
-                    onRunLocalAgent: onRunLocalAgent,
-                    localAgents: agents,
                   ),
                   icon: const Icon(Icons.link_rounded),
                 ),
                 IconButton(
                   tooltip: 'New session',
                   onPressed: () {
-                    store.createPreviewSession();
+                    onNewSession();
                     if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
                       Navigator.pop(context);
                     }
@@ -914,7 +1206,12 @@ class _SessionRail extends StatelessWidget {
                   subtitle: Text(
                     [
                       if (session.fullAccess != null) 'Full access',
-                      session.status == SessionStatus.preview ? 'Preview · offline' : session.status.name,
+                      switch (session.status) {
+                        SessionStatus.preview => 'Preview · offline',
+                        SessionStatus.draft => 'New',
+                        SessionStatus.connecting when session.isDraft => 'Starting',
+                        final status => status.name,
+                      },
                       if (session.worktree case final worktree?) worktree.branch,
                     ].join(' · '),
                     maxLines: 1,
@@ -944,6 +1241,13 @@ class _SessionRail extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// What a start under way has made so far, for quitting to take back.
+final class _Starting {
+  Worktrees? worktrees;
+  SessionWorktree? made;
+  VerifiedAgent? client;
 }
 
 /// What a session in the list has for the person: something waiting for their answer, a turn running, or a turn that ended
@@ -988,9 +1292,11 @@ final class _ConversationHandle {
 class _Conversation extends StatefulWidget {
   const _Conversation({
     super.key, required this.store, required this.narrow, this.onEndAgentFullAccess, required this.handle,
+    this.kit = const ComposerKit(),
   });
 
   final _ConversationHandle handle;
+  final ComposerKit kit;
 
   final SessionStore store;
   final bool narrow;
@@ -1018,12 +1324,27 @@ class _ConversationState extends State<_Conversation> {
         return KeyEventResult.handled;
       }
     }
-    return KeyEventResult.ignored;
+    return _composer.currentState?.onKey(node, event) ?? KeyEventResult.ignored;
   });
+
+  final _composer = GlobalKey<ComposerState>();
+
+  /// The conversation's own selection, which Ctrl+A fills and Ctrl+C copies.
+  final _transcript = GlobalKey<SelectableTranscriptState>();
+
+  /// A draft's composer text goes with it, across sessions shown and runs of the app.
+  void _keepText() {
+    final session = widget.store.selected;
+    if (session != null && session.isDraft) widget.store.keepDraftText(session, _input.text);
+  }
 
   @override
   void initState() {
     super.initState();
+    final session = widget.store.selected;
+    // A draft's text, or a first message not yet taken by its agent.
+    if (session != null && (session.isDraft || session.draftText.isNotEmpty)) _input.text = session.draftText;
+    _input.addListener(_keepText);
     widget.handle
       ..owner = this
       ..focusComposer = _composerFocus.requestFocus
@@ -1116,19 +1437,11 @@ class _ConversationState extends State<_Conversation> {
         ..showChanges = null
         ..insert = null;
     }
+    _input.removeListener(_keepText);
     _composerFocus.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
-  }
-
-  Future<void> _attach(ChatSession session) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final chosen = await openFiles();
-    for (final file in chosen) {
-      final problem = widget.store.addAttachment(session, file.name, await file.readAsBytes(), mimeType: file.mimeType);
-      if (problem != null) messenger.showSnackBar(SnackBar(content: Text(problem)));
-    }
   }
 
   Future<void> _showEarlier(ChatSession session) async {
@@ -1147,16 +1460,24 @@ class _ConversationState extends State<_Conversation> {
 
   void _send() {
     final text = _input.text;
-    final attached = widget.store.selected?.attachments.isNotEmpty ?? false;
+    final session = widget.store.selected;
+    final attached = session?.attachments.isNotEmpty ?? false;
     if (text.trim().isEmpty && !attached) return;
+    // A draft's first message stays in the composer until its agent has started and taken it, so a start that fails
+    // leaves it to send again.
+    final starting = session != null && session.isDraft;
     try {
-      _input.clear();
-      unawaited(widget.store.sendText(text).catchError((Object error) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Message not accepted: $error')),
-          );
-        }
+      if (!starting) _input.clear();
+      unawaited(widget.store.sendText(text).then((_) {
+        if (starting && mounted && _input.text == text) _input.clear();
+      }).catchError((Object error) {
+        if (!mounted) return;
+        // Not sent, so it is there to change and send again.
+        if (_input.text.isEmpty) _input.text = text;
+        final started = session?.remoteSessionId != null;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${starting && !started ? 'Not started' : 'Message not accepted'}: ${reasonOf(error)}')),
+        );
       }));
     } on StateError {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1167,15 +1488,29 @@ class _ConversationState extends State<_Conversation> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _toEnd());
   }
 
+  /// Under the title: the agent, and once a session made here has started, its folder and worktree, which stay as they are.
+  static String _subtitle(ChatSession? session) => session == null
+      ? 'Multi-session agent chat'
+      : [
+          session.agent,
+          if (!session.isDraft && session.source != null) ?session.cwd,
+          if (session.worktree case final worktree?) 'worktree ${worktree.branch}',
+        ].join(' · ');
+
+  /// The state a session's header names.
+  static String _state(ChatSession? session) => switch (session?.status) {
+    null => 'Offline',
+    SessionStatus.preview => 'Preview',
+    SessionStatus.draft => 'New',
+    SessionStatus.connecting when session!.isDraft => 'Starting',
+    final status => status.name,
+  };
+
   /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
   List<Widget> _headerActions(ChatSession? session) {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && widget.store.canListEarlier(session))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && session.status != SessionStatus.preview && session.fullAccess == null)
-        ('Full access…', Icons.gpp_maybe_outlined, () async {
-          if (await confirmFullAccess(context, session)) widget.store.setFullAccess(session, true);
-        }),
       if (session != null && changesOf(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
       if (session?.profile case final report?)
         ('Profile', Icons.tune, () => unawaited(showDialog<void>(
@@ -1203,6 +1538,13 @@ class _ConversationState extends State<_Conversation> {
   @override
   Widget build(BuildContext context) {
     final session = widget.store.selected;
+    // A first message shown here once its agent has taken it, sent from another view of this session, goes.
+    if (session?.firstSent case final sent? when _input.text == sent && !widget.store.isStarting(session!)) {
+      session.firstSent = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _input.text == sent) _input.clear();
+      });
+    }
 
     final conversation = Column(children: [
       Material(
@@ -1222,7 +1564,7 @@ class _ConversationState extends State<_Conversation> {
                 Text(session?.title ?? 'Canoa', style: const TextStyle(
                   fontSize: 17, fontWeight: FontWeight.w600,
                 ), maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(session?.agent ?? 'Multi-session agent chat',
+                Text(_subtitle(session),
                   style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             )),
@@ -1236,14 +1578,13 @@ class _ConversationState extends State<_Conversation> {
             // On a phone the state is an icon whose tooltip names it, which leaves the conversation's name room to be read.
             if (widget.narrow)
               Tooltip(
-                message: session?.status == SessionStatus.preview ? 'Preview' : (session?.status.name ?? 'Offline'),
+                message: _state(session),
                 child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)),
               )
             else
               Chip(
                 avatar: const Icon(Icons.hub_outlined, size: 16),
-                label: Text(session?.status == SessionStatus.preview
-                    ? 'Preview' : (session?.status.name ?? 'Offline')),
+                label: Text(_state(session)),
                 visualDensity: VisualDensity.compact,
               ),
           ]),
@@ -1265,23 +1606,36 @@ class _ConversationState extends State<_Conversation> {
         ),
       if (session == null)
         const Expanded(child: Center(child: Text('Create a conversation to begin.')))
+      else if (session.isDraft)
+        Expanded(
+          child: _dropping(session, NewSessionView(
+            store: widget.store,
+            session: session,
+            kit: widget.kit,
+            composer: _composerFor(session, centred: true),
+          )),
+        )
       else ...[
         Expanded(
-          child: Stack(children: [
+          child: _dropping(session, Stack(children: [
             NotificationListener<ScrollMetricsNotification>(
               onNotification: _onMetrics,
               child: NotificationListener<ScrollNotification>(
                 onNotification: _onScroll,
-                child: ListView.builder(
-                  controller: _scroll,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: widget.narrow ? 12 : 40,
-                    vertical: context.look.padding + 10,
+                child: SelectableTranscript(
+                  key: _transcript,
+                  session: session,
+                  child: ListView.builder(
+                    controller: _scroll,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: widget.narrow ? 12 : 40,
+                      vertical: context.look.padding + 10,
+                    ),
+                    itemCount: session.messages.length,
+                    itemBuilder: (context, index) {
+                      return TranscriptEntry(message: session.messages[index], session: session);
+                    },
                   ),
-                  itemCount: session.messages.length,
-                  itemBuilder: (context, index) {
-                    return TranscriptEntry(message: session.messages[index], session: session);
-                  },
                 ),
               ),
             ),
@@ -1298,36 +1652,30 @@ class _ConversationState extends State<_Conversation> {
                   ),
                 ),
               ),
-          ]),
+          ])),
         ),
-        if (session.plan.isNotEmpty) PlanPanel(entries: session.plan),
+        if (session.plan.isNotEmpty) SelectionArea(child: PlanPanel(entries: session.plan)),
         if (session.queue.isNotEmpty) QueuePanel(store: widget.store, session: session),
         if (session.pendingPermissions.isNotEmpty)
           PermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) QuestionCard(store: widget.store, session: session),
-        SessionControls(
-          session: session,
-          onChoose: (option, value) => unawaited(widget.store.choose(session, option, value)),
-        ),
-        _Composer(
-          controller: _input,
-          focusNode: _composerFocus,
-          enabled: session.status == SessionStatus.preview ||
-              session.status == SessionStatus.connected ||
-              session.status == SessionStatus.working,
-          onSend: _send,
-          working: session.status == SessionStatus.working,
-          onStop: () {
-            final messenger = ScaffoldMessenger.of(context);
-            unawaited(widget.store.cancelActiveSession().catchError((Object error) {
-              messenger.showSnackBar(SnackBar(content: Text('Could not stop: $error')));
-            }));
-          },
-          commands: session.commands,
-          attachments: session.attachments,
-          onAttach: widget.store.canAttach(session) ? () => unawaited(_attach(session)) : null,
-          onRemove: (attachment) => widget.store.removeAttachment(session, attachment),
-          remote: !canRunLocalAgents || session.place != SessionPlace.local,
+        SessionControls(session: session),
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+          child: Center(
+            heightFactor: 1,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: context.look.messageWidth + 100),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                _composerFor(session),
+                if (!canRunLocalAgents || session.place != SessionPlace.local) ...[
+                  const SizedBox(height: 8),
+                  Text('Remote sessions require verified peer authentication',
+                    style: TextStyle(fontSize: 11, color: context.look.muted)),
+                ],
+              ]),
+            ),
+          ),
         ),
       ],
     ]);
@@ -1337,115 +1685,55 @@ class _ConversationState extends State<_Conversation> {
       const VerticalDivider(width: 1),
       SizedBox(
         width: 420,
-        child: ChangesPane(
-          store: widget.store,
-          session: session,
-          onComment: _addToComposer,
-          onClose: () => setState(() => _changesOpen = false),
+        child: SelectionArea(
+          child: ChangesPane(
+            store: widget.store,
+            session: session,
+            onComment: _addToComposer,
+            onClose: () => setState(() => _changesOpen = false),
+          ),
         ),
       ),
     ]);
   }
-}
 
-class _Composer extends StatelessWidget {
-  const _Composer({
-    required this.controller, required this.enabled, required this.onSend, this.focusNode,
-    this.working = false, this.onStop, this.commands = const [],
-    this.attachments = const [], this.onAttach, this.onRemove, this.remote = true,
-  });
+  /// The composer of [session]: in the middle of a new session's view when [centred], else docked under the conversation.
+  Widget _composerFor(ChatSession session, {bool centred = false}) => Composer(
+    key: _composer,
+    store: widget.store,
+    session: session,
+    controller: _input,
+    focusNode: _composerFocus,
+    kit: widget.kit,
+    centred: centred,
+    enabled: !widget.store.isStarting(session) && (session.status == SessionStatus.preview ||
+        session.status == SessionStatus.draft ||
+        session.status == SessionStatus.connected ||
+        session.status == SessionStatus.working),
+    onSend: _send,
+    working: session.status == SessionStatus.working,
+    onStop: () {
+      final messenger = ScaffoldMessenger.of(context);
+      unawaited(widget.store.cancelActiveSession().catchError((Object error) {
+        messenger.showSnackBar(SnackBar(content: Text('Could not stop: $error')));
+      }));
+    },
+    commands: session.commands,
+  );
 
-  /// Whether the agent is reached as a peer, which is what the line under the field is about.
-  final bool remote;
-
-  final TextEditingController controller;
-  final FocusNode? focusNode;
-  final bool enabled;
-  final VoidCallback onSend;
-  final bool working;
-  final VoidCallback? onStop;
-  final List<AgentCommandInfo> commands;
-  final List<AcpAttachment> attachments;
-  final VoidCallback? onAttach;
-  final ValueChanged<AcpAttachment>? onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final look = context.look;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
-      child: Center(
-        heightFactor: 1,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: look.messageWidth + 100),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: controller,
-              builder: (context, value, _) => CommandSuggestions(
-                commands: commands,
-                typed: value.text,
-                onPick: (command) {
-                  final text = '/${command.name} ';
-                  controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
-                },
-              ),
-            ),
-            const SizedBox(height: 4),
-            if (attachments.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(spacing: 6, runSpacing: 4, children: [
-                    for (final attachment in attachments)
-                      InputChip(
-                        avatar: Icon(attachment.isImage ? Icons.image_outlined : Icons.description_outlined, size: 16),
-                        label: Text(attachment.name, overflow: TextOverflow.ellipsis),
-                        onDeleted: () => onRemove?.call(attachment),
-                      ),
-                  ]),
-                ),
-              ),
-            TextField(
-              controller: controller,
-              focusNode: focusNode,
-              enabled: enabled,
-              minLines: 1,
-              maxLines: 5,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => onSend(),
-              decoration: InputDecoration(
-                hintText: enabled ? 'Message agent' : 'Connect an ACP peer to chat',
-                filled: true,
-                fillColor: look.composer,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(look.radius + 2),
-                  borderSide: BorderSide.none,
-                ),
-                prefixIcon: onAttach == null
-                    ? null
-                    : IconButton(tooltip: 'Attach', onPressed: enabled ? onAttach : null, icon: const Icon(Icons.attach_file)),
-                // While the agent works, what is written waits in the queue, and Stop leaves the queue as it is.
-                suffixIcon: working
-                    ? Row(mainAxisSize: MainAxisSize.min, children: [
-                        IconButton(tooltip: 'Queue', onPressed: enabled ? onSend : null, icon: const Icon(Icons.schedule_send_outlined)),
-                        IconButton(tooltip: 'Stop', onPressed: onStop, icon: const Icon(Icons.stop_circle_outlined)),
-                      ])
-                    : IconButton(
-                        tooltip: 'Send',
-                        onPressed: enabled ? onSend : null,
-                        icon: const Icon(Icons.arrow_upward_rounded),
-                      ),
-              ),
-            ),
-            if (remote) ...[
-              const SizedBox(height: 8),
-              Text('Remote sessions require verified peer authentication',
-                style: TextStyle(fontSize: 11, color: look.muted)),
-            ],
-          ]),
-        ),
-      ),
+  /// [child], taking files dropped on it as attachments where this app can read them.
+  Widget _dropping(ChatSession session, Widget child) {
+    if (widget.kit.statFile == null || !widget.store.canAttach(session)) return child;
+    return DropTarget(
+      onDragDone: (details) async {
+        final messenger = ScaffoldMessenger.of(context);
+        final problems = await addPaths(widget.store, session, [
+          for (final file in details.files)
+            if (file.path.isNotEmpty) file.path,
+        ], widget.kit);
+        if (problems.isNotEmpty) messenger.showSnackBar(SnackBar(content: Text(problems.join('\n'))));
+      },
+      child: child,
     );
   }
 }

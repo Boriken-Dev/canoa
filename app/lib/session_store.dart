@@ -1,21 +1,28 @@
 import 'dart:async';
 import 'acp/client.dart';
+import 'acp/local_agent.dart' show readLocalFile;
 import 'package:coqui_web/coqui_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import 'chat/agent_events.dart';
+import 'chat/attachments.dart';
+import 'chat/session_options.dart';
 import 'chat/update_record.dart';
+import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'profile/apply.dart';
 import 'profile/profile_layers.dart' show LayerNote;
+import 'sources/sources.dart';
 import 'worktree/worktree.dart';
 
+export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
 export 'ledger/session_ledger.dart' show SessionPlace;
 
 /// Canoa's local view of an agent-issued session. The agent session id is
 /// separate from the local view id and is absent from offline previews.
-enum SessionStatus { preview, disconnected, connecting, connected, working }
+/// A [draft] is a session whose agent has not started: it starts on the first message, and is [connecting] meanwhile.
+enum SessionStatus { preview, draft, disconnected, connecting, connected, working }
 
 enum MessageRole { user, agent, notice, thought, tool, compaction }
 
@@ -27,24 +34,6 @@ const int maxMessageText = 2 * 1024 * 1024;
 
 /// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
 const int maxPendingPermissions = 64;
-
-/// The most that goes with one message. An agent's context is what these fill, so they stay what a person would pick by hand.
-const int maxAttachments = 8;
-const int maxAttachedText = 1024 * 1024;
-const int maxAttachedImage = 5 * 1024 * 1024;
-
-/// An image's type, from what it was chosen as or its name, or null for anything else.
-String? imageTypeOf(String name, String? mimeType) {
-  if (const {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}.contains(mimeType)) return mimeType;
-  final dot = name.lastIndexOf('.');
-  return switch (dot < 0 ? '' : name.substring(dot + 1).toLowerCase()) {
-    'png' => 'image/png',
-    'jpg' || 'jpeg' => 'image/jpeg',
-    'gif' => 'image/gif',
-    'webp' => 'image/webp',
-    _ => null,
-  };
-}
 
 class ChatMessage {
   ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool, this.compaction});
@@ -92,7 +81,7 @@ const int maxQueued = 20;
 final class QueuedMessage {
   QueuedMessage(this.text, this.attachments);
   String text;
-  final List<AcpAttachment> attachments;
+  final List<Attachment> attachments;
 }
 
 /// What a session needs the person for: a permission request, a question, or a turn it finished.
@@ -120,23 +109,54 @@ class ChatSession {
     this.place = SessionPlace.local,
     this.method,
     this.worktree,
+    this.source,
     List<ChatMessage>? messages,
   }) : messages = messages ?? <ChatMessage>[];
 
-  /// Where the agent works, on its machine, when this side knows.
-  final String? cwd;
+  /// Where the agent works, on its machine, when this side knows. A draft's folder until it starts.
+  String? cwd;
 
   /// The git worktree [cwd] is, on the session's own branch, when it was started in one.
-  final SessionWorktree? worktree;
+  SessionWorktree? worktree;
 
   /// Where the agent runs, as this app reached it.
-  final SessionPlace place;
+  SessionPlace place;
 
   /// The proof a peer's key makes, for a session reached by its endpoint.
-  final String? method;
+  String? method;
+
+  /// The source a session made here runs; null for one reached any other way.
+  AgentSource? source;
+
+  /// Whether a draft starts in a new git worktree of its folder, which is made when it starts.
+  bool wantsWorktree = false;
+
+  /// What is written in a draft's composer, kept with it.
+  String draftText = '';
+
+  /// When this app made it.
+  final DateTime created = DateTime.now();
+
+  /// Which of Canoa.cfg's overlays a draft starts with, by name; null for all of them.
+  Set<String>? overlays;
+
+  /// The id a draft is kept under between runs; null once it starts.
+  String? draftId;
+
+  /// The source a restored draft was kept with, by kind and label, while no source of that name is here.
+  ({String kind, String label})? keptSource;
+
+  /// Whether [title] is taken from the first message: shown here, and never kept in the session list.
+  bool titleFromMessage = false;
+
+  /// The first message once it has reached the agent, for a composer still showing it to let it go.
+  String? firstSent;
+
+  /// Choices made before the agent could take them, by option id: sent before the next prompt.
+  final Map<String, PendingChoice> pending = {};
 
   /// What goes with the next message.
-  final List<AcpAttachment> attachments = [];
+  final List<Attachment> attachments = [];
 
   /// What the agent is waiting for the person to answer, oldest first.
   final List<PermissionQuestion> pendingPermissions = [];
@@ -188,21 +208,44 @@ class ChatSession {
 
   final String id;
   String title;
-  final String agent;
+  String agent;
   SessionStatus status;
-  final String? peerId;
-  final String? remoteSessionId;
+  String? peerId;
+  String? remoteSessionId;
   /// Preferred HTTPS WebTransport or direct WSS endpoint.
-  final Uri? endpoint;
-  final Uri? websocketFallback;
+  Uri? endpoint;
+  Uri? websocketFallback;
   final List<ChatMessage> messages;
+
+  /// Whether its agent has not started: it starts on the first message.
+  bool get isDraft => status == SessionStatus.draft || (status == SessionStatus.connecting && remoteSessionId == null);
+}
+
+/// Starts [draft]'s agent and binds it with [SessionStore.bindDraft]: what the app does on a draft's first message. It
+/// throws, leaving nothing behind, when the agent could not be started.
+typedef DraftStarter = Future<void> Function(ChatSession draft);
+
+//// Why [error] happened, in the words it carries for a person: for an agent's own error, the message it gave.
+String reasonOf(Object error) => switch (error) {
+  StateError(:final message) => message,
+  AcpFailure(:final message) => RegExp(r'^Agent error: \{.*\bmessage: (.*)\}$', dotAll: true).firstMatch(message)?.group(1) ?? message,
+  WorktreeFailure(:final message) => message,
+  _ => '$error',
+};
+
+/// The title a draft takes from its first message when it was given none.
+String titleFrom(String text) {
+  final line = text.trim().split('\n').first.trim();
+  return line.length > 60 ? '${line.substring(0, 59).trimRight()}…' : line;
 }
 
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder, this.ledger, Set<String> fullAccessAgents = const {}, this.onWeakened})
-      : _fullAccessAgents = {...fullAccessAgents} {
+  SessionStore({bool includePreview = true, this.recorder, this.ledger, Set<String> fullAccessAgents = const {}, this.onWeakened,
+      this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
+      : _fullAccessAgents = {...fullAccessAgents},
+        readFile = readFile ?? readLocalFile {
     if (includePreview) {
       final first = createPreviewSession(title: 'Getting started', agent: 'Canoa preview');
       first.messages.addAll([
@@ -227,6 +270,18 @@ class SessionStore extends ChangeNotifier {
 
   /// Where every session opened or resumed here is noted, to be listed and opened again after the app ends.
   final SessionLedger? ledger;
+
+  /// Where drafts are kept between runs, with what is written in them and what goes with them.
+  final DraftKeeper? drafts;
+
+  /// Starts a draft's agent on its first message; set by the app. Without it a draft cannot start.
+  DraftStarter? starter;
+
+  /// The largest file, in bytes, sent as the agent's embedded context; a larger one goes as a link to it.
+  int embedLimit;
+
+  /// A file's bytes, read when it is sent.
+  final Future<List<int>> Function(String path) readFile;
 
   /// Told each weakening as it happens, beside [weakenings]; by default the debug log.
   final void Function(String)? onWeakened;
@@ -354,6 +409,255 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
     return session;
   }
+
+  /// The title a draft has until its first message names it.
+  static const draftTitle = 'New session';
+
+  /// A new session that has started nothing: its agent starts on its first message, from [source] in [cwd], and a worktree
+  /// is made then if [worktree]. It is kept between runs until it starts or is closed, and never noted in the ledger before.
+  ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
+      String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
+      ({String kind, String label})? keptSource}) {
+    final session = ChatSession(
+      id: 'local-${++_nextId}',
+      title: title ?? draftTitle,
+      agent: source?.label ?? draftTitle,
+      status: SessionStatus.draft,
+      cwd: cwd,
+      source: source,
+    )
+      ..wantsWorktree = worktree
+      ..overlays = overlays
+      ..draftId = id ?? newDraftId()
+      ..draftText = text
+      ..keptSource = source == null ? keptSource : null
+      ..agentNames = title == null;
+    session.pending.addAll(pending);
+    session.attachments.addAll(attachments.take(maxAttachments));
+    _insert(session);
+    _keepDraft(session);
+    return session;
+  }
+
+  /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
+  void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool? worktree, Set<String>? overlays,
+      bool allOverlays = false, String? text}) {
+    if (text != null) session.draftText = text;
+    if (session.status == SessionStatus.draft) {
+      if (source != null && source != session.source) {
+        session
+          ..source = source
+          ..keptSource = null
+          ..agent = source.label;
+        // Choices for another source's options mean nothing to this one's.
+        session.pending.clear();
+      }
+      if (cwd != null) session.cwd = cwd;
+      if (worktree != null) session.wantsWorktree = worktree;
+      if (overlays != null || allOverlays) session.overlays = allOverlays ? null : overlays;
+    }
+    _keepDraft(session);
+    notifyListeners();
+  }
+
+  /// Every draft kept from an earlier run, as sessions; [source] finds each one's source again by its kind and label.
+  Future<void> restoreDrafts(AgentSource? Function(String kind, String label) source) async {
+    final kept = await drafts?.load() ?? const <KeptDraft>[];
+    for (final draft in kept) {
+      final record = draft.record;
+      final from = record['source'] is Map ? record['source'] as Map : const {};
+      final kept = from['kind'] is String && from['label'] is String
+          ? (kind: from['kind'] as String, label: from['label'] as String)
+          : null;
+      createDraft(
+        id: draft.id,
+        source: kept == null ? null : source(kept.kind, kept.label),
+        keptSource: kept,
+        cwd: record['cwd'] is String ? record['cwd'] as String : null,
+        worktree: record['worktree'] == true,
+        overlays: record['overlays'] is List ? {for (final name in record['overlays'] as List) if (name is String) name} : null,
+        text: record['text'] is String ? record['text'] as String : '',
+        title: record['title'] is String ? record['title'] as String : null,
+        pending: {
+          for (final choice in [
+            for (final json in record['pending'] is List ? record['pending'] as List : const []) ?PendingChoice.fromJson(json),
+          ])
+            choice.id: choice,
+        },
+        attachments: draft.attachments,
+      );
+    }
+  }
+
+  void _keepDraft(ChatSession session) {
+    final id = session.draftId;
+    if (drafts == null || id == null || !session.isDraft) return;
+    drafts!.save(id, {
+      'created': session.created.toUtc().toIso8601String(),
+      'source': ?switch ((session.source, session.keptSource)) {
+        (final source?, _) => {'kind': source.kind.name, 'label': source.label},
+        (null, final kept?) => {'kind': kept.kind, 'label': kept.label},
+        _ => null,
+      },
+      'cwd': ?session.cwd,
+      'worktree': session.wantsWorktree,
+      'overlays': ?session.overlays?.toList(),
+      'text': session.draftText,
+      if (!session.agentNames) 'title': session.title,
+      'pending': [for (final choice in session.pending.values) choice.toJson()],
+    }, session.attachments);
+  }
+
+  /// What a draft's composer holds, kept with it.
+  void keepDraftText(ChatSession session, String text) {
+    if (!session.isDraft || session.draftText == text) return;
+    session.draftText = text;
+    _keepDraft(session);
+  }
+
+  /// Binds [client], which [opened] a session in [cwd] for [draft], as [attachVerifiedClient] does: from here the session is
+  /// started and the ledger notes it. Throws when the draft was closed meanwhile, and [client] is then the caller's to end.
+  void bindDraft(ChatSession draft, VerifiedAgent client, AcpOpenedSession opened,
+      {required String cwd, SessionWorktree? worktree, SessionPlace place = SessionPlace.local, Uri? endpoint,
+      Uri? websocketFallback, String? method}) {
+    if (!_sessions.contains(draft) || !draft.isDraft) throw StateError('The session was closed before it started');
+    draft
+      ..peerId = client.peerId
+      ..remoteSessionId = opened.id
+      ..cwd = cwd
+      ..worktree = worktree
+      ..place = place
+      ..endpoint = endpoint
+      ..websocketFallback = websocketFallback
+      ..method = method;
+    applyOpened(draft, opened);
+    attachVerifiedClient(draft.id, client);
+    final kept = draft.draftId;
+    draft.draftId = null;
+    if (kept != null) unawaited(drafts?.remove(kept));
+    _rememberSource(draft);
+  }
+
+  /// Notes what [session]'s agent offers and takes, for its source's next draft.
+  void _rememberSource(ChatSession session) {
+    final source = session.source;
+    final client = _verifiedClients[session.id];
+    if (source == null || client == null) return;
+    ledger?.rememberSource(sourceKey(source), options: session.options, images: client.takesImages, files: client.takesFiles);
+  }
+
+  /// What the agent of [session] is known to take with a prompt: its own word once it runs, else what its source's agent said
+  /// last time; null when neither is known.
+  PromptTakes? takesOf(ChatSession session) {
+    final client = _verifiedClients[session.id];
+    // A link names a path on this computer, which only an agent running here can read.
+    final here = session.place == SessionPlace.local || session.place == SessionPlace.host;
+    if (client != null && !client.isClosed) {
+      return PromptTakes(images: client.takesImages, files: client.takesFiles, links: here);
+    }
+    final memory = session.source == null ? null : ledger?.source(sourceKey(session.source!));
+    final images = memory?.images, files = memory?.files;
+    return images == null || files == null ? null : PromptTakes(images: images, files: files);
+  }
+
+  /// The choices shown for [session]: the agent's own once it runs, else what its source's agent offered last time.
+  List<ConfigOption> optionsOf(ChatSession session) {
+    if (!session.isDraft) return session.options;
+    final source = session.source;
+    return source == null ? const [] : ledger?.source(sourceKey(source))?.options ?? const [];
+  }
+
+  /// When [session]'s source's choices were last seen, for a draft showing them; null otherwise.
+  DateTime? optionsSeen(ChatSession session) =>
+      session.isDraft && session.source != null ? ledger?.source(sourceKey(session.source!))?.seen : null;
+
+  /// Puts a person's choice for a draft as its source's default: the profile's [hints] by role where it gives one, else the
+  /// last choice made for that source. Choices already made in the draft stay.
+  void defaultChoices(ChatSession session, {Map<OptionRole, String> hints = const {}}) {
+    if (!session.isDraft) return;
+    final source = session.source;
+    final memory = source == null ? null : ledger?.source(sourceKey(source));
+    for (final role in const [OptionRole.mode, OptionRole.model, OptionRole.effort]) {
+      if (session.pending.values.any((choice) => choice.role == role)) continue;
+      final value = hints[role] ?? memory?.chosen[role.name];
+      if (value == null) continue;
+      final option = memory == null ? null : optionIn(memory.options, role);
+      final id = option?.id ?? role.name;
+      session.pending[id] = PendingChoice(id, role, value);
+    }
+    _keepDraft(session);
+    notifyListeners();
+  }
+
+  /// Sends each choice made before the agent could take it, and says in [session] what it would not take.
+  Future<void> _applyPending(ChatSession session) async {
+    if (session.pending.isEmpty) return;
+    final waiting = [...session.pending.values];
+    session.pending.clear();
+    for (final choice in waiting) {
+      final option = session.options.where((option) => option.id == choice.id && option.choices.any((each) => each.value == choice.value)).firstOrNull ??
+          session.options.where((option) => roleOf(option) == choice.role && option.choices.any((each) => each.value == choice.value)).firstOrNull;
+      if (option == null) {
+        _note(session, 'The agent offers no ${choice.role == OptionRole.other ? choice.id : choice.role.name} of ${shortText(choice.value) ?? 'that'} now, so it was not set.');
+        continue;
+      }
+      if (option.current != choice.value) await _set(session, option, choice.value);
+      final took = session.options.where((each) => each.id == option.id).firstOrNull?.current == choice.value;
+      if (took && choice.byPerson && session.source != null) {
+        ledger?.rememberChoice(sourceKey(session.source!), choice.role, choice.value);
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Puts a person's message to a draft: its agent starts, then takes the message. Until it has started, the message stays the
+  /// person's to send again; a start that fails says why in the conversation and leaves the draft as it was.
+  Future<void> _startThenDeliver(ChatSession session, String text) async {
+    final starter = this.starter;
+    if (starter == null) throw StateError('This app cannot start an agent here');
+    if (session.status != SessionStatus.draft) throw StateError('It is starting already');
+    if (session.source == null) throw StateError('Choose where its agent comes from first');
+    session.status = SessionStatus.connecting;
+    _starting.add(session.id);
+    final named = session.agentNames && session.title == draftTitle && text.trim().isNotEmpty;
+    if (named) {
+      session
+        ..title = titleFrom(text)
+        ..titleFromMessage = true;
+    }
+    notifyListeners();
+    try {
+      try {
+        await starter(session);
+      } catch (error) {
+        if (session.remoteSessionId == null) {
+          session.status = SessionStatus.draft;
+          if (named) {
+            session
+              ..title = draftTitle
+              ..titleFromMessage = false;
+          }
+          if (_sessions.contains(session)) _note(session, 'Not started: ${reasonOf(error)}');
+        }
+        rethrow;
+      }
+      if (_verifiedClients[session.id] == null) throw StateError('The agent did not start');
+      await _deliver(session, text, List.of(session.attachments), onSent: () {
+        // Sent: what follows is queued or sent as usual, even while a v1 agent's first turn runs.
+        _starting.remove(session.id);
+        session.firstSent = text;
+      });
+    } finally {
+      _starting.remove(session.id);
+      notifyListeners();
+    }
+  }
+
+  /// Sessions whose first message is on its way: started, or starting, and not yet delivered.
+  final Set<String> _starting = {};
+
+  /// Whether [session]'s first message is still on its way, during which nothing else is sent.
+  bool isStarting(ChatSession session) => _starting.contains(session.id);
 
   /// Puts a permission request to the person, in the conversation it belongs to: the one [from] serves under the request's
   /// session id. A request about no session here is refused, and one past [maxPendingPermissions] is cancelled.
@@ -632,7 +936,7 @@ class SessionStore extends ChangeNotifier {
       version: identity.version,
       reopenBy: identity.reopenBy,
       cwd: session.cwd,
-      title: session.title,
+      title: session.titleFromMessage ? session.agent : session.title,
       endpoint: session.endpoint?.toString(),
       fallback: session.websocketFallback?.toString(),
       method: session.method,
@@ -685,8 +989,33 @@ class SessionStore extends ChangeNotifier {
     }
   }
 
-  /// Sets one of the agent's choices. It stays as it was unless the agent agrees, which it says in its answer or an update.
-  Future<void> choose(ChatSession session, ConfigOption option, String value) async {
+  /// A person's choice of one of the agent's options. It goes to the agent now when it can take it; before the agent starts, or
+  /// while a turn runs, it waits and goes before the next prompt. [value] null takes back a choice still waiting.
+  Future<void> choose(ChatSession session, ConfigOption option, String? value) async {
+    final role = roleOf(option);
+    if (value == null) {
+      session.pending.remove(option.id);
+      _keepDraft(session);
+      notifyListeners();
+      return;
+    }
+    if (session.isDraft || session.status == SessionStatus.working || isStarting(session)) {
+      session.pending[option.id] = PendingChoice(option.id, role, value, byPerson: true);
+      _keepDraft(session);
+      notifyListeners();
+      return;
+    }
+    session.pending.remove(option.id);
+    await _set(session, option, value);
+    if (session.options.where((each) => each.id == option.id).firstOrNull?.current == value && session.source != null) {
+      ledger?.rememberChoice(sourceKey(session.source!), role, value);
+      _rememberSource(session);
+    }
+  }
+
+  /// Sets one of the agent's choices. It stays as it was unless the agent agrees, which it says in its answer or an update; a
+  /// refusal is said in the conversation, with the agent's reason.
+  Future<void> _set(ChatSession session, ConfigOption option, String value) async {
     final client = _verifiedClients[session.id];
     final remote = session.remoteSessionId;
     if (client == null || remote == null) return;
@@ -704,7 +1033,8 @@ class SessionStore extends ChangeNotifier {
         }
       }
     } on AcpFailure catch (error) {
-      _note(session, 'The agent did not change ${option.label}: ${error.message}');
+      final shown = option.choices.where((choice) => choice.value == value).firstOrNull?.label ?? value;
+      _note(session, 'The agent did not change ${option.label} to ${shortText(shown) ?? 'that'}: ${reasonOf(error)}');
     }
     notifyListeners();
   }
@@ -729,7 +1059,7 @@ class SessionStore extends ChangeNotifier {
     final set = <String, String>{};
     for (final (id, value, key) in chosen) {
       final option = session.options.firstWhere((option) => option.id == id);
-      await choose(session, option, value);
+      await _set(session, option, value);
       final now = session.options.where((option) => option.id == id).firstOrNull;
       if (now?.current == value) set[key] = option.isMode ? 'session/set_mode' : 'session/set_config_option $id';
     }
@@ -847,6 +1177,7 @@ class SessionStore extends ChangeNotifier {
         session.usage = session.usage.applied(update.raw);
       case Rendering.choices when update.kind == 'config_option_update':
         _setOptions(session, update.raw['configOptions'], null);
+        _rememberSource(session);
       case Rendering.choices:
         if (update.raw['currentModeId'] case final String mode) {
           for (final option in session.options) {
@@ -856,7 +1187,9 @@ class SessionStore extends ChangeNotifier {
       case Rendering.title:
         final title = shortText(update.raw['title']);
         if (title != null && session.agentNames) {
-          session.title = title;
+          session
+            ..title = title
+            ..titleFromMessage = false;
           if (session.peerId != null && session.remoteSessionId != null) {
             ledger?.touch(session.peerId!, session.remoteSessionId!, title: title);
           }
@@ -938,6 +1271,11 @@ class SessionStore extends ChangeNotifier {
       sendPreviewText(text);
       return;
     }
+    if (isStarting(session)) throw StateError('Its first message is still on its way');
+    if (session.isDraft) {
+      await _startThenDeliver(session, text);
+      return;
+    }
     if (session.status == SessionStatus.working || session.queue.isNotEmpty) {
       if (session.queue.length >= maxQueued) throw StateError('$maxQueued messages already wait for this turn to end');
       session.queue.add(QueuedMessage(text, List.of(session.attachments)));
@@ -970,7 +1308,15 @@ class SessionStore extends ChangeNotifier {
     session.queueHeld = null;
     final next = session.queue.removeAt(0);
     notifyListeners();
-    await _deliver(session, next.text, next.attachments);
+    try {
+      await _deliver(session, next.text, next.attachments);
+    } catch (error) {
+      // Not sent, so it stays first in the queue, which waits for the person.
+      if (!session.queue.contains(next)) session.queue.insert(0, next);
+      session.queueHeld = 'it could not be sent: ${reasonOf(error)}';
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Changes the text of a queued message.
@@ -991,25 +1337,37 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _deliver(ChatSession session, String text, List<AcpAttachment> attachments) async {
+  /// [onSent] is told once the agent has the message, which for a v1 agent is before its turn ends.
+  Future<void> _deliver(ChatSession session, String text, List<Attachment> attached, {void Function()? onSent}) async {
     final client = _verifiedClients[session.id];
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
     }
+    // Each is checked before anything is sent: one the agent cannot be given stops the message, which stays to be changed.
+    final takes = takesOf(session)!;
+    final attachments = <AcpAttachment>[
+      for (final attachment in attached)
+        await toAcp(attachment, takes, embedLimit: embedLimit, read: readFile, agent: _named(session.agent)),
+    ];
+    await _applyPending(session);
     if (session.peerId != null) ledger?.touch(session.peerId!, session.remoteSessionId!);
     final sent = attachments.isEmpty ? null : 'Sent with this: ${attachments.map((item) => item.name).join(', ')}';
     if (client.protocolVersion == 1) {
       // A v1 answer arrives when the whole turn ends, so the message shows now.
       if (text.trim().isNotEmpty) session.messages.add(ChatMessage(role: MessageRole.user, text: text, at: DateTime.now()));
       if (sent != null) _note(session, sent);
-      session.attachments.removeWhere(attachments.contains);
+      session.attachments.removeWhere(attached.contains);
       session.status = SessionStatus.working;
+      session.draftText = '';
+      final turn = client.prompt(session.remoteSessionId!, text, attachments: attachments);
+      onSent?.call();
       notifyListeners();
-      await client.prompt(session.remoteSessionId!, text, attachments: attachments);
+      await turn;
       return;
     }
     final messageId = await client.prompt(session.remoteSessionId!, text, attachments: attachments);
-    session.attachments.removeWhere(attachments.contains);
+    onSent?.call();
+    session.attachments.removeWhere(attached.contains);
     if (text.trim().isNotEmpty && !session.messages.any((message) => message.messageId == messageId)) {
       session.messages.add(ChatMessage(
         role: MessageRole.user,
@@ -1017,44 +1375,89 @@ class SessionStore extends ChangeNotifier {
       ));
     }
     _nameAttachments(session, messageId, [for (final item in attachments) item.name]);
+    session.draftText = '';
     notifyListeners();
   }
 
-  /// Whether this session's agent takes anything with a message.
+  /// Whether anything can go with this session's messages: a draft's, or one whose agent this app reaches.
   bool canAttach(ChatSession session) {
+    if (session.isDraft) return true;
     final client = _verifiedClients[session.id];
-    return client != null && !client.isClosed && (client.takesImages || client.takesFiles);
+    return client != null && !client.isClosed;
   }
 
-  /// Takes a file a person chose, to go with their next message. What is wrong with it, for them to read, or null.
-  String? addAttachment(ChatSession session, String name, List<int> bytes, {String? mimeType}) {
-    final client = _verifiedClients[session.id];
-    if (client == null || client.isClosed) return 'This conversation has no agent.';
+  /// Why [attachment] cannot go with [session]'s next message, or null; known only once its agent, or its source's last
+  /// time, has said what it takes.
+  String? refusalOf(ChatSession session, Attachment attachment) {
+    final takes = takesOf(session);
+    if (takes == null) return null;
+    final (route, why) = routeOf(attachment, takes, embedLimit: embedLimit, agent: _named(session.agent));
+    return route == AttachmentRoute.refused ? why : null;
+  }
+
+  /// How [attachment] will reach [session]'s agent when it is not as it is, such as a link in place of an embedded file; null
+  /// when it goes as it is, or that is not known yet.
+  String? routeNote(ChatSession session, Attachment attachment) {
+    final takes = takesOf(session);
+    return takes == null ? null : routeOf(attachment, takes, embedLimit: embedLimit, agent: _named(session.agent)).$2;
+  }
+
+  String? _add(ChatSession session, Attachment attachment) {
+    if (!canAttach(session)) return 'This conversation has no agent.';
     if (session.attachments.length >= maxAttachments) return 'That is as many as one message can take.';
-    if (session.attachments.any((item) => item.name == name)) return '$name is already there.';
-    if (bytes.isEmpty) return '$name is empty.';
-    final image = imageTypeOf(name, mimeType);
-    if (image != null) {
-      if (!client.takesImages) return '${session.agent} does not take images.';
-      if (bytes.length > maxAttachedImage) return '$name is larger than an image can be here.';
-      session.attachments.add(AcpAttachment.image(name, image, bytes));
-    } else {
-      if (!client.takesFiles) return '${session.agent} does not take files.';
-      if (bytes.length > maxAttachedText) return '$name is larger than a file can be here.';
-      final String text;
-      try {
-        text = utf8.decode(bytes);
-      } on FormatException {
-        return '$name is not text, and only text files and images can be sent.';
-      }
-      session.attachments.add(AcpAttachment.text(name, text, mimeType: mimeType));
-    }
+    if (session.attachments.any((item) => item.name == attachment.name)) return '${attachment.name} is already there.';
+    final refused = refusalOf(session, attachment);
+    if (refused != null) return '$refused.';
+    session.attachments.add(attachment);
+    _keepDraft(session);
     notifyListeners();
     return null;
   }
 
-  void removeAttachment(ChatSession session, AcpAttachment attachment) {
+  /// Takes what a person chose or pasted, by its bytes, to go with their next message: an image, or text. With [path], a file
+  /// on this computer that the agent can be given a link to. What is wrong with it, for them to read, or null.
+  String? addAttachment(ChatSession session, String name, List<int> bytes, {String? mimeType, String? path}) {
+    if (bytes.isEmpty) return '$name is empty.';
+    final image = imageTypeOf(name, mimeType);
+    if (image != null) {
+      if (bytes.length > maxAttachedImage) return '$name is larger than an image can be here.';
+      return _add(session, Attachment.image(name, image, bytes, path: path));
+    }
+    if (path != null) return _add(session, Attachment.file(name, path, bytes.length, mimeType: mimeType));
+    if (bytes.length > maxAttachedText) return '$name is larger than a file can be here.';
+    final String text;
+    try {
+      text = utf8.decode(bytes);
+    } on FormatException {
+      return '$name is not text, and only text files and images can be sent.';
+    }
+    return _add(session, Attachment.text(name, text, mimeType: mimeType));
+  }
+
+  /// Takes the file at [path] on this computer, [size] bytes, read only when it is sent: embedded where the agent takes files
+  /// and it is small enough text, else linked.
+  String? addFile(ChatSession session, String name, String path, int size, {String? mimeType}) {
+    if (size == 0) return '$name is empty.';
+    return _add(session, Attachment.file(name, path, size, mimeType: mimeType));
+  }
+
+  /// Takes the folder at [path] on this computer, which the agent is given a link to.
+  String? addFolder(ChatSession session, String name, String path) => _add(session, Attachment.folder(name, path));
+
+  /// Takes pasted [text] as an attachment of its own.
+  String? addText(ChatSession session, String text) {
+    final lines = '\n'.allMatches(text).length + 1;
+    var name = 'Pasted text, $lines line${lines == 1 ? '' : 's'}';
+    for (var n = 2; session.attachments.any((item) => item.name == name); n++) {
+      name = 'Pasted text $n, $lines line${lines == 1 ? '' : 's'}';
+    }
+    if (utf8.encode(text).length > maxAttachedText) return 'That paste is larger than a file can be here.';
+    return _add(session, Attachment.text(name, text, mimeType: 'text/plain'));
+  }
+
+  void removeAttachment(ChatSession session, Attachment attachment) {
     session.attachments.remove(attachment);
+    _keepDraft(session);
     notifyListeners();
   }
 
@@ -1199,6 +1602,11 @@ class SessionStore extends ChangeNotifier {
   /// Takes a conversation out of the list. The agent still has it, and its connection stays with whoever else uses it.
   void forget(ChatSession session) {
     _keepText(session);
+    // A draft closed leaves nothing kept of it.
+    if (session.draftId case final id?) {
+      session.draftId = null;
+      unawaited(drafts?.remove(id));
+    }
     unawaited(_subscriptions.remove(session.id)?.cancel());
     unawaited(_turnSubscriptions.remove(session.id)?.cancel());
     _verifiedClients.remove(session.id);

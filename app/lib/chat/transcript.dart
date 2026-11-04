@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:coqui_acp/coqui_acp.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:markdown/markdown.dart' as md;
 
 import '../session_store.dart';
 import '../theme/look.dart';
@@ -22,9 +25,10 @@ class AgentMarkdown extends StatelessWidget {
     final look = context.look;
     final base = Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: look.bodySize, height: 1.45);
     final code = base?.copyWith(fontFamily: CanoaLook.monospaceFont, fontSize: look.bodySize - 1);
+    // The conversation's own selection takes this text in, so it is not a selection of its own.
     return MarkdownBody(
       data: text,
-      selectable: true,
+      builders: {'pre': _CodeBlock(look)},
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: base,
         code: code?.copyWith(backgroundColor: look.code),
@@ -64,11 +68,17 @@ class TranscriptEntry extends StatelessWidget {
       MessageRole.thought => _Thought(text: message.text),
       MessageRole.compaction =>
         message.compaction == null ? const SizedBox.shrink() : _CompactionView(compaction: message.compaction!),
-      MessageRole.agent => _Message(color: look.agent, inBubble: look.agentInBubble, child: AgentMarkdown(text: message.text)),
+      MessageRole.agent => _Message(
+        color: look.agent,
+        inBubble: look.agentInBubble,
+        copy: message.text,
+        child: AgentMarkdown(text: message.text),
+      ),
       MessageRole.user => _Message(
         color: look.user,
         inBubble: look.userPrefix == null,
-        child: SelectableText(
+        copy: message.text,
+        child: Text(
           '${look.userPrefix ?? ''}${message.text}',
           style: TextStyle(fontSize: look.bodySize, height: 1.45, color: look.userPrefix == null ? null : look.accent),
         ),
@@ -90,20 +100,82 @@ class TranscriptEntry extends StatelessWidget {
 }
 
 class _Message extends StatelessWidget {
-  const _Message({required this.color, required this.child, this.inBubble = true});
+  const _Message({required this.color, required this.child, this.inBubble = true, this.copy});
 
   final Color color;
   final bool inBubble;
   final Widget child;
 
+  /// What its copy button copies; none without.
+  final String? copy;
+
   @override
   Widget build(BuildContext context) {
     final look = context.look;
-    if (!inBubble) return child;
+    final body = !inBubble
+        ? child
+        : Container(
+            padding: EdgeInsets.symmetric(horizontal: look.padding + 2, vertical: look.padding - 2),
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(look.radius)),
+            child: child,
+          );
+    if (copy == null) return body;
+    return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+      body,
+      CopyButton(text: copy!, tooltip: 'Copy message'),
+    ]);
+  }
+}
+
+/// Copies [text] as it is, and says so.
+class CopyButton extends StatelessWidget {
+  const CopyButton({super.key, required this.text, this.tooltip = 'Copy'});
+
+  final String text;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) => SelectionContainer.disabled(
+    child: IconButton(
+      tooltip: tooltip,
+      iconSize: 15,
+      visualDensity: VisualDensity.compact,
+      color: context.look.muted,
+      onPressed: () async {
+        await Clipboard.setData(ClipboardData(text: text));
+        if (context.mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Copied'), duration: Duration(seconds: 1)));
+        }
+      },
+      icon: const Icon(Icons.copy_rounded),
+    ),
+  );
+}
+
+/// A code block in an agent's Markdown, with a button that copies its code alone.
+class _CodeBlock extends MarkdownElementBuilder {
+  _CodeBlock(this.look);
+  final CanoaLook look;
+
+  @override
+  bool isBlockElement() => true;
+
+  @override
+  Widget? visitElementAfterWithContext(BuildContext context, md.Element element, TextStyle? preferredStyle, TextStyle? parentStyle) {
+    var code = element.textContent;
+    if (code.endsWith('\n')) code = code.substring(0, code.length - 1);
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: look.padding + 2, vertical: look.padding - 2),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(look.radius)),
-      child: child,
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(color: look.code, borderRadius: BorderRadius.circular(look.radius / 2)),
+      child: Stack(children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(10, 10, 40, 10),
+          child: Text(code, style: TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: look.bodySize - 1, height: 1.35)),
+        ),
+        Positioned(top: 0, right: 0, child: CopyButton(text: code, tooltip: 'Copy code')),
+      ]),
     );
   }
 }
@@ -127,7 +199,7 @@ class _Thought extends StatelessWidget {
         children: [
           Align(
             alignment: Alignment.centerLeft,
-            child: SelectableText(text, style: TextStyle(color: look.muted, fontSize: look.bodySize - 1, height: 1.4)),
+            child: Text(text, style: TextStyle(color: look.muted, fontSize: look.bodySize - 1, height: 1.4)),
           ),
         ],
       ),
@@ -168,7 +240,7 @@ class _CompactionView extends StatelessWidget {
         children: [
           Align(
             alignment: Alignment.centerLeft,
-            child: SelectableText(compaction.summary, style: TextStyle(color: look.muted, fontSize: look.bodySize - 1, height: 1.4)),
+            child: Text(compaction.summary, style: TextStyle(color: look.muted, fontSize: look.bodySize - 1, height: 1.4)),
           ),
         ],
       ),
@@ -237,7 +309,7 @@ class ToolCard extends StatelessWidget {
                   for (final place in tool.locations)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 4),
-                      child: SelectableText(place, style: TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: look.muted)),
+                      child: Text(place, style: TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: look.muted)),
                     ),
                   for (final block in tool.blocks) _ToolBlockView(block: block, session: session),
                 ],
@@ -303,8 +375,7 @@ class DiffView extends StatelessWidget {
       child: SingleChildScrollView(
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: SelectionArea(
-            child: Column(
+          child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (final line in lines)
@@ -329,7 +400,6 @@ class DiffView extends StatelessWidget {
                     ),
               ],
             ),
-          ),
         ),
       ),
     );
@@ -350,7 +420,7 @@ class _Code extends StatelessWidget {
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(color: look.code, borderRadius: BorderRadius.circular(look.radius / 2)),
       child: SingleChildScrollView(
-        child: SelectableText(text, style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, height: 1.35)),
+        child: Text(text, style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, height: 1.35)),
       ),
     );
   }
@@ -370,7 +440,7 @@ class _TerminalBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (view.command != null)
-          SelectableText('\$ ${view.command}', style: TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: look.accent)),
+          Text('\$ ${view.command}', style: TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: look.accent)),
         if (view.output.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: _Code(text: view.output)),
         if (view.exitCode != null && view.exitCode != 0)
           Padding(
@@ -429,46 +499,136 @@ class PlanPanel extends StatelessWidget {
   }
 }
 
-/// The agent's own choices, such as its model and mode, and what the session has used.
+/// What the session has used, as the agent says. Its choices are in the row under the message.
 class SessionControls extends StatelessWidget {
-  const SessionControls({super.key, required this.session, required this.onChoose});
+  const SessionControls({super.key, required this.session});
 
   final ChatSession session;
-  final void Function(ConfigOption option, String value) onChoose;
 
   @override
   Widget build(BuildContext context) {
     final look = context.look;
     final usage = session.usage.describe();
-    if (session.options.isEmpty && usage == null) return const SizedBox.shrink();
+    if (usage == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Wrap(
-        spacing: 12,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          for (final option in session.options)
-            Tooltip(
-              message: option.label,
-              child: DropdownButton<String>(
-                value: option.current,
-                isDense: true,
-                underline: const SizedBox.shrink(),
-                style: TextStyle(fontSize: look.bodySize - 3, color: look.muted),
-                items: [
-                  for (final choice in option.choices)
-                    DropdownMenuItem(value: choice.value, child: Text(choice.label, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (value) {
-                  if (value != null && value != option.current) onChoose(option, value);
-                },
-              ),
-            ),
-          if (usage != null) Text(usage, style: TextStyle(fontSize: look.bodySize - 3, color: look.muted)),
-        ],
-      ),
+      child: Text(usage, style: TextStyle(fontSize: look.bodySize - 3, color: look.muted)),
     );
   }
+}
+
+/// Markdown as the text it shows, a block to a line: a code block is its code, and no mark of the Markdown is left.
+String plainMarkdown(String text) {
+  final nodes = md.Document(extensionSet: md.ExtensionSet.gitHubFlavored).parseLines(text.split('\n'));
+  return [
+    for (final node in nodes)
+      if (node.textContent.trimRight() case final shown when shown.isNotEmpty) shown,
+  ].join('\n');
+}
+
+/// A conversation's text in reading order, as copying all of it gives it: each message, notice and tool by what it shows,
+/// and a folded thought or summary by its heading.
+String conversationText(ChatSession session) => [
+  for (final message in session.messages)
+    switch (message.role) {
+      MessageRole.agent => plainMarkdown(message.text),
+      MessageRole.user || MessageRole.notice => message.text,
+      MessageRole.thought => 'Thinking',
+      MessageRole.tool => message.tool?.title ?? '',
+      MessageRole.compaction => 'Context compacted',
+    },
+].where((text) => text.isNotEmpty).join('\n\n');
+
+/// The conversation as one selection: dragging selects across messages, tool cards, code and diffs, Ctrl+A (⌘A on a Mac)
+/// selects all of it and Ctrl+C copies, and the context menu offers Copy and Select all. Entries the list has not built are
+/// in it too: after Select all, Copy gives the whole conversation's text.
+class SelectableTranscript extends StatefulWidget {
+  const SelectableTranscript({super.key, required this.session, required this.child});
+
+  final ChatSession session;
+  final Widget child;
+
+  @override
+  State<SelectableTranscript> createState() => SelectableTranscriptState();
+}
+
+class SelectableTranscriptState extends State<SelectableTranscript> {
+  late final FocusNode _focus = FocusNode(debugLabel: 'transcript', onKeyEvent: _onKey);
+
+  /// Whether the selection is all of it: set by Select all, and ended by any other change.
+  bool _all = false;
+  bool _selectingAll = false;
+  String? _allShown;
+
+  bool get _mac => defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.iOS;
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final keys = HardwareKeyboard.instance;
+    if (!(_mac ? keys.isMetaPressed : keys.isControlPressed) || keys.isShiftPressed || keys.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyA) {
+      _startSelectingAll();
+    } else if (event.logicalKey == LogicalKeyboardKey.keyC && _all) {
+      unawaited(copyAll());
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Puts the whole conversation's text on the clipboard.
+  Future<void> copyAll() => Clipboard.setData(ClipboardData(text: conversationText(widget.session)));
+
+  /// Select all is under way until the frame after it: what the selection reports meanwhile is all of it.
+  void _startSelectingAll() {
+    _selectingAll = true;
+    _all = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _selectingAll = false);
+  }
+
+  void _changed(SelectedContent? content) {
+    if (_selectingAll) {
+      _all = content != null;
+      _allShown = content?.plainText;
+    } else if (_all && content?.plainText != _allShown) {
+      _all = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SelectionArea(
+    focusNode: _focus,
+    onSelectionChanged: _changed,
+    contextMenuBuilder: (context, region) => AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: region.contextMenuAnchors,
+      buttonItems: [
+        for (final item in region.contextMenuButtonItems)
+          switch (item.type) {
+            ContextMenuButtonType.copy => item.copyWith(onPressed: () {
+              if (_all) {
+                unawaited(copyAll());
+                region.hideToolbar();
+              } else {
+                item.onPressed?.call();
+              }
+            }),
+            ContextMenuButtonType.selectAll => item.copyWith(onPressed: () {
+              _startSelectingAll();
+              item.onPressed?.call();
+            }),
+            _ => item,
+          },
+      ],
+    ),
+    child: widget.child,
+  );
 }
 
 /// The agent's commands matching what is being typed. Nothing runs until the person sends it.

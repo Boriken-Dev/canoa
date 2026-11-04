@@ -334,8 +334,8 @@ void main() {
       expect(find.textContaining('[image: the secret]'), findsOneWidget);
       // What a tap on the link runs: the framework's own text-range tap cannot find selectable text here.
       TapGestureRecognizer? link;
-      for (final text in tester.widgetList<SelectableText>(find.byType(SelectableText))) {
-        text.textSpan?.visitChildren((span) {
+      for (final text in tester.widgetList<RichText>(find.byType(RichText))) {
+        text.text.visitChildren((span) {
           if (span is TextSpan && span.recognizer is TapGestureRecognizer) link = span.recognizer! as TapGestureRecognizer;
           return true;
         });

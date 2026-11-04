@@ -7,6 +7,7 @@ import 'package:canoa/chat/changes.dart';
 import 'package:canoa/chat/palette.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/sources/sources.dart' show SourceCheck;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -85,7 +86,8 @@ Future<(List<_Agent>, List<ChatSession>, SessionStore)> _three(WidgetTester test
   }
   // The list holds the newest first.
   store.select(store.sessions.first.id);
-  await tester.pumpWidget(CanoaApp(store: store));
+  // Sources are checked with no program looked for.
+  await tester.pumpWidget(CanoaApp(store: store, checkSource: (_) async => const SourceCheck()));
   await tester.pump();
   return (agents, sessions, store);
 }
@@ -104,11 +106,11 @@ Future<void> _press(WidgetTester tester, LogicalKeyboardKey key, {bool shift = f
 Finder get _composer => find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.hintText == 'Message agent');
 
 void main() {
-  testWidgets('Ctrl+N starts a new session', (tester) async {
+  testWidgets('Ctrl+N opens a new session, which has started nothing', (tester) async {
     final (_, _, store) = await _three(tester);
     await _press(tester, LogicalKeyboardKey.keyN);
     expect(store.sessions, hasLength(4));
-    expect(store.selected?.status, SessionStatus.preview);
+    expect(store.selected?.status, SessionStatus.draft);
   });
 
   testWidgets('Ctrl+2 goes to the second session, Ctrl+Tab to the next and Ctrl+Shift+Tab back', (tester) async {

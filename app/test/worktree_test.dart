@@ -4,7 +4,7 @@
 import 'dart:io';
 import 'dart:math';
 
-import 'package:canoa/acp/agent_commands.dart';
+import 'package:canoa/auth/peer_proof.dart' show PeerMethod;
 import 'package:canoa/connect_dialog.dart';
 import 'package:canoa/ledger/ledger_list.dart';
 import 'package:canoa/ledger/session_ledger.dart';
@@ -359,21 +359,17 @@ void main() {
     });
   });
 
-  testWidgets('the connect dialog starts a session in a worktree when asked', (tester) async {
-    const scripted = AgentCommand(label: 'Scripted', program: 'node');
+  testWidgets('the connect dialog asks for a worktree for an agent elsewhere when asked', (tester) async {
     final asked = <bool>[];
-    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    await tester.binding.setSurfaceSize(const Size(1280, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
       onPressed: () => showCanoaConnectDialog(
         context,
-        (_) async {},
-        onRunLocalAgent: (command, {required cwd, required title, required worktree}) async => asked.add(worktree),
-        localAgents: const [scripted],
-        checkInstalled: (_) async => true,
-        methodUnavailable: (method) async => 'no key here',
-        localPeerId: (method) async => throw UnsupportedError('no key'),
-        inBrowser: false,
+        (target) async => asked.add(target.worktree),
+        methodUnavailable: (method) async => null,
+        localPeerId: (method) async => 'sha256:own-${method.id}',
+        method: PeerMethod.webcrypto,
       ),
       child: const Text('open'),
     ))));
@@ -381,9 +377,12 @@ void main() {
     await tester.pumpAndSettle();
     final box = find.byKey(const ValueKey('worktree'));
     expect(tester.widget<CheckboxListTile>(box).value, isFalse, reason: 'off unless asked');
+    await tester.ensureVisible(box);
     await tester.tap(box);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Run Scripted'));
+    await tester.enterText(find.widgetWithText(TextField, 'WebSocket WSS endpoint'), 'wss://agent.example/acp');
+    await tester.enterText(find.widgetWithText(TextField, 'Pinned server peer ID'), 'sha256:${'a' * 64}');
+    await tester.tap(find.text('Connect'));
     await tester.pumpAndSettle();
     expect(asked, [true]);
   });

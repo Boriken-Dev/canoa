@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../chat/agent_events.dart' show ConfigOption, maxConfigOptions;
+import '../chat/session_options.dart';
 import '../worktree/worktree.dart';
 
 /// Where a session's agent runs, as the app reached it.
@@ -190,6 +192,50 @@ final class LedgerEntry {
   }
 }
 
+/// What a source's agent offered when it last ran, and what it takes with a prompt, with when that was seen, and the person's
+/// last choice for it in each role: shown and used before the source's next session starts.
+final class SourceMemory {
+  SourceMemory({required this.seen, this.options = const [], this.images, this.files, Map<String, String>? chosen})
+    : chosen = chosen ?? {};
+
+  DateTime seen;
+  List<ConfigOption> options;
+
+  /// Whether it took images and files with a prompt; null when it has not run.
+  bool? images, files;
+
+  /// By [OptionRole] name, the value last chosen.
+  final Map<String, String> chosen;
+
+  Map<String, Object?> toJson() => {
+    'seen': seen.toUtc().toIso8601String(),
+    'options': [for (final option in options) optionToJson(option)],
+    'images': ?images,
+    'files': ?files,
+    if (chosen.isNotEmpty) 'chosen': chosen,
+  };
+
+  static SourceMemory? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final seen = DateTime.tryParse('${json['seen']}');
+    if (seen == null) return null;
+    return SourceMemory(
+      seen: seen,
+      options: [
+        if (json['options'] case final List<dynamic> options)
+          for (final option in options.take(maxConfigOptions)) ?optionFromJson(option),
+      ],
+      images: json['images'] is bool ? json['images'] as bool : null,
+      files: json['files'] is bool ? json['files'] as bool : null,
+      chosen: {
+        if (json['chosen'] case final Map<dynamic, dynamic> chosen)
+          for (final MapEntry(:key, :value) in chosen.entries)
+            if (value is String && OptionRole.values.any((role) => role.name == key)) '$key': value,
+      },
+    );
+  }
+}
+
 /// How much the ledger keeps, from Canoa.cfg's `[sessions]`.
 final class LedgerSettings {
   const LedgerSettings({
@@ -258,6 +304,12 @@ class SessionLedger extends ChangeNotifier {
   LedgerSettings _settings;
   HarnessNames _names;
   final List<LedgerEntry> _entries = [];
+
+  /// By source label.
+  final Map<String, SourceMemory> _sources = {};
+
+  /// The most sources remembered; the one seen longest ago goes first.
+  static const maxSources = 256;
   Timer? _saveTimer;
   Future<void> _writing = Future.value();
 
@@ -296,6 +348,12 @@ class SessionLedger extends ChangeNotifier {
       _entries
         ..clear()
         ..addAll([for (final json in decoded['sessions'] as List) ?LedgerEntry.fromJson(json)]);
+      _sources.clear();
+      if (decoded['sources'] case final Map<dynamic, dynamic> sources) {
+        for (final MapEntry(:key, :value) in sources.entries.take(maxSources)) {
+          if (SourceMemory.fromJson(value) case final memory?) _sources['$key'] = memory;
+        }
+      }
     } on FormatException catch (error) {
       problem = '${backend.location} is not a session list (${error.message}), so the list starts empty';
     }
@@ -416,6 +474,36 @@ class SessionLedger extends ChangeNotifier {
 
   bool get holdsText => _entries.any((entry) => entry.messages.isNotEmpty);
 
+  /// What the source [label] reported when it last ran, and the person's last choices for it; null for one never run.
+  SourceMemory? source(String label) => _sources[label];
+
+  /// Notes what the source [label]'s agent offers and takes, as it just said.
+  void rememberSource(String label, {required List<ConfigOption> options, required bool images, required bool files}) {
+    final memory = _sources[label] ??= SourceMemory(seen: _clock());
+    memory
+      ..seen = _clock()
+      ..options = List.unmodifiable(options)
+      ..images = images
+      ..files = files;
+    _boundSources();
+    _changed();
+  }
+
+  /// Notes [value] as the person's last choice in [role] for the source [label].
+  void rememberChoice(String label, OptionRole role, String value) {
+    final memory = _sources[label] ??= SourceMemory(seen: _clock());
+    memory.chosen[role.name] = value;
+    _boundSources();
+    _changed();
+  }
+
+  void _boundSources() {
+    while (_sources.length > maxSources) {
+      final oldest = _sources.entries.reduce((a, b) => a.value.seen.isBefore(b.value.seen) ? a : b).key;
+      _sources.remove(oldest);
+    }
+  }
+
   void _changed() {
     notifyListeners();
     _saveTimer?.cancel();
@@ -425,6 +513,7 @@ class SessionLedger extends ChangeNotifier {
   String encode() => const JsonEncoder.withIndent('  ').convert({
     'version': 1,
     'sessions': [for (final entry in _entries) entry.toJson()],
+    if (_sources.isNotEmpty) 'sources': {for (final MapEntry(:key, :value) in _sources.entries) key: value.toJson()},
   });
 
   /// Writes what is pending now, after any write already under way.

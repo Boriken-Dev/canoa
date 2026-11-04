@@ -19,3 +19,9 @@ Future<VerifiedAgent> startLocalAgent(
   String? workingDirectory,
   Map<String, String> environment = const {},
 }) => throw const AcpFailure('A page cannot start a program');
+
+Future<List<int>> readLocalFile(String path) => throw UnsupportedError('A page cannot read a file by its path');
+
+bool inGitRepository(String folder) => false;
+
+Future<int?> localFileSize(String path) async => null;

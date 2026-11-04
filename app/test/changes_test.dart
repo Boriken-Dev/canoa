@@ -159,13 +159,7 @@ void main() {
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
     testWidgets('the pane draws at $label width with nothing overflowing', (tester) async {
       await _shown(tester, size);
-      if (label == 'phone') {
-        await tester.tap(find.byTooltip('More'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Changes'));
-      } else {
-        await tester.tap(find.byTooltip('Changes'));
-      }
+      await tester.tap(find.byTooltip('Changes'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.byType(ChangesPane), findsOneWidget);

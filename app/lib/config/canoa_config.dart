@@ -74,7 +74,19 @@ final class CanoaConfig {
     this.tables = const {},
     this.fullAccess = const {},
     this.notifications = const NotificationSettings(),
+    this.hiddenSources = const {},
+    this.pasteAsFile = defaultPasteAsFile,
+    this.embedLimit = defaultEmbedLimit,
   });
+
+  /// `[attachments] paste_as_file`: the most characters a paste puts in the message; a longer one goes as an attachment.
+  final int pasteAsFile;
+  static const defaultPasteAsFile = 8000;
+
+  /// `[attachments] embed_limit`: the largest file, in bytes, sent as the agent's embedded context; a larger one goes as a
+  /// link to it.
+  final int embedLimit;
+  static const defaultEmbedLimit = 1024 * 1024;
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
   final String cdn;
@@ -107,6 +119,9 @@ final class CanoaConfig {
 
   final NotificationSettings notifications;
 
+  /// `[sources] hidden`: the presets, by label, that Settings keeps out of the new-session picker.
+  final Set<String> hiddenSources;
+
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
 
@@ -119,7 +134,7 @@ final class CanoaConfig {
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
       LookId? look, String? brightness, LedgerSettings? sessions, Set<String>? fullAccess,
-      NotificationSettings? notifications}) =>
+      NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -129,7 +144,7 @@ final class CanoaConfig {
         cdn: cdn,
         look: look ?? this.look,
         brightness: brightness ?? this.brightness,
-        agents: agents,
+        agents: agents ?? this.agents,
         host: host,
         sessions: sessions ?? this.sessions,
         overlays: overlays,
@@ -138,6 +153,9 @@ final class CanoaConfig {
         tables: tables,
         fullAccess: fullAccess ?? this.fullAccess,
         notifications: notifications ?? this.notifications,
+        hiddenSources: hiddenSources ?? this.hiddenSources,
+        pasteAsFile: pasteAsFile,
+        embedLimit: embedLimit,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -159,6 +177,9 @@ final class CanoaConfig {
     tables: tables,
     fullAccess: fullAccess,
     notifications: notifications,
+    hiddenSources: hiddenSources,
+    pasteAsFile: pasteAsFile,
+    embedLimit: embedLimit,
   );
 
   /// What `[host]` names for canoa-host to serve, agents first, as written. canoa-host itself checks each one.
@@ -372,6 +393,9 @@ final class CanoaConfig {
     tables: tables,
     fullAccess: fullAccess,
     notifications: notifications,
+    hiddenSources: hiddenSources,
+    pasteAsFile: pasteAsFile,
+    embedLimit: embedLimit,
   );
 
   static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
@@ -389,7 +413,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store'}
+            'permissions', 'notifications', 'catalogs', 'store', 'sources', 'attachments'}
           .contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
@@ -411,6 +435,17 @@ final class CanoaConfig {
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages'});
     final permissions = table('permissions', {'full_access'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
+    final sources = table('sources', {'hidden'});
+    final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
+    int limit(String key, int fallback) {
+      final raw = attachments[key] ?? fallback;
+      if (raw is! int || raw < 0) throw FormatException('Canoa.cfg: attachments.$key must be a whole number, 0 or more');
+      return raw;
+    }
+    final hidden = sources['hidden'] ?? const <Object>[];
+    if (hidden is! List || hidden.any((name) => name is! String || name.trim().isEmpty)) {
+      throw const FormatException('Canoa.cfg: sources.hidden must be a list of preset names');
+    }
     final fullAccess = permissions['full_access'] ?? const <Object>[];
     if (fullAccess is! List || fullAccess.any((name) => name is! String || name.trim().isEmpty)) {
       throw const FormatException('Canoa.cfg: permissions.full_access must be a list of agent names');
@@ -534,6 +569,9 @@ final class CanoaConfig {
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
       fullAccess: {for (final name in fullAccess) name as String},
+      hiddenSources: {for (final name in hidden) name as String},
+      pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
+      embedLimit: limit('embed_limit', defaultEmbedLimit),
       notifications: NotificationSettings(
         permission: flag(notifications, 'permission', true),
         question: flag(notifications, 'question', true),
@@ -575,7 +613,11 @@ text_messages = ${sessions.textMessages}
 permission = ${notifications.permission}
 question = ${notifications.question}
 finished = ${notifications.finished}
-${fullAccess.isEmpty ? '' : '\n[permissions]\nfull_access = ${jsonEncode(fullAccess.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+
+[attachments]
+paste_as_file = $pasteAsFile
+embed_limit = $embedLimit
+${fullAccess.isEmpty ? '' : '\n[permissions]\nfull_access = ${jsonEncode(fullAccess.toList())}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

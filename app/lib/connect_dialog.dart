@@ -4,9 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'package:coqui_acp/page.dart';
 
-import 'acp/agent_commands.dart';
 import 'acp/browser_connect.dart';
-import 'acp/local_agent.dart';
 import 'acp/served_host.dart';
 import 'auth/browser_peer.dart';
 
@@ -45,10 +43,6 @@ typedef LocalPeerId = Future<String> Function(PeerMethod method);
 /// Pairs this browser's Noise key with the machine waiting at an address, by the PIN it shows, and answers that machine's id.
 typedef PairByPin = Future<String> Function(Uri url, String pin);
 
-/// Runs an agent on this computer, as a child of the app; with [worktree], in a new git worktree of [cwd] on its own branch.
-typedef RunLocalAgent = Future<void> Function(AgentCommand command,
-    {required String cwd, required String title, required bool worktree});
-
 /// Uses the agents a person grants through the browser's provider, asking them in the provider's own window.
 typedef UseBrowserAgents = Future<void> Function(AcpPage acp, {required String cwd, required String title});
 
@@ -57,9 +51,6 @@ Future<void> showCanoaConnectDialog(
   Future<void> Function(ConnectTarget) onConnect, {
   Future<AcpPage?>? browserProvider,
   UseBrowserAgents? onUseBrowserAgents,
-  RunLocalAgent? onRunLocalAgent,
-  List<AgentCommand> localAgents = agentPresets,
-  Future<bool> Function(AgentCommand) checkInstalled = isInstalled,
   MethodCheck methodUnavailable = browserMethodUnavailable,
   LocalPeerId localPeerId = localBrowserPeerId,
   PairByPin pair = pairBrowserAcp,
@@ -72,9 +63,6 @@ Future<void> showCanoaConnectDialog(
     onConnect: onConnect,
     browserProvider: browserProvider,
     onUseBrowserAgents: onUseBrowserAgents,
-    onRunLocalAgent: onRunLocalAgent,
-    localAgents: localAgents,
-    checkInstalled: checkInstalled,
     methodUnavailable: methodUnavailable,
     localPeerId: localPeerId,
     pair: pair,
@@ -124,9 +112,6 @@ class _ConnectDialog extends StatefulWidget {
     required this.pair,
     this.browserProvider,
     this.onUseBrowserAgents,
-    this.onRunLocalAgent,
-    this.localAgents = agentPresets,
-    this.checkInstalled = isInstalled,
     this.method,
     this.inBrowser = kIsWeb,
     this.servedHost = loadServedHost,
@@ -143,9 +128,6 @@ class _ConnectDialog extends StatefulWidget {
   final MethodCheck methodUnavailable;
   final LocalPeerId localPeerId;
   final PairByPin pair;
-  final Future<bool> Function(AgentCommand) checkInstalled;
-  final RunLocalAgent? onRunLocalAgent;
-  final List<AgentCommand> localAgents;
   final Future<void> Function(ConnectTarget) onConnect;
   final Future<AcpPage?>? browserProvider;
   final UseBrowserAgents? onUseBrowserAgents;
@@ -160,7 +142,6 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   final pinned = TextEditingController();
   final cwd = TextEditingController(text: '/');
   final title = TextEditingController();
-  final command = TextEditingController();
   final pairUrl = TextEditingController();
   final pin = TextEditingController();
   late PeerMethod? method = widget.method;
@@ -293,36 +274,6 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     }
   }
 
-  late final Future<List<AgentCommand>> _installed = () async {
-    final found = <AgentCommand>[];
-    for (final command in widget.localAgents) {
-      if (await widget.checkInstalled(command)) found.add(command);
-    }
-    return found;
-  }();
-
-  void _runTyped() {
-    final parsed = parseCommand(command.text);
-    if (parsed == null) {
-      setState(() => error = 'That is not a command: check its quotes.');
-      return;
-    }
-    _runLocal(parsed);
-  }
-
-  Future<void> _runLocal(AgentCommand command) async {
-    if (busy) return;
-    setState(() {busy = true; error = null;});
-    try {
-      await widget.onRunLocalAgent!(command, cwd: cwd.text.trim(), title: title.text.trim(), worktree: worktree);
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) setState(() => error = '$e');
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
   /// No await before the provider's request: it needs the click's user activation.
   Future<void> _useBrowser(AcpPage acp) async {
     if (busy) return;
@@ -347,9 +298,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // An agent on this computer needs only where it works and a title, so those come first, beside the Run buttons; pairing and
-    // endpoints are about agents elsewhere and follow under their own heading.
-    final local = widget.onRunLocalAgent != null;
+    // An agent on this computer starts from a new session's view; this dialog is for one elsewhere, or the browser's.
     final intro = Text(
       'The server must be explicitly paired with $_here. '
       'Only enter a fingerprint verified out of band. '
@@ -374,7 +323,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       ),
     ]);
     return AlertDialog(
-      title: Text(local ? 'Run or connect to an agent' : 'Connect to verified agent'),
+      title: const Text('Connect to verified agent'),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
@@ -382,47 +331,8 @@ class _ConnectDialogState extends State<_ConnectDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (local) ...[cwdField, titleField] else intro,
+              intro,
               const SizedBox(height: 12),
-              if (widget.onRunLocalAgent != null)
-                FutureBuilder<List<AgentCommand>>(
-                  future: _installed,
-                  builder: (context, snapshot) {
-                    final found = snapshot.data ?? const <AgentCommand>[];
-                    if (found.isEmpty) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final command in found)
-                            FilledButton.icon(
-                              onPressed: busy ? null : () => _runLocal(command),
-                              icon: const Icon(Icons.play_arrow_rounded),
-                              label: Text('Run ${command.label}'),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              if (widget.onRunLocalAgent != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: TextField(
-                    controller: command,
-                    decoration: InputDecoration(
-                      labelText: 'Or run any ACP agent, by its command',
-                      suffixIcon: IconButton(
-                        tooltip: 'Run this command',
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        onPressed: busy ? null : _runTyped,
-                      ),
-                    ),
-                    onSubmitted: (_) => _runTyped(),
-                  ),
-                ),
               if (widget.onUseBrowserAgents != null)
                 FutureBuilder<AcpPage?>(
                   future: widget.browserProvider,
@@ -439,12 +349,6 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                     );
                   },
                 ),
-              if (local) ...[
-                Text('Or connect to an agent on another machine', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                intro,
-                const SizedBox(height: 12),
-              ],
               Text('Method the host proves by', style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 4),
               SegmentedButton<PeerMethod>(
@@ -520,7 +424,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   );
                 },
               ),
-              if (!local) titleField,
+              titleField,
               if (served case final host?) _ServedEntries(host: host, chosen: ws.text, onChoose: busy ? null : (url) => setState(() => ws.text = url)),
               TextField(controller: wt,
                 decoration: const InputDecoration(
@@ -537,7 +441,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   labelText: 'Pinned server peer ID',
                   hintText: 'sha256:…',
                 )),
-              if (!local) cwdField,
+              cwdField,
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),

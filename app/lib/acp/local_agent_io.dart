@@ -161,3 +161,26 @@ Future<VerifiedAgent> startLocalAgent(
     throw AcpFailure('${command.label} did not start: ${said.isEmpty ? error : said}');
   }
 }
+
+/// The bytes of the file at [path] on this computer.
+Future<List<int>> readLocalFile(String path) => File(path).readAsBytes();
+
+/// Whether [folder] is in a git repository: it or a folder above it holds `.git`.
+bool inGitRepository(String folder) {
+  var dir = Directory(folder);
+  if (!dir.existsSync()) return false;
+  while (true) {
+    if (FileSystemEntity.typeSync('${dir.path}${Platform.pathSeparator}.git', followLinks: false) != FileSystemEntityType.notFound) {
+      return true;
+    }
+    final parent = dir.parent;
+    if (parent.path == dir.path) return false;
+    dir = parent;
+  }
+}
+
+/// The size in bytes of the file at [path], or null for anything that is not a file that can be read.
+Future<int?> localFileSize(String path) async {
+  final file = File(path);
+  return await file.exists() ? file.length() : null;
+}
