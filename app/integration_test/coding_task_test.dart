@@ -18,6 +18,7 @@ import 'dart:ui' as ui;
 
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/chat/agent_events.dart' show ToolStatus;
+import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/chat/transcript.dart';
 import 'package:canoa/chat/update_record.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -188,7 +189,10 @@ void main() {
 
     bool showing(Finder finder) => finder.evaluate().isNotEmpty;
     final composer = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.hintText == 'Message agent');
-    final question = find.ancestor(of: find.text('Refuse'), matching: find.byType(Card));
+    final question = find.byType(PermissionCard);
+    // The agent's own option of that kind, under whatever name it gave it.
+    Finder answer(String kind) =>
+        find.descendant(of: question, matching: find.byWidgetPredicate((widget) => widget is PermissionChoice && widget.option.kind == kind));
     final working = find.byTooltip('Stop');
 
     Future<void> runAgent() async {
@@ -256,7 +260,7 @@ void main() {
           } else if (refusing) {
             refused++;
           }
-          await tester.tap(find.descendant(of: question, matching: find.text(refusing ? 'Refuse' : 'Allow')));
+          await tester.tap(answer(refusing ? 'reject_once' : 'allow_once').first);
           await tester.pump(const Duration(milliseconds: 300));
           continue;
         }

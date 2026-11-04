@@ -227,7 +227,7 @@ void main() {
       expect(find.text('Write to hello.txt'), findsOneWidget);
       expect(find.text('hello.txt'), findsOneWidget);
       expect(session.toolEntries['w1']?.tool?.title, 'Write', reason: 'the subject is applied before the prompt shows');
-      await tester.tap(find.text('Refuse'));
+      await tester.tap(find.text('No'));
       await _settle(tester);
       expect(agent.sent.singleWhere((message) => message['id'] == 88)['result'], {'outcome': {'outcome': 'selected', 'optionId': 'no'}});
     });
@@ -604,7 +604,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.byTooltip('Stop'), findsOneWidget);
-        expect(find.text('Allow'), findsOneWidget);
+        expect(find.text('Yes'), findsOneWidget);
         expect(find.text('Fix the failing test'), findsWidgets);
         // At phone width the turn has scrolled past it.
         if (label == 'desktop') expect(find.byTooltip('cancelled'), findsOneWidget);

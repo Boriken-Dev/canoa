@@ -55,6 +55,7 @@ final class CanoaConfig {
     this.profile = const Profile(),
     this.agentProfiles = const {},
     this.tables = const {},
+    this.fullAccess = const {},
   });
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
   final int connectTimeout;
@@ -82,6 +83,10 @@ final class CanoaConfig {
   /// `[overlays]`, `[profile]` and each `[agents.NAME.profile]` as they were read, so saving writes them back unchanged.
   final Map<String, Object?> tables;
 
+  /// `[permissions] full_access`: the agents, by label, whose sessions start with full access, which answers each permission request
+  /// that offers to allow once with that option and no question. Empty by default.
+  final Set<String> fullAccess;
+
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
 
@@ -93,7 +98,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness, LedgerSettings? sessions}) =>
+      LookId? look, String? brightness, LedgerSettings? sessions, Set<String>? fullAccess}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -110,6 +115,7 @@ final class CanoaConfig {
         profile: profile,
         agentProfiles: agentProfiles,
         tables: tables,
+        fullAccess: fullAccess ?? this.fullAccess,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -129,6 +135,7 @@ final class CanoaConfig {
     profile: profile,
     agentProfiles: agentProfiles,
     tables: tables,
+    fullAccess: fullAccess,
   );
 
   /// What `[host]` names for canoa-host to serve, agents first, as written. canoa-host itself checks each one.
@@ -237,7 +244,8 @@ final class CanoaConfig {
         ? source.substring(source.indexOf('\n') + 1) : source;
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
-      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile'}
+      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
+            'permissions'}
           .contains(name)) {
         throw FormatException('Canoa.cfg: unknown table $name');
       }
@@ -257,6 +265,11 @@ final class CanoaConfig {
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages'});
+    final permissions = table('permissions', {'full_access'});
+    final fullAccess = permissions['full_access'] ?? const <Object>[];
+    if (fullAccess is! List || fullAccess.any((name) => name is! String || name.trim().isEmpty)) {
+      throw const FormatException('Canoa.cfg: permissions.full_access must be a list of agent names');
+    }
     bool flag(Map<String, dynamic> map, String key, bool fallback) {
       final raw = map[key];
       if (raw == null) return fallback;
@@ -368,6 +381,7 @@ final class CanoaConfig {
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
+      fullAccess: {for (final name in fullAccess) name as String},
       sessions: LedgerSettings(
         keep: count('keep', LedgerSettings.defaultKeep),
         keepText: flag(sessions, 'keep_text', false),
@@ -399,7 +413,7 @@ brightness = "$brightness"
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}
 text_messages = ${sessions.textMessages}
-${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${fullAccess.isEmpty ? '' : '\n[permissions]\nfull_access = ${jsonEncode(fullAccess.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

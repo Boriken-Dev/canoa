@@ -10,7 +10,7 @@ Future<VerifiedAgent> connectBrowserAcp(
   required String pinnedPeerId,
   required PeerMethod method,
   Duration timeout = const Duration(seconds: 10),
-  AcpDecider? decider,
+  AgentDecider? decider,
 }) async {
   final why = await browserMethodUnavailable(method);
   if (why != null) throw MethodUnavailable(method, why);

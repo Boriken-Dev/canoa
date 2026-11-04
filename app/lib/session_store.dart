@@ -22,6 +22,9 @@ const int maxEntries = 5000;
 /// The most one message keeps, since an agent can send any amount.
 const int maxMessageText = 2 * 1024 * 1024;
 
+/// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
+const int maxPendingPermissions = 64;
+
 /// The most that goes with one message. An agent's context is what these fill, so they stay what a person would pick by hand.
 const int maxAttachments = 8;
 const int maxAttachedText = 1024 * 1024;
@@ -51,16 +54,31 @@ class ChatMessage {
   final Compaction? compaction;
 }
 
-/// A tool an agent wants to use, waiting on the person. Nothing answers it for them.
+/// A tool an agent wants to use, waiting on the person. Nothing answers it for them: full access answers a request before it
+/// would wait here, never one already waiting.
 final class PermissionQuestion {
-  PermissionQuestion(this.title, this.kind, {this.detail});
+  PermissionQuestion(this.title, this.kind, {this.detail, this.options = const [], this.fullAccessPassed = false});
   final String title;
   final String? kind;
 
   /// What it would run or touch, when the agent said.
   final String? detail;
+
+  /// The answers the agent offers, in its order.
+  final List<AcpPermissionOption> options;
+
+  /// Whether full access was on and left this to the person, since the agent offered no option to allow once.
+  final bool fullAccessPassed;
   final Completer<AcpDecision> _answer = Completer();
 }
+
+/// Where a session's full access comes from: turned on for it, or for its agent in Canoa.cfg.
+enum FullAccess { session, agent }
+
+/// The option full access answers with: the first that allows once. An `allow_always` is never chosen for the person, since the
+/// agent would remember it after full access ends.
+AcpPermissionOption? fullAccessOption(List<AcpPermissionOption> options) =>
+    options.where((option) => option.kind == 'allow_once').firstOrNull;
 
 class ChatSession {
   ChatSession({
@@ -110,6 +128,10 @@ class ChatSession {
   /// Whether the agent may name the conversation, which it may until the person has.
   bool agentNames = false;
 
+  /// Whether this session's permission requests are answered without asking, and why; null when every one is asked. Off unless
+  /// the person turned it on, for this session or for its agent.
+  FullAccess? fullAccess;
+
   final String id;
   String title;
   final String agent;
@@ -125,7 +147,8 @@ class ChatSession {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder, this.ledger}) {
+  SessionStore({bool includePreview = true, this.recorder, this.ledger, Set<String> fullAccessAgents = const {}, this.onWeakened})
+      : _fullAccessAgents = {...fullAccessAgents} {
     if (includePreview) {
       final first = createPreviewSession(title: 'Getting started', agent: 'Canoa preview');
       first.messages.addAll([
@@ -150,6 +173,86 @@ class SessionStore extends ChangeNotifier {
 
   /// Where every session opened or resumed here is noted, to be listed and opened again after the app ends.
   final SessionLedger? ledger;
+
+  /// Told each weakening as it happens, beside [weakenings]; by default the debug log.
+  final void Function(String)? onWeakened;
+
+  /// The most [weakenings] keeps, the oldest going first.
+  static const maxWeakenings = 200;
+
+  /// Each time something here was made to ask less than it does by default, in the words of a `weakened:` log line.
+  final List<String> weakenings = [];
+
+  final Set<String> _fullAccessAgents;
+
+  /// The agents, by label, whose sessions start with full access.
+  Set<String> get fullAccessAgents => Set.unmodifiable(_fullAccessAgents);
+
+  void _weakened(String what) {
+    final line = 'weakened: $what';
+    weakenings.add(line);
+    if (weakenings.length > maxWeakenings) weakenings.removeAt(0);
+    (onWeakened ?? debugPrint)(line);
+  }
+
+  /// Turns full access on or off for [session]. On, each permission request it makes that offers to allow once is answered with
+  /// that option without asking, which is logged as a weakening and said in the conversation; a request already waiting stays
+  /// for the person. Off, every request is asked again.
+  void setFullAccess(ChatSession session, bool on) {
+    if (on == (session.fullAccess != null)) return;
+    if (on) {
+      session.fullAccess = FullAccess.session;
+      _weakened('full access is on for the conversation "${_named(session.title)}" with ${_named(session.agent)}: it allows what '
+          'it can without asking, looser than asking each time');
+      _note(session, 'Full access is on for this conversation: each request that offers to allow once is allowed without '
+          'asking you.');
+    } else {
+      session.fullAccess = null;
+      _note(session, 'Full access is off: every request is asked again.');
+    }
+    notifyListeners();
+  }
+
+  /// Turns full access on or off for [agent], by the label of a program this app runs: its sessions open now and those it opens
+  /// later, until it is turned off. A session reached any other way, whatever its agent calls itself, is not the program's.
+  void setAgentFullAccess(String agent, bool on) {
+    if (on ? !_fullAccessAgents.add(agent) : !_fullAccessAgents.remove(agent)) return;
+    if (on) {
+      _weakened('full access is on for the agent ${_named(agent)}: its sessions allow what they can without asking, looser than '
+          'asking each time');
+    }
+    for (final session in _sessions) {
+      if (session.agent != agent || !_runsAs(session, agent)) continue;
+      if (on && session.fullAccess == null) {
+        session.fullAccess = FullAccess.agent;
+        _note(session, 'Full access is on for ${_named(agent)}: each request that offers to allow once is allowed without '
+            'asking you.');
+      } else if (!on && session.fullAccess == FullAccess.agent) {
+        session.fullAccess = null;
+        _note(session, 'Full access is off for ${_named(agent)}: every request is asked again.');
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Whether [session] is served by the program this app runs as [agent].
+  bool _runsAs(ChatSession session, String agent) {
+    final client = _verifiedClients[session.id];
+    return client != null && client.isChild && client.peerId == 'local:$agent';
+  }
+
+  /// A name an agent or a person gave, as it is shown and logged: one line, with nothing that could reorder what surrounds it.
+  static String _named(String name) => shortText(name) ?? 'an unnamed one';
+
+  /// A session just given its agent, which starts with full access when that agent's setting says so.
+  void _startFullAccess(ChatSession session) {
+    if (session.fullAccess != null || !_fullAccessAgents.contains(session.agent) || !_runsAs(session, session.agent)) return;
+    session.fullAccess = FullAccess.agent;
+    _weakened('full access is on for the conversation "${_named(session.title)}" with ${_named(session.agent)}, as Canoa.cfg says '
+        'for that agent: it allows what it can without asking, looser than asking each time');
+    _note(session, 'Full access is on for ${_named(session.agent)}: each request that offers to allow once is allowed without '
+        'asking you.');
+  }
 
   final List<ChatSession> _sessions = [];
   final Map<String, VerifiedAgent> _verifiedClients = {};
@@ -184,33 +287,69 @@ class SessionStore extends ChangeNotifier {
     return session;
   }
 
-  /// Puts a permission request to the person, in the conversation it belongs to. A request about no session here is refused.
-  Future<AcpDecision> askPermission(AcpPermissionRequest request) {
+  /// Puts a permission request to the person, in the conversation it belongs to: the one [from] serves under the request's
+  /// session id. A request about no session here is refused, and one past [maxPendingPermissions] is cancelled.
+  Future<AcpDecision> askPermission(AcpPermissionRequest request, VerifiedAgent from) {
     ChatSession? target;
     for (final session in _sessions) {
-      if (session.remoteSessionId == request.sessionId) target = session;
+      if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
     }
     if (target == null) return Future.value(const AcpDeny('not a session here'));
+    if (target.pendingPermissions.length >= maxPendingPermissions) {
+      _note(target, 'The agent asked more questions than the $maxPendingPermissions a conversation holds waiting, so the rest '
+          'were answered cancelled.');
+      notifyListeners();
+      return Future.value(const AcpCancel());
+    }
     // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about.
     if (request.toolCall != null) _applyTool(target, request.toolCall!);
+    final title = shortText(request.title) ?? shortText(request.kind) ?? 'A tool';
+    if (target.fullAccess != null) {
+      final allow = fullAccessOption(request.options);
+      if (allow != null) {
+        _note(target, 'Full access allowed: $title (${shortText(allow.name) ?? 'allow once'}).');
+        notifyListeners();
+        return Future.value(AcpSelect(allow.optionId));
+      }
+    }
     final question = PermissionQuestion(
-      shortText(request.title) ?? shortText(request.kind) ?? 'A tool',
+      title,
       request.kind,
       detail: [
         ?shortText(request.description),
         ?describeToolInput(request.rawInput),
       ].join('\n').trim(),
+      options: request.options,
+      fullAccessPassed: target.fullAccess != null,
     );
     target.pendingPermissions.add(question);
     notifyListeners();
     return question._answer.future;
   }
 
-  /// The person's answer to the oldest question in [session].
+  /// The person's answer to the oldest question in [session]: the agent's first option that allows once, or refuses once.
   void answerPermission(ChatSession session, {required bool allow}) {
     if (session.pendingPermissions.isEmpty) return;
     final question = session.pendingPermissions.removeAt(0);
     question._answer.complete(allow ? const AcpAllow() : const AcpDeny('the person refused'));
+    notifyListeners();
+  }
+
+  /// The person's choice of one of the agent's own answers to the oldest question in [session]. What an "always" answer
+  /// remembers is the agent's to keep.
+  void choosePermission(ChatSession session, AcpPermissionOption option) {
+    if (session.pendingPermissions.isEmpty) return;
+    final question = session.pendingPermissions.first;
+    if (!question.options.contains(option)) return;
+    session.pendingPermissions.removeAt(0);
+    question._answer.complete(AcpSelect(option.optionId));
+    notifyListeners();
+  }
+
+  /// The person's answer to a question offering nothing they could choose: it is answered cancelled.
+  void cancelPermission(ChatSession session) {
+    if (session.pendingPermissions.isEmpty) return;
+    session.pendingPermissions.removeAt(0)._answer.complete(const AcpCancel());
     notifyListeners();
   }
 
@@ -309,6 +448,7 @@ class SessionStore extends ChangeNotifier {
     final session = target;
     unawaited(_subscriptions.remove(localId)?.cancel());
     _verifiedClients[localId] = client;
+    _startFullAccess(session);
     session.status = SessionStatus.connected;
     _subscriptions[localId] = client.updates.listen(
       (update) {
@@ -760,7 +900,7 @@ class SessionStore extends ChangeNotifier {
     var title = entry.title ?? 'Earlier conversation';
     try {
       if (await client.describe() case AcpDescription(sessions: AcpKnown(value: final listed))) {
-        for (final info in listed) {
+        for (final info in listed.sessions) {
           if (info.id == entry.sessionId) title = shortText(info.title) ?? title;
         }
       }

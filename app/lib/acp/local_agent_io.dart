@@ -86,7 +86,7 @@ Future<void> _end(Process process) async {
 /// and the client refuses nothing on its behalf: [decider] puts each permission request to the person.
 Future<VerifiedAgent> startLocalAgent(
   AgentCommand command, {
-  AcpDecider? decider,
+  AgentDecider? decider,
   String? workingDirectory,
 }) async {
   final environment = <String, String>{};

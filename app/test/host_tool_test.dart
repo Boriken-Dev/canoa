@@ -117,7 +117,7 @@ void main() {
     }
   });
 
-  Future<VerifiedAgent> connect({AcpDecider? decider}) => connectVerifiedAcp(
+  Future<VerifiedAgent> connect({AgentDecider? decider}) => connectVerifiedAcp(
     chatEndpoints(webSocket: url),
     expectedPeerId: peer,
     verifyPeer: (channel, expected) => provePeer(browser!, channel, expected, method: method),
@@ -134,7 +134,7 @@ void main() {
     await pair();
     final asked = <AcpPermissionRequest>[];
     var answer = const AcpAllow() as AcpDecision;
-    final client = await connect(decider: (request) async {
+    final client = await connect(decider: (request, _) async {
       asked.add(request);
       return answer;
     });
@@ -182,7 +182,7 @@ void main() {
     await pair();
     final asked = <String>[];
     final allow = Platform.environment['CANOA_TEST_TOOL_ANSWER'] == 'allow';
-    final client = await connect(decider: (request) async {
+    final client = await connect(decider: (request, _) async {
       asked.add(request.title ?? '?');
       return allow ? const AcpAllow() : const AcpDeny('the test refuses');
     });

@@ -83,12 +83,22 @@ final class AgentIdentity {
   }
 }
 
+/// Answers a permission request [from] the client it reached, which names the conversation it belongs to along with its session
+/// id: an agent chooses its own session ids, and two agents can choose the same one.
+typedef AgentDecider = Future<AcpDecision> Function(AcpPermissionRequest request, VerifiedAgent from);
+
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
-  VerifiedAgent._(this._client, this.peerId, this.identity);
+  VerifiedAgent._(AcpClient Function(AcpDecider? decider) client, this.peerId, this.identity, AgentDecider? decider,
+      {this.isChild = false}) {
+    _client = client(decider == null ? null : (request) => decider(request, this));
+  }
 
-  final AcpClient _client;
+  late final AcpClient _client;
   final String peerId;
+
+  /// Whether this is a program this app started, named in [peerId] as `local:<label>`.
+  final bool isChild;
 
   /// What the agent said about itself when it was initialized.
   final AgentIdentity identity;
@@ -98,7 +108,7 @@ final class VerifiedAgent {
     required String expectedPeerId,
     required VerifyAcpPeer verifyPeer,
     Duration verificationTimeout = const Duration(seconds: 10),
-    AcpDecider? decider,
+    AgentDecider? decider,
   }) async {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
@@ -110,7 +120,7 @@ final class VerifiedAgent {
       final proven = actual.channel;
       final identity = AgentIdentity();
       return VerifiedAgent._(
-        AcpClient(
+        (decider) => AcpClient(
           incoming: proven.messages.map(identity._inspect),
           send: proven.send,
           closeSource: proven.close,
@@ -120,6 +130,7 @@ final class VerifiedAgent {
         ),
         actual.peerId,
         identity,
+        decider,
       );
     } catch (_) {
       await channel.close();
@@ -133,11 +144,11 @@ final class VerifiedAgent {
     required Stream<String> messages,
     required Future<void> Function(String) send,
     required Future<void> Function() close,
-    AcpDecider? decider,
+    AgentDecider? decider,
   }) {
     final identity = AgentIdentity();
     return VerifiedAgent._(
-      AcpClient(
+      (decider) => AcpClient(
         incoming: messages.map(identity._inspect),
         send: send,
         closeSource: close,
@@ -149,11 +160,13 @@ final class VerifiedAgent {
       ),
       'local:$label',
       identity,
+      decider,
+      isChild: true,
     );
   }
 
   /// Over a connection a browser's provider holds. The proof is the provider's, and without one there is no client.
-  static Future<VerifiedAgent> fromProvider(AcpPageConnection connection, {AcpDecider? decider}) async {
+  static Future<VerifiedAgent> fromProvider(AcpPageConnection connection, {AgentDecider? decider}) async {
     final agent = connection.agent;
     final peer = agent.peer;
     if (!agent.verified || peer == null) {
@@ -162,7 +175,7 @@ final class VerifiedAgent {
     }
     final identity = AgentIdentity();
     return VerifiedAgent._(
-      AcpClient(
+      (decider) => AcpClient(
         incoming: connection.messages.map(identity._inspect),
         send: connection.send,
         closeSource: connection.close,
@@ -172,6 +185,7 @@ final class VerifiedAgent {
       ),
       peer,
       identity,
+      decider,
     );
   }
 

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:canoa/acp/agent_commands.dart';
+import 'package:canoa/acp/client.dart' show VerifiedAgent;
 import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -103,15 +106,22 @@ void main() {
     testWidgets('a permission waits in the conversation until the person answers', (tester) async {
       final store = SessionStore(includePreview: false);
       final session = store.addProviderSession(title: 'T', agent: 'Agent', peerId: 'local:a', remoteSessionId: 'r');
+      final silent = StreamController<String>();
+      addTearDown(silent.close);
+      final client = VerifiedAgent.fromChild(label: 'a', messages: silent.stream, send: (_) async {}, close: () async {});
+      store.attachVerifiedClient(session.id, client, record: false);
       store.select(session.id);
-      final answer = store.askPermission(const AcpPermissionRequest(sessionId: 'r', toolCallId: 't', title: 'Delete a file'));
+      final answer = store.askPermission(const AcpPermissionRequest(sessionId: 'r', toolCallId: 't', title: 'Delete a file', options: [
+        AcpPermissionOption(optionId: 'yes', name: 'Allow', kind: 'allow_once'),
+        AcpPermissionOption(optionId: 'no', name: 'Refuse', kind: 'reject_once'),
+      ]), client);
       await tester.pumpWidget(CanoaApp(store: store));
       await tester.pump();
       expect(find.text('Delete a file'), findsOneWidget);
       await tester.tap(find.text('Refuse'));
       await tester.pump();
       expect(find.text('Delete a file'), findsNothing);
-      expect(await answer, isA<AcpDeny>());
+      expect(await answer, isA<AcpSelect>().having((select) => select.optionId, 'optionId', 'no'));
     });
   });
 

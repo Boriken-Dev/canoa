@@ -19,6 +19,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'chat/agent_events.dart' show AgentCommandInfo;
+import 'chat/permission_card.dart';
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
@@ -145,7 +146,7 @@ class _CanoaAppState extends State<CanoaApp> {
         context: above,
         builder: (_) => SettingsDialog(
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
-          onProfiles: _showProfiles,
+          onProfiles: _showProfiles, agents: [for (final agent in [...agentPresets, ...config.agents]) agent.label],
         ),
       );
     } finally {
@@ -157,6 +158,9 @@ class _CanoaAppState extends State<CanoaApp> {
     final changed = fromDialog.withHost(config.host).withProfilesOf(config);
     setState(() => config = changed);
     store.ledger?.configure(changed.sessions);
+    for (final agent in {...store.fullAccessAgents, ...changed.fullAccess}) {
+      store.setAgentFullAccess(agent, changed.fullAccess.contains(agent));
+    }
     await widget.shell?.update(changed);
     try {
       await _write(changed);
@@ -170,6 +174,21 @@ class _CanoaAppState extends State<CanoaApp> {
       }
     }
   }
+  /// Ends full access for [agent], in its sessions and in Canoa.cfg: the banner's one action, where the agent's setting turned it on.
+  Future<void> _endAgentFullAccess(String agent) async {
+    store.setAgentFullAccess(agent, false);
+    if (!config.fullAccess.contains(agent)) return;
+    final changed = config.copyWith(fullAccess: {...config.fullAccess}..remove(agent));
+    setState(() => config = changed);
+    try {
+      await _write(changed);
+    } on UnsupportedError {
+      // Canoa.cfg in web/PWA deployments is read-only.
+    } catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save Canoa.cfg: $error')));
+    }
+  }
+
   /// The profiles as Canoa.cfg has them now, for every agent the app offers or the file gives a profile.
   Future<void> _showProfiles() async {
     final above = _navigator.currentContext;
@@ -362,7 +381,8 @@ class _CanoaAppState extends State<CanoaApp> {
     config = widget.config;
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
-    store = widget.store ?? SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger);
+    store = widget.store ??
+        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, fullAccessAgents: config.fullAccess);
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     unawaited(_claimContext());
@@ -406,6 +426,7 @@ class _CanoaAppState extends State<CanoaApp> {
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onRunLocalAgent: canRunLocalAgents ? _runLocalAgent : null, onSettings: _showSettings,
           onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
           agents: [...agentPresets, ...config.agents],
+          onEndAgentFullAccess: _endAgentFullAccess,
         ),
       ),
     );
@@ -415,7 +436,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets, this.onHosting, this.onReopen,
+    this.agents = agentPresets, this.onHosting, this.onReopen, this.onEndAgentFullAccess,
   });
 
   final List<AgentCommand> agents;
@@ -427,6 +448,7 @@ class _CanoaHome extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
+  final Future<void> Function(String agent)? onEndAgentFullAccess;
 
   @override
   Widget build(BuildContext context) {
@@ -451,6 +473,7 @@ class _CanoaHome extends StatelessWidget {
                   key: ValueKey(store.selectedId ?? 'empty'),
                   store: store,
                   narrow: narrow,
+                  onEndAgentFullAccess: onEndAgentFullAccess,
                 ),
               ),
             ],
@@ -553,10 +576,15 @@ class _SessionRail extends StatelessWidget {
                   selected: active,
                   selectedTileColor: context.look.selected,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  leading: const Icon(Icons.chat_bubble_outline, size: 21),
+                  leading: session.fullAccess == null
+                      ? const Icon(Icons.chat_bubble_outline, size: 21)
+                      : Icon(Icons.gpp_maybe_outlined, size: 21, color: Theme.of(context).colorScheme.error),
                   title: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text(
-                    session.status == SessionStatus.preview ? 'Preview · offline' : session.status.name,
+                    [
+                      if (session.fullAccess != null) 'Full access',
+                      session.status == SessionStatus.preview ? 'Preview · offline' : session.status.name,
+                    ].join(' · '),
                     maxLines: 1,
                   ),
                   onTap: () {
@@ -588,11 +616,14 @@ class _SessionRail extends StatelessWidget {
 
 class _Conversation extends StatefulWidget {
   const _Conversation({
-    super.key, required this.store, required this.narrow,
+    super.key, required this.store, required this.narrow, this.onEndAgentFullAccess,
   });
 
   final SessionStore store;
   final bool narrow;
+
+  /// Ends full access for an agent, where its setting is what turned it on.
+  final Future<void> Function(String agent)? onEndAgentFullAccess;
 
   @override
   State<_Conversation> createState() => _ConversationState();
@@ -685,6 +716,33 @@ class _ConversationState extends State<_Conversation> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _toEnd());
   }
 
+  /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
+  List<Widget> _headerActions(ChatSession? session) {
+    final actions = <(String, IconData, VoidCallback)>[
+      if (session != null && widget.store.canListEarlier(session))
+        ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
+      if (session != null && session.status != SessionStatus.preview && session.fullAccess == null)
+        ('Full access…', Icons.gpp_maybe_outlined, () async {
+          if (await confirmFullAccess(context, session)) widget.store.setFullAccess(session, true);
+        }),
+    ];
+    if (!widget.narrow || actions.length < 2) {
+      return [
+        for (final (tooltip, icon, onPressed) in actions) IconButton(tooltip: tooltip, icon: Icon(icon), onPressed: onPressed),
+      ];
+    }
+    return [
+      PopupMenuButton<VoidCallback>(
+        tooltip: 'More',
+        onSelected: (chosen) => chosen(),
+        itemBuilder: (context) => [
+          for (final (label, icon, onPressed) in actions)
+            PopupMenuItem(value: onPressed, child: ListTile(leading: Icon(icon), title: Text(label))),
+        ],
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = widget.store.selected;
@@ -711,12 +769,7 @@ class _ConversationState extends State<_Conversation> {
                   style: Theme.of(context).textTheme.bodySmall),
               ],
             )),
-            if (session != null && widget.store.canListEarlier(session))
-              IconButton(
-                tooltip: 'Earlier conversations',
-                icon: const Icon(Icons.history),
-                onPressed: () => unawaited(_showEarlier(session)),
-              ),
+            ..._headerActions(session),
             if (session != null)
               IconButton(
                 tooltip: 'Close conversation',
@@ -732,6 +785,20 @@ class _ConversationState extends State<_Conversation> {
           ]),
         ),
       ),
+      if (session?.fullAccess != null)
+        FullAccessBanner(
+          session: session!,
+          onTurnOff: () {
+            final agent = session.fullAccess == FullAccess.agent ? widget.onEndAgentFullAccess : null;
+            if (agent != null) {
+              unawaited(agent(session.agent));
+            } else if (session.fullAccess == FullAccess.agent) {
+              widget.store.setAgentFullAccess(session.agent, false);
+            } else {
+              widget.store.setFullAccess(session, false);
+            }
+          },
+        ),
       if (session == null)
         const Expanded(child: Center(child: Text('Create a conversation to begin.')))
       else ...[
@@ -771,7 +838,7 @@ class _ConversationState extends State<_Conversation> {
         ),
         if (session.plan.isNotEmpty) PlanPanel(entries: session.plan),
         if (session.pendingPermissions.isNotEmpty)
-          _PermissionCard(store: widget.store, session: session),
+          PermissionCard(store: widget.store, session: session),
         SessionControls(
           session: session,
           onChoose: (option, value) => unawaited(widget.store.choose(session, option, value)),
@@ -892,115 +959,6 @@ class _Composer extends StatelessWidget {
           ]),
         ),
       ),
-    );
-  }
-}
-
-/// What an agent is waiting on. It stays until the person answers: nothing answers it for them.
-class _PermissionCard extends StatelessWidget {
-  const _PermissionCard({required this.store, required this.session});
-
-  final SessionStore store;
-  final ChatSession session;
-
-  /// Narrower than this, the answers go under the question rather than beside it, which would leave its text a thin column.
-  static const double besideFrom = 560;
-
-  @override
-  Widget build(BuildContext context) {
-    final question = session.pendingPermissions.first;
-    final asked = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('${session.agent} wants to use a tool', style: Theme.of(context).textTheme.labelMedium),
-        Text(question.title),
-        if (question.detail?.isNotEmpty ?? false) _ToApprove(detail: question.detail!),
-        if (session.pendingPermissions.length > 1)
-          Text(
-            '${session.pendingPermissions.length - 1} more after this',
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-      ],
-    );
-    final answers = [
-      TextButton(
-        onPressed: () => store.answerPermission(session, allow: false),
-        child: const Text('Refuse'),
-      ),
-      const SizedBox(width: 8),
-      FilledButton(
-        onPressed: () => store.answerPermission(session, allow: true),
-        child: const Text('Allow'),
-      ),
-    ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: LayoutBuilder(builder: (context, constraints) {
-            final beside = constraints.maxWidth >= besideFrom;
-            final top = Row(
-              crossAxisAlignment: beside ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.shield_outlined),
-                const SizedBox(width: 12),
-                Expanded(child: asked),
-                if (beside) ...answers,
-              ],
-            );
-            if (beside) return top;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [top, const SizedBox(height: 8), Row(mainAxisAlignment: MainAxisAlignment.end, children: answers)],
-            );
-          }),
-        ),
-      ),
-    );
-  }
-}
-
-/// What a tool would do, in a box of a fixed height. Whether it holds more than the box shows is measured at the width it has, so a
-/// short edit spread over a few lines is not called long, and a long one is.
-class _ToApprove extends StatelessWidget {
-  const _ToApprove({required this.detail});
-
-  final String detail;
-
-  static const double shown = 120;
-  static const TextStyle _style = TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: LayoutBuilder(builder: (context, constraints) {
-        final painter = TextPainter(
-          text: TextSpan(text: detail, style: DefaultTextStyle.of(context).style.merge(_style)),
-          textDirection: Directionality.of(context),
-          textScaler: MediaQuery.textScalerOf(context),
-        )..layout(maxWidth: constraints.maxWidth);
-        final long = painter.height > shown;
-        painter.dispose();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: shown),
-              child: SingleChildScrollView(child: SelectableText(detail, style: _style)),
-            ),
-            if (long)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'This is long. Scroll to read all of it before you answer.',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-          ],
-        );
-      }),
     );
   }
 }

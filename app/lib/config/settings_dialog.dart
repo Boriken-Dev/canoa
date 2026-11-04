@@ -4,8 +4,11 @@ import '../ledger/session_ledger.dart';
 import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles});
+  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles, this.agents = const []});
   final CanoaConfig config;
+
+  /// The agents this app offers, by label, each of which full access can be turned on for.
+  final List<String> agents;
 
   /// The session list, whose kept text Settings can clear.
   final SessionLedger? ledger;
@@ -27,6 +30,21 @@ class SettingsDialogState extends State<SettingsDialog> {
     textMessages: config.sessions.textMessages,
     harnesses: config.sessions.harnesses,
   );
+
+  Future<bool> _confirmFullAccess(String agent) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Full access for $agent?'),
+          content: Text('Each request $agent makes that offers to allow once will be allowed without asking you, in every '
+              'conversation with it, until you turn this off here or on the conversation\'s banner.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Turn on full access')),
+          ],
+        ),
+      ) ??
+      false;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -91,6 +109,30 @@ class SettingsDialogState extends State<SettingsDialog> {
             },
           ),
         ),
+        if (widget.agents.isNotEmpty || config.fullAccess.isNotEmpty)
+          ExpansionTile(
+            key: const Key('settings-full-access'),
+            title: const Text('Full access'),
+            subtitle: Text(config.fullAccess.isEmpty ? 'Off for every agent' : 'On for ${config.fullAccess.join(', ')}'),
+            children: [
+              const ListTile(
+                dense: true,
+                subtitle: Text('An agent with full access has each request that offers to allow once allowed without asking you. '
+                    'A request offering no way to allow once is still asked. It changes nothing the browser lets pages or agents do.'),
+              ),
+              for (final agent in {...widget.agents, ...config.fullAccess})
+                SwitchListTile(
+                  title: Text(agent),
+                  value: config.fullAccess.contains(agent),
+                  onChanged: (on) async {
+                    if (on && !await _confirmFullAccess(agent)) return;
+                    final names = {...config.fullAccess};
+                    on ? names.add(agent) : names.remove(agent);
+                    setState(() => config = config.copyWith(fullAccess: names));
+                  },
+                ),
+            ],
+          ),
         ListTile(
           title: const Text('Sessions remembered'),
           subtitle: const Text('The least recently used go first'),

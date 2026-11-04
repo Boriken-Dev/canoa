@@ -123,7 +123,7 @@ void main() {
     await host.stop();
   });
 
-  Future<VerifiedAgent> connect(String entry, {AcpDecider? decider}) => connectVerifiedAcp(
+  Future<VerifiedAgent> connect(String entry, {AgentDecider? decider}) => connectVerifiedAcp(
     chatEndpoints(webSocket: host.urls[entry]!),
     expectedPeerId: host.peer,
     verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: host.method),
@@ -159,7 +159,7 @@ void main() {
 
   test('the chat reaches a stdio ACP agent, and a permission it asks reaches the person', () async {
     final asked = <AcpPermissionRequest>[];
-    final client = await connect('fixture', decider: (request) async {
+    final client = await connect('fixture', decider: (request, _) async {
       asked.add(request);
       return const AcpAllow();
     });

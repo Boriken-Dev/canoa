@@ -10,6 +10,6 @@ String? defaultWorkingDirectory() => null;
 
 Future<VerifiedAgent> startLocalAgent(
   AgentCommand command, {
-  AcpDecider? decider,
+  AgentDecider? decider,
   String? workingDirectory,
 }) => throw const AcpFailure('A page cannot start a program');

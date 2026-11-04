@@ -25,7 +25,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
   Duration timeout = const Duration(seconds: 10),
   WebDialer? webTransportDialer,
   WebDialer? webSocketDialer,
-  AcpDecider? decider,
+  AgentDecider? decider,
 }) async {
   final source = await connectWebChannel(
     endpoints,

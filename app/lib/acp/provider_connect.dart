@@ -7,7 +7,7 @@ import 'client.dart';
 Future<VerifiedAgent> connectProviderAgent(
   AcpPage acp,
   AcpPageAgent agent, {
-  AcpDecider? decider,
+  AgentDecider? decider,
 }) async {
   final client = await VerifiedAgent.fromProvider(await acp.connect(agent), decider: decider);
   try {

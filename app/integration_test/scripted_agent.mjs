@@ -22,23 +22,28 @@ let turn = null;
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 const update = (sessionId, body) => send({ method: 'session/update', params: { sessionId, update: body } });
 
+// Every kind ACP has, in the order Claude's adapter sends its own. An "always" answer is this agent's to remember: it holds for
+// the tool's kind for the rest of the session, which then neither asks nor tells the client.
+const options = [
+  { optionId: 'yes', name: 'Allow', kind: 'allow_once' },
+  { optionId: 'yes-always', name: 'Always allow', kind: 'allow_always' },
+  { optionId: 'no', name: 'Reject', kind: 'reject_once' },
+  { optionId: 'no-always', name: 'Always reject', kind: 'reject_always' },
+];
+const remembered = new Map();
+
 function ask(sessionId, toolCall) {
+  const always = remembered.get(`${sessionId} ${toolCall.kind}`);
+  if (always) return Promise.resolve(always);
   const id = nextId++;
-  send({
-    id,
-    method: 'session/request_permission',
-    params: {
-      sessionId,
-      toolCall,
-      options: [
-        { optionId: 'yes', name: 'Allow', kind: 'allow_once' },
-        { optionId: 'no', name: 'Reject', kind: 'reject_once' },
-      ],
-    },
-  });
+  send({ id, method: 'session/request_permission', params: { sessionId, toolCall, options } });
   return new Promise((resolve) => waiting.set(id, (answer) => {
     const outcome = answer.result?.outcome;
-    resolve(outcome?.outcome === 'cancelled' ? 'cancelled' : outcome?.optionId === 'yes' ? 'allowed' : 'refused');
+    const chosen = options.find((option) => option.optionId === outcome?.optionId);
+    if (outcome?.outcome === 'cancelled' || !chosen) return resolve('cancelled');
+    const said = chosen.kind.startsWith('allow') ? 'allowed' : 'refused';
+    if (chosen.kind.endsWith('always')) remembered.set(`${sessionId} ${toolCall.kind}`, said);
+    resolve(said);
   }));
 }
 
