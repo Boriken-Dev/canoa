@@ -190,6 +190,8 @@ team = "https://github.com/example/overlays.git@main#catalog.toml"   # a label o
 [store]
 catalog_max_bytes = 4194304   # a catalog file's size, 4 MiB
 catalog_max_depth = 64        # how deeply it nests
+catalog_max_entries = 2000    # entries listed from one catalog, by name; the rest are left out and counted
+catalog_max_icons = 256       # distinct icon files read for one catalog, each once
 icon_max_bytes = 524288       # an icon's size, 512 KiB
 icon_max_width = 1024         # the width and height its header may give
 icon_max_height = 1024
@@ -214,10 +216,17 @@ looser than the default.
 - **A catalog's pin** is checked against the tree fetched: one that does not match is shown as a refusal and the
   overlay cannot be installed from that entry. An entry with no pin is shown as unpinned.
 - **Install and pin** installs exactly what was shown, through the path **Install…** takes, and names the overlay in
-  `[overlays]` as `{ source, pin }`, pinned to the digest checked. **Update and pin** shows what an update changes first,
-  then the same. **Remove…** takes the overlay out of `[overlays]` and deletes its files and fetched history. An
-  overlay of the same name that Canoa.cfg names from another source is neither installed over nor removed. Nothing of
-  an overlay runs, from the store or otherwise. Catalogs are fetched into `overlays/.catalogs/LABEL.git`.
+  `[overlays]` as `{ source, pin }`, pinned to the digest checked. **Update** shows what an update changes first. A pin
+  Canoa.cfg already gives the overlay holds as it does for **Check for changes…**: a tree of another digest installs
+  only once you choose **Update and move the pin…** and confirm the move, naming both digests. **Remove…** takes the
+  overlay out of `[overlays]` and deletes its files and fetched history. An overlay of the same name that Canoa.cfg
+  names from another source is neither installed over nor removed. Nothing of an overlay runs, from the store or
+  otherwise. Catalogs are fetched into `overlays/.catalogs/LABEL.git`; what a page fetched and did not install is
+  deleted when the page closes.
+- **Text from a catalog or a manifest** is shown as plain text, with every control, invisible or bidirectional
+  character named as `<U+XXXX>`; a line break is named too wherever one line is shown, and a description is set
+  apart, after the source, pin, commit and digest. A source is shown without user information or query, and one that
+  holds a password is refused, in `[catalogs]` and from a catalog.
 
 Only git sources with a branch, tag or commit install: an entry whose source is a directory, a URL that is not git, or
 git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown as text to
