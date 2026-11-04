@@ -19,9 +19,11 @@ import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show KeyDownEvent, KeyRepeatEvent, LogicalKeyboardKey;
 
 import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/changes.dart';
+import 'chat/palette.dart';
 import 'chat/permission_card.dart';
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
@@ -216,6 +218,9 @@ class _CanoaAppState extends State<CanoaApp> {
       ),
     );
   }
+
+  /// What the conversation shown offers the keyboard and the palette.
+  final _conversation = _ConversationHandle();
 
   /// This state sits above the app's Navigator, so its dialogs open in the Navigator's context.
   final _navigator = GlobalKey<NavigatorState>();
@@ -463,6 +468,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
           agents: [...agentPresets, ...config.agents],
           onEndAgentFullAccess: _endAgentFullAccess,
+          conversation: _conversation,
         ),
       ),
     );
@@ -472,7 +478,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onRunLocalAgent, required this.onSettings,
-    this.agents = agentPresets, this.onHosting, this.onReopen, this.onEndAgentFullAccess,
+    this.agents = agentPresets, this.onHosting, this.onReopen, this.onEndAgentFullAccess, required this.conversation,
   });
 
   final List<AgentCommand> agents;
@@ -485,9 +491,93 @@ class _CanoaHome extends StatelessWidget {
   final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
   final Future<void> Function(String agent)? onEndAgentFullAccess;
+  final _ConversationHandle conversation;
+
+  void _connect(BuildContext context) => unawaited(showCanoaConnectDialog(
+    context,
+    onConnect,
+    browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
+    onUseBrowserAgents: onUseBrowserAgents,
+    onRunLocalAgent: onRunLocalAgent,
+    localAgents: agents,
+  ));
+
+  /// The session [step] places from the one chosen, going round the list.
+  void _step(int step) {
+    final sessions = store.sessions;
+    if (sessions.isEmpty) return;
+    final at = sessions.indexWhere((session) => session.id == store.selectedId);
+    store.select(sessions[(at + step) % sessions.length].id);
+  }
+
+  /// The agent's first option of [kind] for the question shown, if any.
+  void _answer(String kind) {
+    final session = store.selected;
+    if (session == null || session.pendingPermissions.isEmpty) return;
+    final options = session.pendingPermissions.first.options;
+    final chosen = options.where((option) => option.kind == kind).firstOrNull ??
+        (kind == 'reject_once' ? options.where((option) => option.rejects).firstOrNull : null);
+    if (chosen != null) store.choosePermission(session, chosen);
+  }
+
+  void _stop() {
+    if (store.selected?.status == SessionStatus.working) unawaited(store.cancelActiveSession().catchError((Object _) {}));
+  }
+
+  Future<void> _palette(BuildContext context) {
+    final session = store.selected;
+    return showDialog<void>(
+      context: context,
+      builder: (_) => CommandPalette(items: [
+        PaletteItem('New session', store.createPreviewSession, icon: Icons.add_comment_outlined),
+        PaletteItem('Connect to an agent', () => _connect(context), icon: Icons.link_rounded),
+        if (session != null && conversation.showChanges != null && changesOf(session).isNotEmpty)
+          PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
+        if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
+        PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
+        if (onHosting != null) PaletteItem('Hosting', onHosting!, icon: Icons.dns_outlined),
+        PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
+        for (final other in store.sessions)
+          if (other.id != store.selectedId)
+            PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
+        for (final command in session?.commands ?? const <AgentCommandInfo>[])
+          PaletteItem('/${command.name}', () => conversation.insert?.call('/${command.name} '),
+              detail: command.description.isEmpty ? 'A command of the agent\'s' : command.description, icon: Icons.terminal),
+      ]),
+    );
+  }
+
+  /// The keyboard's shortcuts, wherever focus is in the window.
+  Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
+    chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
+    chord(LogicalKeyboardKey.keyN): store.createPreviewSession,
+    for (final (index, key) in const [
+      LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5, LogicalKeyboardKey.digit6,
+      LogicalKeyboardKey.digit7, LogicalKeyboardKey.digit8, LogicalKeyboardKey.digit9,
+    ].indexed)
+      chord(key): () {
+        if (index < store.sessions.length) store.select(store.sessions[index].id);
+      },
+    chord(LogicalKeyboardKey.tab): () => _step(1),
+    chord(LogicalKeyboardKey.tab, shift: true): () => _step(-1),
+    chord(LogicalKeyboardKey.keyL): () => conversation.focusComposer?.call(),
+    chord(LogicalKeyboardKey.period): _stop,
+    chord(LogicalKeyboardKey.keyA, shift: true): () => _answer('allow_once'),
+    chord(LogicalKeyboardKey.keyR, shift: true): () => _answer('reject_once'),
+    chord(LogicalKeyboardKey.keyD, shift: true): () => conversation.showChanges?.call(),
+    chord(LogicalKeyboardKey.slash): () => unawaited(showShortcutHelp(context)),
+  };
 
   @override
   Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: _shortcuts(context),
+      child: Focus(autofocus: true, child: _layout(context)),
+    );
+  }
+
+  Widget _layout(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final narrow = constraints.maxWidth < 730 ||
           Uri.base.queryParameters['view'] == 'panel';
@@ -510,6 +600,7 @@ class _CanoaHome extends StatelessWidget {
                   store: store,
                   narrow: narrow,
                   onEndAgentFullAccess: onEndAgentFullAccess,
+                  handle: conversation,
                 ),
               ),
             ],
@@ -680,10 +771,19 @@ class _SessionMark extends StatelessWidget {
   }
 }
 
+/// What the conversation shown offers the keyboard and the palette, set by it while it is shown.
+final class _ConversationHandle {
+  Object? owner;
+  VoidCallback? focusComposer, showChanges;
+  ValueChanged<String>? insert;
+}
+
 class _Conversation extends StatefulWidget {
   const _Conversation({
-    super.key, required this.store, required this.narrow, this.onEndAgentFullAccess,
+    super.key, required this.store, required this.narrow, this.onEndAgentFullAccess, required this.handle,
   });
+
+  final _ConversationHandle handle;
 
   final SessionStore store;
   final bool narrow;
@@ -698,6 +798,37 @@ class _Conversation extends StatefulWidget {
 class _ConversationState extends State<_Conversation> {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
+
+  /// The composer's focus. Up in an empty composer brings back the last message the person sent here; otherwise Up moves the
+  /// cursor as usual, since the composer's own handler sees the key before the text field's shortcuts do.
+  late final FocusNode _composerFocus = FocusNode(onKeyEvent: (node, event) {
+    if ((event is KeyDownEvent || event is KeyRepeatEvent) && event.logicalKey == LogicalKeyboardKey.arrowUp &&
+        _input.text.isEmpty) {
+      final last = widget.store.selected?.messages.lastWhere((message) => message.role == MessageRole.user,
+          orElse: () => ChatMessage(role: MessageRole.user, text: '', at: DateTime.now()));
+      if (last != null && last.text.isNotEmpty) {
+        _input.value = TextEditingValue(text: last.text, selection: TextSelection.collapsed(offset: last.text.length));
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  });
+
+  @override
+  void initState() {
+    super.initState();
+    widget.handle
+      ..owner = this
+      ..focusComposer = _composerFocus.requestFocus
+      ..showChanges = () {
+        final session = widget.store.selected;
+        if (session != null && changesOf(session).isNotEmpty) _showChanges(session);
+      }
+      ..insert = (text) {
+        _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+        _composerFocus.requestFocus();
+      };
+  }
 
   /// Whether the transcript keeps its end in view as entries arrive: true until the person scrolls away from the end.
   bool _following = true;
@@ -770,6 +901,15 @@ class _ConversationState extends State<_Conversation> {
 
   @override
   void dispose() {
+    // A conversation chosen next may have taken the handle already.
+    if (identical(widget.handle.owner, this)) {
+      widget.handle
+        ..owner = null
+        ..focusComposer = null
+        ..showChanges = null
+        ..insert = null;
+    }
+    _composerFocus.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -957,6 +1097,7 @@ class _ConversationState extends State<_Conversation> {
         ),
         _Composer(
           controller: _input,
+          focusNode: _composerFocus,
           enabled: session.status == SessionStatus.preview ||
               session.status == SessionStatus.connected ||
               session.status == SessionStatus.working,
@@ -995,7 +1136,7 @@ class _ConversationState extends State<_Conversation> {
 
 class _Composer extends StatelessWidget {
   const _Composer({
-    required this.controller, required this.enabled, required this.onSend,
+    required this.controller, required this.enabled, required this.onSend, this.focusNode,
     this.working = false, this.onStop, this.commands = const [],
     this.attachments = const [], this.onAttach, this.onRemove, this.remote = true,
   });
@@ -1004,6 +1145,7 @@ class _Composer extends StatelessWidget {
   final bool remote;
 
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final bool enabled;
   final VoidCallback onSend;
   final bool working;
@@ -1052,6 +1194,7 @@ class _Composer extends StatelessWidget {
               ),
             TextField(
               controller: controller,
+              focusNode: focusNode,
               enabled: enabled,
               minLines: 1,
               maxLines: 5,
