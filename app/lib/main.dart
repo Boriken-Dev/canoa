@@ -24,6 +24,7 @@ import 'package:flutter/services.dart' show KeyDownEvent, KeyRepeatEvent, Logica
 import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/changes.dart';
 import 'chat/palette.dart';
+import 'chat/queue_panel.dart';
 import 'chat/permission_card.dart';
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
@@ -1089,6 +1090,7 @@ class _ConversationState extends State<_Conversation> {
           ]),
         ),
         if (session.plan.isNotEmpty) PlanPanel(entries: session.plan),
+        if (session.queue.isNotEmpty) QueuePanel(store: widget.store, session: session),
         if (session.pendingPermissions.isNotEmpty)
           PermissionCard(store: widget.store, session: session),
         SessionControls(
@@ -1211,8 +1213,12 @@ class _Composer extends StatelessWidget {
                 prefixIcon: onAttach == null
                     ? null
                     : IconButton(tooltip: 'Attach', onPressed: enabled ? onAttach : null, icon: const Icon(Icons.attach_file)),
+                // While the agent works, what is written waits in the queue, and Stop leaves the queue as it is.
                 suffixIcon: working
-                    ? IconButton(tooltip: 'Stop', onPressed: onStop, icon: const Icon(Icons.stop_circle_outlined))
+                    ? Row(mainAxisSize: MainAxisSize.min, children: [
+                        IconButton(tooltip: 'Queue', onPressed: enabled ? onSend : null, icon: const Icon(Icons.schedule_send_outlined)),
+                        IconButton(tooltip: 'Stop', onPressed: onStop, icon: const Icon(Icons.stop_circle_outlined)),
+                      ])
                     : IconButton(
                         tooltip: 'Send',
                         onPressed: enabled ? onSend : null,

@@ -72,6 +72,16 @@ final class PermissionQuestion {
   final Completer<AcpDecision> _answer = Completer();
 }
 
+/// The most messages one conversation holds waiting for its turn to end.
+const int maxQueued = 20;
+
+/// A message written while the agent was working, sent when its turn ends.
+final class QueuedMessage {
+  QueuedMessage(this.text, this.attachments);
+  String text;
+  final List<AcpAttachment> attachments;
+}
+
 /// What a session needs the person for: a permission request, a question, or a turn it finished.
 enum AttentionKind { permission, question, finished }
 
@@ -140,6 +150,12 @@ class ChatSession {
 
   /// The files of the changes pane the person marked viewed, each with the version of it they saw.
   final Map<String, int> viewedChanges = {};
+
+  /// Messages written while a turn ran, oldest first. The first is sent when a turn ends as it should.
+  final List<QueuedMessage> queue = [];
+
+  /// Why the queue waits for the person rather than going on: a turn that was stopped or failed. Null while it goes on.
+  String? queueHeld;
 
   /// Whether something here waits for the person's answer.
   bool get needsYou => pendingPermissions.isNotEmpty;
@@ -522,12 +538,14 @@ class SessionStore extends ChangeNotifier {
         if (event is AcpCancelled) _note(session, 'Stopped.');
         if (event is AcpCompleted) _needs(session, AttentionKind.finished);
         _keepText(session);
+        _turnEnded(session, event is AcpCompleted ? null : 'the turn was stopped');
         notifyListeners();
       } else if (event is AcpFailed) {
         session.status = SessionStatus.connected;
         session.messages.add(ChatMessage(role: MessageRole.notice, text: event.message, at: DateTime.now()));
         _needs(session, AttentionKind.finished);
         _keepText(session);
+        _turnEnded(session, 'the turn failed');
         notifyListeners();
       }
     });
@@ -740,8 +758,16 @@ class SessionStore extends ChangeNotifier {
           session.status = SessionStatus.working;
         } else if (update.state == 'idle') {
           // A turn the person stopped is not news to them, and an idle state outside a turn ends nothing.
-          if (session.status == SessionStatus.working && update.reason != 'cancelled') _needs(session, AttentionKind.finished);
+          final ended = session.status == SessionStatus.working;
+          if (ended && update.reason != 'cancelled') _needs(session, AttentionKind.finished);
           session.status = SessionStatus.connected;
+          if (ended) {
+            _turnEnded(session, switch (update.reason) {
+              'cancelled' => 'the turn was stopped',
+              'error' || 'refusal' => 'the turn failed',
+              _ => null,
+            });
+          }
           if (update.reason == 'cancelled') {
             _note(session, 'Stopped.');
           } else if (update.reason == 'error') {
@@ -795,7 +821,8 @@ class SessionStore extends ChangeNotifier {
   }
 
   /// A v2 prompt response confirms insertion, not agent turn completion.
-  /// The prompt is never retried automatically after a disconnect.
+  /// The prompt is never retried automatically after a disconnect. Written while a turn runs, the message is queued instead,
+  /// with what goes with it, and sent when the turn ends.
   Future<void> sendText(String text) async {
     final session = selected;
     if (session == null || (text.trim().isEmpty && session.attachments.isEmpty)) return;
@@ -803,25 +830,72 @@ class SessionStore extends ChangeNotifier {
       sendPreviewText(text);
       return;
     }
+    if (session.status == SessionStatus.working || session.queue.isNotEmpty) {
+      if (session.queue.length >= maxQueued) throw StateError('$maxQueued messages already wait for this turn to end');
+      session.queue.add(QueuedMessage(text, List.of(session.attachments)));
+      session.attachments.clear();
+      notifyListeners();
+      // A queue waiting on nothing, after a turn that ended as it should, goes on at once.
+      if (session.status != SessionStatus.working && session.queueHeld == null) await sendQueued(session);
+      return;
+    }
+    await _deliver(session, text, List.of(session.attachments));
+  }
+
+  /// A turn of [session] ended, stopped or failed when [held] says why. The next queued message goes, unless the turn did not
+  /// end as it should: then the queue waits for the person, who may send it, edit it or clear it.
+  void _turnEnded(ChatSession session, String? held) {
+    if (session.queue.isEmpty) return;
+    session.queueHeld = held;
+    if (held == null) unawaited(sendQueued(session).catchError((Object error) => _note(session, 'A queued message was not sent: $error')));
+  }
+
+  /// Sends the first queued message of [session] now, and lets the queue go on after it.
+  Future<void> sendQueued(ChatSession session) async {
+    if (session.queue.isEmpty || session.status == SessionStatus.working) return;
+    session.queueHeld = null;
+    final next = session.queue.removeAt(0);
+    notifyListeners();
+    await _deliver(session, next.text, next.attachments);
+  }
+
+  /// Changes the text of a queued message.
+  void editQueued(ChatSession session, QueuedMessage message, String text) {
+    if (!session.queue.contains(message) || (text.trim().isEmpty && message.attachments.isEmpty)) return;
+    message.text = text;
+    notifyListeners();
+  }
+
+  /// Takes one queued message out, or every one.
+  void removeQueued(ChatSession session, [QueuedMessage? message]) {
+    if (message == null) {
+      session.queue.clear();
+    } else {
+      session.queue.remove(message);
+    }
+    if (session.queue.isEmpty) session.queueHeld = null;
+    notifyListeners();
+  }
+
+  Future<void> _deliver(ChatSession session, String text, List<AcpAttachment> attachments) async {
     final client = _verifiedClients[session.id];
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
     }
     if (session.peerId != null) ledger?.touch(session.peerId!, session.remoteSessionId!);
-    final attachments = List.of(session.attachments);
     final sent = attachments.isEmpty ? null : 'Sent with this: ${attachments.map((item) => item.name).join(', ')}';
     if (client.protocolVersion == 1) {
       // A v1 answer arrives when the whole turn ends, so the message shows now.
       if (text.trim().isNotEmpty) session.messages.add(ChatMessage(role: MessageRole.user, text: text, at: DateTime.now()));
       if (sent != null) _note(session, sent);
-      session.attachments.clear();
+      session.attachments.removeWhere(attachments.contains);
       session.status = SessionStatus.working;
       notifyListeners();
       await client.prompt(session.remoteSessionId!, text, attachments: attachments);
       return;
     }
     final messageId = await client.prompt(session.remoteSessionId!, text, attachments: attachments);
-    session.attachments.clear();
+    session.attachments.removeWhere(attachments.contains);
     if (text.trim().isNotEmpty && !session.messages.any((message) => message.messageId == messageId)) {
       session.messages.add(ChatMessage(
         role: MessageRole.user,
