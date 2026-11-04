@@ -1,7 +1,11 @@
 // The overlay store: two catalogs in local bare repositories listed and searched, a name both offer shown once per
 // catalog, refused icons and entries, an overlay's page built from its own manifest, a catalog pin checked against
 // the tree fetched, and install, update and remove through the install path an overlay named by hand takes. The git
-// tests need git on PATH and are skipped without it.
+// tests need git on PATH and are skipped without it; each fetches several repositories, which a full parallel run can
+// slow past the default 30 s.
+@Timeout.factor(4)
+library;
+
 import 'dart:convert';
 import 'dart:io';
 
