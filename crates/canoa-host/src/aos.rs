@@ -275,6 +275,32 @@ pub fn is_relative_path(path: &str) -> bool {
         })
 }
 
+/// Whether `url` is plain `http` to another computer: its host is neither `localhost`, `[::1]` nor an IPv4 address in
+/// `127.0.0.0/8`, compared as an address, so `127.0.0.1.example.org` is another computer.
+#[must_use]
+pub fn is_insecure_url(url: &str) -> bool {
+    let Some(rest) = url
+        .get(..7)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("http://"))
+        .map(|_| &url[7..])
+    else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = if authority.starts_with('[') {
+        authority.split_inclusive(']').next().unwrap_or(authority)
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    let host = host.to_ascii_lowercase();
+    let loopback = host == "localhost"
+        || host == "[::1]"
+        || host
+            .parse::<core::net::Ipv4Addr>()
+            .is_ok_and(|address| address.is_loopback());
+    !loopback
+}
+
 /// Where an overlay comes from, as a source string names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

@@ -189,27 +189,6 @@ fn resolve_path(root: &str, relative: &str, windows: bool) -> String {
     )
 }
 
-fn insecure(url: &str) -> bool {
-    if !url
-        .get(..7)
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
-    {
-        return false;
-    }
-    let host = url[7..]
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("");
-    let host = host
-        .rsplit_once(':')
-        .map_or(host, |(host, _)| host)
-        .to_ascii_lowercase();
-    host != "localhost" && host != "[::1]" && !host.starts_with("127.")
-}
-
 /// A mapping's entries by key bytes: mapping order carries no meaning in AOS, so every order Canoa shows is this one.
 fn sorted(map: &Map<String, Value>) -> Vec<(&String, &Value)> {
     let mut entries: Vec<(&String, &Value)> = map.iter().collect();
@@ -438,7 +417,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                 .unwrap_or("")
                 .to_owned();
             let mut headers = IndexMap::new();
-            let plain = insecure(&url);
+            let plain = aos::is_insecure_url(&url);
             for (header, variable) in entries(server.get("headers_env")) {
                 if plain {
                     not_applied.push(format!(
@@ -502,6 +481,9 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         }
         for (key, value) in entries(Some(hints)) {
             match (key.as_str(), value) {
+                ("model" | "effort", Value::String(text)) if !super::plain(text) => {
+                    not_applied.push(format!("harness.{id}.{key}: not one line of plain text"));
+                }
                 ("model", Value::String(model)) => profile.model = Some(model.clone()),
                 ("effort", Value::String(effort)) => profile.effort = Some(effort.clone()),
                 ("context", Value::Array(paths)) => profile.contexts.extend(

@@ -796,28 +796,15 @@ pub fn grants_report(
                 ungranted.insert(format!("env:{name}"));
             }
         }
-        if let Some(url) = server.get("url").and_then(Value::as_str)
-            && url
-                .get(..7)
-                .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
+        if server
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(super::is_insecure_url)
         {
-            let host = url[7..]
-                .split('/')
-                .next()
-                .unwrap_or("")
-                .split('?')
-                .next()
-                .unwrap_or("");
-            let host = host
-                .rsplit_once(':')
-                .map_or(host, |(host, _)| host)
-                .to_ascii_lowercase();
-            if host != "localhost" && host != "[::1]" && !host.starts_with("127.") {
-                weakenings.push(Weakening::new(
-                    "insecure-transport",
-                    server.get("name").and_then(Value::as_str).unwrap_or(""),
-                ));
-            }
+            weakenings.push(Weakening::new(
+                "insecure-transport",
+                server.get("name").and_then(Value::as_str).unwrap_or(""),
+            ));
         }
     }
     for entry in manifest

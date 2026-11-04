@@ -9,22 +9,100 @@ use super::AosError;
 /// What a placeholder reads: the value, none when the variable is unset, or an error for one it may not read.
 pub(crate) type Lookup<'a> = &'a dyn Fn(&str) -> Result<Option<String>, AosError>;
 
+/// What one substitution may cost: settings with defaults and no floor, so that text from elsewhere cannot exhaust memory,
+/// the stack or the processor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SubstLimits {
+    /// The longest value one substitution gives, in bytes: 1 MiB by default.
+    pub max_value: usize,
+    /// How deep expressions may nest inside the words of others: 32 by default.
+    pub max_depth: usize,
+    /// How many steps pattern matching may take in one substitution: ten million by default.
+    pub max_steps: u64,
+}
+
+impl Default for SubstLimits {
+    fn default() -> Self {
+        Self {
+            max_value: 1024 * 1024,
+            max_depth: 32,
+            max_steps: 10_000_000,
+        }
+    }
+}
+
+/// One substitution: its lookup, its limits and what it has spent of them.
+struct Run<'a> {
+    lookup: Lookup<'a>,
+    limits: SubstLimits,
+    depth: core::cell::Cell<usize>,
+    steps: core::cell::Cell<u64>,
+}
+
+impl Run<'_> {
+    fn step(&self, cost: usize) -> Result<(), AosError> {
+        let spent = self.steps.get().saturating_add(cost as u64);
+        self.steps.set(spent);
+        if spent > self.limits.max_steps {
+            return Err(AosError::new("too-complex", "a pattern"));
+        }
+        Ok(())
+    }
+
+    fn fits(&self, out: &str) -> Result<(), AosError> {
+        if out.len() > self.limits.max_value {
+            return Err(AosError::new("too-large", "a substituted value"));
+        }
+        Ok(())
+    }
+}
+
 /// `text` with every placeholder replaced, reading variables through `lookup`.
 ///
 /// # Errors
 ///
 /// `undefined-variable` for an unset name whose value is needed, `invalid-pattern` for a bracket expression with nothing
 /// in it or a range whose end is below its start, and whatever `lookup` refuses (`secret-placeholder`). The subject is
-/// the placeholder's name, or the pattern.
+/// the placeholder's name, or the pattern. Past [`SubstLimits::default`]: `too-large`, `too-deep` and `too-complex`.
 pub fn substitute(
     text: &str,
     lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>,
 ) -> Result<String, AosError> {
-    let chars: Vec<char> = text.chars().collect();
-    substitute_chars(&chars, lookup)
+    substitute_with(text, lookup, SubstLimits::default())
 }
 
-fn substitute_chars(text: &[char], lookup: Lookup<'_>) -> Result<String, AosError> {
+/// As [`substitute`], within `limits`.
+///
+/// # Errors
+///
+/// As [`substitute`].
+pub fn substitute_with(
+    text: &str,
+    lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>,
+    limits: SubstLimits,
+) -> Result<String, AosError> {
+    let chars: Vec<char> = text.chars().collect();
+    let run = Run {
+        lookup,
+        limits,
+        depth: core::cell::Cell::new(0),
+        steps: core::cell::Cell::new(0),
+    };
+    substitute_chars(&chars, &run)
+}
+
+fn substitute_chars(text: &[char], run: &Run<'_>) -> Result<String, AosError> {
+    if run.depth.get() > run.limits.max_depth {
+        return Err(AosError::new("too-deep", "an expression"));
+    }
+    run.depth.set(run.depth.get() + 1);
+    let result = substitute_inner(text, run);
+    run.depth.set(run.depth.get() - 1);
+    result
+}
+
+fn substitute_inner(text: &[char], run: &Run<'_>) -> Result<String, AosError> {
     let mut out = String::new();
     let mut index = 0;
     while index < text.len() {
@@ -41,9 +119,10 @@ fn substitute_chars(text: &[char], lookup: Lookup<'_>) -> Result<String, AosErro
             }
             Some('{') => {
                 if let Some(close) = closing_brace(text, index + 2)
-                    && let Some(found) = expression(&text[index + 2..close], lookup)?
+                    && let Some(found) = expression(&text[index + 2..close], run)?
                 {
                     out.push_str(&found);
+                    run.fits(&out)?;
                     index = close + 1;
                     continue;
                 }
@@ -53,6 +132,7 @@ fn substitute_chars(text: &[char], lookup: Lookup<'_>) -> Result<String, AosErro
         out.push('$');
         index += 1;
     }
+    run.fits(&out)?;
     Ok(out)
 }
 
@@ -89,17 +169,17 @@ fn name_at(text: &[char]) -> usize {
     }
 }
 
-fn required(name: &str, lookup: Lookup<'_>) -> Result<String, AosError> {
-    lookup(name)?.ok_or_else(|| AosError::new("undefined-variable", name))
+fn required(name: &str, run: &Run<'_>) -> Result<String, AosError> {
+    (run.lookup)(name)?.ok_or_else(|| AosError::new("undefined-variable", name))
 }
 
 /// The text for `${body}`, or none when it is no expression the specification defines.
-fn expression(body: &[char], lookup: Lookup<'_>) -> Result<Option<String>, AosError> {
+fn expression(body: &[char], run: &Run<'_>) -> Result<Option<String>, AosError> {
     if body.first() == Some(&'#') {
         let length = name_at(&body[1..]);
         if length > 0 && length + 1 == body.len() {
             let name: String = body[1..].iter().collect();
-            return Ok(Some(required(&name, lookup)?.chars().count().to_string()));
+            return Ok(Some(required(&name, run)?.chars().count().to_string()));
         }
     }
     let length = name_at(body);
@@ -109,26 +189,26 @@ fn expression(body: &[char], lookup: Lookup<'_>) -> Result<Option<String>, AosEr
     let key: String = body[..length].iter().collect();
     let rest = &body[length..];
     if rest.is_empty() {
-        return required(&key, lookup).map(Some);
+        return required(&key, run).map(Some);
     }
     for operator in [":-", ":=", ":+", "-", "=", "+"] {
         let operator: Vec<char> = operator.chars().collect();
         if rest.starts_with(&operator) {
             let word = &rest[operator.len()..];
-            let value = lookup(&key)?;
+            let value = (run.lookup)(&key)?;
             let present = value
                 .as_deref()
                 .is_some_and(|value| !(operator[0] == ':' && value.is_empty()));
             if operator.last() == Some(&'+') {
                 return Ok(Some(if present {
-                    substitute_chars(word, lookup)?
+                    substitute_chars(word, run)?
                 } else {
                     String::new()
                 }));
             }
             return Ok(Some(match value {
                 Some(value) if present => value,
-                _ => substitute_chars(word, lookup)?,
+                _ => substitute_chars(word, run)?,
             }));
         }
     }
@@ -137,7 +217,7 @@ fn expression(body: &[char], lookup: Lookup<'_>) -> Result<Option<String>, AosEr
             let Some((offset, length)) = slice_spec(&rest[1..]) else {
                 return Ok(None);
             };
-            Ok(Some(slice(&required(&key, lookup)?, offset, length)))
+            Ok(Some(slice(&required(&key, run)?, offset, length)))
         }
         '/' => {
             let spec = &rest[1..];
@@ -146,21 +226,21 @@ fn expression(body: &[char], lookup: Lookup<'_>) -> Result<Option<String>, AosEr
                 _ => None,
             };
             let (pattern, replacement) = split_pattern(&spec[usize::from(kind.is_some())..]);
-            let value = required(&key, lookup)?;
-            replace(&value, kind, pattern, replacement).map(Some)
+            let value = required(&key, run)?;
+            replace(&value, kind, pattern, replacement, run).map(Some)
         }
         '#' | '%' => {
             let doubled = rest.get(1) == Some(&rest[0]);
             let pattern = &rest[if doubled { 2 } else { 1 }..];
-            let value = required(&key, lookup)?;
-            trim(&value, rest[0], doubled, pattern).map(Some)
+            let value = required(&key, run)?;
+            trim(&value, rest[0], doubled, pattern, run).map(Some)
         }
         _ => {
             let operator: String = rest.iter().collect();
             if !["^", "^^", ",", ",,"].contains(&operator.as_str()) {
                 return Ok(None);
             }
-            let value = required(&key, lookup)?;
+            let value = required(&key, run)?;
             let mut chars = value.chars();
             Ok(Some(match operator.as_str() {
                 "^^" => value.to_uppercase(),
@@ -373,11 +453,13 @@ fn compile(pattern: &[char]) -> Result<Vec<Token>, AosError> {
     Ok(out)
 }
 
-/// Whether `tokens` match the whole of `text`.
-fn whole(tokens: &[Token], text: &[char]) -> bool {
+/// Whether `tokens` match the whole of `text`; each step it takes is spent from `run`.
+fn whole(tokens: &[Token], text: &[char], run: &Run<'_>) -> Result<bool, AosError> {
     let (mut t, mut s) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
+    let mut steps = 0usize;
     while s < text.len() {
+        steps += 1;
         if t < tokens.len() && !matches!(tokens[t], Token::Star) && tokens[t].matches(text[s]) {
             t += 1;
             s += 1;
@@ -389,17 +471,47 @@ fn whole(tokens: &[Token], text: &[char]) -> bool {
             s = from + 1;
             star = Some((at, from + 1));
         } else {
-            return false;
+            run.step(steps)?;
+            return Ok(false);
         }
     }
-    tokens[t..].iter().all(|token| matches!(token, Token::Star))
+    run.step(steps + 1)?;
+    Ok(tokens[t..].iter().all(|token| matches!(token, Token::Star)))
 }
 
 /// Every end at which the pattern matches `text` from `start`, shortest first.
-fn ends(tokens: &[Token], text: &[char], start: usize) -> Vec<usize> {
-    (start..=text.len())
-        .filter(|end| whole(tokens, &text[start..*end]))
-        .collect()
+fn ends(
+    tokens: &[Token],
+    text: &[char],
+    start: usize,
+    run: &Run<'_>,
+) -> Result<Vec<usize>, AosError> {
+    let mut found = Vec::new();
+    for end in start..=text.len() {
+        if whole(tokens, &text[start..end], run)? {
+            found.push(end);
+        }
+    }
+    Ok(found)
+}
+
+/// The first start from which the pattern matches the rest of `text`, or the last one with `last`.
+fn suffix_start(
+    tokens: &[Token],
+    text: &[char],
+    last: bool,
+    run: &Run<'_>,
+) -> Result<Option<usize>, AosError> {
+    let mut found = None;
+    for start in 0..=text.len() {
+        if whole(tokens, &text[start..], run)? {
+            found = Some(start);
+            if !last {
+                break;
+            }
+        }
+    }
+    Ok(found)
 }
 
 fn replace(
@@ -407,6 +519,7 @@ fn replace(
     kind: Option<char>,
     pattern: &[char],
     replacement: &[char],
+    run: &Run<'_>,
 ) -> Result<String, AosError> {
     if pattern.is_empty() {
         return Ok(value.into());
@@ -414,56 +527,61 @@ fn replace(
     let tokens = compile(pattern)?;
     let text: Vec<char> = value.chars().collect();
     let replacement: String = replacement.iter().collect();
-    match kind {
-        Some('#') => Ok(match ends(&tokens, &text, 0).last() {
+    let out = match kind {
+        Some('#') => match ends(&tokens, &text, 0, run)?.last() {
             Some(end) => replacement + &text[*end..].iter().collect::<String>(),
             None => value.into(),
-        }),
-        Some('%') => Ok(
-            match (0..=text.len()).find(|start| whole(&tokens, &text[*start..])) {
-                Some(start) => text[..start].iter().collect::<String>() + &replacement,
-                None => value.into(),
-            },
-        ),
+        },
+        Some('%') => match suffix_start(&tokens, &text, false, run)? {
+            Some(start) => text[..start].iter().collect::<String>() + &replacement,
+            None => value.into(),
+        },
         _ => {
             let mut out = String::new();
             let mut position = 0;
             loop {
-                let found = (position..text.len()).find_map(|start| {
-                    ends(&tokens, &text, start)
+                let mut found = None;
+                for start in position..text.len() {
+                    if let Some(end) = ends(&tokens, &text, start, run)?
                         .last()
                         .filter(|end| **end > start)
-                        .map(|end| (start, *end))
-                });
+                    {
+                        found = Some((start, *end));
+                        break;
+                    }
+                }
                 let Some((start, end)) = found else { break };
                 out.extend(&text[position..start]);
                 out.push_str(&replacement);
+                run.fits(&out)?;
                 position = end;
                 if kind != Some('/') {
                     break;
                 }
             }
             out.extend(&text[position..]);
-            Ok(out)
+            out
         }
-    }
+    };
+    run.fits(&out)?;
+    Ok(out)
 }
 
-fn trim(value: &str, operator: char, longest: bool, pattern: &[char]) -> Result<String, AosError> {
+fn trim(
+    value: &str,
+    operator: char,
+    longest: bool,
+    pattern: &[char],
+    run: &Run<'_>,
+) -> Result<String, AosError> {
     let tokens = compile(pattern)?;
     let text: Vec<char> = value.chars().collect();
     if operator == '#' {
-        let found = ends(&tokens, &text, 0);
+        let found = ends(&tokens, &text, 0, run)?;
         let end = if longest { found.last() } else { found.first() };
         return Ok(end.map_or_else(|| value.into(), |end| text[*end..].iter().collect()));
     }
-    let starts: Vec<usize> = (0..=text.len())
-        .filter(|start| whole(&tokens, &text[*start..]))
-        .collect();
-    let start = if longest {
-        starts.first()
-    } else {
-        starts.last()
-    };
-    Ok(start.map_or_else(|| value.into(), |start| text[..*start].iter().collect()))
+    // The shortest suffix starts last, the longest first.
+    let start = suffix_start(&tokens, &text, !longest, run)?;
+    Ok(start.map_or_else(|| value.into(), |start| text[..start].iter().collect()))
 }
