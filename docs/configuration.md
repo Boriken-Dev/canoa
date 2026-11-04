@@ -19,6 +19,7 @@ Configuration tables:
 - [assets] cdn = "none" or "local" (deployment option; font hosting remains a separate build concern)
 - [host] what `canoa-host` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
 - [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200)
+- [notifications] permission, question, finished: which of these, in a conversation the person is not looking at, reach them as a notification outside the window; each on by default. See [below](#when-a-conversation-needs-you).
 - [permissions] full_access: the agents, by the label the app shows, whose sessions start with full access, such as `full_access = ["Claude"]`. Empty by default. Full access answers each permission request that offers to allow once with that option and no question, and is shown on the conversation and its row while it lasts; see [permission requests in the chat](acp-client.md#permission-requests-in-the-chat).
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
@@ -192,6 +193,27 @@ What has been run, by platform:
 The Settings action brings up the main window and opens the Canoa settings dialog. Saving writes the same Canoa.cfg file, not an unrelated preferences database. A system-hosted web application cannot overwrite its deployment Canoa.cfg.
 
 The default launch is visible, with close-to-tray enabled. The start-hidden option takes effect on the next launch.
+
+## When a conversation needs you
+
+A conversation needs the person when its agent asks leave to use a tool, asks a question, or finishes a turn (a turn the person
+stopped does not count). If that conversation is not the one shown, or the window is hidden, minimized or not focused, the
+desktop shows a notification, and choosing it opens that conversation. A notification names the conversation and its agent and
+says which of the three it is, nothing else: never the command, the path or anything else the agent sent, which a lock screen or
+a shared screen could show. `[notifications]` in Canoa.cfg, or Settings → **Notifications**, turns each kind off: `permission`,
+`question` and `finished`, each on by default.
+
+In the side list, a conversation waiting for an answer is marked **Needs you**, one whose turn is running shows that it works,
+and one whose turn ended since it was last chosen has a dot. The tray says how many conversations wait for an answer: its
+tooltip on Windows, the first item of its menu everywhere.
+
+- **Windows**: a toast, through `flutter_local_notifications_windows`. The first one registers Canoa's app id,
+  `dev.boriken.canoa`, under the current user's registry (`HKEY_CURRENT_USER`), which Windows requires for an unpackaged
+  program; nothing is registered until a notification is shown.
+- **Linux**: a freedesktop notification over D-Bus, through `flutter_local_notifications_linux`, which needs a notification
+  service on the session bus.
+- **Web, a PWA and the extension**: the browser's Notification API, once the person allows it from Settings → Notifications →
+  **Allow notifications**; nothing registers a service worker. A page shows them while it is open.
 
 ## Building desktop runners
 
