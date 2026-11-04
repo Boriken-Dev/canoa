@@ -70,6 +70,18 @@ the message being written, for the person to send.
 All of it is what the agent sent, never read from disk, and bounded as the transcript is: a change the agent's text was cut
 from says so. A line number counts in the text the agent sent, which is the whole file only when it sent the whole file.
 
+## An agent's questions as forms
+
+Canoa advertises ACP's form elicitation, so an agent can ask the person something (Claude's adapter does for its
+`AskUserQuestion` tool). `elicitation/create` shows as a card in its conversation, built from the request's schema: text, one
+choice, several choices, a number or a whole number, yes or no, each with the agent's title and description, required ones
+marked. **Send answer** is offered only once the answer fits the form; **Decline** refuses to answer and **Cancel** dismisses
+it. A question of a kind Canoa does not know is shown as one it cannot answer, and when it is required only Decline and Cancel
+remain. Everything the agent wrote is shown as text, with nothing that could reorder or hide what surrounds it, and no link in
+it is followed. A question counts as needing the person, with its own notification (`[notifications] question`). Stop, closing
+the conversation, or the agent going away answers a waiting question cancelled. URL elicitation is not offered: Canoa opens no
+address an agent names. `coqui_acp` reads the form and checks the answer, as `vectors/elicitation.json` in coqui-acp says.
+
 ## A queue while the agent works
 
 A message written while a turn runs (Enter, or **Queue** beside Stop) waits in a queue under the conversation, with what goes
