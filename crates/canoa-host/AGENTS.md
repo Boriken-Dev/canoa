@@ -4,7 +4,7 @@ Header-file-style reference for the `canoa-host` crate: every public item with i
 
 No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `ee19118`), `coqui-agentic-peer` (`9b1fee4`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `indexmap`, `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `config`, `peers`, `profile`, `provider`, `serve`, `tool`.
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper` and `ToolSpec`. Public modules: `aos`, `config`, `peers`, `profile`, `provider`, `serve`, `tool`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -216,7 +216,7 @@ pub const MAX_SECRET_FILE: u64 = 1024 * 1024;
 pub const RESERVED_ENV: &[&str];            // PATH, HOME, NODE_OPTIONS, CLAUDE_CONFIG_DIR, ...: 42 names
 pub const RESERVED_ENV_PREFIXES: &[&str];   // LD_, DYLD_, PYTHON, GIT_, NPM_CONFIG_, CANOA_, COQUI_
 pub const RESERVED_ENV_SUFFIXES: &[&str];   // _BASE_URL, _PROXY
-pub fn is_reserved_env(name: &str) -> bool  // any of those, without case
+pub fn is_reserved_env(name: &str) -> bool  // any of those, without case, and every name aos::is_sensitive names
 pub fn full_commit_id(reference: &str) -> bool   // 40 or 64 lower-case hex digits
 
 #[non_exhaustive] pub enum LayerKind { BuiltIn, Overlay, User, Project, Agent, Session }   // Copy, Ord: lowest first
@@ -225,20 +225,20 @@ pub const fn LayerKind::is_confined(self) -> bool         // Overlay and Project
 pub struct LayerId { pub kind: LayerKind, pub name: String }   // Display: "user", "overlay:team", "agent:Claude"
 pub fn LayerId::new(kind: LayerKind, name: impl Into<String>) -> LayerId
 
-#[non_exhaustive] pub struct Profile { pub model, effort, mode: Option<String>, pub context: Option<Context>, pub unset: Vec<Scalar>, pub share_env: Vec<String>, pub env: IndexMap<String, Change<EnvValue>>, pub skills: IndexMap<String, Change<Skill>>, pub mcp: IndexMap<String, Change<McpServer>> }   // Default
+#[non_exhaustive] pub struct Profile { pub model, effort, mode: Option<String>, pub context: Option<Context>, pub unset: Vec<Scalar>, pub share_env: Vec<String>, pub env: IndexMap<String, Change<EnvValue>>, pub skills: IndexMap<String, Change<Skill>>, pub mcp: IndexMap<String, Change<McpServer>>, pub contexts: Vec<Context> }   // Default; contexts only from an AOS overlay
 pub fn Profile::from_str(text: &str, kind: LayerKind) -> Result<Profile, ProfileError>    // touches no file, reads no variable
 pub fn Profile::from_table(table: toml::Table, kind: LayerKind) -> Result<Profile, ProfileError>
-#[non_exhaustive] pub enum EnvValue { Value(String), FromEnv(String), FromFile(String) }   // Debug never shows a Value's text
+#[non_exhaustive] pub enum EnvValue { Value(String), FromEnv(String), FromFile(String), Text(String), Path(String), Reference { reference: String, optional: bool }, Paths(Vec<(String, bool)>) }   // Debug never shows a Value's or Text's text; the last four only from an AOS overlay
 #[non_exhaustive] pub enum Context { Text(String), File(String) }
 #[non_exhaustive] pub struct Skill { pub path: String }   pub fn Skill::new(path) -> Skill
 #[non_exhaustive] pub enum McpServer { Stdio { command, args, env }, Http { url, headers }, Sse { url, headers } }
 #[non_exhaustive] pub enum Change<T> { Set(T), Remove }
 #[non_exhaustive] pub enum Scalar { Model, Effort, Mode, Context }
 
-#[non_exhaustive] pub struct Layer { pub id: LayerId, pub dir: Option<PathBuf>, pub profile: Profile }
+#[non_exhaustive] pub struct Layer { pub id: LayerId, pub dir: Option<PathBuf>, pub profile: Profile, pub aos: Option<Box<AosLayer>> }
 pub fn Layer::new(id: LayerId, dir: Option<PathBuf>, profile: Profile) -> Layer
 pub fn merge(layers: &[Layer]) -> Effective
-#[non_exhaustive] pub struct Effective { pub model, effort, mode: Option<Sourced<String>>, pub context: Option<Sourced<Context>>, pub env, skills, mcp: IndexMap<String, Sourced<_>>, pub removed: Vec<Removed>, pub share_env: IndexMap<String, LayerId>, pub refused: Vec<Refused> }
+#[non_exhaustive] pub struct Effective { pub model, effort, mode: Option<Sourced<String>>, pub context: Option<Sourced<Context>>, pub env, skills, mcp: IndexMap<String, Sourced<_>>, pub removed: Vec<Removed>, pub share_env: IndexMap<String, LayerId>, pub refused: Vec<Refused>, pub contexts: Vec<Sourced<Context>>, pub overlays: Vec<OverlayReport>, pub aos: Vec<AosLayer> }
 #[non_exhaustive] pub struct Refused { pub key: String, pub layer: LayerId, pub reads: String }
 #[non_exhaustive] pub struct Sourced<T> { pub value: T, pub layer: LayerId, pub dir: Option<PathBuf> }
 #[non_exhaustive] pub struct Removed { pub key: String, pub layer: LayerId, pub was: LayerId }
@@ -248,7 +248,14 @@ pub fn resolve(key: &str, value: &EnvValue, dir: Option<&Path>, confined: bool, 
 pub struct Secret(..)   pub fn Secret::expose(&self) -> &str   // Debug "Secret(..)", Display "(hidden)"
 
 #[non_exhaustive] pub enum OverlaySource { Git { repo: String, reference: String, path: String }, Dir(PathBuf) }
-pub fn OverlaySource::parse_git(source: &str) -> Result<OverlaySource, ProfileError>   // <repository>@<ref>[#<path>]
+pub fn OverlaySource::parse_git(source: &str) -> Result<OverlaySource, ProfileError>   // [git+]<repository>@<ref>[#<path>], an AOS source string
+
+#[non_exhaustive] pub struct OverlayInput<'a> { pub identity, root, os: &'a str, pub harness: Option<&'a str>, pub pinned: bool, pub tree: &'a [aos::TreeEntry] }
+pub fn OverlayInput::new(identity, root, os, tree) -> OverlayInput   // no harness, not pinned
+pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal>   // reads nothing but input.tree
+#[non_exhaustive] pub struct AosLayer { pub identity, root, os, digest: String, pub pinned: bool, pub manifest: Map<String, Value>, pub files: BTreeSet<String>, pub texts: BTreeMap<String, Vec<u8>>, pub references: Vec<(String, String, bool)>, pub not_applied: Vec<String> }
+#[non_exhaustive] pub struct OverlayReport { pub layer: LayerId, pub digest: String, pub not_applied, ungranted, unresolved: Vec<String>, pub weakenings: Vec<aos::Weakening> }   pub fn OverlayReport::view(&self) -> Value
+#[non_exhaustive] pub struct OverlayRefusal { pub code: &'static str, pub subject: String }   // code: name, digest, manifest, invalid, env-file, reserved
 
 #[non_exhaustive] pub enum ProfileError { Parse { line, column }, Invalid { key: String, rule: Rule }, Resolve { key: String, what: &'static str } }
 #[non_exhaustive] pub enum Rule { Name, Path, Form, Value, Reserved }
@@ -261,8 +268,40 @@ pub const fn ProfileError::code(&self) -> &'static str     // "parse", "name", "
 - **Paths** are judged on the text, the same on every platform. In a confined layer (overlay, project) a path is relative and stays below its directory: no leading `/`, `\` or `~`, no `:`, no `..` segment. Elsewhere any non-empty path without NUL.
 - **Errors** never quote a value: `Invalid.key` names the setting (`env.A`, `mcp.a.headers.T`), or for a refused name the table holding it (`env`, `mcp.a.env`). The first refusal in a document is, in order: anything serde refuses (an unknown key, a wrong type, a key twice) as `Parse`; then `model`, `effort`, `mode`, `context`, `unset`, then `env`, `skills` and `mcp` entries in the document's order.
 - **`resolve`** reads `FromEnv` through `lookup` and `FromFile` from `dir` (an absolute path only outside a confined layer), less one final `\n` or `\r\n`. The path is canonicalized and that path is what is read; for a confined layer it must be under `dir` canonicalized, so a link out of the project is refused. It must be a regular file of at most `MAX_SECRET_FILE` bytes, UTF-8. Call it only when a session starts.
-- **`parse_git`**: the ref follows the last `@`, the path the last `#`. Refused: no ref; a repository that opens with `-`, holds a space or control character, names a transport helper (`::`), or a scheme other than `https`, `http`, `ssh`, `git`, `file`; `file://` with a host, or a path opening with `\\` or `//` (another host's share); `http://` or `git://` at a ref that is not a `full_commit_id`, since nothing else checks what a plaintext transport carries; a ref `git check-ref-format` refuses, or one opening with `-`; a path empty after `#`, absolute, holding `\` or `:`, or with a `..` segment. `Dir` is never parsed here.
+- **`parse_git`** reads an AOS source string (`aos::parse_source`): the path follows the first `#`, without leading or trailing `/`, and must be an AOS relative path; the ref follows the last `@` when it holds no `/`, `:` or `\`. Refused besides what AOS refuses: a source that is not Git, or names no ref; a repository holding a space or control character, or a scheme other than `https`, `http`, `ssh`, `git`, `file` in lowercase; `file://` with a host, or a path opening with `\\` or `//` (another host's share); `http://` or `git://` at a ref that is not a `full_commit_id`, since nothing else checks what a plaintext transport carries; a ref `git check-ref-format` refuses, or one opening with `-`. `Dir` is never parsed here.
+- **`overlay_layer`** makes the layer of an AOS overlay from its tree, whose digest it computes: the root variable `<NAME>_OVERLAY_ROOT` (a `Value`), then each env file's and `env`'s variables as written, then path additions per variable, merged as any layer's; skills `skills/<name>`; MCP servers (a command with a separator made absolute under the root; `env_passthrough` and `headers_env` as optional `env:` references; no header over plain `http` to another host); `contexts` from rules, routing lines, `context` and the harness's `context`; `model` and `effort` from `[harness.<input.harness>]`. Mapping entries are taken in key byte order. Refused whole: a name AOS refuses, a tree it cannot digest, an unreadable or invalid `overlay.cfg` (problems under `/about` alone never refuse), a missing or unreadable env file, a variable `is_reserved_env` names. Not applied, and listed in `not_applied`: the `bin` and `lib` defaults, env scripts, setup, dependencies, `runtime`, `scripts`, `mcp.skills`, an MCP `timeout` and working directory, other harnesses' hints and the harness's own keys.
+- **An AOS layer in a merge** adds an `OverlayReport` (grants: the merged `share_env`, as `env` provider keys) to `overlays`, and its `AosLayer` to `aos`. `unset = ["context"]` also takes back every `contexts` entry below. `Effective::environment` builds the overlays' environment first, lowest first, over this process's environment through `lookup`: every root variable, then each overlay's env files, `env` and path additions with substitution. A placeholder reads what overlays set and the shared variables only; any other variable is seen by a path addition and `if_unset`, never a placeholder. A variable an overlay won takes the built value (an optional reference not resolved leaves it out); an error is `Resolve` with key `overlay:<identity>.env.<subject>`. The view adds `contexts` and `overlays` when there are any.
 
+## AOS overlays (`canoa_host::aos`)
+
+The Agent Overlay Specification v0 (edition `0.1.0-draft`, vectors of agent-overlay-spec `061b8f5` in `tests/vectors/aos/`): manifest reader (TOML, and JSON after `#!json`; YAML and other formats `unsupported-format`), validator, integrity, resolver and environment. No env script, setup or package manager is run. Every function is static except `read_tree`, which reads a directory.
+
+```rust
+pub struct AosError { pub code: &'static str, pub subject: String }   // the vectors' class; subject: a variable, path or format, never a value
+pub struct Limits { pub max_bytes: usize, pub max_depth: usize }       // Default: 1 MiB, 64
+pub fn read_document(bytes: &[u8], limits: Limits) -> Result<Map<String, Value>, AosError>
+pub fn parse_dotenv(bytes: &[u8]) -> Result<Vec<DotenvLine>, AosError>     DotenvLine { name, text, literal }
+pub fn read_dotenv(bytes: &[u8], env: &mut Environment) -> Result<IndexMap<String, String>, AosError>
+pub fn substitute(text: &str, lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>) -> Result<String, AosError>
+pub fn validate(doc: &Map<String, Value>, files: Option<&BTreeSet<String>>) -> Vec<Issue>   Issue { code, at }   // sorted by pointer
+pub fn applies(issues: &[Issue]) -> bool                // only problems under /about
+pub fn valid_overlay_name, normalize_name, root_variable, state_variable, is_relative_path, is_reserved_variable, is_sensitive, is_env_name
+pub fn parse_source(text: &str) -> Result<Source, AosError>   Source { kind: SourceKind (Git, Url, Directory), location, reference, path }
+pub fn digest_entries(entries: &[TreeEntry]) -> Result<TreeDigest, AosError>   TreeEntry { components: Vec<Vec<u8>>, kind: EntryKind, data }, TreeDigest { digest, lines }
+pub fn read_tree(root: &Path, max_files: usize, max_bytes: u64) -> Result<Vec<TreeEntry>, AosError>   // never follows a link or junction
+pub fn sha256_digest(data: &[u8]) -> String     pub fn same_digest(a: &str, b: &str) -> bool
+pub fn resolve(overlays: &BTreeMap<String, Map<String, Value>>, requested: &[String]) -> Result<Resolved, Vec<String>>   // Err: the cycle
+pub fn composition_order(overlays, active: &[String]) -> Vec<String>   // (priority, name, identity), by code point
+pub fn rules_of, context_of, skills_of(manifest, files) -> Vec<String>;  paths_of -> Vec<PathAddition>;  env_files_of -> Vec<EnvFile>
+pub struct Environment<'a>   new(windows), with_base(windows, base: &dyn Fn(&str) -> Option<(String, bool)>), get, set(name, value, secret), lookup, is_secret, values()
+pub struct Facts { os, grants, host_env, secrets, secret_files, providers }   Facts::new(os): only the env provider
+pub struct Overlay<'a> { identity, manifest, files, root, state, read: &dyn Fn(&str) -> Option<Vec<u8>> }
+pub fn apply_overlay(env: &mut Environment, overlay: &Overlay, facts: &Facts, weakenings: &mut Vec<Weakening>) -> Result<(), AosError>
+pub fn grants_report(manifest, facts, weakenings) -> Vec<String>   // not granted: <provider>:<key>, secret:<name>, env:<variable>
+```
+
+- `[about]` is validated (its own pointer), never applied; Canoa's app shows a valid `summary` and `icon` only.
+- Mapping order carries no meaning: `serde_json::Map` iteration is what a caller gets.
 ## Pairing (`canoa_host::peers`)
 
 ```rust

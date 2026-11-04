@@ -32,7 +32,7 @@ A profile is what an agent is launched with: environment variables, an initial c
 model, effort and mode it starts with. It comes in layers, merged lowest first:
 
 1. **built-in**: Canoa's own, which sets nothing;
-2. **overlays**, each named in `[overlays]`, in the file's order;
+2. **overlays**, each named in `[overlays]`: [AOS](https://github.com/Boriken-Dev/agent-overlay-spec) overlays, in their composition order (`priority`, then name);
 3. **yours**: `[profile]` in Canoa.cfg;
 4. **the project's**: `.canoa/profile.toml` in the working directory, only once you trust that directory;
 5. **the agent's entry**: `[agents.NAME.profile]`, where `NAME` is an agent's label (an entry with only a `profile` names
@@ -49,8 +49,9 @@ not done yet.
 
 ```toml
 [overlays]
-team = "https://github.com/example/canoa-profiles.git@main#team"   # <repository>@<ref>#<path>, as dotagents writes it
+team = "https://github.com/example/canoa-profiles.git@main#team"   # an AOS source string, <repository>@<ref>#<path>
 mine = { dir = "profiles/mine" }                                   # a directory, relative to Canoa.cfg's
+# pinned = { source = "...", pin = "sha256:..." }                 # what installing writes: the tree digest it checks
 
 [profile]
 model = "claude-sonnet-4-5"
@@ -88,7 +89,7 @@ from_env = "DOCS_MCP_AUTH"
 model = "claude-opus-4-1"
 ```
 
-A profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
+A project's profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
 a key the schema does not know is refused. Names: environment variables a letter or `_` then letters, digits or `_`;
 skills, MCP servers and headers 1 to 64 letters, digits, `-` or `_`. A relative path is read from its layer's
 directory: Canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project.
@@ -104,7 +105,8 @@ directory: Canoa.cfg's for yours and an agent's, the overlay's, or the working d
   harness keeps its configuration, or which certificates are trusted: `PATH`, `NODE_OPTIONS`, `HOME`, `TMP`,
   `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and the like, anything starting `LD_`, `DYLD_`, `PYTHON`, `GIT_`, `NPM_CONFIG_`,
   `CANOA_` or `COQUI_`, and anything ending `_BASE_URL` or `_PROXY`, in any case. Your own layers may set them. The
-  whole list is `RESERVED_ENV` in `canoa_host::profile`.
+  whole list is `RESERVED_ENV` in `canoa_host::profile`, with every variable the AOS specification names sensitive.
+  An overlay that sets one anywhere (`env`, an env file, `paths`, an MCP server) is left out whole.
 
 **Secrets** come from a reference, `from_env` or `from_file`, and are never written into a profile. A reference is
 resolved only when a session starts; the view shows the reference and the variable each MCP header or variable comes
@@ -113,27 +115,59 @@ value.
 
 ### Overlays
 
-An overlay is a directory holding `profile.toml` and whatever it names, such as skills. From git, the desktop app
-installs it into `overlays/NAME/` beside Canoa.cfg, with `overlays/NAME.json` recording the source, **the commit** and
-each file's git blob id, and its history in `overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in
-Settings → Profiles fetch the source and show the commit it would move to, every file it adds, changes or removes, and
-its `profile.toml`; nothing changes until you apply, and what is applied is that commit, wherever the ref has moved
-since. The ref is a branch, a tag, or a whole commit id, which names that commit even if a branch or tag carries the
-same name; an abbreviated id is not taken. Only that ref is fetched, one commit deep. An overlay is upstream's copy,
+An overlay is an [Agent Overlay Specification](https://github.com/Boriken-Dev/agent-overlay-spec) (AOS) v0 overlay: a
+directory whose files take effect by convention (`skills/<name>/SKILL.md`, `CONTEXT.md`, `rules/<name>.md`, the file
+`env`), with an optional `overlay.cfg` manifest, TOML, or JSON after a `#!json` line; YAML is refused. Canoa reads the
+manifest statically and validates it; one it cannot read or that is not valid leaves the overlay out, except that a
+problem in `[about]`, store metadata, never does. Canoa applies:
+
+- the environment: the overlay's env files (the file `env` read as dotenv, and `env_files`), `env`, and `paths`, each
+  value substituted (`${NAME}` and its operators) when a session starts, in the overlays' order, after every overlay's
+  `<NAME>_OVERLAY_ROOT`. A placeholder reads what overlays set and the variables your own layers share; any other variable
+  of this computer it names is an error, so no session starts. A secret reference is read only for `provider = "env"`
+  and a variable you share; Canoa holds no named or file secrets, so those stay unset when `optional`, and otherwise
+  stop the session from starting;
+- skills, MCP servers (`env_passthrough` and `headers_env` only for variables you share; no header over plain `http` to
+  another host), rules, routing lines and context as initial context, and the `model` and `effort` hints of
+  `[harness.<id>]` for the agent's harness (`claude-code`, `codex`, `gemini-cli`, `pi` for the presets);
+- `requires`, among the overlays `[overlays]` names: a missing one is noted and the overlay applies without it, and
+  overlays in a cycle are left out.
+
+Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
+`env_scripts`), `setup`, dependencies (`lib/python/requirements.txt`, `lib/node/package.json`, `runtime`), `runtime`
+probes, `scripts`, `mcp.skills`, an MCP server's `timeout` and working directory, other harnesses' hints, and the
+`bin/` and `lib/` defaults, which would change `PATH`, `PYTHONPATH` and `NODE_PATH`. Nothing of an overlay ever runs.
+
+From git, the desktop app installs an overlay into `overlays/NAME/` beside Canoa.cfg, with `overlays/NAME.json`
+recording the source, the commit, each file's git blob id and **the tree digest** of what it wrote, and its history in
+`overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in Settings → Profiles fetch the source and show
+the commit, the tree digest, every file it adds, changes or removes, and its `overlay.cfg`; nothing changes until you
+apply, and what is applied is that commit's files, checked against the digest as they are written. Applying **pins**
+the overlay in Canoa.cfg by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
+have another digest installs nothing until you change the pin. Each time profiles are built the installed copy is
+digested again, and one whose files changed, or that holds an entry no overlay has (`.git`, `node_modules`, ...), is
+left out until synced. An overlay with no pin, or a `{ dir = "..." }` with none, is reported as `unpinned` each time.
+A pin is a SHA-256 over every file's bytes as published, the same on every platform; the commit is kept beside it.
+The ref is a branch, a tag, or a whole commit id, which names that commit even if a branch or tag carries the same
+name; an abbreviated id is not taken. Only that ref is fetched, one commit deep. An overlay is upstream's copy,
 replaced whole on each apply: put your own additions in `[profile]`, which wins over it. An overlay installed from
 another source than the one Canoa.cfg names is left out until it is synced.
 
 Nothing from a source runs: its files are read out of git's object store, never checked out, so no hook, filter or
-attribute of the source applies; links and submodules are listed and never installed. A file name that is not safe on
-every platform refuses the whole overlay: `..`, `\`, `:`, `"`, `*`, `<`, `>`, `?`, `|`, a control or invisible
-character, a Windows device name, `.git` in any case, `~` followed by a digit (a Windows short name), or two names
-that differ only in case. Git may fetch only over `https`, `ssh`, `file` with no host, and `http` or `git` at a whole
-commit id; never a transport helper such as `ext::`, nor another host's share. It asks nothing in a terminal and tells
-Git Credential Manager not to ask; another credential helper you configured may still ask. Git is run from an absolute
-directory of `PATH`, never from the current directory. An overlay holds at most 4096 files and 64 MiB, listing stops
-as soon as it passes either, and each git command is ended after 5 minutes. A local directory, `{ dir = "..." }`, is
-read in place, as it is when an agent starts.
+attribute of the source applies. A link or a submodule refuses the whole overlay, and so does a file name that is not
+an AOS relative path: `..`, `\`, `:`, `"`, `*`, `<`, `>`, `?`, `|`, a control or invisible character, a Windows device
+name, `.git` or another excluded name in another case, `~` followed by a digit (a Windows short name), or two names that
+differ only in case. Entries under an excluded name (`.git`, `node_modules`, `__pycache__`, ...) are no part of an
+overlay and are never installed. Git may fetch only over `https`, `ssh`, `file` with no host, and `http` or `git` at a
+whole commit id; never a transport helper such as `ext::`, nor another host's share. It asks nothing in a terminal and
+tells Git Credential Manager not to ask; another credential helper you configured may still ask. Git is run from an
+absolute directory of `PATH`, never from the current directory. An overlay holds at most 4096 files and 64 MiB, listing
+stops as soon as it passes either, and each git command is ended after 5 minutes. A local directory,
+`{ dir = "..." }`, is read in place, digested each time, as it is when an agent starts.
 
+An overlay's `[about]` `summary` shows beside it, as plain text. Its `icon`, a PNG or WebP file of the overlay (never
+SVG), shows only after its size (512 KiB) and the dimensions its header gives (1024 by 1024) are checked, before it is
+decoded; otherwise a placeholder shows.
 ### Trusting a project
 
 A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first, every
