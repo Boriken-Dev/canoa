@@ -70,6 +70,15 @@ the message being written, for the person to send.
 All of it is what the agent sent, never read from disk, and bounded as the transcript is: a change the agent's text was cut
 from says so. A line number counts in the text the agent sent, which is the whole file only when it sent the whole file.
 
+## Keyboard and the command palette
+
+Ctrl (⌘ on a Mac) with: **K** the command palette, **N** a new session, **1** to **9** that session in the list, **Tab** and
+**Shift+Tab** the next and previous session, **L** the message being written, **.** Stop, **Shift+A** and **Shift+R** the
+agent's own allow-once and refuse-once options for the question shown (never an "always" one), **Shift+D** the changes, and
+**/** a sheet of all of these. Up in an empty message brings back the last message sent in that conversation. The palette lists
+what the app can do, the other sessions to go to and the agent's own commands; typing narrows it, and Enter runs the first
+left. A command chosen there is written into the message, not sent.
+
 ## Verification
 
 ```sh
