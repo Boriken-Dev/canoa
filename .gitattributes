@@ -1,1 +1,2 @@
 * text=auto eol=lf
+crates/canoa-host/tests/vectors/aos/*.json -text
