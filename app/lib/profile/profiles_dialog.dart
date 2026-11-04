@@ -160,7 +160,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
           Text('Effective profile', style: Theme.of(context).textTheme.titleMedium),
           if (found == null) const LinearProgressIndicator() else EffectiveTable(effective: found.effective),
           for (final note in found?.notes ?? const <LayerNote>[])
-            Text('${note.layer}: ${note.text}', style: Theme.of(context).textTheme.bodySmall),
+            Text(visible('${note.layer}: ${note.text}'), style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 12),
           Text('Overlays', style: Theme.of(context).textTheme.titleMedium),
           if (config.overlays.isEmpty) const Text('None: add one to [overlays] in Canoa.cfg.'),
@@ -181,7 +181,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
               ),
           ],
           if (busy != null) Text('$busy…'),
-          if (problem != null) Text(problem!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          if (problem != null) Text(visible(problem!), style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ],
       ))),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
@@ -195,10 +195,9 @@ class ProfilesDialogState extends State<ProfilesDialog> {
 
   Widget? _icon(String name) {
     final aos = _aos(name);
-    final home = widget.home;
     final path = aos?.about['icon'];
-    if (aos == null || home == null || path == null) return null;
-    return OverlayIcon(path: path, read: () => home.readBytes(home.join(aos.root, path)));
+    final bytes = path == null ? null : aos?.icon[path];
+    return path == null || bytes == null ? null : OverlayIcon(path: path, bytes: bytes);
   }
 
   Widget _projectRow(ProjectLayer project) {
@@ -239,7 +238,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
           dense: true,
           leading: _icon(name),
           title: Text('$name  ${source.spec}'),
-          subtitle: Text([?_summary(name), state].join('\n')),
+          subtitle: Text(visible([?_summary(name), state].join('\n'))),
           trailing: home == null
               ? null
               : TextButton(
@@ -365,7 +364,7 @@ class EffectiveTable extends StatelessWidget {
         for (final (key, value, layer) in rows)
           TableRow(key: ValueKey('profile-row-$key'), children: [
             Padding(padding: const EdgeInsets.all(4), child: Text(key)),
-            Padding(padding: const EdgeInsets.all(4), child: Text(value)),
+            Padding(padding: const EdgeInsets.all(4), child: Text(visible(value))),
             Padding(padding: const EdgeInsets.all(4), child: Text(layer, key: Key('profile-layer-$key'))),
           ]),
       ],
@@ -390,42 +389,37 @@ class OverlayReportView extends StatelessWidget {
     ];
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Text(lines.join('\n'), key: Key('overlay-report-${report.layer.name}'),
+      child: Text(visible(lines.join('\n')), key: Key('overlay-report-${report.layer.name}'),
           style: Theme.of(context).textTheme.bodySmall),
     );
   }
 }
 
-/// An overlay's `[about]` icon: PNG or WebP only, its size and the dimensions in its header checked against the
-/// specification's limits before it is decoded, shown as pixels only; anything refused or undecodable shows a
-/// placeholder, never another image.
+/// An overlay's `[about]` icon, from the bytes its tree digest covered: PNG or WebP only, its size and the dimensions in
+/// its header checked against the specification's limits before it is decoded, shown as pixels only; anything refused or
+/// undecodable shows a placeholder, never another image.
 class OverlayIcon extends StatelessWidget {
-  const OverlayIcon({super.key, required this.path, required this.read});
+  const OverlayIcon({super.key, required this.path, required this.bytes});
   final String path;
-  final Future<List<int>?> Function() read;
+  final List<int> bytes;
 
   static const placeholder = Icon(Icons.extension, size: 32);
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<List<int>?>(
-    future: read(),
-    builder: (context, snapshot) {
-      final bytes = snapshot.data;
-      if (bytes == null) return placeholder;
-      try {
-        final header = checkIcon(path, bytes);
-        return Image.memory(
-          Uint8List.fromList(bytes),
-          width: 32,
-          height: 32,
-          fit: BoxFit.contain,
-          cacheWidth: header.width > 64 ? 64 : null,
-          gaplessPlayback: true,
-          errorBuilder: (_, _, _) => placeholder,
-        );
-      } on AosException {
-        return placeholder;
-      }
-    },
-  );
+  Widget build(BuildContext context) {
+    try {
+      final header = checkIcon(path, bytes);
+      return Image.memory(
+        Uint8List.fromList(bytes),
+        width: 32,
+        height: 32,
+        fit: BoxFit.contain,
+        cacheWidth: header.width > 64 ? 64 : null,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => placeholder,
+      );
+    } on AosException {
+      return placeholder;
+    }
+  }
 }

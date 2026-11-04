@@ -555,10 +555,53 @@ Map<String, String> readDotenv(List<int> bytes, AosEnvironment env) {
 /// What a placeholder reads: the value, null when the variable is unset; throws for one it may not read.
 typedef AosLookup = String? Function(String name);
 
-/// [text] with every placeholder replaced, reading variables through [lookup].
-String substitute(String text, AosLookup lookup) => _substitute(text.runes.toList(), lookup);
+/// What one substitution may cost: settings with defaults and no floor, so text from elsewhere cannot exhaust memory, the
+/// stack or the processor.
+final class SubstLimits {
+  const SubstLimits({this.maxValue = 1024 * 1024, this.maxDepth = 32, this.maxSteps = 10000000});
 
-String _substitute(List<int> text, AosLookup lookup) {
+  /// The longest value one substitution gives, in UTF-16 units.
+  final int maxValue;
+
+  /// How deep expressions may nest inside the words of others.
+  final int maxDepth;
+
+  /// How many steps pattern matching may take in one substitution.
+  final int maxSteps;
+}
+
+final class _Run {
+  _Run(this.lookup, this.limits);
+  final AosLookup lookup;
+  final SubstLimits limits;
+  var depth = 0, steps = 0;
+
+  void step(int cost) {
+    steps += cost;
+    if (steps > limits.maxSteps) throw const AosException('too-complex', 'a pattern');
+  }
+
+  void fits(int length) {
+    if (length > limits.maxValue) throw const AosException('too-large', 'a substituted value');
+  }
+}
+
+/// [text] with every placeholder replaced, reading variables through [lookup]. Past [limits]: `too-large`, `too-deep`
+/// and `too-complex`.
+String substitute(String text, AosLookup lookup, {SubstLimits limits = const SubstLimits()}) =>
+    _substitute(text.runes.toList(), _Run(lookup, limits));
+
+String _substitute(List<int> text, _Run run) {
+  if (run.depth > run.limits.maxDepth) throw const AosException('too-deep', 'an expression');
+  run.depth++;
+  try {
+    return _substituteInner(text, run);
+  } finally {
+    run.depth--;
+  }
+}
+
+String _substituteInner(List<int> text, _Run run) {
   final out = StringBuffer();
   var index = 0;
   while (index < text.length) {
@@ -576,9 +619,10 @@ String _substitute(List<int> text, AosLookup lookup) {
     if (next == 0x7b) {
       final close = _closingBrace(text, index + 2);
       if (close != null) {
-        final found = _expression(text.sublist(index + 2, close), lookup);
+        final found = _expression(text.sublist(index + 2, close), run);
         if (found != null) {
           out.write(found);
+          run.fits(out.length);
           index = close + 1;
           continue;
         }
@@ -587,6 +631,7 @@ String _substitute(List<int> text, AosLookup lookup) {
     out.write(r'$');
     index++;
   }
+  run.fits(out.length);
   return out.toString();
 }
 
@@ -620,7 +665,7 @@ int _nameAt(List<int> text) {
   return length;
 }
 
-String _required(String name, AosLookup lookup) => lookup(name) ?? (throw AosException('undefined-variable', name));
+String _required(String name, _Run run) => run.lookup(name) ?? (throw AosException('undefined-variable', name));
 
 bool _startsWith(List<int> text, String prefix) {
   final runes = prefix.runes.toList();
@@ -631,45 +676,45 @@ bool _startsWith(List<int> text, String prefix) {
   return true;
 }
 
-String? _expression(List<int> body, AosLookup lookup) {
+String? _expression(List<int> body, _Run run) {
   if (body.isNotEmpty && body.first == 0x23) {
     final length = _nameAt(body.sublist(1));
     if (length > 0 && length + 1 == body.length) {
-      return '${_required(String.fromCharCodes(body.sublist(1)), lookup).runes.length}';
+      return '${_required(String.fromCharCodes(body.sublist(1)), run).runes.length}';
     }
   }
   final length = _nameAt(body);
   if (length == 0) return null;
   final key = String.fromCharCodes(body.sublist(0, length));
   final rest = body.sublist(length);
-  if (rest.isEmpty) return _required(key, lookup);
+  if (rest.isEmpty) return _required(key, run);
   for (final operator in const [':-', ':=', ':+', '-', '=', '+']) {
     if (!_startsWith(rest, operator)) continue;
     final word = rest.sublist(operator.length);
-    final value = lookup(key);
+    final value = run.lookup(key);
     final present = value != null && !(operator.startsWith(':') && value.isEmpty);
-    if (operator.endsWith('+')) return present ? _substitute(word, lookup) : '';
-    return present ? value : _substitute(word, lookup);
+    if (operator.endsWith('+')) return present ? _substitute(word, run) : '';
+    return present ? value : _substitute(word, run);
   }
   switch (rest.first) {
     case 0x3a:
       final spec = _sliceSpec(rest.sublist(1));
       if (spec == null) return null;
-      return _slice(_required(key, lookup), spec.$1, spec.$2);
+      return _slice(_required(key, run), spec.$1, spec.$2);
     case 0x2f:
       final spec = rest.sublist(1);
       final kind = spec.isNotEmpty && (spec.first == 0x2f || spec.first == 0x23 || spec.first == 0x25) ? spec.first : null;
       final (pattern, replacement) = _splitPattern(spec.sublist(kind == null ? 0 : 1));
-      final value = _required(key, lookup);
-      return _replace(value, kind, pattern, replacement);
+      final value = _required(key, run);
+      return _replace(value, kind, pattern, replacement, run);
     case 0x23 || 0x25:
       final doubled = rest.length > 1 && rest[1] == rest[0];
-      final value = _required(key, lookup);
-      return _trim(value, rest[0], doubled, rest.sublist(doubled ? 2 : 1));
+      final value = _required(key, run);
+      return _trim(value, rest[0], doubled, rest.sublist(doubled ? 2 : 1), run);
     default:
       final operator = String.fromCharCodes(rest);
       if (!const {'^', '^^', ',', ',,'}.contains(operator)) return null;
-      final value = _required(key, lookup);
+      final value = _required(key, run);
       if (value.isEmpty) return value;
       final runes = value.runes.toList();
       final first = String.fromCharCode(runes.first);
@@ -898,10 +943,14 @@ List<_Token> _compile(List<int> pattern) {
   return out;
 }
 
-bool _whole(List<_Token> tokens, List<int> text) {
-  var t = 0, s = 0;
+bool _whole(List<_Token> tokens, List<int> text, _Run run) {
+  var t = 0, s = 0, steps = 0;
   int? starAt, starFrom;
   while (s < text.length) {
+    if (++steps == 4096) {
+      run.step(steps);
+      steps = 0;
+    }
     if (t < tokens.length && !tokens[t].isStar && tokens[t].matches(text[s])) {
       t++;
       s++;
@@ -914,29 +963,31 @@ bool _whole(List<_Token> tokens, List<int> text) {
       starFrom = starFrom! + 1;
       s = starFrom;
     } else {
+      run.step(steps);
       return false;
     }
   }
+  run.step(steps + 1);
   return tokens.skip(t).every((token) => token.isStar);
 }
 
-List<int> _ends(List<_Token> tokens, List<int> text, int start) => [
+List<int> _ends(List<_Token> tokens, List<int> text, int start, _Run run) => [
   for (var end = start; end <= text.length; end++)
-    if (_whole(tokens, text.sublist(start, end))) end,
+    if (_whole(tokens, text.sublist(start, end), run)) end,
 ];
 
-String _replace(String value, int? kind, List<int> pattern, List<int> replacement) {
+String _replace(String value, int? kind, List<int> pattern, List<int> replacement, _Run run) {
   if (pattern.isEmpty) return value;
   final tokens = _compile(pattern);
   final text = value.runes.toList();
   final with_ = String.fromCharCodes(replacement);
   if (kind == 0x23) {
-    final found = _ends(tokens, text, 0);
+    final found = _ends(tokens, text, 0, run);
     return found.isEmpty ? value : with_ + String.fromCharCodes(text.sublist(found.last));
   }
   if (kind == 0x25) {
     for (var start = 0; start <= text.length; start++) {
-      if (_whole(tokens, text.sublist(start))) return String.fromCharCodes(text.sublist(0, start)) + with_;
+      if (_whole(tokens, text.sublist(start), run)) return String.fromCharCodes(text.sublist(0, start)) + with_;
     }
     return value;
   }
@@ -945,7 +996,7 @@ String _replace(String value, int? kind, List<int> pattern, List<int> replacemen
   while (true) {
     (int, int)? match;
     for (var start = position; start < text.length; start++) {
-      final found = _ends(tokens, text, start);
+      final found = _ends(tokens, text, start, run);
       if (found.isNotEmpty && found.last > start) {
         match = (start, found.last);
         break;
@@ -955,6 +1006,7 @@ String _replace(String value, int? kind, List<int> pattern, List<int> replacemen
     out
       ..write(String.fromCharCodes(text.sublist(position, match.$1)))
       ..write(with_);
+    run.fits(out.length);
     position = match.$2;
     if (kind != 0x2f) break;
   }
@@ -962,17 +1014,17 @@ String _replace(String value, int? kind, List<int> pattern, List<int> replacemen
   return out.toString();
 }
 
-String _trim(String value, int operator, bool longest, List<int> pattern) {
+String _trim(String value, int operator, bool longest, List<int> pattern, _Run run) {
   final tokens = _compile(pattern);
   final text = value.runes.toList();
   if (operator == 0x23) {
-    final found = _ends(tokens, text, 0);
+    final found = _ends(tokens, text, 0, run);
     if (found.isEmpty) return value;
     return String.fromCharCodes(text.sublist(longest ? found.last : found.first));
   }
   final starts = [
     for (var start = 0; start <= text.length; start++)
-      if (_whole(tokens, text.sublist(start))) start,
+      if (_whole(tokens, text.sublist(start), run)) start,
   ];
   if (starts.isEmpty) return value;
   return String.fromCharCodes(text.sublist(0, longest ? starts.first : starts.last));
@@ -2121,14 +2173,24 @@ void _applyInner(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<Ao
   _applyPaths(env, paths, overlay.root, facts.os, weakenings);
 }
 
-/// Whether plain `http` to [url] goes to another host than this one.
+/// Whether plain `http` to [url] goes to another computer: its host is neither `localhost`, `[::1]` nor an IPv4 address in
+/// `127.0.0.0/8`, read as an address, so `127.0.0.1.example.org` is another computer.
 bool isInsecureUrl(String url) {
   if (url.length < 7 || _asciiLower(url.substring(0, 7)) != 'http://') return false;
-  var host = url.substring(7).split('/').first.split('?').first;
-  final colon = host.lastIndexOf(':');
-  if (colon >= 0) host = host.substring(0, colon);
-  host = _asciiLower(host);
-  return host != 'localhost' && host != '[::1]' && !host.startsWith('127.');
+  final authority = url.substring(7).split(RegExp('[/?#]')).first;
+  final host = _asciiLower(authority.startsWith('[')
+      ? authority.substring(0, authority.contains(']') ? authority.indexOf(']') + 1 : authority.length)
+      : authority.split(':').first);
+  bool loopbackAddress() {
+    final parts = host.split('.');
+    if (parts.length != 4) return false;
+    for (final part in parts) {
+      if (!RegExp(r'^(0|[1-9][0-9]{0,2})$').hasMatch(part) || int.parse(part) > 255) return false;
+    }
+    return parts.first == '127';
+  }
+
+  return host != 'localhost' && host != '[::1]' && !loopbackAddress();
 }
 
 /// What an overlay's MCP servers and optional references read that is not granted, sorted; granted reads and plain

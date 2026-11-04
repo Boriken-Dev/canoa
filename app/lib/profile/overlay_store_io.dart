@@ -12,13 +12,19 @@ import 'profile.dart';
 /// object store, never checked out, so no hook, filter or attribute of the source applies.
 final class OverlayStore implements OverlayManager {
   OverlayStore(this.root, {this.git = 'git', this.maxFiles = defaultMaxFiles, this.maxBytes = defaultMaxBytes,
-      this.timeout = defaultTimeout});
+      this.maxEntries = defaultMaxEntries, this.maxFetchBytes = defaultMaxFetchBytes, this.timeout = defaultTimeout});
 
   /// The most files one overlay may hold.
   static const defaultMaxFiles = 4096;
 
   /// The most bytes its files may hold in all.
   static const defaultMaxBytes = 64 * 1024 * 1024;
+
+  /// The most entries a source's tree may list, excluded ones included.
+  static const defaultMaxEntries = 16384;
+
+  /// The most bytes one fetch may write into the cache before it is ended.
+  static const defaultMaxFetchBytes = 256 * 1024 * 1024;
 
   /// How long one git command may run before it is ended.
   static const defaultTimeout = Duration(minutes: 5);
@@ -27,7 +33,7 @@ final class OverlayStore implements OverlayManager {
 
   /// The git program: a path, or a name looked for in the absolute directories of `PATH`.
   final String git;
-  final int maxFiles, maxBytes;
+  final int maxFiles, maxBytes, maxEntries, maxFetchBytes;
   final Duration timeout;
 
   /// [git] as a full path, found once; a name is never looked for in the current directory, which Windows would
@@ -159,11 +165,12 @@ final class OverlayStore implements OverlayManager {
   Future<String> _fetch(String cache, GitOverlay source) async {
     final reference = source.reference;
     if (isFullCommitId(reference)) {
-      final direct = await _run(['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules',
+      final direct = await _run(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules',
           '--depth=1', '--', source.repo, reference]);
       if (direct.exitCode != 0) {
         // A server that refuses a want by id still serves its branches and tags, one of which may hold the commit.
-        await _git(['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--', source.repo,
+        await _git(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1',
+            '--', source.repo,
             '+refs/heads/*:refs/canoa/heads/*', '+refs/tags/*:refs/canoa/tags/*']);
       }
       final found = await _run(['--git-dir=$cache', 'rev-parse', '--verify', '--quiet', '--end-of-options',
@@ -179,7 +186,7 @@ final class OverlayStore implements OverlayManager {
     final remote = ['refs/heads/$reference', 'refs/tags/$reference'].where(names.contains).firstOrNull;
     if (remote == null) throw const OverlayException('The source has no branch or tag of that name');
     final local = 'refs/canoa/${remote.substring('refs/'.length)}';
-    await _git(['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1', '--',
+    await _git(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1', '--',
         source.repo, '+$remote:$local']);
     final found = await _git(['--git-dir=$cache', 'rev-parse', '--verify', '--end-of-options', '$local^{commit}']);
     return (found as String).trim();
@@ -191,8 +198,10 @@ final class OverlayStore implements OverlayManager {
   Future<(OverlayFiles, List<String>, String)> _list(String cache, String commit, String path) async {
     final prefix = path.isEmpty ? <int>[] : utf8.encode('$path/');
     final entries = <(AosTreeEntry, String)>[];
+    final folded = <String, String>{};
     var count = 0, bytes = 0;
     void take(List<int> line) {
+      if (entries.length >= maxEntries) throw OverlayException('The source holds more than $maxEntries entries');
       final tab = line.indexOf(0x09);
       final fields = ascii.decode(line.sublist(0, tab)).split(RegExp(' +'));
       final full = line.sublist(tab + 1);
@@ -213,6 +222,19 @@ final class OverlayStore implements OverlayManager {
         }
       }
       final entry = AosTreeEntry(components, kind);
+      if (!entry.isExcluded && kind != AosEntryKind.file) {
+        throw const OverlayException('The source holds a link or a submodule, which no overlay has');
+      }
+      if (!entry.isExcluded) {
+        // One directory on a file system that ignores case: two names it would merge refuse the overlay.
+        final names = entry.path.split('/');
+        for (var end = 1; end <= names.length; end++) {
+          final name = names.take(end).join('/');
+          if (folded.putIfAbsent(name.toLowerCase(), () => name) != name) {
+            throw const OverlayException('The source holds two names that differ only in case');
+          }
+        }
+      }
       if (kind == AosEntryKind.file && !entry.isExcluded) {
         count++;
         bytes += int.tryParse(fields[3]) ?? 0;
@@ -302,8 +324,8 @@ final class OverlayStore implements OverlayManager {
     return out;
   }
 
-  Future<Object> _git(List<String> args, {bool binary = false}) async {
-    final result = await _run(args, binary: binary);
+  Future<Object> _git(List<String> args, {bool binary = false, String? guard}) async {
+    final result = await _run(args, binary: binary, guard: guard);
     if (result.exitCode != 0) {
       throw OverlayException('git ${args.firstWhere((arg) => !arg.startsWith('-'))} failed (status ${result.exitCode})');
     }
@@ -330,18 +352,39 @@ final class OverlayStore implements OverlayManager {
     },
   );
 
-  Future<ProcessResult> _run(List<String> args, {bool binary = false}) async {
+  /// [args] run to their end, or ended after [timeout]; with [guard], also ended once that directory holds more than
+  /// [maxFetchBytes], which then throws.
+  Future<ProcessResult> _run(List<String> args, {bool binary = false, String? guard}) async {
     final process = await _start(args);
     final timer = Timer(timeout, process.kill);
+    var tooLarge = false;
+    final watch = guard == null
+        ? null
+        : Timer.periodic(const Duration(milliseconds: 500), (_) {
+            var size = 0;
+            try {
+              for (final entity in Directory(guard).listSync(recursive: true, followLinks: false)) {
+                if (entity is File) size += entity.lengthSync();
+              }
+            } on FileSystemException {
+              return;
+            }
+            if (size > maxFetchBytes) {
+              tooLarge = true;
+              process.kill();
+            }
+          });
     try {
       final out = process.stdout.fold<List<int>>([], (all, chunk) => all..addAll(chunk));
       final err = process.stderr.drain<void>();
       final code = await process.exitCode;
       final bytes = await out;
       await err;
+      if (tooLarge) throw OverlayException('The source sent more than $maxFetchBytes bytes: nothing was installed');
       return ProcessResult(process.pid, code, binary ? bytes : utf8.decode(bytes, allowMalformed: true), '');
     } finally {
       timer.cancel();
+      watch?.cancel();
     }
   }
 }

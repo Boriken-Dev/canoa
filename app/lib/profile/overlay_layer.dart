@@ -12,7 +12,7 @@ import 'profile.dart';
 final class AosLayer {
   const AosLayer({required this.identity, required this.root, required this.os, required this.digest,
       required this.pinned, required this.manifest, required this.files, required this.texts, required this.references,
-      required this.notApplied, this.about = const {}});
+      required this.notApplied, this.about = const {}, this.icon = const {}});
 
   /// The name Canoa.cfg gives it, its identity.
   final String identity;
@@ -41,6 +41,10 @@ final class AosLayer {
 
   /// The valid `summary` and `icon` of its `[about]`, for Settings to show; nothing else reads them.
   final Map<String, String> about;
+
+  /// The icon `[about]` names, by path, as the bytes its digest covered, once its header passed [checkIcon]: what
+  /// Settings decodes, never the file read again. Empty when there is none or it was refused.
+  final Map<String, List<int>> icon;
 }
 
 /// Why an overlay is left out whole. Never quotes a value.
@@ -266,6 +270,8 @@ Layer overlayLayer({
     }
     for (final MapEntry(:key, :value) in _sorted(hints)) {
       switch ((key, value)) {
+        case ('model' || 'effort', final String text) when !_plain(text):
+          notApplied.add('harness.$id.$key: not one line of plain text');
         case ('model', final String text):
           model = text;
         case ('effort', final String text):
@@ -314,6 +320,15 @@ Layer overlayLayer({
       if (table[key] case final String value when valid(key)) about[key] = value;
     }
   }
+  final icon = <String, List<int>>{};
+  if (about['icon'] case final path?) {
+    try {
+      checkIcon(path, members[path]!);
+      icon[path] = members[path]!;
+    } on AosException {
+      about.remove('icon');
+    }
+  }
 
   return Layer(
     LayerId(LayerKind.overlay, identity),
@@ -338,9 +353,13 @@ Layer overlayLayer({
       references: references,
       notApplied: notApplied,
       about: about,
+      icon: icon,
     ),
   );
 }
+
+/// Not empty, with no control character: what Canoa's own layers take for a model or an effort.
+bool _plain(String text) => text.isNotEmpty && !text.runes.any((rune) => rune < 0x20 || (rune >= 0x7f && rune < 0xa0));
 
 bool _shared(Map<String, LayerId> shared, String name, bool windows) =>
     shared.keys.any((key) => key == name || windows && key.toLowerCase() == name.toLowerCase());

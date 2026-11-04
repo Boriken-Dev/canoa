@@ -177,7 +177,7 @@ void main() {
       linked.entry('120000', 'kb/link', '../../elsewhere/secret.txt');
       linked.commit('a link');
       await expectLater(OverlayStore('${temp.path}/linked-home').check('o', GitOverlay(repo: linked.bare, reference: 'main')),
-          throwsA(isA<OverlayException>().having((e) => e.message, 'message', contains('symlink'))));
+          throwsA(isA<OverlayException>().having((e) => e.message, 'message', contains('a link'))));
 
       final upstream = Upstream(Directory('${temp.path}/up'));
       upstream.write('overlay.cfg', '');
@@ -231,6 +231,7 @@ void main() {
       ('a .git directory in another case, deeper', {'skills': {'.GIT': {'config': 'x'}}}),
       ('the short name Windows gives .git', {'git~1': {'config': 'x'}}),
       ('two names that differ only in case', {'CONTEXT.md': 'benign', 'context.md': 'evil'}),
+      ('two directories that differ only in case', {'Kb': {'a.md': 'benign'}, 'kb': {'b.md': 'evil'}}),
       ('a short name Windows could give another file', {'1234567890.md': 'benign', '123456~1.MD': 'evil'}),
       ('a character Windows refuses in a name', {'a|b.md': 'x'}),
       ('a wildcard Windows refuses in a name', {'what?.md': 'x'}),
@@ -286,6 +287,17 @@ void main() {
         level = await source.tree({for (var i = 0; i < 10; i++) 'd$i': 'tree:$level'});
       }
       await source.commit(await source.tree({'overlay.cfg': '', 'bomb': 'tree:$level'}));
+      final clock = Stopwatch()..start();
+      await expectLater(store.check('o', at('main')), throwsA(isA<OverlayException>()));
+      expect(clock.elapsed, lessThan(const Duration(seconds: 15)));
+    });
+
+    test('a million entries under an excluded name are refused as soon as they pass the limit', () async {
+      var level = await source.tree({'f': 'x'});
+      for (var depth = 0; depth < 6; depth++) {
+        level = await source.tree({for (var i = 0; i < 10; i++) 'd$i': 'tree:$level'});
+      }
+      await source.commit(await source.tree({'overlay.cfg': '', 'node_modules': 'tree:$level'}));
       final clock = Stopwatch()..start();
       await expectLater(store.check('o', at('main')), throwsA(isA<OverlayException>()));
       expect(clock.elapsed, lessThan(const Duration(seconds: 15)));
