@@ -39,6 +39,7 @@ file, the provider, and the source's settings:
 source = "guatiao_source_py.dll"
 provider = "acp_echo_echo"
 listen = "127.0.0.1:7803"
+import_search = "library"                                   # optional, Windows: library or path; see below
 
 [host.providers.python.source_settings]
 dirs = ["python/echo"]                                     # directories of manifests, each <name>.guatiao
@@ -72,9 +73,15 @@ What a provider prints, to standard output or standard error, goes to the host's
 never to the client: the host and the provider's process speak ACP over a loopback socket of their own, which the process
 proves with a one-time token. Its standard input is closed once the settings are read.
 
-On Windows the Python's `python3.dll` has to be found: name its directory (`sys.base_prefix`) in `import_dirs`, or put it
-on the host's `PATH`. On Linux and macOS the source links that Python's shared library, found where the loader looks, or
-through `LD_LIBRARY_PATH` or `DYLD_FALLBACK_LIBRARY_PATH`; `import_dirs` is ignored there.
+On Windows the Python's `python3.dll` has to be found: name its directory (`sys.base_prefix`) in `import_dirs`. The
+entry's `import_search` says where else it may come from: `library` looks only in `import_dirs` (after the source's own
+directory, `canoa-host`'s and the system's); `path` also in the Windows directory, the provider's working directory
+(Canoa.cfg's) and every directory on `PATH`, so whoever can write any of those chooses the Python that loads. Without
+`import_search` an entry whose `import_dirs` names a directory takes `library`, and one that names none takes `path`,
+which keeps a Python on `PATH` working. `canoa-host serve` logs every entry on `path` when it starts:
+`weakened: host.providers.NAME.import_search is path, looser than library`, with how to narrow it. On Linux and macOS the
+source links that Python's shared library, found where the loader looks, or through `LD_LIBRARY_PATH` or
+`DYLD_FALLBACK_LIBRARY_PATH`; `import_dirs` and `import_search` change nothing there.
 
 ### A provider built from settings
 
@@ -264,8 +271,9 @@ only from a dialog that shows its whole id.
   as you.
 - **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
   and in the system's directories only. For a source, an import it names itself that those leave missing, such as
-  `python3.dll`, is looked for in `import_dirs`, the Windows directory, the provider's working directory (Canoa.cfg's) and
-  every directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
+  `python3.dll`, is looked for in `import_dirs` and, with `import_search = "path"` (the default when `import_dirs` names no
+  directory, and logged as weakened), the Windows directory, the provider's working directory (Canoa.cfg's) and every
+  directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
   opened with the narrow search again, so its other imports come from where they did.
 - **A stdio agent** is the program the file names, with the host's environment and working directory.
 - **A tool entry** runs its program with the host's environment, in the session's working directory, with the rights of
