@@ -7,6 +7,7 @@ import 'dart:js_interop_unsafe';
 
 import 'package:canoa/acp/browser_connect.dart';
 import 'package:canoa/acp/connect.dart';
+import 'package:canoa/acp/served_host.dart';
 import 'package:canoa/auth/browser_peer.dart';
 
 Future<String> _turn(String url, String peer, String method, String text) async {
@@ -30,8 +31,20 @@ Future<String> _turn(String url, String peer, String method, String text) async 
   }
 }
 
+/// What the connect dialog reads from the `canoa-host` that served this page, as JSON, or null.
+Future<String?> _served() async {
+  final host = await loadServedHost();
+  if (host == null) return null;
+  return jsonEncode({
+    'peer': host.peer,
+    'method': host.method.id,
+    'entries': [for (final entry in host.entries) {'name': entry.name, 'kind': entry.kind, 'url': entry.url}],
+  });
+}
+
 void main() {
   globalContext
+    ..setProperty('canoaServedHost'.toJS, (() => _served().then((json) => json?.toJS).toJS).toJS)
     ..setProperty(
       'canoaOwnId'.toJS,
       ((JSString method) => localBrowserPeerId(PeerMethod.parse(method.toDart)).then((id) => id.toJS).toJS).toJS,
