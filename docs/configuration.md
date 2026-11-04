@@ -126,7 +126,8 @@ problem in `[about]`, store metadata, never does. Canoa applies:
   `<NAME>_OVERLAY_ROOT`. A placeholder reads what overlays set and the variables your own layers share; any other variable
   of this computer it names is an error, so no session starts. A secret reference is read only for `provider = "env"`
   and a variable you share; Canoa holds no named or file secrets, so those stay unset when `optional`, and otherwise
-  stop the session from starting;
+  stop the session from starting. A substituted value is at most 1 MiB, expressions nest at most 32 deep, and a pattern
+  may take at most ten million steps;
 - skills, MCP servers (`env_passthrough` and `headers_env` only for variables you share; no header over plain `http` to
   another host), rules, routing lines and context as initial context, and the `model` and `effort` hints of
   `[harness.<id>]` for the agent's harness (`claude-code`, `codex`, `gemini-cli`, `pi` for the presets);
@@ -161,8 +162,9 @@ differ only in case. Entries under an excluded name (`.git`, `node_modules`, `__
 overlay and are never installed. Git may fetch only over `https`, `ssh`, `file` with no host, and `http` or `git` at a
 whole commit id; never a transport helper such as `ext::`, nor another host's share. It asks nothing in a terminal and
 tells Git Credential Manager not to ask; another credential helper you configured may still ask. Git is run from an
-absolute directory of `PATH`, never from the current directory. An overlay holds at most 4096 files and 64 MiB, listing
-stops as soon as it passes either, and each git command is ended after 5 minutes. A local directory,
+absolute directory of `PATH`, never from the current directory. An overlay holds at most 4096 files and 64 MiB, and its
+source's listing at most 16384 entries; listing stops as soon as it passes any of them, a fetch that writes more than
+256 MiB is ended, and each git command is ended after 5 minutes. A local directory,
 `{ dir = "..." }`, is read in place, digested each time, as it is when an agent starts.
 
 An overlay's `[about]` `summary` shows beside it, as plain text. Its `icon`, a PNG or WebP file of the overlay (never
