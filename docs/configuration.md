@@ -47,8 +47,7 @@ lower one's whole and keeps its place, and `remove = true` takes it out. `unset 
 `model`, `effort`, `mode` or `context`. **Settings → Profiles** shows the effective profile of each agent, every value
 beside the layer it came from, and what each layer removed. canoa-host reads the same schema
 (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds the app and the host to the same merge.
-Which of these each harness can take, and when, is in [the roadmap](roadmap.md); applying a profile to a harness is
-not done yet.
+What each harness takes of it, and how, is [below](#applying-a-profile).
 
 ```toml
 [overlays]
@@ -116,6 +115,51 @@ resolved only when a session starts; the view shows the reference and the variab
 from, and nothing logs the value. A `from_file` reads a regular file of at most 1 MiB. Errors name a key, never a
 value.
 
+### Applying a profile
+
+The desktop app applies a profile to each agent it starts on this computer, its own way for each harness. Before the
+session starts, a dialog shows every part of the profile and what that harness takes of it, every layer left out and
+why, and each MCP server: what it runs or the URL it reaches, the variables or headers it receives by name (never their
+values), what is left out of them, and a switch. Once the session is open, the conversation says in one line what
+applied and what did not, and **Profile** in its header lists each part, its layer, what became of it and through what.
+Nothing is applied that is not listed there. An agent reached on another machine, through the host or a browser, is
+given none of it, and its conversation says so; serving profiles from `canoa-host` is not done yet.
+
+| Part | Claude Code (`claude-agent-acp`) | Codex (`codex-acp`) | Gemini CLI | Pi (`pi-acp`) | Another agent |
+| --- | --- | --- | --- | --- | --- |
+| Environment | the agent's process | the agent's process | the agent's process | the agent's process | the agent's process |
+| Initial context | ACP `systemPrompt`, appended | ACP `systemPrompt`, appended | not supported | not supported | ACP `systemPrompt` when it advertises it |
+| Skills | a Claude Code plugin, `canoa-profile`, through the adapter's `_meta.claudeCode.options.plugins`; a skill is `canoa-profile:<name>` | the Agent Skills directory of a new directory given as ACP `additionalDirectories` | not supported | not supported | not supported |
+| MCP servers | ACP `mcpServers`: stdio, HTTP, SSE | ACP `mcpServers`: stdio, HTTP; skipped by Codex when its own configuration names a server the same | ACP `mcpServers` | not supported: pi-acp accepts them and starts none | ACP `mcpServers`, as it advertises |
+| Model, effort, mode | the session's config option offering that value | the same | the same | the same | the same |
+
+Which harness an agent is comes from what it says in `initialize`, else from the preset it was started from. A part a
+harness does not take is listed as not supported, with why: Gemini CLI, Pi, OpenCode and Grok read context and skills only
+from their own directories when they start. What the dialog says is what Canoa expects; the conversation says what the
+agent itself advertised.
+
+Skills and context are read once, when the session is prepared: an overlay's from the bytes its tree digest covered, never
+from its files again; a project's only inside its directory once links are resolved, and a skill directory holding a link
+is refused. Skills are written into a new directory under the system's temporary directory, private to you, removed when
+the agent ends. The initial context, every layer's together, is at most 1 MiB; a skill directory at most 1024 files and
+16 MiB.
+
+An MCP server's environment is resolved as the profile's is: an overlay's text is substituted against that overlay's own
+environment, with `AOS_OVERLAY_ROOT` and `AOS_OVERLAY_NAME`; its `env_passthrough` and `headers_env` give a variable only
+when one of your layers shares it, and otherwise leave it out and say so. A command with no directory is looked up on
+`PATH`, since ACP takes an absolute one; one not found refuses that server. An overlay's server runs in the session's
+working directory, not the overlay's, since ACP gives an MCP server none: the dialog says so.
+
+A server from your own layers is on unless you turn it off; one from an overlay or a project is off until you allow it.
+**Keep these choices** in the dialog writes them to Canoa.cfg, under the agent:
+
+```toml
+[agents.Claude.mcp]
+files = true                 # on
+docs = false                 # off
+team = "sha256:..."          # an overlay's or a project's server, allowed at this definition: one that changes is off again
+```
+
 ### Overlays
 
 An overlay is an [Agent Overlay Specification](https://github.com/Boriken-Dev/agent-overlay-spec) (AOS) v0 overlay: a
@@ -139,7 +183,8 @@ problem in `[about]`, store metadata, never does. Canoa applies:
 
 Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
 `env_scripts`), `setup`, dependencies (`lib/python/requirements.txt`, `lib/node/package.json`, `runtime`), `runtime`
-probes, `scripts`, `mcp.skills`, an MCP server's `timeout` and working directory, other harnesses' hints, and the
+probes, `scripts`, `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
+harnesses' hints, and the
 `bin/` and `lib/` defaults, which would change `PATH`, `PYTHONPATH` and `NODE_PATH`. Nothing of an overlay ever runs.
 
 From git, the desktop app installs an overlay into `overlays/NAME/` beside Canoa.cfg, with `overlays/NAME.json`
