@@ -406,6 +406,8 @@ void main() {
     final config = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\n'
         'public = "$publicRepo@main#catalog.json"\n');
 
+    setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/store_test.dart')));
+
     setUp(() {
       overlays = MemoryOverlays();
       saved = [];

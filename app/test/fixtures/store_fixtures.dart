@@ -119,6 +119,23 @@ List<int> pngHeaderOnly(int width, int height) {
 /// An SVG with a script, which no name makes an icon.
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><script>alert(1)</script></svg>\n';
 
+/// A golden comparison that passes a difference of at most [tolerated], a fraction of the pixels: the test font's
+/// edges are antialiased differently on Windows and on Linux, by up to about 1.6% of a page dense with text.
+final class PlatformTolerant extends LocalFileComparator {
+  PlatformTolerant(super.testFile, {this.tolerated = 0.02});
+  final double tolerated;
+
+  @override
+  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
+    final result = await GoldenFileComparator.compareLists(imageBytes, await getGoldenBytes(golden));
+    if (!result.passed && result.diffPercent > tolerated) {
+      fail(await generateFailureOutput(result, golden, basedir));
+    }
+    result.dispose();
+    return true;
+  }
+}
+
 /// Files in memory by source: what a widget test's catalogs and overlays hold.
 final class MemoryTree implements FetchedTree {
   MemoryTree(this.files, {this.commit = 'c0ffee0000000000000000000000000000000000'});
