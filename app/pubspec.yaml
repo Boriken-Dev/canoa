@@ -18,7 +18,7 @@ dependencies:
     git:
       url: https://github.com/Boriken-Dev/coqui-web.git
       path: bindings/dart/coqui_web
-      ref: e1a5d79c1b5712ef56cdb15a7d66d7658bb87b17
+      ref: 445007acb04f1b11f8f0f7c9fcf104f694189a2b
   crypto: ^3.0.6
   file_selector: ^1.1.0
   flutter_markdown_plus: ^1.0.12

@@ -120,9 +120,15 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         }
     }
 
-    /// Builds guatiao-source-py from a copy of Guatiao's checkout, since a build writes beside its manifest.
+    /// Builds guatiao-source-py from a copy of Guatiao's checkout, since a build writes beside its manifest. The copy is
+    /// named after the checkout's directory, which Cargo names by revision, so another pin builds from a copy of its own.
     fn build_source(python: &Python, guatiao: &Path) -> PathBuf {
-        let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("guatiao-source-py");
+        let revision = guatiao
+            .file_name()
+            .expect("Cargo's checkout is a directory of its own");
+        let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .join("guatiao-source-py")
+            .join(revision);
         let copy = scratch.join("guatiao");
         if !copy.join("Cargo.toml").is_file() {
             copy_tree(&guatiao.join("crates"), &copy.join("crates"));

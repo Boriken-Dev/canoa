@@ -16,6 +16,9 @@ CLAUDE*
 # Node
 node_modules/
 
+# Python: a Guatiao source's interpreter writes bytecode beside a provider's modules, whatever the environment says.
+__pycache__/
+
 # Flutter
 /app/.dart_tool/
 /app/build/

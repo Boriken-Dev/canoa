@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - New keys prove by Noise: `canoa-host` on a home with no identity, and the key the extension calls its own. A home or agent made before keeps WebCrypto, and its pairings keep working. To move a host, run `canoa-host serve --method noise` once, which the home then records for the app's own `serve` and `pair`, and pair each browser again, by PIN or by accepting its Noise key: a key of one method is never the other's. Canoa's app reaches such a host by Noise once the person names that method, which `serve` prints and Hosting shows, or pairs by PIN.
+- `canoa-host` builds on Guatiao `266baf9c`, coqui-acp `ee19118`, coqui-agentic-peer `9b1fee4` and coqui-web `445007a`, and the app on coqui-web `445007a`. A Guatiao manifest is now `<name>.guatiao` (or `<name>.guatiao.<major>[.<minor>]`): a `*.guatiao.toml` is no longer found, so rename each. A Python provider's `close` slot is `close`, no longer `close_`. A Python source's interpreter no longer reads `PYTHONPATH`, `PYTHONHOME` or the user's own site-packages unless its entry says `isolation = "inherit"`.
 
 ### Added
 

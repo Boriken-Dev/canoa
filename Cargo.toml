@@ -22,18 +22,18 @@ serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "ansi"] }
 # The stdio relay and the provider facade, on coqui-acp at one revision. Not published yet.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "5397c7df302cc64598976517c71f84a4790fea6e" }
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "5397c7df302cc64598976517c71f84a4790fea6e" }
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "5397c7df302cc64598976517c71f84a4790fea6e" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d345437209eaea5b02091226a6bfa47e3" }
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d345437209eaea5b02091226a6bfa47e3" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d345437209eaea5b02091226a6bfa47e3" }
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.
-coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "79a9f393b0cc306a1230ed0e85fa4bd7ec8087c5" }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "9b1fee4aa12969d7e070182ebc820ca7593fdc17" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "1f00bfe6319f64e7ec038a7003746f4f031d538c" }
 coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "a3776fba131415d006f68ea493120fd7f894244a" }
-coqui-web = { git = "https://github.com/Boriken-Dev/coqui-web", rev = "6fd0ca3446e7702d2dd323824a6b97b31851d665", default-features = false, features = ["websocket"] }
+coqui-web = { git = "https://github.com/Boriken-Dev/coqui-web", rev = "445007acb04f1b11f8f0f7c9fcf104f694189a2b", default-features = false, features = ["websocket"] }
 # Loading a provider library; the revision coqui-acp-provider's kinds are built on.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa319795614ac6fe12d35d856ec3d8b", features = ["provider", "load"] }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "266baf9c9e0c4e03bedf8a830d8e434279f83b94", features = ["provider", "load"] }
 # A provider's settings, as JSON, made a Guatiao value: only the adapter, no text format.
-guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "a67fd4be0aa319795614ac6fe12d35d856ec3d8b", default-features = false }
+guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "266baf9c9e0c4e03bedf8a830d8e434279f83b94", default-features = false }
 
 # coqui-acp-bridge takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
 # needs the one source coqui-acp patches it to.
