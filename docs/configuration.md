@@ -214,6 +214,15 @@ tooltip on Windows, the first item of its menu everywhere.
 - **Web, a PWA and the extension**: the browser's Notification API, once the person allows it from Settings → Notifications →
   **Allow notifications**; nothing registers a service worker. A page shows them while it is open.
 
+`app/integration_test/notification_test.dart` has a conversation behind the chosen one finish its turn in the app's own window,
+and holds the window open for `CANOA_TEST_HOLD` seconds. What has been run:
+
+- **Windows 11 (arm64)**: Windows' own notification history for Canoa held the toast, titled with the conversation and saying
+  its agent finished its turn. Choosing it was not run.
+- **Linux (Fedora 44 under WSLg, arm64)**: WSLg has no notification service of its own; with `dunst` running, it received the
+  notification from Canoa with the same words. Choosing it was not run.
+- **Web and macOS**: not run.
+
 ## Building desktop runners
 
 This repository keeps the canonical Flutter code in app/. Flutter's platform runner directories must be generated before native desktop builds:
