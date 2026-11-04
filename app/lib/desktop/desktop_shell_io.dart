@@ -69,7 +69,9 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
     _hasTray = await _trayAvailable();
     if (_hasTray) {
       trayManager.addListener(this);
-      await trayManager.setIcon('assets/icons/canoa_tray.png');
+      // Windows loads the tray icon with LoadImage(IMAGE_ICON), which takes no PNG, and picks the .ico's entry for the
+      // display's small-icon size; Linux and macOS take the one PNG.
+      await trayManager.setIcon(Platform.isWindows ? 'assets/icons/canoa.ico' : 'assets/icons/canoa_tray.png');
       // A StatusNotifier icon on Linux has no tooltip, and tray_manager has no such call there.
       if (!Platform.isLinux) await trayManager.setToolTip('Canoa');
       await trayManager.setContextMenu(menu = _menu(0));

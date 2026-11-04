@@ -42,3 +42,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icons/canoa_tray.png
+    - assets/icons/canoa.ico
