@@ -225,7 +225,8 @@ command = "/usr/local/bin/lint-mcp"
 - **A client chooses only by name, only among the entry's `profiles`.** It names one in `initialize`'s
   `_meta["dev.boriken.canoa/profile"]`; anything else there, a name the entry does not offer, or a choice in any later
   message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A first message that is not
-  `initialize` is refused too, before any secret is read or any process starts. A client never sends a
+  `initialize` is refused too, before any secret is read or any agent starts; only [worktree requests](#worktrees),
+  which the host answers itself with git, may come before it. A client never sends a
   profile's contents: every value comes from Canoa.cfg.
 - **The environment** reaches the agent's process when it starts, on the first line of its standard input through
   `canoa-host launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
@@ -261,25 +262,38 @@ worktrees = true                   # the default
   root as written, and again once every link in it is resolved, against the roots resolved too; so must the repository's
   main worktree, and the directory beside it that worktrees go in. A `.worktrees` directory that is a link, a branch
   other than `canoa/` and lower-case words joined by single hyphens, and a share or device path are refused before git
-  runs. A worktree is made on a new branch from the directory's current commit, then checked again where it landed.
+  runs, and so is a `.git` file or `commondir` naming a share. A worktree is made on a new branch from the directory's
+  current commit, then checked again where it landed. A repository holds at most 32 worktrees beside it from the host.
 - **A repository that is itself a working root has nowhere beside it** inside the roots: name the directory holding it.
-- **Git runs from an argument list**, never a shell, with `--` before every path, its hooks and fsmonitor off
-  and none of the host's `GIT_` variables, so a repository's hooks do not run for the host. A post-checkout hook such as
-  Git LFS's does not run either.
-- **Only a worktree the host would have made is read or removed**: a linked worktree on a `canoa/` branch, where that
-  branch's worktree goes. Removing one holding changes or untracked files takes the client's `discard`; without it git
-  refuses. Its branch is deleted only when no other branch, tag or remote has a commit of it.
+- **Refused before git reads more than its settings**: a repository whose own settings (`.git/config`, a worktree's
+  `config.worktree`) name a filter, an include or an attributes file, which would run a program or read files the host
+  does not check; one whose git directory is not its work tree's own `.git`, as a submodule's or a
+  `--separate-git-dir`'s is, or is outside the roots; and one that borrows objects from another (alternates).
+- **Git runs from an argument list**, never a shell, with `--` before every path, its hooks and fsmonitor off, no
+  repository looked for above the roots (`GIT_CEILING_DIRECTORIES`), none of the host's `GIT_` variables, and two minutes
+  at most per command. A repository's hooks do not run for the host: a post-checkout hook such as Git LFS's does not
+  either. Filters in your own global settings, such as Git LFS's, do.
+- **Only a worktree the host would have made is read or removed**: a linked worktree at its own top level, where the
+  branch its directory is named for goes; found there even when its HEAD was detached or moved to another branch.
+- **Nothing in no commit goes unasked.** `status` counts what `git status` lists, files git ignores and repositories
+  inside included, and a digest of that list. Removing a worktree that holds any of it takes the client's `discard`, which
+  the host checks itself since git removes ignored files without being forced. A HEAD detached at commits no branch
+  holds is never removed. The branch is deleted only when no other branch, tag or remote has a commit of it, and only at
+  the commit counted: one that moved meanwhile stays.
 - **Before the agent starts.** The requests come first on a connection, before `initialize`, and no agent starts for a
   connection that sends only these; once the agent runs, one is refused. So a worktree is removed with no agent of that
-  connection working in it.
+  connection working in it. An agent of another connection, or a process one left behind, may still be.
 
 The requests, each answered by the host, never the agent:
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `_canoa/worktree/new` | `cwd`, `branch` | `path` (under the root as written), `branch`, `repo` |
-| `_canoa/worktree/status` | `path` | `{"exists": false}`, or `exists`, `branch`, `changed` (files `git status` lists), `commits` (on the branch alone) |
+| `_canoa/worktree/status` | `path` | `{"exists": false}`, or `exists`, `branch` (null when detached), `detached`, `changed`, `commits` (reached by HEAD or the branch alone), `listing` (SHA-256 of what `changed` counts) |
 | `_canoa/worktree/remove` | `path`, `discard` (default false) | `removed`, `branch`, `branchKept`, `commits` |
+
+A link swapped in, between the host's check and git's work, by someone who can already write inside a root, is not
+guarded against.
 
 ## In the desktop app
 
