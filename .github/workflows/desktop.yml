@@ -12,15 +12,15 @@ jobs:
           - os: ubuntu-latest
             platform: linux
             bundle: app/build/linux/x64/release/bundle
-            host: canoa-host
+            host: canoa
           - os: windows-latest
             platform: windows
             bundle: app/build/windows/x64/runner/Release
-            host: canoa-host.exe
+            host: canoa.exe
           - os: macos-latest
             platform: macos
-            bundle: app/build/macos/Build/Products/Release/canoa.app/Contents/MacOS
-            host: canoa-host
+            bundle: app/build/macos/Build/Products/Release/Canoa.app/Contents/MacOS
+            host: canoa
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +40,9 @@ jobs:
       - name: Generate platform runner
         working-directory: app
         run: flutter create --org dev.boriken --platforms=${{ matrix.platform }} .
+      - name: Name the executable CanoaUI
+        shell: bash
+        run: sh app/tool/name_runner.sh app
       - name: Resolve packages
         working-directory: app
         run: flutter pub get
@@ -49,11 +52,11 @@ jobs:
         env:
           CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
         run: flutter build ${{ matrix.platform }} --release
-      # The app runs the canoa-host it finds beside its own executable.
-      - name: Build canoa-host and put it beside the app
+      # The app runs the canoa it finds beside its own executable.
+      - name: Build canoa and put it beside the app
         shell: bash
         run: |
-          cargo build --release -p canoa-host --bin canoa-host
+          cargo build --release -p canoa-host --bin canoa
           cp "target/release/${{ matrix.host }}" "${{ matrix.bundle }}/"
       - name: The app on a desktop, with its host
         if: matrix.platform != 'macos'
@@ -63,7 +66,7 @@ jobs:
           CANOA_TEST_NODE: node
           CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
         run: |
-          cargo build -p canoa-host --bin canoa-host --examples
+          cargo build -p canoa-host --bin canoa --examples
           export CANOA_TEST_HOST="$GITHUB_WORKSPACE/target/debug/${{ matrix.host }}" CANOA_TEST_APP="$PWD"
           if [ "${{ matrix.platform }}" = linux ]; then
             xvfb-run -a flutter test integration_test/desktop_test.dart -d linux

@@ -25,7 +25,7 @@ jobs:
         toolchain: [stable, "1.89"]
     runs-on: ${{ matrix.os }}
     env:
-      # The site canoa-host's web feature builds in, which --all-features turns on.
+      # The site canoa's web feature builds in, which --all-features turns on.
       CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
     steps:
       - uses: actions/checkout@v4

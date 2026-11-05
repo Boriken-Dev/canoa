@@ -36,7 +36,7 @@ jobs:
         run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
-          # The site canoa-host's web feature builds in.
+          # The site canoa's web feature builds in.
           CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
       - name: Build documentation
         run: mkdocs build --strict
