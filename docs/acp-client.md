@@ -45,7 +45,7 @@ questions waiting; the agent's further ones are answered cancelled, and the conv
 
 **Full access** answers a session's requests without asking. It is off unless the person turns it on, for one conversation (the
 header's **Full access…**, after a dialog that says what it does) or for an agent (Settings, or `[permissions] full_access` in
-Canoa.cfg), whose sessions then start with it. An agent's setting reaches only sessions of the program this app runs under that
+canoa.cfg), whose sessions then start with it. An agent's setting reaches only sessions of the program this app runs under that
 label: a peer, a hosted agent or a browser's agent never gets it by calling itself that, and is given full access per
 conversation instead. A request reaches only the conversation of the connection that sent it, whatever session id the agent
 chose. While it is on, a banner on the conversation and a mark on its row say so, and the
@@ -86,7 +86,7 @@ address an agent names. `coqui_acp` reads the form and checks the answer, as `ve
 
 A new session is the conversation's empty view: the folder above the message box, and under it the source, Local or
 Worktree, the agent's mode, model and effort, the overlays, `+` and Send ([a new session](configuration.md#a-new-session)).
-Nothing starts until the first message. Then the app starts the agent, or reaches `canoa-host` for a hosted one, sends
+Nothing starts until the first message. Then the app starts the agent, or reaches `canoa` for a hosted one, sends
 `initialize`, then `session/new` with the folder, the profile's `systemPrompt`, `additionalDirectories`, `_meta` and MCP
 servers, sets each choice made beforehand with `session/set_config_option`, and sends the message. A choice the agent does not
 offer by then is said in the conversation and not sent. A start that fails leaves the session as it was, with the message.

@@ -1,6 +1,6 @@
 # The host
 
-`canoa-host` serves agents to Canoa's chat on this machine. Each entry of Canoa.cfg's `[host]` table is one agent, on a
+`canoa` serves agents to Canoa's chat on this machine. Each entry of canoa.cfg's `[host]` table is one agent, on a
 loopback WebSocket of its own:
 
 - **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as Claude's
@@ -51,7 +51,7 @@ import_dirs = ["python/runtime"]                           # optional, Windows: 
 ```
 
 `library` and `source` exclude each other, and `source_settings` goes with `source` alone. Relative paths in `library`,
-`source`, `home` and the `dirs`, `manifests`, `paths` and `import_dirs` lists are made absolute from Canoa.cfg's directory
+`source`, `home` and the `dirs`, `manifests`, `paths` and `import_dirs` lists are made absolute from canoa.cfg's directory
 when the file is read; the provider's process runs in that directory, so any other relative path in `source_settings` is
 taken from there too. The source reads the rest; it refuses a value it does not take when a connection loads it.
 
@@ -62,11 +62,11 @@ is TOML unless its first line is `#!json` or `#!yaml`.
 
 | `isolation` | What it reads | What it ignores |
 | --- | --- | --- |
-| `shipped` (the default) | what ships with the program: a `._pth` or `pyvenv.cfg` beside `canoa-host`, on Windows `canoa-host`'s own directory, `home`, the installation's `site-packages`, `paths` | `PYTHONPATH`, `PYTHONHOME` and every other `PYTHON*` variable, the user's own `site-packages` |
-| `isolated` | the standard library of `home` (else of the installation `python3.dll` came from) and `paths`, nothing else | everything beside `canoa-host`, the installation's `site-packages`, the environment |
+| `shipped` (the default) | what ships with the program: a `._pth` or `pyvenv.cfg` beside `canoa`, on Windows `canoa`'s own directory, `home`, the installation's `site-packages`, `paths` | `PYTHONPATH`, `PYTHONHOME` and every other `PYTHON*` variable, the user's own `site-packages` |
+| `isolated` | the standard library of `home` (else of the installation `python3.dll` came from) and `paths`, nothing else | everything beside `canoa`, the installation's `site-packages`, the environment |
 | `inherit` | the environment as well, as a `python` started from the host would | nothing |
 
-`inherit` is weaker: whoever sets the host's environment chooses the code a library runs. `canoa-host serve` says so in its
+`inherit` is weaker: whoever sets the host's environment chooses the code a library runs. `canoa serve` says so in its
 log when it starts, once per entry: `weakened: host.providers.NAME.source_settings.isolation is inherit, looser than
 shipped`. The first source a process adds decides `isolation` and `home`; each connection is a process of its own.
 
@@ -76,10 +76,10 @@ proves with a one-time token. Its standard input is closed once the settings are
 
 On Windows the Python's `python3.dll` has to be found: name its directory (`sys.base_prefix`) in `import_dirs`. The
 entry's `import_search` says where else it may come from: `library` looks only in `import_dirs` (after the source's own
-directory, `canoa-host`'s and the system's); `path` also in the Windows directory, the provider's working directory
-(Canoa.cfg's) and every directory on `PATH`, so whoever can write any of those chooses the Python that loads. Without
+directory, `canoa`'s and the system's); `path` also in the Windows directory, the provider's working directory
+(canoa.cfg's) and every directory on `PATH`, so whoever can write any of those chooses the Python that loads. Without
 `import_search` an entry whose `import_dirs` names a directory takes `library`, and one that names none takes `path`,
-which keeps a Python on `PATH` working. `canoa-host serve` logs every entry on `path` when it starts:
+which keeps a Python on `PATH` working. `canoa serve` logs every entry on `path` when it starts:
 `weakened: host.providers.NAME.import_search is path, looser than library`, with how to narrow it. On Linux and macOS the
 source links that Python's shared library, found where the loader looks, or through `LD_LIBRARY_PATH` or
 `DYLD_FALLBACK_LIBRARY_PATH`; `import_dirs` and `import_search` change nothing there.
@@ -101,7 +101,7 @@ The table is checked against the schema the provider declares when a connection 
 its code; a misspelled or ill-typed setting fails that connection, and the host's log names the setting, never its value.
 A provider that is its own instance refuses `settings`.
 
-Settings are read from Canoa.cfg only, never from a client. They reach the provider's process on its standard input, not
+Settings are read from canoa.cfg only, never from a client. They reach the provider's process on its standard input, not
 on its command line, which other users of the machine may be able to read.
 
 ### A command-line tool
@@ -157,9 +157,9 @@ reject = { type = "extension_ui_response", id = "{id}", cancelled = true }
   JSON of `prompt`, `cancel`, `allow`, `reject` and `line`, a string that is a placeholder alone keeps the value's type,
   and only values are filled: a prompt cannot add a key or end the line, since it is never parsed as JSON, and U+2028 and
   U+2029, at which some line readers split, are escaped.
-- **On a command line**: `serve` gives the entry, as JSON, to `canoa-host tool` on its command line, which other users of
+- **On a command line**: `serve` gives the entry, as JSON, to `canoa tool` on its command line, which other users of
   the machine may be able to read. Put nothing secret in a tool entry; a key belongs in the host's environment, which the
-  tool inherits. An entry is at most 16 KiB as JSON and holds no NUL, or Canoa.cfg is refused.
+  tool inherits. An entry is at most 16 KiB as JSON and holds no NUL, or canoa.cfg is refused.
 - **The person is told** what they would not otherwise know: every session opens with the notices the entry implies,
   listed under `_meta["dev.boriken.canoa/notices"]` in the answer to `session/new`, which the app shows in the
   conversation as the agent's words (any agent can send that key, so the app never shows it as its own). One says what the tool does without asking, in the entry's own `unasked` words, which every entry must give;
@@ -190,14 +190,14 @@ own: a `models.json` in `PI_CODING_AGENT_DIR`, whose key it reads from an enviro
 commands and usage arrived in that turn; its README also lists diffs for `edit` and reopening sessions) and is the better
 choice; the tool entry is for a Pi, or a tool like it, with no adapter.
 
-`canoa-host serve` reads the same Canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
+`canoa serve` reads the same canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
 prints one JSON line per entry: its name, kind, address, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
 saves its own settings.
 
 ## Profiles
 
 A stdio agent entry can be launched with a profile, the same schema as the app's `[profile]` (see
-[Desktop and Canoa.cfg](configuration.md)): environment variables, an initial context, skills, MCP servers and model,
+[Desktop and canoa.cfg](configuration.md)): environment variables, an initial context, skills, MCP servers and model,
 effort and mode defaults.
 
 ```toml
@@ -209,7 +209,7 @@ profiles = ["review", "plain"]        # a client chooses among these; the first 
 [host.profiles.review]
 context = { text = "Review before you change anything." }
 share_env = ["GITHUB_TOKEN"]          # what the overlays below may read
-overlays = ["team"]                   # installed by the app in overlays/ beside Canoa.cfg
+overlays = ["team"]                   # installed by the app in overlays/ beside canoa.cfg
 allow_mcp = { team = "sha256:…" }     # an overlay's MCP server, at the digest of its definition
 
 [host.profiles.review.env.GITHUB_TOKEN]
@@ -227,9 +227,9 @@ command = "/usr/local/bin/lint-mcp"
   message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A first message that is not
   `initialize` is refused too, before any secret is read or any agent starts; only [worktree requests](#worktrees),
   which the host answers itself with git, may come before it. A client never sends a
-  profile's contents: every value comes from Canoa.cfg.
+  profile's contents: every value comes from canoa.cfg.
 - **The environment** reaches the agent's process when it starts, on the first line of its standard input through
-  `canoa-host launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
+  `canoa launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
   environment and files when the connection starts; one that cannot be read starts no agent.
 - **Context, skills and MCP servers** go with each `session/new`, `session/load` and `session/resume`, where the
   agent's harness takes them, as the app does: the context through ACP `systemPrompt` (before a client's own), skills as the
@@ -299,17 +299,17 @@ guarded against.
 
 Canoa's desktop app runs the host as its own child, so nothing else has to be started:
 
-- It runs the `canoa-host` named by `CANOA_HOST`, else the one beside its own executable, where a desktop build puts it.
+- It runs the `canoa` named by `CANOA_HOST`, else the one beside its own executable, where a desktop build puts it.
   Without one, the app hosts nothing and says so.
-- It starts `canoa-host serve --until-stdin-closes` when Canoa.cfg has a `[host]` entry, and again whenever its hosting
+- It starts `canoa serve --until-stdin-closes` when canoa.cfg has a `[host]` entry, and again whenever its hosting
   dialog changes one. If the host ends on its own, the app starts it again after a pause that doubles from one second up
-  to a minute, and back to one second after a run of thirty seconds. A Canoa.cfg the host refuses (status 2) is shown, and
+  to a minute, and back to one second after a run of thirty seconds. A canoa.cfg the host refuses (status 2) is shown, and
   not retried until the person asks.
 - Closing the window leaves the host and its agents running. Quitting ends them: the app closes the host's input, and the
   host ends every agent it started, then itself. If the app itself dies, its end closes that input too.
 
 **Hosting**, in the app's side rail and its tray menu, shows the host's state and its peer id, lists its entries with
-their addresses, adds a stdio ACP agent by its command on a loopback port of its own, after `canoa-host check` accepts the
+their addresses, adds a stdio ACP agent by its command on a loopback port of its own, after `canoa check` accepts the
 change, and stops hosting one. It lists the keys that may connect, pairs a waiting one and removes one, and shows a PIN for
 a program to pair with.
 
@@ -320,24 +320,24 @@ with the trust store `coqui-acp-bridge serve --paired` uses. A home keeps each m
 a home paired before Noise keeps its WebCrypto identity and its paired keys, and `--method` names one when a home has
 both. A key is of one method, and a client of the other is refused, which the host's log says. The home records the
 method named last, or its first identity's, so the app's `serve` and `pair`, which name none, use it. **Canoa's app proves
-by WebCrypto today:** a home it reaches must prove by WebCrypto (`canoa-host serve --method webcrypto` once) until the app
-proves by Noise. A home with no identity gets a Noise one; to move a WebCrypto home, run `canoa-host serve --method noise`
+by WebCrypto today:** a home it reaches must prove by WebCrypto (`canoa serve --method webcrypto` once) until the app
+proves by Noise. A home with no identity gets a Noise one; to move a WebCrypto home, run `canoa serve --method noise`
 once and pair each browser again: its Noise key is a new key.
 
 A browser pairs by connecting once:
 
 1. In the browser, give the entry's address (`ws://127.0.0.1:7801`), the host's peer id, which Hosting shows (and
-   `canoa-host id` prints), and the method it proves by, which `serve` prints: in Canoa's web connect dialog, or by
+   `canoa id` prints), and the method it proves by, which `serve` prints: in Canoa's web connect dialog, or by
    adding the agent by hand in the extension's window.
 2. The first connection is turned away, and the browser's key waits on the host.
-3. Hosting lists it as waiting, as does `canoa-host peers`. Compare its whole id with the one the browser shows (Canoa's
+3. Hosting lists it as waiting, as does `canoa peers`. Compare its whole id with the one the browser shows (Canoa's
    connect dialog, or the extension's permissions page), then pair it: **Pair…** and **Pair** in Hosting, or
-   `canoa-host accept <id>`.
-4. Connect again. Removing the key in Hosting, or `canoa-host revoke <id>`, ends its links within about a second.
+   `canoa accept <id>`.
+4. Connect again. Removing the key in Hosting, or `canoa revoke <id>`, ends its links within about a second.
 
 A program with a native key, such as `coqui-acp-bridge`, can pair by PIN instead: **Show a PIN** in Hosting, or
-`canoa-host pair`, shows six digits and an address, and `coqui-acp-bridge pair-dial ADDRESS` with those digits pairs it.
-One wrong try ends the PIN, and it pairs by the host's method. `canoa-host pair` refuses a browser, so a page cannot spend
+`canoa pair`, shows six digits and an address, and `coqui-acp-bridge pair-dial ADDRESS` with those digits pairs it.
+One wrong try ends the PIN, and it pairs by the host's method. `canoa pair` refuses a browser, so a page cannot spend
 the PIN; a browser pairs with it by connecting once. The extension and Canoa's web connect dialog pair by PIN with
 `coqui-acp-bridge pair-accept --method noise --origin ORIGIN`, the origin each of them shows.
 
@@ -349,21 +349,21 @@ only from a dialog that shows its whole id.
 The host can serve Canoa's web build itself, so a browser on this machine opens the chat with no other web server:
 
 ```sh
-canoa-host serve --web app/build/web     # a directory, or [host.web] dir in Canoa.cfg
-canoa-host serve --web                   # the site built in, in a build with the web feature
+canoa serve --web app/build/web     # a directory, or [host.web] dir in canoa.cfg
+canoa serve --web                   # the site built in, in a build with the web feature
 ```
 
 ```toml
 [host.web]
-dir = "site"                 # relative to Canoa.cfg; without it, the site built in
+dir = "site"                 # relative to canoa.cfg; without it, the site built in
 listen = "127.0.0.1:7800"    # the default
 ```
 
 `serve` prints `{"web": "http://127.0.0.1:7800"}` after its entries. Open that address: the connect dialog starts filled
-with the host's first entry, its peer id and its method, read from `/canoa-host.json`, and lists its other entries to
+with the host's first entry, its peer id and its method, read from `/canoa.json`, and lists its other entries to
 choose from. That is only a filling. Connecting still proves the host holds that id's key, and the host turns the
 browser away until its key is paired, as in [Pairing](#pairing): connect once, then accept the browser's id in Hosting
-or with `canoa-host accept`.
+or with `canoa accept`.
 
 What it serves and refuses:
 
@@ -375,7 +375,7 @@ What it serves and refuses:
   built with `flutter build web --csp --no-web-resources-cdn`. That build still fetches its fonts from
   `https://fonts.gstatic.com`, and without them Flutter draws no text: until the app carries its own fonts, add
   `connect = ["https://fonts.gstatic.com"]` to `[host.web]`, which the host logs as a weakening.
-- **Not the host's own files.** A site directory that holds Canoa.cfg's directory or the host's identity and trust store
+- **Not the host's own files.** A site directory that holds canoa.cfg's directory or the host's identity and trust store
   is refused.
 - **Requests for this host only.** A request whose `Host` is not `localhost`, an IP address or a name in `[host.web]
   hosts` is refused, so another site cannot reach this one by pointing a name of its own at this machine.
@@ -409,7 +409,7 @@ The API header lists every setting.
   outside it is followed. A worktree is made, read or removed only where links are resolved too; see
   [Worktrees](#worktrees).
 - **Only the profiles an entry offers, by name.** What a profile holds, its secrets and its MCP servers included, comes
-  from Canoa.cfg alone; see [Profiles](#profiles).
+  from canoa.cfg alone; see [Profiles](#profiles).
 
 ## What it trusts
 
@@ -420,15 +420,15 @@ The API header lists every setting.
   trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A provider source runs code too, and loads more.** Python's source trusts, besides its own file: the Python whose
   shared library `import_dirs` or the system finds; that Python's standard library, and unless `isolation` is
-  `isolated` its `site-packages` and their `.pth` files and, on Windows, `canoa-host`'s own directory with a
-  `canoa-host._pth` or `pyvenv.cfg` there; `GUATIAO_LIBRARY`, which its process inherits; every directory in `paths`;
+  `isolated` its `site-packages` and their `.pth` files and, on Windows, `canoa`'s own directory with a
+  `canoa._pth` or `pyvenv.cfg` there; `GUATIAO_LIBRARY`, which its process inherits; every directory in `paths`;
   every manifest in `dirs` and the directories it names; and every module those import. With `isolation = "inherit"` it
   also trusts your own site-packages and the host's `PYTHONPATH` and `PYTHONHOME`. Whoever can write any of them runs code
   as you.
 - **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
   and in the system's directories only. For a source, an import it names itself that those leave missing, such as
   `python3.dll`, is looked for in `import_dirs` and, with `import_search = "path"` (the default when `import_dirs` names no
-  directory, and logged as weakened), the Windows directory, the provider's working directory (Canoa.cfg's) and every
+  directory, and logged as weakened), the Windows directory, the provider's working directory (canoa.cfg's) and every
   directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
   opened with the narrow search again, so its other imports come from where they did.
 - **A stdio agent** is the program the file names, with the host's environment and working directory, and its profile's

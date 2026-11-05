@@ -31,7 +31,7 @@ Future<String> _turn(String url, String peer, String method, String text) async 
   }
 }
 
-/// What the connect dialog reads from the `canoa-host` that served this page, as JSON, or null.
+/// What the connect dialog reads from the `canoa` that served this page, as JSON, or null.
 Future<String?> _served() async {
   final host = await loadServedHost();
   if (host == null) return null;

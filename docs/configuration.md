@@ -1,23 +1,23 @@
-# Desktop and Canoa.cfg
+# Desktop and canoa.cfg
 
 Canoa uses the **same deployment configuration convention** as AI6's Outer Office: a user-level TOML file ending in .cfg, with the environment override taking priority.
 
-The default template is [examples/config/Canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/Canoa.cfg).
+The default template is [examples/config/canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa.cfg).
 
 | Platform | Config location |
 | --- | --- |
-| Windows | %APPDATA%\Canoa\Canoa.cfg |
-| macOS | ~/Library/Application Support/Canoa/Canoa.cfg |
-| Linux | $XDG_CONFIG_HOME/Canoa/Canoa.cfg or ~/.config/Canoa/Canoa.cfg |
+| Windows | %APPDATA%\Canoa\canoa.cfg |
+| macOS | ~/Library/Application Support/Canoa/canoa.cfg |
+| Linux | $XDG_CONFIG_HOME/Canoa/canoa.cfg or ~/.config/Canoa/canoa.cfg |
 | Override | CANOA_CONFIG |
-| PWA / extension | Canoa.cfg alongside the deployed index.html, read-only |
+| PWA / extension | canoa.cfg alongside the deployed index.html, read-only |
 
 Configuration tables:
 
 - [desktop] start_hidden, close_to_tray, minimize_to_tray
 - [network] prefer_webtransport, connect_timeout (seconds, between 1 and 120)
 - [assets] cdn = "none" or "local" (deployment option; font hosting remains a separate build concern)
-- [host] what `canoa-host` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
+- [host] what `canoa` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
 - [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200)
 - [notifications] permission, question, finished: which of these, in a conversation the person is not looking at, reach them as a notification outside the window; each on by default. See [below](#when-a-conversation-needs-you).
 - [permissions] full_access: the agents, by the label the app shows, whose sessions start with full access, such as `full_access = ["Claude"]`. Empty by default. Full access answers each permission request that offers to allow once with that option and no question, and is shown on the conversation and its row while it lasts; see [permission requests in the chat](acp-client.md#permission-requests-in-the-chat).
@@ -28,15 +28,15 @@ Configuration tables:
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
 - [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store).
 
-The session list is `sessions.json` beside Canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
+The session list is `sessions.json` beside canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
 
 ### A new session
 
 **New session**, Ctrl+N (⌘N on a Mac) or the palette opens a new session in the middle of the window: its folder (recent folders, or **Open folder…**) above the message box, and in the row under the box `+`, the **source**, **Local** or **Worktree**, the agent's **mode**, **model** and **effort**, the **overlays** it starts with, and Send. It is in the side list at once, as New, with nothing started: no agent, no connection and no worktree. One left untouched is shown again rather than another made, and a new one starts from the source and folder chosen last.
 
-A source is a program with its arguments and what else it needs: the presets (Claude Code and Codex through their ACP adapters, Gemini, Pi), the commands under `[agents.NAME]`, and the agent entries of the `canoa-host` this app runs. Settings → Sources lists them with where each program was found, hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
+A source is a program with its arguments and what else it needs: the presets (Claude Code and Codex through their ACP adapters, Gemini, Pi), the commands under `[agents.NAME]`, and the agent entries of the `canoa` this app runs. Settings → Sources lists them with where each program was found, hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
 
-The first message starts it: the worktree is made, the profile is prepared (its dialog shown only when it has more than a model, effort or mode to approve), the agent started or the host reached, `session/new` sent with the folder, the profile and its MCP servers, the model, effort and mode chosen set, and then the message sent with what goes with it. A start that fails says why, takes back the worktree it made, and leaves the message to send again. Until then the session is kept in `drafts/` beside Canoa.cfg, with what is written in it and what goes with it, and comes back after a restart; closing it leaves nothing there or in the session list. The session list notes it once it has started.
+The first message starts it: the worktree is made, the profile is prepared (its dialog shown only when it has more than a model, effort or mode to approve), the agent started or the host reached, `session/new` sent with the folder, the profile and its MCP servers, the model, effort and mode chosen set, and then the message sent with what goes with it. A start that fails says why, takes back the worktree it made, and leaves the message to send again. Until then the session is kept in `drafts/` beside canoa.cfg, with what is written in it and what goes with it, and comes back after a restart; closing it leaves nothing there or in the session list. The session list notes it once it has started.
 
 Before its source has run, model and effort offer only **Default**, which sets nothing; once it has, they list what the agent offered then, with when. A new session's default is the profile's value, else your last choice for that source. After the start they list what the agent offers, a change is sent with `session/set_config_option` and shown once the agent takes it, and a value it refuses goes back, with its reason in the conversation. A change during a turn is sent before the next message. Full access shows in the mode control, in red, beside the conversation's banner. The overlays can be changed until the first message; after it the control shows what applied.
 
@@ -45,11 +45,11 @@ Before its source has run, model and effort offer only **Default**, which sets n
 **Worktree** under a new session's message (only for a folder in a git repository), or **In a new git worktree, on its own branch** in the connect dialog for an agent elsewhere, starts the session in a new worktree of the repository holding the folder, from that directory's current commit. For a new session it is made when the first message is sent, and named after its source. The branch is `canoa/` and the session's title (or its agent's name) in lower-case letters and digits joined by hyphens, then six random hexadecimal digits, such as `canoa/fix-the-tests-3fa91c`; nothing else is taken, so no branch reads as an option, a range or a path step. The worktree goes beside the repository, in `<repository>.worktrees/<branch without canoa/>`, and a `.worktrees` directory already there that is a link is refused. The session list shows the branch, and the session list kept across runs notes the worktree with the session.
 
 - **An agent this app runs**: the app runs `git` itself, with an argument list, its hooks and fsmonitor off, and refuses a repository whose own settings name a filter, an include or an attributes file, or whose git directory is apart from its work tree, as a submodule's is. Filters in your global settings, such as Git LFS's, run as usual.
-- **An agent `canoa-host` serves**: the host makes the worktree, only inside its entry's working roots, as [the host](host.md#worktrees) describes; with no working root, or `worktrees = false`, it makes none. The browser's provider makes none.
+- **An agent `canoa` serves**: the host makes the worktree, only inside its entry's working roots, as [the host](host.md#worktrees) describes; with no working root, or `worktrees = false`, it makes none. The browser's provider makes none.
 
 Closing the session ends its agent first, then asks whether to keep the worktree. Everything there in no commit is counted: changed, new, and files git ignores. Removing them is a button of its own that names them, and a different set found before anything is deleted is told again; without that button nothing in no commit is removed. A HEAD left detached at commits no branch holds keeps the worktree. Its branch goes with it only when it holds no commit another branch, tag or remote does not have, and only if no commit came meanwhile; otherwise it stays, so no commit is lost. A session list entry is taken only when its worktree is where Canoa puts that branch beside that repository. Reopening a session from the list finds its worktree again, even with its HEAD moved, or says it is gone and does not start the agent.
 
-Do not store identity private keys, tokens or passwords in Canoa.cfg.
+Do not store identity private keys, tokens or passwords in canoa.cfg.
 
 ## Profiles
 
@@ -58,7 +58,7 @@ model, effort and mode it starts with. It comes in layers, merged lowest first:
 
 1. **built-in**: Canoa's own, which sets nothing;
 2. **overlays**, each named in `[overlays]`: [AOS](https://github.com/Boriken-Dev/agent-overlay-spec) overlays, in their composition order (`priority`, then name);
-3. **yours**: `[profile]` in Canoa.cfg;
+3. **yours**: `[profile]` in canoa.cfg;
 4. **the project's**: `.canoa/profile.toml` in the working directory, only once you trust that directory;
 5. **the agent's entry**: `[agents.NAME.profile]`, where `NAME` is an agent's label (an entry with only a `profile` names
    a preset, such as `Claude`);
@@ -67,14 +67,14 @@ model, effort and mode it starts with. It comes in layers, merged lowest first:
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's
 `model`, `effort`, `mode` or `context`. **Settings → Profiles** shows the effective profile of each agent, every value
-beside the layer it came from, and what each layer removed. canoa-host reads the same schema
+beside the layer it came from, and what each layer removed. canoa reads the same schema
 (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds the app and the host to the same merge.
 What each harness takes of it, and how, is [below](#applying-a-profile).
 
 ```toml
 [overlays]
 team = "https://github.com/example/canoa-profiles.git@main#team"   # an AOS source string, <repository>@<ref>#<path>
-mine = { dir = "profiles/mine" }                                   # a directory, relative to Canoa.cfg's
+mine = { dir = "profiles/mine" }                                   # a directory, relative to canoa.cfg's
 # pinned = { source = "...", pin = "sha256:..." }                 # what installing writes: the tree digest it checks
 
 [profile]
@@ -116,7 +116,7 @@ model = "claude-opus-4-1"
 A project's profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
 a key the schema does not know is refused. Names: environment variables a letter or `_` then letters, digits or `_`;
 skills, MCP servers and headers 1 to 64 letters, digits, `-` or `_`. A relative path is read from its layer's
-directory: Canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project.
+directory: canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project.
 
 **An overlay or a project comes from elsewhere**, so it is held to more:
 
@@ -145,7 +145,7 @@ why, and each MCP server: what it runs or the URL it reaches, the variables or h
 values), what is left out of them, and a switch. Once the session is open, the conversation says in one line what
 applied and what did not, and **Profile** in its header lists each part, its layer, what became of it and through what.
 Nothing is applied that is not listed there. An agent reached on another machine, through the host or a browser, is
-given none of it, and its conversation says so; serving profiles from `canoa-host` is not done yet.
+given none of it, and its conversation says so; serving profiles from `canoa` is not done yet.
 
 | Part | Claude Code (`claude-agent-acp`) | Codex (`codex-acp`) | Gemini CLI | Pi (`pi-acp`) | Another agent |
 | --- | --- | --- | --- | --- | --- |
@@ -173,7 +173,7 @@ when one of your layers shares it, and otherwise leave it out and say so. A comm
 working directory, not the overlay's, since ACP gives an MCP server none: the dialog says so.
 
 A server from your own layers is on unless you turn it off; one from an overlay or a project is off until you allow it.
-**Keep these choices** in the dialog writes them to Canoa.cfg, under the agent:
+**Keep these choices** in the dialog writes them to canoa.cfg, under the agent:
 
 ```toml
 [agents.Claude.mcp]
@@ -209,12 +209,12 @@ probes, `scripts`, `mcp.skills`, an MCP server's `timeout` and its working direc
 harnesses' hints, and the
 `bin/` and `lib/` defaults, which would change `PATH`, `PYTHONPATH` and `NODE_PATH`. Nothing of an overlay ever runs.
 
-From git, the desktop app installs an overlay into `overlays/NAME/` beside Canoa.cfg, with `overlays/NAME.json`
+From git, the desktop app installs an overlay into `overlays/NAME/` beside canoa.cfg, with `overlays/NAME.json`
 recording the source, the commit, each file's git blob id and **the tree digest** of what it wrote, and its history in
 `overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in Settings → Profiles fetch the source and show
 the commit, the tree digest, every file it adds, changes or removes, and its `overlay.cfg`; nothing changes until you
 apply, and what is applied is that commit's files, checked against the digest as they are written. Applying **pins**
-the overlay in Canoa.cfg by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
+the overlay in canoa.cfg by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
 have another digest installs nothing until you change the pin. Each time profiles are built the installed copy is
 digested again, and one whose files changed, or that holds an entry no overlay has (`.git`, `node_modules`, ...), is
 left out until synced. An overlay with no pin, or a `{ dir = "..." }` with none, is reported as `unpinned` each time.
@@ -222,7 +222,7 @@ A pin is a SHA-256 over every file's bytes as published, the same on every platf
 The ref is a branch, a tag, or a whole commit id, which names that commit even if a branch or tag carries the same
 name; an abbreviated id is not taken. Only that ref is fetched, one commit deep. An overlay is upstream's copy,
 replaced whole on each apply: put your own additions in `[profile]`, which wins over it. An overlay installed from
-another source than the one Canoa.cfg names is left out until it is synced.
+another source than the one canoa.cfg names is left out until it is synced.
 
 Nothing from a source runs: its files are read out of git's object store, never checked out, so no hook, filter or
 attribute of the source applies. A link or a submodule refuses the whole overlay, and so does a file name that is not
@@ -284,9 +284,9 @@ looser than the default.
   overlay cannot be installed from that entry. An entry with no pin is shown as unpinned.
 - **Install and pin** installs exactly what was shown, through the path **Install…** takes, and names the overlay in
   `[overlays]` as `{ source, pin }`, pinned to the digest checked. **Update** shows what an update changes first. A pin
-  Canoa.cfg already gives the overlay holds as it does for **Check for changes…**: a tree of another digest installs
+  canoa.cfg already gives the overlay holds as it does for **Check for changes…**: a tree of another digest installs
   only once you choose **Update and move the pin…** and confirm the move, naming both digests. **Remove…** takes the
-  overlay out of `[overlays]` and deletes its files and fetched history. An overlay of the same name that Canoa.cfg
+  overlay out of `[overlays]` and deletes its files and fetched history. An overlay of the same name that canoa.cfg
   names from another source is neither installed over nor removed. Nothing of an overlay runs, from the store or
   otherwise. Catalogs are fetched into `overlays/.catalogs/LABEL.git`; what a page fetched and did not install is
   deleted when the page closes.
@@ -303,13 +303,13 @@ copy, never fetched. A web build lists no catalog.
 
 A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first, every
 invisible or control character in it named as `<U+XXXX>`. The
-trust is kept per directory, links resolved, in `trust.json` beside Canoa.cfg, with the SHA-256 of the file you were
+trust is kept per directory, links resolved, in `trust.json` beside canoa.cfg, with the SHA-256 of the file you were
 shown: if the file changes, it is ignored again until you trust it again. **Stop trusting** revokes it for every later
 session. A web build reads no working directory and installs no overlay.
 
 ## Windows, macOS and Linux tray behavior
 
-Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa-host` running; Exit, or **Quit Canoa** in Settings, ends them.
+Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa` running; Exit, or **Quit Canoa** in Settings, ends them.
 
 What has been run, by platform:
 
@@ -317,7 +317,7 @@ What has been run, by platform:
 - **Linux (Fedora 44 under WSLg, arm64)**: tray_manager draws the icon as a StatusNotifier item, which passes no clicks on, so **Open Canoa** in its menu opens the chat. The app looks for a StatusNotifier host on the session bus (`org.kde.StatusNotifierWatcher`). With one, closing the window hides it, and picking Open Canoa from the menu over D-Bus, as a panel does, brings it back. WSLg's desktop has none, so there the app shows no icon, and closing the window minimizes it instead of hiding it where nothing could bring it back; WSLg does not report the window as minimized.
 - **macOS**: not run.
 
-The Settings action brings up the main window and opens the Canoa settings dialog. Saving writes the same Canoa.cfg file, not an unrelated preferences database. A system-hosted web application cannot overwrite its deployment Canoa.cfg.
+The Settings action brings up the main window and opens the Canoa settings dialog. Saving writes the same canoa.cfg file, not an unrelated preferences database. A system-hosted web application cannot overwrite its deployment canoa.cfg.
 
 The default launch is visible, with close-to-tray enabled. The start-hidden option takes effect on the next launch.
 
@@ -327,7 +327,7 @@ A conversation needs the person when its agent asks leave to use a tool, asks a 
 stopped does not count). If that conversation is not the one shown, or the window is hidden, minimized or not focused, the
 desktop shows a notification, and choosing it opens that conversation. A notification names the conversation and its agent and
 says which of the three it is, nothing else: never the command, the path or anything else the agent sent, which a lock screen or
-a shared screen could show. `[notifications]` in Canoa.cfg, or Settings → **Notifications**, turns each kind off: `permission`,
+a shared screen could show. `[notifications]` in canoa.cfg, or Settings → **Notifications**, turns each kind off: `permission`,
 `question` and `finished`, each on by default.
 
 In the side list, a conversation waiting for an answer is marked **Needs you**, one whose turn is running shows that it works,
@@ -355,9 +355,15 @@ and holds the window open for `CANOA_TEST_HOLD` seconds. What has been run:
 This repository keeps the canonical Flutter code in app/. Flutter's platform runner directories must be generated before native desktop builds:
 
     cd app
-    flutter create --org dev.boriken --platforms=windows,linux,macos .
+    flutter create --org dev.boriken --platforms=windows,linux,macos --project-name canoa .
+    sh tool/name_runner.sh
     flutter pub get
     flutter build windows  # use linux or macos on that platform
+
+The generated runner names the executable `canoa`, the command-line program's name, which Windows and macOS read as the
+same file. `app/tool/name_runner.sh` renames it before the first build, as above: the executable becomes `CanoaUI`
+(`CanoaUI.exe` on Windows), the window and the file's description are titled Canoa, and on macOS the bundle is `Canoa.app`
+with the executable `CanoaUI` (not yet run on a Mac). People see Canoa everywhere; only the file is `CanoaUI`.
 
 On Linux the tray and window packages (leanflutter's `tray_manager` and `window_manager`) link system libraries that no Dart package carries, so a build needs them installed, offline too:
 
@@ -368,8 +374,8 @@ On Linux the tray and window packages (leanflutter's `tray_manager` and `window_
 deprecated, and the generated runner builds with `-Werror`, so build with
 `CXXFLAGS=-Wno-error=deprecated-declarations` there (Fedora 44).
 
-A desktop build carries `canoa-host` beside the app's executable, where the app finds it: `cargo build --release -p
-canoa-host`, then copy `target/release/canoa-host` (`.exe` on Windows) into the bundle's directory, as the desktop
+A desktop build carries `canoa` beside the app's executable, where the app finds it: `cargo build --release -p
+canoa-host`, then copy `target/release/canoa` (`.exe` on Windows) into the bundle's directory, as the desktop
 workflow does.
 
 `app/integration_test/desktop_test.dart` runs the app on a real desktop. On a Linux session with no tray, run

@@ -5,7 +5,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | Shipped header | Covers |
 | --- | --- |
 | [`crates/canoa/AGENTS.md`](crates/canoa/AGENTS.md) | the `canoa` crate's public API |
-| [`crates/canoa-host/AGENTS.md`](crates/canoa-host/AGENTS.md) | `canoa-host`: Canoa.cfg's `[host]`, its command line and library |
+| [`crates/canoa-host/AGENTS.md`](crates/canoa-host/AGENTS.md) | `canoa-host`: the `canoa` program, canoa.cfg's `[host]`, its command line and library |
 
 ## Layout
 
@@ -13,7 +13,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | --- | --- |
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
-| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from Canoa.cfg to paired keys, on loopback, and the web app |
+| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
 | `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
@@ -42,7 +42,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 ## Commands
 
 ```sh
-export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # --all-features builds canoa-host's web feature, which needs a site
+export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # --all-features builds canoa's web feature, which needs a site
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
@@ -52,8 +52,8 @@ CANOA_TEST_PYTHON=python3 cargo test -p canoa-host --test python_source   # a Py
 node --test --test-force-exit "app/test/*.test.mjs"
 (cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST, CANOA_TEST_NODE, CANOA_TEST_APP
 # the chat's connection code against the real host; needs Node 22 or later
-cargo build -p canoa-host --bin canoa-host --examples
-(cd app && CANOA_TEST_HOST=../target/debug/canoa-host CANOA_TEST_NODE=node flutter test test/host_test.dart)
+cargo build -p canoa-host --bin canoa --examples
+(cd app && CANOA_TEST_HOST=../target/debug/canoa CANOA_TEST_NODE=node flutter test test/host_test.dart)
 (cd bindings/browser/chromium && npm test)
 (cd examples/acp-echo && npm install && npm test)   # needs OpenSSL
 mkdocs build --strict
@@ -63,7 +63,7 @@ mkdocs build --strict
 
 A coding task through the desktop window, its widgets only (fix a failing test, stop and continue, attach, refuse one question,
 close and reopen from Earlier conversations), then checked on disk. It needs `node` on PATH and a runner from `flutter create
---platforms=windows .` (or `linux`); screenshots go to `CANOA_TEST_SHOTS`, each distinct update's kind and shape to
+--platforms=windows .` (or `linux`) renamed by `sh app/tool/name_runner.sh app`; screenshots go to `CANOA_TEST_SHOTS`, each distinct update's kind and shape to
 `CANOA_TEST_UPDATES`:
 
 ```sh
