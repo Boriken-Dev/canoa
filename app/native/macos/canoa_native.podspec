@@ -17,7 +17,7 @@ Pod::Spec.new do |s|
     :script => <<~'SCRIPT',
       set -e
       export PATH="$HOME/.cargo/bin:$PATH"
-      workspace="$(cd "$PODS_TARGET_SRCROOT/../../.." && pwd)"
+      workspace="$(cd -P "$PODS_TARGET_SRCROOT/../../.." && pwd)"
       profile=release; flag=--release
       if [ "$CONFIGURATION" = "Debug" ]; then profile=debug; flag=; fi
       features=

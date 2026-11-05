@@ -3,9 +3,11 @@
 cmake_minimum_required(VERSION 3.14)
 project(canoa_native LANGUAGES CXX)
 
-# The plugin is reached through a link under the runner's ephemeral directory; the workspace is above where it really is.
-get_filename_component(CANOA_NATIVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" REALPATH)
-get_filename_component(CANOA_WORKSPACE "${CANOA_NATIVE_DIR}/../../.." ABSOLUTE)
+# The runner is generated in app/linux, so the workspace is two above it; the plugin's own directory is only a link.
+get_filename_component(CANOA_WORKSPACE "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
+if(NOT EXISTS "${CANOA_WORKSPACE}/crates/canoa-ffi/Cargo.toml")
+  message(FATAL_ERROR "canoa_native builds crates/canoa-ffi, which is not at ${CANOA_WORKSPACE}: generate the runner in app/")
+endif()
 
 find_program(CANOA_CARGO cargo HINTS "$ENV{HOME}/.cargo/bin" REQUIRED)
 if(DEFINED ENV{CARGO_TARGET_DIR})
@@ -37,7 +39,7 @@ add_custom_target(canoa_ffi_build ALL
 add_dependencies(${BINARY_NAME} canoa_ffi_build)
 
 # Before the runner's own code, whichever runner `flutter create` wrote.
-target_sources(${BINARY_NAME} PRIVATE "${CANOA_NATIVE_DIR}/linux/child_entry.cc")
+target_sources(${BINARY_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/child_entry.cc")
 target_link_libraries(${BINARY_NAME} PRIVATE ${CMAKE_DL_LIBS})
 
 set(canoa_native_bundled_libraries
