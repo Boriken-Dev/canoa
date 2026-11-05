@@ -802,8 +802,12 @@ String _lower(String text) {
 
 bool _isSpace(int c) => c == 0x20 || c == 0x09 || c == 0x0a || c == 0x0d || c == 0x0b || c == 0x0c;
 
+/// The largest number a slice spec reads: a 64-bit int's maximum natively, 2^53 - 1 on the web, whose ints are doubles and where
+/// no literal past 2^53 compiles.
+final int _maxNumber = identical(1, 1.0) ? 9007199254740991 : int.parse('9223372036854775807');
+
 int _number(List<int> digits, bool negative) {
-  const max = 0x7fffffffffffffff;
+  final max = _maxNumber;
   var value = 0;
   for (final digit in digits) {
     value = value > (max - 9) ~/ 10 ? max : value * 10 + (digit - 0x30);
