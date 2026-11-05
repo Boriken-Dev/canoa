@@ -171,6 +171,57 @@ pub extern "C" fn canoa_ffi_child_main() -> i32 {
 mod tests {
     use super::*;
 
+    /// Every pointer path of a job, with nothing below it but a command that ends at once: what Miri runs.
+    #[test]
+    fn a_job_read_to_its_end_gives_text_that_frees_once() {
+        let request = br#"{"args":["--version"]}"#;
+        let mut job = 0_u64;
+        // SAFETY: both point at what lives across the call.
+        let status = unsafe { canoa_ffi_job_start(request.as_ptr(), request.len(), &raw mut job) };
+        assert_eq!(status, STATUS_OK);
+        let mut said = String::new();
+        loop {
+            let (mut text, mut len) = (ptr::null_mut(), 0_usize);
+            // SAFETY: both point at locals that live across the call.
+            let status = unsafe { canoa_ffi_job_read(job, &raw mut text, &raw mut len) };
+            assert_eq!(status, STATUS_OK);
+            // SAFETY: the library just gave this text of this length.
+            said = String::from_utf8_lossy(unsafe { core::slice::from_raw_parts(text, len) })
+                .into_owned();
+            // SAFETY: as it was given, once.
+            unsafe { canoa_ffi_text_free(text, len) };
+            if !said.contains(r#""exit":null"#) {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(said.contains(r#""exit":0"#), "{said}");
+        assert_eq!(canoa_ffi_job_stop(job), STATUS_OK);
+        assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+        assert_eq!(canoa_ffi_job_free(job), STATUS_UNKNOWN_JOB);
+    }
+
+    #[test]
+    fn refusals_write_their_out_parameters_first() {
+        let mut job = 9_u64;
+        let request = b"not json";
+        // SAFETY: both point at what lives across the call.
+        let status = unsafe { canoa_ffi_job_start(request.as_ptr(), request.len(), &raw mut job) };
+        assert_eq!(status, STATUS_BAD_ARGUMENT);
+        assert_eq!(job, 0);
+        let (mut text, mut len) = (ptr::dangling_mut::<u8>(), 9_usize);
+        // SAFETY: both point at locals that live across the call.
+        let status = unsafe { canoa_ffi_job_read(u64::MAX, &raw mut text, &raw mut len) };
+        assert_eq!(status, STATUS_UNKNOWN_JOB);
+        assert!(text.is_null());
+        assert_eq!(len, 0);
+        let mut both = 0_usize;
+        let alias = &raw mut both;
+        // SAFETY: the two name one word, which is what is refused, and neither is written through.
+        let status = unsafe { canoa_ffi_job_read(1, alias.cast(), alias) };
+        assert_eq!(status, STATUS_BAD_ARGUMENT);
+    }
+
     #[test]
     fn a_panic_becomes_a_status() {
         assert_eq!(guarded(|| panic!("inside")), STATUS_PANIC);
