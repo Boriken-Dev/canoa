@@ -1,4 +1,4 @@
-// An app that starts canoa-host as Canoa's desktop app does, prints its pid, and dies without stopping it, as a crash
+// An app that starts canoa as Canoa's desktop app does, prints its pid, and dies without stopping it, as a crash
 // would. Plain Dart: `dart run test/fixtures/dying_parent.dart HOST CONFIG PEER_HOME`.
 import 'dart:io';
 

@@ -9,7 +9,7 @@ import 'profile.dart';
 import 'profile_home.dart';
 import 'project_trust.dart';
 
-/// The profile home beside Canoa.cfg at [configPath]: overlays in `overlays/`, trusted projects in `trust.json`.
+/// The profile home beside canoa.cfg at [configPath]: overlays in `overlays/`, trusted projects in `trust.json`.
 ProfileHome? platformProfileHome({String? configPath}) =>
     configPath == null ? null : IoProfileHome(File(configPath).parent.path);
 

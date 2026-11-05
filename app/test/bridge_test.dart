@@ -2,7 +2,7 @@
 // PIN pairing and peer proof the web build runs, its sealed channel and VerifiedAgent. The browser's WebCrypto is
 // web/canoa_peer_bridge.mjs run by Node, since the Dart VM has none.
 //
-// CANOA_TEST_BRIDGE names a built coqui-acp-bridge; CANOA_TEST_HOST a built canoa-host, whose stdio_agent example (in
+// CANOA_TEST_BRIDGE names a built coqui-acp-bridge; CANOA_TEST_HOST a built canoa, whose stdio_agent example (in
 // examples/ beside it) is the agent served. CANOA_TEST_NODE names Node 22 or later (default `node`). Without both the tests
 // are skipped.
 @Timeout(Duration(minutes: 2))

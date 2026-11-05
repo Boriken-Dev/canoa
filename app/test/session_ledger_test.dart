@@ -88,7 +88,7 @@ void main() {
       expect(names.label(grokShell: true, entry: 'x'), 'Grok');
     });
 
-    test('an unknown or absent name falls back to the entry, and Canoa.cfg extends and overrides the map', () {
+    test('an unknown or absent name falls back to the entry, and canoa.cfg extends and overrides the map', () {
       expect(HarnessNames().label(reportedName: 'my-acp', entry: 'Mine'), 'Mine');
       expect(HarnessNames().label(entry: 'Mine'), 'Mine');
       final names = HarnessNames({'my-acp': 'My Harness', 'pi-acp': 'Pi (adapter)'});
@@ -227,8 +227,8 @@ void main() {
     setUp(() => dir = Directory.systemTemp.createTempSync('canoa-ledger-'));
     tearDown(() => dir.deleteSync(recursive: true));
 
-    test('lives beside Canoa.cfg', () {
-      final backend = platformLedgerBackend(configPath: '${dir.path}${Platform.pathSeparator}Canoa.cfg');
+    test('lives beside canoa.cfg', () {
+      final backend = platformLedgerBackend(configPath: '${dir.path}${Platform.pathSeparator}canoa.cfg');
       expect((backend as FileLedgerBackend).path, '${dir.path}${Platform.pathSeparator}sessions.json');
       expect(platformLedgerBackend(), isA<MemoryLedgerBackend>());
     });
@@ -256,7 +256,7 @@ void main() {
     });
   });
 
-  group('Canoa.cfg', () {
+  group('canoa.cfg', () {
     test('[sessions] and [harnesses] are read, checked and written back', () {
       final config = CanoaConfig.parse('[sessions]\nkeep = 20\nkeep_text = true\ntext_messages = 5\n\n'
           '[harnesses]\n"my-acp" = "My Harness"\n');
@@ -319,7 +319,7 @@ void main() {
       expect(store.sessions, hasLength(1));
     });
 
-    test('a session on canoa-host is noted with the host as its peer, over plain WebSocket on loopback', () {
+    test('a session on canoa is noted with the host as its peer, over plain WebSocket on loopback', () {
       final ledger = SessionLedger(MemoryLedgerBackend());
       final store = SessionStore(includePreview: false, ledger: ledger);
       final session = store.addRemoteSession(

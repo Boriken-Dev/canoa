@@ -6,7 +6,7 @@ import 'worktree.dart';
 
 /// Worktrees by git on this computer, for agents this app runs. Git runs from an argument list, never a shell, with hooks
 /// and fsmonitor off and no `GIT_` variable of the app's; a repository whose own configuration names a filter or an include
-/// is refused before git reads its files, as `canoa-host` does.
+/// is refused before git reads its files, as `canoa` does.
 Worktrees? localWorktrees() => LocalWorktrees();
 
 final class LocalWorktrees implements Worktrees {

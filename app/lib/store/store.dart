@@ -1,5 +1,5 @@
 /// The store: catalogs fetched as overlays are, their entries listed and searched, and an overlay fetched to show what
-/// it would do before it is installed through the same path as an overlay named by hand in Canoa.cfg.
+/// it would do before it is installed through the same path as an overlay named by hand in canoa.cfg.
 ///
 /// A catalog is advertising (AOS catalog.md, "Trust"): what a listing shows before fetching is the catalog's claim, and
 /// what the overlay page shows after fetching comes from the overlay's own manifest and files.
@@ -196,7 +196,7 @@ String installName(CatalogEntry entry) {
   throw StoreRefusal('Canoa names an overlay with 1 to 64 letters, digits, - or _, and ${entry.name} has no such form');
 }
 
-/// The git source Canoa installs [entry] from, held to what an overlay named by hand in Canoa.cfg is held to.
+/// The git source Canoa installs [entry] from, held to what an overlay named by hand in canoa.cfg is held to.
 GitOverlay installSource(CatalogEntry entry) {
   final source = entry.source;
   if (source.kind != SourceKind.git) {
@@ -207,16 +207,16 @@ GitOverlay installSource(CatalogEntry entry) {
     throw const StoreRefusal('It names no branch, tag or commit, and Canoa fetches only a named one');
   }
   if (holdsPassword(source.location)) {
-    throw const StoreRefusal('Its source holds a password, which Canoa.cfg may not: it is not installed from here');
+    throw const StoreRefusal('Its source holds a password, which canoa.cfg may not: it is not installed from here');
   }
   try {
     return OverlaySource.parseGit('${source.location}@$reference${source.path == null ? '' : '#${source.path}'}');
   } on ProfileException {
-    throw const StoreRefusal('Canoa would refuse this source in Canoa.cfg: a transport or ref git must not take');
+    throw const StoreRefusal('Canoa would refuse this source in canoa.cfg: a transport or ref git must not take');
   }
 }
 
-/// How an entry stands against Canoa.cfg's `[overlays]`.
+/// How an entry stands against canoa.cfg's `[overlays]`.
 enum EntryState {
   /// No overlay of its identity is named.
   absent,
@@ -301,7 +301,7 @@ final class OverlayPreview {
 /// Fetches [source] as [name] and computes what installing it would do, touching nothing installed: the manifest and
 /// files are read from the fetched tree, the layer is the one Settings, Profiles would make of it, and the report is
 /// its weakenings and what Canoa does not apply. A catalog's [catalogPin] must match the tree fetched, or installing is
-/// refused; Canoa.cfg's own pin is held by [installPreview].
+/// refused; canoa.cfg's own pin is held by [installPreview].
 Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitOverlay source, {
   required String os,
   required Map<String, LayerId> shared,
@@ -354,7 +354,7 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
       iconRefused: iconRefused, layer: layer, report: report, refusal: refusal, pinRefusal: pinRefusal);
 }
 
-/// The pin Canoa.cfg gives the overlay [name], when it names one, and the tree [preview] fetched has another digest:
+/// The pin canoa.cfg gives the overlay [name], when it names one, and the tree [preview] fetched has another digest:
 /// installing it moves that pin, which [installPreview] does only when asked to.
 String? pinMoved(CanoaConfig config, OverlayPreview preview) {
   final named = namedAs(config, preview.name);
@@ -366,8 +366,8 @@ String? pinMoved(CanoaConfig config, OverlayPreview preview) {
 }
 
 /// Installs or updates what [preview] showed, through the same path an overlay named by hand takes: the files at its
-/// commit, checked against its tree digest as written, then the overlay named in Canoa.cfg pinned to that digest. A
-/// pin Canoa.cfg already gives it holds as it does for a sync from Settings, Profiles: a tree of another digest is
+/// commit, checked against its tree digest as written, then the overlay named in canoa.cfg pinned to that digest. A
+/// pin canoa.cfg already gives it holds as it does for a sync from Settings, Profiles: a tree of another digest is
 /// installed only with [movePin], the person's choice to move it.
 Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, OverlayPreview preview,
     {bool movePin = false}) async {
@@ -376,10 +376,10 @@ Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, 
   final name = preview.name;
   final named = namedAs(config, name);
   if (named != null && entryState(config, name, preview.update.source) != EntryState.installed) {
-    throw StoreRefusal('Canoa.cfg names $named from another source: remove it there first');
+    throw StoreRefusal('canoa.cfg names $named from another source: remove it there first');
   }
   if (pinMoved(config, preview) case final pin? when !movePin) {
-    throw StoreRefusal('Canoa.cfg pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
+    throw StoreRefusal('canoa.cfg pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
   }
   final record = await overlays.apply(preview.update);
   return config.withOverlay(named ?? name, preview.update.source.pinnedTo(null), record.digest!);
@@ -391,7 +391,7 @@ Future<CanoaConfig> removeInstalled(OverlayManager overlays, CanoaConfig config,
   final named = namedAs(config, name);
   if (named == null) return config;
   if (entryState(config, name, source) != EntryState.installed) {
-    throw StoreRefusal('Canoa.cfg names $named from another source: the store does not remove it');
+    throw StoreRefusal('canoa.cfg names $named from another source: the store does not remove it');
   }
   await overlays.remove(named);
   return config.withoutOverlay(named);

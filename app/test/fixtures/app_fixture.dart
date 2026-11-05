@@ -76,7 +76,7 @@ Future<SourceCheck> Function(AgentSource) checkFinding({Set<String> missing = co
   );
 };
 
-/// The app on [store] at [size], each outside service the test's. Answers what Canoa.cfg was written as.
+/// The app on [store] at [size], each outside service the test's. Answers what canoa.cfg was written as.
 Future<List<CanoaConfig>> pumpApp(
   WidgetTester tester,
   SessionStore store, {
@@ -100,7 +100,7 @@ Future<List<CanoaConfig>> pumpApp(
   await tester.pumpWidget(CanoaApp(
     store: store,
     config: config,
-    configPath: '${dir.path}/Canoa.cfg',
+    configPath: '${dir.path}/canoa.cfg',
     writeConfig: (changed) async => written.add(changed),
     checkSource: checkFinding(missing: missing),
     isGitRepository: (folder) => folder.endsWith('repo'),

@@ -1,9 +1,9 @@
-// Canoa's chat reaching the agents `canoa-host` serves, through the app's own connection code: connectVerifiedAcp, the
+// Canoa's chat reaching the agents `canoa` serves, through the app's own connection code: connectVerifiedAcp, the
 // peer proof the web build runs, its sealed channel and VerifiedAgent, against the real host binary. The browser's WebCrypto
 // is web/canoa_peer_bridge.mjs run by Node, since the Dart VM has none.
 //
-// CANOA_TEST_HOST names a built canoa-host, with its examples (stdio_agent, echo_provider) in examples/ beside it, as
-// `cargo build -p canoa-host --bin canoa-host --examples` leaves them. CANOA_TEST_NODE names Node 22 or later (default
+// CANOA_TEST_HOST names a built canoa, with its examples (stdio_agent, echo_provider) in examples/ beside it, as
+// `cargo build -p canoa-host --bin canoa --examples` leaves them. CANOA_TEST_NODE names Node 22 or later (default
 // `node`). CANOA_TEST_METHOD (`noise` or `webcrypto`) is the method the host serves by, its default unless set; the browser
 // proves by the method the host says. Without CANOA_TEST_HOST the tests are skipped.
 @Timeout(Duration(minutes: 2))
@@ -23,7 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/node_peer_bridge.dart';
 
-// Absolute, since the provider's library is named in a Canoa.cfg written to a temporary directory and read from there.
+// Absolute, since the provider's library is named in a canoa.cfg written to a temporary directory and read from there.
 final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
   final String path => File(path).absolute.path,
   null => null,
@@ -33,7 +33,7 @@ final String? _method = switch (Platform.environment['CANOA_TEST_METHOD']) {
   _ => null,
 };
 
-/// `canoa-host serve` on a Canoa.cfg in a directory of its own.
+/// `canoa serve` on a canoa.cfg in a directory of its own.
 final class HostUnderTest {
   HostUnderTest._(this.process, this.dir, this.urls, this.peer, this.method);
 
@@ -54,8 +54,8 @@ final class HostUnderTest {
   }
 
   static Future<HostUnderTest> start() async {
-    final dir = await Directory.systemTemp.createTemp('canoa-host-app-test');
-    final config = File('${dir.path}/Canoa.cfg');
+    final dir = await Directory.systemTemp.createTemp('canoa-app-test');
+    final config = File('${dir.path}/canoa.cfg');
     await config.writeAsString('''
 [appearance]
 look = "bubbles"
@@ -113,7 +113,7 @@ Future<bool> _running(int pid) async {
 }
 
 void main() {
-  final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa-host' : null;
+  final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa' : null;
   late HostUnderTest host;
   late NodePeerBridge browser;
 
@@ -232,7 +232,7 @@ void main() {
 
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('canoa-supervised');
-      config = File('${dir.path}/Canoa.cfg');
+      config = File('${dir.path}/canoa.cfg');
       await config.writeAsString('''
 [host.agents.fixture]
 program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
@@ -257,7 +257,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       }
     }
 
-    test('serves Canoa.cfg, and a key the person pairs in the app reaches its agent', () async {
+    test('serves canoa.cfg, and a key the person pairs in the app reaches its agent', () async {
       await supervisor.apply(configPath: config.path, hasEntries: true);
       await until(() => supervisor.phase == HostPhase.running, 'the host to run');
       final url = supervisor.listening.single.url;
@@ -327,7 +327,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       expect(alive, isFalse, reason: 'the host outlived the app that started it');
     }, skip: skip);
 
-    test('a Canoa.cfg the host refuses is said in its words and not retried', () async {
+    test('a canoa.cfg the host refuses is said in its words and not retried', () async {
       await config.writeAsString('[host.agents.fixture]\nprogram = "x"\nlisten = "0.0.0.0:7999"\n');
       expect(await supervisor.check(config.path), isNotNull);
       await supervisor.apply(configPath: config.path, hasEntries: true);

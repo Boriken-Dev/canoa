@@ -216,7 +216,7 @@ void main() {
       expect(agent.answerTo(9), isNull);
     });
 
-    testWidgets('per agent, from Canoa.cfg: its sessions start with it, logged, and turning it off there stops it for the agent', (tester) async {
+    testWidgets('per agent, from canoa.cfg: its sessions start with it, logged, and turning it off there stops it for the agent', (tester) async {
       final config = CanoaConfig.parse('[permissions]\nfull_access = ["Scripted"]\n');
       expect(config.fullAccess, {'Scripted'});
       expect(CanoaConfig.parse(config.encode()).fullAccess, {'Scripted'});
@@ -238,7 +238,7 @@ void main() {
       await _settle(tester);
       expect(session.fullAccess, isNull);
       expect(store.fullAccessAgents, isEmpty);
-      expect(saved?.fullAccess, isEmpty, reason: 'Canoa.cfg no longer names the agent');
+      expect(saved?.fullAccess, isEmpty, reason: 'canoa.cfg no longer names the agent');
     });
 
     testWidgets('Settings turns it on for an agent only after saying what it does', (tester) async {
@@ -340,7 +340,7 @@ void main() {
       expect(session.messages.where((message) => message.text.contains('more questions than')), isNotEmpty);
     });
 
-    test('Canoa.cfg refuses a full_access that is not a list of names', () {
+    test('canoa.cfg refuses a full_access that is not a list of names', () {
       expect(() => CanoaConfig.parse('[permissions]\nfull_access = "Claude"\n'), throwsFormatException);
       expect(() => CanoaConfig.parse('[permissions]\nfull_access = [1]\n'), throwsFormatException);
       expect(() => CanoaConfig.parse('[permissions]\nask = false\n'), throwsFormatException);

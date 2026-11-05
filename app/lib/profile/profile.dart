@@ -1,5 +1,5 @@
 /// Profiles: the environment, initial context, skills, MCP servers and defaults an agent is launched with, in layers.
-/// canoa-host reads the same schema (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds both.
+/// canoa reads the same schema (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds both.
 library;
 
 import 'package:toml/toml.dart';
@@ -277,7 +277,7 @@ final class Profile {
     return fromMap(map, kind);
   }
 
-  /// Reads a profile from a TOML table already parsed, such as Canoa.cfg's `[profile]`.
+  /// Reads a profile from a TOML table already parsed, such as canoa.cfg's `[profile]`.
   static Profile fromMap(Map<dynamic, dynamic> map, LayerKind kind) {
     _shape(map);
     return _checked(map, kind.confined);
@@ -742,7 +742,7 @@ sealed class OverlaySource {
   const OverlaySource();
 
   /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [parseSource] does, and holds it to what Canoa
-  /// fetches: a Git repository at a named ref. Throws [ProfileException] with key `overlays` for what canoa-host refuses
+  /// fetches: a Git repository at a named ref. Throws [ProfileException] with key `overlays` for what canoa refuses
   /// too: what the specification refuses, a source that is not Git or names no ref, a scheme not in lowercase, a
   /// plaintext `http` or `git` transport at anything but a full commit id, another host's share, a ref git would refuse.
   static GitOverlay parseGit(String source) {
@@ -782,10 +782,10 @@ final class GitOverlay extends OverlaySource {
   final String repo, reference, path;
   final String? written;
 
-  /// The tree digest Canoa.cfg pins it to, `sha256:<hex>`, or null when it names none.
+  /// The tree digest canoa.cfg pins it to, `sha256:<hex>`, or null when it names none.
   final String? pin;
 
-  /// The source as Canoa.cfg writes it.
+  /// The source as canoa.cfg writes it.
   String get spec => written ?? '$repo@$reference${path.isEmpty ? '' : '#$path'}';
 
   /// This source pinned to [digest].
@@ -798,7 +798,7 @@ final class DirOverlay extends OverlaySource {
   const DirOverlay(this.dir, {this.pin});
   final String dir;
 
-  /// The tree digest Canoa.cfg pins it to, or null.
+  /// The tree digest canoa.cfg pins it to, or null.
   final String? pin;
 }
 

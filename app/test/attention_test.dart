@@ -175,7 +175,7 @@ void main() {
     expect(find.descendant(of: _row('Back'), matching: find.byTooltip('Working')), findsOneWidget);
   });
 
-  test('Canoa.cfg keeps each kind, on by default, and refuses what is not yes or no', () {
+  test('canoa.cfg keeps each kind, on by default, and refuses what is not yes or no', () {
     const fallback = CanoaConfig();
     expect([fallback.notifications.permission, fallback.notifications.question, fallback.notifications.finished], [true, true, true]);
     final read = CanoaConfig.parse('[notifications]\nfinished = false\n');

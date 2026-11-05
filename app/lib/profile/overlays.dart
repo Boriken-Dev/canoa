@@ -20,7 +20,7 @@ final class InstalledOverlay {
 
   final String name;
 
-  /// The source it was installed from, as Canoa.cfg wrote it then.
+  /// The source it was installed from, as canoa.cfg wrote it then.
   final String source;
   final String commit;
 

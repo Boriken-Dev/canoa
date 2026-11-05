@@ -3,13 +3,13 @@ import 'dart:math';
 /// Every branch Canoa makes for a session starts with this.
 const worktreeBranchPrefix = 'canoa/';
 
-/// The longest branch name taken, prefix included; `canoa-host` holds the same bound.
+/// The longest branch name taken, prefix included; `canoa` holds the same bound.
 const maxWorktreeBranch = 70;
 
 final _safeBranch = RegExp(r'^canoa/[a-z0-9]+(?:-[a-z0-9]+)*$');
 
 /// `canoa/` and then lower-case letters and digits in runs joined by single hyphens: nothing git or a shell reads as an option,
-/// a range or a path step, and no control character. `canoa-host` refuses any other.
+/// a range or a path step, and no control character. `canoa` refuses any other.
 bool safeWorktreeBranch(String branch) => branch.length <= maxWorktreeBranch && _safeBranch.hasMatch(branch);
 
 /// A branch for a session named [label] (its title, or its agent's when it has none): the label's letters and digits, lower

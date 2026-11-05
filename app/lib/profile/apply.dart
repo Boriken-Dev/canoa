@@ -458,7 +458,7 @@ String _shown(McpServer server) => switch (server) {
   McpHttp(:final url, :final sse) => '${sse ? 'SSE' : 'HTTP'} $url',
 };
 
-/// Whether an MCP server starts when nothing was chosen for it: one of the person's own layers, unless Canoa.cfg turns it
+/// Whether an MCP server starts when nothing was chosen for it: one of the person's own layers, unless canoa.cfg turns it
 /// off for the agent; one from an overlay or a project, only once allowed for the agent at this very definition.
 /// [remembered] is `[agents.NAME.mcp]`: a server's name to `false`, `true`, or the digest it was allowed at.
 bool mcpOnByDefault(PreparedMcp server, Map<String, Object> remembered) {

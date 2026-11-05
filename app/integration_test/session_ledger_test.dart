@@ -1,6 +1,6 @@
 // Sessions from two harnesses outlive the app, are listed by harness, and one opens again, in the app's own window through its
 // widgets. The scripted stand-in (scripted_agent.mjs) plays three agents: one reporting Claude's adapter, which the built-in map
-// names Claude Code; one reporting a name that Canoa.cfg's [harnesses] maps to Pi; and one that reports no name and offers
+// names Claude Code; one reporting a name that canoa.cfg's [harnesses] maps to Pi; and one that reports no name and offers
 // neither session/load nor session/resume, which the list must say it cannot reopen.
 //
 // Two runs of the app, each its own process, sharing CANOA_TEST_LEDGER_DIR (an empty directory before the first):
@@ -32,7 +32,7 @@ final String _appDir = (Platform.environment['CANOA_TEST_APP'] ?? Directory.curr
 
 const _claude = 'Stand-in Claude', _pi = 'Stand-in Pi', _plain = 'Stand-in plain';
 
-/// Canoa.cfg for the three agents, each keeping its sessions in a file of its own under [dir].
+/// canoa.cfg for the three agents, each keeping its sessions in a file of its own under [dir].
 String _config(String dir) {
   String agent(String label, String state, List<String> extra) =>
       '[agents.${jsonEncode(label)}]\nprogram = "node"\n'
@@ -52,10 +52,10 @@ void main() {
     }
     final dir = _dir!.replaceAll(r'\', '/');
     Directory(dir).createSync(recursive: true);
-    final configFile = File('$dir/Canoa.cfg');
+    final configFile = File('$dir/canoa.cfg');
     if (_step == 'record') configFile.writeAsStringSync(_config(dir));
     final config = CanoaConfig.parse(configFile.readAsStringSync());
-    // The app's own place for the list: beside Canoa.cfg.
+    // The app's own place for the list: beside canoa.cfg.
     final ledger = SessionLedger(platformLedgerBackend(configPath: configFile.path), settings: config.sessions);
     await ledger.load();
     final store = SessionStore(includePreview: false, ledger: ledger);

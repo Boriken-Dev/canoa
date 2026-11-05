@@ -13,7 +13,7 @@ class SettingsDialog extends StatefulWidget {
   /// The built-in sources, which can be hidden from a new session but not changed.
   final List<AgentCommand> presets;
 
-  /// The agent entries of the canoa-host this app runs, which Hosting changes.
+  /// The agent entries of the canoa this app runs, which Hosting changes.
   final List<String> hosted;
 
   /// What a source needs and whether it is here.
@@ -129,7 +129,7 @@ class SettingsDialogState extends State<SettingsDialog> {
           ),
         ),
       for (final name in widget.hosted)
-        ListTile(title: Text(name), subtitle: const Text('Served by canoa-host: Hosting changes it')),
+        ListTile(title: Text(name), subtitle: const Text('Served by canoa: Hosting changes it')),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

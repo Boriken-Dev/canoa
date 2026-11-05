@@ -449,7 +449,7 @@ void main() {
   });
 
   group('looks', () {
-    test('Canoa.cfg keeps them, and refuses what it does not know', () {
+    test('canoa.cfg keeps them, and refuses what it does not know', () {
       const chosen = CanoaConfig(look: LookId.terminal, brightness: 'light');
       final read = CanoaConfig.parse(chosen.encode());
       expect(read.look, LookId.terminal);

@@ -3,9 +3,9 @@ import 'overlays.dart';
 import 'project_trust.dart';
 
 /// What profiles need from this computer: where overlays install, which projects are trusted, and reading files.
-/// A desktop has one beside Canoa.cfg; a web build has none.
+/// A desktop has one beside canoa.cfg; a web build has none.
 abstract interface class ProfileHome {
-  /// Canoa.cfg's directory, which the user's and the agents' relative paths are read from.
+  /// canoa.cfg's directory, which the user's and the agents' relative paths are read from.
   String get configDir;
 
   /// This computer's OS as AOS names it: `windows`, `linux` (Android too), `macos`, ...

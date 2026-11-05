@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'host_tool_stub.dart' if (dart.library.io) 'host_tool_io.dart' as platform;
 
-/// What `canoa-host serve` printed for one entry it serves.
+/// What `canoa serve` printed for one entry it serves.
 final class HostListening {
   const HostListening({required this.name, required this.kind, required this.url, required this.peer, this.method});
 
@@ -66,7 +66,7 @@ final class HostKey {
   }
 }
 
-/// What one run of a `canoa-host` command left.
+/// What one run of a `canoa` command left.
 final class HostOutput {
   const HostOutput(this.exitCode, this.stdout, this.stderr);
   final int exitCode;
@@ -74,7 +74,7 @@ final class HostOutput {
   final String stderr;
 }
 
-/// A `canoa-host` running as this app's child.
+/// A `canoa` running as this app's child.
 abstract interface class HostChild {
   int get pid;
 
@@ -92,14 +92,14 @@ abstract interface class HostChild {
   void kill();
 }
 
-/// The `canoa-host` program this app runs.
+/// The `canoa` program this app runs.
 abstract interface class HostTool {
   String get path;
   Future<HostChild> start(List<String> args);
   Future<HostOutput> run(List<String> args);
 }
 
-/// The `canoa-host` to run: the one `CANOA_HOST` names, else the one installed beside this app's own executable, else
+/// The `canoa` to run: the one `CANOA_HOST` names, else the one installed beside this app's own executable, else
 /// none. A web build has none.
 HostTool? findHostTool() => platform.findHostTool();
 
@@ -109,3 +109,12 @@ Future<int> freeLoopbackPort() => platform.freeLoopbackPort();
 /// Runs [use] on a file holding [text] in the directory of [path], so names relative to it read the same, and removes it.
 Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String file) use) =>
     platform.withFileBeside(path, text, use);
+
+/// What a line of a host's standard error says after its `canoa: ` prefix (a host built before the rename wrote
+/// `canoa-host: `), or null for any other line.
+String? hostSaid(String line) {
+  for (final prefix in const ['canoa: ', 'canoa-host: ']) {
+    if (line.startsWith(prefix)) return line.substring(prefix.length);
+  }
+  return null;
+}

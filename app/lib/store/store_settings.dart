@@ -1,7 +1,7 @@
 import '../profile/aos.dart';
 import '../profile/aos_catalog.dart';
 
-/// Canoa.cfg `[store]`: how much of a catalog and of an icon the store reads. Each is a setting with the AOS
+/// canoa.cfg `[store]`: how much of a catalog and of an icon the store reads. Each is a setting with the AOS
 /// specification's recommended default and no floor; a value above the default is a weakening the store shows.
 final class StoreSettings {
   const StoreSettings({
@@ -44,15 +44,15 @@ final class StoreSettings {
     if (iconMaxHeight > defaultIconMaxSide) 'icon_max_height = $iconMaxHeight',
   ];
 
-  /// `[store]` as Canoa.cfg has it. Throws [FormatException] for an unknown key or a value that is not a whole number,
+  /// `[store]` as canoa.cfg has it. Throws [FormatException] for an unknown key or a value that is not a whole number,
   /// 0 or more.
   static StoreSettings parse(Map<dynamic, dynamic> table) {
     for (final key in table.keys) {
-      if (!keys.contains(key)) throw FormatException('Canoa.cfg: store: invalid key $key');
+      if (!keys.contains(key)) throw FormatException('canoa.cfg: store: invalid key $key');
     }
     int read(String key, int fallback) {
       final value = table[key] ?? fallback;
-      if (value is! int || value < 0) throw FormatException('Canoa.cfg: store.$key must be a whole number, 0 or more');
+      if (value is! int || value < 0) throw FormatException('canoa.cfg: store.$key must be a whole number, 0 or more');
       return value;
     }
 

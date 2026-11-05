@@ -50,7 +50,7 @@ void main() {
     await _fill(tester);
     await tester.tap(find.text('Connect'));
     await tester.pumpAndSettle();
-    expect(find.text('Choose the method the host proves by: canoa-host serve prints it.'), findsOneWidget);
+    expect(find.text('Choose the method the host proves by: canoa serve prints it.'), findsOneWidget);
     expect(targets, isEmpty, reason: 'no method is assumed');
     await _choose(tester, PeerMethod.noise);
     expect(find.textContaining('sha256:own-noise'), findsOneWidget);

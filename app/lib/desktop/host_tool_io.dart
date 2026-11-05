@@ -5,14 +5,29 @@ import 'dart:math';
 
 import 'host_tool.dart';
 
-final String _program = Platform.isWindows ? 'canoa-host.exe' : 'canoa-host';
+String _file(String name) => Platform.isWindows ? '$name.exe' : name;
 
-HostTool? findHostTool() {
-  final named = Platform.environment['CANOA_HOST'];
+HostTool? findHostTool() => findHostToolIn(
+  environment: Platform.environment,
+  directory: File(Platform.resolvedExecutable).parent.path,
+  log: stderr.writeln,
+);
+
+/// The host `CANOA_HOST` in [environment] names, else the `canoa` in [directory] (a Windows runner's folder, or a Linux
+/// bundle's root), else the `canoa-host` there from before the rename, which [log] says once.
+HostTool? findHostToolIn({
+  required Map<String, String> environment,
+  required String directory,
+  required void Function(String line) log,
+}) {
+  final named = environment['CANOA_HOST'];
   if (named != null && named.isNotEmpty) return ProcessHostTool(named);
-  // Packaged builds carry it beside the app: a Windows runner's folder, or a Linux bundle's root.
-  final beside = File('${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}$_program');
-  return beside.existsSync() ? ProcessHostTool(beside.path) : null;
+  final beside = File('$directory${Platform.pathSeparator}${_file('canoa')}');
+  if (beside.existsSync()) return ProcessHostTool(beside.path);
+  final old = File('$directory${Platform.pathSeparator}${_file('canoa-host')}');
+  if (!old.existsSync()) return null;
+  log('found the host under its old name, ${old.path}: rename it to ${_file('canoa')}');
+  return ProcessHostTool(old.path);
 }
 
 Future<int> freeLoopbackPort() async {
@@ -29,7 +44,7 @@ Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String 
   // link at a name known in advance.
   final random = Random.secure();
   final suffix = List.generate(16, (_) => random.nextInt(16).toRadixString(16)).join();
-  final file = File('${directory.path}${Platform.pathSeparator}.Canoa.cfg.$suffix.check');
+  final file = File('${directory.path}${Platform.pathSeparator}.canoa.cfg.$suffix.check');
   await file.create(exclusive: true);
   final writing = await file.open(mode: FileMode.writeOnlyAppend);
   try {
@@ -49,7 +64,7 @@ Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String 
   }
 }
 
-/// `canoa-host` at [path], run with this app's environment plus [environment].
+/// `canoa` at [path], run with this app's environment plus [environment].
 final class ProcessHostTool implements HostTool {
   ProcessHostTool(this.path, {this.environment = const {}});
 

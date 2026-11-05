@@ -71,7 +71,7 @@ final class OverlayStore implements OverlayManager {
     final commit = await _fetch(cache, source);
     final (files, skipped, digest) = await _list(cache, commit, source.path);
     if (source.pin case final pin? when !sameDigest(pin, digest)) {
-      throw OverlayException('Its tree digest is $digest, not the pin $pin Canoa.cfg names: nothing was installed');
+      throw OverlayException('Its tree digest is $digest, not the pin $pin canoa.cfg names: nothing was installed');
     }
     final before = installed(name);
     final old = before?.files ?? const {};

@@ -11,7 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('the web build keeps the list in IndexedDB', () {
-    expect(platformLedgerBackend(configPath: '/ignored/Canoa.cfg'), isA<IndexedDbLedgerBackend>());
+    expect(platformLedgerBackend(configPath: '/ignored/canoa.cfg'), isA<IndexedDbLedgerBackend>());
   });
 
   test('a ledger written by one page is read by the next, and nothing written reads as none', () async {

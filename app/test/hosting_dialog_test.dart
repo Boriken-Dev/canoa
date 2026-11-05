@@ -1,5 +1,5 @@
 // The hosting dialog against a host it cannot tell from the real one: a key is paired or removed only by the person's
-// click on a dialog that shows the whole id, an agent added by hand reaches Canoa.cfg, and a PIN is shown until it is used.
+// click on a dialog that shows the whole id, an agent added by hand reaches canoa.cfg, and a PIN is shown until it is used.
 import 'dart:async';
 
 import 'package:canoa/config/canoa_config.dart';
@@ -104,7 +104,7 @@ void main() {
     ]);
   });
 
-  testWidgets('an agent added by hand goes to Canoa.cfg on a loopback port of its own', (tester) async {
+  testWidgets('an agent added by hand goes to canoa.cfg on a loopback port of its own', (tester) async {
     final host = _Harness();
     await host.show(tester);
     await tester.tap(find.text('Add an agent'));
@@ -136,7 +136,7 @@ void main() {
     expect(find.text('mine'), findsOneWidget);
   });
 
-  testWidgets('what canoa-host finds wrong with a change is shown, and nothing is listed as hosted', (tester) async {
+  testWidgets('what canoa finds wrong with a change is shown, and nothing is listed as hosted', (tester) async {
     final host = _Harness()..refuseWith = 'host entry mine: program not found';
     await host.show(tester);
     await tester.tap(find.text('Add an agent'));
@@ -150,7 +150,7 @@ void main() {
     expect(find.text('None yet.'), findsOneWidget);
   });
 
-  testWidgets('stopping hosting an entry asks first, then saves Canoa.cfg without it', (tester) async {
+  testWidgets('stopping hosting an entry asks first, then saves canoa.cfg without it', (tester) async {
     final host = _Harness();
     final config = const CanoaConfig().withHostAgent(name: 'claude', program: 'npx', listen: '127.0.0.1:7801');
     await host.show(tester, config: config);
@@ -196,7 +196,7 @@ void main() {
 
   testWidgets('the host id a browser pins is shown once the host says it', (tester) async {
     final host = _Harness();
-    unawaited(host.supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
     await host.show(tester);
     host.tool.children.single.out.add('{"name":"claude","kind":"agent","url":"ws://127.0.0.1:7801","peer":"$_paired"}');
     await tester.pumpAndSettle();
@@ -207,7 +207,7 @@ void main() {
 
   testWidgets('the method the host proves by is shown beside its id', (tester) async {
     final host = _Harness();
-    unawaited(host.supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
     await host.show(tester);
     host.tool.children.single.out.add(
       '{"name":"claude","kind":"agent","url":"ws://127.0.0.1:7801","peer":"$_paired","method":"noise"}',

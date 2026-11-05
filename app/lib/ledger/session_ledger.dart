@@ -10,7 +10,7 @@ import '../worktree/worktree.dart';
 /// Where a session's agent runs, as the app reached it.
 enum SessionPlace {
   local('on this computer'),
-  host('through this app\'s canoa-host'),
+  host('through this app\'s canoa'),
   peer('on a paired peer'),
   browser('through the browser\'s provider');
 
@@ -34,7 +34,7 @@ const Map<String, String> builtInHarnesses = {
 /// The name an agent with `_meta.grokShell` and no `agentInfo` is looked up by.
 const String grokName = 'grok';
 
-/// Harness labels: [builtInHarnesses], extended and overridden by Canoa.cfg's `[harnesses]`.
+/// Harness labels: [builtInHarnesses], extended and overridden by canoa.cfg's `[harnesses]`.
 final class HarnessNames {
   HarnessNames([Map<String, String> extra = const {}]) : _names = {...builtInHarnesses, ...extra};
   final Map<String, String> _names;
@@ -236,7 +236,7 @@ final class SourceMemory {
   }
 }
 
-/// How much the ledger keeps, from Canoa.cfg's `[sessions]`.
+/// How much the ledger keeps, from canoa.cfg's `[sessions]`.
 final class LedgerSettings {
   const LedgerSettings({
     this.keep = defaultKeep,
@@ -257,7 +257,7 @@ final class LedgerSettings {
   /// How many of a session's latest messages are kept when [keepText] is on.
   final int textMessages;
 
-  /// Canoa.cfg's `[harnesses]`: reported name to harness label.
+  /// canoa.cfg's `[harnesses]`: reported name to harness label.
   final Map<String, String> harnesses;
 }
 

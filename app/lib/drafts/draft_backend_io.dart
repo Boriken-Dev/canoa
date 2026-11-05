@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'draft_store.dart';
 
-/// `drafts/` beside Canoa.cfg at [configPath]; in memory when there is no such place.
+/// `drafts/` beside canoa.cfg at [configPath]; in memory when there is no such place.
 DraftBackend platformDraftBackend({String? configPath}) =>
     configPath == null ? MemoryDraftBackend() : FileDraftBackend('${File(configPath).parent.path}${Platform.pathSeparator}drafts');
 

@@ -1,4 +1,4 @@
-// What a hostile overlay's text cannot do to the app, as canoa-host's tests/aos_limits.rs holds the host to it.
+// What a hostile overlay's text cannot do to the app, as canoa's tests/aos_limits.rs holds the host to it.
 import 'dart:convert';
 
 import 'package:canoa/profile/aos.dart';

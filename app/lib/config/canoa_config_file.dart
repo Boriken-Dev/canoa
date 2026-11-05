@@ -13,14 +13,14 @@ Future<CanoaConfig> loadConfig() async {
     final local = await platform.readDesktopConfig();
     if (local != null) return CanoaConfig.parse(local);
     if (kIsWeb) {
-      final response = await http.get(Uri.base.resolve('Canoa.cfg'));
+      final response = await http.get(Uri.base.resolve('canoa.cfg'));
       if (response.statusCode == 200) return CanoaConfig.parse(response.body);
       if (response.statusCode != 404) {
-        throw FormatException('Unable to read Canoa.cfg');
+        throw FormatException('Unable to read canoa.cfg');
       }
     }
   } catch (error) {
-    debugPrint('Canoa.cfg: $error; using defaults');
+    debugPrint('canoa.cfg: $error; using defaults');
   }
   return const CanoaConfig();
 }

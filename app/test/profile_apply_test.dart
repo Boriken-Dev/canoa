@@ -288,7 +288,7 @@ command = "no-such-program"
     ]), [('model', 'opus', 'model'), ('reasoning', 'high', 'effort')]);
   });
 
-  test("[agents.NAME.mcp] reads back as written, and keeping it keeps the rest of Canoa.cfg", () {
+  test("[agents.NAME.mcp] reads back as written, and keeping it keeps the rest of canoa.cfg", () {
     final parsed = CanoaConfig.parse('''
 [permissions]
 full_access = ["Claude"]

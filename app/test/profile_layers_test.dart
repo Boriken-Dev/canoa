@@ -189,7 +189,7 @@ void main() {
           throwsA(isA<OverlayException>()));
     });
 
-    test('a tree whose digest is not the pin Canoa.cfg names is refused before anything is installed', () async {
+    test('a tree whose digest is not the pin canoa.cfg names is refused before anything is installed', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
       upstream.write('overlay.cfg', '[env]\nMODE = "on"\n');
       upstream.commit('one');
@@ -407,7 +407,7 @@ remove = true
       expect(reread.trust.projects, isEmpty, reason: 'revoking is kept');
     });
 
-    test('an installed overlay from another source than Canoa.cfg names is left out until synced', () async {
+    test('an installed overlay from another source than canoa.cfg names is left out until synced', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
       upstream.write('overlay.cfg', '');
       upstream.commit('one');
@@ -417,7 +417,7 @@ remove = true
       final moved = {'o': GitOverlay(repo: upstream.bare, reference: 'other')};
       final result = await profileLayers(overlays: moved, user: const Profile(), agents: const {}, agent: 'a', home: home);
       expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'user']);
-      expect(result.notes.single.text, contains('not the source Canoa.cfg names'));
+      expect(result.notes.single.text, contains('not the source canoa.cfg names'));
     });
     test('an installed copy is digested each time it is used: a change leaves it out, a pin ends unpinned', () async {
       final upstream = Upstream(Directory('${temp.path}/up'));
@@ -435,7 +435,7 @@ remove = true
       expect(weakenings(), [['unpinned', '']]);
 
       config = CanoaConfig.parse(config.withOverlayPin('o', installed.digest!).encode());
-      expect((config.overlays['o']! as GitOverlay).pin, installed.digest, reason: 'the pin is kept in Canoa.cfg');
+      expect((config.overlays['o']! as GitOverlay).pin, installed.digest, reason: 'the pin is kept in canoa.cfg');
       result = await layers();
       expect(weakenings(), isEmpty);
 
@@ -479,7 +479,7 @@ remove = true
         throwsA(isA<ProfileException>().having((e) => e.code, 'code', 'resolve')));
   });
 
-  test('Canoa.cfg keeps [overlays], [profile] and each agent profile when the app saves it', () {
+  test('canoa.cfg keeps [overlays], [profile] and each agent profile when the app saves it', () {
     const text = '''
 [overlays]
 team = "https://example.invalid/p.git@main#team"
@@ -509,7 +509,7 @@ path = "/skills/s"
     expect(again.tables, config.tables);
   });
 
-  test('Canoa.cfg refuses an overlay source git must not run, and a profile the schema refuses', () {
+  test('canoa.cfg refuses an overlay source git must not run, and a profile the schema refuses', () {
     expect(() => CanoaConfig.parse('[overlays]\nx = "ext::sh -c id@main"\n'), throwsFormatException);
     expect(() => CanoaConfig.parse('[overlays]\nx = { dir = "" }\n'), throwsFormatException);
     expect(() => CanoaConfig.parse('[profile]\ncolour = "red"\n'), throwsFormatException);
@@ -537,6 +537,6 @@ path = "/skills/s"
     expect(await resolve('big') == null, isTrue, reason: 'over the limit');
     expect(await resolve('a-directory'), isNull);
     expect((await resolve('fits'))!.length, maxSecretFile);
-    expect(await resolve('carriage'), 'value\r', reason: 'as canoa-host reads it');
+    expect(await resolve('carriage'), 'value\r', reason: 'as canoa reads it');
   });
 }

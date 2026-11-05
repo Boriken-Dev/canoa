@@ -55,7 +55,7 @@ bool _worktreeEnabled(WidgetTester tester) =>
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/new_session_test.dart')));
 
-  test('hidden presets and attachment limits go into Canoa.cfg and come back', () {
+  test('hidden presets and attachment limits go into canoa.cfg and come back', () {
     const config = CanoaConfig(hiddenSources: {'Gemini', 'Pi'}, pasteAsFile: 100, embedLimit: 2048);
     final read = CanoaConfig.parse(config.encode());
     expect(read.hiddenSources, {'Gemini', 'Pi'});
@@ -77,7 +77,7 @@ void main() {
     expect(const SourceCheck(found: {'x': '/x'}).describe('X'), isNull);
   });
 
-  testWidgets('a command source added in Settings is saved to Canoa.cfg and offered for a new session', (tester) async {
+  testWidgets('a command source added in Settings is saved to canoa.cfg and offered for a new session', (tester) async {
     final (_, _, _, written) = await _app(tester, config: const CanoaConfig(), size: const Size(1280, 1400));
     await _openSources(tester);
     await tester.enterText(find.byKey(const Key('source-name')), 'Mine');

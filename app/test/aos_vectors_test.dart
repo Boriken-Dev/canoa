@@ -1,4 +1,4 @@
-// The Agent Overlay Specification's conformance vectors, read from crates/canoa-host/tests/vectors/aos/ as canoa-host
+// The Agent Overlay Specification's conformance vectors, read from crates/canoa-host/tests/vectors/aos/ as canoa
 // reads them (tests/aos_vectors.rs). A vector Canoa does not apply is skipped by name, and the skips are printed.
 import 'dart:convert';
 import 'dart:io';

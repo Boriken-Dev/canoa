@@ -9,7 +9,7 @@ import '../theme/look.dart';
 import 'host_supervisor.dart';
 import 'host_tool.dart';
 
-/// Checks and saves a changed Canoa.cfg, then serves it: what is wrong with it, or null once it is saved.
+/// Checks and saves a changed canoa.cfg, then serves it: what is wrong with it, or null once it is saved.
 typedef SaveHosting = Future<String?> Function(CanoaConfig changed);
 
 /// What this computer hosts for browsers: the host's state, its agents, adding one, and the keys that may connect, each
@@ -379,12 +379,12 @@ class _Status extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, said) = switch (supervisor.phase) {
-      HostPhase.absent => (Icons.block, 'canoa-host was not found beside Canoa, so nothing is hosted.'),
+      HostPhase.absent => (Icons.block, 'canoa was not found beside Canoa, so nothing is hosted.'),
       HostPhase.idle => (Icons.pause_circle_outline, 'Nothing to host: add an agent.'),
       HostPhase.starting => (Icons.hourglass_top, 'Starting…'),
       HostPhase.running => (Icons.check_circle_outline, 'Hosting, on this computer only.'),
       HostPhase.waiting => (Icons.restart_alt, 'It stopped: starting again soon. ${supervisor.problem ?? ''}'),
-      HostPhase.failed => (Icons.error_outline, 'Canoa.cfg is not right for it: ${supervisor.problem ?? ''}'),
+      HostPhase.failed => (Icons.error_outline, 'canoa.cfg is not right for it: ${supervisor.problem ?? ''}'),
       HostPhase.stopped => (Icons.stop_circle_outlined, 'Stopped.'),
     };
     final peer = supervisor.peerId;

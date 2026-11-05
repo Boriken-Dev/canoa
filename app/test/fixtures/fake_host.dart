@@ -1,4 +1,4 @@
-// A canoa-host the tests cannot tell from the real one: what was started and run, and children they end by hand.
+// A canoa the tests cannot tell from the real one: what was started and run, and children they end by hand.
 import 'dart:async';
 
 import 'package:canoa/desktop/host_tool.dart';
@@ -48,7 +48,7 @@ final class FakeTool implements HostTool {
   HostOutput Function(List<String>) answer = (_) => const HostOutput(0, '', '');
 
   @override
-  String get path => 'canoa-host';
+  String get path => 'canoa';
 
   @override
   Future<HostChild> start(List<String> args) async {

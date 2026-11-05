@@ -1,7 +1,7 @@
 /// Overlays in the Agent Overlay Specification (AOS) v0 format, edition `0.1.0-draft`
 /// (https://github.com/Boriken-Dev/agent-overlay-spec): reading `overlay.cfg` and env files, validating a manifest, overlay
 /// names, source strings, tree digests, the defaults conventional files contribute, composition order, the environment
-/// an overlay builds with its substitution, and an icon's header. canoa-host has the same (`canoa_host::aos`), and both
+/// an overlay builds with its substitution, and an icon's header. canoa has the same (`canoa_host::aos`), and both
 /// run the specification's vectors in `crates/canoa-host/tests/vectors/aos/`.
 ///
 /// Canoa reads TOML and JSON; YAML is refused as an unsupported format. It runs no env script, no setup and no package

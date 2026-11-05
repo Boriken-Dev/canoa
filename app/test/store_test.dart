@@ -209,7 +209,7 @@ void main() {
       expect(store.installed('docs-tools')!.commit, first.update.commit, reason: 'and records the commit');
       expect(entryState(changed, 'docs-tools', source), EntryState.installed);
 
-      // The same overlay named by hand in Canoa.cfg and installed from Settings, Profiles, in another home.
+      // The same overlay named by hand in canoa.cfg and installed from Settings, Profiles, in another home.
       final byHand = CanoaConfig.parse('[overlays]\ndocs-tools = { source = "${source.spec}", pin = "${pinned.pin}" }\n');
       final handHome = IoProfileHome('${temp.path}/hand');
       await handHome.overlays.apply(await handHome.overlays.check('docs-tools', byHand.overlays['docs-tools']! as GitOverlay));
@@ -246,7 +246,7 @@ void main() {
       expect(changed.catalogs.keys, ['team', 'public'], reason: 'the catalogs stay');
     });
 
-    test('an update Canoa.cfg\'s pin does not cover installs nothing until the pin is moved on purpose', () async {
+    test('an update canoa.cfg\'s pin does not cover installs nothing until the pin is moved on purpose', () async {
       final source = installSource((await listing()).listing.choose('team/docs-tools').entry);
       // Named by hand, pinned, and installed from Settings, Profiles: the store finds it under the same source.
       final first = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
@@ -279,7 +279,7 @@ void main() {
       expect(store.installed('docs-tools'), isNotNull);
     });
 
-    test('a name Canoa.cfg gives another source is neither installed over nor removed', () async {
+    test('a name canoa.cfg gives another source is neither installed over nor removed', () async {
       final entry = (await listing()).listing.choose('team/docs-tools').entry;
       final mine = CanoaConfig.parse('[overlays]\ndocs-tools = "${public.location}@main#docs"\n');
       expect(entryState(mine, 'docs-tools', installSource(entry)), EntryState.taken);
@@ -375,7 +375,7 @@ void main() {
     }
   });
 
-  test('Canoa.cfg keeps [catalogs] and [store], and refuses what they may not hold', () {
+  test('canoa.cfg keeps [catalogs] and [store], and refuses what they may not hold', () {
     final config = CanoaConfig.parse('[catalogs]\nteam = "https://example.invalid/c.git@main#catalog.toml"\n\n'
         '[store]\nicon_max_bytes = 1024\n');
     expect(config.catalogs['team']!.path, 'catalog.toml');
@@ -513,7 +513,7 @@ void main() {
       expect(shown, contains('tracker'));
       expect(shown, contains('setup: setup.sh: not applied by Canoa yet'));
       expect(shown, contains('setup setup.sh: says it needs the network'));
-      expect(shown, contains('requires lint, which Canoa.cfg does not name'));
+      expect(shown, contains('requires lint, which canoa.cfg does not name'));
       expect(find.byKey(const Key('store-pin-ok')), findsOneWidget);
       expect(overlays.records, isEmpty, reason: 'fetching installs nothing');
     });
@@ -572,7 +572,7 @@ path = "s\u202Eh.sh"
       expect(overlays.records, isEmpty);
     });
 
-    testWidgets('install pins the digest in Canoa.cfg; remove takes it out again', (tester) async {
+    testWidgets('install pins the digest in canoa.cfg; remove takes it out again', (tester) async {
       await open(tester, const Size(1280, 2400));
       await tester.tap(find.byKey(const Key('store-entry-team-docs-tools')));
       await tester.pumpAndSettle();

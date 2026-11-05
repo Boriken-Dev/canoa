@@ -1,4 +1,4 @@
-// canoa-host.json, which `canoa-host serve --web` serves beside the page: read only as a filling for the connect dialog.
+// canoa.json, which `canoa serve --web` serves beside the page: read only as a filling for the connect dialog.
 import 'dart:convert';
 
 import 'package:canoa/acp/served_host.dart';
@@ -55,7 +55,7 @@ void main() {
       return http.Response(_listed(), 200);
     });
     final host = await loadServedHost(client: served, base: Uri.parse('http://127.0.0.1:7800/'));
-    expect(asked, [Uri.parse('http://127.0.0.1:7800/canoa-host.json')]);
+    expect(asked, [Uri.parse('http://127.0.0.1:7800/canoa.json')]);
     expect(host?.entries.first.name, 'claude');
 
     final elsewhere = MockClient((request) async => http.Response('not found', 404));
@@ -86,14 +86,14 @@ void main() {
   String field(WidgetTester tester, String label) =>
       tester.widget<TextField>(find.widgetWithText(TextField, label)).controller!.text;
 
-  testWidgets('a page canoa-host served starts filled with its first entry, its id and its method', (tester) async {
+  testWidgets('a page canoa served starts filled with its first entry, its id and its method', (tester) async {
     final targets = <ConnectTarget>[];
     await open(tester, (target) async => targets.add(target));
     expect(field(tester, 'WebSocket WSS endpoint'), 'ws://127.0.0.1:7801');
     expect(field(tester, 'Pinned server peer ID'), _peer);
     expect(find.textContaining('sha256:own-noise'), findsOneWidget, reason: 'its method is chosen, so this browser shows its id');
-    expect(find.textContaining('canoa-host accept'), findsOneWidget, reason: 'the key still has to be accepted on the host');
-    expect(find.textContaining('canoa-host id'), findsOneWidget, reason: 'the id filled in is the page\'s word: compare it');
+    expect(find.textContaining('canoa accept'), findsOneWidget, reason: 'the key still has to be accepted on the host');
+    expect(find.textContaining('canoa id'), findsOneWidget, reason: 'the id filled in is the page\'s word: compare it');
 
     await tester.tap(find.widgetWithText(ChoiceChip, 'echo'));
     await tester.pumpAndSettle();

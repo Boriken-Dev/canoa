@@ -12,7 +12,7 @@ import '../profile/profiles_dialog.dart' show EffectiveTable, OverlayReportView,
 import 'store.dart';
 import 'store_icon.dart';
 
-/// Saves a changed Canoa.cfg and gives the configuration saved, or null when it was not.
+/// Saves a changed canoa.cfg and gives the configuration saved, or null when it was not.
 typedef SaveConfig = Future<CanoaConfig?> Function(CanoaConfig changed);
 
 /// [text] for a place that holds one line: as [visible] shows it, and a line break or tab named too, so text from a
@@ -195,7 +195,7 @@ class StorePageState extends State<StorePage> {
     final status = switch (_state(entry)) {
       null => null,
       EntryState.installed => 'Installed',
-      EntryState.taken => 'Another overlay of this name is in Canoa.cfg',
+      EntryState.taken => 'Another overlay of this name is in canoa.cfg',
       EntryState.absent => null,
     };
     return Card(
@@ -355,7 +355,7 @@ class OverlayPageState extends State<OverlayPage> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Move the pin?'),
-          content: Text('Canoa.cfg pins ${shown.name} to $moved. What was fetched is ${shown.update.digest}, '
+          content: Text('canoa.cfg pins ${shown.name} to $moved. What was fetched is ${shown.update.digest}, '
               'shown on this page. Installing it moves the pin there.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -386,7 +386,7 @@ class OverlayPageState extends State<OverlayPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Remove ${namedAs(config, name) ?? name}?'),
-        content: const Text('Its files, its fetched history and its entry in Canoa.cfg go; agents started after this '
+        content: const Text('Its files, its fetched history and its entry in canoa.cfg go; agents started after this '
             'start without it.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -429,7 +429,7 @@ class OverlayPageState extends State<OverlayPage> {
             if (_refusal case final why?)
               Text(visible(why), key: const Key('store-refusal'), style: TextStyle(color: Theme.of(context).colorScheme.error))
             else if (state == EntryState.taken)
-              Text('Canoa.cfg names ${namedAs(config, target!.$1)} from another source. The store neither installs over '
+              Text('canoa.cfg names ${namedAs(config, target!.$1)} from another source. The store neither installs over '
                   'it nor removes it.', key: const Key('store-taken'))
             else if (widget.home == null)
               const Text('The desktop app fetches and installs overlays.')
@@ -566,7 +566,7 @@ class OverlayPageState extends State<OverlayPage> {
         else if (entry.pin != null)
           const Text('The catalog\'s pin matches what was fetched.', key: Key('store-pin-ok')),
         if (moved != null)
-          Text('Canoa.cfg pins it to $moved: installing this moves the pin, which it asks first.',
+          Text('canoa.cfg pins it to $moved: installing this moves the pin, which it asks first.',
               key: const Key('store-pin-moves'), style: error),
         if (found.iconRefused case final why?) _field('Icon', 'refused ($why): a placeholder shows instead'),
         if (description is String)
@@ -602,8 +602,8 @@ class OverlayPageState extends State<OverlayPage> {
               style: text.bodySmall),
         for (final name in found.requires)
           Text(oneLine(named.contains(normalizeName(name))
-              ? 'requires $name, which Canoa.cfg names'
-              : 'requires $name, which Canoa.cfg does not name: install it too, or this applies without it'),
+              ? 'requires $name, which canoa.cfg names'
+              : 'requires $name, which canoa.cfg does not name: install it too, or this applies without it'),
               style: text.bodySmall),
       ],
     );

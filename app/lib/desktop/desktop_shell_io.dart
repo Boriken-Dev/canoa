@@ -64,6 +64,8 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
     this.onHosting = onHosting;
     if (!_desktop) return;
     await windowManager.ensureInitialized();
+    // The generated runner titles the window with the project's name, `canoa`.
+    await windowManager.setTitle('Canoa');
     await windowManager.setPreventClose(true);
     windowManager.addListener(this);
     _hasTray = await _trayAvailable();

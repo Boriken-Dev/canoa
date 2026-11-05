@@ -1,5 +1,5 @@
 /// An AOS overlay as a profile layer: what Canoa applies of it, what it reports as not applied yet, and its
-/// environment, built when a session starts. canoa-host has the same (`canoa_host::profile::overlay_layer`), held to the
+/// environment, built when a session starts. canoa has the same (`canoa_host::profile::overlay_layer`), held to the
 /// `overlays` cases of `crates/canoa-host/tests/vectors/profile.json`.
 library;
 
@@ -14,7 +14,7 @@ final class AosLayer {
       required this.pinned, required this.manifest, required this.files, required this.texts, required this.references,
       required this.notApplied, this.about = const {}, this.icon = const {}, this.blobs = const {}});
 
-  /// The name Canoa.cfg gives it, its identity.
+  /// The name canoa.cfg gives it, its identity.
   final String identity;
 
   /// Its root, absolute, as processes see it.

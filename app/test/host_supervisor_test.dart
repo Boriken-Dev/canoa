@@ -1,5 +1,5 @@
 // The supervisor's decisions against a host it cannot tell from the real one: when it starts, how long it waits after an
-// end, what it does with a wrong Canoa.cfg, and how it ends the host. The real binary's side is in host_test.dart.
+// end, what it does with a wrong canoa.cfg, and how it ends the host. The real binary's side is in host_test.dart.
 import 'dart:async';
 
 import 'package:canoa/desktop/host_supervisor.dart';
@@ -12,25 +12,25 @@ import 'fixtures/fake_host.dart';
 const _line = '{"name":"claude","kind":"agent","url":"ws://127.0.0.1:7801","peer":"sha256:aa"}';
 
 void main() {
-  test('with no canoa-host there is nothing to run', () async {
+  test('with no canoa there is nothing to run', () async {
     final supervisor = HostSupervisor(null);
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true);
     expect(supervisor.phase, HostPhase.absent);
   });
 
-  test('nothing starts until Canoa.cfg names something to host', () async {
+  test('nothing starts until canoa.cfg names something to host', () async {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: false);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: false);
     expect(supervisor.phase, HostPhase.idle);
     expect(tool.started, isEmpty);
   });
 
-  test('it serves Canoa.cfg tied to its input, and says where each entry listens', () async {
+  test('it serves canoa.cfg tied to its input, and says where each entry listens', () async {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
-    expect(tool.started.single, ['serve', '--config', '/c/Canoa.cfg', '--until-stdin-closes']);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true);
+    expect(tool.started.single, ['serve', '--config', '/c/canoa.cfg', '--until-stdin-closes']);
     expect(supervisor.phase, HostPhase.starting);
     tool.children.single.out.add(_line);
     expect(supervisor.phase, HostPhase.running);
@@ -47,11 +47,11 @@ void main() {
         longestPause: const Duration(seconds: 4),
         clock: () => async.getClock(DateTime(2026)).now(),
       );
-      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
       async.flushMicrotasks();
       final pauses = <Duration>[];
       for (var end = 0; end < 4; end++) {
-        tool.children.last.err.add('canoa-host: the agent could not start');
+        tool.children.last.err.add('canoa: the agent could not start');
         tool.children.last.end(1);
         async.flushMicrotasks();
         expect(supervisor.phase, HostPhase.waiting);
@@ -71,7 +71,7 @@ void main() {
     fakeAsync((async) {
       final tool = FakeTool();
       final supervisor = HostSupervisor(tool, clock: () => async.getClock(DateTime(2026)).now());
-      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
       async.flushMicrotasks();
       for (var end = 0; end < 3; end++) {
         tool.children.last.end(1);
@@ -87,17 +87,30 @@ void main() {
     });
   });
 
-  test('a wrong Canoa.cfg is said and not retried until asked', () {
+  test('a host built before the rename says its trouble as canoa-host: and is understood', () {
     fakeAsync((async) {
       final tool = FakeTool();
       final supervisor = HostSupervisor(tool);
-      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
       async.flushMicrotasks();
-      tool.children.single.err.add('canoa-host: Canoa.cfg line 3: unknown key');
+      tool.children.single.err.add('canoa-host: canoa.cfg line 3: unknown key');
+      tool.children.single.end(2);
+      async.flushMicrotasks();
+      expect(supervisor.problem, 'canoa.cfg line 3: unknown key');
+    });
+  });
+
+  test('a wrong canoa.cfg is said and not retried until asked', () {
+    fakeAsync((async) {
+      final tool = FakeTool();
+      final supervisor = HostSupervisor(tool);
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
+      async.flushMicrotasks();
+      tool.children.single.err.add('canoa: canoa.cfg line 3: unknown key');
       tool.children.single.end(2);
       async.flushMicrotasks();
       expect(supervisor.phase, HostPhase.failed);
-      expect(supervisor.problem, 'Canoa.cfg line 3: unknown key');
+      expect(supervisor.problem, 'canoa.cfg line 3: unknown key');
       async.elapse(const Duration(hours: 1));
       expect(tool.started, hasLength(1));
       unawaited(supervisor.restart());
@@ -110,7 +123,7 @@ void main() {
     fakeAsync((async) {
       final tool = FakeTool()..leavesOnInput = false;
       final supervisor = HostSupervisor(tool);
-      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
       async.flushMicrotasks();
       final child = tool.children.single;
       var stopped = false;
@@ -130,20 +143,20 @@ void main() {
   test('a host that ends when its input closes is not killed', () async {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true);
     await supervisor.stop();
     expect(tool.children.single.inputClosed, isTrue);
     expect(tool.children.single.killed, isFalse);
   });
 
-  test('a changed Canoa.cfg ends the running host before the new one starts', () async {
+  test('a changed canoa.cfg ends the running host before the new one starts', () async {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true);
     expect(tool.children.first.inputClosed, isTrue);
     expect(tool.started, hasLength(2));
-    await supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: false);
+    await supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: false);
     expect(tool.children.last.inputClosed, isTrue);
     expect(supervisor.phase, HostPhase.idle);
   });
@@ -157,7 +170,7 @@ void main() {
               '{"peer":"sha256:a","state":"accepted","source":null}\nnot json\n',
           '',
         ),
-        'accept' => const HostOutput(2, '', 'canoa-host: that key is not waiting\n'),
+        'accept' => const HostOutput(2, '', 'canoa: that key is not waiting\n'),
         _ => const HostOutput(0, 'removed\n', ''),
       };
     final supervisor = HostSupervisor(tool);
@@ -204,12 +217,12 @@ void main() {
     fakeAsync((async) {
       final tool = FakeTool();
       final supervisor = HostSupervisor(tool);
-      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
       async.flushMicrotasks();
       // A real process's status can arrive before the line it wrote last on standard error.
       tool.children.last.end(2, closeErrors: false);
       async.elapse(const Duration(milliseconds: 100));
-      tool.children.last.err.add('canoa-host: the configuration is malformed at line 2');
+      tool.children.last.err.add('canoa: the configuration is malformed at line 2');
       unawaited(tool.children.last.err.close());
       async.flushMicrotasks();
       expect(supervisor.phase, HostPhase.failed);
@@ -221,14 +234,14 @@ void main() {
     fakeAsync((async) {
       final tool = FakeTool();
       final supervisor = HostSupervisor(tool, errorDrain: const Duration(seconds: 2));
-      unawaited(supervisor.apply(configPath: '/c/Canoa.cfg', hasEntries: true));
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
       async.flushMicrotasks();
       tool.children.last.end(2, closeErrors: false);
       async.elapse(const Duration(milliseconds: 1999));
       expect(supervisor.phase, isNot(HostPhase.failed));
       async.elapse(const Duration(milliseconds: 1));
       expect(supervisor.phase, HostPhase.failed);
-      expect(supervisor.problem, 'canoa-host ended with status 2');
+      expect(supervisor.problem, 'canoa ended with status 2');
     });
   });
 }

@@ -30,10 +30,10 @@ class ProfilesDialog extends StatefulWidget {
   /// The directory whose project profile is shown first, if any.
   final String? workingDirectory;
 
-  /// Pins the overlay [name] in Canoa.cfg to the tree digest just installed, and gives the configuration saved.
+  /// Pins the overlay [name] in canoa.cfg to the tree digest just installed, and gives the configuration saved.
   final Future<CanoaConfig?> Function(String name, String digest)? onPin;
 
-  /// Saves Canoa.cfg as the overlay store changed it, and gives the configuration saved; without it there is no store.
+  /// Saves canoa.cfg as the overlay store changed it, and gives the configuration saved; without it there is no store.
   final SaveConfig? onSave;
 
   @override
@@ -182,7 +182,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
                 child: const Text('Store…'),
               ),
           ]),
-          if (config.overlays.isEmpty) const Text('None: add one to [overlays] in Canoa.cfg.'),
+          if (config.overlays.isEmpty) const Text('None: add one to [overlays] in canoa.cfg.'),
           for (final MapEntry(key: name, value: source) in config.overlays.entries) _overlayRow(name, source),
           for (final report in found?.effective.overlays ?? const <OverlayReport>[]) OverlayReportView(report: report),
           if (home != null && home.trust.projects.isNotEmpty) ...[
@@ -296,7 +296,7 @@ class OverlayUpdateDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('${update.source.spec}\n${update.from == null ? '' : 'From ${update.from}\n'}To ${update.commit}\n'
-              'Tree digest ${update.digest}: applying pins it in Canoa.cfg, and Canoa checks it each time the overlay is used.'),
+              'Tree digest ${update.digest}: applying pins it in canoa.cfg, and Canoa checks it each time the overlay is used.'),
           if (update.changesNothing) const Text('Nothing changes.'),
           files('Added', update.added),
           files('Changed', update.changed),

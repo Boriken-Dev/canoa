@@ -1,7 +1,7 @@
 import '../acp/agent_commands.dart';
 
-/// Where a source's agent comes from: a preset this app starts, a command from Canoa.cfg's `[agents.NAME]`, or an agent
-/// entry of the `canoa-host` this app runs.
+/// Where a source's agent comes from: a preset this app starts, a command from canoa.cfg's `[agents.NAME]`, or an agent
+/// entry of the `canoa` this app runs.
 enum SourceKind { preset, command, hosted }
 
 /// One way to run an agent, as Settings lists it and the new-session picker offers it.
@@ -15,7 +15,7 @@ final class AgentSource {
   /// The program and its arguments, and what else it needs, for a source this app starts.
   final AgentCommand? command;
 
-  /// The name of the `[host]` agent entry, for a source `canoa-host` serves.
+  /// The name of the `[host]` agent entry, for a source `canoa` serves.
   final String? hostEntry;
 
   String get label => command?.label ?? hostEntry!;
@@ -82,4 +82,4 @@ List<String> commandNeeds(AgentCommand command) => {command.program, ...command.
 
 /// What the session list keeps a source's memory under: its label, and for a hosted entry the host's name before it, since a
 /// preset and a hosted entry can share a label.
-String sourceKey(AgentSource source) => source.kind == SourceKind.hosted ? 'canoa-host/${source.label}' : source.label;
+String sourceKey(AgentSource source) => source.kind == SourceKind.hosted ? 'canoa/${source.label}' : source.label;

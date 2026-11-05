@@ -21,7 +21,7 @@ final class ServedEntry {
   final String url;
 }
 
-/// What the `canoa-host` that served this page says it serves, from `canoa-host.json` beside the page. It only fills the
+/// What the `canoa` that served this page says it serves, from `canoa.json` beside the page. It only fills the
 /// connect dialog: connecting still proves the host holds [peer]'s key, and the host still turns this browser away until
 /// its key is accepted there.
 final class ServedHost {
@@ -36,7 +36,7 @@ final class ServedHost {
 
   static final _peerId = RegExp(r'^sha256:[0-9a-f]{64}$');
 
-  /// The list `canoa-host serve` writes, or null for anything else: another server's page, or a list with an entry whose
+  /// The list `canoa serve` writes, or null for anything else: another server's page, or a list with an entry whose
   /// address is not a WebSocket's.
   static ServedHost? parse(String text) {
     try {
@@ -62,13 +62,13 @@ final class ServedHost {
   }
 }
 
-/// Reads `canoa-host.json` beside this page, as `canoa-host serve --web` serves it: null where the app is no web page or
+/// Reads `canoa.json` beside this page, as `canoa serve --web` serves it: null where the app is no web page or
 /// the page came from anything else.
 Future<ServedHost?> loadServedHost({http.Client? client, Uri? base}) async {
   if (!_inPage && base == null) return null;
   final ask = client ?? http.Client();
   try {
-    final response = await ask.get((base ?? Uri.base).resolve('canoa-host.json'));
+    final response = await ask.get((base ?? Uri.base).resolve('canoa.json'));
     return response.statusCode == 200 ? ServedHost.parse(response.body) : null;
   } catch (_) {
     return null;

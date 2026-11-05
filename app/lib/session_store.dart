@@ -87,7 +87,7 @@ final class QueuedMessage {
 /// What a session needs the person for: a permission request, a question, or a turn it finished.
 enum AttentionKind { permission, question, finished }
 
-/// Where a session's full access comes from: turned on for it, or for its agent in Canoa.cfg.
+/// Where a session's full access comes from: turned on for it, or for its agent in canoa.cfg.
 enum FullAccess { session, agent }
 
 /// The option full access answers with: the first that allows once. An `allow_always` is never chosen for the person, since the
@@ -137,7 +137,7 @@ class ChatSession {
   /// When this app made it.
   final DateTime created = DateTime.now();
 
-  /// Which of Canoa.cfg's overlays a draft starts with, by name; null for all of them.
+  /// Which of canoa.cfg's overlays a draft starts with, by name; null for all of them.
   Set<String>? overlays;
 
   /// The id a draft is kept under between runs; null once it starts.
@@ -371,7 +371,7 @@ class SessionStore extends ChangeNotifier {
   void _startFullAccess(ChatSession session) {
     if (session.fullAccess != null || !_fullAccessAgents.contains(session.agent) || !_runsAs(session, session.agent)) return;
     session.fullAccess = FullAccess.agent;
-    _weakened('full access is on for the conversation "${_named(session.title)}" with ${_named(session.agent)}, as Canoa.cfg says '
+    _weakened('full access is on for the conversation "${_named(session.title)}" with ${_named(session.agent)}, as canoa.cfg says '
         'for that agent: it allows what it can without asking, looser than asking each time');
     _note(session, 'Full access is on for ${_named(session.agent)}: each request that offers to allow once is allowed without '
         'asking you.');
@@ -830,7 +830,7 @@ class SessionStore extends ChangeNotifier {
       if (websocketFallback != null) {
         throw ArgumentError('A direct WSS endpoint cannot have a fallback');
       }
-      // Plain WebSocket only on loopback, where canoa-host listens.
+      // Plain WebSocket only on loopback, where canoa listens.
       WebEndpoints(webSocket: endpoint, allowLocalPlainWebSocket: true);
     } else {
       throw ArgumentError.value(endpoint, 'endpoint', 'Use HTTPS WebTransport or WSS');
@@ -956,7 +956,7 @@ class SessionStore extends ChangeNotifier {
     ]);
   }
 
-  /// The `_meta` key under which `canoa-host` lists, in its answer to `session/new`, what a person should know about an agent
+  /// The `_meta` key under which `canoa` lists, in its answer to `session/new`, what a person should know about an agent
   /// before using it: what a command-line tool does without asking, and whether it remembers earlier messages.
   static const hostNoticesKey = 'dev.boriken.canoa/notices';
 

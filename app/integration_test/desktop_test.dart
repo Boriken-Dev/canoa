@@ -1,9 +1,9 @@
-// The desktop app on a real desktop: its own window and tray through their native plugins, canoa-host running as its child,
+// The desktop app on a real desktop: its own window and tray through their native plugins, canoa running as its child,
 // and a browser's key reaching a hosted agent while the window is closed.
 //
 //   flutter test integration_test/desktop_test.dart -d windows   (or -d linux)
 //
-// CANOA_TEST_HOST names a built canoa-host, with its examples beside it as `cargo build -p canoa-host --bin canoa-host
+// CANOA_TEST_HOST names a built canoa, with its examples beside it as `cargo build -p canoa-host --bin canoa
 // --examples` leaves them; CANOA_TEST_NODE names Node 22 or later, for the browser's WebCrypto; CANOA_TEST_APP is this app's
 // directory, where the Node fixture is (default: the working directory). Without CANOA_TEST_HOST the test is skipped.
 import 'dart:io';
@@ -102,7 +102,7 @@ void main() {
     'closed to the tray, the host keeps serving a browser; the app opens again and shows what it hosts',
     (tester) async {
       final dir = await Directory.systemTemp.createTemp('canoa-desktop');
-      final cfg = File('${dir.path}${Platform.pathSeparator}Canoa.cfg');
+      final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg');
       final config = const CanoaConfig().withHostAgent(
         name: 'fixture',
         program: _example('stdio_agent'),
@@ -115,6 +115,7 @@ void main() {
       final hosting = ValueNotifier<int>(0);
       final shell = TrayShell();
       await shell.initialize(config, onSettings: () {}, onHosting: () => hosting.value++);
+      expect(await windowManager.getTitle(), 'Canoa', reason: 'the runner titles it with the project name');
       final browser = await NodePeerBridge.start(script: '$_appDir/test/fixtures/node_peer.mjs');
       addTearDown(() async {
         browser.kill();

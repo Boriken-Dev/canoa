@@ -1,13 +1,13 @@
-// Canoa's chat reaching a command-line tool that `canoa-host` presents as an ACP agent, through the app's own connection
+// Canoa's chat reaching a command-line tool that `canoa` presents as an ACP agent, through the app's own connection
 // code: connectVerifiedAcp, the peer proof, its sealed channel and VerifiedAgent, against the real host binary, and the
 // session store showing what the host says about the tool.
 //
-// CANOA_TEST_HOST names a built canoa-host with its examples beside it, as host_test.dart says. The entry is Pi's, from
+// CANOA_TEST_HOST names a built canoa with its examples beside it, as host_test.dart says. The entry is Pi's, from
 // examples/config/pi.cfg, with the jsonl_tool fixture as its program. CANOA_TEST_METHOD (`noise` or `webcrypto`) is the
 // method the host serves by, its default unless set; the browser proves by the method the host says. Without
 // CANOA_TEST_HOST the tests are skipped.
 //
-// A real tool instead: CANOA_TEST_TOOL_CONFIG names a Canoa.cfg and CANOA_TEST_TOOL_ENTRY its [host.tools] entry; the
+// A real tool instead: CANOA_TEST_TOOL_CONFIG names a canoa.cfg and CANOA_TEST_TOOL_ENTRY its [host.tools] entry; the
 // host's environment is this test's. CANOA_TEST_TOOL_PROMPT is the one prompt (a short default otherwise), and
 // CANOA_TEST_TOOL_ANSWER `allow` or `refuse` answers any question it asks (refuse by default). It prints the shape of
 // each update, never its text.
@@ -57,7 +57,7 @@ Future<String> _piConfig() async {
 }
 
 void main() {
-  final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa-host' : null;
+  final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa' : null;
   final entry = _realConfig == null ? 'pi' : Platform.environment['CANOA_TEST_TOOL_ENTRY'] ?? 'pi';
   late Directory dir;
   // Nullable, so a setUpAll that fails partway still has what it started ended.
@@ -72,9 +72,9 @@ void main() {
 
   setUpAll(() async {
     if (skip != null) return;
-    dir = await Directory.systemTemp.createTemp('canoa-host-tool-test');
+    dir = await Directory.systemTemp.createTemp('canoa-tool-test');
     await Directory('${dir.path}/work').create();
-    final config = File('${dir.path}/Canoa.cfg');
+    final config = File('${dir.path}/canoa.cfg');
     final real = _realConfig;
     await config.writeAsString(real == null ? await _piConfig() : await File(real).readAsString());
     final started = await Process.start(

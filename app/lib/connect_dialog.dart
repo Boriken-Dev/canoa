@@ -84,7 +84,7 @@ class _ServedEntries extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 12),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('From the canoa-host that served this page:', style: Theme.of(context).textTheme.bodySmall),
+      Text('From the canoa that served this page:', style: Theme.of(context).textTheme.bodySmall),
       Wrap(spacing: 8, children: [
         for (final entry in host.entries)
           ChoiceChip(
@@ -95,9 +95,9 @@ class _ServedEntries extends StatelessWidget {
           ),
       ]),
       Text(
-        'The pinned id below is what this page says: compare it with the one canoa-host id prints, or Hosting shows. '
+        'The pinned id below is what this page says: compare it with the one canoa id prints, or Hosting shows. '
         'Connecting then proves the host holds it. Until this browser\'s key is accepted there, the host turns it away: '
-        'run canoa-host accept with your id above.',
+        'run canoa accept with your id above.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     ]),
@@ -120,7 +120,7 @@ class _ConnectDialog extends StatefulWidget {
   /// Whether this app is a web page, whose key and identity are the browser's; otherwise they are this app's own.
   final bool inBrowser;
 
-  /// What the `canoa-host` that served this page lists, which fills the fields; asked only in a web page.
+  /// What the `canoa` that served this page lists, which fills the fields; asked only in a web page.
   final Future<ServedHost?> Function() servedHost;
 
   /// The method an agent's record or its host named, prefilled; null for an agent typed in by hand.
@@ -246,7 +246,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     }
     final method = this.method;
     if (method == null) {
-      setState(() => error = 'Choose the method the host proves by: canoa-host serve prints it.');
+      setState(() => error = 'Choose the method the host proves by: canoa serve prints it.');
       return;
     }
     final request = ConnectTarget(
@@ -278,7 +278,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   Future<void> _useBrowser(AcpPage acp) async {
     if (busy) return;
     if (worktree) {
-      setState(() => error = 'A worktree is made on this computer or by canoa-host, not by the browser\'s provider.');
+      setState(() => error = 'A worktree is made on this computer or by canoa, not by the browser\'s provider.');
       return;
     }
     final asked = widget.onUseBrowserAgents!(acp, cwd: cwd.text.trim(), title: title.text.trim());

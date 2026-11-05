@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'session_ledger.dart';
 
-/// `sessions.json` beside Canoa.cfg at [configPath], in the app's config directory; in memory when there is no such place.
+/// `sessions.json` beside canoa.cfg at [configPath], in the app's config directory; in memory when there is no such place.
 LedgerBackend platformLedgerBackend({String? configPath}) =>
     configPath == null
         ? MemoryLedgerBackend()

@@ -130,7 +130,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextField, 'Pinned server peer ID'), 'sha256:${'a' * 64}');
     await tester.tap(find.text('Connect'));
     await tester.pump();
-    expect(find.text('Choose the method the host proves by: canoa-host serve prints it.'), findsOneWidget);
+    expect(find.text('Choose the method the host proves by: canoa serve prints it.'), findsOneWidget);
     expect(targets, isEmpty, reason: 'no method is assumed');
 
     await tester.tap(find.text('WebCrypto'));
@@ -142,7 +142,7 @@ void main() {
     expect(targets.single.peerId, 'sha256:${'a' * 64}');
   });
 
-  group('agents in Canoa.cfg', () {
+  group('agents in canoa.cfg', () {
     test('survive a round trip, with names that need quoting', () {
       const config = CanoaConfig(agents: [AgentCommand(label: 'My "agent"', program: r'C:\tools\agent.exe', args: ['--acp', 'a b'])]);
       final read = CanoaConfig.parse(config.encode());
@@ -186,7 +186,7 @@ void main() {
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
 
-    await host.apply(configPath: '/c/Canoa.cfg', hasEntries: true);
+    await host.apply(configPath: '/c/canoa.cfg', hasEntries: true);
     await shell.beforeQuit!();
     expect(tool.children.single.inputClosed, isTrue, reason: 'the host and its agents end with the app');
   });
@@ -198,7 +198,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final config = CanoaConfig.parse('[profile]\neffort = "high"\n[agents.Mine.profile]\nmodel = "m"\n');
     await tester.pumpWidget(CanoaApp(
-      store: SessionStore(includePreview: false), config: config, configPath: '${dir.path}/Canoa.cfg',
+      store: SessionStore(includePreview: false), config: config, configPath: '${dir.path}/canoa.cfg',
     ));
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
@@ -232,7 +232,7 @@ void _staleDialogs() {
       host: host,
       settingsSignal: settings,
       hostingSignal: hosting,
-      configPath: '${dir.path}/Canoa.cfg',
+      configPath: '${dir.path}/canoa.cfg',
       writeConfig: (changed) async => written.add(changed),
     ));
 

@@ -9,7 +9,7 @@ import 'worktree.dart';
 /// One request to a host on a connection of its own, its `result` or a [WorktreeFailure] with the host's words.
 typedef HostWorktreeCall = Future<Map<String, Object?>> Function(String method, Map<String, Object?> params);
 
-/// Worktrees `canoa-host` makes for the agents it serves, inside the working roots of their entry; the host decides where
+/// Worktrees `canoa` makes for the agents it serves, inside the working roots of their entry; the host decides where
 /// and refuses anything outside them. Each request is a connection of its own, made before any agent starts on it, so a
 /// worktree is removed with no agent working in it.
 final class HostWorktrees implements Worktrees {

@@ -35,7 +35,7 @@ cdn = "local"
     }
   });
 
-  test('keeps the host table canoa-host reads when settings are saved', () {
+  test('keeps the host table canoa reads when settings are saved', () {
     final parsed = CanoaConfig.parse('''
 [desktop]
 start_hidden = true

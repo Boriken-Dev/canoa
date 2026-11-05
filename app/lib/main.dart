@@ -61,7 +61,7 @@ import 'worktree/worktree.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final config = await loadConfig();
-  // Beside Canoa.cfg on a desktop, in this origin's IndexedDB on the web.
+  // Beside canoa.cfg on a desktop, in this origin's IndexedDB on the web.
   final ledger = SessionLedger(platformLedgerBackend(configPath: desktopConfigPath()), settings: config.sessions);
   await ledger.load();
   final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
@@ -130,11 +130,11 @@ class CanoaApp extends StatefulWidget {
   final DesktopShell? shell;
   final ValueNotifier<int>? settingsSignal;
 
-  /// The `canoa-host` this app runs, on a desktop.
+  /// The `canoa` this app runs, on a desktop.
   final HostSupervisor? host;
   final ValueNotifier<int>? hostingSignal;
 
-  /// Where Canoa.cfg is and how it is written; by default the platform's place.
+  /// Where canoa.cfg is and how it is written; by default the platform's place.
   @visibleForTesting
   final String? configPath;
   @visibleForTesting
@@ -178,12 +178,12 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// Saves Canoa.cfg once canoa-host finds nothing wrong with it, then serves it.
+  /// Saves canoa.cfg once canoa finds nothing wrong with it, then serves it.
   /// Only [host] comes from the dialog: the rest is what the app has now, which Settings may have changed meanwhile.
   Future<String?> _saveHosting(CanoaConfig fromDialog) async {
     final host = widget.host;
     final path = _configPath;
-    if (host == null || path == null) return 'Canoa.cfg has no place on this computer';
+    if (host == null || path == null) return 'canoa.cfg has no place on this computer';
     final changed = config.withHost(fromDialog.host);
     if (changed.hostEntries.isNotEmpty) {
       final problem = await withFileBeside(path, changed.encode(), host.check);
@@ -236,16 +236,16 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       await _write(changed);
     } on UnsupportedError {
-      // Canoa.cfg in web/PWA deployments is read-only.
+      // canoa.cfg in web/PWA deployments is read-only.
     } catch (error) {
       if (mounted) {
         _messenger.currentState?.showSnackBar(
-          SnackBar(content: Text('Could not save Canoa.cfg: $error')),
+          SnackBar(content: Text('Could not save canoa.cfg: $error')),
         );
       }
     }
   }
-  /// Ends full access for [agent], in its sessions and in Canoa.cfg: the banner's one action, where the agent's setting turned it on.
+  /// Ends full access for [agent], in its sessions and in canoa.cfg: the banner's one action, where the agent's setting turned it on.
   Future<void> _endAgentFullAccess(String agent) async {
     store.setAgentFullAccess(agent, false);
     if (!config.fullAccess.contains(agent)) return;
@@ -254,13 +254,13 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       await _write(changed);
     } on UnsupportedError {
-      // Canoa.cfg in web/PWA deployments is read-only.
+      // canoa.cfg in web/PWA deployments is read-only.
     } catch (error) {
-      _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save Canoa.cfg: $error')));
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save canoa.cfg: $error')));
     }
   }
 
-  /// The profiles as Canoa.cfg has them now, for every agent the app offers or the file gives a profile.
+  /// The profiles as canoa.cfg has them now, for every agent the app offers or the file gives a profile.
   Future<void> _showProfiles() async {
     final above = _navigator.currentContext;
     if (above == null) return;
@@ -357,10 +357,10 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// Whether Canoa.cfg sets any profile, so an agent given none of it says so.
+  /// Whether canoa.cfg sets any profile, so an agent given none of it says so.
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
-  /// The profile [agent] starts with in [cwd], from [overlays] (by default all of Canoa.cfg's), once the person has seen it and
+  /// The profile [agent] starts with in [cwd], from [overlays] (by default all of canoa.cfg's), once the person has seen it and
   /// chosen its MCP servers; empty where there is none or no profile home. The dialog is shown only for a profile with more
   /// than a model, effort or mode, which are chosen beside Send. Throws when the person does not start it, or its environment
   /// cannot be built.
@@ -394,10 +394,10 @@ class _CanoaAppState extends State<CanoaApp> {
         await _write(changed);
         if (mounted) setState(() => config = changed);
       } on UnsupportedError {
-        // Canoa.cfg in web/PWA deployments is read-only.
+        // canoa.cfg in web/PWA deployments is read-only.
       } catch (error) {
         // The choices still apply to this session; only keeping them failed.
-        _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save Canoa.cfg: $error')));
+        _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save canoa.cfg: $error')));
       }
     }
     // What the dialog showed is what goes: its notes are said once, there.
@@ -491,8 +491,8 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// The sources Settings has: the presets it does not hide, Canoa.cfg's `[agents.NAME]` commands, and the agent entries of
-  /// the canoa-host this app runs.
+  /// The sources Settings has: the presets it does not hide, canoa.cfg's `[agents.NAME]` commands, and the agent entries of
+  /// the canoa this app runs.
   List<AgentSource> get _sources => [
     for (final preset in agentPresets)
       if (!config.hiddenSources.contains(preset.label)) AgentSource.preset(preset),
@@ -512,7 +512,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final serving = host?.listening.any((listening) => listening.name == source.hostEntry) ?? false;
     return serving
         ? const SourceCheck()
-        : SourceCheck(problem: 'canoa-host is not serving ${source.label} now: open Hosting to see why.');
+        : SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
   }
 
   /// Whether the sources have been looked for: only once a new session or Settings needs them, since each runs a lookup.
@@ -606,7 +606,7 @@ class _CanoaAppState extends State<CanoaApp> {
     }());
   }
 
-  /// Canoa.cfg's overlays that [session] starts with.
+  /// canoa.cfg's overlays that [session] starts with.
   Map<String, OverlaySource> _overlaysFor(ChatSession session) {
     final chosen = session.overlays;
     return chosen == null
@@ -694,14 +694,14 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
-    if (host == null || listening == null) throw StateError('canoa-host is not serving $name now: open Hosting to see why');
+    if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
     final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
-    if (method == null) throw StateError('canoa-host did not say which method it proves by');
+    if (method == null) throw StateError('canoa did not say which method it proves by');
     final endpoint = Uri.parse(listening.url);
     final worktrees = worktree
         ? _worktrees(SessionPlace.host, endpoint: listening.url, peerId: listening.peer, method: method.id)
         : null;
-    if (worktree && worktrees == null) throw StateError('Canoa cannot ask canoa-host for a worktree');
+    if (worktree && worktrees == null) throw StateError('Canoa cannot ask canoa for a worktree');
     final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(name));
     starting
       ..worktrees = worktrees

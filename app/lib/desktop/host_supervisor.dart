@@ -7,10 +7,10 @@ import 'package:flutter/foundation.dart';
 import 'host_tool.dart';
 
 enum HostPhase {
-  /// No `canoa-host` was found to run.
+  /// No `canoa` was found to run.
   absent,
 
-  /// Canoa.cfg names nothing to host.
+  /// canoa.cfg names nothing to host.
   idle,
   starting,
   running,
@@ -18,7 +18,7 @@ enum HostPhase {
   /// It ended on its own, and starts again after [HostSupervisor.retryIn].
   waiting,
 
-  /// Canoa.cfg is wrong for it; it starts again only when told to.
+  /// canoa.cfg is wrong for it; it starts again only when told to.
   failed,
   stopped,
 }
@@ -29,7 +29,7 @@ const int maxHostLog = 16 * 1024;
 /// How long the host has to end after its input closes before it is killed: longer than the host gives its agents.
 const Duration hostLeaving = Duration(seconds: 8);
 
-/// A `canoa-host` command that did not succeed, in its words.
+/// A `canoa` command that did not succeed, in its words.
 final class HostCommandFailed implements Exception {
   const HostCommandFailed(this.message);
   final String message;
@@ -37,7 +37,7 @@ final class HostCommandFailed implements Exception {
   String toString() => message;
 }
 
-/// `canoa-host pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
+/// `canoa pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
 final class HostPairing {
   HostPairing._(this._child, this.pin, this.hostId, this.method, this.url, this.paired);
 
@@ -61,7 +61,8 @@ final class HostPairing {
     final shown = Completer<Map<Object?, Object?>>();
     final said = StringBuffer();
     child.errors.listen((line) {
-      if (line.startsWith('canoa-host: ')) said.write(line.substring('canoa-host: '.length));
+      final text = hostSaid(line);
+      if (text != null) said.write(text);
     });
     child.lines.listen((line) {
       final Object? value;
@@ -88,13 +89,13 @@ final class HostPairing {
       const Duration(seconds: 20),
       onTimeout: () {
         child.kill();
-        throw const HostCommandFailed('canoa-host did not show a PIN');
+        throw const HostCommandFailed('canoa did not show a PIN');
       },
     );
     final [pin, hostId, url] = [first['pin'], first['peer'], first['url']];
     if (pin is! String || hostId is! String || url is! String) {
       child.kill();
-      throw const HostCommandFailed('canoa-host showed no PIN');
+      throw const HostCommandFailed('canoa showed no PIN');
     }
     // Nobody may be waiting on it when it is cancelled.
     unawaited(paired.future.then((_) {}, onError: (Object _) {}));
@@ -106,7 +107,7 @@ final class HostPairing {
   void cancel() => _child.kill();
 }
 
-/// Runs `canoa-host serve` as this app's child: started when Canoa.cfg names something to host, started again with a
+/// Runs `canoa serve` as this app's child: started when canoa.cfg names something to host, started again with a
 /// growing pause when it ends on its own, and ended, with every agent it started, when the app quits.
 class HostSupervisor extends ChangeNotifier {
   HostSupervisor(
@@ -171,7 +172,7 @@ class HostSupervisor extends ChangeNotifier {
   DateTime? _startedAt;
   int _generation = 0;
 
-  /// Serves Canoa.cfg at [configPath] when [hasEntries], else stops: called with the file as saved, after every change.
+  /// Serves canoa.cfg at [configPath] when [hasEntries], else stops: called with the file as saved, after every change.
   Future<void> apply({required String? configPath, required bool hasEntries}) async {
     _configPath = configPath;
     await _end();
@@ -217,7 +218,7 @@ class HostSupervisor extends ChangeNotifier {
     try {
       child = await tool!.start(['serve', '--config', _configPath!, '--until-stdin-closes']);
     } on Object catch (error) {
-      _problem = 'canoa-host could not start: $error';
+      _problem = 'canoa could not start: $error';
       return _ended(generation, null);
     }
     if (generation != _generation) {
@@ -268,10 +269,10 @@ class HostSupervisor extends ChangeNotifier {
     _child = null;
     _listening.clear();
     if (code != null) {
-      final said = const LineSplitter().convert(_log.toString()).where((line) => line.startsWith('canoa-host: '));
-      _problem = said.isEmpty ? 'canoa-host ended with status $code' : said.last.substring('canoa-host: '.length);
+      final said = const LineSplitter().convert(_log.toString()).map(hostSaid).nonNulls;
+      _problem = said.isEmpty ? 'canoa ended with status $code' : said.last;
     }
-    // Status 2 is a wrong Canoa.cfg or invocation: the same file fails the same way, so it waits for a person.
+    // Status 2 is a wrong canoa.cfg or invocation: the same file fails the same way, so it waits for a person.
     if (code == 2) {
       _phase = HostPhase.failed;
       return notifyListeners();
@@ -323,10 +324,10 @@ class HostSupervisor extends ChangeNotifier {
   /// Removes a key, paired or waiting. A link it holds ends within about a second.
   Future<void> revoke(String id) => _command(['revoke', '--', id]);
 
-  /// What is wrong with Canoa.cfg at [configPath] for the host, in its words, or null when nothing is.
+  /// What is wrong with canoa.cfg at [configPath] for the host, in its words, or null when nothing is.
   Future<String?> check(String configPath) async {
     final tool = this.tool;
-    if (tool == null) return 'canoa-host is not installed';
+    if (tool == null) return 'canoa is not installed';
     final checked = await tool.run(['check', '--config', configPath]);
     return checked.exitCode == 0 ? null : _said(checked);
   }
@@ -334,13 +335,13 @@ class HostSupervisor extends ChangeNotifier {
   /// Shows a PIN a native client pairs with. One wrong try ends it.
   Future<HostPairing> pair() async {
     final tool = this.tool;
-    if (tool == null) throw const HostCommandFailed('canoa-host is not installed');
+    if (tool == null) throw const HostCommandFailed('canoa is not installed');
     return HostPairing._start(await tool.start(['pair', '--until-stdin-closes']));
   }
 
   Future<HostOutput> _command(List<String> args) async {
     final tool = this.tool;
-    if (tool == null) throw const HostCommandFailed('canoa-host is not installed');
+    if (tool == null) throw const HostCommandFailed('canoa is not installed');
     final ran = await tool.run(args);
     if (ran.exitCode != 0) throw HostCommandFailed(_said(ran));
     return ran;
@@ -348,9 +349,9 @@ class HostSupervisor extends ChangeNotifier {
 
   static String _said(HostOutput output) {
     final lines = const LineSplitter().convert(output.stderr).where((line) => line.trim().isNotEmpty);
-    if (lines.isEmpty) return 'canoa-host ended with status ${output.exitCode}';
+    if (lines.isEmpty) return 'canoa ended with status ${output.exitCode}';
     final last = lines.last;
-    return last.startsWith('canoa-host: ') ? last.substring('canoa-host: '.length) : last;
+    return hostSaid(last) ?? last;
   }
 
   @override

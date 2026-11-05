@@ -70,7 +70,7 @@ final class ComposerKit {
   final Future<int?> Function(String path)? statFile;
   final ClipboardReader clipboard;
 
-  /// Canoa.cfg's overlays, by name, in their order.
+  /// canoa.cfg's overlays, by name, in their order.
   final List<String> overlays;
   final int pasteAsFile;
 

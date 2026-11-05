@@ -1,4 +1,4 @@
-// The profile vectors canoa-host is held to as well (crates/canoa-host/tests/profile.rs): each merge's view or first
+// The profile vectors canoa is held to as well (crates/canoa-host/tests/profile.rs): each merge's view or first
 // refusal, and each overlay source.
 import 'dart:convert';
 import 'dart:io';
