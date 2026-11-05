@@ -1,6 +1,6 @@
 [package]
 name = "canoa-host"
-description = "Serves stdio ACP agents and Guatiao agent providers from Canoa.cfg to paired keys, on loopback"
+description = "Serves stdio ACP agents and Guatiao agent providers from canoa.cfg to paired keys, on loopback"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,8 +14,10 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [[bin]]
-name = "canoa-host"
+name = "canoa"
 path = "src/main.rs"
+# The library crate canoa documents itself under the same name: both would write target/doc/canoa.
+doc = false
 
 [features]
 default = []

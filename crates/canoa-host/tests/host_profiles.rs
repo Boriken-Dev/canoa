@@ -1,4 +1,4 @@
-//! The built `canoa-host` serving an agent entry with profiles: what a profile gives the scripted agent it starts, what the
+//! The built `canoa` serving an agent entry with profiles: what a profile gives the scripted agent it starts, what the
 //! client is told, and what a client may not choose.
 #![allow(
     clippy::std_instead_of_core,
@@ -213,7 +213,7 @@ fn a_client_picks_only_among_the_profiles_its_entry_offers() {
     assert!(written.contains("after initialize"), "{written}");
 }
 
-/// Installs overlay `team` as the app does, in `overlays/` beside Canoa.cfg: its files, holding a copy of the MCP server,
+/// Installs overlay `team` as the app does, in `overlays/` beside canoa.cfg: its files, holding a copy of the MCP server,
 /// and a record with their digest.
 fn install_overlay(scratch: &Scratch) {
     let root = scratch.0.join("overlays").join("team");

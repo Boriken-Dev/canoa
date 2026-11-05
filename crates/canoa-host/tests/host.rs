@@ -1,4 +1,4 @@
-//! The built `canoa-host`, serving a stdio ACP agent and a Guatiao provider, reached by a client that proves a key as Canoa's
+//! The built `canoa`, serving a stdio ACP agent and a Guatiao provider, reached by a client that proves a key as Canoa's
 //! chat does.
 #![allow(
     clippy::std_instead_of_core,
@@ -113,7 +113,7 @@ fn a_paired_key_reaches_a_guatiao_provider() {
     let dir = cwd(&host.scratch);
     let (first, second) = with_link(host.url("echo"), &client, host.peer, |rpc| {
         let info = rpc.initialize().expect("initialize is answered");
-        assert_eq!(info["agentInfo"]["name"], "canoa-host", "{info}");
+        assert_eq!(info["agentInfo"]["name"], "canoa", "{info}");
         let session = new_session(rpc, &dir).expect("a session opens");
         let id = session["sessionId"].as_str().expect("an id").to_owned();
         (
@@ -265,7 +265,7 @@ fn id_prints_the_key_serve_reports() {
 #[test]
 fn check_prints_entries_and_a_bad_configuration_exits_2() {
     let scratch = Scratch::new();
-    let path = scratch.0.join("Canoa.cfg");
+    let path = scratch.0.join("canoa.cfg");
     let run = |args: &[&str]| {
         std::process::Command::new(host_binary())
             .args(args)
@@ -661,8 +661,8 @@ fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
 #[test]
 fn a_fresh_home_serves_by_the_default_method() {
     let scratch = Scratch::new();
-    let config = scratch.0.join("Canoa.cfg");
-    std::fs::write(&config, agent_entry("fixture", "")).expect("Canoa.cfg is written");
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(&config, agent_entry("fixture", "")).expect("canoa.cfg is written");
     let mut child = std::process::Command::new(host_binary())
         .args(["serve", "--config"])
         .arg(&config)

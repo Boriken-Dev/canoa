@@ -57,7 +57,7 @@ function agentForm(onAdd) {
   const add = element("button", { type: "button", className: "quiet", textContent: "Add this agent" });
   add.addEventListener("click", async () => {
     const problem = validAgent(label.value, url.value.trim(), peer.value.trim())
-      ?? (peer.value.trim() !== "" && method.value === "" ? "Choose the method the agent proves by: coqui-acp-bridge serve and canoa-host serve print it." : null);
+      ?? (peer.value.trim() !== "" && method.value === "" ? "Choose the method the agent proves by: coqui-acp-bridge serve and canoa serve print it." : null);
     status.textContent = problem ?? "";
     if (problem !== null) return;
     await onAdd({ label: label.value.trim(), url: url.value.trim(), peer: peer.value.trim(), method: method.value || undefined });

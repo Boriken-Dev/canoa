@@ -23,7 +23,7 @@ use crate::aos::{self, Environment, Facts, Limits, Overlay, TreeEntry, Weakening
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AosLayer {
-    /// The name Canoa.cfg gives it, its identity.
+    /// The name canoa.cfg gives it, its identity.
     pub identity: String,
     /// Its root, absolute, as processes see it.
     pub root: String,
@@ -31,7 +31,7 @@ pub struct AosLayer {
     pub os: String,
     /// Its tree digest.
     pub digest: String,
-    /// Whether Canoa.cfg pins it by digest.
+    /// Whether canoa.cfg pins it by digest.
     pub pinned: bool,
     /// Its manifest as Canoa applies it: the `bin` and `lib` defaults off, and no header sent over plain `http` to
     /// another host.
@@ -50,7 +50,7 @@ pub struct AosLayer {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct OverlayInput<'a> {
-    /// The name Canoa.cfg gives it.
+    /// The name canoa.cfg gives it.
     pub identity: &'a str,
     /// Its root, absolute.
     pub root: &'a str,
@@ -58,7 +58,7 @@ pub struct OverlayInput<'a> {
     pub os: &'a str,
     /// The AOS harness id of the agent it is for (`claude-code`, `codex`, ...), whose hints apply.
     pub harness: Option<&'a str>,
-    /// Whether Canoa.cfg pins it by digest; checking the digest is the caller's.
+    /// Whether canoa.cfg pins it by digest; checking the digest is the caller's.
     pub pinned: bool,
     /// Its tree, as [`aos::read_tree`] reads it or a source's objects hold it.
     pub tree: &'a [TreeEntry],

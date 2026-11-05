@@ -1,14 +1,14 @@
-// The real extension in a real browser reaching an agent that canoa-host serves on this machine, as Canoa's desktop app runs
+// The real extension in a real browser reaching an agent that canoa serves on this machine, as Canoa's desktop app runs
 // it: the person adds the host's entry by hand, the first connection leaves the browser's key waiting, the key is paired on
 // the host, and a whole turn then runs through the host to its agent.
 //
 //   CANOA_E2E_BROWSER=path/to/browser CANOA_E2E_HOST_URL=ws://127.0.0.1:PORT CANOA_E2E_HOST_PEER=sha256:...
-//     [CANOA_E2E_ACCEPT=path/to/canoa-host] [CANOA_E2E_METHOD=noise] node e2e/host.mjs
+//     [CANOA_E2E_ACCEPT=path/to/canoa] [CANOA_E2E_METHOD=noise] node e2e/host.mjs
 //
 // CANOA_E2E_METHOD is the method the host proves by, which the person names adding its entry: `noise` unless set.
 //
-// The entry must echo a prompt as `echo: TEXT`, as canoa-host's stdio_agent example does. With CANOA_E2E_ACCEPT the key is
-// paired by `canoa-host accept`, under this environment's COQUI_AGENTIC_PEER_HOME; without it the run waits up to five minutes
+// The entry must echo a prompt as `echo: TEXT`, as canoa's stdio_agent example does. With CANOA_E2E_ACCEPT the key is
+// paired by `canoa accept`, under this environment's COQUI_AGENTIC_PEER_HOME; without it the run waits up to five minutes
 // for a person to pair it in Canoa's Hosting dialog, comparing the id this prints.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -161,7 +161,7 @@ try {
 
   if (accept) {
     execFileSync(accept, ["accept", browserId], { encoding: "utf8" });
-    step("paired by canoa-host accept");
+    step("paired by canoa accept");
   } else {
     console.log(`waiting for a person to pair ${browserId} in Canoa's Hosting dialog`);
   }

@@ -310,13 +310,13 @@ impl Connection {
         })
     }
 
-    /// The line `canoa-host launch` reads first.
+    /// The line `canoa launch` reads first.
     pub(crate) fn launch_line(&self) -> Vec<u8> {
         super::launch::launch_line(&self.env)
     }
 }
 
-/// Each overlay `host` names, read from `overlays/NAME` beside Canoa.cfg and checked against the digest of the record
+/// Each overlay `host` names, read from `overlays/NAME` beside canoa.cfg and checked against the digest of the record
 /// the app wrote when it installed it, `overlays/NAME.json`. One that cannot be read or does not match is left out.
 fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> {
     let mut out = Vec::new();
@@ -529,7 +529,7 @@ impl Written {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
         let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-        let root = std::env::temp_dir().join(format!("canoa-host-profile-{name}"));
+        let root = std::env::temp_dir().join(format!("canoa-profile-{name}"));
         #[cfg_attr(not(unix), expect(unused_mut, reason = "only Unix sets a mode"))]
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]

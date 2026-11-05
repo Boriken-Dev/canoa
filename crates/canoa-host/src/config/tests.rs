@@ -9,7 +9,7 @@ use super::*;
 const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn base() -> PathBuf {
-    std::env::temp_dir().join("canoa-host-config-test")
+    std::env::temp_dir().join("canoa-config-test")
 }
 
 fn parse(text: &str) -> Result<Config, ConfigError> {

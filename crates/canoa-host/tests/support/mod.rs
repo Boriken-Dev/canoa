@@ -43,7 +43,7 @@ pub fn key() -> Identity {
 }
 
 pub fn host_binary() -> &'static str {
-    env!("CARGO_BIN_EXE_canoa-host")
+    env!("CARGO_BIN_EXE_canoa")
 }
 
 /// A fixture `cargo test` built into `target/<profile>/examples`.
@@ -82,7 +82,7 @@ impl Scratch {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |since| since.as_nanos());
         let dir = std::env::temp_dir().join(format!(
-            "canoa-host-test-{}-{stamp}-{}",
+            "canoa-test-{}-{stamp}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
@@ -97,7 +97,7 @@ impl Drop for Scratch {
     }
 }
 
-/// `canoa-host serve` on a configuration, with a home of its own.
+/// `canoa serve` on a configuration, with a home of its own.
 pub struct Host {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -108,7 +108,7 @@ pub struct Host {
 }
 
 impl Host {
-    /// Writes `config` as Canoa.cfg and serves it, waiting for one line per entry.
+    /// Writes `config` as canoa.cfg and serves it, waiting for one line per entry.
     pub fn start(config: &str, entries: usize) -> Self {
         Self::start_with(config, entries, &[], &[])
     }
@@ -178,8 +178,8 @@ impl Host {
         env: &[(&str, std::ffi::OsString)],
         stderr: Stdio,
     ) -> Self {
-        let path = scratch.0.join("Canoa.cfg");
-        std::fs::write(&path, config).expect("Canoa.cfg is written");
+        let path = scratch.0.join("canoa.cfg");
+        std::fs::write(&path, config).expect("canoa.cfg is written");
         let mut child = Command::new(host_binary())
             .arg("serve")
             .arg("--config")
@@ -275,7 +275,7 @@ impl Host {
         self.scratch.0.join("home")
     }
 
-    /// Another `canoa-host` command on this host's home.
+    /// Another `canoa` command on this host's home.
     pub fn command(&self, args: &[&str]) -> Output {
         let named = ["--method", method().name()];
         let takes_method = matches!(args.first(), Some(&"id" | &"pair"));
@@ -287,7 +287,7 @@ impl Host {
             .expect("the command runs")
     }
 
-    /// Pairs `identity` as `canoa-host accept` would, without the round of being turned away first.
+    /// Pairs `identity` as `canoa accept` would, without the round of being turned away first.
     pub fn pair(&self, identity: &Identity) {
         let store = TrustStore::open(&self.home().join("peers")).expect("the trust store opens");
         store

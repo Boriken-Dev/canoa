@@ -1,4 +1,4 @@
-//! A git worktree per session, made by the built `canoa-host` inside an entry's working roots, against repositories in a
+//! A git worktree per session, made by the built `canoa` inside an entry's working roots, against repositories in a
 //! temporary directory. Skipped, saying so, where no `git` runs.
 #![allow(
     clippy::std_instead_of_core,

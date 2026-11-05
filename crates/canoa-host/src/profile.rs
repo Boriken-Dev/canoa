@@ -1,6 +1,6 @@
 //! Profiles: the environment, initial context, skills, MCP servers and defaults an agent is launched with, in layers.
 //!
-//! A profile document is TOML, the same in a file and under a table of Canoa.cfg. Layers merge lowest first: a later layer
+//! A profile document is TOML, the same in a file and under a table of canoa.cfg. Layers merge lowest first: a later layer
 //! wins per key, named entries merge by name, and a layer can remove what a lower one set. The effective profile keeps the
 //! layer of every value. The app reads the same schema; `tests/vectors/profile.json` holds both to it.
 
@@ -102,7 +102,7 @@ pub enum LayerKind {
     BuiltIn,
     /// A named overlay, from a git source or a local directory.
     Overlay,
-    /// The person's own, in Canoa.cfg.
+    /// The person's own, in canoa.cfg.
     User,
     /// A file in the working directory, used only once the person trusts that directory.
     Project,
@@ -520,7 +520,7 @@ impl Profile {
         Self::checked(raw, kind)
     }
 
-    /// Reads a profile from a TOML table already parsed, such as Canoa.cfg's `[profile]`.
+    /// Reads a profile from a TOML table already parsed, such as canoa.cfg's `[profile]`.
     ///
     /// # Errors
     ///

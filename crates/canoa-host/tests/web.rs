@@ -1,5 +1,5 @@
-//! `canoa-host serve` serving the web app beside its entries: from a directory or the site built in, over HTTP on loopback
-//! or HTTPS, with `/canoa-host.json` naming the entries it serves.
+//! `canoa serve` serving the web app beside its entries: from a directory or the site built in, over HTTP on loopback
+//! or HTTPS, with `/canoa.json` naming the entries it serves.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -106,9 +106,9 @@ fn serve_web_serves_a_directory_and_lists_its_entries() {
         std::fs::read(site.join("app.js")).expect("the fixture")
     );
     assert_eq!(get(&url, "/sessions/1").1, index, "an app route is the app");
-    assert_eq!(get(&url, "/../Canoa.cfg").0, 404);
+    assert_eq!(get(&url, "/../canoa.cfg").0, 404);
 
-    let (status, listed) = get(&url, "/canoa-host.json");
+    let (status, listed) = get(&url, "/canoa.json");
     assert_eq!(status, 200);
     let listed: Value = serde_json::from_slice(&listed).expect("JSON");
     assert_eq!(listed["peer"], host.peer.to_string());
@@ -161,11 +161,11 @@ fn the_web_table_serves_a_directory_named_from_canoa_cfg() {
     );
 }
 
-/// `canoa-host serve` on `config` with `args`, which is expected to end at once.
+/// `canoa serve` on `config` with `args`, which is expected to end at once.
 fn serve_refused(config: &str, args: &[&str]) -> (Option<i32>, String) {
     let scratch = Scratch::new();
-    let path = scratch.0.join("Canoa.cfg");
-    std::fs::write(&path, config).expect("Canoa.cfg is written");
+    let path = scratch.0.join("canoa.cfg");
+    std::fs::write(&path, config).expect("canoa.cfg is written");
     let output = Command::new(host_binary())
         .arg("serve")
         .arg("--config")
@@ -217,8 +217,8 @@ fn a_site_that_is_not_one_is_refused() {
 fn a_site_holding_canoa_cfg_is_refused() {
     let scratch = Scratch::new();
     std::fs::copy(site().join("index.html"), scratch.0.join("index.html")).expect("an index");
-    let path = scratch.0.join("Canoa.cfg");
-    std::fs::write(&path, agents(1)).expect("Canoa.cfg is written");
+    let path = scratch.0.join("canoa.cfg");
+    std::fs::write(&path, agents(1)).expect("canoa.cfg is written");
     let output = Command::new(host_binary())
         .arg("serve")
         .arg("--config")

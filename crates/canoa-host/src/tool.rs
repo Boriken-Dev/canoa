@@ -1,6 +1,6 @@
-//! A command-line tool with no ACP of its own, presented as an ACP agent. Canoa.cfg says how a prompt goes in and how each
+//! A command-line tool with no ACP of its own, presented as an ACP agent. canoa.cfg says how a prompt goes in and how each
 //! JSON line the tool writes becomes an ACP update, so no tool has code of its own here. What runs for each connection is
-//! `canoa-host tool`, as a stdio agent: the host's scope and process handling apply to it as to any agent.
+//! `canoa tool`, as a stdio agent: the host's scope and process handling apply to it as to any agent.
 
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -28,7 +28,7 @@ pub const MAX_TEXT: usize = 1024 * 1024;
 pub const MAX_LABEL: usize = 4096;
 /// Permission requests one process may have waiting; past it, a request is refused at once.
 pub const MAX_ASKS: usize = 16;
-/// The most an entry takes as JSON, since `serve` gives it to `canoa-host tool` on a command line, which Windows caps at
+/// The most an entry takes as JSON, since `serve` gives it to `canoa tool` on a command line, which Windows caps at
 /// 32,767 characters.
 pub const MAX_SPEC: usize = 16 * 1024;
 

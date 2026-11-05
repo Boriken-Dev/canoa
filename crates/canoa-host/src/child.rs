@@ -217,7 +217,7 @@ fn token() -> io::Result<String> {
 fn forward(entry: &str, mut output: Box<dyn Read + Send>, budget: Arc<AtomicUsize>) {
     let entry = String::from(entry);
     let spawned = thread::Builder::new()
-        .name("canoa-host-provider-output".to_owned())
+        .name("canoa-provider-output".to_owned())
         .spawn(move || {
             let mut buffer = vec![0_u8; 8192];
             loop {

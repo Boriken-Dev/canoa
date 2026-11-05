@@ -19,10 +19,10 @@ use std::time::{Instant, SystemTime};
 use crate::config::{WebConfig, WebTls};
 use crate::serve::{Gate, Listening, Serving};
 
-/// Where the site is served when Canoa.cfg does not say: loopback, port 7800.
+/// Where the site is served when canoa.cfg does not say: loopback, port 7800.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7800);
 /// The path of the list of this host's entries: `{"peer", "method", "entries": [{"name", "kind", "url"}]}`.
-pub const HOST_INDEX: &str = "/canoa-host.json";
+pub const HOST_INDEX: &str = "/canoa.json";
 /// Whether this build holds a site of its own (feature `web`), served when no directory is given.
 pub const BUILT_IN: bool = cfg!(feature = "web");
 /// Headers one request may carry; past it the request is refused with 431.
@@ -143,7 +143,7 @@ impl Limits {
         self
     }
 
-    /// Each limit looser than the default, as `(setting, value, default)` in Canoa.cfg's words.
+    /// Each limit looser than the default, as `(setting, value, default)` in canoa.cfg's words.
     fn weakened(&self) -> Vec<(&'static str, String, String)> {
         let strict = Self::default();
         let mut looser = Vec::new();
@@ -188,7 +188,7 @@ impl Limits {
         looser
     }
 
-    /// The first limit that would serve nothing, in Canoa.cfg's words.
+    /// The first limit that would serve nothing, in canoa.cfg's words.
     fn zero(&self) -> Option<&'static str> {
         [
             ("max_connections", self.max_connections == 0),
@@ -247,7 +247,7 @@ impl fmt::Display for WebError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoSite => f.write_str(
-                "no site to serve: give [host.web] dir or --web DIR, or build canoa-host with the web feature",
+                "no site to serve: give [host.web] dir or --web DIR, or build canoa with the web feature",
             ),
             Self::Site { dir, why } => write!(f, "the site {} {why}", dir.display()),
             Self::PlainBeyondLoopback(address) => write!(
@@ -439,7 +439,7 @@ impl WebServer {
             };
             let shared = Arc::clone(&self.shared);
             let spawned = std::thread::Builder::new()
-                .name("canoa-host-web".to_owned())
+                .name("canoa-web".to_owned())
                 .spawn(move || {
                     connection(&shared, tcp);
                     drop((entered, from));
@@ -512,7 +512,7 @@ fn site_root(dir: &Path, keep_out: &[PathBuf]) -> Result<PathBuf, WebError> {
         .any(|private| private.starts_with(&root))
     {
         return Err(refused(
-            "holds a directory the host keeps private, Canoa.cfg's or its identity's: serve a directory of the site's own",
+            "holds a directory the host keeps private, canoa.cfg's or its identity's: serve a directory of the site's own",
         ));
     }
     Ok(root)

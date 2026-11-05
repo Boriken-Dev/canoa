@@ -1,5 +1,5 @@
 {
-  "about": "Profile documents, their merge and the effective view, read by canoa-host (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal.",
+  "about": "Profile documents, their merge and the effective view, read by canoa (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal.",
   "merges": [
     {
       "name": "all six layers: a later layer wins per key, lists merge by name, a layer removes an entry",

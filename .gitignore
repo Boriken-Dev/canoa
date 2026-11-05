@@ -10,7 +10,7 @@ CLAUDE*
 .claude
 *.local.*
 
-# Rust. The workspace builds a binary, canoa-host, so its lockfile is committed.
+# Rust. The workspace builds a binary, canoa, so its lockfile is committed.
 /target/
 
 # Node

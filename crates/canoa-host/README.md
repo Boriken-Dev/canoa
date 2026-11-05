@@ -6,7 +6,7 @@
 [![Docs](https://img.shields.io/docsrs/canoa-host)](https://docs.rs/canoa-host)
 [![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/test.yml)](https://github.com/Boriken-Dev/canoa/actions/workflows/test.yml)
 
-**Serves the agents Canoa.cfg names to keys you paired, on this machine's loopback, and to nobody else.** An entry is a
+**Serves the agents canoa.cfg names to keys you paired, on this machine's loopback, and to nobody else.** An entry is a
 program that speaks the Agent Client Protocol on its standard streams, or a Guatiao `agent_provider` from a library or
 from a source such as Python's, served through `coqui-acp-provider`'s facade. Each entry listens on a WebSocket of its own; a client proves a key the trust
 store accepts, and every message after that is sealed in the session the proof ended in. See the
@@ -14,19 +14,19 @@ store accepts, and every message after that is sealed in the session the proof e
 
 ## Features
 
-- Stdio ACP agents and Guatiao agent providers, one `Canoa.cfg` entry each, a fresh process per connection.
+- Stdio ACP agents and Guatiao agent providers, one `canoa.cfg` entry each, a fresh process per connection.
 - A provider written in Python, Lua, JavaScript, Rhai or WebAssembly through its Guatiao source, and a provider built from
   a `settings` table checked against its schema. Settings reach the provider's process on its standard input, never its
   command line.
 - The in-band proof only, by Noise or WebCrypto, the method of this user's identity: no connection reaches an agent without a paired key, and a removed key loses its link
   within about a second.
 - Loopback only. A proxy that ends TLS can carry it further, since the proof does not depend on TLS.
-- A command-line tool with no ACP, such as Pi, from one `[host.tools]` entry: rules in Canoa.cfg turn its JSON lines into
+- A command-line tool with no ACP, such as Pi, from one `[host.tools]` entry: rules in canoa.cfg turn its JSON lines into
   ACP updates and its questions into permission requests, and each session opens by saying what the tool does unasked.
 - A client cannot have the host start a program: a stdio MCP server in `session/new`, and `_meta`, never reach a stdio agent.
 - Per entry: working roots a session's `cwd` must be under, the paired keys that may use it, and how many at once.
 - Canoa's web app, served beside the entries from a directory or built in: only the site's files, under a
-  Content-Security-Policy that lets the page connect to this host's entries alone, with `/canoa-host.json` naming them
+  Content-Security-Policy that lets the page connect to this host's entries alone, with `/canoa.json` naming them
   for the page to fill in; plain HTTP on loopback, HTTPS beyond it.
 
 ## Installation
@@ -51,7 +51,7 @@ CANOA_WEB_DIST="$PWD/app/build/web" cargo build --release -p canoa-host --featur
 ## Quick start
 
 ```toml
-# Canoa.cfg
+# canoa.cfg
 [host.agents.claude]
 program = "npx"
 args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
@@ -72,9 +72,9 @@ paths = ["python/guatiao", "python/coqui_acp_provider"]
 ```
 
 ```sh
-canoa-host serve            # one JSON line per entry: name, kind, url, this host's peer id and its method
-canoa-host peers            # a client that connected once is waiting
-canoa-host accept <PEER>    # pair it, after comparing the id with the one the client shows
+canoa serve            # one JSON line per entry: name, kind, url, this host's peer id and its method
+canoa peers            # a client that connected once is waiting
+canoa accept <PEER>    # pair it, after comparing the id with the one the client shows
 ```
 
 The library reads the same file:
@@ -91,14 +91,14 @@ assert_eq!(config.entries[0].name, "echo");
 ## Command line
 
 ```text
-canoa-host serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--web [DIR]] [--web-listen ADDRESS]
-canoa-host check [--config FILE] [--format text|json]
-canoa-host id [--method noise|webcrypto]
-canoa-host peers [--format text|json]
-canoa-host accept PEER
-canoa-host revoke PEER
-canoa-host pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto]
-canoa-host provider (--library FILE | --source FILE) --provider ID [--working-root DIR]... [--max-sessions N]
+canoa serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--web [DIR]] [--web-listen ADDRESS]
+canoa check [--config FILE] [--format text|json]
+canoa id [--method noise|webcrypto]
+canoa peers [--format text|json]
+canoa accept PEER
+canoa revoke PEER
+canoa pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto]
+canoa provider (--library FILE | --source FILE) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin]
 ```
 
@@ -109,13 +109,13 @@ the identity's method; without it, the one this user has, or the default for a n
 on `127.0.0.1:7800` too, from `DIR`, `[host.web]`'s `dir` or the site built in, and prints `{"web": URL}` after the
 entries.
 
-Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg was wrong.
+Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong.
 
 ## API overview
 
 | Module | Purpose |
 | --- | --- |
-| `config` | the `[host]` table of Canoa.cfg |
+| `config` | the `[host]` table of canoa.cfg |
 | `serve` | binding every entry and serving connections |
 | `provider` | one Guatiao provider as an ACP agent on standard input and output |
 | `peers` | listing, accepting and removing keys |

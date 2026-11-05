@@ -137,7 +137,7 @@ fn reading() {
                 continue;
             }
             "catalog" => {
-                skipped.push((id, "a catalog, which canoa-host does not read"));
+                skipped.push((id, "a catalog, which canoa does not read"));
                 continue;
             }
             "aos" if yaml => {
@@ -235,7 +235,7 @@ fn catalogs_are_not_read_by_canoa_host() {
         .map(|case| {
             (
                 id(case).to_owned(),
-                "catalogs and icons: canoa-host is no store, and reads neither",
+                "catalogs and icons: canoa is no store, and reads neither",
             )
         })
         .collect();

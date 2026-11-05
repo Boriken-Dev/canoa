@@ -49,7 +49,7 @@ impl ProviderOptions {
     }
 }
 
-/// The settings `canoa-host serve` gives a provider process as the first line of its standard input, so that no value is
+/// The settings `canoa serve` gives a provider process as the first line of its standard input, so that no value is
 /// on a command line, which other users of the machine may read. `Debug` shows no setting's value and no token.
 #[derive(Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -209,7 +209,7 @@ pub fn serve_stdio(options: &ProviderOptions) -> Result<(), ProviderError> {
     serve_on(options, std::io::stdin(), std::io::stdout())
 }
 
-/// As [`serve_stdio`], on the socket `canoa-host serve` listens on at `address`, after sending it `token`. The process's
+/// As [`serve_stdio`], on the socket `canoa serve` listens on at `address`, after sending it `token`. The process's
 /// standard input, output and error are then the provider's alone: none of them is the transport.
 ///
 /// # Errors
@@ -249,13 +249,13 @@ fn serve_on(
         .map_err(ProviderError::Transport)?;
     AcpFacade::new(provider)
         .with_settings(settings)
-        .with_agent_info("canoa-host", env!("CARGO_PKG_VERSION"))
+        .with_agent_info("canoa", env!("CARGO_PKG_VERSION"))
         .run(transport)
         .map_err(|error| ProviderError::Facade(error.to_string()))
 }
 
 fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>), ProviderError> {
-    let mut registry = Registry::new("canoa-host", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     match &options.origin {
         Origin::Library(library) => {
             registry

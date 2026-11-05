@@ -1,4 +1,4 @@
-//! The `[host]` table of Canoa.cfg: what the host serves, and to whom. The other tables belong to the app and are not read.
+//! The `[host]` table of canoa.cfg: what the host serves, and to whom. The other tables belong to the app and are not read.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -55,7 +55,7 @@ pub struct WebConfig {
     pub connect: Vec<String>,
     /// What one connection may take.
     pub limits: crate::web::Limits,
-    /// Directories the site may not hold, such as Canoa.cfg's and the identity's: a site whose directory is one of them,
+    /// Directories the site may not hold, such as canoa.cfg's and the identity's: a site whose directory is one of them,
     /// or above one, is refused. Not read from the file.
     pub keep_out: Vec<PathBuf>,
 }
@@ -109,12 +109,12 @@ impl WebTls {
 pub struct HostProfile {
     /// The profile document, read as the person's own layer: its relative paths are taken from `directory`.
     pub profile: Profile,
-    /// AOS overlays the app installed in `overlays/` beside Canoa.cfg, by name, applied below the profile.
+    /// AOS overlays the app installed in `overlays/` beside canoa.cfg, by name, applied below the profile.
     pub overlays: Vec<String>,
     /// An overlay's MCP server name and the definition digest (`sha256:` and 64 hex digits) it may start at. No other
     /// overlay server starts.
     pub allow_mcp: BTreeMap<String, String>,
-    /// Canoa.cfg's directory, absolute.
+    /// canoa.cfg's directory, absolute.
     pub directory: PathBuf,
 }
 
@@ -160,7 +160,7 @@ pub enum EntryKind {
         provider: String,
         /// The provider's configuration, checked against the schema it declares when a connection loads it.
         settings: Option<Settings>,
-        /// The directory the provider's process runs in, absolute: Canoa.cfg's.
+        /// The directory the provider's process runs in, absolute: canoa.cfg's.
         directory: PathBuf,
         /// Sessions one connection may hold.
         max_sessions: usize,
@@ -237,7 +237,7 @@ impl ImportSearch {
     }
 }
 
-/// A table of settings from Canoa.cfg, as JSON, the form a provider process receives it in. `Debug` shows its keys,
+/// A table of settings from canoa.cfg, as JSON, the form a provider process receives it in. `Debug` shows its keys,
 /// never its values, which may be secrets.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Settings(serde_json::Map<String, serde_json::Value>);
@@ -262,7 +262,7 @@ impl fmt::Debug for Settings {
     }
 }
 
-/// Why Canoa.cfg could not be used. No variant quotes a value from the file, which may hold a secret.
+/// Why canoa.cfg could not be used. No variant quotes a value from the file, which may hold a secret.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ConfigError {
@@ -427,7 +427,7 @@ impl Config {
         Self::from_str_in(text, base)
     }
 
-    /// Parses Canoa.cfg's text, with relative `library` and `source` paths taken from `base`, where a provider runs.
+    /// Parses canoa.cfg's text, with relative `library` and `source` paths taken from `base`, where a provider runs.
     /// Touches no file.
     ///
     /// # Errors
@@ -704,7 +704,7 @@ fn absolute_paths(
         let path = std::path::absolute(&path).unwrap_or(path);
         *text = path
             .to_str()
-            .ok_or_else(|| invalid(name, "Canoa.cfg's directory is not Unicode, so a relative path cannot be made absolute"))?
+            .ok_or_else(|| invalid(name, "canoa.cfg's directory is not Unicode, so a relative path cannot be made absolute"))?
             .to_owned();
         Ok(())
     };
@@ -879,7 +879,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
     })
 }
 
-/// `[host.web]`, its paths made absolute from Canoa.cfg's directory. Errors name a setting, never a value.
+/// `[host.web]`, its paths made absolute from canoa.cfg's directory. Errors name a setting, never a value.
 fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig, ConfigError> {
     let refused = |what: &str| ConfigError::Invalid {
         entry: None,

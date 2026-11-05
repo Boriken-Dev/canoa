@@ -1,14 +1,14 @@
-// The web app as canoa-host serves it, in a real browser: `serve` with [host.web] serves a `flutter build web` output, which
+// The web app as canoa serves it, in a real browser: `serve` with [host.web] serves a `flutter build web` output, which
 // starts under the host's Content-Security-Policy with nothing refused; then Canoa's own connection code, compiled from
-// app/tool/peer_page.dart and served from the same site, reads canoa-host.json, is turned away by the host's agent entry
-// until its key is accepted, and after `canoa-host accept` runs a turn with that entry's scripted agent.
+// app/tool/peer_page.dart and served from the same site, reads canoa.json, is turned away by the host's agent entry
+// until its key is accepted, and after `canoa accept` runs a turn with that entry's scripted agent.
 //
 //   dart compile js -O1 -o <dir>/page.js tool/peer_page.dart        (in app/)
-//   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_HOST=path/to/canoa-host CANOA_E2E_AGENT=path/to/stdio_agent \
+//   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_HOST=path/to/canoa CANOA_E2E_AGENT=path/to/stdio_agent \
 //   CANOA_E2E_WEB=app/build/web CANOA_E2E_APP_PAGE=<dir> [CANOA_E2E_METHOD=noise] [CANOA_E2E_SHOT=<file.png>] \
 //   [CANOA_E2E_CONNECT=https://fonts.gstatic.com] node e2e/served.mjs
 //
-// The agent must echo a prompt as `echo: TEXT`, as canoa-host's stdio_agent example does. CANOA_E2E_SHOT keeps a picture of
+// The agent must echo a prompt as `echo: TEXT`, as canoa's stdio_agent example does. CANOA_E2E_SHOT keeps a picture of
 // the app as it started. CANOA_E2E_CONNECT, comma-separated, is [host.web] connect: origins the page may reach besides the
 // entries, such as the one Flutter's web build fetches its fonts from when the app does not bundle them.
 import { execFileSync, spawn } from "node:child_process";
@@ -37,14 +37,14 @@ cpSync(web, site, { recursive: true });
 copyFileSync(path.join(appPage, "page.js"), path.join(site, "page.js"));
 writeFileSync(path.join(site, "peer.html"),
   '<!doctype html><title>peer</title><script type="module" src="canoa_peer_bridge.mjs"></script><script src="page.js" defer></script>');
-writeFileSync(path.join(work, "Canoa.cfg"), [
+writeFileSync(path.join(work, "canoa.cfg"), [
   "[host.agents.echo]", `program = ${JSON.stringify(agent)}`,
   "[host.web]", 'dir = "site"', 'listen = "127.0.0.1:0"',
   ...(connect ? [`connect = ${JSON.stringify(connect.split(","))}`] : []), "",
 ].join("\n"));
 
 const env = { ...process.env, COQUI_AGENTIC_PEER_HOME: home, CANOA_LOG: "info" };
-const host = spawn(hostProgram, ["serve", "--config", path.join(work, "Canoa.cfg"), "--method", METHOD, "--until-stdin-closes"],
+const host = spawn(hostProgram, ["serve", "--config", path.join(work, "canoa.cfg"), "--method", METHOD, "--until-stdin-closes"],
   { env, stdio: ["pipe", "pipe", "inherit"] });
 const said = readline.createInterface({ input: host.stdout })[Symbol.asyncIterator]();
 const hear = async () => JSON.parse((await said.next()).value);
@@ -126,7 +126,7 @@ try {
   const call = (name, ...args) => page.run(`${name}(${args.map((arg) => JSON.stringify(arg)).join(", ")})`);
   const turn = async (text) => JSON.parse(await call("canoaTurn", entry.url, entry.peer, METHOD, text));
 
-  await check("the app reads the host's entries, its id and its method from canoa-host.json", async () => {
+  await check("the app reads the host's entries, its id and its method from canoa.json", async () => {
     const served = JSON.parse(await call("canoaServedHost"));
     const expected = { peer: entry.peer, method: METHOD, entries: [{ name: entry.name, kind: entry.kind, url: entry.url }] };
     if (JSON.stringify(served) !== JSON.stringify(expected)) throw new Error(JSON.stringify(served));

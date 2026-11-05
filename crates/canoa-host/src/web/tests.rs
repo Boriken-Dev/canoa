@@ -454,7 +454,7 @@ fn the_host_index_lists_the_entries_it_was_given() {
         },
     ];
     let address = running(&loopback(&site()), &entries);
-    let reply = get(address, "/canoa-host.json?x=1");
+    let reply = get(address, "/canoa.json?x=1");
     assert_eq!(reply.status, 200);
     assert_eq!(reply.headers["content-type"], "application/json");
     assert_eq!(reply.headers["cache-control"], "no-store");
@@ -479,8 +479,7 @@ struct Outside {
 
 impl Outside {
     fn new(name: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("canoa-host-web-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("canoa-web-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("site")).expect("a site");
         std::fs::create_dir_all(dir.join("outside")).expect("a directory outside it");
@@ -782,7 +781,7 @@ fn plain_http_beyond_loopback_is_refused() {
 
 #[test]
 fn a_site_without_an_index_or_a_limit_of_zero_is_refused() {
-    let empty = std::env::temp_dir().join(format!("canoa-host-web-empty-{}", std::process::id()));
+    let empty = std::env::temp_dir().join(format!("canoa-web-empty-{}", std::process::id()));
     std::fs::create_dir_all(&empty).expect("a directory");
     let refused =
         WebServer::bind_listing(&loopback(&empty), PEER, "noise", &[]).expect_err("refused");

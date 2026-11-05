@@ -105,7 +105,7 @@ impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NothingToServe => f.write_str(
-                "Canoa.cfg has no [host.agents], [host.providers] or [host.tools] entry to serve",
+                "canoa.cfg has no [host.agents], [host.providers] or [host.tools] entry to serve",
             ),
             Self::Listen { entry, failure } => {
                 write!(f, "host entry {entry} could not listen: {failure}")
@@ -550,7 +550,7 @@ impl Serving {
             .map(|(served, listener)| {
                 let shared = Arc::clone(&self.shared);
                 thread::Builder::new()
-                    .name(format!("canoa-host-{}", served.name))
+                    .name(format!("canoa-{}", served.name))
                     .spawn(move || accept_loop(&shared, &served, &listener))
             })
             .collect();
@@ -589,7 +589,7 @@ fn accept_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &websocket:
         let shared = Arc::clone(shared);
         let served = Arc::clone(served);
         let spawned = thread::Builder::new()
-            .name("canoa-host-peer".to_owned())
+            .name("canoa-peer".to_owned())
             .spawn(move || match pending.handshake() {
                 Ok(channel) => {
                     connection(&shared, &served, &channel, entered);
@@ -633,7 +633,7 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         Err(error @ coqui_agentic_peer::Error::Proof(_)) => {
             return tracing::info!(
                 entry = served.name,
-                "a key was refused: {error}; a key that proved itself and is not paired waits for `canoa-host accept`"
+                "a key was refused: {error}; a key that proved itself and is not paired waits for `canoa accept`"
             );
         }
         Err(error) => {

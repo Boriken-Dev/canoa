@@ -1,4 +1,4 @@
-//! `canoa-host`: serves the agents and providers Canoa.cfg names to paired keys, on loopback.
+//! `canoa`: serves the agents and providers canoa.cfg names to paired keys, on loopback.
 #![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,
@@ -8,7 +8,7 @@
 
 use std::io::{IsTerminal as _, Write as _};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,16 +28,16 @@ use coqui_web::{Channel as _, Failure, Limits};
 
 const AFTER_HELP: &str = "\
 Environment:
-  CANOA_CONFIG             Canoa.cfg to read, below --config and above the platform's default
+  CANOA_CONFIG             canoa.cfg to read, below --config and above the platform's default
   CANOA_LOG                what to log on standard error, as a tracing filter (default: info)
   COQUI_AGENTIC_PEER_HOME  the directory of this host's identity and trust store, shared with coqui-acp-bridge
   NO_COLOR                 no colour in the log
 
-Exit status: 0 success, 1 the operation failed, 2 the invocation or Canoa.cfg was wrong.";
+Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong.";
 
-/// Serves stdio ACP agents and Guatiao agent providers from Canoa.cfg to paired keys, on loopback.
+/// Serves stdio ACP agents and Guatiao agent providers from canoa.cfg to paired keys, on loopback.
 #[derive(Debug, Parser)]
-#[command(name = "canoa-host", version, after_help = AFTER_HELP)]
+#[command(name = "canoa", version, after_help = AFTER_HELP)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -45,9 +45,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Serve every entry of Canoa.cfg's [host] table until stopped; prints one JSON line per entry.
+    /// Serve every entry of canoa.cfg's [host] table until stopped; prints one JSON line per entry.
     Serve(ServeArgs),
-    /// Check Canoa.cfg's [host] table and print its entries, serving nothing.
+    /// Check canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
     /// Print this host's peer id, which a client pins.
     Id {
@@ -110,10 +110,10 @@ enum Command {
         /// The directory to run in, from which relative paths in the settings are taken.
         #[arg(long)]
         directory: Option<PathBuf>,
-        /// Read the settings from the first line of standard input, as `canoa-host serve` writes them.
+        /// Read the settings from the first line of standard input, as `canoa serve` writes them.
         #[arg(long)]
         settings_on_stdin: bool,
-        /// Serve ACP on the loopback socket `canoa-host serve` listens on, proving the token its first line gives, instead
+        /// Serve ACP on the loopback socket `canoa serve` listens on, proving the token its first line gives, instead
         /// of on standard input and output.
         #[arg(long, requires = "settings_on_stdin")]
         connect: Option<std::net::SocketAddr>,
@@ -179,8 +179,8 @@ struct ServeArgs {
 
 #[derive(Debug, Args)]
 struct ConfigArgs {
-    /// Canoa.cfg to read; default %APPDATA%\Canoa\Canoa.cfg, ~/Library/Application Support/Canoa/Canoa.cfg, or
-    /// $XDG_CONFIG_HOME/Canoa/Canoa.cfg (~/.config without it).
+    /// canoa.cfg to read; default %APPDATA%\Canoa\canoa.cfg, ~/Library/Application Support/Canoa/canoa.cfg, or
+    /// $XDG_CONFIG_HOME/Canoa/canoa.cfg (~/.config without it).
     #[arg(long, env = "CANOA_CONFIG")]
     config: Option<PathBuf>,
     /// How `check` prints entries.
@@ -194,7 +194,8 @@ enum Format {
     Json,
 }
 
-/// The platform's place for Canoa.cfg, as the app reads it.
+/// The platform's place for canoa.cfg, as the app reads it. A `Canoa.cfg` there with no `canoa.cfg` beside it is renamed
+/// first, on the platforms whose file names are case sensitive.
 fn default_config() -> Option<PathBuf> {
     let var = |name: &str| {
         std::env::var_os(name)
@@ -208,7 +209,37 @@ fn default_config() -> Option<PathBuf> {
     } else {
         var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|home| home.join(".config")))?
     };
-    Some(base.join("Canoa").join("Canoa.cfg"))
+    let path = base.join("Canoa").join("canoa.cfg");
+    if !cfg!(windows) {
+        adopt_legacy_name(&path);
+    }
+    Some(path)
+}
+
+/// Gives a `Canoa.cfg` beside `path` the name `path`, once, and says so on standard error. A file already at `path`, a
+/// dangling link included, is never replaced. Returns whether it renamed.
+fn adopt_legacy_name(path: &Path) -> bool {
+    let Some(old) = path.parent().map(|dir| dir.join("Canoa.cfg")) else {
+        return false;
+    };
+    if path.symlink_metadata().is_ok() || !old.is_file() {
+        return false;
+    }
+    // A hard link fails where the name is taken, which a rename would replace.
+    let renamed = std::fs::hard_link(&old, path).and_then(|()| std::fs::remove_file(&old));
+    match renamed {
+        Ok(()) => {
+            eprintln!("canoa: renamed {} to {}", old.display(), path.display());
+            true
+        }
+        Err(error) => {
+            eprintln!(
+                "canoa: {} was not renamed to canoa.cfg: {error}",
+                old.display()
+            );
+            false
+        }
+    }
 }
 
 /// A failure, and the status it ends with.
@@ -229,7 +260,7 @@ fn load(args: &ConfigArgs) -> Result<Config, Failed> {
         .config
         .clone()
         .or_else(default_config)
-        .ok_or_else(|| Failed::usage("no Canoa.cfg: give --config or CANOA_CONFIG"))?;
+        .ok_or_else(|| Failed::usage("no canoa.cfg: give --config or CANOA_CONFIG"))?;
     Config::load(&path).map_err(Failed::usage)
 }
 
@@ -259,7 +290,7 @@ fn web_config(config: &Config, args: &ServeArgs) -> Result<Option<WebConfig>, Fa
             .listen = listen;
     }
     if let Some(web) = web.as_mut() {
-        // The site may hold neither Canoa.cfg nor this user's identity and trust store.
+        // The site may hold neither canoa.cfg nor this user's identity and trust store.
         let file = args.config.config.clone().or_else(default_config);
         web.keep_out.extend(
             file.and_then(|file| std::path::absolute(file).ok())
@@ -312,7 +343,7 @@ fn serve(args: &ServeArgs) -> Result<(), Failed> {
     }
     if let Some(web) = web {
         std::thread::Builder::new()
-            .name("canoa-host-web".to_owned())
+            .name("canoa-web".to_owned())
             .spawn(move || web.run())
             .map_err(Failed::run)?;
     }
@@ -329,7 +360,7 @@ const PAIRING_RUN: Duration = Duration::from_secs(60);
 /// pipe nobody reads, and on Windows a write to it then never returns.
 fn end_with_input(code: i32, before: impl FnOnce() + Send + 'static) -> Result<(), Failed> {
     std::thread::Builder::new()
-        .name("canoa-host-stdin".to_owned())
+        .name("canoa-stdin".to_owned())
         .spawn(move || {
             // Whatever arrives is not read as anything: only its end matters.
             let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
@@ -609,7 +640,7 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failed(status, why)) => {
-            eprintln!("canoa-host: {why}");
+            eprintln!("canoa: {why}");
             ExitCode::from(status)
         }
     }
@@ -621,6 +652,68 @@ mod tests {
 
     use super::*;
 
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("canoa-config-name-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_name_is_renamed_once_when_nothing_has_the_new_one() {
+        let dir = scratch("rename");
+        std::fs::write(dir.join("Canoa.cfg"), "[host]\n").expect("written");
+        assert!(adopt_legacy_name(&dir.join("canoa.cfg")));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("canoa.cfg")).expect("read"),
+            "[host]\n"
+        );
+        assert!(!dir.join("Canoa.cfg").exists());
+        assert!(
+            !adopt_legacy_name(&dir.join("canoa.cfg")),
+            "nothing is left to rename"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_name_never_replaces_the_new_one() {
+        let dir = scratch("keep");
+        std::fs::write(dir.join("Canoa.cfg"), "old").expect("written");
+        std::fs::write(dir.join("canoa.cfg"), "new").expect("written");
+        assert!(!adopt_legacy_name(&dir.join("canoa.cfg")));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("canoa.cfg")).expect("read"),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("Canoa.cfg")).expect("read"),
+            "old"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_canoa_cfg_that_exists_is_read_by_the_new_name_on_windows() {
+        let dir = scratch("windows");
+        std::fs::write(dir.join("Canoa.cfg"), "[host]\n").expect("written");
+        assert!(
+            !adopt_legacy_name(&dir.join("canoa.cfg")),
+            "nothing to rename: it is the same file"
+        );
+        Config::load(&dir.join("canoa.cfg")).expect("the file with the old spelling loads");
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .expect("listed")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, ["Canoa.cfg"], "it keeps the name it was given");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_command_line_is_well_formed() {
         Cli::command().debug_assert();
@@ -628,8 +721,7 @@ mod tests {
 
     #[test]
     fn serve_takes_a_config_flag() {
-        let cli =
-            Cli::try_parse_from(["canoa-host", "serve", "--config", "x.cfg"]).expect("parses");
+        let cli = Cli::try_parse_from(["canoa", "serve", "--config", "x.cfg"]).expect("parses");
         let Command::Serve(args) = cli.command else {
             panic!("serve");
         };
@@ -640,8 +732,7 @@ mod tests {
     #[test]
     fn serve_takes_the_web_app_with_or_without_a_directory() {
         let parsed = |args: &[&str]| {
-            let cli =
-                Cli::try_parse_from(["canoa-host", "serve"].iter().chain(args)).expect("parses");
+            let cli = Cli::try_parse_from(["canoa", "serve"].iter().chain(args)).expect("parses");
             let Command::Serve(args) = cli.command else {
                 panic!("serve");
             };
@@ -657,14 +748,14 @@ mod tests {
                 Some("127.0.0.1:0".parse().expect("an address"))
             )
         );
-        assert!(Cli::try_parse_from(["canoa-host", "serve", "--web-listen", "nowhere"]).is_err());
+        assert!(Cli::try_parse_from(["canoa", "serve", "--web-listen", "nowhere"]).is_err());
     }
 
     #[test]
     fn a_provider_needs_its_library_and_id() {
-        assert!(Cli::try_parse_from(["canoa-host", "provider", "--library", "x"]).is_err());
+        assert!(Cli::try_parse_from(["canoa", "provider", "--library", "x"]).is_err());
         let cli = Cli::try_parse_from([
-            "canoa-host",
+            "canoa",
             "provider",
             "--library",
             "x",
@@ -690,6 +781,6 @@ mod tests {
 
     #[test]
     fn accept_needs_a_peer() {
-        assert!(Cli::try_parse_from(["canoa-host", "accept"]).is_err());
+        assert!(Cli::try_parse_from(["canoa", "accept"]).is_err());
     }
 }

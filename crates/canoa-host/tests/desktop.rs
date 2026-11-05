@@ -173,7 +173,7 @@ fn killing_the_host_on_windows_ends_what_its_providers_started() {
     );
 }
 
-/// `canoa-host pair` on a home of its own: what it printed first, and the process.
+/// `canoa pair` on a home of its own: what it printed first, and the process.
 fn start_pairing(
     home: &std::path::Path,
     args: &[&str],

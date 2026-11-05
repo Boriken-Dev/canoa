@@ -107,5 +107,5 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 fn refuse(why: &str) -> ! {
-    panic!("canoa-host: {why}");
+    panic!("canoa: {why}");
 }

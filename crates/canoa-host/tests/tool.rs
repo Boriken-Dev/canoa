@@ -1,4 +1,4 @@
-//! The built `canoa-host` serving a `[host.tools]` entry: Pi's entry from `examples/config/pi.cfg`, unchanged but for its
+//! The built `canoa` serving a `[host.tools]` entry: Pi's entry from `examples/config/pi.cfg`, unchanged but for its
 //! program, which is a fixture shaped like Pi's command line, reached by a client that proves a key as Canoa's chat does.
 #![allow(
     clippy::std_instead_of_core,
@@ -210,7 +210,7 @@ fn a_question_pi_asks_reaches_the_person_and_their_answer_reaches_pi() {
         assert!(
             asked["toolCall"]["toolCallId"]
                 .as_str()
-                .is_some_and(|id| id.starts_with("canoa-host-ask-")),
+                .is_some_and(|id| id.starts_with("canoa-ask-")),
             "{asked}"
         );
         let kinds: Vec<&Value> = asked["options"]
@@ -555,7 +555,7 @@ fn the_tools_processes_end_with_the_link() {
 #[test]
 fn a_session_takes_no_mcp_server_and_a_tool_that_cannot_start_says_so() {
     let config = pi_config(&["--mode", "rpc"], "")
-        + "\n[host.tools.missing]\nprogram = \"canoa-host-test-no-such-program\"\nruns = \"session\"\nunasked = \"x\"\nprompt = { type = \"prompt\", message = \"{prompt}\" }\n";
+        + "\n[host.tools.missing]\nprogram = \"canoa-test-no-such-program\"\nruns = \"session\"\nunasked = \"x\"\nprompt = { type = \"prompt\", message = \"{prompt}\" }\n";
     let host = Host::start(&config, 2);
     let client = support::key();
     host.pair(&client);
@@ -593,7 +593,7 @@ fn a_session_takes_no_mcp_server_and_a_tool_that_cannot_start_says_so() {
 #[test]
 fn check_lists_a_tool_entry() {
     let scratch = Scratch::new();
-    let path = scratch.0.join("Canoa.cfg");
+    let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, pi_config(&["--mode", "rpc"], "")).expect("written");
     let output = std::process::Command::new(support::host_binary())
         .args(["check", "--format", "json", "--config"])

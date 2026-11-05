@@ -1,4 +1,4 @@
-//! `canoa-host launch`: starts an agent with a profile's environment, which reaches it on the first line of standard input
+//! `canoa launch`: starts an agent with a profile's environment, which reaches it on the first line of standard input
 //! rather than on a command line other users may read.
 
 use alloc::string::String;
@@ -81,7 +81,7 @@ fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::con
         .ok_or_else(|| io::Error::other("no standard input"))?;
     // The program may end while its input is still open, so its end, not the input's, ends this process.
     std::thread::Builder::new()
-        .name("canoa-host-launch".into())
+        .name("canoa-launch".into())
         .spawn(move || {
             let status: io::Result<ExitStatus> = child.wait();
             std::process::exit(status.ok().and_then(|status| status.code()).unwrap_or(1));

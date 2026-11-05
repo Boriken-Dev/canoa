@@ -1,5 +1,5 @@
-//! A provider written in Python, coqui-acp's `examples/provider-python` echo, served by the built `canoa-host` from one
-//! Canoa.cfg entry through Guatiao's source of Python libraries. The source is a `cdylib` built against a Python, so this
+//! A provider written in Python, coqui-acp's `examples/provider-python` echo, served by the built `canoa` from one
+//! canoa.cfg entry through Guatiao's source of Python libraries. The source is a `cdylib` built against a Python, so this
 //! test builds it from Cargo's checkout of Guatiao at the workspace's revision, with the Python `CANOA_TEST_PYTHON` names.
 //! Without that variable the test is ignored, and a run counts it as not run.
 #![allow(
@@ -203,7 +203,7 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         ]
     }
 
-    /// A Canoa.cfg entry `python` serving `provider` from the manifests in `dirs`, with the source built against `python`.
+    /// A canoa.cfg entry `python` serving `provider` from the manifests in `dirs`, with the source built against `python`.
     fn source_entry(python: &Python, provider: &str, dirs: &[PathBuf]) -> String {
         let guatiao = checkout("guatiao");
         let coqui_acp = checkout("coqui-acp-provider");

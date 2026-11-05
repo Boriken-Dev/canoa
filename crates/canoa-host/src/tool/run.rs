@@ -227,7 +227,7 @@ impl Link {
                     "promptCapabilities": {"image": false, "audio": false, "embeddedContext": false},
                 },
                 "authMethods": [],
-                "agentInfo": {"name": "canoa-host", "version": env!("CARGO_PKG_VERSION")},
+                "agentInfo": {"name": "canoa", "version": env!("CARGO_PKG_VERSION")},
             })),
             "session/new" => self.new_session(params),
             "session/prompt" => match self.prompt(id, params) {
@@ -337,7 +337,7 @@ impl Link {
         forward(&self.name, stderr);
         let (link, reading, read) = (Arc::clone(self), Arc::clone(session), Arc::clone(&process));
         let spawned = thread::Builder::new()
-            .name("canoa-host-tool".to_owned())
+            .name("canoa-tool".to_owned())
             .spawn(move || link.read_tool(&reading, &read, stdout));
         if let Err(error) = spawned {
             process.stop();
@@ -722,7 +722,7 @@ impl Link {
                 "sessionId": session.id,
                 // The title is shown cut short, so the whole question goes as the call's input too.
                 "toolCall": {
-                    "toolCallId": format!("canoa-host-ask-{id}"),
+                    "toolCallId": format!("canoa-ask-{id}"),
                     "title": label(&question),
                     "status": "pending",
                     "rawInput": {"text": cut(&question, MAX_TEXT)},
@@ -932,7 +932,7 @@ fn label(text: &str) -> String {
 fn forward(entry: &str, mut stderr: ChildStderr) {
     let entry = entry.to_owned();
     let spawned = thread::Builder::new()
-        .name("canoa-host-tool-stderr".to_owned())
+        .name("canoa-tool-stderr".to_owned())
         .spawn(move || {
             let mut left = OUTPUT_LIMIT;
             let mut buffer = vec![0_u8; 8192];
@@ -1014,7 +1014,7 @@ impl Process {
         // Writes go through a thread of their own, since a write to a process that has stopped reading never returns.
         let (input, lines) = mpsc::sync_channel::<Vec<u8>>(LINES_IN);
         thread::Builder::new()
-            .name("canoa-host-tool-input".to_owned())
+            .name("canoa-tool-input".to_owned())
             .spawn(move || {
                 while let Ok(line) = lines.recv() {
                     if stdin.write_all(&line).and_then(|()| stdin.flush()).is_err() {
