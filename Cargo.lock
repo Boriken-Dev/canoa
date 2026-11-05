@@ -298,6 +298,20 @@ name = "canoa"
 version = "0.0.0-alpha.0"
 
 [[package]]
+name = "canoa-ffi"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa-host",
+ "clap",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "canoa-host"
 version = "0.0.0-alpha.0"
 dependencies = [

@@ -1,0 +1,46 @@
+[package]
+name = "canoa-ffi"
+description = "The Canoa host as a library inside an application: canoa commands run in-process, behind a small C ABI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["acp", "agent", "host", "ffi"]
+categories = ["external-ffi-bindings", "network-programming"]
+exclude = [".*", "*.local.*"]
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# The web app built in, as canoa-host's feature of that name: CANOA_WEB_DIST at build time.
+web = ["canoa-host/web"]
+
+[dependencies]
+canoa-host = { path = "../canoa-host" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Puts this process's standard error on a pipe, through a safe call.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "stdio"] }
+
+# Puts this process's standard error on a pipe, and gives a windowed process a console nobody sees for what it starts.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
