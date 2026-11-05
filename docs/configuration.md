@@ -14,7 +14,7 @@ The default template is [examples/config/canoa.cfg](https://github.com/Boriken-D
 
 Configuration tables:
 
-- [desktop] start_hidden, close_to_tray, minimize_to_tray
+- [desktop] start_hidden, close_to_tray, minimize_to_tray, local_host (default true: the app runs its own host; false, or `--no-local-host`, leaves it off)
 - [network] prefer_webtransport, connect_timeout (seconds, between 1 and 120)
 - [assets] cdn = "none" or "local" (deployment option; font hosting remains a separate build concern)
 - [host] what `canoa` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
@@ -374,9 +374,11 @@ On Linux the tray and window packages (leanflutter's `tray_manager` and `window_
 deprecated, and the generated runner builds with `-Werror`, so build with
 `CXXFLAGS=-Wno-error=deprecated-declarations` there (Fedora 44).
 
-A desktop build carries `canoa` beside the app's executable, where the app finds it: `cargo build --release -p
-canoa-host`, then copy `target/release/canoa` (`.exe` on Windows) into the bundle's directory, as the desktop
-workflow does.
+A desktop build carries the host as a library, with no `canoa` program: the app's own plugin, `app/native`, builds
+`crates/canoa-ffi` with cargo as part of `flutter build`, so `cargo` has to be on PATH or in `~/.cargo/bin`, and the runner
+has to be generated in `app/`, whose workspace the plugin finds from there. The result is `canoa_ffi.dll` beside
+`CanoaUI.exe`, or `lib/libcanoa_ffi.so` in a Linux bundle; a macOS build is written and has not been run. With
+`CANOA_WEB_DIST` set to the absolute path of a web build, the library has the web app built in.
 
 `app/integration_test/desktop_test.dart` runs the app on a real desktop. On a Linux session with no tray, run
 `python3 integration_test/sni_watcher.py` first to have one: it is a minimal StatusNotifier watcher that draws nothing,

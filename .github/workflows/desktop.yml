@@ -52,12 +52,15 @@ jobs:
         env:
           CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
         run: flutter build ${{ matrix.platform }} --release
-      # The app runs the canoa it finds beside its own executable.
-      - name: Build canoa and put it beside the app
+      # The app carries its host: flutter build ran cargo through app/native. A build that says it worked proves nothing.
+      - name: The built app holds the host's library, and no canoa
         shell: bash
         run: |
-          cargo build --release -p canoa-host --bin canoa
-          cp "target/release/${{ matrix.host }}" "${{ matrix.bundle }}/"
+          case "${{ matrix.platform }}" in
+            windows) test -f "${{ matrix.bundle }}/canoa_ffi.dll" ;;
+            linux) test -f "${{ matrix.bundle }}/lib/libcanoa_ffi.so" ;;
+          esac
+          test ! -e "${{ matrix.bundle }}/${{ matrix.host }}"
       - name: The app on a desktop, with its host
         if: matrix.platform != 'macos'
         working-directory: app
@@ -72,4 +75,18 @@ jobs:
             xvfb-run -a flutter test integration_test/desktop_test.dart -d linux
           else
             flutter test integration_test/desktop_test.dart -d windows
+          fi
+      - name: The app on a desktop, from the library it carries
+        if: matrix.platform != 'macos'
+        working-directory: app
+        shell: bash
+        env:
+          CANOA_TEST_NODE: node
+          CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
+        run: |
+          export CANOA_TEST_APP="$PWD"
+          if [ "${{ matrix.platform }}" = linux ]; then
+            xvfb-run -a flutter test integration_test/embedded_host_test.dart -d linux
+          else
+            flutter test integration_test/embedded_host_test.dart -d windows
           fi

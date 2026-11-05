@@ -297,16 +297,25 @@ guarded against.
 
 ## In the desktop app
 
-Canoa's desktop app runs the host as its own child, so nothing else has to be started:
+Canoa's desktop app carries the host as a library and runs it in its own process, on the host's own threads, so there is
+no other program to install or start. Agents stay child processes of the host.
 
-- It runs the `canoa` named by `CANOA_HOST`, else the one beside its own executable, where a desktop build puts it.
-  Without one, the app hosts nothing and says so.
-- It starts `canoa serve --until-stdin-closes` when canoa.cfg has a `[host]` entry, and again whenever its hosting
-  dialog changes one. If the host ends on its own, the app starts it again after a pause that doubles from one second up
-  to a minute, and back to one second after a run of thirty seconds. A canoa.cfg the host refuses (status 2) is shown, and
-  not retried until the person asks.
-- Closing the window leaves the host and its agents running. Quitting ends them: the app closes the host's input, and the
-  host ends every agent it started, then itself. If the app itself dies, its end closes that input too.
+- It starts its host when it starts, whatever canoa.cfg names, and again whenever its hosting dialog changes it. With
+  nothing to host, the host is up and idle. If it ends on its own, the app starts it again after a pause that doubles from
+  one second up to a minute, and back to one second after a run of thirty seconds. A canoa.cfg the host refuses (status 2)
+  is shown, and not retried until the person asks.
+- `local_host = false` under `[desktop]` in canoa.cfg, or starting the app with `--no-local-host`, leaves it off. Hosting
+  says so; the keys can still be managed, and sessions on other hosts work as before.
+- **One host on a home.** The app's host and a `canoa serve` on the same `COQUI_AGENTIC_PEER_HOME` never run together: the
+  second says which is running (`canoa (process 12) already hosts this home`, or `CanoaUI ...`) and does not start. The app
+  shows it in Hosting and tries again only when asked, so the two never take turns. A lock in the home decides, which a
+  holder gives up however it ends.
+- Closing the window leaves the host and its agents running. Quitting stops the host, which ends every agent it started.
+  If the app dies, agents on Windows end with it; on Unix each sees its standard input close, and most then exit.
+- A provider, a tool, and an agent with a profile need a process of the host's own. The app starts itself for those, with
+  `--canoa-child` first, and that process runs the command and never reaches Flutter or a window.
+- `canoa` stays for servers and for use with no desktop: the same library with a command line in front. `CANOA_HOST`
+  names a `canoa` for the app to run as a child instead, which is for tests.
 
 **Hosting**, in the app's side rail and its tray menu, shows the host's state and its peer id, lists its entries with
 their addresses, adds a stdio ACP agent by its command on a loopback port of its own, after `canoa check` accepts the

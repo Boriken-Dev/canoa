@@ -6,14 +6,17 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | --- | --- |
 | [`crates/canoa/AGENTS.md`](crates/canoa/AGENTS.md) | the `canoa` crate's public API |
 | [`crates/canoa-host/AGENTS.md`](crates/canoa-host/AGENTS.md) | `canoa-host`: the `canoa` program, canoa.cfg's `[host]`, its command line and library |
+| [`crates/canoa-ffi/AGENTS.md`](crates/canoa-ffi/AGENTS.md) | `canoa-ffi`: the C ABI that runs the host inside an application |
 
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
+| `app/native/` | The app's own plugin: builds `crates/canoa-ffi` with the desktop runner and declares its C ABI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
 | `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app |
+| `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe` |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
 | `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
@@ -54,6 +57,11 @@ node --test --test-force-exit "app/test/*.test.mjs"
 # the chat's connection code against the real host; needs Node 22 or later
 cargo build -p canoa-host --bin canoa --examples
 (cd app && CANOA_TEST_HOST=../target/debug/canoa CANOA_TEST_NODE=node flutter test test/host_test.dart)
+# the host as a library in a test process, and a standalone canoa on the same home
+cargo build -p canoa-ffi --lib
+(cd app && CANOA_TEST_LIBRARY=../target/debug/canoa_ffi.dll CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_library_test.dart)   # libcanoa_ffi.so on Linux
+# the built app hosting the scripted agent from its library, with no canoa on disk; needs node on PATH and a runner
+(cd app && CANOA_TEST_NODE=node flutter test integration_test/embedded_host_test.dart -d windows)   # or -d linux
 (cd bindings/browser/chromium && npm test)
 (cd examples/acp-echo && npm install && npm test)   # needs OpenSSL
 mkdocs build --strict

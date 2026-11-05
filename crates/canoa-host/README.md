@@ -91,7 +91,7 @@ assert_eq!(config.entries[0].name, "echo");
 ## Command line
 
 ```text
-canoa serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--web [DIR]] [--web-listen ADDRESS]
+canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--method noise|webcrypto] [--web [DIR]] [--web-listen ADDRESS]
 canoa check [--config FILE] [--format text|json]
 canoa id [--method noise|webcrypto]
 canoa peers [--format text|json]
@@ -107,9 +107,12 @@ closes, the host ends every agent it started, then itself. `pair` shows a PIN th
 `coqui-acp-bridge pair-dial`, uses to pair; it refuses a browser, which pairs by connecting once and being accepted. `--method` names
 the identity's method; without it, the one this user has, or the default for a new one. `serve --web` serves the web app
 on `127.0.0.1:7800` too, from `DIR`, `[host.web]`'s `dir` or the site built in, and prints `{"web": URL}` after the
-entries.
+entries. `serve` prints `{"ready": true, ...}` last, once up; `--allow-empty` runs it with nothing to serve.
 
-Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong.
+Only one host runs on a home: a second `serve`, or Canoa's desktop app, says which is running and does not start. A lock
+in the home decides, which a holder gives up however it ends.
+
+Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong, 3 another host holds this home.
 
 ## API overview
 

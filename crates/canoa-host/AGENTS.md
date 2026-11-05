@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `WebConfig`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError` and `WebServer`. Public modules: `aos`, `config`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `WebConfig`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `aos`, `cli`, `config`, `home`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -140,22 +140,26 @@ pub const ACP_CAPABILITY: &str = "acp/1";
 pub const OUTPUT_LIMIT: usize = 1024 * 1024;   // what a provider's process may print per connection
 pub const START_LIMIT: Duration = 30 s;        // for a provider's process to connect back
 
-#[non_exhaustive] pub struct ServeOptions { pub provider_program: PathBuf, pub key_limit: Option<u64>, pub rekey: bool }
+#[non_exhaustive] pub struct ServeOptions { pub provider_program: PathBuf, pub program_args: Vec<OsString>, pub key_limit: Option<u64>, pub rekey: bool, pub nothing_to_serve: bool }
 pub fn ServeOptions::new(provider_program: impl Into<PathBuf>) -> ServeOptions   // each method's defaults: key limit 2^38, rekey on
 pub const fn ServeOptions::with_key_limit(self, bytes: u64) -> ServeOptions      // no floor; above the default the log says weakened
 pub const fn ServeOptions::with_rekey(self, rekey: bool) -> ServeOptions
+pub fn ServeOptions::with_program_args(self, args: Vec<OsString>) -> ServeOptions   // before the subcommand on provider_program's command line
+pub const fn ServeOptions::with_nothing_to_serve(self, allowed: bool) -> ServeOptions   // a configuration with no entry binds, and serves nothing until stopped
 
 pub fn Serving::bind(config: &Config, identity: coqui_agentic_peer::auth::Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
 pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the identity's: every entry proves by it
 pub fn Serving::peer(&self) -> PeerId          // the identity's id, which a client pins
 pub fn Serving::listening(&self) -> &[Listening]
 pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another thread
-pub fn Serving::run(self)                      // takes connections until the process ends
-pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves
+pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed
+pub fn Stopper::stop(&self)                    // ends every listener, link and agent
+pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay
 #[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String }   // kind: "agent", "provider" or "tool"
 ```
 
-- `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound: end the process to free them.
+- `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound.
+- `stop` does that and ends the rest, so an application can start a host again in its own process: each listener closes within 100 ms, when `run` returns, and a fixed address can be bound again; a proven link ends within about a second; a link still in its proof ends by `PROOF_LIMIT` at the latest, holding no address. An entry could one day be served from a stream in this process rather than a program: `run` keeps what serves a connection behind one private enum.
 
 - `bind` binds every entry before any is served, so a failure leaves none listening. A plain socket beyond loopback is refused by `coqui-web` too.
 - Each connection: the WebSocket handshake, then the proof of the identity's method, Noise (`coqui-peer-noise`) or WebCrypto (`coqui-peer-webcrypto`), within `PROOF_LIMIT`; a client of the other method fails it, and the log names both methods. Then the trust store decides (a stranger that proved its key is recorded as waiting), then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
@@ -190,7 +194,9 @@ pub const fn Limits::with_max_connections(self, count: usize) -> Limits   // and
 pub fn WebServer::bind(web: &WebConfig, serving: &Serving) -> Result<WebServer, WebError>
 pub const fn WebServer::local_addr(&self) -> SocketAddr
 pub fn WebServer::url(&self) -> String          // http(s)://ADDRESS, or http(s)://hosts[0]:PORT when bound to every interface
-pub fn WebServer::run(self)                     // takes connections until the process ends
+pub fn WebServer::run(self)                     // takes connections until WebStopper::stop or the process ends; returns with the address free
+pub fn WebServer::stopper(&self) -> WebStopper  // Clone, for another thread
+pub fn WebStopper::stop(&self)                  // a connection already open ends after the answer it is sending, or when it next goes quiet
 
 #[non_exhaustive] pub enum WebError { NoSite, Site { dir: PathBuf, why: &'static str }, PlainBeyondLoopback(SocketAddr), Limit(&'static str), Connect, Tls { file: PathBuf, why: String }, Listen { address: SocketAddr, source: io::Error } }
 ```
@@ -226,7 +232,7 @@ pub fn HostLine::read(input: &mut impl BufRead, max: usize) -> Result<HostLine, 
 
 | `isolation` | The interpreter also reads |
 | --- | --- |
-| `shipped` (the source's default) | the standard library and `site-packages` of `home` or the Python found, with their `.pth` files; a `canoa._pth` or `pyvenv.cfg` beside the `canoa` executable, and on Windows that executable's directory, which CPython puts on `sys.path`, so whoever can write that directory chooses where modules come from. Not the `PYTHON*` variables or the user's own site-packages. |
+| `shipped` (the source's default) | the standard library and `site-packages` of `home` or the Python found, with their `.pth` files; a `canoa._pth` or `pyvenv.cfg` beside the `canoa` executable (`CanoaUI._pth` beside the app's, when it hosts), and on Windows that executable's directory, which CPython puts on `sys.path`, so whoever can write that directory chooses where modules come from. Not the `PYTHON*` variables or the user's own site-packages. |
 | `isolated` | the standard library of `home` or the Python found, and nothing beside the executable, in `site-packages` or in the environment |
 | `inherit` | all of `shipped`'s, the user's own site-packages, and the `PYTHON*` variables this process inherits from the host (`PYTHONPATH`, `PYTHONHOME`). `serve` logs it as weakened. |
 
@@ -418,6 +424,47 @@ pub fn revoke(store: &TrustStore, id: &str) -> Result<bool, PeersError>   // fal
 
 A key is paired when the store accepts it. `accept` takes only a key that is waiting, so a person pairs a client by connecting with it once, then accepting the id the client shows.
 
+## One host on a home (`canoa_host::home`)
+
+```rust
+pub fn Home::at(dir: impl Into<PathBuf>) -> Home
+pub fn Home::of_user() -> Result<Home, coqui_agentic_peer::Error>   // COQUI_AGENTIC_PEER_HOME, else the platform's place
+pub fn Home::dir(&self) -> &Path
+pub fn Home::identity(&self, method: Option<Method>) -> Result<Identity, coqui_agentic_peer::Error>   // as coqui_agentic_peer::home, in this directory
+pub fn Home::store(&self) -> Result<TrustStore, coqui_agentic_peer::Error>
+pub fn Home::lock(&self, name: &str) -> Result<HomeLock, LockError>
+pub fn Home::holder(&self) -> Option<Holder>   // by what it wrote; proves nothing about the lock
+#[non_exhaustive] pub struct Holder { pub name: String, pub pid: u32 }
+#[non_exhaustive] pub enum LockError { Held { dir: PathBuf, holder: Option<Holder> }, Io { dir: PathBuf, source: io::Error } }
+```
+
+- `lock` takes the operating system's lock on `host.lock` in the directory, made with its parents when absent, and writes `{"pid", "name"}` to `host.holder` beside it. So a holder that dies gives it up however it died, and a process id used again proves nothing. `Held` says who, or `None` when the holder has not said within half a second. Two locks in one process conflict too.
+- Dropping a `HomeLock` removes `host.holder` and gives the lock up; `host.lock` stays.
+- What `Display` says of `Held` names the holder, its process and the home. `canoa serve` and the app show it.
+- A file system that has no such lock is `Io`: that host does not start.
+
+## The command line as a library (`canoa_host::cli`)
+
+```rust
+pub const STATUS_HELD: u8 = 3;
+pub trait Front: Send + Sync {
+    fn print(&self, line: &str) -> io::Result<()>;     // a line of results: standard output for `canoa`
+    fn say(&self, line: &str);                         // a line of diagnostics: standard error for `canoa`
+    fn when_input_closes(&self, status: u8, then: Box<dyn FnOnce() + Send>) -> io::Result<()>;   // for --until-stdin-closes
+    fn program(&self) -> io::Result<Program>;          // what runs provider, tool and launch for this host
+    fn home(&self) -> Option<PathBuf>;                 // None: this user's
+    fn holder(&self) -> &str;                          // what serve calls itself to another host
+}
+#[non_exhaustive] pub struct Program { pub path: PathBuf, pub args: Vec<OsString> }   // args go before the subcommand
+pub const fn Program::new(path: PathBuf, args: Vec<OsString>) -> Program
+pub struct Cli;                                        // clap::Parser
+pub const fn Cli::is_a_hosts_own(&self) -> bool        // provider, tool or launch
+pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed>
+pub struct Failed { pub status: u8, pub why: String }
+```
+
+Everything `canoa` does is here; `src/main.rs` is a `Front` on its own standard streams, and `canoa-ffi` another. `run` neither exits nor writes anywhere but through the front. With a `Front` that returns from `when_input_closes`, `serve --until-stdin-closes` returns once it has stopped, its lock given up.
+
 ## Errors
 
 - `ConfigError` (`#[non_exhaustive]`): `Read { path, source }`; `Parse { line, column, what }`, 1-based, `what` in the schema's words; `Invalid { entry, what }`. No variant quotes a value from the file; an entry's name is quoted.
@@ -428,7 +475,7 @@ A key is paired when the store accepts it. `accept` takes only a key that is wai
 ## Command line
 
 ```text
-canoa serve [--config FILE] [--until-stdin-closes] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
+canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
                  [--web [DIR]] [--web-listen ADDRESS]
 canoa check [--config FILE] [--format text|json]
 canoa id [--method noise|webcrypto]
@@ -445,9 +492,11 @@ canoa launch PROGRAM [ARGS]...
 - `launch` is what `serve` runs for an agent entry with profiles: the environment on the first line of standard input, the rest to `PROGRAM`, whose status it exits with; a first line of another form is status 2.
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.
-- `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound; then it serves until stopped. It logs on standard error.
+- `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound, and then `{"ready": true, "peer", "method"}`, a line with no `name`; then it serves until stopped. It logs on standard error.
+- **One host on a home.** `serve` takes the home's lock (see "One host on a home") before anything else of the home, or any address: a second one, the app's or another `canoa serve`, says `canoa: NAME (process PID) already hosts this home, DIR: ...`, binds nothing and ends with status 3. A holder that died holds nothing. `check`, `peers`, `accept`, `revoke`, `id` and `pair` take no lock, and `coqui-acp-bridge serve --paired` does not know of it.
+- `serve --allow-empty`: a canoa.cfg with no entry runs with nothing to serve, printing only the `ready` line, where without it that is status 2.
 - `serve --web [DIR]` serves the web app too (see "The web app"): from `DIR` (made absolute from the working directory), else `[host.web]`'s `dir`, else the site built in; on `[host.web]`'s settings, or the defaults without the table. `--web-listen` replaces `listen`, and needs `--web` or `[host.web]` (status 2). After the entries' lines it prints `{"web": URL}`, a line with no `name`. A site that cannot be served, no site, plain HTTP beyond loopback, a zero limit or an unusable certificate is status 2; an address that cannot be bound, status 1.
-- `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every agent is ended (`Stopper::stop_agents`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
+- `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every listener and agent is ended (`Stopper::stop`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
 - `pair` (`--listen` default `127.0.0.1:0`, loopback only, else status 2; `--timeout-seconds` default 300) prints `{"pin", "peer", "method", "url"}`, a six-digit PIN, this host's id, its method and the address to dial, and pairs by that method; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.
 - On `serve --until-stdin-closes` and `pair --until-stdin-closes`, nothing is logged between the input closing and the exit, and the process exits within 5 s whatever is left: a parent that died can leave standard error a pipe a write to which never returns (seen on Windows under a Dart parent).
 - `accept` and `revoke` take `--` before the id.
@@ -456,7 +505,7 @@ canoa launch PROGRAM [ARGS]...
 - `peers` prints `accepted ID` and `waiting ID [from ADDRESS]`, or `{"peer", "state", "source"}`.
 - canoa.cfg is `--config`, else `CANOA_CONFIG`, else `%APPDATA%\Canoa\canoa.cfg` on Windows, `~/Library/Application Support/Canoa/canoa.cfg` on macOS, `$XDG_CONFIG_HOME/Canoa/canoa.cfg` (else `~/.config/…`) elsewhere: where the app keeps it.
 - `provider` takes `--library` and `--source` from where it was started, then runs in `--directory`; with `--settings-on-stdin` it reads a `HostLine` first, as `serve` writes it; with `--connect` it serves on that loopback socket after sending the line's token, rather than on standard input and output.
-- Exit status: 0 success; 1 the operation failed; 2 the invocation or canoa.cfg was wrong, `serve` with nothing to serve, or a text that is not a peer id.
+- Exit status: 0 success; 1 the operation failed; 2 the invocation or canoa.cfg was wrong, `serve` with nothing to serve, or a text that is not a peer id; 3 another host holds this home.
 
 ## Environment variables
 
@@ -476,7 +525,7 @@ canoa launch PROGRAM [ARGS]...
 - A profile's variable and MCP server values never reach the client from the host, but they reach the agent, which acts for that client and may show them: give a profile only what that entry's clients may use.
 - A paired key reaches every session an agent keeps for this user: `session/list` and `session/load` pass to a stdio agent unchanged.
 - `working_roots` compare paths as written: a link inside a root that points outside it is followed by the agent. Worktrees are made, read and removed only where every link is resolved, inside the roots resolved too.
-- If the host itself is killed, on Windows the system ends its agents with it (each is in a job object closed with the host); on Unix each sees its standard input close, and most then exit. `serve --until-stdin-closes` ends them on every platform when the parent goes.
+- If the host itself is killed, on Windows the system ends its agents with it (each is in a job object closed with the host); on Unix each sees its standard input close, and most then exit. `serve --until-stdin-closes` ends them on every platform when the parent goes. A host inside an application has no parent to watch: on Unix, an agent that ignores its input closing outlives an application that crashes.
 - Each connection is a fresh process, so a turn in progress ends with its link; a later connection resumes a session only if the agent kept it.
 - `peers` is read when the host starts; a key removed from the trust store loses its link within about a second without a restart.
 - A provider's process inherits the host's environment. For a Python source that includes, on Windows, `PATH`, which decides which `python3.dll` loads under `import_search = "path"` unless `import_dirs` holds one; and with `isolation = "inherit"`, `PYTHONPATH` and `PYTHONHOME`.
