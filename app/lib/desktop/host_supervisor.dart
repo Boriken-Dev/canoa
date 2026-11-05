@@ -7,10 +7,13 @@ import 'package:flutter/foundation.dart';
 import 'host_tool.dart';
 
 enum HostPhase {
-  /// No `canoa` was found to run.
+  /// This build carries no host.
   absent,
 
-  /// canoa.cfg names nothing to host.
+  /// Left off, by canoa.cfg's `[desktop] local_host` or `--no-local-host`.
+  off,
+
+  /// Running, with nothing in canoa.cfg to host; or canoa.cfg has no place on this computer.
   idle,
   starting,
   running,
@@ -20,6 +23,10 @@ enum HostPhase {
 
   /// canoa.cfg is wrong for it; it starts again only when told to.
   failed,
+
+  /// Another host runs on this home, and [HostSupervisor.problem] says which; it starts only when told to, so that the two
+  /// never take turns.
+  held,
   stopped,
 }
 
@@ -37,7 +44,7 @@ final class HostCommandFailed implements Exception {
   String toString() => message;
 }
 
-/// `canoa pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
+/// `pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
 final class HostPairing {
   HostPairing._(this._child, this.pin, this.hostId, this.method, this.url, this.paired);
 
@@ -107,11 +114,12 @@ final class HostPairing {
   void cancel() => _child.kill();
 }
 
-/// Runs `canoa serve` as this app's child: started when canoa.cfg names something to host, started again with a
-/// growing pause when it ends on its own, and ended, with every agent it started, when the app quits.
+/// Runs this app's own host: started when the app starts, whatever canoa.cfg names, started again with a growing pause when
+/// it ends on its own, and ended, with every agent it started, when the app quits.
 class HostSupervisor extends ChangeNotifier {
   HostSupervisor(
     this.tool, {
+    this.off = false,
     this.firstPause = const Duration(seconds: 1),
     this.longestPause = const Duration(minutes: 1),
     this.steady = const Duration(seconds: 30),
@@ -119,8 +127,11 @@ class HostSupervisor extends ChangeNotifier {
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
-  /// Null when none was found: nothing can be hosted.
+  /// Null in a build that carries none: nothing can be hosted.
   final HostTool? tool;
+
+  /// Whether the person left the host off: it never starts, though keys can still be managed.
+  final bool off;
 
   /// The pause after the first unplanned end, doubled for each one after, up to [longestPause].
   final Duration firstPause, longestPause;
@@ -133,7 +144,7 @@ class HostSupervisor extends ChangeNotifier {
   final DateTime Function() _clock;
 
   HostPhase _phase = HostPhase.stopped;
-  HostPhase get phase => tool == null ? HostPhase.absent : _phase;
+  HostPhase get phase => tool == null ? HostPhase.absent : (off ? HostPhase.off : _phase);
 
   /// What the entries are listening on, while running.
   List<HostListening> get listening => List.unmodifiable(_listening);
@@ -172,14 +183,15 @@ class HostSupervisor extends ChangeNotifier {
   DateTime? _startedAt;
   int _generation = 0;
 
-  /// Serves canoa.cfg at [configPath] when [hasEntries], else stops: called with the file as saved, after every change.
-  Future<void> apply({required String? configPath, required bool hasEntries}) async {
+  /// Serves canoa.cfg at [configPath], whatever it names: called when the app starts, and with the file as saved after
+  /// every change.
+  Future<void> apply({required String? configPath}) async {
     _configPath = configPath;
     await _end();
     _restarts = 0;
     _problem = null;
-    if (tool == null) return notifyListeners();
-    if (configPath == null || !hasEntries) {
+    if (tool == null || off) return notifyListeners();
+    if (configPath == null) {
       _phase = HostPhase.idle;
       return notifyListeners();
     }
@@ -190,7 +202,7 @@ class HostSupervisor extends ChangeNotifier {
   Future<void> restart() async {
     await _end();
     _restarts = 0;
-    if (tool != null && _configPath != null) await _start();
+    if (tool != null && !off && _configPath != null) await _start();
   }
 
   /// Ends the host and every agent it started. Nothing starts it again until [apply] or [restart].
@@ -216,7 +228,7 @@ class HostSupervisor extends ChangeNotifier {
     notifyListeners();
     final HostChild child;
     try {
-      child = await tool!.start(['serve', '--config', _configPath!, '--until-stdin-closes']);
+      child = await tool!.start(['serve', '--config', _configPath!, '--allow-empty', '--until-stdin-closes']);
     } on Object catch (error) {
       _problem = 'canoa could not start: $error';
       return _ended(generation, null);
@@ -238,7 +250,7 @@ class HostSupervisor extends ChangeNotifier {
     child.lines.listen((line) {
       if (generation != _generation) return;
       final entry = HostListening.parse(line);
-      if (entry == null) return;
+      if (entry == null) return _ready(line);
       _listening.add(entry);
       _peerId = entry.peer;
       _peerMethod = entry.method;
@@ -252,6 +264,21 @@ class HostSupervisor extends ChangeNotifier {
         _ended(generation, code);
       }),
     );
+  }
+
+  /// The line after the entries, which says the host is up even with none, and who it is.
+  void _ready(String line) {
+    final Object? value;
+    try {
+      value = jsonDecode(line);
+    } on FormatException {
+      return;
+    }
+    if (value is! Map || value['ready'] != true) return;
+    if (value['peer'] case final String peer) _peerId = peer;
+    if (value['method'] case final String method) _peerMethod = method;
+    _phase = _listening.isEmpty ? HostPhase.idle : HostPhase.running;
+    notifyListeners();
   }
 
   void _keep(String line) {
@@ -275,6 +302,10 @@ class HostSupervisor extends ChangeNotifier {
     // Status 2 is a wrong canoa.cfg or invocation: the same file fails the same way, so it waits for a person.
     if (code == 2) {
       _phase = HostPhase.failed;
+      return notifyListeners();
+    }
+    if (code == statusHeld) {
+      _phase = HostPhase.held;
       return notifyListeners();
     }
     final ranFor = _startedAt == null ? Duration.zero : _clock().difference(_startedAt!);
@@ -327,7 +358,7 @@ class HostSupervisor extends ChangeNotifier {
   /// What is wrong with canoa.cfg at [configPath] for the host, in its words, or null when nothing is.
   Future<String?> check(String configPath) async {
     final tool = this.tool;
-    if (tool == null) return 'canoa is not installed';
+    if (tool == null) return 'this build carries no host';
     final checked = await tool.run(['check', '--config', configPath]);
     return checked.exitCode == 0 ? null : _said(checked);
   }
@@ -335,13 +366,13 @@ class HostSupervisor extends ChangeNotifier {
   /// Shows a PIN a native client pairs with. One wrong try ends it.
   Future<HostPairing> pair() async {
     final tool = this.tool;
-    if (tool == null) throw const HostCommandFailed('canoa is not installed');
+    if (tool == null) throw const HostCommandFailed('this build carries no host');
     return HostPairing._start(await tool.start(['pair', '--until-stdin-closes']));
   }
 
   Future<HostOutput> _command(List<String> args) async {
     final tool = this.tool;
-    if (tool == null) throw const HostCommandFailed('canoa is not installed');
+    if (tool == null) throw const HostCommandFailed('this build carries no host');
     final ran = await tool.run(args);
     if (ran.exitCode != 0) throw HostCommandFailed(_said(ran));
     return ran;

@@ -60,6 +60,7 @@ final class CanoaConfig {
     this.startHidden = false,
     this.closeToTray = true,
     this.minimizeToTray = false,
+    this.localHost = true,
     this.preferWebTransport = true,
     this.connectTimeout = 10,
     this.cdn = 'none',
@@ -88,6 +89,9 @@ final class CanoaConfig {
   final int embedLimit;
   static const defaultEmbedLimit = 1024 * 1024;
   final bool startHidden, closeToTray, minimizeToTray, preferWebTransport;
+
+  /// `[desktop] local_host`: whether the desktop app runs its own host.
+  final bool localHost;
   final int connectTimeout;
   final String cdn;
   final LookId look;
@@ -139,6 +143,7 @@ final class CanoaConfig {
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
         minimizeToTray: minimizeToTray ?? this.minimizeToTray,
+        localHost: localHost,
         preferWebTransport: preferWebTransport ?? this.preferWebTransport,
         connectTimeout: connectTimeout ?? this.connectTimeout,
         cdn: cdn,
@@ -163,6 +168,7 @@ final class CanoaConfig {
     startHidden: startHidden,
     closeToTray: closeToTray,
     minimizeToTray: minimizeToTray,
+    localHost: localHost,
     preferWebTransport: preferWebTransport,
     connectTimeout: connectTimeout,
     cdn: cdn,
@@ -379,6 +385,7 @@ final class CanoaConfig {
     startHidden: startHidden,
     closeToTray: closeToTray,
     minimizeToTray: minimizeToTray,
+    localHost: localHost,
     preferWebTransport: preferWebTransport,
     connectTimeout: connectTimeout,
     cdn: cdn,
@@ -428,7 +435,7 @@ final class CanoaConfig {
       }
       return entries;
     }
-    final desktop = table('desktop', {'start_hidden','close_to_tray','minimize_to_tray'});
+    final desktop = table('desktop', {'start_hidden','close_to_tray','minimize_to_tray','local_host'});
     final network = table('network', {'prefer_webtransport','connect_timeout'});
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
@@ -566,6 +573,7 @@ final class CanoaConfig {
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
+      localHost: flag(desktop, 'local_host', true),
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
       fullAccess: {for (final name in fullAccess) name as String},
@@ -592,6 +600,7 @@ final class CanoaConfig {
 start_hidden = $startHidden
 close_to_tray = $closeToTray
 minimize_to_tray = $minimizeToTray
+local_host = $localHost
 
 [network]
 prefer_webtransport = $preferWebTransport

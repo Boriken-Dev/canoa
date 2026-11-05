@@ -379,12 +379,14 @@ class _Status extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, said) = switch (supervisor.phase) {
-      HostPhase.absent => (Icons.block, 'canoa was not found beside Canoa, so nothing is hosted.'),
+      HostPhase.absent => (Icons.block, 'This build carries no host, so nothing is hosted.'),
+      HostPhase.off => (Icons.power_settings_new, 'Left off, by canoa.cfg\'s local_host or --no-local-host.'),
       HostPhase.idle => (Icons.pause_circle_outline, 'Nothing to host: add an agent.'),
       HostPhase.starting => (Icons.hourglass_top, 'Starting…'),
       HostPhase.running => (Icons.check_circle_outline, 'Hosting, on this computer only.'),
       HostPhase.waiting => (Icons.restart_alt, 'It stopped: starting again soon. ${supervisor.problem ?? ''}'),
       HostPhase.failed => (Icons.error_outline, 'canoa.cfg is not right for it: ${supervisor.problem ?? ''}'),
+      HostPhase.held => (Icons.people_outline, supervisor.problem ?? 'Another host runs on this home.'),
       HostPhase.stopped => (Icons.stop_circle_outlined, 'Stopped.'),
     };
     final peer = supervisor.peerId;
@@ -396,7 +398,9 @@ class _Status extends StatelessWidget {
             Icon(icon),
             const SizedBox(width: 8),
             Expanded(child: Text(said)),
-            if (supervisor.phase == HostPhase.failed || supervisor.phase == HostPhase.waiting)
+            if (supervisor.phase == HostPhase.failed ||
+                supervisor.phase == HostPhase.waiting ||
+                supervisor.phase == HostPhase.held)
               TextButton(onPressed: () => unawaited(supervisor.restart()), child: const Text('Try again')),
           ],
         ),

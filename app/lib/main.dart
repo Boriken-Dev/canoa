@@ -14,6 +14,7 @@ import 'acp/provider_connect.dart';
 import 'acp/agent_commands.dart';
 import 'acp/client.dart';
 import 'acp/local_agent.dart';
+import 'desktop/child_flag.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'connect_dialog.dart';
@@ -58,7 +59,10 @@ import 'worktree/host.dart';
 import 'worktree/local.dart';
 import 'worktree/worktree.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  // The executable's own entry takes this before Flutter starts; reaching here means a runner built without it, which must
+  // not answer a host's own command by opening another window.
+  if (args.firstOrNull == canoaChildFlag) throw StateError('this build has no entry for $canoaChildFlag');
   WidgetsFlutterBinding.ensureInitialized();
   final config = await loadConfig();
   // Beside canoa.cfg on a desktop, in this origin's IndexedDB on the web.
@@ -68,7 +72,9 @@ Future<void> main() async {
   final shell = createDesktopShell();
   final settingsSignal = ValueNotifier<int>(0);
   final hostingSignal = ValueNotifier<int>(0);
-  final host = shell.isDesktop ? HostSupervisor(findHostTool()) : null;
+  final host = shell.isDesktop
+      ? HostSupervisor(findHostTool(), off: !config.localHost || args.contains('--no-local-host'))
+      : null;
   await shell.initialize(
     config,
     onSettings: () => settingsSignal.value++,
@@ -78,7 +84,7 @@ Future<void> main() async {
     config: config, shell: shell, settingsSignal: settingsSignal,
     host: host, hostingSignal: hostingSignal, ledger: ledger, notifier: platformNotifier(), drafts: drafts,
   ));
-  await host?.apply(configPath: desktopConfigPath(), hasEntries: config.hostEntries.isNotEmpty);
+  await host?.apply(configPath: desktopConfigPath());
 }
 
 /// Shared Flutter application for standalone desktop/web and extension views.
@@ -130,7 +136,7 @@ class CanoaApp extends StatefulWidget {
   final DesktopShell? shell;
   final ValueNotifier<int>? settingsSignal;
 
-  /// The `canoa` this app runs, on a desktop.
+  /// This app's own host, on a desktop.
   final HostSupervisor? host;
   final ValueNotifier<int>? hostingSignal;
 
@@ -191,7 +197,7 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     await _write(changed);
     if (mounted) setState(() => config = changed);
-    await host.apply(configPath: path, hasEntries: changed.hostEntries.isNotEmpty);
+    await host.apply(configPath: path);
     return null;
   }
 

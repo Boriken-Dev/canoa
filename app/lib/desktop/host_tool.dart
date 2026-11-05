@@ -2,6 +2,9 @@ import 'dart:convert';
 
 import 'host_tool_stub.dart' if (dart.library.io) 'host_tool_io.dart' as platform;
 
+/// The status of `canoa serve` when another host holds its home.
+const int statusHeld = 3;
+
 /// What `canoa serve` printed for one entry it serves.
 final class HostListening {
   const HostListening({required this.name, required this.kind, required this.url, required this.peer, this.method});
@@ -66,7 +69,7 @@ final class HostKey {
   }
 }
 
-/// What one run of a `canoa` command left.
+/// What one `canoa` command left when it ended.
 final class HostOutput {
   const HostOutput(this.exitCode, this.stdout, this.stderr);
   final int exitCode;
@@ -74,8 +77,9 @@ final class HostOutput {
   final String stderr;
 }
 
-/// A `canoa` running as this app's child.
+/// A `canoa` command running: in this app's own process through the library, or as a child where `CANOA_HOST` names one.
 abstract interface class HostChild {
+  /// The process it runs in.
   int get pid;
 
   /// Its standard output, line by line.
@@ -85,22 +89,23 @@ abstract interface class HostChild {
   Stream<String> get errors;
   Future<int> get exitCode;
 
-  /// Closes its standard input, which `serve --until-stdin-closes` ends on, with every agent it started.
+  /// Closes its input, which `serve --until-stdin-closes` ends on, with every agent it started.
   Future<void> closeInput();
 
   /// Ends it at once.
   void kill();
 }
 
-/// The `canoa` program this app runs.
+/// How this app runs `canoa` commands.
 abstract interface class HostTool {
+  /// What they run from: the library's file, or the program's.
   String get path;
   Future<HostChild> start(List<String> args);
   Future<HostOutput> run(List<String> args);
 }
 
-/// The `canoa` to run: the one `CANOA_HOST` names, else the one installed beside this app's own executable, else
-/// none. A web build has none.
+/// How to run `canoa`: the program `CANOA_HOST` names, for tests, else the library this app carries, else not at all. A
+/// web build has none.
 HostTool? findHostTool() => platform.findHostTool();
 
 /// A port on loopback that nothing listens on at this moment.

@@ -141,7 +141,7 @@ void main() {
           hostingSignal: hosting,
         ),
       );
-      await host.apply(configPath: cfg.path, hasEntries: true);
+      await host.apply(configPath: cfg.path);
       await until(() async => host.phase == HostPhase.running, 'the host to run');
       final hostPid = host.pid;
       debugPrint('platform ${Platform.operatingSystem}: tray shown ${shell.hasTray}, host pid $hostPid');

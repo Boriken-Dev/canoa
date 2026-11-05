@@ -196,7 +196,7 @@ void main() {
 
   testWidgets('the host id a browser pins is shown once the host says it', (tester) async {
     final host = _Harness();
-    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg'));
     await host.show(tester);
     host.tool.children.single.out.add('{"name":"claude","kind":"agent","url":"ws://127.0.0.1:7801","peer":"$_paired"}');
     await tester.pumpAndSettle();
@@ -207,7 +207,7 @@ void main() {
 
   testWidgets('the method the host proves by is shown beside its id', (tester) async {
     final host = _Harness();
-    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg', hasEntries: true));
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg'));
     await host.show(tester);
     host.tool.children.single.out.add(
       '{"name":"claude","kind":"agent","url":"ws://127.0.0.1:7801","peer":"$_paired","method":"noise"}',

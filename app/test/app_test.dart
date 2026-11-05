@@ -186,7 +186,7 @@ void main() {
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
 
-    await host.apply(configPath: '/c/canoa.cfg', hasEntries: true);
+    await host.apply(configPath: '/c/canoa.cfg');
     await shell.beforeQuit!();
     expect(tool.children.single.inputClosed, isTrue, reason: 'the host and its agents end with the app');
   });

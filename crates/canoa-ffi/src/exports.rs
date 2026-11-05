@@ -166,3 +166,29 @@ pub extern "C" fn canoa_ffi_job_free(job: u64) -> i32 {
 pub extern "C" fn canoa_ffi_child_main() -> i32 {
     guarded(jobs::child_main)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_becomes_a_status() {
+        assert_eq!(guarded(|| panic!("inside")), STATUS_PANIC);
+        assert_eq!(guarded(|| STATUS_OK), STATUS_OK);
+    }
+
+    #[test]
+    fn a_panic_whose_payload_panics_when_dropped_still_becomes_a_status() {
+        struct Loud;
+        impl Drop for Loud {
+            fn drop(&mut self) {
+                panic!("while being dropped");
+            }
+        }
+        assert_eq!(
+            guarded(|| std::panic::panic_any(Loud)),
+            STATUS_PANIC,
+            "the payload is forgotten"
+        );
+    }
+}

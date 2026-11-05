@@ -1,0 +1,23 @@
+name: canoa_native
+description: The Canoa host's library, built with the desktop app and carried inside it.
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  ffi: ^2.1.0
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true

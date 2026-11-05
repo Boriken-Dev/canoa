@@ -25,6 +25,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
+  canoa_native:
+    dependency: "direct main"
+    description:
+      path: native
+      relative: true
+    source: path
+    version: "0.0.1"
   characters:
     dependency: transitive
     description:

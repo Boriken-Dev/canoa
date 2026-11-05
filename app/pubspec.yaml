@@ -19,6 +19,9 @@ dependencies:
       url: https://github.com/Boriken-Dev/coqui-web.git
       path: bindings/dart/coqui_web
       ref: 445007acb04f1b11f8f0f7c9fcf104f694189a2b
+  # The host, as a library inside the desktop app: builds crates/canoa-ffi with it.
+  canoa_native:
+    path: native
   crypto: ^3.0.6
   desktop_drop: ^0.8.4
   file_selector: ^1.1.0

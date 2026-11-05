@@ -1,56 +1,44 @@
-// Where the app finds its host: CANOA_HOST, else `canoa` beside the app, else a `canoa-host` left from before the rename.
+// How the app finds its host: the program CANOA_HOST names, for tests, else the library it carries, else none. It no longer
+// looks for a program beside itself.
 import 'dart:io';
 
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa_native/canoa_native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-String _exe(String name) => Platform.isWindows ? '$name.exe' : name;
+Never _noLibrary() => throw ArgumentError('Failed to load dynamic library');
 
 void main() {
-  late Directory dir;
   final said = <String>[];
 
-  setUp(() async {
-    dir = await Directory.systemTemp.createTemp('canoa-find');
-    said.clear();
-  });
-  tearDown(() => dir.delete(recursive: true));
+  setUp(said.clear);
 
-  HostTool? find({Map<String, String> environment = const {}}) =>
-      findHostToolIn(environment: environment, directory: dir.path, log: said.add);
+  HostTool? find({Map<String, String> environment = const {}, CanoaNative Function() open = _noLibrary}) =>
+      findHostToolIn(environment: environment, open: open, log: said.add);
 
-  String named(String name) => '${dir.path}${Platform.pathSeparator}${_exe(name)}';
-
-  test('the canoa beside the app is the host, and nothing is said', () {
-    File(named('canoa')).writeAsStringSync('');
-    expect(find()?.path, named('canoa'));
+  test('CANOA_HOST names a program, and the library is not asked for', () {
+    final tool = find(environment: {'CANOA_HOST': '/elsewhere/canoa'});
+    expect(tool, isA<ProcessHostTool>());
+    expect(tool?.path, '/elsewhere/canoa');
     expect(said, isEmpty);
   });
 
-  test('a canoa-host from before the rename is found, and said once as such', () {
-    File(named('canoa-host')).writeAsStringSync('');
-    expect(find()?.path, named('canoa-host'));
-    expect(said, hasLength(1));
-    expect(said.single, contains('canoa-host'));
-    expect(said.single, contains('canoa'));
+  test('an empty CANOA_HOST names nothing', () {
+    expect(find(environment: {'CANOA_HOST': ''}), isNull);
   });
 
-  test('canoa wins over a canoa-host beside it', () {
-    File(named('canoa')).writeAsStringSync('');
-    File(named('canoa-host')).writeAsStringSync('');
-    expect(find()?.path, named('canoa'));
-    expect(said, isEmpty);
-  });
-
-  test('CANOA_HOST names the host before either', () {
-    File(named('canoa')).writeAsStringSync('');
-    expect(find(environment: {'CANOA_HOST': '/elsewhere/canoa'})?.path, '/elsewhere/canoa');
-    expect(said, isEmpty);
-  });
-
-  test('neither beside the app is no host', () {
+  test('a canoa beside the app is not run: only CANOA_HOST runs a program', () async {
+    final dir = await Directory.systemTemp.createTemp('canoa-find');
+    addTearDown(() => dir.delete(recursive: true));
+    final name = Platform.isWindows ? 'canoa.exe' : 'canoa';
+    File('${dir.path}${Platform.pathSeparator}$name').writeAsStringSync('');
     expect(find(), isNull);
+  });
+
+  test('no library is no host, and that is said', () {
+    expect(find(), isNull);
+    expect(said.single, contains('host library'));
   });
 
   test('a host speaks as canoa: or, built before the rename, canoa-host:', () {

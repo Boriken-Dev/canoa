@@ -258,7 +258,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
     }
 
     test('serves canoa.cfg, and a key the person pairs in the app reaches its agent', () async {
-      await supervisor.apply(configPath: config.path, hasEntries: true);
+      await supervisor.apply(configPath: config.path);
       await until(() => supervisor.phase == HostPhase.running, 'the host to run');
       final url = supervisor.listening.single.url;
       final method = PeerMethod.parse(supervisor.listening.single.method!);
@@ -291,7 +291,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
     }, skip: skip);
 
     test('a host that dies is started again, and stopping ends it for good', () async {
-      await supervisor.apply(configPath: config.path, hasEntries: true);
+      await supervisor.apply(configPath: config.path);
       await until(() => supervisor.phase == HostPhase.running, 'the host to run');
       final first = supervisor.pid!;
       Process.killPid(first, ProcessSignal.sigkill);
@@ -330,7 +330,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
     test('a canoa.cfg the host refuses is said in its words and not retried', () async {
       await config.writeAsString('[host.agents.fixture]\nprogram = "x"\nlisten = "0.0.0.0:7999"\n');
       expect(await supervisor.check(config.path), isNotNull);
-      await supervisor.apply(configPath: config.path, hasEntries: true);
+      await supervisor.apply(configPath: config.path);
       await until(() => supervisor.phase == HostPhase.failed, 'the host to refuse it');
       expect(supervisor.problem, contains('loopback'));
     }, skip: skip);
