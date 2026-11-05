@@ -36,6 +36,10 @@ rustix = { version = "1.1", default-features = false, features = ["std", "stdio"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 
+# Whether a console has a window anybody can see, asked by a test's probe.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
+
 [lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"

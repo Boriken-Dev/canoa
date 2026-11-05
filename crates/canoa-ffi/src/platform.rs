@@ -50,6 +50,8 @@ pub(crate) fn hide_console_for_children() -> std::io::Result<()> {
 
     /// `CREATE_NO_WINDOW`: the helper's console is made with no window.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    /// What `AttachConsole` answers a process that has a console already, which may have no window to report.
+    const ALREADY_ATTACHED: i32 = 5;
 
     // SAFETY: takes nothing, and only reports.
     if !unsafe { GetConsoleWindow() }.is_null() {
@@ -74,6 +76,9 @@ pub(crate) fn hide_console_for_children() -> std::io::Result<()> {
             break Ok(());
         }
         let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ALREADY_ATTACHED) {
+            break Ok(());
+        }
         if Instant::now() >= until {
             break Err(error);
         }
