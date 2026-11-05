@@ -179,22 +179,21 @@ mod tests {
         // SAFETY: both point at what lives across the call.
         let status = unsafe { canoa_ffi_job_start(request.as_ptr(), request.len(), &raw mut job) };
         assert_eq!(status, STATUS_OK);
-        let mut said = String::new();
-        loop {
+        let said = loop {
             let (mut text, mut len) = (ptr::null_mut(), 0_usize);
             // SAFETY: both point at locals that live across the call.
             let status = unsafe { canoa_ffi_job_read(job, &raw mut text, &raw mut len) };
             assert_eq!(status, STATUS_OK);
             // SAFETY: the library just gave this text of this length.
-            said = String::from_utf8_lossy(unsafe { core::slice::from_raw_parts(text, len) })
+            let said = String::from_utf8_lossy(unsafe { core::slice::from_raw_parts(text, len) })
                 .into_owned();
             // SAFETY: as it was given, once.
             unsafe { canoa_ffi_text_free(text, len) };
             if !said.contains(r#""exit":null"#) {
-                break;
+                break said;
             }
             std::thread::yield_now();
-        }
+        };
         assert!(said.contains(r#""exit":0"#), "{said}");
         assert_eq!(canoa_ffi_job_stop(job), STATUS_OK);
         assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
