@@ -3,6 +3,7 @@
 // and has no entry for them. Without CANOA_TEST_LIBRARY these tests are skipped. It also holds the C ABI's one table of
 // statuses to the Rust one, which needs nothing built.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
@@ -93,6 +94,39 @@ void main() {
       await _until(() => second.phase == HostPhase.idle, 'the second to start once told');
       await second.stop();
     });
+
+    test('a standalone canoa serve and this host never fight over a home, whichever came first', () async {
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.idle, 'this host to be up');
+      final environment = {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'};
+      final refused = await Process.run(_host!, ['serve', '--allow-empty', '--config', cfg], environment: environment);
+      expect(refused.exitCode, statusHeld, reason: '${refused.stderr}');
+      expect(refused.stderr as String, contains('CanoaUI (process $pid)'));
+      expect(refused.stdout as String, isEmpty, reason: 'it serves nothing');
+      await supervisor.stop();
+
+      final standalone = await Process.start(_host!, [
+        'serve',
+        '--allow-empty',
+        '--until-stdin-closes',
+        '--config',
+        cfg,
+      ], environment: environment);
+      final said = standalone.stdout.transform(utf8.decoder).transform(const LineSplitter()).asBroadcastStream();
+      standalone.stderr.listen((_) {});
+      await said.firstWhere((line) => line.contains('"ready"')).timeout(const Duration(seconds: 30));
+      await supervisor.restart();
+      await _until(() => supervisor.phase == HostPhase.held, 'this host to refuse');
+      expect(supervisor.problem, contains('canoa (process ${standalone.pid})'));
+
+      // A holder that dies gives the home up, however it died.
+      standalone.kill(ProcessSignal.sigkill);
+      await standalone.exitCode;
+      await supervisor.restart();
+      await _until(() => supervisor.phase == HostPhase.idle, 'this host to take the home over');
+      await supervisor.stop();
+    }, skip: _host == null ? 'CANOA_TEST_HOST names a built canoa' : null);
 
     test('its other commands run too: keys, check, and pairing given up', () async {
       final supervisor = HostSupervisor(tool);
