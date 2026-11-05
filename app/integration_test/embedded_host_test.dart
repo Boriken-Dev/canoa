@@ -38,7 +38,7 @@ Future<List<int>> _processes(String marker) async {
           "(Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*$marker*' -and "
               "\$_.Name -notlike 'powershell*' }).ProcessId",
         ])
-      : await Process.run('pgrep', ['-f', marker]);
+      : await Process.run('pgrep', ['-f', '--', marker]);
   return [
     for (final line in const LineSplitter().convert(ran.stdout as String))
       if (int.tryParse(line.trim()) case final int id)

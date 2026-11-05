@@ -205,6 +205,30 @@ void main() {
     expect(find.textContaining(_methodShown), findsNothing, reason: 'a host that does not say its method shows none');
   });
 
+  testWidgets('with nothing to host the host is still up, and its id is shown', (tester) async {
+    final host = _Harness();
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg'));
+    await host.show(tester);
+    host.tool.children.single.out.add('{"ready":true,"peer":"$_paired","method":"noise"}');
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing to host: add an agent.'), findsOneWidget);
+    expect(find.text('A browser pins this host as:'), findsOneWidget);
+  });
+
+  testWidgets('another host on this home is said in its words, with a way to try again', (tester) async {
+    final host = _Harness();
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg'));
+    await host.show(tester);
+    host.tool.children.single
+      ..err.add('canoa: canoa (process 12) already hosts this home, /h: stop it')
+      ..end(statusHeld);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('canoa (process 12) already hosts this home'), findsOneWidget);
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(host.tool.started, hasLength(2));
+  });
+
   testWidgets('the method the host proves by is shown beside its id', (tester) async {
     final host = _Harness();
     unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg'));

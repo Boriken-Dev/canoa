@@ -95,4 +95,15 @@ provider = "echo_provider"
     expect(() => CanoaConfig.parse('[network]\nconnect_timeout = 0'),
         throwsFormatException);
   });
+
+  test('the app runs its own host unless canoa.cfg leaves it off, and saving keeps the choice', () {
+    expect(const CanoaConfig().localHost, isTrue);
+    expect(CanoaConfig.parse('').localHost, isTrue);
+    final off = CanoaConfig.parse('[desktop]\nlocal_host = false\n');
+    expect(off.localHost, isFalse);
+    expect(CanoaConfig.parse(off.encode()).localHost, isFalse);
+    expect(off.copyWith(startHidden: true).localHost, isFalse);
+    expect(off.withHost(const {}).localHost, isFalse);
+    expect(off.withProfileTables(overlays: const {}, tables: const {}).localHost, isFalse);
+  });
 }
