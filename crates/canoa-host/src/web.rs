@@ -8,6 +8,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -31,6 +32,8 @@ const MAX_HEADERS: usize = 64;
 const CHUNK: usize = 4096;
 /// How long an accept loop rests after the system refuses a connection, so a full descriptor table is not a busy loop.
 const ACCEPT_REST: Duration = Duration::from_millis(50);
+/// How often an idle listener looks up to see whether [`WebStopper::stop`] was called.
+const STOP_POLL: Duration = Duration::from_millis(25);
 
 /// The site built in by the `web` feature: each file's path under the site, its bytes and its entity tag, by path.
 #[cfg(feature = "web")]
@@ -293,6 +296,8 @@ struct Shared {
     hosts: Vec<String>,
     policy: String,
     index: Vec<u8>,
+    /// Set by [`WebStopper::stop`]: the listener ends, and each connection after the answer it is sending.
+    stopped: Arc<AtomicBool>,
 }
 
 /// The web app bound to its address, not yet taking connections.
@@ -382,8 +387,15 @@ impl WebServer {
                 hosts: web.hosts.clone(),
                 policy: policy(&connect),
                 index: host_index(peer, method, entries),
+                stopped: Arc::new(AtomicBool::new(false)),
             }),
         })
+    }
+
+    /// What ends this server, for a thread other than the one in [`WebServer::run`].
+    #[must_use]
+    pub fn stopper(&self) -> WebStopper {
+        WebStopper(Arc::clone(&self.shared.stopped))
     }
 
     /// The address it is bound to.
@@ -409,20 +421,33 @@ impl WebServer {
         }
     }
 
-    /// Takes connections until the process ends, each on a thread of its own, at most `max_connections` at once and
-    /// `max_connections_per_address` from one address.
+    /// Takes connections until [`WebStopper::stop`] or the process ends, each on a thread of its own, at most
+    /// `max_connections` at once and `max_connections_per_address` from one address. It returns with the address free.
     pub fn run(self) {
         let gate = Gate::new(self.shared.limits.max_connections);
         let addresses = Arc::new(Mutex::new(BTreeMap::<IpAddr, usize>::new()));
-        loop {
+        // Waiting in `accept` could never notice a stop.
+        if let Err(error) = self.listener.set_nonblocking(true) {
+            return tracing::warn!("web: the listener cannot be set up: {error}");
+        }
+        while !self.shared.stopped.load(Ordering::SeqCst) {
             let (tcp, peer) = match self.listener.accept() {
                 Ok(accepted) => accepted,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(STOP_POLL);
+                    continue;
+                }
                 Err(error) => {
                     tracing::warn!("web: a connection failed: {error}");
                     std::thread::sleep(ACCEPT_REST);
                     continue;
                 }
             };
+            // On some systems an accepted socket takes the listener's mode.
+            if let Err(error) = tcp.set_nonblocking(false) {
+                tracing::warn!("web: a connection failed: {error}");
+                continue;
+            }
             let Some(entered) = gate.enter() else {
                 tracing::debug!("web: a connection was closed: max_connections are open");
                 continue;
@@ -448,6 +473,18 @@ impl WebServer {
                 tracing::warn!("web: a connection was dropped: {error}");
             }
         }
+    }
+}
+
+/// Ends a [`WebServer`] from another thread.
+#[derive(Clone, Debug)]
+pub struct WebStopper(Arc<AtomicBool>);
+
+impl WebStopper {
+    /// Ends [`WebServer::run`] within a moment. A connection already open ends after the answer it is sending, or when it
+    /// next goes quiet.
+    pub fn stop(&self) {
+        self.0.store(true, Ordering::SeqCst);
     }
 }
 
@@ -946,7 +983,7 @@ fn read_head<W: Wire>(
 fn exchange<W: Wire>(shared: &Shared, mut wire: W) {
     let mut buffer = Vec::with_capacity(CHUNK);
     let mut served = 0_usize;
-    loop {
+    while !shared.stopped.load(Ordering::SeqCst) {
         let length = match read_head(&mut wire, &mut buffer, &shared.limits, served == 0) {
             Ok(length) => length,
             Err(Unread::Gone) => break,

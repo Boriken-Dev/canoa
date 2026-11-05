@@ -7,7 +7,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::net::SocketAddr;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -44,6 +44,8 @@ pub const PROOF_LIMIT: Duration = Duration::from_secs(15);
 pub const FIRST_MESSAGE: Duration = Duration::from_secs(60);
 /// Messages an unproven peer may have queued.
 const UNPROVEN_PENDING: usize = 8;
+/// How often a listener looks up to see whether [`Stopper::stop`] was called.
+const STOP_POLL: Duration = Duration::from_millis(100);
 pub use crate::child::{OUTPUT_LIMIT, START_LIMIT};
 /// What a peer is granted on an entry, in [`Registry`] terms.
 pub const ACP_CAPABILITY: &str = "acp/1";
@@ -52,12 +54,18 @@ pub const ACP_CAPABILITY: &str = "acp/1";
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ServeOptions {
-    /// The program that serves a provider: this host's own executable, run as `PROGRAM provider ...`.
+    /// The program that serves a provider, a tool or a profile's launch: this host's own executable, run as
+    /// `PROGRAM [program_args] provider ...`.
     pub provider_program: PathBuf,
+    /// What goes before the subcommand on `provider_program`'s command line: nothing for `canoa`, the flag that makes an
+    /// application hosting this library behave as one when it starts itself.
+    pub program_args: Vec<OsString>,
     /// What one key may carry in each direction, in bytes; the method's own default, 2^38, when `None`.
     pub key_limit: Option<u64>,
     /// Whether a Noise sender changes its key at the limit; WebCrypto has no key change and ends the session there.
     pub rekey: bool,
+    /// Whether a configuration with no entry binds, serving nothing, rather than being refused.
+    pub nothing_to_serve: bool,
 }
 
 impl ServeOptions {
@@ -66,8 +74,10 @@ impl ServeOptions {
     pub fn new(provider_program: impl Into<PathBuf>) -> Self {
         Self {
             provider_program: provider_program.into(),
+            program_args: Vec::new(),
             key_limit: None,
             rekey: true,
+            nothing_to_serve: false,
         }
     }
 
@@ -82,6 +92,20 @@ impl ServeOptions {
     #[must_use]
     pub const fn with_rekey(mut self, rekey: bool) -> Self {
         self.rekey = rekey;
+        self
+    }
+
+    /// What goes before the subcommand on the provider program's command line.
+    #[must_use]
+    pub fn with_program_args(mut self, args: Vec<OsString>) -> Self {
+        self.program_args = args;
+        self
+    }
+
+    /// Lets a configuration with no entry bind, serving nothing until it is stopped.
+    #[must_use]
+    pub const fn with_nothing_to_serve(mut self, allowed: bool) -> Self {
+        self.nothing_to_serve = allowed;
         self
     }
 }
@@ -194,6 +218,9 @@ struct Shared {
     registry: Registry,
     unproven: Gate,
     agents: Mutex<Agents>,
+    /// Set by [`Stopper::stop`]: every listener and link ends.
+    stopped: Arc<AtomicBool>,
+    program_args: Vec<OsString>,
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -272,8 +299,15 @@ impl fmt::Debug for Stopper {
 }
 
 impl Stopper {
+    /// Ends every listener, link and agent: [`Serving::run`] returns with the addresses free, and each link still in its
+    /// proof ends by [`PROOF_LIMIT`] at the latest.
+    pub fn stop(&self) {
+        self.0.stopped.store(true, Ordering::SeqCst);
+        self.stop_agents();
+    }
+
     /// Ends every agent process running, with what each started, and every later connection before its agent starts.
-    /// The listeners stay bound: end the process to free them.
+    /// The listeners stay bound: end the process to free them, or use [`Stopper::stop`].
     pub fn stop_agents(&self) {
         let running = {
             let mut agents = self.0.agents.lock().unwrap_or_else(PoisonError::into_inner);
@@ -304,6 +338,7 @@ impl fmt::Debug for Serving {
 /// The arguments that make `program` serve a provider entry on its standard streams. They hold paths and names only: the
 /// settings go on its standard input.
 fn provider_args(
+    before: &[OsString],
     entry: &Entry,
     origin: &Origin,
     provider: &str,
@@ -314,7 +349,8 @@ fn provider_args(
         Origin::Library(library) => ("--library", library),
         Origin::Source { file, .. } => ("--source", file),
     };
-    let mut args = vec![
+    let mut args = before.to_vec();
+    args.extend([
         OsString::from("provider"),
         OsString::from(flag),
         file.as_os_str().to_owned(),
@@ -325,7 +361,7 @@ fn provider_args(
         OsString::from("--directory"),
         directory.as_os_str().to_owned(),
         OsString::from("--settings-on-stdin"),
-    ];
+    ]);
     if let Origin::Source { import_search, .. } = origin {
         args.push(OsString::from("--import-search"));
         args.push(OsString::from(import_search.as_str()));
@@ -339,14 +375,16 @@ fn provider_args(
 
 /// The arguments that make `program` serve a tool entry: its name and the entry as JSON, which holds no setting a client
 /// gave and nothing the tool's own command line does not show.
-fn tool_args(name: &str, spec: &crate::tool::ToolSpec) -> Vec<OsString> {
-    vec![
+fn tool_args(before: &[OsString], name: &str, spec: &crate::tool::ToolSpec) -> Vec<OsString> {
+    let mut args = before.to_vec();
+    args.extend([
         OsString::from("tool"),
         OsString::from("--name"),
         OsString::from(name),
         OsString::from("--spec"),
         OsString::from(serde_json::to_string(spec).unwrap_or_default()),
-    ]
+    ]);
+    args
 }
 
 impl Serving {
@@ -355,15 +393,15 @@ impl Serving {
     ///
     /// # Errors
     ///
-    /// [`ServeError::NothingToServe`] for a configuration with no entry, [`ServeError::Listen`] for an address that cannot
-    /// be bound.
+    /// [`ServeError::NothingToServe`] for a configuration with no entry, unless the options allow it;
+    /// [`ServeError::Listen`] for an address that cannot be bound.
     pub fn bind(
         config: &Config,
         identity: Identity,
         store: TrustStore,
         options: &ServeOptions,
     ) -> Result<Self, ServeError> {
-        if config.entries.is_empty() {
+        if config.entries.is_empty() && !options.nothing_to_serve {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
@@ -462,7 +500,14 @@ impl Serving {
                         "provider",
                         Run::Provider {
                             program: options.provider_program.as_os_str().to_owned(),
-                            args: provider_args(entry, origin, provider, directory, *max_sessions),
+                            args: provider_args(
+                                &options.program_args,
+                                entry,
+                                origin,
+                                provider,
+                                directory,
+                                *max_sessions,
+                            ),
                             line,
                         },
                     )
@@ -472,7 +517,7 @@ impl Serving {
                     "tool",
                     Run::Agent {
                         program: options.provider_program.as_os_str().to_owned(),
-                        args: tool_args(&entry.name, spec),
+                        args: tool_args(&options.program_args, &entry.name, spec),
                         scope: Scope::new(entry.working_roots.clone()),
                         offer: None,
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
@@ -511,6 +556,8 @@ impl Serving {
                 registry,
                 unproven: Gate::new(MAX_UNPROVEN),
                 agents: Mutex::new(Agents::default()),
+                stopped: Arc::new(AtomicBool::new(false)),
+                program_args: options.program_args.clone(),
             }),
             listeners,
             listening,
@@ -535,15 +582,16 @@ impl Serving {
         &self.listening
     }
 
-    /// What ends the agents this serves, for a thread other than the one in [`Serving::run`].
+    /// What stops this and ends its agents, for a thread other than the one in [`Serving::run`].
     #[must_use]
     pub fn stopper(&self) -> Stopper {
         Stopper(Arc::clone(&self.shared))
     }
 
-    /// Takes connections on every entry until the process ends. Each handshake and proof runs on a thread of its own, so
-    /// a slow peer holds up nobody.
+    /// Takes connections on every entry until [`Stopper::stop`] or the process ends. Each handshake and proof runs on a
+    /// thread of its own, so a slow peer holds up nobody. It returns with every listener closed.
     pub fn run(self) {
+        let nothing = self.listeners.is_empty();
         let threads: Vec<_> = self
             .listeners
             .into_iter()
@@ -556,6 +604,10 @@ impl Serving {
             .collect();
         for thread in threads.into_iter().flatten() {
             let _ = thread.join();
+        }
+        // With no entry there is no listener to wait on, and it still runs until stopped.
+        while nothing && !self.shared.stopped.load(Ordering::SeqCst) {
+            thread::sleep(STOP_POLL);
         }
     }
 }
@@ -571,9 +623,10 @@ fn unproven_limits() -> Limits {
 }
 
 fn accept_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &websocket::Listener) {
-    loop {
-        let pending = match listener.next(None) {
+    while !shared.stopped.load(Ordering::SeqCst) {
+        let pending = match listener.next(Some(STOP_POLL)) {
             Ok(pending) => pending,
+            Err(Failure::Timeout) => continue,
             Err(failure) => {
                 tracing::warn!(entry = served.name, "a connection failed: {failure}");
                 continue;
@@ -649,8 +702,9 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         return tracing::info!(entry = served.name, %peer, "a paired key this entry does not list was turned away");
     }
     let store = Arc::clone(&shared.store);
-    let sealed =
-        Sealed::new(channel, established.session).with_check(move || store.is_accepted(&peer));
+    let stopped = Arc::clone(&shared.stopped);
+    let sealed = Sealed::new(channel, established.session)
+        .with_check(move || !stopped.load(Ordering::SeqCst) && store.is_accepted(&peer));
     let Some(_running) = served.running.enter() else {
         tracing::info!(entry = served.name, %peer, "turned away: max_peers are running");
         return sealed.close();
@@ -761,11 +815,12 @@ fn give_agent<C: Channel>(
         }
     };
     // The agent's environment reaches it on `launch`'s first line, never on a command line.
-    let mut launched = vec![
+    let mut launched = shared.program_args.clone();
+    launched.extend([
         OsString::from("launch"),
         OsString::from("--"),
         program.clone(),
-    ];
+    ]);
     launched.extend(args.iter().cloned());
     let (key, agent) = match shared.start(&offer.launcher, &launched) {
         Ok(Some(started)) => started,
@@ -838,7 +893,7 @@ mod tests {
         else {
             panic!("a provider");
         };
-        let args = provider_args(entry, origin, provider, directory, *max_sessions);
+        let args = provider_args(&[], entry, origin, provider, directory, *max_sessions);
         assert!(
             args.iter().any(|arg| arg == "--settings-on-stdin"),
             "{args:?}"
