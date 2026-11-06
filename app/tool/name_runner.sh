@@ -1,6 +1,6 @@
 #!/bin/sh
 # Names the desktop executable CanoaUI, and what people see of it Canoa, in the runners `flutter create` generated in app/.
-# The command-line program is `canoa`, which sits beside the executable: on Windows and macOS names ignore case, so the
+# The command-line program is `canoa`, which can sit beside the executable: on Windows and macOS names ignore case, so the
 # executable cannot be `Canoa`. Run it after `flutter create` and before the first build, in app/ or with its directory
 # as the argument; it is safe to run again.
 set -eu
