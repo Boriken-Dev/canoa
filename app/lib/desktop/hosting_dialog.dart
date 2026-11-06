@@ -485,7 +485,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
             controller: command,
             decoration: const InputDecoration(
               labelText: 'Command',
-              hintText: 'npx -y @agentclientprotocol/claude-agent-acp@0.99.1',
+              hintText: 'gemini --acp',
             ),
           ),
           TextField(
