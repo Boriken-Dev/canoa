@@ -166,7 +166,7 @@ void main() {
       }
     });
     stdout.writeln('ANSWERED $answered WRITTEN ${written.existsSync()}');
-    stdout.writeln('ENTRIES ${session.messages.map((message) => message.role.name).toSet()} TOOLS ${session.toolEntries.length} COMMANDS ${session.commands.length} USAGE ${session.usage.describe() != null}');
+    stdout.writeln('ENTRIES ${session.messages.map((message) => message.role.name).toSet()} TOOLS ${session.toolEntries.length} COMMANDS ${session.commands.length} USAGE ${session.usage.describe()}');
     await client.close();
     expect(answered, greaterThan(0), reason: 'the agent has to have asked');
     expect(written.existsSync(), allow, reason: 'a refusal has to stop it');
