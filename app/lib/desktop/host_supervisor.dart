@@ -179,6 +179,9 @@ class HostSupervisor extends ChangeNotifier {
 
   String? _configPath;
   HostChild? _child;
+
+  /// Whether it gave up on a host that did not end in time, which in this process may still hold the home.
+  bool _gaveUpOnOne = false;
   Timer? _retry;
   DateTime? _startedAt;
   int _generation = 0;
@@ -276,6 +279,7 @@ class HostSupervisor extends ChangeNotifier {
       return;
     }
     if (value is! Map || value['ready'] != true) return;
+    _gaveUpOnOne = false;
     if (value['peer'] case final String peer) _peerId = peer;
     if (value['method'] case final String method) _peerMethod = method;
     _phase = _listening.isEmpty ? HostPhase.idle : HostPhase.running;
@@ -292,8 +296,8 @@ class HostSupervisor extends ChangeNotifier {
     }
   }
 
-  /// [own] is the process the host ran in: a home held by it is held by an earlier host of this app's, one that was given up
-  /// on before it had ended, which ends in time, so it is waited out like any end rather than shown as another host.
+  /// [own] is the process the host ran in. A home held there after a host was given up on is held by that host, which ends in
+  /// time: it is waited out like any end rather than shown as another host.
   void _ended(int generation, int? code, [int? own]) {
     if (generation != _generation) return;
     _child = null;
@@ -307,7 +311,8 @@ class HostSupervisor extends ChangeNotifier {
       _phase = HostPhase.failed;
       return notifyListeners();
     }
-    if (code == statusHeld && (own == null || !(_problem?.contains('(process $own)') ?? false))) {
+    final heldByTheOneGivenUp = _gaveUpOnOne && own != null && (_problem?.contains('(process $own)') ?? false);
+    if (code == statusHeld && !heldByTheOneGivenUp) {
       _phase = HostPhase.held;
       return notifyListeners();
     }
@@ -339,6 +344,7 @@ class HostSupervisor extends ChangeNotifier {
     await child.exitCode.timeout(
       hostLeaving,
       onTimeout: () {
+        _gaveUpOnOne = true;
         child.kill();
         return child.exitCode;
       },

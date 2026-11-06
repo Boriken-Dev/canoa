@@ -83,7 +83,27 @@ void main() {
     });
   });
 
-  test('a home held by its own process, an earlier host of this app that has not ended yet, is waited out', () {
+  test('its home held by the host it gave up on, in its own process, is waited out rather than shown as another', () {
+    fakeAsync((async) {
+      final tool = FakeTool()..leavesOnInput = false;
+      final supervisor = HostSupervisor(tool, errorDrain: Duration.zero);
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg'));
+      async.flushMicrotasks();
+      // A changed canoa.cfg, and a host that does not end in time: given up on, still holding the home.
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg'));
+      async.elapse(hostLeaving);
+      final next = tool.children.last;
+      expect(tool.children, hasLength(2));
+      next.err.add('canoa: CanoaUI (process ${next.pid}) already hosts this home, /h: stop it');
+      next.end(statusHeld);
+      async.flushMicrotasks();
+      expect(supervisor.phase, HostPhase.waiting, reason: 'no other host holds it');
+      async.elapse(supervisor.pauseAfter(1));
+      expect(tool.children, hasLength(3), reason: 'it starts again by itself');
+    });
+  });
+
+  test('a home held by another host in its own process, not one it gave up on, is shown as held', () {
     fakeAsync((async) {
       final tool = FakeTool();
       final supervisor = HostSupervisor(tool, errorDrain: Duration.zero);
@@ -93,9 +113,7 @@ void main() {
       child.err.add('canoa: CanoaUI (process ${child.pid}) already hosts this home, /h: stop it');
       child.end(statusHeld);
       async.flushMicrotasks();
-      expect(supervisor.phase, HostPhase.waiting, reason: 'no other host holds it');
-      async.elapse(supervisor.pauseAfter(1));
-      expect(tool.started, hasLength(2), reason: 'it starts again by itself');
+      expect(supervisor.phase, HostPhase.held);
     });
   });
 
