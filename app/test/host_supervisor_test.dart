@@ -83,6 +83,22 @@ void main() {
     });
   });
 
+  test('a home held by its own process, an earlier host of this app that has not ended yet, is waited out', () {
+    fakeAsync((async) {
+      final tool = FakeTool();
+      final supervisor = HostSupervisor(tool, errorDrain: Duration.zero);
+      unawaited(supervisor.apply(configPath: '/c/canoa.cfg'));
+      async.flushMicrotasks();
+      final child = tool.children.single;
+      child.err.add('canoa: CanoaUI (process ${child.pid}) already hosts this home, /h: stop it');
+      child.end(statusHeld);
+      async.flushMicrotasks();
+      expect(supervisor.phase, HostPhase.waiting, reason: 'no other host holds it');
+      async.elapse(supervisor.pauseAfter(1));
+      expect(tool.started, hasLength(2), reason: 'it starts again by itself');
+    });
+  });
+
   test('it serves canoa.cfg tied to its input, and says where each entry listens', () async {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);

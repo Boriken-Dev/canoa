@@ -239,6 +239,7 @@ class HostSupervisor extends ChangeNotifier {
       return;
     }
     _child = child;
+    final own = child.pid;
     _startedAt = _clock();
     final errorsDone = Completer<void>();
     child.errors.listen(
@@ -261,7 +262,7 @@ class HostSupervisor extends ChangeNotifier {
     unawaited(
       child.exitCode.then((code) async {
         await errorsDone.future.timeout(errorDrain, onTimeout: () {});
-        _ended(generation, code);
+        _ended(generation, code, own);
       }),
     );
   }
@@ -291,7 +292,9 @@ class HostSupervisor extends ChangeNotifier {
     }
   }
 
-  void _ended(int generation, int? code) {
+  /// [own] is the process the host ran in: a home held by it is held by an earlier host of this app's, one that was given up
+  /// on before it had ended, which ends in time, so it is waited out like any end rather than shown as another host.
+  void _ended(int generation, int? code, [int? own]) {
     if (generation != _generation) return;
     _child = null;
     _listening.clear();
@@ -304,7 +307,7 @@ class HostSupervisor extends ChangeNotifier {
       _phase = HostPhase.failed;
       return notifyListeners();
     }
-    if (code == statusHeld) {
+    if (code == statusHeld && (own == null || !(_problem?.contains('(process $own)') ?? false))) {
       _phase = HostPhase.held;
       return notifyListeners();
     }
