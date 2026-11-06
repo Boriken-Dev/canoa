@@ -1,9 +1,11 @@
 //! The directory of a host's identity and trust store, and the lock that keeps two hosts off it. The directory's layout is
 //! [`coqui_agentic_peer::home`]'s; this names any directory rather than only the one this user's environment gives.
 //!
-//! The lock is the operating system's, on `host.lock`, so a holder that dies gives it up however it died and a process id
-//! used again by something else proves nothing. Whoever holds it writes `host.holder` beside it: Windows refuses to read a
-//! file another process has locked, and that file is only what a second host says, never what decides.
+//! The lock is the operating system's, so a holder that dies gives it up however it died and a process id used again by
+//! something else proves nothing. On Unix it is on the home's directory itself, which no file removed from it takes away;
+//! Windows locks no directory, so there it is on `host.lock`, held open with no leave to delete or rename it. Whoever holds
+//! it writes `host.holder`: Windows refuses to read a file another process has locked, and that file is only what a second
+//! host says, never what decides.
 //!
 //! Dropping a [`HomeLock`] gives it up; `host.lock` itself stays, since removing a file another host may be locking would
 //! let two hold "the" lock at once.
@@ -22,7 +24,8 @@ use coqui_agentic_peer::home::{self, METHOD_FILE, identity_file};
 use coqui_peer_webcrypto::TrustStore;
 use serde_json::{Value, json};
 
-/// The file the operating system's lock is taken on.
+/// The file the operating system's lock is taken on, where a directory cannot be locked.
+#[cfg(not(unix))]
 const LOCK_FILE: &str = "host.lock";
 /// The file saying who holds the lock.
 const HOLDER_FILE: &str = "host.holder";
@@ -142,6 +145,21 @@ impl Home {
         &self.dir
     }
 
+    /// As [`Home::identity`], for a command that holds no lock: the method the home records is left as it is, unless it
+    /// records none, so what a running host is next started with does not change under it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Home::identity`].
+    pub fn identity_as_is(&self, method: Option<Method>) -> Result<Identity, Error> {
+        match (method, self.chosen()?) {
+            (Some(method), Some(_)) => {
+                Identity::open_or_create(&self.dir.join(identity_file(method)), method)
+            }
+            _ => self.identity(method),
+        }
+    }
+
     /// The identity of `method`, made when absent; with no method, the one the home records, else the one it holds, else a
     /// new one of the default method. It then records that method, as [`coqui_agentic_peer::home`] does for its own.
     ///
@@ -216,13 +234,7 @@ impl Home {
             source,
         };
         fs::create_dir_all(&self.dir).map_err(failed)?;
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.dir.join(LOCK_FILE))
-            .map_err(failed)?;
+        let file = lock_target(&self.dir).map_err(failed)?;
         match file.try_lock() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => {
@@ -263,6 +275,27 @@ impl Home {
     }
 }
 
+/// What the lock is taken on: see the module's documentation.
+#[cfg(unix)]
+fn lock_target(dir: &Path) -> io::Result<File> {
+    File::open(dir)
+}
+
+/// What the lock is taken on: see the module's documentation.
+#[cfg(not(unix))]
+fn lock_target(dir: &Path) -> io::Result<File> {
+    let mut options = File::options();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        /// `FILE_SHARE_READ | FILE_SHARE_WRITE`: others may open it, and none may delete or rename it while it is held.
+        const SHARE_BUT_NOT_DELETE: u32 = 0x1 | 0x2;
+        options.share_mode(SHARE_BUT_NOT_DELETE);
+    }
+    options.open(dir.join(LOCK_FILE))
+}
+
 /// Writes who holds the home whole, beside its place and then over it, so that nobody reads half of it.
 fn write_holder(file: &Path, name: &str) -> io::Result<()> {
     let name: String = name
@@ -271,8 +304,15 @@ fn write_holder(file: &Path, name: &str) -> io::Result<()> {
         .take(MAX_NAME)
         .collect();
     let text = json!({ "pid": std::process::id(), "name": name }).to_string();
-    let beside = file.with_extension(format!("holder.{}", std::process::id()));
-    let written = File::create(&beside)
+    // A name nobody could have put a link at in advance, made only where nothing is.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let beside = file.with_extension(format!("holder.{}.{stamp}", std::process::id()));
+    let written = File::options()
+        .write(true)
+        .create_new(true)
+        .open(&beside)
         .and_then(|mut out| out.write_all(text.as_bytes()))
         .and_then(|()| fs::rename(&beside, file));
     if written.is_err() {
@@ -342,6 +382,7 @@ mod tests {
         let home = Home::at(&dir);
         drop(home.lock("canoa").expect("a free home locks"));
         assert_eq!(home.holder(), None);
+        #[cfg(windows)]
         assert!(dir.join(LOCK_FILE).exists(), "the lock's file stays");
         fs::remove_dir_all(&dir).expect("removed");
     }
@@ -382,6 +423,65 @@ mod tests {
             })
         );
         fs::remove_dir_all(&dir).expect("removed");
+    }
+
+    #[test]
+    fn a_held_home_stays_held_when_its_lock_file_is_removed() {
+        let dir = fresh("removed");
+        let home = Home::at(&dir);
+        let lock = home.lock("CanoaUI").expect("a free home locks");
+        let _ = fs::remove_file(dir.join(LOCK_FILE));
+        let second = home.lock("canoa");
+        assert!(
+            matches!(second, Err(LockError::Held { .. })),
+            "two hosts on one home: {second:?}"
+        );
+        drop(second);
+        drop(lock);
+        fs::remove_dir_all(&dir).expect("removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saying_who_holds_a_home_writes_through_no_link() {
+        let dir = fresh("link");
+        fs::create_dir_all(&dir).expect("made");
+        let target = dir.join("elsewhere");
+        fs::write(&target, "kept").expect("written");
+        let planted = dir.join(format!("{HOLDER_FILE}.{}", std::process::id()));
+        std::os::unix::fs::symlink(&target, &planted).expect("a link");
+        let lock = Home::at(&dir).lock("canoa").expect("a free home locks");
+        assert_eq!(fs::read_to_string(&target).expect("read"), "kept");
+        drop(lock);
+        fs::remove_dir_all(&dir).expect("removed");
+    }
+
+    #[test]
+    fn a_command_that_holds_no_lock_leaves_the_recorded_method_alone() {
+        let dir = fresh("unrecorded");
+        let home = Home::at(&dir);
+        let first = home.identity(None).expect("made");
+        let other = Method::ALL
+            .into_iter()
+            .find(|method| *method != first.method())
+            .expect("two methods");
+        let asked = home.identity_as_is(Some(other)).expect("made");
+        assert_eq!(asked.method(), other);
+        assert_eq!(
+            home.identity(None).expect("read").peer_id(),
+            first.peer_id(),
+            "what a running host is next started with is unchanged"
+        );
+        fs::remove_dir_all(&dir).expect("removed");
+
+        let fresh_home = Home::at(fresh("unrecorded-fresh"));
+        let made = fresh_home.identity_as_is(Some(other)).expect("made");
+        assert_eq!(
+            fresh_home.identity(None).expect("read").peer_id(),
+            made.peer_id(),
+            "a home that records none records the first"
+        );
+        fs::remove_dir_all(fresh_home.dir()).expect("removed");
     }
 
     #[test]

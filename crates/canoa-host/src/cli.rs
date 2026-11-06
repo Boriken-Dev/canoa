@@ -206,8 +206,24 @@ struct MethodArg {
 }
 
 impl MethodArg {
+    /// The identity a host serves with, its method recorded for the next start.
     fn identity(self, home: &Home) -> Result<auth::Identity, Failed> {
         home.identity(self.method).map_err(Failed::run)
+    }
+
+    /// The identity for a command that holds no lock, the home's recorded method left alone.
+    fn identity_as_is(self, home: &Home) -> Result<auth::Identity, Failed> {
+        home.identity_as_is(self.method).map_err(Failed::run)
+    }
+}
+
+/// Takes back the PIN when `pair` returns, however it returns: a connection still pairing runs on a thread of its own, which
+/// in an application's process goes on after the command has ended.
+struct ClearPin<'a>(&'a coqui_peer_webcrypto::pair::PairingDesk);
+
+impl Drop for ClearPin<'_> {
+    fn drop(&mut self) {
+        self.0.clear_pin();
     }
 }
 
@@ -478,7 +494,9 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
             .when_input_closes(
                 0,
                 Box::new(move || {
-                    stopper.stop();
+                    // The web app is stopped whatever happens to the rest, or `serve` would wait on it for ever.
+                    let _ =
+                        std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| stopper.stop()));
                     if let Some(web) = web_stopper {
                         web.stop();
                     }
@@ -520,7 +538,7 @@ fn pair(
         return Err(Failed::usage("pair listens only on loopback"));
     }
     let home = home_of(front)?;
-    let identity = Arc::new(method.identity(&home)?);
+    let identity = Arc::new(method.identity_as_is(&home)?);
     let store = Arc::new(store(&home)?);
     let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
@@ -542,6 +560,7 @@ fn pair(
     }
     let desk = pairing::desk().map_err(Failed::run)?;
     let shown = desk.show_pin().map_err(Failed::run)?;
+    let _clear = ClearPin(&desk);
     print(
         front,
         &serde_json::json!({
@@ -672,7 +691,10 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Check(args) => check(&args, front),
         Command::Id { method } => print(
             front,
-            &method.identity(&home_of(front)?)?.peer_id().to_string(),
+            &method
+                .identity_as_is(&home_of(front)?)?
+                .peer_id()
+                .to_string(),
         ),
         Command::Peers { format } => list_peers(format, front),
         Command::Pair {

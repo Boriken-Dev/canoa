@@ -152,9 +152,9 @@ pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the ident
 pub fn Serving::peer(&self) -> PeerId          // the identity's id, which a client pins
 pub fn Serving::listening(&self) -> &[Listening]
 pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another thread
-pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed
+pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed and every agent ended
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
-pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay
+pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
 #[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String }   // kind: "agent", "provider" or "tool"
 ```
 
@@ -431,6 +431,7 @@ pub fn Home::at(dir: impl Into<PathBuf>) -> Home
 pub fn Home::of_user() -> Result<Home, coqui_agentic_peer::Error>   // COQUI_AGENTIC_PEER_HOME, else the platform's place
 pub fn Home::dir(&self) -> &Path
 pub fn Home::identity(&self, method: Option<Method>) -> Result<Identity, coqui_agentic_peer::Error>   // as coqui_agentic_peer::home, in this directory
+pub fn Home::identity_as_is(&self, method: Option<Method>) -> Result<Identity, coqui_agentic_peer::Error>   // the same, the recorded method left alone unless none is recorded
 pub fn Home::store(&self) -> Result<TrustStore, coqui_agentic_peer::Error>
 pub fn Home::lock(&self, name: &str) -> Result<HomeLock, LockError>
 pub fn Home::holder(&self) -> Option<Holder>   // by what it wrote; proves nothing about the lock
@@ -438,8 +439,10 @@ pub fn Home::holder(&self) -> Option<Holder>   // by what it wrote; proves nothi
 #[non_exhaustive] pub enum LockError { Held { dir: PathBuf, holder: Option<Holder> }, Io { dir: PathBuf, source: io::Error } }
 ```
 
-- `lock` takes the operating system's lock on `host.lock` in the directory, made with its parents when absent, and writes `{"pid", "name"}` to `host.holder` beside it. So a holder that dies gives it up however it died, and a process id used again proves nothing. `Held` says who, or `None` when the holder has not said within half a second. Two locks in one process conflict too.
-- Dropping a `HomeLock` removes `host.holder` and gives the lock up; `host.lock` stays.
+- `lock` takes the operating system's lock, made with its parents when absent: on Unix on the directory itself, on Windows on `host.lock` in it, held open so that nobody can delete or rename it meanwhile; removing a file cannot let a second host in. It writes `{"pid", "name"}` to `host.holder` through a file of a name nobody could know in advance, made only where nothing is. So a holder that dies gives it up however it died, and a process id used again proves nothing. `Held` says who, or `None` when the holder has not said within half a second. Two locks in one process conflict too.
+- Dropping a `HomeLock` removes `host.holder` and gives the lock up; `host.lock`, on Windows, stays.
+- `identity_as_is` is for a command that holds no lock: `id --method` or `pair --method` on a home whose host runs gives that method's identity and does not change the method recorded, which the host's next start would use.
+- The lock is only as good as the filesystem's: a home on WSL's `/mnt/c` (9p) is not locked against a host on Windows, and a network filesystem is untested.
 - What `Display` says of `Held` names the holder, its process and the home. `canoa serve` and the app show it.
 - A file system that has no such lock is `Io`: that host does not start.
 
@@ -493,7 +496,8 @@ canoa launch PROGRAM [ARGS]...
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound, and then `{"ready": true, "peer", "method"}`, a line with no `name`; then it serves until stopped. It logs on standard error.
-- **One host on a home.** `serve` takes the home's lock (see "One host on a home") before anything else of the home, or any address: a second one, the app's or another `canoa serve`, says `canoa: NAME (process PID) already hosts this home, DIR: ...`, binds nothing and ends with status 3. A holder that died holds nothing. `check`, `peers`, `accept`, `revoke`, `id` and `pair` take no lock, and `coqui-acp-bridge serve --paired` does not know of it.
+- **One host on a home.** `serve` takes the home's lock (see "One host on a home") before anything else of the home, or any address: a second one, the app's or another `canoa serve`, says `canoa: NAME (process PID) already hosts this home, DIR: ...`, binds nothing and ends with status 3. A holder that died holds nothing. `check`, `peers`, `accept`, `revoke`, `id` and `pair` take no lock and change no recorded method, and `coqui-acp-bridge serve --paired` does not know of it.
+- `pair` takes its PIN back however it ends, so a connection still pairing on its own thread when it is given up pairs nobody: in an application's process such a thread outlives the command.
 - `serve --allow-empty`: a canoa.cfg with no entry, or none at all at that path, runs with nothing to serve, printing only the `ready` line, where without it that is status 2. It writes no file. A canoa.cfg that exists and cannot be read or parsed is still status 2.
 - `serve --web [DIR]` serves the web app too (see "The web app"): from `DIR` (made absolute from the working directory), else `[host.web]`'s `dir`, else the site built in; on `[host.web]`'s settings, or the defaults without the table. `--web-listen` replaces `listen`, and needs `--web` or `[host.web]` (status 2). After the entries' lines it prints `{"web": URL}`, a line with no `name`. A site that cannot be served, no site, plain HTTP beyond loopback, a zero limit or an unusable certificate is status 2; an address that cannot be bound, status 1.
 - `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every listener and agent is ended (`Stopper::stop`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.

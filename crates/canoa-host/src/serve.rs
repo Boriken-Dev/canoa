@@ -218,6 +218,8 @@ struct Shared {
     registry: Registry,
     unproven: Gate,
     agents: Mutex<Agents>,
+    /// Held while agents are being ended, so that whoever else ends them returns only once they have.
+    ending: Mutex<()>,
     /// Set by [`Stopper::stop`]: every listener and link ends.
     stopped: Arc<AtomicBool>,
     program_args: Vec<OsString>,
@@ -306,9 +308,11 @@ impl Stopper {
         self.stop_agents();
     }
 
-    /// Ends every agent process running, with what each started, and every later connection before its agent starts.
-    /// The listeners stay bound: end the process to free them, or use [`Stopper::stop`].
+    /// Ends every agent process running, with what each started, and every later connection before its agent starts. It
+    /// returns once they have ended, also when another thread is ending them. The listeners stay bound: end the process to
+    /// free them, or use [`Stopper::stop`].
     pub fn stop_agents(&self) {
+        let _ending = self.0.ending.lock().unwrap_or_else(PoisonError::into_inner);
         let running = {
             let mut agents = self.0.agents.lock().unwrap_or_else(PoisonError::into_inner);
             agents.stopping = true;
@@ -556,6 +560,7 @@ impl Serving {
                 registry,
                 unproven: Gate::new(MAX_UNPROVEN),
                 agents: Mutex::new(Agents::default()),
+                ending: Mutex::new(()),
                 stopped: Arc::new(AtomicBool::new(false)),
                 program_args: options.program_args.clone(),
             }),
@@ -589,8 +594,9 @@ impl Serving {
     }
 
     /// Takes connections on every entry until [`Stopper::stop`] or the process ends. Each handshake and proof runs on a
-    /// thread of its own, so a slow peer holds up nobody. It returns with every listener closed.
+    /// thread of its own, so a slow peer holds up nobody. It returns with every listener closed and every agent ended.
     pub fn run(self) {
+        let stopper = self.stopper();
         let nothing = self.listeners.is_empty();
         let threads: Vec<_> = self
             .listeners
@@ -609,6 +615,8 @@ impl Serving {
         while nothing && !self.shared.stopped.load(Ordering::SeqCst) {
             thread::sleep(STOP_POLL);
         }
+        // The stop that ended the listeners may still be ending agents on its own thread.
+        stopper.stop_agents();
     }
 }
 
