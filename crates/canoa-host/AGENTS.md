@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge` and `coqui-acp-provider` (coqui-acp `ee19118`), `coqui-agentic-peer` (`9b1fee4`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` and `coqui-acp-provider` (coqui-acp `f770997`), `coqui-agentic-peer` (`9b1fee4`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `WebConfig`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `aos`, `cli`, `config`, `home`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `Origin`, `Settings`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `aos`, `cli`, `config`, `harness`, `home`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -23,9 +23,13 @@ The host reads only `[host]`; the app's tables (`desktop`, `network`, `assets`, 
 origins = ["https://canoa.example"]  # optional: browser origins that may connect; empty or absent lets any, and the proof decides
 
 [host.agents.NAME]                    # a program speaking ACP on its standard streams
-program = "npx"                       # required; found as the OS finds a command
-args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+program = "gemini"                    # this or harness, one of the two; found as the OS finds a command
+args = ["--acp"]
 profiles = ["review", "plain"]        # optional: [host.profiles] a client may choose among, the first by default
+
+[host.agents.OTHER]                   # Claude Code or Codex, served by the host itself; see Serving
+harness = "claude"                    # "claude" or "codex"; takes no args
+executable = "/opt/claude/bin/claude" # optional: the command line's program; claude or codex as the OS finds it
 
 [host.profiles.NAME]                  # a profile (see Profiles below), read as the person's own layer
 overlays = ["team"]                   # optional: AOS overlays the app installed in overlays/ beside this file
@@ -109,7 +113,7 @@ pub fn Config::entry(&self, name: &str) -> Option<&Entry>
 
 #[non_exhaustive] pub struct HostProfile { pub profile: Profile, pub overlays: Vec<String>, pub allow_mcp: BTreeMap<String, String>, pub directory: PathBuf }
 #[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: SocketAddr, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize }
-#[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
+#[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String> }, Harness { harness: Harness, executable: Option<OsString>, profiles: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
 #[non_exhaustive] pub enum Origin { Library(PathBuf), Source { file: PathBuf, settings: Settings, import_search: ImportSearch } }   // paths absolute
 #[non_exhaustive] pub enum ImportSearch { Library, Path }   // Copy
 pub const fn ImportSearch::as_str(self) -> &'static str     // "library", "path"
@@ -121,6 +125,13 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 ```
 
 - `entries` keeps the file's order, every agent before every provider, every provider before every tool. A file with no `[host]` gives no entries.
+- An agent names `program` (with optional `args`) or `harness` (with optional `executable`, not empty), one of the two; a `harness` other than `claude` or `codex`, `args` with `harness`, and `executable` with `program` are refused. A harness entry is an `agent` in `check`'s and `serve`'s lines.
+
+```rust
+#[non_exhaustive] pub enum Harness { Claude, Codex }   // Copy, Eq; canoa_host::harness::Harness
+pub const fn Harness::as_str(self) -> &'static str    // "claude", "codex"
+pub fn Harness::named(name: &str) -> Option<Harness>
+```
 - `[host.profiles.NAME]`: a name as an entry's; `overlays` valid AOS overlay names; `allow_mcp` values `sha256:` and 64 lower-case hex digits; the rest `Profile::from_table` as `LayerKind::User`, its relative paths from the file's directory. An agent's `profiles` must name profiles the file holds, each once. Errors say `profile NAME:` and a setting, never a value.
 - A tool entry's `listen`, `working_roots`, `worktrees`, `peers` and `max_peers` are read as in the other tables; the rest is a `ToolSpec`, refused as a whole when `ToolSpec::check` refuses it. Its errors name a setting and a rule's index, never a value.
 - `library` and `source` are made absolute against `base` (the file's directory for `load`); `directory` is `base` made absolute, where the provider's process runs.
@@ -167,6 +178,8 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 - The first message must be plain ACP: a link of streams (`coqui_agentic_peer::mux`) is refused. Then a fresh process serves that connection, relayed by `coqui_acp_bridge::relay`, and is stopped with its process tree when either side ends.
 - An agent entry runs `program args`. Every message from the client to it is parsed and the host's own serialization forwarded: `params` other than an object is answered `-32602`, since a list would fill a request's fields in order; `_meta` is removed at every depth; a request whose `params.mcpServers` holds anything but `http` or `sse` over `https`, or `acp`, is answered `-32602` and never reaches the agent; with `working_roots`, so is one whose `cwd` or `additionalDirectories` is outside them; what is not one JSON object is answered `-32700` or `-32600`. A refused notification is dropped.
 - **An agent entry with `profiles`** runs `provider_program launch -- PROGRAM ARGS...` instead, whose first line of standard input the host writes: the profile's environment (see `profile::launch`). The client chooses a profile by name in its first message, `initialize`, under `params._meta["dev.boriken.canoa/profile"]` (`profile::PROFILE_META`); none takes the first. A first message that is not `initialize` (after any worktree requests, which the host answers itself, see "Worktrees") is answered `-32600` (`-32602` when it names a profile), a name the entry does not offer or a value that is not text `-32602`, each logged, and then no reference is read and no process starts; a choice in any later message is answered `-32602` and logged. A reference that cannot be resolved (`from_env` unset, `from_file` unreadable) answers `-32603` and starts nothing. Each overlay the profile names is read from `overlays/NAME` beside canoa.cfg (4096 files, 64 MiB at most), with no link or excluded name, and must have the digest `overlays/NAME.json` records; else it is left out and reported. The agent's `initialize` answer decides the harness (from `agentInfo.name`, else an entry named `Claude`, `Codex`, `Gemini` or `Pi`) and what it takes (`systemPrompt`, `additionalDirectories`, MCP transports, by ACP v1 or v2 capability paths); then every `session/new`, `session/load` and `session/resume`, after the scope above, gets the context as `systemPrompt` (`append`, before a client's own blocks), the MCP servers in `mcpServers` (v1's stdio form untyped; a client's server of a name the profile holds, started or not, is `-32602`), skills written once per connection to a private temporary directory (removed after the agent ends) as the Claude plugin `canoa-profile` in `_meta.claudeCode.options.plugins` or a directory Codex reads (`.agents/skills` inside) in `additionalDirectories`. A session request before `initialize` is answered `-32600`. A stdio server's `command` goes absolute: as written, from its layer's directory when it holds a separator, else the first match on the host's `PATH` (absolute entries only; `PATHEXT` on Windows), refused when none is found. An overlay's MCP server starts only when `allow_mcp` names it at its digest (`sha256` of `{"layer", "server"}` as the view writes them, and `"program"`, the stdio program found); off, it is logged with that digest. The answer to `initialize` and to each session request carries `_meta[PROFILE_META]` = `{"name", "harness", "summary", "items": [{"key", "layer", "state", "how", "digest"?}]}`, `state` being `applied`, `not supported`, `off` or `refused`: names, never values. No project profile is read.
+- **A harness entry** runs coqui-acp's translator (`coqui-acp-claude` or `coqui-acp-codex`) in this process for each connection, over the same channel and scope as an agent entry; the translator starts `claude` or `codex app-server` as the host's child. `stop_agents` ends the translator's input, which closes its sessions and ends each command line with what it started, and returns once that is done or after 10 s. The translator keeps its defaults (prompts asked through ACP, ACP version 2 at most, 8 sessions) and no working roots of its own, since the scope has already held the client's directories and the host adds its own after it; a resumed Codex thread's own directory is held to the entry's `working_roots`. With `profiles`, the profile's environment is added to the command line's process, never its arguments, and Claude Code's translator takes client plugins, of which the host's skills plugin is the only one, since every `_meta` a client sends is removed; without profiles it takes none. Notices and how a command line ended are logged at `info` under the entry's name.
+- A profile reads an agent's `initialize` answer where its version puts what it says: `capabilities` and `info` in version 2, `agentCapabilities` and `agentInfo` in version 1. `coqui-acp-claude` is Claude Code and `coqui-acp-codex` Codex.
 - A tool entry is served as an agent entry whose program is `provider_program` itself: `provider_program tool --name NAME --spec JSON`, the entry as `ToolSpec` serializes it. So the scope above applies to its clients, and the process, with every tool process it starts, ends with the connection.
 - A provider entry is not filtered: its facade reads the client's `_meta` launch values (`context`, `model`, `effort`, an opaque `meta`) and hands them to the provider, and refuses an environment name. What a provider does with them is the provider's.
 - A provider entry runs `provider_program provider (--library L | --source S) --provider ID --max-sessions N --directory D --settings-on-stdin [--import-search library|path] [--working-root R]... --connect A`, so a library or source is loaded only in that connection's process, which runs in `D`. The command line holds paths, names and the address only. For each connection the host listens on a loopback port of its own, `A`; writes the entry's `source_settings` and `settings` and a one-time token of 32 random bytes as the first line of the process's standard input (`HostLine`), then closes it; and takes the first connection to `A` that sends the token within `START_LIMIT`, up to 8 that do not. ACP runs on that socket alone. What the process writes to standard output or error goes to the host's standard error, `OUTPUT_LIMIT` bytes per connection in all, the rest read and dropped after one warning; none of it reaches the client. The process and what it starts are ended with the connection, by job object on Windows and process group elsewhere. Its facade refuses any `mcpServers` and checks `working_roots` itself.
@@ -459,7 +472,7 @@ pub trait Front: Send + Sync {
 #[non_exhaustive] pub struct Program { pub path: PathBuf, pub args: Vec<OsString> }   // args go before the subcommand
 pub const fn Program::new(path: PathBuf, args: Vec<OsString>) -> Program
 pub struct Cli;                                        // clap::Parser
-pub const fn Cli::is_a_hosts_own(&self) -> bool        // provider, tool or launch
+pub const fn Cli::is_a_hosts_own(&self) -> bool        // provider, tool, agent or launch
 pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed>
 pub struct Failed { pub status: u8, pub why: String }
 ```
@@ -487,9 +500,15 @@ canoa pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--metho
 canoa provider (--library FILE | --source FILE [--import-search library|path]) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin [--connect ADDRESS]]
 canoa tool --name NAME --spec JSON
+canoa agent claude [--executable FILE] [--permission-mode MODE] [--setting-sources LIST] [--strict-mcp-config]
+                   [--no-permission-prompts] [--allow-client-plugins] COMMON...
+canoa agent codex [--executable FILE] [--approval-policy POLICY] [--sandbox SANDBOX] COMMON...
+      COMMON: [--model M] [--effort E] [--max-acp-version 1|2] [--max-sessions N] [--working-root DIR]...
+              [--no-client-mcp-servers] [--allow-network-paths]
 canoa launch PROGRAM [ARGS]...
 ```
 
+- `agent claude|codex` serves the installed Claude Code or Codex as an ACP agent (version 1 or 2, whichever the client asks, up to `--max-acp-version`) on standard input and output, through coqui-acp's translators, with no Node; notices and exits go to standard error as `canoa agent NAME: ...`. `--executable` defaults to `COQUI_ACP_CLAUDE_EXECUTABLE` or `COQUI_ACP_CODEX_EXECUTABLE`, else `claude` or `codex`. Plugins from a client are off unless `--allow-client-plugins`. A `--working-root` holds a session's `cwd`, more directories and plugins, and a resumed Codex thread's own directory. It takes the process's standard streams, so `canoa-ffi` runs it only through `--canoa-child`, as `provider`, `tool` and `launch`. The command line reads its own variables (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_HOME`, ...) from the environment it runs in. Exit 0 when the client closes, 1 when reading it failed, 2 for a wrong invocation.
 - `launch` is what `serve` runs for an agent entry with profiles: the environment on the first line of standard input, the rest to `PROGRAM`, whose status it exits with; a first line of another form is status 2.
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.

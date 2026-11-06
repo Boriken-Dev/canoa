@@ -147,13 +147,22 @@ applied and what did not, and **Profile** in its header lists each part, its lay
 Nothing is applied that is not listed there. An agent reached on another machine, through the host or a browser, is
 given none of it, and its conversation says so; serving profiles from `canoa` is not done yet.
 
-| Part | Claude Code (`claude-agent-acp`) | Codex (`codex-acp`) | Gemini CLI | Pi (`pi-acp`) | Another agent |
+Claude Code and Codex are run by `canoa agent claude` and `canoa agent codex`, the host's own translators of their stdio
+protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), with no Node; the desktop app runs them from its own
+executable, and a `[host.agents]` entry with `harness` runs them inside the host.
+
+| Part | Claude Code (`canoa agent claude`) | Codex (`canoa agent codex`) | Gemini CLI | Pi (`pi-acp`) | Another agent |
 | --- | --- | --- | --- | --- | --- |
-| Environment | the agent's process | the agent's process | the agent's process | the agent's process | the agent's process |
-| Initial context | ACP `systemPrompt`, appended | ACP `systemPrompt`, appended | not supported | not supported | ACP `systemPrompt` when it advertises it |
-| Skills | a Claude Code plugin, `canoa-profile`, through the adapter's `_meta.claudeCode.options.plugins`; a skill is `canoa-profile:<name>` | the Agent Skills directory of a new directory given as ACP `additionalDirectories` | not supported | not supported | not supported |
-| MCP servers | ACP `mcpServers`: stdio, HTTP, SSE | ACP `mcpServers`: stdio, HTTP; skipped by Codex when its own configuration names a server the same | ACP `mcpServers` | not supported: pi-acp accepts them and starts none | ACP `mcpServers`, as it advertises |
-| Model, effort, mode | the session's config option offering that value | the same | the same | the same | the same |
+| Environment | the process of `claude` | the process of `codex app-server` | the agent's process | the agent's process | the agent's process |
+| Initial context | ACP `systemPrompt`, appended: `claude --append-system-prompt` | ACP `systemPrompt`, appended: the thread's developer instructions | not supported | not supported | ACP `systemPrompt` when it advertises it |
+| Skills | a Claude Code plugin, `canoa-profile`, through `_meta.claudeCode.options.plugins`, which becomes `claude --plugin-dir`; a skill is `canoa-profile:<name>` | the Agent Skills directory of a new directory given as ACP `additionalDirectories`, which becomes one of Codex's skill roots | not supported | not supported | not supported |
+| MCP servers | ACP `mcpServers`: stdio, HTTP, SSE (version 1), written to the file `claude --mcp-config` names | ACP `mcpServers`: stdio, HTTP, as the thread's `mcp_servers`; skipped by Codex when its own configuration names a server the same | ACP `mcpServers` | not supported: pi-acp accepts them and starts none | ACP `mcpServers`, as it advertises |
+| Model, effort | the session's config options `model` and `effort`: the models Claude Code lists and their efforts | the same: the models Codex lists and their reasoning efforts | the session's config option offering that value | the same | the same |
+| Mode | not supported: the translator offers no mode | not supported: the translator offers no mode | the session's config option offering that value | the same | the same |
+
+Plugins from a client are off in `canoa agent claude` unless `--allow-client-plugins` is given, since a plugin's hooks and
+MCP servers run with nothing asked. The app passes it, as it writes the only plugin, `canoa-profile`. A host entry allows
+them only when it offers profiles, and then only its own: the host removes every `_meta` a client sends.
 
 Which harness an agent is comes from what it says in `initialize`, else from the preset it was started from. A part a
 harness does not take is listed as not supported, with why: Gemini CLI, Pi, OpenCode and Grok read context and skills only

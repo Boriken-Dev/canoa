@@ -53,8 +53,7 @@ CANOA_WEB_DIST="$PWD/app/build/web" cargo build --release -p canoa-host --featur
 ```toml
 # canoa.cfg
 [host.agents.claude]
-program = "npx"
-args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+harness = "claude"                 # the installed claude, served by the host itself; or "codex"
 listen = "127.0.0.1:7801"
 working_roots = ["/home/me/src"]
 

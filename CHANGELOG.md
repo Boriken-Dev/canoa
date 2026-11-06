@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Claude and Codex run with no Node. The app's Claude and Codex sources are the host's own `agent claude` and `agent codex`, which the app runs from its own executable (`CanoaUI --canoa-child agent claude|codex`) and offers whenever `claude` or `codex` is on PATH; no source runs `@agentclientprotocol/claude-agent-acp` or `codex-acp` through `npx` any more. They drive the installed command line over its own stdio protocol through coqui-acp's translators (`coqui-acp-claude`, `coqui-acp-codex`), tested with Claude Code 2.1.318 and Codex 0.164.0 and 0.166.0. A profile reaches them as the configuration guide's table says; through them a profile's mode is not supported, since the translators offer only model and effort, and Earlier conversations lists nothing, since they answer no `session/list` (the session list still reopens a conversation by `session/load`).
+- Every coqui-acp crate is at `f770997`; coqui-web stays at `445007a`, the revision coqui-acp-bridge names there.
+
 - `canoa id --method` and `canoa pair --method` refuse to change the method of a home a host is running on (status 3, naming the host and saying already-paired clients would be refused after its next restart); `--force` changes it, logged as `weakened`. The same method, and a home no host runs on, are never refused. `Home::recorded` and `Home::probe` are new.
 - The desktop app carries the host as a library and runs it in its own process, always, with no `canoa` program beside it (`canoa-ffi`, `app/native`). `[desktop] local_host = false` or `--no-local-host` leaves it off. The app no longer looks for a `canoa` or `canoa-host` beside its executable; `CANOA_HOST` names one for tests.
 - `canoa serve` prints `{"ready": true, "peer", "method"}` after its entries, and takes a lock on its home: a second host on it, a `canoa serve` or the app's, says which is running and ends with the new status 3. A dead holder's lock is free.
@@ -21,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `canoa agent claude|codex` serves Claude Code or Codex as an ACP agent on standard input and output, with the translators' own flags (`--allow-client-plugins` off by default, `--working-root`, `--no-client-mcp-servers`, Claude's `--permission-mode` and `--setting-sources`, Codex's `--approval-policy` and `--sandbox`, `--model`, `--effort`, `--max-acp-version`). A `[host.agents]` entry may name `harness = "claude"` or `"codex"` (with an optional `executable`) instead of `program`: the host then runs the translator in its own process for each connection, under the entry's scope and profiles, and ends the command line with the connection or the host. `canoa-ffi` refuses `agent` as a job, as it does `provider`, `tool` and `launch`.
 - `canoa serve --allow-empty` runs with nothing to serve, a canoa.cfg that does not exist yet included, so the desktop app's host starts on a first launch.
 - One host on a home holds when `host.lock` is removed: on Unix the lock is on the home's directory, and on Windows `host.lock` cannot be deleted while held. A pairing given up takes its PIN back, so a connection still pairing then pairs nobody. `Serving::run` returns with every agent ended, and `Stopper::stop_agents` once they have, whichever thread ends them.
 - In the app's process, `canoa-ffi` refuses `provider`, `tool` and `launch` as jobs, writes each good out-parameter beside a bad one, refuses an out-parameter inside the request, keeps agents' standard error on its pipe in an app started from Explorer, and sets `SIGPIPE` aside on Unix. The app waits out an earlier host of its own still holding its home, rather than showing it as another host. `canoa_host::cli` is the command line as a library, `canoa_host::home` names a home by path and locks it, and `Stopper::stop` and `WebStopper` end a host in its own process with its addresses free.
@@ -81,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A hosted profile read a version 2 agent's capabilities and name from version 1's places (`agentCapabilities`, `agentInfo`), so a version 2 client was told the agent took no context, skills or MCP servers: version 2's `capabilities` and `info` are read now.
 - Saving Settings, pinning, installing or removing an overlay, a catalog change, or keeping MCP choices no longer drops `[permissions] full_access` and `[notifications]` from the Canoa.cfg it saves.
 - A session with an agent on `canoa-host`'s plain WebSocket on loopback is taken into the chat's list: it refused any `ws://` endpoint, though the dialer allows one on loopback.
 - A sealed link that ends while the chat is still sending a request now fails that request. Before, under Noise, a refused key's link could end while the first request was being sealed, and the error reached no one.

@@ -3,8 +3,11 @@
 `canoa` serves agents to Canoa's chat on this machine. Each entry of canoa.cfg's `[host]` table is one agent, on a
 loopback WebSocket of its own:
 
-- **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as Claude's
-  adapter, Codex's adapter or `gemini --acp`.
+- **Claude Code or Codex**: the installed `claude` or `codex`, served by the host's own translators of their stdio
+  protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
+  [Claude and ChatGPT](#claude-and-chatgpt).
+- **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as
+  `gemini --acp`, or `canoa agent claude` itself.
 - **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
   library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
   libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.
@@ -18,8 +21,7 @@ The API and every setting are in the crate's [API header](https://github.com/Bor
 
 ```toml
 [host.agents.claude]
-program = "npx"
-args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+harness = "claude"                # or "codex"; instead of program and args
 listen = "127.0.0.1:7801"
 working_roots = ["/home/me/src"]
 worktrees = true                  # a git worktree per session, inside working_roots; see Worktrees
@@ -202,8 +204,7 @@ effort and mode defaults.
 
 ```toml
 [host.agents.claude]
-program = "npx"
-args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+harness = "claude"
 profiles = ["review", "plain"]        # a client chooses among these; the first when it names none
 
 [host.profiles.review]
@@ -252,8 +253,7 @@ working root, and a provider, makes none.
 
 ```toml
 [host.agents.claude]
-program = "npx"
-args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
+harness = "claude"
 working_roots = ["/home/me/src"]   # a repository at /home/me/src/proj gets its worktrees in /home/me/src/proj.worktrees/
 worktrees = true                   # the default
 ```
@@ -470,9 +470,22 @@ The host never sees, stores or forwards a vendor credential, and never reuses a 
 
 | | Claude | ChatGPT |
 | --- | --- | --- |
-| Entry | `npx -y @agentclientprotocol/claude-agent-acp@0.99.1`, which drives Claude Code (`CLAUDE_CODE_EXECUTABLE` names it) | `npx -y @agentclientprotocol/codex-acp@2.5.0`, which starts Codex's app server |
+| Entry | `harness = "claude"`, which runs `claude` in stream-json mode inside the host (`executable` names another) | `harness = "codex"`, which starts `codex app-server` inside the host (`executable` names another) |
+| On standard streams | `canoa agent claude` | `canoa agent codex` |
 | Sign-in | `claude` signed in on this machine: a subscription, or an API key | `codex` signed in with a ChatGPT plan, or an API key |
-| Without the adapter | `claude -p --output-format stream-json`, `--resume` | `codex exec --json`, `codex app-server` |
+| Protocol it drives | `claude -p --input-format stream-json --output-format stream-json`, `--resume` | `codex app-server`'s JSON-RPC |
+
+**A harness entry.** The host runs coqui-acp's translator in its own process for each connection, which starts the
+command line as a child of the host, ended with everything it started when the connection or the host ends (a job object
+on Windows, a process group elsewhere). The scope above applies before it: a client's `cwd` and more directories are held
+to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. A resumed Codex thread's own directory, which
+no request shows the host, is held to `working_roots` by the translator. Permission prompts reach the client as
+`session/request_permission` with the command line's own options (Claude Code: allow once, always allow with the rule it
+suggests, reject; Codex: its own decisions). With `profiles`, the profile's environment is the command line's process
+environment, never its command line; its skills are the host's own Claude Code plugin, the only plugin the translator
+takes, since the host removes every client's `_meta`; context, MCP servers and Codex's skills go as the
+[profile table](configuration.md#applying-a-profile) says. The translators are tested with Claude Code 2.1.318 and Codex
+0.164.0 and 0.166.0; another version runs, with a notice.
 
 **What the terms say.** Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
 does not prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription",
