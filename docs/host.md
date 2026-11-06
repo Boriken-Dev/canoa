@@ -300,8 +300,8 @@ guarded against.
 Canoa's desktop app carries the host as a library and runs it in its own process, on the host's own threads, so there is
 no other program to install or start. Agents stay child processes of the host.
 
-- It starts its host when it starts, whatever canoa.cfg names, and again whenever its hosting dialog changes it. With
-  nothing to host, the host is up and idle. If it ends on its own, the app starts it again after a pause that doubles from
+- It starts its host when it starts, whatever canoa.cfg names and whether or not there is one yet, and again whenever its
+  hosting dialog changes it. With nothing to host, the host is up and idle. If it ends on its own, the app starts it again after a pause that doubles from
   one second up to a minute, and back to one second after a run of thirty seconds. A canoa.cfg the host refuses (status 2)
   is shown, and not retried until the person asks.
 - `local_host = false` under `[desktop]` in canoa.cfg, or starting the app with `--no-local-host`, leaves it off. Hosting

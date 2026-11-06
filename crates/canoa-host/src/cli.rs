@@ -226,7 +226,8 @@ struct ServeArgs {
     /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
     #[arg(long)]
     until_stdin_closes: bool,
-    /// With no entry in canoa.cfg, keep running with nothing to serve, rather than ending with status 2.
+    /// With no entry in canoa.cfg, or no canoa.cfg at all, keep running with nothing to serve, rather than ending with
+    /// status 2.
     #[arg(long)]
     allow_empty: bool,
     /// Serve the web app too, on [host.web]'s address (default 127.0.0.1:7800): from DIR, else [host.web]'s dir, else the
@@ -340,13 +341,30 @@ impl Failed {
     }
 }
 
-fn load(args: &ConfigArgs, front: &dyn Front) -> Result<Config, Failed> {
-    let path = args
-        .config
+fn config_path(args: &ConfigArgs, front: &dyn Front) -> Result<PathBuf, Failed> {
+    args.config
         .clone()
         .or_else(|| default_config(front))
-        .ok_or_else(|| Failed::usage("no canoa.cfg: give --config or CANOA_CONFIG"))?;
-    Config::load(&path).map_err(Failed::usage)
+        .ok_or_else(|| Failed::usage("no canoa.cfg: give --config or CANOA_CONFIG"))
+}
+
+fn load(args: &ConfigArgs, front: &dyn Front) -> Result<Config, Failed> {
+    Config::load(&config_path(args, front)?).map_err(Failed::usage)
+}
+
+/// canoa.cfg for `serve`. With `--allow-empty`, a file that does not exist names nothing, as an empty one does: a person
+/// who has written none yet has a host to run all the same.
+fn load_for_serving(args: &ServeArgs, front: &dyn Front) -> Result<Config, Failed> {
+    let path = config_path(&args.config, front)?;
+    match Config::load(&path) {
+        Err(crate::ConfigError::Read { source, .. })
+            if args.allow_empty && source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Config::from_str_in("", path.parent().unwrap_or_else(|| Path::new("")))
+                .map_err(Failed::usage)
+        }
+        loaded => loaded.map_err(Failed::usage),
+    }
 }
 
 fn home_of(front: &dyn Front) -> Result<Home, Failed> {
@@ -396,7 +414,7 @@ fn web_config(
 }
 
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
-    let config = load(&args.config, front)?;
+    let config = load_for_serving(args, front)?;
     let home = home_of(front)?;
     let web = web_config(&config, args, &home, front)?;
     // Before anything of the home is touched or any address bound.

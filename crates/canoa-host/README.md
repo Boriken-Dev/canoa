@@ -107,7 +107,7 @@ closes, the host ends every agent it started, then itself. `pair` shows a PIN th
 `coqui-acp-bridge pair-dial`, uses to pair; it refuses a browser, which pairs by connecting once and being accepted. `--method` names
 the identity's method; without it, the one this user has, or the default for a new one. `serve --web` serves the web app
 on `127.0.0.1:7800` too, from `DIR`, `[host.web]`'s `dir` or the site built in, and prints `{"web": URL}` after the
-entries. `serve` prints `{"ready": true, ...}` last, once up; `--allow-empty` runs it with nothing to serve.
+entries. `serve` prints `{"ready": true, ...}` last, once up; `--allow-empty` runs it with nothing to serve when canoa.cfg names nothing or does not exist.
 
 Only one host runs on a home: a second `serve`, or Canoa's desktop app, says which is running and does not start. A lock
 in the home decides, which a holder gives up however it ends.

@@ -129,6 +129,57 @@ fn with_nothing_to_serve_it_ends_unless_told_to_stay() {
     }
 }
 
+/// What a person gets who has never written a canoa.cfg: a program that hosts by default has to start all the same.
+#[test]
+fn with_no_canoa_cfg_at_all_it_stays_only_when_told_to() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("never-written").join("canoa.cfg");
+    let refused = Command::new(host_binary())
+        .args(["serve", "--config"])
+        .arg(&path)
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .output()
+        .expect("it runs");
+    assert_eq!(refused.status.code(), Some(2), "{refused:?}");
+
+    let mut stays = Command::new(host_binary())
+        .args(["serve", "--allow-empty", "--until-stdin-closes", "--config"])
+        .arg(&path)
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("it starts");
+    let out = stays.stdout.take().expect("its output");
+    let mut line = String::new();
+    BufReader::new(out).read_line(&mut line).expect("a line");
+    drop(stays.stdin.take());
+    let ended = stays.wait_with_output().expect("it ends");
+    let value: Value = serde_json::from_str(&line).unwrap_or_else(|_| {
+        panic!(
+            "one JSON object, not {line:?}: {}",
+            String::from_utf8_lossy(&ended.stderr)
+        )
+    });
+    assert_eq!(value["ready"], true, "{line}");
+    assert!(ended.status.success(), "{ended:?}");
+    assert!(!path.exists(), "it writes no canoa.cfg");
+}
+
+#[test]
+fn allow_empty_does_not_excuse_a_canoa_cfg_that_cannot_be_read() {
+    let scratch = Scratch::new();
+    let refused = Command::new(host_binary())
+        .args(["serve", "--allow-empty", "--config"])
+        .arg(&scratch.0)
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("it runs");
+    assert_eq!(refused.status.code(), Some(2), "a directory: {refused:?}");
+}
+
 /// The library run in this process, as an application hosting it does.
 #[test]
 fn a_host_stopped_through_the_library_gives_back_its_address_and_agents() {
