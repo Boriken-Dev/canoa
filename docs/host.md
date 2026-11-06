@@ -7,7 +7,7 @@ loopback WebSocket of its own:
   protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
   [Claude and ChatGPT](#claude-and-chatgpt).
 - **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as
-  `gemini --acp`, or `canoa agent claude` itself.
+  `gemini --acp`, or `canoa agent claude` itself (with `--allow-client-plugins` when a profile gives it skills).
 - **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
   library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
   libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.
@@ -479,9 +479,29 @@ The host never sees, stores or forwards a vendor credential, and never reuses a 
 command line as a child of the host, ended with everything it started when the connection or the host ends (a job object
 on Windows, a process group elsewhere). The scope above applies before it: a client's `cwd` and more directories are held
 to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. A resumed Codex thread's own directory, which
-no request shows the host, is held to `working_roots` by the translator. Permission prompts reach the client as
-`session/request_permission` with the command line's own options (Claude Code: allow once, always allow with the rule it
-suggests, reject; Codex: its own decisions). With `profiles`, the profile's environment is the command line's process
+no request shows the host, is held to `working_roots` by the translator. What the command line asks before it acts is
+the entry's, never the configuration of the person on the host's machine, which a paired key would otherwise get:
+Claude Code runs with `permission_mode = "default"` and Codex with `approval_policy = "on-request"` and
+`sandbox = "workspace-write"` unless the entry names others, and a looser one is logged as `weakened`. Claude Code's own
+allow rules in the settings it loads (`setting_sources`, its default when unset) still apply. Permission prompts reach the
+client as `session/request_permission` with the command line's own options (Claude Code: allow once, always allow with
+the rule it suggests, reject; Codex: its own decisions).
+
+```toml
+[host.agents.claude]
+harness = "claude"
+permission_mode = "default"       # default, acceptEdits, plan, dontAsk, bypassPermissions, auto or manual
+setting_sources = ["project"]     # of user, project, local; unset is Claude Code's own
+executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from canoa.cfg's directory
+
+[host.agents.codex]
+harness = "codex"
+approval_policy = "on-request"    # untrusted, on-failure, on-request or never
+sandbox = "workspace-write"       # read-only, workspace-write or danger-full-access
+```
+
+On Windows the translators start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
+is untested. With `profiles`, the profile's environment is the command line's process
 environment, never its command line; its skills are the host's own Claude Code plugin, the only plugin the translator
 takes, since the host removes every client's `_meta`; context, MCP servers and Codex's skills go as the
 [profile table](configuration.md#applying-a-profile) says. The translators are tested with Claude Code 2.1.318 and Codex
