@@ -338,6 +338,35 @@ fn codex_reads_skills_from_a_directory_given_as_additional_directories() {
 }
 
 #[test]
+fn the_rust_translators_are_claude_code_and_codex() {
+    assert_eq!(
+        harness_of(Some("coqui-acp-claude"), "hosted"),
+        Some("claude-code")
+    );
+    assert_eq!(harness_of(Some("coqui-acp-codex"), "hosted"), Some("codex"));
+}
+
+#[test]
+fn an_initialize_answer_is_read_where_its_version_puts_what_it_says() {
+    let v2 = json!({
+        "protocolVersion": 2,
+        "info": {"name": "coqui-acp-codex", "version": "0"},
+        "capabilities": {"session": {"additionalDirectories": {}, "systemPrompt": {}, "mcp": {"stdio": true}}},
+    });
+    let (takes, name) = described(&v2);
+    assert_eq!(name, Some("coqui-acp-codex"));
+    assert!(takes.additional_directories() && takes.system_prompt() && takes.mcp("stdio"));
+    let v1 = json!({
+        "protocolVersion": 1,
+        "agentInfo": {"name": "coqui-acp-claude", "version": "0"},
+        "agentCapabilities": {"sessionCapabilities": {"systemPrompt": {}}},
+    });
+    let (takes, name) = described(&v1);
+    assert_eq!(name, Some("coqui-acp-claude"));
+    assert!(takes.system_prompt() && !takes.additional_directories());
+}
+
+#[test]
 fn a_session_request_gets_the_parts_and_a_client_server_may_not_take_a_profile_name() {
     let parts = Parts {
         system_prompt: Some("Host.".to_owned()),

@@ -469,11 +469,34 @@ impl Takes {
     }
 }
 
+/// What an agent's `initialize` answer says it takes, and the name it gives itself: version 2 says them under
+/// `capabilities` and `info`, version 1 under `agentCapabilities` and `agentInfo`.
+fn described(result: &Value) -> (Takes, Option<&str>) {
+    let version = result
+        .get("protocolVersion")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
+    let (capabilities, info) = if version == 2 {
+        ("capabilities", "info")
+    } else {
+        ("agentCapabilities", "agentInfo")
+    };
+    let takes = Takes {
+        version,
+        capabilities: result.get(capabilities).cloned().unwrap_or(Value::Null),
+    };
+    let reported = result
+        .get(info)
+        .and_then(|info| info.get("name"))
+        .and_then(Value::as_str);
+    (takes, reported)
+}
+
 /// The AOS harness id of what an agent reports as its name, else of an entry named as Canoa's presets are.
 fn harness_of(reported: Option<&str>, entry: &str) -> Option<&'static str> {
     match reported {
-        Some("@agentclientprotocol/claude-agent-acp") => Some("claude-code"),
-        Some("@agentclientprotocol/codex-acp") => Some("codex"),
+        Some("coqui-acp-claude" | "@agentclientprotocol/claude-agent-acp") => Some("claude-code"),
+        Some("coqui-acp-codex" | "@agentclientprotocol/codex-acp") => Some("codex"),
         Some("gemini-cli") => Some("gemini-cli"),
         Some("pi-acp") => Some("pi"),
         Some("OpenCode") => Some("opencode"),
@@ -1426,20 +1449,7 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             }
             Some(Pending::Initialize) => {
                 if let Some(result) = value.get("result") {
-                    let takes = Takes {
-                        version: result
-                            .get("protocolVersion")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(1),
-                        capabilities: result
-                            .get("agentCapabilities")
-                            .cloned()
-                            .unwrap_or(Value::Null),
-                    };
-                    let reported = result
-                        .get("agentInfo")
-                        .and_then(|info| info.get("name"))
-                        .and_then(Value::as_str);
+                    let (takes, reported) = described(result);
                     let harness = harness_of(reported, &self.connection.entry);
                     let lookup = |name: &str| std::env::var(name).ok();
                     let parts = parts_for(self.connection, harness, &takes, &lookup);
