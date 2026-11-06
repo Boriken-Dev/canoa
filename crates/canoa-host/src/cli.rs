@@ -206,14 +206,8 @@ struct MethodArg {
 }
 
 impl MethodArg {
-    /// The identity a host serves with, its method recorded for the next start.
     fn identity(self, home: &Home) -> Result<auth::Identity, Failed> {
         home.identity(self.method).map_err(Failed::run)
-    }
-
-    /// The identity for a command that holds no lock, the home's recorded method left alone.
-    fn identity_as_is(self, home: &Home) -> Result<auth::Identity, Failed> {
-        home.identity_as_is(self.method).map_err(Failed::run)
     }
 }
 
@@ -538,7 +532,7 @@ fn pair(
         return Err(Failed::usage("pair listens only on loopback"));
     }
     let home = home_of(front)?;
-    let identity = Arc::new(method.identity_as_is(&home)?);
+    let identity = Arc::new(method.identity(&home)?);
     let store = Arc::new(store(&home)?);
     let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
@@ -691,10 +685,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Check(args) => check(&args, front),
         Command::Id { method } => print(
             front,
-            &method
-                .identity_as_is(&home_of(front)?)?
-                .peer_id()
-                .to_string(),
+            &method.identity(&home_of(front)?)?.peer_id().to_string(),
         ),
         Command::Peers { format } => list_peers(format, front),
         Command::Pair {

@@ -145,21 +145,6 @@ impl Home {
         &self.dir
     }
 
-    /// As [`Home::identity`], for a command that holds no lock: the method the home records is left as it is, unless it
-    /// records none, so what a running host is next started with does not change under it.
-    ///
-    /// # Errors
-    ///
-    /// As [`Home::identity`].
-    pub fn identity_as_is(&self, method: Option<Method>) -> Result<Identity, Error> {
-        match (method, self.chosen()?) {
-            (Some(method), Some(_)) => {
-                Identity::open_or_create(&self.dir.join(identity_file(method)), method)
-            }
-            _ => self.identity(method),
-        }
-    }
-
     /// The identity of `method`, made when absent; with no method, the one the home records, else the one it holds, else a
     /// new one of the default method. It then records that method, as [`coqui_agentic_peer::home`] does for its own.
     ///
@@ -430,7 +415,8 @@ mod tests {
         let dir = fresh("removed");
         let home = Home::at(&dir);
         let lock = home.lock("CanoaUI").expect("a free home locks");
-        let _ = fs::remove_file(dir.join(LOCK_FILE));
+        // Windows refuses this while the lock is held; on Unix nothing of the lock is in a file.
+        let _ = fs::remove_file(dir.join("host.lock"));
         let second = home.lock("canoa");
         assert!(
             matches!(second, Err(LockError::Held { .. })),
@@ -454,34 +440,6 @@ mod tests {
         assert_eq!(fs::read_to_string(&target).expect("read"), "kept");
         drop(lock);
         fs::remove_dir_all(&dir).expect("removed");
-    }
-
-    #[test]
-    fn a_command_that_holds_no_lock_leaves_the_recorded_method_alone() {
-        let dir = fresh("unrecorded");
-        let home = Home::at(&dir);
-        let first = home.identity(None).expect("made");
-        let other = Method::ALL
-            .into_iter()
-            .find(|method| *method != first.method())
-            .expect("two methods");
-        let asked = home.identity_as_is(Some(other)).expect("made");
-        assert_eq!(asked.method(), other);
-        assert_eq!(
-            home.identity(None).expect("read").peer_id(),
-            first.peer_id(),
-            "what a running host is next started with is unchanged"
-        );
-        fs::remove_dir_all(&dir).expect("removed");
-
-        let fresh_home = Home::at(fresh("unrecorded-fresh"));
-        let made = fresh_home.identity_as_is(Some(other)).expect("made");
-        assert_eq!(
-            fresh_home.identity(None).expect("read").peer_id(),
-            made.peer_id(),
-            "a home that records none records the first"
-        );
-        fs::remove_dir_all(fresh_home.dir()).expect("removed");
     }
 
     #[test]
