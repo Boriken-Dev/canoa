@@ -87,6 +87,14 @@ jobs:
           export CANOA_TEST_APP="$PWD"
           if [ "${{ matrix.platform }}" = linux ]; then
             xvfb-run -a flutter test integration_test/embedded_host_test.dart -d linux
+            for step in first flag config hosted; do
+              d="$RUNNER_TEMP/launch-$step"; mkdir -p "$d"
+              CANOA_TEST_LAUNCH_STEP=$step CANOA_CONFIG="$d/canoa.cfg" COQUI_AGENTIC_PEER_HOME="$d/home" xvfb-run -a flutter test integration_test/launch_test.dart -d linux
+            done
           else
             flutter test integration_test/embedded_host_test.dart -d windows
+            for step in first flag config hosted; do
+              d="$RUNNER_TEMP/launch-$step"; mkdir -p "$d"
+              CANOA_TEST_LAUNCH_STEP=$step CANOA_CONFIG="$d/canoa.cfg" COQUI_AGENTIC_PEER_HOME="$d/home" flutter test integration_test/launch_test.dart -d windows
+            done
           fi

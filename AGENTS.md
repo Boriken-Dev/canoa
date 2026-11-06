@@ -62,6 +62,8 @@ cargo build -p canoa-ffi --lib
 (cd app && CANOA_TEST_LIBRARY=../target/debug/canoa_ffi.dll CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_library_test.dart)   # libcanoa_ffi.so on Linux
 # the built app hosting the scripted agent from its library, with no canoa on disk; needs node on PATH and a runner
 (cd app && CANOA_TEST_NODE=node flutter test integration_test/embedded_host_test.dart -d windows)   # or -d linux
+# main.dart's own main in the built app, one step a run on a new empty DIR: first (no canoa.cfg), flag, config, hosted
+(cd app && CANOA_TEST_LAUNCH_STEP=first CANOA_CONFIG=DIR/canoa.cfg COQUI_AGENTIC_PEER_HOME=DIR/home CANOA_TEST_NODE=node flutter test integration_test/launch_test.dart -d windows)
 (cd bindings/browser/chromium && npm test)
 (cd examples/acp-echo && npm install && npm test)   # needs OpenSSL
 mkdocs build --strict
