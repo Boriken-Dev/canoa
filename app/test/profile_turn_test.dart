@@ -1,8 +1,8 @@
 // One real turn with Claude, started through the app's own launch path with a profile whose initial context, one skill and
 // one MCP server each hold a word found nowhere else. It spends the subscription, so it runs only when asked:
-// CANOA_TEST_PROFILE_TURN=Claude, with CANOA_TEST_NODE naming node by its absolute path. Claude Code starts without the
-// person's user settings or CLAUDE.md (integration_test/without_user_settings.mjs). It prints what was used and the turn's
-// usage, never what was said.
+// CANOA_TEST_PROFILE_TURN=Claude, with CANOA_TEST_NODE naming node by its absolute path for the MCP server and CANOA_HOST a
+// built canoa, which runs the preset in a test. Claude Code starts with `--setting-sources=project,local`, without the person's
+// user settings. It prints what was used and the turn's usage, never what was said.
 @TestOn('vm')
 library;
 
@@ -57,9 +57,10 @@ value = "$toolWord"
     final claude = agentPresets.firstWhere((preset) => preset.label == real);
     final command = AgentCommand(
       label: claude.label,
-      program: node,
-      args: ['${Directory.current.path}/integration_test/without_user_settings.mjs', '--', claude.program, ...claude.args],
+      program: claude.program,
+      args: [...claude.args, '--setting-sources=project,local'],
       programPaths: claude.programPaths,
+      hosts: claude.hosts,
     );
     final store = SessionStore(includePreview: false);
     final started = await startProfiled(command, cwd: work.path, prepared: prepared, mcpOn: {'marker'}, files: home,

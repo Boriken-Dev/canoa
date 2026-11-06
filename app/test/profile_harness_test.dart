@@ -1,6 +1,8 @@
 // A profile through the real launch path of a harness installed here: the preset's adapter is started, its session
 // opened with what the profile gives it, and the report printed. No prompt is sent, so nothing is spent. Runs only when
-// asked: CANOA_TEST_PROFILE_HARNESS=Codex (or Pi), with CANOA_TEST_NODE naming node by its absolute path.
+// asked: CANOA_TEST_PROFILE_HARNESS=Claude, Codex or Pi, with CANOA_TEST_NODE naming node by its absolute path for the MCP
+// server, or CANOA_TEST_MCP_SERVER a stdio MCP server program (crates/canoa-host's mcp_server example) for Claude and Codex,
+// which then run with no Node through CANOA_HOST, a built canoa.
 @TestOn('vm')
 library;
 
@@ -18,8 +20,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 String slash(String path) => path.replaceAll(r'\', '/');
 
-/// What each harness is expected to take, by key: Codex all three, Pi none of them.
+/// What each harness is expected to take, by key: Claude and Codex all three, Pi none of them.
 const expected = {
+  'Claude': {'context': ItemState.applied, 'skills.canoa-marker': ItemState.applied, 'mcp.marker': ItemState.applied},
   'Codex': {'context': ItemState.applied, 'skills.canoa-marker': ItemState.applied, 'mcp.marker': ItemState.applied},
   'Pi': {
     'context': ItemState.unsupported,
@@ -31,6 +34,7 @@ const expected = {
 void main() {
   final harness = Platform.environment['CANOA_TEST_PROFILE_HARNESS'];
   final node = Platform.environment['CANOA_TEST_NODE'];
+  final mcpServer = Platform.environment['CANOA_TEST_MCP_SERVER'];
   test('a harness installed here opens a session with the profile, and shows what applied', () async {
     final temp = Directory.systemTemp.createTempSync('canoa-profile-harness-');
     final work = Directory('${temp.path}/work')..createSync();
@@ -49,8 +53,8 @@ value = "set"
 path = "${slash(temp.path)}/skill"
 [profile.mcp.marker]
 type = "stdio"
-command = "${slash(node!)}"
-args = ["${slash(server.path)}"]
+command = "${slash(mcpServer ?? node!)}"
+args = [${mcpServer == null ? '"${slash(server.path)}"' : ''}]
 ''');
     final home = IoProfileHome('${temp.path}/config');
     final layers = await profileLayers(overlays: config.overlays, user: config.profile, agents: config.agentProfiles,
@@ -87,6 +91,8 @@ args = ["${slash(server.path)}"]
     final items = {for (final item in session.profile!.items) item.key: item.state};
     expect(items['env.CANOA_PROFILE_PROBE'], ItemState.applied);
     expected[harness]!.forEach((key, state) => expect(items[key], state, reason: key));
-  }, skip: harness == null || node == null ? 'set CANOA_TEST_PROFILE_HARNESS and CANOA_TEST_NODE' : false,
+  }, skip: harness == null || (node == null && mcpServer == null)
+          ? 'set CANOA_TEST_PROFILE_HARNESS, and CANOA_TEST_NODE or CANOA_TEST_MCP_SERVER'
+          : false,
       timeout: const Timeout(Duration(minutes: 6)));
 }

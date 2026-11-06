@@ -7,8 +7,9 @@
 //
 //   flutter test integration_test/coding_task_test.dart -d windows   (or -d linux)
 //
-// `node` has to be on PATH. CANOA_TEST_TASK_AGENT=Claude runs the Claude preset's adapter on the person's own sign-in, through
-// without_user_settings.mjs so that their user-level settings and CLAUDE.md stay out, and spends the subscription; without it a
+// `node` has to be on PATH, for the project's tests and the stand-in. CANOA_TEST_TASK_AGENT=Claude runs the Claude preset on the
+// person's own sign-in with `--setting-sources=project,local`, so that their user-level settings and CLAUDE.md stay out, and
+// spends the subscription; without it a
 // scripted stand-in (scripted_agent.mjs) plays the agent and nothing is spent. Reaching outside the temporary directory fails the
 // test, whether asked (and refused) or done unasked. CANOA_TEST_SHOTS names a
 // directory for a screenshot of each step, and CANOA_TEST_UPDATES a file for the kind and shape of each distinct update. Neither
@@ -149,13 +150,14 @@ void main() {
         program: 'node',
         args: ['$_appDir/integration_test/scripted_agent.mjs', '--state=${dir.path}/scripted.json'],
       ),
-      // Claude through its preset's own adapter, but without the person's user-level settings and CLAUDE.md.
+      // Claude through its preset, but without the person's user-level settings.
       final AgentCommand claude when claude.label == 'Claude' => AgentCommand(
         label: 'Claude without user settings',
-        program: 'node',
-        args: ['$_appDir/integration_test/without_user_settings.mjs', '--', claude.program, ...claude.args],
+        program: claude.program,
+        args: [...claude.args, '--setting-sources=project,local'],
         requires: claude.requires,
         programPaths: claude.programPaths,
+        hosts: claude.hosts,
       ),
       final AgentCommand other => other,
     };

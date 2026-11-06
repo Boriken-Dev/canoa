@@ -1,5 +1,7 @@
 // A real turn with a real agent, which spends its subscription, so it runs only when asked. It writes one file in a temporary
 // directory, with the permission answered through the app's own store, and prints the shape of what the agent sent, never its text.
+// CANOA_TEST_REAL_TURN names the preset; Claude and Codex run through CANOA_HOST, a built canoa, in a test, and take
+// CANOA_TEST_REAL_MODEL and CANOA_TEST_REAL_EFFORT as their first model and effort.
 @TestOn('vm')
 library;
 
@@ -48,11 +50,27 @@ List<String> _workingIn(Directory dir) {
 String _said(ChatSession session) =>
     session.messages.where((message) => message.role == MessageRole.agent).map((message) => message.text).join(' ').toLowerCase();
 
+/// The preset [label], with the model and effort the environment names for a host's own command.
+AgentCommand _preset(String? label) {
+  final preset = agentPresets.firstWhere((preset) => preset.label == label);
+  if (!preset.hosts) return preset;
+  final model = Platform.environment['CANOA_TEST_REAL_MODEL'];
+  final effort = Platform.environment['CANOA_TEST_REAL_EFFORT'];
+  return AgentCommand(
+    label: preset.label,
+    program: preset.program,
+    args: [...preset.args, if (model != null) ...['--model', model], if (effort != null) ...['--effort', effort]],
+    requires: preset.requires,
+    programPaths: preset.programPaths,
+    hosts: true,
+  );
+}
+
 void main() {
   final real = Platform.environment['CANOA_TEST_REAL_TURN'];
   // Two short turns, and a third program that opens the conversation again. Prints whether each thing held, never what was said.
   test('a real agent reads what is attached, and a later program can open that conversation again', () async {
-    final command = agentPresets.firstWhere((preset) => preset.label == real);
+    final command = _preset(real);
     final dir = Directory.systemTemp.createTempSync('canoa-earlier-');
     final store = SessionStore(includePreview: false);
     final first = await startLocalAgent(command, decider: store.askPermission, workingDirectory: dir.path);
@@ -110,7 +128,7 @@ void main() {
   }, skip: real == null ? 'set CANOA_TEST_REAL_TURN' : false, timeout: const Timeout(Duration(minutes: 12)));
 
   test('a real agent asks, is answered, and does it', () async {
-    final command = agentPresets.firstWhere((preset) => preset.label == real);
+    final command = _preset(real);
     final dir = Directory.systemTemp.createTempSync('canoa-turn-');
     final settings = File('${dir.path}${Platform.pathSeparator}.claude${Platform.pathSeparator}settings.json');
     settings.parent.createSync();
