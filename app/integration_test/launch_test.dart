@@ -185,5 +185,7 @@ context = { text = "A profile, so that this entry starts through the host's own 
       default:
         fail('no step $step');
     }
+    // The app's own frames, such as a scrollbar's, finish before the test takes its widgets away.
+    await tester.pump(const Duration(seconds: 1));
   });
 }
