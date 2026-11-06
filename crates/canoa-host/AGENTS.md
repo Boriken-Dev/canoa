@@ -479,11 +479,11 @@ Everything `canoa` does is here; `src/main.rs` is a `Front` on its own standard 
 canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
                  [--web [DIR]] [--web-listen ADDRESS]
 canoa check [--config FILE] [--format text|json]
-canoa id [--method noise|webcrypto]
+canoa id [--method noise|webcrypto [--force]]
 canoa peers [--format text|json]
 canoa accept PEER
 canoa revoke PEER
-canoa pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto]
+canoa pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto [--force]]
 canoa provider (--library FILE | --source FILE [--import-search library|path]) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin [--connect ADDRESS]]
 canoa tool --name NAME --spec JSON
@@ -493,6 +493,7 @@ canoa launch PROGRAM [ARGS]...
 - `launch` is what `serve` runs for an agent entry with profiles: the environment on the first line of standard input, the rest to `PROGRAM`, whose status it exits with; a first line of another form is status 2.
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a looser one is logged as `weakened`.
+- **A running host keeps its home's method.** `id --method X` and `pair --method X`, with another method than the one the home records while a host holds the home (`Home::probe`, which takes nothing and writes nothing), are refused with status 3: `NAME (process PID) is running on this home, which proves by Y: already-paired clients would be refused after its next restart if the method became X. Stop it first, or add --force to change it anyway`. `--force` changes it and logs `weakened: method is X while NAME (process PID) runs on this home, looser than Y: …` on standard error. The method the home already records, no `--method`, and a home no host holds are never refused. `serve --method` is not guarded: it holds the home itself.
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "peer", "method"}`, `peer` being this host's id and `method` its proof's, once every entry is bound, and then `{"ready": true, "peer", "method"}`, a line with no `name`; then it serves until stopped. It logs on standard error.
 - **One host on a home.** `serve` takes the home's lock (see "One host on a home") before anything else of the home, or any address: a second one, the app's or another `canoa serve`, says `canoa: NAME (process PID) already hosts this home, DIR: ...`, binds nothing and ends with status 3. A holder that died holds nothing. `check`, `peers`, `accept`, `revoke`, `id` and `pair` take no lock, and `coqui-acp-bridge serve --paired` does not know of it.
 - `pair` takes its PIN back however it ends, so a connection still pairing on its own thread when it is given up pairs nobody: in an application's process such a thread outlives the command.

@@ -108,9 +108,12 @@ enum Command {
     /// Check canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
     /// Print this host's peer id, which a client pins.
+    /// A home a host is running on keeps its method: naming another is refused unless --force.
     Id {
         #[command(flatten)]
         method: MethodArg,
+        #[command(flatten)]
+        force: ForceArg,
     },
     /// List paired keys, then keys waiting to be paired.
     Peers {
@@ -142,6 +145,8 @@ enum Command {
         until_stdin_closes: bool,
         #[command(flatten)]
         method: MethodArg,
+        #[command(flatten)]
+        force: ForceArg,
     },
     /// Serve one Guatiao agent provider as an ACP agent on standard input and output.
     Provider {
@@ -209,6 +214,46 @@ impl MethodArg {
     fn identity(self, home: &Home) -> Result<auth::Identity, Failed> {
         home.identity(self.method).map_err(Failed::run)
     }
+
+    /// The identity, for a command that does not hold the home: a method other than the one the home records is refused
+    /// while a host runs on it, since that host's next restart would refuse every client already paired.
+    fn identity_unless_running(
+        self,
+        home: &Home,
+        force: ForceArg,
+        front: &dyn Front,
+    ) -> Result<auth::Identity, Failed> {
+        let recorded = home.recorded().map_err(Failed::run)?;
+        if let (Some(requested), Some(recorded)) = (self.method, recorded)
+            && requested != recorded
+            && let Err(LockError::Held { holder, .. }) = home.probe()
+        {
+            let who = holder.map_or_else(
+                || "another host".to_owned(),
+                |holder| format!("{} (process {})", holder.name, holder.pid),
+            );
+            if !force.force {
+                return Err(Failed {
+                    status: STATUS_HELD,
+                    why: format!(
+                        "{who} is running on this home, which proves by {recorded}: already-paired clients would be refused after its next restart if the method became {requested}. Stop it first, or add --force to change it anyway"
+                    ),
+                });
+            }
+            front.say(&format!(
+                "weakened: method is {requested} while {who} runs on this home, looser than {recorded}: already-paired clients are refused after its next restart"
+            ));
+        }
+        self.identity(home)
+    }
+}
+
+/// `--force`, for a command that would change the method of a home a host is running on.
+#[derive(Clone, Copy, Debug, Args)]
+struct ForceArg {
+    /// Change the method of a home a host is running on anyway; the host's next restart refuses every client already paired.
+    #[arg(long)]
+    force: bool,
 }
 
 /// Takes back the PIN when `pair` returns, however it returns: a connection still pairing runs on a thread of its own, which
@@ -526,13 +571,14 @@ fn pair(
     timeout: Duration,
     until_stdin_closes: bool,
     method: MethodArg,
+    force: ForceArg,
     front: &dyn Front,
 ) -> Result<(), Failed> {
     if !listen.ip().is_loopback() {
         return Err(Failed::usage("pair listens only on loopback"));
     }
     let home = home_of(front)?;
-    let identity = Arc::new(method.identity(&home)?);
+    let identity = Arc::new(method.identity_unless_running(&home, force, front)?);
     let store = Arc::new(store(&home)?);
     let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
@@ -683,9 +729,12 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
     match cli.command {
         Command::Serve(args) => serve(&args, front),
         Command::Check(args) => check(&args, front),
-        Command::Id { method } => print(
+        Command::Id { method, force } => print(
             front,
-            &method.identity(&home_of(front)?)?.peer_id().to_string(),
+            &method
+                .identity_unless_running(&home_of(front)?, force, front)?
+                .peer_id()
+                .to_string(),
         ),
         Command::Peers { format } => list_peers(format, front),
         Command::Pair {
@@ -693,11 +742,13 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             timeout_seconds,
             until_stdin_closes,
             method,
+            force,
         } => pair(
             listen,
             Duration::from_secs(timeout_seconds),
             until_stdin_closes,
             method,
+            force,
             front,
         ),
         Command::Accept { peer } => {

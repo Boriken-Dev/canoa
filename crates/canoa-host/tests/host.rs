@@ -629,12 +629,13 @@ fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
         .into_iter()
         .find(|method| *method != support::method())
         .expect("another method");
+    // Its host is running, so the method is changed only when forced.
     let theirs = std::process::Command::new(host_binary())
-        .args(["id", "--method", other.name()])
+        .args(["id", "--force", "--method", other.name()])
         .env("COQUI_AGENTIC_PEER_HOME", host.home())
         .output()
         .expect("id runs");
-    assert!(theirs.status.success());
+    assert!(theirs.status.success(), "{theirs:?}");
     // A key of its own: one key is never used by both methods.
     assert_ne!(
         String::from_utf8_lossy(&theirs.stdout).trim(),
@@ -651,7 +652,8 @@ fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
         String::from_utf8_lossy(&neither.stdout).trim(),
         String::from_utf8_lossy(&theirs.stdout).trim()
     );
-    let ours = host.command(&["id"]);
+    // Back to the running host's own method, which takes --force while that host runs.
+    let ours = host.command(&["id", "--force"]);
     assert_eq!(
         String::from_utf8_lossy(&ours.stdout).trim(),
         host.peer.to_string()

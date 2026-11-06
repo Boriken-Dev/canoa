@@ -153,7 +153,7 @@ impl Home {
     /// [`Error::Identity`] when it cannot be read or written, when the recorded method names none, or when no method is
     /// named and the home holds identities of both.
     pub fn identity(&self, method: Option<Method>) -> Result<Identity, Error> {
-        let chosen = self.chosen()?;
+        let chosen = self.recorded()?;
         let method = match (method, chosen) {
             (Some(method), _) | (None, Some(method)) => method,
             (None, None) => {
@@ -183,7 +183,12 @@ impl Home {
         Ok(identity)
     }
 
-    fn chosen(&self) -> Result<Option<Method>, Error> {
+    /// The method this home records in its method file, if any.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Identity`] when the file cannot be read or names no method.
+    pub fn recorded(&self) -> Result<Option<Method>, Error> {
         match fs::read_to_string(self.dir.join(METHOD_FILE)) {
             Ok(text) => text.trim().parse().map(Some).map_err(|_| {
                 Error::Identity(format!(
@@ -239,6 +244,30 @@ impl Home {
             _file: file,
             holder_file,
         })
+    }
+
+    /// Whether a host holds this home now, without taking it or writing anything: a home with no directory is free.
+    ///
+    /// # Errors
+    ///
+    /// [`LockError::Held`] when a host holds it; [`LockError::Io`] when the lock's file cannot be used.
+    pub fn probe(&self) -> Result<(), LockError> {
+        if !self.dir.is_dir() {
+            return Ok(());
+        }
+        let failed = |source| LockError::Io {
+            dir: self.dir.clone(),
+            source,
+        };
+        let file = lock_target(&self.dir).map_err(failed)?;
+        match file.try_lock() {
+            Ok(()) => Ok(()),
+            Err(TryLockError::WouldBlock) => Err(LockError::Held {
+                dir: self.dir.clone(),
+                holder: self.holder_when_said(),
+            }),
+            Err(TryLockError::Error(source)) => Err(failed(source)),
+        }
     }
 
     /// Who holds this home, by what it wrote; `None` while nobody says.
