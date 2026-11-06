@@ -190,6 +190,13 @@ enum Command {
         #[arg(long)]
         spec: String,
     },
+    /// Serve Claude Code or Codex as an ACP agent on standard input and output, in ACP version 1 or 2, through the
+    /// translators of their own stdio protocols, with no Node. Each session runs the installed command line; permission
+    /// prompts are asked through ACP. Notices and how each command line ended go to standard error.
+    Agent {
+        #[command(subcommand)]
+        harness: AgentHarness,
+    },
     /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
     /// with profiles. The rest of standard input goes to the agent.
     Launch {
@@ -199,6 +206,131 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<std::ffi::OsString>,
     },
+}
+
+/// The command line `canoa agent` serves.
+#[derive(Debug, Subcommand)]
+enum AgentHarness {
+    /// Claude Code, `claude`, over stream-json. It reads its own variables (CLAUDE_CONFIG_DIR, ANTHROPIC_API_KEY,
+    /// CLAUDE_CODE_OAUTH_TOKEN and others) from the environment it is given.
+    Claude {
+        /// The Claude Code program.
+        #[arg(long, env = "COQUI_ACP_CLAUDE_EXECUTABLE", default_value = "claude")]
+        executable: OsString,
+        /// The permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions, auto or manual.
+        #[arg(long)]
+        permission_mode: Option<String>,
+        /// The setting sources Claude Code loads, comma-separated, of user, project and local; empty loads none.
+        #[arg(long)]
+        setting_sources: Option<String>,
+        /// Only the MCP servers a session is given, none from the person's or the project's configuration.
+        #[arg(long)]
+        strict_mcp_config: bool,
+        /// Do not ask for permission through ACP: what nothing has granted is refused where it is made.
+        #[arg(long)]
+        no_permission_prompts: bool,
+        /// Let a client load Claude Code plugins through a session's `_meta.claudeCode.options.plugins`, as Canoa's app
+        /// gives a profile's skills; a plugin's hooks and MCP servers run with nothing asked.
+        #[arg(long)]
+        allow_client_plugins: bool,
+        #[command(flatten)]
+        common: AgentArgs,
+    },
+    /// Codex, `codex app-server`, over its JSON-RPC. It reads its own variables (CODEX_HOME, OPENAI_API_KEY and others)
+    /// from the environment it is given.
+    Codex {
+        /// The Codex program.
+        #[arg(long, env = "COQUI_ACP_CODEX_EXECUTABLE", default_value = "codex")]
+        executable: OsString,
+        /// The approval policy: untrusted, on-failure, on-request or never.
+        #[arg(long)]
+        approval_policy: Option<String>,
+        /// The sandbox: read-only, workspace-write or danger-full-access.
+        #[arg(long)]
+        sandbox: Option<String>,
+        #[command(flatten)]
+        common: AgentArgs,
+    },
+}
+
+/// What `canoa agent` takes for either harness.
+#[derive(Debug, Args)]
+struct AgentArgs {
+    /// The model every session starts with, until the client chooses another.
+    #[arg(long)]
+    model: Option<String>,
+    /// The effort every session starts with, such as low or high.
+    #[arg(long)]
+    effort: Option<String>,
+    /// The highest ACP version answered.
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=2))]
+    max_acp_version: u8,
+    /// Sessions at once.
+    #[arg(long, default_value_t = crate::config::DEFAULT_MAX_SESSIONS)]
+    max_sessions: usize,
+    /// A directory every session's cwd and more directories must lie in; repeat for several. None takes any.
+    #[arg(long = "working-root", value_name = "DIRECTORY")]
+    working_roots: Vec<PathBuf>,
+    /// Refuse a session that a client gives MCP servers.
+    #[arg(long)]
+    no_client_mcp_servers: bool,
+    /// Take a network path (`\\host\share`) as a session's cwd or more directories.
+    #[arg(long)]
+    allow_network_paths: bool,
+}
+
+impl AgentHarness {
+    /// The translator's options this command line gives.
+    fn options(self) -> crate::harness::AgentOptions {
+        use crate::harness::{AgentOptions, Harness};
+        let (mut options, common) = match self {
+            Self::Claude {
+                executable,
+                permission_mode,
+                setting_sources,
+                strict_mcp_config,
+                no_permission_prompts,
+                allow_client_plugins,
+                common,
+            } => {
+                let mut options = AgentOptions::new(Harness::Claude);
+                options.executable = Some(executable);
+                options.permission_mode = permission_mode;
+                options.setting_sources = setting_sources.map(|sources| {
+                    sources
+                        .split(',')
+                        .filter(|source| !source.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                });
+                options.strict_mcp_config = strict_mcp_config;
+                options.permission_prompts = !no_permission_prompts;
+                options.client_plugins = allow_client_plugins;
+                (options, common)
+            }
+            Self::Codex {
+                executable,
+                approval_policy,
+                sandbox,
+                common,
+            } => {
+                let mut options = AgentOptions::new(Harness::Codex);
+                options.executable = Some(executable);
+                options.approval_policy = approval_policy;
+                options.sandbox = sandbox;
+                (options, common)
+            }
+        };
+        options.model = common.model;
+        options.effort = common.effort;
+        options.max_version = common.max_acp_version;
+        options.max_sessions = common.max_sessions;
+        options.resume_roots.clone_from(&common.working_roots);
+        options.working_roots = common.working_roots;
+        options.client_mcp_servers = !common.no_client_mcp_servers;
+        options.network_paths = common.allow_network_paths;
+        options
+    }
 }
 
 /// Which proof this host runs, chosen here and never negotiated on a connection.
@@ -672,7 +804,7 @@ fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     let config = load(args, front)?;
     for entry in &config.entries {
         let kind = match entry.kind {
-            crate::EntryKind::Agent { .. } => "agent",
+            crate::EntryKind::Agent { .. } | crate::EntryKind::Harness { .. } => "agent",
             crate::EntryKind::Provider { .. } => "provider",
             crate::EntryKind::Tool { .. } => "tool",
         };
@@ -826,6 +958,20 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
                 _ => Failed::run(error),
             })
         }
+        Command::Agent { harness } => {
+            let options = harness.options();
+            let name = options.harness.as_str();
+            let notice: coqui_acp_harness::acp::NoticeHook =
+                Arc::new(move |text: &str| eprintln!("canoa agent {name}: {text}"));
+            let settings = options.settings(notice);
+            coqui_acp_harness::serve(
+                options.agent(),
+                settings,
+                std::io::stdin(),
+                std::io::stdout(),
+            )
+            .map_err(Failed::run)
+        }
         Command::Launch { program, args } => {
             let error = crate::profile::launch(&program, &args, crate::serve::MAX_LINE);
             Err(match error.kind() {
@@ -837,13 +983,17 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
 }
 
 impl Cli {
-    /// Whether this is one of the commands a host starts for itself: `provider`, `tool` or `launch`. An application that
-    /// runs as one when it starts itself takes nothing else on that command line.
+    /// Whether this is one of the commands a host starts for itself, which take the process's own standard streams:
+    /// `provider`, `tool`, `agent` or `launch`. An application that runs as one when it starts itself takes nothing else
+    /// on that command line.
     #[must_use]
     pub const fn is_a_hosts_own(&self) -> bool {
         matches!(
             self.command,
-            Command::Provider { .. } | Command::Tool { .. } | Command::Launch { .. }
+            Command::Provider { .. }
+                | Command::Tool { .. }
+                | Command::Agent { .. }
+                | Command::Launch { .. }
         )
     }
 }
@@ -1007,5 +1157,84 @@ mod tests {
     #[test]
     fn accept_needs_a_peer() {
         assert!(Cli::try_parse_from(["canoa", "accept"]).is_err());
+    }
+
+    fn agent_options(args: &[&str]) -> crate::harness::AgentOptions {
+        let cli = Cli::try_parse_from(["canoa", "agent"].iter().chain(args)).expect("parses");
+        assert!(cli.is_a_hosts_own(), "it takes the standard streams");
+        let Command::Agent { harness } = cli.command else {
+            panic!("agent");
+        };
+        harness.options()
+    }
+
+    #[test]
+    fn agent_serves_claude_code_with_its_own_flags_and_what_a_host_narrows() {
+        let options = agent_options(&[
+            "claude",
+            "--executable",
+            "/opt/claude",
+            "--model",
+            "claude-haiku-5-5",
+            "--effort",
+            "low",
+            "--setting-sources=",
+            "--allow-client-plugins",
+            "--working-root",
+            "/w",
+            "--no-client-mcp-servers",
+            "--max-acp-version",
+            "1",
+        ]);
+        assert_eq!(options.harness, crate::Harness::Claude);
+        assert_eq!(
+            options.executable.as_deref(),
+            Some(std::ffi::OsStr::new("/opt/claude"))
+        );
+        assert_eq!(options.model.as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(options.effort.as_deref(), Some("low"));
+        assert_eq!(options.setting_sources, Some(Vec::new()));
+        assert!(options.client_plugins && options.permission_prompts);
+        assert_eq!(options.working_roots, [PathBuf::from("/w")]);
+        assert!(!options.client_mcp_servers);
+        assert_eq!(options.max_version, 1);
+
+        let bare = agent_options(&["claude"]);
+        assert!(
+            !bare.client_plugins,
+            "plugins from a client are off unless asked for"
+        );
+        assert!(bare.permission_prompts && bare.client_mcp_servers);
+        assert_eq!(bare.setting_sources, None);
+        assert_eq!(bare.max_version, 2);
+    }
+
+    #[test]
+    fn agent_serves_codex_with_its_own_flags_and_holds_a_resumed_thread_to_the_roots() {
+        let options = agent_options(&[
+            "codex",
+            "--approval-policy",
+            "on-request",
+            "--sandbox",
+            "workspace-write",
+            "--working-root",
+            "/w",
+        ]);
+        assert_eq!(options.harness, crate::Harness::Codex);
+        assert_eq!(options.approval_policy.as_deref(), Some("on-request"));
+        assert_eq!(options.sandbox.as_deref(), Some("workspace-write"));
+        assert_eq!(options.resume_roots, [PathBuf::from("/w")]);
+        for wrong in [
+            &["codex", "--permission-mode", "plan"][..],
+            &["codex", "--allow-client-plugins"],
+            &["claude", "--sandbox", "read-only"],
+            &["gemini"],
+            &["claude", "--max-acp-version", "3"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["canoa", "agent"].iter().chain(wrong)).is_err(),
+                "{wrong:?}"
+            );
+        }
     }
 }

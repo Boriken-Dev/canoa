@@ -85,6 +85,9 @@ name = "profile_agent"
 [[example]]
 name = "mcp_server"
 
+[[example]]
+name = "harness_standin"
+
 [lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"

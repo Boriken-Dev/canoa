@@ -310,6 +310,11 @@ impl Connection {
         })
     }
 
+    /// The profile's environment, resolved: what the agent's process is given.
+    pub(crate) fn env(&self) -> &[(String, Secret)] {
+        &self.env
+    }
+
     /// The line `canoa launch` reads first.
     pub(crate) fn launch_line(&self) -> Vec<u8> {
         super::launch::launch_line(&self.env)
@@ -1354,6 +1359,13 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 parts: None,
             }),
         }
+    }
+
+    /// The same, for an agent in this process, which takes its environment some other way than a first line.
+    pub(crate) fn in_process(inner: &'a C, scope: &'a Scope, connection: &'a Connection) -> Self {
+        let hosted = Self::new(inner, scope, connection);
+        hosted.hold().launch = None;
+        hosted
     }
 
     fn hold(&self) -> std::sync::MutexGuard<'_, Hold> {

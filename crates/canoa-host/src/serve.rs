@@ -15,7 +15,7 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
-use coqui_acp_bridge::agent::Agent;
+use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_agentic_peer::link::Prefilled;
@@ -26,6 +26,8 @@ use coqui_web::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
 use crate::config::{Config, Entry, EntryKind, ImportSearch, Origin};
+use crate::harness::AgentOptions;
+use crate::inproc::{self, InProcess};
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
@@ -185,12 +187,23 @@ impl Gate {
     }
 }
 
+/// What serves one connection of an agent entry.
+#[derive(Debug)]
+enum Agent {
+    /// A program of its own on its standard streams.
+    Program {
+        program: OsString,
+        args: Vec<OsString>,
+    },
+    /// A harness's translator, in this process.
+    Harness(AgentOptions),
+}
+
 /// What runs for one entry's connections.
 #[derive(Debug)]
 enum Run {
     Agent {
-        program: OsString,
-        args: Vec<OsString>,
+        agent: Agent,
         scope: Scope,
         /// The profiles a client may choose among; `None` starts the program bare.
         offer: Option<Arc<Offer>>,
@@ -235,8 +248,9 @@ struct Agents {
 
 /// A process the host started for one connection.
 enum Process {
-    Agent(Arc<Agent>),
+    Agent(Arc<BridgeAgent>),
     Provider(Arc<Running>),
+    InProcess(Arc<InProcess>),
 }
 
 impl Process {
@@ -247,6 +261,7 @@ impl Process {
                 let _ = agent.stop();
             }
             Self::Provider(running) => running.stop(),
+            Self::InProcess(agent) => agent.stop(),
         }
     }
 }
@@ -258,9 +273,9 @@ impl Shared {
         &self,
         program: &OsString,
         args: &[OsString],
-    ) -> std::io::Result<Option<(u64, Arc<Agent>)>> {
+    ) -> std::io::Result<Option<(u64, Arc<BridgeAgent>)>> {
         self.record(|| {
-            let agent = Arc::new(Agent::spawn(program, args, MAX_LINE)?);
+            let agent = Arc::new(BridgeAgent::spawn(program, args, MAX_LINE)?);
             Ok((Process::Agent(Arc::clone(&agent)), agent))
         })
     }
@@ -452,8 +467,10 @@ impl Serving {
                 } => (
                     "agent",
                     Run::Agent {
-                        program: program.clone(),
-                        args: args.clone(),
+                        agent: Agent::Program {
+                            program: program.clone(),
+                            args: args.clone(),
+                        },
                         scope: Scope::new(entry.working_roots.clone()),
                         offer: hosted::offer(
                             profiles,
@@ -516,12 +533,35 @@ impl Serving {
                         },
                     )
                 }
+                EntryKind::Harness {
+                    harness,
+                    executable,
+                    profiles,
+                } => (
+                    "agent",
+                    Run::Agent {
+                        agent: Agent::Harness(harness_options(
+                            entry,
+                            *harness,
+                            executable.as_ref(),
+                        )),
+                        scope: Scope::new(entry.working_roots.clone()),
+                        offer: hosted::offer(
+                            profiles,
+                            &config.profiles,
+                            options.provider_program.as_os_str().to_owned(),
+                        ),
+                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
+                    },
+                ),
                 // A stdio agent like any other, so the scope applies to its clients and its processes end with the link.
                 EntryKind::Tool { spec } => (
                     "tool",
                     Run::Agent {
-                        program: options.provider_program.as_os_str().to_owned(),
-                        args: tool_args(&options.program_args, &entry.name, spec),
+                        agent: Agent::Program {
+                            program: options.provider_program.as_os_str().to_owned(),
+                            args: tool_args(&options.program_args, &entry.name, spec),
+                        },
                         scope: Scope::new(entry.working_roots.clone()),
                         offer: None,
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
@@ -764,21 +804,41 @@ fn give_agent<C: Channel>(
     first: &[u8],
     peer: &PeerId,
 ) {
-    let (program, args, scope, offer) = match &served.run {
+    let (agent, scope, offer) = match &served.run {
         Run::Agent {
-            program,
-            args,
+            agent,
             scope,
             offer,
             ..
-        } => (program, args, scope, offer),
+        } => (agent, scope, offer),
         Run::Provider {
             program,
             args,
             line,
         } => return give_provider(shared, served, channel, peer, (program, args), line),
     };
-    let Some(offer) = offer else {
+    let connection = match offer {
+        Some(offer) => match prepare(served, channel, first, peer, offer) {
+            Some(connection) => Some(connection),
+            None => return,
+        },
+        None => None,
+    };
+    let (program, args) = match agent {
+        Agent::Program { program, args } => (program, args),
+        Agent::Harness(options) => {
+            return give_harness(
+                shared,
+                served,
+                channel,
+                peer,
+                options,
+                scope,
+                connection.as_ref(),
+            );
+        }
+    };
+    let (Some(offer), Some(connection)) = (offer, connection) else {
         // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
         let (key, agent) = match shared.start(program, args) {
             Ok(Some(started)) => started,
@@ -792,35 +852,6 @@ fn give_agent<C: Channel>(
         shared.forget(key);
         let _ = agent.stop();
         return;
-    };
-    let refuse = |answer: Option<Vec<u8>>, log: &str| {
-        if let Some(answer) = answer {
-            let _ = channel.send(&answer);
-        }
-        tracing::info!(entry = served.name, %peer, "{log}");
-    };
-    let index = match hosted::choose(offer, first) {
-        Ok(index) => index,
-        Err(refusal) => return refuse(refusal.answer, refusal.log),
-    };
-    let lookup = |name: &str| std::env::var(name).ok();
-    let connection = match Connection::prepare(offer, index, &served.name, &lookup) {
-        Ok(connection) => connection,
-        Err(why) => {
-            let id = serde_json::from_slice::<serde_json::Value>(first)
-                .ok()
-                .and_then(|message| message.get("id").cloned());
-            let answer = id.map(|id| {
-                serde_json::to_vec(&serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {
-                    "code": -32603, "message": "the host's profile for this entry cannot be applied",
-                }}))
-                .unwrap_or_default()
-            });
-            return refuse(
-                answer,
-                &format!("the profile could not be applied, so no agent started: {why}"),
-            );
-        }
     };
     // The agent's environment reaches it on `launch`'s first line, never on a command line.
     let mut launched = shared.program_args.clone();
@@ -846,7 +877,114 @@ fn give_agent<C: Channel>(
     drop(hosted);
 }
 
-/// Serves one connection with a provider process of its own, which [`Stopper::stop_agents`] ends like any agent.
+/// The profile the client chose in its first message, ready for its agent; `None` once it was refused, answered and logged.
+fn prepare<C: Channel>(
+    served: &Served,
+    channel: &C,
+    first: &[u8],
+    peer: &PeerId,
+    offer: &Offer,
+) -> Option<Connection> {
+    let refuse = |answer: Option<Vec<u8>>, log: &str| {
+        if let Some(answer) = answer {
+            let _ = channel.send(&answer);
+        }
+        tracing::info!(entry = served.name, %peer, "{log}");
+    };
+    let index = match hosted::choose(offer, first) {
+        Ok(index) => index,
+        Err(refusal) => {
+            refuse(refusal.answer, refusal.log);
+            return None;
+        }
+    };
+    let lookup = |name: &str| std::env::var(name).ok();
+    match Connection::prepare(offer, index, &served.name, &lookup) {
+        Ok(connection) => Some(connection),
+        Err(why) => {
+            let id = serde_json::from_slice::<serde_json::Value>(first)
+                .ok()
+                .and_then(|message| message.get("id").cloned());
+            let answer = id.map(|id| {
+                serde_json::to_vec(&serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {
+                    "code": -32603, "message": "the host's profile for this entry cannot be applied",
+                }}))
+                .unwrap_or_default()
+            });
+            refuse(
+                answer,
+                &format!("the profile could not be applied, so no agent started: {why}"),
+            );
+            None
+        }
+    }
+}
+
+/// A harness entry's translator options. The host's scope already holds a client's `cwd` and more directories to the
+/// entry's roots and adds directories of its own after it, so the translator takes any; a resumed Codex thread's own
+/// directory, which no request shows the host, is held to the roots by the translator.
+fn harness_options(
+    entry: &Entry,
+    harness: crate::Harness,
+    executable: Option<&OsString>,
+) -> AgentOptions {
+    let mut options = AgentOptions::new(harness);
+    options.executable = executable.cloned();
+    options.resume_roots.clone_from(&entry.working_roots);
+    options
+}
+
+/// Serves one connection with a harness's translator in this process, which [`Stopper::stop_agents`] ends like any agent.
+/// With a profile, its environment goes to the command line's process, and Claude Code takes the plugin the host writes
+/// for its skills: the host removes every `_meta` a client sends, so that plugin is the only one that can reach it.
+fn give_harness<C: Channel>(
+    shared: &Shared,
+    served: &Served,
+    channel: &C,
+    peer: &PeerId,
+    options: &AgentOptions,
+    scope: &Scope,
+    connection: Option<&Connection>,
+) {
+    let mut options = options.clone();
+    if let Some(connection) = connection {
+        options.env = connection
+            .env()
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value.expose())))
+            .collect();
+        options.client_plugins = true;
+    }
+    let control = InProcess::new();
+    let key = match shared.record(|| Ok((Process::InProcess(Arc::clone(&control)), ()))) {
+        Ok(Some((key, ()))) => key,
+        Ok(None) | Err(_) => return,
+    };
+    let entry = served.name.clone();
+    let notice: coqui_acp_harness::acp::NoticeHook =
+        Arc::new(move |text: &str| tracing::info!(entry, "{text}"));
+    let settings = options.settings(notice);
+    let end = match connection {
+        Some(connection) => inproc::serve(
+            &Hosted::in_process(channel, scope, connection),
+            options.agent(),
+            settings,
+            MAX_LINE,
+            &control,
+        ),
+        None => inproc::serve(
+            &Scoped::new(channel, scope),
+            options.agent(),
+            settings,
+            MAX_LINE,
+            &control,
+        ),
+    };
+    tracing::info!(entry = served.name, %peer, "left: {end:?}");
+    shared.forget(key);
+}
+
+// Serves one connection with a provider process of its own, which [`Stopper::stop_agents`] ends like any agent.
 fn give_provider<C: Channel>(
     shared: &Shared,
     served: &Served,

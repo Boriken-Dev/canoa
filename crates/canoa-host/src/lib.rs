@@ -7,7 +7,9 @@ pub mod aos;
 mod child;
 pub mod cli;
 pub mod config;
+pub mod harness;
 pub mod home;
+mod inproc;
 pub mod peers;
 pub mod profile;
 pub mod provider;
@@ -18,6 +20,7 @@ pub mod web;
 mod worktree;
 
 pub use config::{Config, ConfigError, Entry, EntryKind, Origin, Settings, WebConfig};
+pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use peers::{Peer, PeerState, PeersError};
 pub use provider::{HostLine, ProviderError, ProviderOptions, serve_stdio};

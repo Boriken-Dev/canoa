@@ -269,8 +269,8 @@ fn stopping_before_the_host_is_up_still_stops_it() {
     assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
 }
 
-/// `provider`, `tool` and `launch` change the process they run in, its directory, its standard input and its end, so in an
-/// application's process they are refused: they run only as a process of their own.
+/// `provider`, `tool`, `agent` and `launch` change the process they run in, its directory, its standard input and its end,
+/// so in an application's process they are refused: they run only as a process of their own.
 #[test]
 fn a_hosts_own_command_is_refused_as_a_job() {
     let scratch = Scratch::new();
@@ -287,6 +287,7 @@ fn a_hosts_own_command_is_refused_as_a_job() {
         ]),
         json!(["launch", "--", "none"]),
         json!(["tool", "--name", "t", "--spec", "{}"]),
+        json!(["agent", "claude", "--executable", "none"]),
     ] {
         let job = start(&json!({"args": args, "home": scratch.0}));
         let said = to_end(job);

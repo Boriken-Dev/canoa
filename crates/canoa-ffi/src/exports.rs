@@ -170,9 +170,9 @@ pub extern "C" fn canoa_ffi_job_free(job: u64) -> i32 {
     })
 }
 
-/// Runs this process as the host's own `provider`, `tool` or `launch` command, from this process's command line, whose first
-/// argument is [`jobs::CHILD_FLAG`]. Returns the status to exit with; the application calls it before anything else of its
-/// own has started, and runs nothing after it.
+/// Runs this process as the host's own `provider`, `tool`, `agent` or `launch` command, from this process's command line,
+/// whose first argument is [`jobs::CHILD_FLAG`]. Returns the status to exit with; the application calls it before anything
+/// else of its own has started, and runs nothing after it.
 #[unsafe(no_mangle)]
 pub extern "C" fn canoa_ffi_child_main() -> i32 {
     guarded(jobs::child_main)

@@ -615,3 +615,58 @@ fn the_web_app_and_an_entry_cannot_share_an_address() {
         parse("[host.agents.a]\nprogram = \"x\"\nlisten = \"127.0.0.1:0\"\n[host.web]\nlisten = \"127.0.0.1:0\"\n").is_ok()
     );
 }
+
+#[test]
+fn an_agent_entry_names_a_harness_the_host_runs_itself_instead_of_a_program() {
+    let config = parse(
+        r#"
+[host.agents.Claude]
+harness = "claude"
+profiles = ["plain"]
+[host.agents.Codex]
+harness = "codex"
+executable = "/opt/codex/bin/codex"
+[host.profiles.plain]
+"#,
+    )
+    .expect("parses");
+    assert_eq!(
+        config.entry("Claude").expect("there").kind,
+        EntryKind::Harness {
+            harness: crate::Harness::Claude,
+            executable: None,
+            profiles: vec!["plain".to_owned()],
+        }
+    );
+    assert_eq!(
+        config.entry("Codex").expect("there").kind,
+        EntryKind::Harness {
+            harness: crate::Harness::Codex,
+            executable: Some("/opt/codex/bin/codex".into()),
+            profiles: Vec::new(),
+        }
+    );
+    for (text, what) in [
+        ("[host.agents.a]\nharness = \"gemini\"\n", "harness"),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nprogram = \"claude\"\n",
+            "program or harness",
+        ),
+        ("[host.agents.a]\nargs = [\"x\"]\n", "program or harness"),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nargs = [\"x\"]\n",
+            "args",
+        ),
+        (
+            "[host.agents.a]\nprogram = \"x\"\nexecutable = \"y\"\n",
+            "executable",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\nexecutable = \"\"\n",
+            "executable",
+        ),
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains(what), "{text}: {error}");
+    }
+}

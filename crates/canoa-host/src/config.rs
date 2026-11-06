@@ -152,6 +152,15 @@ pub enum EntryKind {
         /// The `[host.profiles]` a client may choose among, the first when it names none; empty launches it bare.
         profiles: Vec<String>,
     },
+    /// A coding agent's own command line that the host serves as an ACP agent itself, in its own process, with no adapter.
+    Harness {
+        /// Which command line.
+        harness: crate::Harness,
+        /// Its program; `claude` or `codex` as the operating system finds a command when `None`.
+        executable: Option<OsString>,
+        /// The `[host.profiles]` a client may choose among, as an agent's.
+        profiles: Vec<String>,
+    },
     /// A Guatiao `agent_provider`, from a library or a source, served through the ACP facade in a process of its own.
     Provider {
         /// Where its code comes from.
@@ -375,9 +384,10 @@ struct RawCommon {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawAgent {
-    program: String,
-    #[serde(default)]
-    args: Vec<String>,
+    program: Option<String>,
+    args: Option<Vec<String>>,
+    harness: Option<String>,
+    executable: Option<String>,
     profiles: Option<Vec<String>>,
     listen: Option<String>,
     #[serde(default)]
@@ -457,9 +467,6 @@ impl Config {
         let mut entries = Vec::new();
         for (name, agent) in host.agents {
             check_name(&name)?;
-            if agent.program.is_empty() {
-                return Err(invalid(&name, "program is empty"));
-            }
             let offered = agent.profiles.unwrap_or_default();
             for (index, profile) in offered.iter().enumerate() {
                 if !profiles.contains_key(profile) {
@@ -479,10 +486,47 @@ impl Config {
                 peers: agent.peers,
                 max_peers: agent.max_peers,
             };
-            let kind = EntryKind::Agent {
-                program: OsString::from(agent.program),
-                args: agent.args.into_iter().map(OsString::from).collect(),
-                profiles: offered,
+            let kind = match (agent.program, agent.harness) {
+                (Some(program), None) => {
+                    if program.is_empty() {
+                        return Err(invalid(&name, "program is empty"));
+                    }
+                    if agent.executable.is_some() {
+                        return Err(invalid(&name, "executable goes with harness, not program"));
+                    }
+                    EntryKind::Agent {
+                        program: OsString::from(program),
+                        args: agent
+                            .args
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(OsString::from)
+                            .collect(),
+                        profiles: offered,
+                    }
+                }
+                (None, Some(harness)) => {
+                    let Some(harness) = crate::Harness::named(&harness) else {
+                        return Err(invalid(&name, "harness is claude or codex"));
+                    };
+                    if agent.args.is_some() {
+                        return Err(invalid(&name, "args go with program; a harness takes none"));
+                    }
+                    if agent.executable.as_deref() == Some("") {
+                        return Err(invalid(&name, "executable is empty"));
+                    }
+                    EntryKind::Harness {
+                        harness,
+                        executable: agent.executable.map(OsString::from),
+                        profiles: offered,
+                    }
+                }
+                _ => {
+                    return Err(invalid(
+                        &name,
+                        "an agent names a program or harness, one of the two",
+                    ));
+                }
             };
             entries.push(entry(name, kind, common)?);
         }
