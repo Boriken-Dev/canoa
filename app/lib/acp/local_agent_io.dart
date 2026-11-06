@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../sources/sources.dart' show commandNeeds;
 import 'agent_commands.dart';
 import 'client.dart';
 
@@ -52,7 +53,7 @@ String? defaultWorkingDirectory() {
 
 /// Whether what it needs is on this computer, so nothing is offered that cannot start.
 Future<bool> isInstalled(AgentCommand command) async {
-  for (final program in [command.program, ...command.requires]) {
+  for (final program in commandNeeds(command)) {
     if (await _find(program) == null) return false;
   }
   return true;
@@ -114,14 +115,20 @@ Future<VerifiedAgent> startLocalAgent(
     if (path == null) throw AcpFailure('${entry.value} is not installed');
     environment[entry.key] = path;
   }
+  final (program, args) = invocation(
+    command,
+    executable: Platform.resolvedExecutable,
+    hostProgram: environmentVariable('CANOA_HOST'),
+  );
   final Process process;
   try {
     process = await Process.start(
-      command.program,
-      command.args,
+      program,
+      args,
       workingDirectory: workingDirectory,
       environment: environment,
-      runInShell: _useShell,
+      // The host's own command is an executable, which a shell would only have to quote.
+      runInShell: _useShell && !command.hosts,
     );
   } on ProcessException catch (error) {
     throw AcpFailure('${command.label} could not start: ${error.message}');

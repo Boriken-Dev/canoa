@@ -111,9 +111,9 @@ void main() {
   });
 
   testWidgets('a preset that cannot run says what it is missing, in Settings and for a new session, and starts nothing', (tester) async {
-    final (store, starts, _, _) = await _app(tester, missing: {'npx'}, size: const Size(1280, 1400));
+    final (store, starts, _, _) = await _app(tester, missing: {'claude'}, size: const Size(1280, 1400));
     await _openSources(tester);
-    expect(find.text('Claude needs npx and claude on PATH: found claude at /usr/bin/claude; npx was not found. '
+    expect(find.text('Claude needs claude on PATH: claude was not found. '
         'Install what is missing, or start Canoa where PATH finds it.'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
@@ -122,17 +122,29 @@ void main() {
     expect(await _offered(tester), contains('Claude'), reason: 'never hidden for what it lacks');
     await tester.tap(find.byKey(const Key('new-session-source')));
     await tester.pumpAndSettle();
-    expect(find.descendant(of: find.byKey(const Key('source Claude')), matching: find.text('Needs npx')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('source Claude')), matching: find.text('Needs claude')), findsOneWidget);
     await tester.tap(find.byKey(const Key('source Claude')).last);
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Fix it');
     await tester.tap(find.byTooltip('Send'));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Not started: Claude needs npx and claude on PATH'), findsWidgets);
+    expect(find.textContaining('Not started: Claude needs claude on PATH'), findsWidgets);
     expect(starts.commands, isEmpty);
     expect(store.selected?.status, SessionStatus.draft);
     expect(find.widgetWithText(TextField, 'Fix it'), findsOneWidget, reason: 'the message stays to send again');
+  });
+
+  testWidgets('with no Node on this computer Claude and Codex are ready, and only what runs on Node says so', (tester) async {
+    await _app(tester, missing: {'node', 'npx'}, size: const Size(1280, 1400));
+    await newSession(tester);
+    await tester.tap(find.byKey(const Key('new-session-source')));
+    await tester.pumpAndSettle();
+    for (final label in ['Claude', 'Codex']) {
+      expect(find.descendant(of: find.byKey(Key('source $label')), matching: find.textContaining('Needs')), findsNothing,
+          reason: label);
+    }
+    expect(find.descendant(of: find.byKey(const Key('source Pi')), matching: find.text('Needs npx')), findsOneWidget);
   });
 
   testWidgets('a new session is in the list at once, with no agent started and no worktree made', (tester) async {

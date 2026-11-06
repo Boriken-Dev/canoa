@@ -20,9 +20,11 @@ enum SessionPlace {
   static SessionPlace? named(Object? name) => values.where((place) => place.name == name).firstOrNull;
 }
 
-/// The harness each `agentInfo` name stands for. Three adapters report their own package name rather than the harness's, and
-/// Grok reports none: [grokName] stands for an agent whose `_meta.grokShell` is set.
+/// The harness each `agentInfo` name stands for. The host's translators and three adapters report their own name rather than
+/// the harness's, and Grok reports none: [grokName] stands for an agent whose `_meta.grokShell` is set.
 const Map<String, String> builtInHarnesses = {
+  'coqui-acp-claude': 'Claude Code',
+  'coqui-acp-codex': 'Codex',
   '@agentclientprotocol/claude-agent-acp': 'Claude Code',
   '@agentclientprotocol/codex-acp': 'Codex',
   'gemini-cli': 'Gemini',

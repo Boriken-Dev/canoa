@@ -41,8 +41,8 @@ const harnessLabels = {
 /// The AOS harness id of what an agent reported in `initialize`, else of the preset [entry] it was started from; null
 /// for neither.
 String? harnessIdOf({String? reportedName, bool grokShell = false, required String entry}) => switch (reportedName) {
-  '@agentclientprotocol/claude-agent-acp' => 'claude-code',
-  '@agentclientprotocol/codex-acp' => 'codex',
+  'coqui-acp-claude' || '@agentclientprotocol/claude-agent-acp' => 'claude-code',
+  'coqui-acp-codex' || '@agentclientprotocol/codex-acp' => 'codex',
   'gemini-cli' => 'gemini-cli',
   'pi-acp' => 'pi',
   'OpenCode' => 'opencode',

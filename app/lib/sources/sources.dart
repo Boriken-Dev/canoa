@@ -62,11 +62,11 @@ final class SourceCheck {
 /// Finds a program the way a command is found, answering its absolute path or null.
 typedef ProgramLookup = Future<String?> Function(String program);
 
-/// Whether [command]'s program and everything it requires can be found.
+/// Whether [command]'s program and everything it requires can be found: a host's own command's program is this app.
 Future<SourceCheck> checkCommand(AgentCommand command, ProgramLookup find) async {
   final found = <String, String>{};
   final missing = <String>[];
-  for (final program in {command.program, ...command.requires}) {
+  for (final program in commandNeeds(command)) {
     final path = await find(program);
     if (path == null) {
       missing.add(program);
@@ -78,7 +78,7 @@ Future<SourceCheck> checkCommand(AgentCommand command, ProgramLookup find) async
 }
 
 /// The programs a command runs and requires, in order, once each.
-List<String> commandNeeds(AgentCommand command) => {command.program, ...command.requires}.toList();
+List<String> commandNeeds(AgentCommand command) => {if (!command.hosts) command.program, ...command.requires}.toList();
 
 /// What the session list keeps a source's memory under: its label, and for a hosted entry the host's name before it, since a
 /// preset and a hosted entry can share a label.
