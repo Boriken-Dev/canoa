@@ -333,6 +333,11 @@ by WebCrypto today:** a home it reaches must prove by WebCrypto (`canoa serve --
 proves by Noise. A home with no identity gets a Noise one; to move a WebCrypto home, run `canoa serve --method noise`
 once and pair each browser again: its Noise key is a new key.
 
+While a host runs on a home, `canoa id --method X` and `canoa pair --method X` refuse to change the home's method: the
+host's next restart (it restarts on every `canoa.cfg` change) would come up with the other identity and refuse every
+client already paired. The refusal names the running host and ends with status 3; `--force` changes the method anyway and
+logs it as `weakened`. Naming the method the home already has is never refused, and a home no host runs on changes freely.
+
 A browser pairs by connecting once:
 
 1. In the browser, give the entry's address (`ws://127.0.0.1:7801`), the host's peer id, which Hosting shows (and
