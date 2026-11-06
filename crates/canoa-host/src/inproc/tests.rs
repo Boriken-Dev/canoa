@@ -13,12 +13,19 @@ struct Memory {
     inbox: Mutex<Receiver<Option<Vec<u8>>>>,
     outbox: Mutex<Sender<Vec<u8>>>,
     refuse_sends: AtomicBool,
+    /// Every send makes no progress, as a client that stopped reading.
+    stall_sends: AtomicBool,
+    /// The next receive panics, as anything on the thread that reads the client may.
+    panic_receive: AtomicBool,
 }
 
 impl Channel for Memory {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
         if self.refuse_sends.load(Ordering::SeqCst) {
             return Err(Failure::PathLost);
+        }
+        if self.stall_sends.load(Ordering::SeqCst) {
+            return Err(Failure::NoProgress);
         }
         let _ = self
             .outbox
@@ -29,6 +36,10 @@ impl Channel for Memory {
     }
 
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        assert!(
+            !self.panic_receive.load(Ordering::SeqCst),
+            "the thread that reads the client panics"
+        );
         let inbox = self.inbox.lock().unwrap_or_else(PoisonError::into_inner);
         match inbox.recv_timeout(timeout.unwrap_or(Duration::from_secs(3600))) {
             Ok(message) => Ok(message),
@@ -77,6 +88,8 @@ fn connection() -> (Memory, Client) {
             inbox: Mutex::new(inbox),
             outbox: Mutex::new(outbox),
             refuse_sends: AtomicBool::new(false),
+            stall_sends: AtomicBool::new(false),
+            panic_receive: AtomicBool::new(false),
         },
         Client { send, seen },
     )
@@ -86,11 +99,14 @@ fn connection() -> (Memory, Client) {
 #[derive(Default)]
 struct Hello {
     closed: Arc<Mutex<u32>>,
+    /// Its prompts panic.
+    panics: bool,
 }
 
 struct HelloSession {
     events: EventSink,
     closed: Arc<Mutex<u32>>,
+    panics: bool,
 }
 
 impl Translator for Hello {
@@ -110,6 +126,7 @@ impl Translator for Hello {
         Ok(Box::new(HelloSession {
             events,
             closed: Arc::clone(&self.closed),
+            panics: self.panics,
         }))
     }
 }
@@ -124,6 +141,7 @@ impl Conversation for HelloSession {
     }
 
     fn prompt(&self, _content: Vec<coqui_acp_harness::event::Content>) -> Result<(), HarnessError> {
+        assert!(!self.panics, "a translator that panics");
         self.events.send(Event::MessageChunk {
             message: "m1".to_owned(),
             text: "hello".to_owned(),
@@ -235,4 +253,106 @@ fn a_client_that_takes_nothing_more_ends_the_connection_and_the_agents_sessions(
     );
     assert_eq!(running.join().expect("served"), End::Failed);
     assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
+}
+
+/// How `running` ended, when it ended within `wait` without panicking.
+fn ends_within(running: thread::JoinHandle<End>, wait: Duration) -> Option<End> {
+    let (done, ended) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = done.send(running.join());
+    });
+    ended.recv_timeout(wait).ok().and_then(Result::ok)
+}
+
+#[test]
+fn stopping_it_while_the_client_takes_nothing_returns_at_once() {
+    let (channel, client) = connection();
+    let agent = Arc::new(Hello::default());
+    let closed = Arc::clone(&agent.closed);
+    let channel = Arc::new(channel);
+    let shared = Arc::clone(&channel);
+    let control = InProcess::new();
+    let running = {
+        let control = Arc::clone(&control);
+        thread::spawn(move || serve(&*shared, agent, Settings::new(), 1024 * 1024, &control))
+    };
+    open_session(&client);
+    channel.stall_sends.store(true, Ordering::SeqCst);
+    client.say(
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
+        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}}),
+    );
+    thread::sleep(Duration::from_millis(300));
+    let asked = Instant::now();
+    control.stop();
+    assert!(
+        asked.elapsed() < Duration::from_secs(5),
+        "stop waited {:?} on a client that takes nothing",
+        asked.elapsed()
+    );
+    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
+    assert_eq!(
+        ends_within(running, Duration::from_secs(5)),
+        Some(End::Stopped)
+    );
+}
+
+#[test]
+fn a_translator_thread_that_panics_leaves_the_connection_to_end_as_usual() {
+    let (channel, client) = connection();
+    let agent = Arc::new(Hello {
+        panics: true,
+        ..Hello::default()
+    });
+    let closed = Arc::clone(&agent.closed);
+    let running = served(channel, agent, InProcess::new());
+    open_session(&client);
+    client.say(
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
+        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}}),
+    );
+    thread::sleep(Duration::from_millis(300));
+    client.send.send(None).expect("closed");
+    assert_eq!(
+        ends_within(running, Duration::from_secs(10)),
+        Some(End::PeerClosed)
+    );
+    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
+}
+
+#[test]
+fn a_panic_on_the_thread_that_serves_ends_the_connection_and_stopping_it_waits_for_nothing() {
+    let (channel, client) = connection();
+    let channel = Arc::new(channel);
+    let shared = Arc::clone(&channel);
+    let control = InProcess::new();
+    let running = {
+        let control = Arc::clone(&control);
+        thread::spawn(move || {
+            serve(
+                &*shared,
+                Arc::new(Hello::default()),
+                Settings::new(),
+                1024 * 1024,
+                &control,
+            )
+        })
+    };
+    // A session open holds the agent's output on a thread of its own, which a panic does not end.
+    open_session(&client);
+    channel.panic_receive.store(true, Ordering::SeqCst);
+    client
+        .say(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "s1"}}));
+    let ended = ends_within(running, Duration::from_secs(10));
+    assert!(
+        matches!(ended, Some(End::AgentFailed)),
+        "the connection ended as {ended:?}"
+    );
+    let asked = Instant::now();
+    control.stop();
+    assert!(
+        asked.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        asked.elapsed()
+    );
 }

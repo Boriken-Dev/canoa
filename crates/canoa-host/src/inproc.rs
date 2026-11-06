@@ -8,6 +8,7 @@
 )]
 
 use std::io::{self, Read, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -56,9 +57,14 @@ impl InProcess {
         Arc::new(Self::default())
     }
 
-    /// Ends its input, so it closes every session and what each started; returns once it has, or after [`STOP_WAIT`].
-    pub(crate) fn stop(&self) {
+    /// Ends its input, so it closes every session and what each started, without waiting for that.
+    pub(crate) fn signal(&self) {
         self.stop.store(true, Ordering::SeqCst);
+    }
+
+    /// As [`InProcess::signal`], then returns once it has closed them, or after [`STOP_WAIT`].
+    pub(crate) fn stop(&self) {
+        self.signal();
         let done = self.done.lock().unwrap_or_else(PoisonError::into_inner);
         let _ = self
             .ended
@@ -153,7 +159,7 @@ impl Write for ToClient {
                 continue;
             }
             self.lines
-                .send(line)
+                .send(crate::harness::kept_content(line))
                 .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))?;
         }
         if self.partial.len() > self.max_line {
@@ -170,13 +176,15 @@ impl Write for ToClient {
     }
 }
 
-/// Sends one line, waiting on a full queue, so the agent feels a slow client as back-pressure.
-fn deliver<C: Channel + ?Sized>(channel: &C, line: &[u8]) -> Result<(), End> {
+/// Sends one line, waiting on a full queue, so the agent feels a slow client as back-pressure; a host that is stopping
+/// waits for no client.
+fn deliver<C: Channel + ?Sized>(channel: &C, line: &[u8], control: &InProcess) -> Result<(), End> {
     let until = Instant::now() + PEER_LIMIT;
     loop {
         match channel.send(line) {
             Ok(()) => return Ok(()),
             Err(Failure::Protocol) => return Err(End::Protocol),
+            Err(Failure::NoProgress) if control.stopping() => return Err(End::Stopped),
             Err(Failure::NoProgress) if Instant::now() < until => thread::sleep(POLL),
             Err(_) => return Err(End::Failed),
         }
@@ -203,16 +211,16 @@ pub(crate) fn serve<C: Channel + ?Sized>(
             loop {
                 match queued.recv_timeout(POLL) {
                     Ok(line) => {
-                        if let Err(end) = deliver(channel, &line) {
+                        if let Err(end) = deliver(channel, &line, control) {
                             gone.store(true, Ordering::SeqCst);
                             return Some(end);
                         }
                     }
                     Err(RecvTimeoutError::Disconnected) => return None,
                     Err(RecvTimeoutError::Timeout) if finished.load(Ordering::SeqCst) => {
-                        // The agent's threads may still say a last word after its input ended.
+                        // The agent's threads may still say a last word after its input ended, unless the host stops.
                         let since = *last.get_or_insert_with(Instant::now);
-                        if since.elapsed() >= LAST_WORDS {
+                        if control.stopping() || since.elapsed() >= LAST_WORDS {
                             return None;
                         }
                     }
@@ -233,7 +241,15 @@ pub(crate) fn serve<C: Channel + ?Sized>(
             partial: Vec::new(),
             max_line,
         };
-        let served = coqui_acp_harness::serve(agent, settings, &mut input, output);
+        // A translator that panics leaves its threads holding the output: the outbound thread is told it finished, rather
+        // than waiting for them to let go.
+        let served = catch_unwind(AssertUnwindSafe(|| {
+            coqui_acp_harness::serve(agent, settings, &mut input, output)
+        }))
+        .unwrap_or_else(|panic| {
+            core::mem::forget(panic);
+            Err(io::Error::other("the agent panicked"))
+        });
         finished.store(true, Ordering::SeqCst);
         let outbound = outbound.join().unwrap_or(Some(End::Failed));
         match (served, input.end, outbound) {

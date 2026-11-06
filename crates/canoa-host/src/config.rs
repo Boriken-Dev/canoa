@@ -139,6 +139,39 @@ pub struct Entry {
     pub max_peers: usize,
 }
 
+/// What a harness entry's command line asks before it acts. Each one unset is the host's own value, never the person's
+/// configuration on this machine: Claude Code's permission mode `default`, Codex's approval policy `on-request` and
+/// sandbox `workspace-write`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HarnessOptions {
+    /// Claude Code's permission mode: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, `auto` or `manual`.
+    pub permission_mode: Option<String>,
+    /// The setting sources Claude Code loads, of `user`, `project` and `local`; empty loads none, `None` its own default.
+    pub setting_sources: Option<Vec<String>>,
+    /// Codex's approval policy: `untrusted`, `on-failure`, `on-request` or `never`.
+    pub approval_policy: Option<String>,
+    /// Codex's sandbox: `read-only`, `workspace-write` or `danger-full-access`.
+    pub sandbox: Option<String>,
+}
+
+/// Claude Code's permission modes, as `--permission-mode` takes them.
+pub const PERMISSION_MODES: &[&str] = &[
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+    "auto",
+    "manual",
+];
+/// Claude Code's setting sources.
+pub const SETTING_SOURCES: &[&str] = &["user", "project", "local"];
+/// Codex's approval policies.
+pub const APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
+/// Codex's sandboxes.
+pub const SANDBOXES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
+
 /// What an entry runs for each connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -156,8 +189,11 @@ pub enum EntryKind {
     Harness {
         /// Which command line.
         harness: crate::Harness,
-        /// Its program; `claude` or `codex` as the operating system finds a command when `None`.
+        /// Its program: a name the operating system finds as a command, or a path made absolute from canoa.cfg's directory;
+        /// `claude` or `codex` when `None`.
         executable: Option<OsString>,
+        /// What the command line asks before it acts, as canoa.cfg sets it.
+        options: HarnessOptions,
         /// The `[host.profiles]` a client may choose among, as an agent's.
         profiles: Vec<String>,
     },
@@ -388,6 +424,10 @@ struct RawAgent {
     args: Option<Vec<String>>,
     harness: Option<String>,
     executable: Option<String>,
+    permission_mode: Option<String>,
+    setting_sources: Option<Vec<String>>,
+    approval_policy: Option<String>,
+    sandbox: Option<String>,
     profiles: Option<Vec<String>>,
     listen: Option<String>,
     #[serde(default)]
@@ -395,6 +435,14 @@ struct RawAgent {
     worktrees: Option<bool>,
     peers: Option<Vec<String>>,
     max_peers: Option<usize>,
+}
+
+/// A harness entry's keys for what its command line asks, taken out of [`RawAgent`].
+struct RawAsks {
+    permission_mode: Option<String>,
+    setting_sources: Option<Vec<String>>,
+    approval_policy: Option<String>,
+    sandbox: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -486,6 +534,12 @@ impl Config {
                 peers: agent.peers,
                 max_peers: agent.max_peers,
             };
+            let asks = RawAsks {
+                permission_mode: agent.permission_mode,
+                setting_sources: agent.setting_sources,
+                approval_policy: agent.approval_policy,
+                sandbox: agent.sandbox,
+            };
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
                     if program.is_empty() {
@@ -493,6 +547,19 @@ impl Config {
                     }
                     if agent.executable.is_some() {
                         return Err(invalid(&name, "executable goes with harness, not program"));
+                    }
+                    for (set, key) in [
+                        (asks.permission_mode.is_some(), "permission_mode"),
+                        (asks.setting_sources.is_some(), "setting_sources"),
+                        (asks.approval_policy.is_some(), "approval_policy"),
+                        (asks.sandbox.is_some(), "sandbox"),
+                    ] {
+                        if set {
+                            return Err(invalid(
+                                &name,
+                                &format!("{key} goes with harness, not program"),
+                            ));
+                        }
                     }
                     EntryKind::Agent {
                         program: OsString::from(program),
@@ -515,9 +582,20 @@ impl Config {
                     if agent.executable.as_deref() == Some("") {
                         return Err(invalid(&name, "executable is empty"));
                     }
+                    let options = harness_options(&name, harness, &asks)?;
+                    // A path is canoa.cfg's, as a provider's library is: the command line runs in a session's directory,
+                    // which a client chooses.
+                    let executable = agent.executable.map(|executable| {
+                        if executable.contains(['/', '\\']) {
+                            directory.join(executable).into_os_string()
+                        } else {
+                            OsString::from(executable)
+                        }
+                    });
                     EntryKind::Harness {
                         harness,
-                        executable: agent.executable.map(OsString::from),
+                        executable,
+                        options,
                         profiles: offered,
                     }
                 }
@@ -638,6 +716,55 @@ fn invalid(name: &str, what: &str) -> ConfigError {
 }
 
 /// `base` made absolute; an empty one is the current directory, as a path joined to it is taken from there.
+/// A harness entry's own keys, each checked against what its command line takes, and refused for the other harness.
+fn harness_options(
+    name: &str,
+    harness: crate::Harness,
+    agent: &RawAsks,
+) -> Result<HarnessOptions, ConfigError> {
+    let claudes = [
+        ("permission_mode", agent.permission_mode.is_some()),
+        ("setting_sources", agent.setting_sources.is_some()),
+    ];
+    let codexs = [
+        ("approval_policy", agent.approval_policy.is_some()),
+        ("sandbox", agent.sandbox.is_some()),
+    ];
+    let theirs = match harness {
+        crate::Harness::Claude => codexs,
+        crate::Harness::Codex => claudes,
+    };
+    if let Some((key, _)) = theirs.iter().find(|(_, set)| *set) {
+        return Err(invalid(
+            name,
+            &format!("{key} is not a setting of harness {}", harness.as_str()),
+        ));
+    }
+    let one_of = |value: &Option<String>, allowed: &[&str], key: &str| match value {
+        Some(value) if !allowed.contains(&value.as_str()) => Err(invalid(
+            name,
+            &format!("{key} is one of {}", allowed.join(", ")),
+        )),
+        _ => Ok(value.clone()),
+    };
+    if let Some(sources) = &agent.setting_sources
+        && sources
+            .iter()
+            .any(|source| !SETTING_SOURCES.contains(&source.as_str()))
+    {
+        return Err(invalid(
+            name,
+            &format!("setting_sources holds only {}", SETTING_SOURCES.join(", ")),
+        ));
+    }
+    Ok(HarnessOptions {
+        permission_mode: one_of(&agent.permission_mode, PERMISSION_MODES, "permission_mode")?,
+        setting_sources: agent.setting_sources.clone(),
+        approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
+        sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
+    })
+}
+
 fn directory_of(base: &Path) -> PathBuf {
     if base.as_os_str().is_empty() {
         return std::env::current_dir().unwrap_or_default();

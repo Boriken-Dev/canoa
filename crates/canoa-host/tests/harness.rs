@@ -143,6 +143,10 @@ fn claude_code_runs_in_the_host_and_asks_its_permission_through_acp() {
         "{args:?}"
     );
     assert!(
+        args.contains(&json!("--permission-mode=default")),
+        "an entry asks whatever the person's own settings say: {args:?}"
+    );
+    assert!(
         !args.iter().any(|arg| arg
             .as_str()
             .is_some_and(|arg| arg.starts_with("--plugin-dir"))),
@@ -333,7 +337,7 @@ fn a_profile_reaches_codex_as_the_table_says_in_both_versions() {
 fn codex_runs_in_the_host_and_asks_its_approval_through_acp() {
     let scratch = Scratch::new();
     let codex = standin(&scratch, "codex");
-    let (_, env) = env_of(&scratch);
+    let (record, env) = env_of(&scratch);
     let config = format!(
         "[host.agents.Codex]\nharness = \"codex\"\nexecutable = {}\n",
         quoted(&codex.to_string_lossy())
@@ -362,6 +366,16 @@ fn codex_runs_in_the_host_and_asks_its_approval_through_acp() {
     assert_eq!(answer["result"]["stopReason"], "end_turn", "{answer}");
     assert_eq!(asked.len(), 1);
     assert_eq!(said(&updates), "Done: run it");
+    let started = records(&record);
+    let thread = started
+        .iter()
+        .find(|entry| entry["method"] == "thread/start")
+        .expect("a thread started");
+    let given = thread["params"].to_string();
+    assert!(
+        given.contains("on-request") && given.contains("workspace-write"),
+        "an entry asks whatever the person's own configuration says: {given}"
+    );
 }
 
 fn ends_within(pid: u32, wait: Duration) -> bool {
@@ -448,4 +462,77 @@ fn the_command_line_ends_with_its_connection_and_with_the_host() {
         "stopping the host ends what it runs in its own process"
     );
     assert!(host.ended_within(Duration::from_secs(20)).is_some());
+}
+
+#[test]
+fn a_version_2_client_keeps_the_text_of_a_message_once_it_ends() {
+    let scratch = Scratch::new();
+    let claude = standin(&scratch, "claude");
+    let (_, env) = env_of(&scratch);
+    let config = format!(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n",
+        quoted(&claude.to_string_lossy())
+    );
+    let host = Host::start_in(scratch, &config, 1, &env);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    let updates = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        rpc.request(
+            "initialize",
+            json!({"protocolVersion": 2, "capabilities": {}}),
+        )
+        .expect("initialize is answered");
+        let opened = rpc
+            .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        let session = opened["sessionId"].as_str().expect("an id").to_owned();
+        rpc.send(
+            &json!({"jsonrpc": "2.0", "id": 900, "method": "session/prompt",
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": "write it"}]}}),
+        )
+        .expect("sent");
+        let mut updates = Vec::new();
+        loop {
+            let message = rpc.next_message(support::WAIT).expect("the turn goes on");
+            if message["method"] == "session/request_permission" {
+                let option = message["params"]["options"]
+                    .as_array()
+                    .expect("options")
+                    .iter()
+                    .find(|option| option["kind"] == "allow_once")
+                    .expect("allow once")
+                    .clone();
+                rpc.send(
+                    &json!({"jsonrpc": "2.0", "id": message["id"], "result": {"outcome": {
+                    "outcome": "selected", "optionId": option["optionId"]}}}),
+                )
+                .expect("answered");
+            } else if message["method"] == "session/update" {
+                let update = message["params"]["update"].clone();
+                let idle = update["sessionUpdate"] == "state_update" && update["state"] == "idle";
+                updates.push(update);
+                if idle {
+                    return updates;
+                }
+            }
+        }
+    })
+    .expect("a paired key is served");
+    let chunks: String = updates
+        .iter()
+        .filter(|update| update["sessionUpdate"] == "agent_message_chunk")
+        .filter_map(|update| update["content"]["text"].as_str())
+        .collect();
+    assert_eq!(chunks, "Done: write it");
+    for update in &updates {
+        let kind = update["sessionUpdate"].as_str().unwrap_or("");
+        if matches!(kind, "agent_message" | "user_message" | "agent_thought") {
+            assert_ne!(
+                update.get("content"),
+                Some(&json!([])),
+                "an empty content clears what was streamed: {update}"
+            );
+        }
+    }
 }

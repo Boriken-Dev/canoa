@@ -19,7 +19,9 @@ pub mod tool;
 pub mod web;
 mod worktree;
 
-pub use config::{Config, ConfigError, Entry, EntryKind, Origin, Settings, WebConfig};
+pub use config::{
+    Config, ConfigError, Entry, EntryKind, HarnessOptions, Origin, Settings, WebConfig,
+};
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use peers::{Peer, PeerState, PeersError};

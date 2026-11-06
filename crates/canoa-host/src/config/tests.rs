@@ -625,7 +625,7 @@ harness = "claude"
 profiles = ["plain"]
 [host.agents.Codex]
 harness = "codex"
-executable = "/opt/codex/bin/codex"
+executable = "codex"
 [host.profiles.plain]
 "#,
     )
@@ -635,6 +635,7 @@ executable = "/opt/codex/bin/codex"
         EntryKind::Harness {
             harness: crate::Harness::Claude,
             executable: None,
+            options: HarnessOptions::default(),
             profiles: vec!["plain".to_owned()],
         }
     );
@@ -642,7 +643,8 @@ executable = "/opt/codex/bin/codex"
         config.entry("Codex").expect("there").kind,
         EntryKind::Harness {
             harness: crate::Harness::Codex,
-            executable: Some("/opt/codex/bin/codex".into()),
+            executable: Some("codex".into()),
+            options: HarnessOptions::default(),
             profiles: Vec::new(),
         }
     );
@@ -664,6 +666,84 @@ executable = "/opt/codex/bin/codex"
         (
             "[host.agents.a]\nharness = \"codex\"\nexecutable = \"\"\n",
             "executable",
+        ),
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains(what), "{text}: {error}");
+    }
+}
+
+#[test]
+fn a_harness_entry_holds_its_command_lines_permissions_and_its_program_to_canoa_cfg() {
+    let config = parse(
+        r#"
+[host.agents.Claude]
+harness = "claude"
+executable = "bin/claude"
+permission_mode = "acceptEdits"
+setting_sources = ["project"]
+[host.agents.Codex]
+harness = "codex"
+executable = "codex-nightly"
+approval_policy = "untrusted"
+sandbox = "read-only"
+"#,
+    )
+    .expect("parses");
+    let Some(EntryKind::Harness {
+        executable,
+        options,
+        ..
+    }) = config.entry("Claude").map(|entry| &entry.kind)
+    else {
+        panic!("a harness");
+    };
+    assert_eq!(
+        executable.as_deref(),
+        Some(directory_of(&base()).join("bin/claude").as_os_str()),
+        "a path is taken from canoa.cfg's directory, never a session's"
+    );
+    assert_eq!(options.permission_mode.as_deref(), Some("acceptEdits"));
+    assert_eq!(options.setting_sources, Some(vec!["project".to_owned()]));
+    let Some(EntryKind::Harness {
+        executable,
+        options,
+        ..
+    }) = config.entry("Codex").map(|entry| &entry.kind)
+    else {
+        panic!("a harness");
+    };
+    assert_eq!(
+        executable.as_deref(),
+        Some(std::ffi::OsStr::new("codex-nightly")),
+        "a bare name is found as a command is"
+    );
+    assert_eq!(options.approval_policy.as_deref(), Some("untrusted"));
+    assert_eq!(options.sandbox.as_deref(), Some("read-only"));
+    for (text, what) in [
+        (
+            "[host.agents.a]\nharness = \"claude\"\napproval_policy = \"never\"\n",
+            "approval_policy",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\npermission_mode = \"plan\"\n",
+            "permission_mode",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\npermission_mode = \"yolo\"\n",
+            "permission_mode",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\nsandbox = \"open\"\n",
+            "sandbox",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nsetting_sources = [\"elsewhere\"]\n",
+            "setting_sources",
+        ),
+        (
+            "[host.agents.a]\nprogram = \"x\"\nsandbox = \"read-only\"\n",
+            "harness",
         ),
     ] {
         let error = parse(text).expect_err(text).to_string();

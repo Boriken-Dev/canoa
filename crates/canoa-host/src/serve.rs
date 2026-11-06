@@ -25,7 +25,7 @@ use coqui_web::websocket::{self, Frames};
 use coqui_web::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
-use crate::config::{Config, Entry, EntryKind, ImportSearch, Origin};
+use crate::config::{Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin};
 use crate::harness::AgentOptions;
 use crate::inproc::{self, InProcess};
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
@@ -196,7 +196,7 @@ enum Agent {
         args: Vec<OsString>,
     },
     /// A harness's translator, in this process.
-    Harness(AgentOptions),
+    Harness(Box<AgentOptions>),
 }
 
 /// What runs for one entry's connections.
@@ -250,7 +250,7 @@ struct Agents {
 enum Process {
     Agent(Arc<BridgeAgent>),
     Provider(Arc<Running>),
-    InProcess(Arc<InProcess>),
+    Translator(Arc<InProcess>),
 }
 
 impl Process {
@@ -261,7 +261,14 @@ impl Process {
                 let _ = agent.stop();
             }
             Self::Provider(running) => running.stop(),
-            Self::InProcess(agent) => agent.stop(),
+            Self::Translator(agent) => agent.stop(),
+        }
+    }
+
+    /// Tells an agent in this process to end, so that all of them end at once rather than one after another.
+    fn signal(&self) {
+        if let Self::Translator(agent) = self {
+            agent.signal();
         }
     }
 }
@@ -333,6 +340,9 @@ impl Stopper {
             agents.stopping = true;
             core::mem::take(&mut agents.running)
         };
+        for process in running.values() {
+            process.signal();
+        }
         for process in running.values() {
             process.stop();
         }
@@ -536,15 +546,17 @@ impl Serving {
                 EntryKind::Harness {
                     harness,
                     executable,
+                    options: asks,
                     profiles,
                 } => (
                     "agent",
                     Run::Agent {
-                        agent: Agent::Harness(harness_options(
+                        agent: Agent::Harness(Box::new(harness_options(
                             entry,
                             *harness,
                             executable.as_ref(),
-                        )),
+                            asks,
+                        ))),
                         scope: Scope::new(entry.working_roots.clone()),
                         offer: hosted::offer(
                             profiles,
@@ -922,15 +934,57 @@ fn prepare<C: Channel>(
 
 /// A harness entry's translator options. The host's scope already holds a client's `cwd` and more directories to the
 /// entry's roots and adds directories of its own after it, so the translator takes any; a resumed Codex thread's own
-/// directory, which no request shows the host, is held to the roots by the translator.
+/// directory, which no request shows the host, is held to the roots by the translator. What the command line asks before
+/// it acts is the entry's, else the host's own, never the person's configuration on this machine: a paired key reaches it.
 fn harness_options(
     entry: &Entry,
     harness: crate::Harness,
     executable: Option<&OsString>,
+    asks: &HarnessOptions,
 ) -> AgentOptions {
     let mut options = AgentOptions::new(harness);
     options.executable = executable.cloned();
     options.resume_roots.clone_from(&entry.working_roots);
+    let chosen = |value: &Option<String>, default: &str| {
+        Some(value.clone().unwrap_or_else(|| default.to_owned()))
+    };
+    let weakened = |setting: &str, value: &Option<String>, loose: &[&str], strict: &str| {
+        if let Some(value) = value.as_deref().filter(|value| loose.contains(value)) {
+            tracing::warn!(
+                "weakened: host.agents.{}.{setting} is {value}, looser than {strict}: the command line acts with nothing \
+                 asked",
+                entry.name
+            );
+        }
+    };
+    match harness {
+        crate::Harness::Claude => {
+            weakened(
+                "permission_mode",
+                &asks.permission_mode,
+                &["bypassPermissions", "acceptEdits", "auto"],
+                "default",
+            );
+            options.permission_mode = chosen(&asks.permission_mode, "default");
+            options.setting_sources.clone_from(&asks.setting_sources);
+        }
+        crate::Harness::Codex => {
+            weakened(
+                "approval_policy",
+                &asks.approval_policy,
+                &["never", "on-failure"],
+                "on-request",
+            );
+            weakened(
+                "sandbox",
+                &asks.sandbox,
+                &["danger-full-access"],
+                "workspace-write",
+            );
+            options.approval_policy = chosen(&asks.approval_policy, "on-request");
+            options.sandbox = chosen(&asks.sandbox, "workspace-write");
+        }
+    }
     options
 }
 
@@ -956,7 +1010,7 @@ fn give_harness<C: Channel>(
         options.client_plugins = true;
     }
     let control = InProcess::new();
-    let key = match shared.record(|| Ok((Process::InProcess(Arc::clone(&control)), ()))) {
+    let key = match shared.record(|| Ok((Process::Translator(Arc::clone(&control)), ()))) {
         Ok(Some((key, ()))) => key,
         Ok(None) | Err(_) => return,
     };
@@ -984,7 +1038,7 @@ fn give_harness<C: Channel>(
     shared.forget(key);
 }
 
-// Serves one connection with a provider process of its own, which [`Stopper::stop_agents`] ends like any agent.
+/// Serves one connection with a provider process of its own, which [`Stopper::stop_agents`] ends like any agent.
 fn give_provider<C: Channel>(
     shared: &Shared,
     served: &Served,

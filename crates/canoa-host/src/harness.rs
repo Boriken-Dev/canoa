@@ -7,6 +7,7 @@
 )]
 
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -46,7 +47,7 @@ impl Harness {
 }
 
 /// How one harness agent runs: what its translator starts the command line with, and what it takes from a client.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct AgentOptions {
     pub(crate) harness: Harness,
     /// The command line's program; its name looked up on `PATH` when `None`.
@@ -77,6 +78,30 @@ pub(crate) struct AgentOptions {
     pub(crate) max_sessions: usize,
     /// Added to the environment the command line inherits.
     pub(crate) env: Vec<(OsString, OsString)>,
+}
+
+/// Names the environment's variables, never their values: a profile's may be secrets.
+impl core::fmt::Debug for AgentOptions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AgentOptions")
+            .field("harness", &self.harness)
+            .field("executable", &self.executable)
+            .field("model", &self.model)
+            .field("effort", &self.effort)
+            .field("permission_mode", &self.permission_mode)
+            .field("setting_sources", &self.setting_sources)
+            .field("approval_policy", &self.approval_policy)
+            .field("sandbox", &self.sandbox)
+            .field("permission_prompts", &self.permission_prompts)
+            .field("client_plugins", &self.client_plugins)
+            .field("working_roots", &self.working_roots)
+            .field("resume_roots", &self.resume_roots)
+            .field(
+                "env",
+                &self.env.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl AgentOptions {
@@ -157,6 +182,73 @@ impl AgentOptions {
         settings.network_paths = self.network_paths;
         settings.on_notice = Some(on_notice);
         settings
+    }
+}
+
+/// A translator's line as a client should read it. coqui-acp-harness ends a version 2 message, user's, agent's or
+/// thought, with an upsert whose `content` is `[]`, which ACP version 2 defines as clearing what was streamed into it:
+/// that `content` is left out, so the upsert names the message and changes nothing of it. Any other line is unchanged.
+pub(crate) fn kept_content(line: Vec<u8>) -> Vec<u8> {
+    const EMPTY: &[u8] = b"\"content\":[]";
+    if !line.windows(EMPTY.len()).any(|window| window == EMPTY) {
+        return line;
+    }
+    let Ok(mut message) = serde_json::from_slice::<serde_json::Value>(&line) else {
+        return line;
+    };
+    if message.get("method").and_then(serde_json::Value::as_str) != Some("session/update") {
+        return line;
+    }
+    let update = message
+        .pointer_mut("/params/update")
+        .and_then(serde_json::Value::as_object_mut)
+        .filter(|update| {
+            matches!(
+                update
+                    .get("sessionUpdate")
+                    .and_then(serde_json::Value::as_str),
+                Some("agent_message" | "user_message" | "agent_thought")
+            ) && update.get("content") == Some(&serde_json::Value::Array(Vec::new()))
+        });
+    match update {
+        Some(update) => {
+            update.remove("content");
+            serde_json::to_vec(&message).unwrap_or(line)
+        }
+        None => line,
+    }
+}
+
+/// Standard output for `canoa agent`, each line as [`kept_content`] has it.
+pub(crate) struct KeptContent<W: Write> {
+    out: W,
+    partial: Vec<u8>,
+}
+
+impl<W: Write> KeptContent<W> {
+    pub(crate) const fn new(out: W) -> Self {
+        Self {
+            out,
+            partial: Vec::new(),
+        }
+    }
+}
+
+impl<W: Write> Write for KeptContent<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.partial.extend_from_slice(bytes);
+        while let Some(at) = self.partial.iter().position(|byte| *byte == b'\n') {
+            let mut line: Vec<u8> = self.partial.drain(..=at).collect();
+            line.pop();
+            let mut line = kept_content(line);
+            line.push(b'\n');
+            self.out.write_all(&line)?;
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
     }
 }
 

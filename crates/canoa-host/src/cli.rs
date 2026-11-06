@@ -968,7 +968,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
                 options.agent(),
                 settings,
                 std::io::stdin(),
-                std::io::stdout(),
+                crate::harness::KeptContent::new(std::io::stdout()),
             )
             .map_err(Failed::run)
         }
