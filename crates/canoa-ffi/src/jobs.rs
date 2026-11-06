@@ -262,6 +262,13 @@ fn run_command(args: &[String], front: &JobFront) -> i32 {
     log::install(follows_the_log(args));
     let line = std::iter::once("canoa".to_owned()).chain(args.iter().cloned());
     let parsed = match Cli::try_parse_from(line) {
+        // They change the process they run in: its directory, its standard input, its end.
+        Ok(parsed) if parsed.is_a_hosts_own() => {
+            front.say(&format!(
+                "canoa: provider, tool and launch run only as a process of their own, through {CHILD_FLAG}"
+            ));
+            return STATUS_USAGE;
+        }
         Ok(parsed) => parsed,
         Err(error) => {
             let text = error.to_string();

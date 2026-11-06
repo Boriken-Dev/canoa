@@ -89,8 +89,8 @@ fn filter() -> tracing_subscriber::EnvFilter {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
 }
 
-/// Sets this process up for hosting, once. Only a long command needs its standard error and a console for its children:
-/// `peers` or `check` leave the application's alone.
+/// Sets this process up for hosting, once: the subscriber for any first command, and for a long one also its standard error,
+/// a console for its children and broken pipes set aside. `peers` or `check` leave the application's alone.
 pub(crate) fn install(long: bool) {
     static SUBSCRIBER: Once = Once::new();
     static HOSTING: Once = Once::new();
@@ -104,11 +104,14 @@ pub(crate) fn install(long: bool) {
     });
     if long {
         HOSTING.call_once(|| {
-            if let Err(error) = capture_standard_error() {
-                tracing::warn!("what agents write to standard error will not be logged: {error}");
-            }
+            platform::ignore_broken_pipes();
+            // First: attaching to a console replaces the standard handles of a process started with none, as Explorer starts
+            // an application, which would take standard error off the pipe.
             if let Err(error) = platform::hide_console_for_children() {
                 tracing::warn!("an agent may open a window of its own: {error}");
+            }
+            if let Err(error) = capture_standard_error() {
+                tracing::warn!("what agents write to standard error will not be logged: {error}");
             }
         });
     }

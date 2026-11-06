@@ -1,5 +1,5 @@
-//! The C ABI. Every function runs under `catch_unwind`, so no panic crosses it, and each out-parameter is written first with
-//! its empty value. Jobs cross as integers, never pointers, so a stale or invented one is [`STATUS_UNKNOWN_JOB`] rather than a
+//! The C ABI. Every function runs under `catch_unwind`, so no panic crosses it, and each out-parameter that can be written is
+//! written first with its empty value, whatever else is refused; one inside the request is refused unwritten. Jobs cross as integers, never pointers, so a stale or invented one is [`STATUS_UNKNOWN_JOB`] rather than a
 //! wild read. No function blocks: what waits, waits on a thread of the job's own.
 
 use alloc::boxed::Box;
@@ -11,7 +11,8 @@ use crate::jobs;
 
 /// Done.
 pub const STATUS_OK: i32 = 0;
-/// A pointer was null, misaligned or an alias of another, a length too long, or the request not one this library reads.
+/// A pointer was null, misaligned or an alias of another, an out-parameter inside the request, a length too long, or the
+/// request not one this library reads.
 pub const STATUS_BAD_ARGUMENT: i32 = 1;
 /// No job has that number, or it was freed.
 pub const STATUS_UNKNOWN_JOB: i32 = 2;
@@ -55,7 +56,15 @@ pub unsafe extern "C" fn canoa_ffi_job_start(
         if out_job.is_null() || !out_job.is_aligned() {
             return STATUS_BAD_ARGUMENT;
         }
-        // SAFETY: non-null and aligned just above, and the caller promises it can be written.
+        // Written there, the number would go over what is read.
+        let (read_from, written_at) = (request.addr(), out_job.addr());
+        if !request.is_null()
+            && read_from < written_at.saturating_add(size_of::<u64>())
+            && written_at < read_from.saturating_add(len)
+        {
+            return STATUS_BAD_ARGUMENT;
+        }
+        // SAFETY: non-null, aligned and apart from the request just above, and the caller promises it can be written.
         unsafe { out_job.write(0) };
         if request.is_null() || isize::try_from(len).is_err() {
             return STATUS_BAD_ARGUMENT;
@@ -88,18 +97,20 @@ pub unsafe extern "C" fn canoa_ffi_job_read(
     out_len: *mut usize,
 ) -> i32 {
     guarded(|| {
-        if out_text.is_null()
-            || out_len.is_null()
-            || !out_text.is_aligned()
-            || !out_len.is_aligned()
-            || out_text.cast::<u8>() == out_len.cast::<u8>()
-        {
-            return STATUS_BAD_ARGUMENT;
-        }
-        // SAFETY: non-null, aligned and distinct just above, and the caller promises they can be written.
+        let text_ok = !out_text.is_null() && out_text.is_aligned();
+        let len_ok = !out_len.is_null() && out_len.is_aligned();
+        // SAFETY: each only when non-null and aligned, and the caller promises it can be written. The two are the same size,
+        // so two that alias name one word, which both write as zero.
         unsafe {
-            out_text.write(ptr::null_mut());
-            out_len.write(0);
+            if text_ok {
+                out_text.write(ptr::null_mut());
+            }
+            if len_ok {
+                out_len.write(0);
+            }
+        }
+        if !text_ok || !len_ok || out_text.cast::<u8>() == out_len.cast::<u8>() {
+            return STATUS_BAD_ARGUMENT;
         }
         let Some(text) = jobs::read(job) else {
             return STATUS_UNKNOWN_JOB;
@@ -219,6 +230,33 @@ mod tests {
         // SAFETY: the two name one word, which is what is refused, and neither is written through.
         let status = unsafe { canoa_ffi_job_read(1, alias.cast(), alias) };
         assert_eq!(status, STATUS_BAD_ARGUMENT);
+    }
+
+    #[test]
+    fn a_good_out_parameter_beside_a_bad_one_is_still_written() {
+        let mut text = ptr::dangling_mut::<u8>();
+        // SAFETY: `text` lives across the call; the null length is what is refused.
+        let status = unsafe { canoa_ffi_job_read(1, &raw mut text, ptr::null_mut()) };
+        assert_eq!(status, STATUS_BAD_ARGUMENT);
+        assert!(text.is_null(), "written first");
+        let mut len = 9_usize;
+        // SAFETY: `len` lives across the call; the null text is what is refused.
+        let status = unsafe { canoa_ffi_job_read(1, ptr::null_mut(), &raw mut len) };
+        assert_eq!(status, STATUS_BAD_ARGUMENT);
+        assert_eq!(len, 0, "written first");
+    }
+
+    #[test]
+    fn an_out_parameter_inside_the_request_is_refused_and_the_request_left_as_it_was() {
+        #[repr(align(8))]
+        struct Aligned([u8; 32]);
+        let mut request = Aligned(*br#"{"args":["--version"]}          "#);
+        let whole = request.0.len();
+        let start = request.0.as_mut_ptr();
+        // SAFETY: the request's own bytes, aligned for a u64 at their start, which is what is refused.
+        let status = unsafe { canoa_ffi_job_start(start.cast_const(), whole, start.cast()) };
+        assert_eq!(status, STATUS_BAD_ARGUMENT);
+        assert_eq!(&request.0, br#"{"args":["--version"]}          "#);
     }
 
     #[test]

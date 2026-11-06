@@ -39,6 +39,22 @@ pub(crate) const fn hide_console_for_children() -> std::io::Result<()> {
 #[cfg(not(windows))]
 pub(crate) const fn share_parents_console() {}
 
+/// Sets `SIGPIPE` aside where this process left it as the system gives it, as a Rust program's own `main` does, so that a
+/// write to an agent that has died is an error rather than this process's end. A handler of the application's own stays.
+#[cfg(unix)]
+pub(crate) fn ignore_broken_pipes() {
+    // SAFETY: `signal` with a constant disposition, then the one it replaced when that was not the default.
+    unsafe {
+        let before = libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        if before != libc::SIG_DFL && before != libc::SIG_ERR {
+            libc::signal(libc::SIGPIPE, before);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) const fn ignore_broken_pipes() {}
+
 /// Gives this process a console with no window when it has none, by attaching to the one a helper is started with. The
 /// console outlives the helper, since this process stays attached.
 #[cfg(windows)]

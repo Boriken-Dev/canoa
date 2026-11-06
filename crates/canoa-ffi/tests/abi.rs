@@ -269,6 +269,48 @@ fn stopping_before_the_host_is_up_still_stops_it() {
     assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
 }
 
+/// `provider`, `tool` and `launch` change the process they run in, its directory, its standard input and its end, so in an
+/// application's process they are refused: they run only as a process of their own.
+#[test]
+fn a_hosts_own_command_is_refused_as_a_job() {
+    let scratch = Scratch::new();
+    let before = std::env::current_dir().expect("a directory");
+    for args in [
+        json!([
+            "provider",
+            "--library",
+            "none",
+            "--provider",
+            "p",
+            "--directory",
+            scratch.0
+        ]),
+        json!(["launch", "--", "none"]),
+        json!(["tool", "--name", "t", "--spec", "{}"]),
+    ] {
+        let job = start(&json!({"args": args, "home": scratch.0}));
+        let said = to_end(job);
+        assert_eq!(said.exit, Some(2), "{args}: {said:?}");
+        assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+    }
+    assert_eq!(std::env::current_dir().expect("a directory"), before);
+}
+
+/// An application that leaves `SIGPIPE` as the system gives it would end the first time the host writes to an agent that has
+/// died: hosting sets it aside.
+#[cfg(unix)]
+#[test]
+fn hosting_sets_broken_pipes_aside() {
+    let scratch = Scratch::new();
+    let probe = child_entry().with_file_name("signal_probe");
+    let said = Command::new(probe)
+        .arg(&scratch.0)
+        .output()
+        .expect("it runs");
+    assert!(said.status.success(), "{said:?}");
+    assert_eq!(String::from_utf8_lossy(&said.stdout).trim(), "ignored=true");
+}
+
 fn child_entry() -> PathBuf {
     let tests = std::env::current_exe().expect("the test knows where it is");
     let profile = tests

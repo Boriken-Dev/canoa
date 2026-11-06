@@ -14,7 +14,7 @@ pub mod jobs;
 mod log;
 #[allow(
     unsafe_code,
-    reason = "the two system calls std has no safe form of, and a load-time entry on macOS"
+    reason = "the system calls std has no safe form of, and a load-time entry on macOS"
 )]
 mod platform;
 

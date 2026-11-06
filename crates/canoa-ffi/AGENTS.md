@@ -25,12 +25,12 @@ int32_t  canoa_ffi_child_main(void);
 | Status | Name | Meaning |
 | --- | --- | --- |
 | 0 | `STATUS_OK` | done |
-| 1 | `STATUS_BAD_ARGUMENT` | a pointer null, misaligned or an alias of another, a length too long, a request this library does not read |
+| 1 | `STATUS_BAD_ARGUMENT` | a pointer null, misaligned or an alias of another, an out-parameter inside the request, a length too long, a request this library does not read |
 | 2 | `STATUS_UNKNOWN_JOB` | no job has that number, or it was freed |
 | 3 | `STATUS_FAILED` | a thread for the job could not be started |
 | 4 | `STATUS_PANIC` | the library panicked in this call |
 
-- **No function blocks**, none calls back, and no panic crosses: each body runs under `catch_unwind`, and an out-parameter is written first with its empty value (0, null, 0). Call them from any thread.
+- **No function blocks**, none calls back, and no panic crosses: each body runs under `catch_unwind`, and each out-parameter that is non-null and aligned is written first with its empty value (0, null, 0), whatever else the call refuses; an `out_job` inside the request is refused unwritten. Call them from any thread.
 - **A job is one `canoa` command**, on a thread of its own, numbered from 1; a number is never used twice, and a stale or invented one is `STATUS_UNKNOWN_JOB`.
 - `canoa_ffi_job_start`: `request` is UTF-8 JSON, read only during the call, unknown keys refused:
 
@@ -49,13 +49,14 @@ int32_t  canoa_ffi_child_main(void);
 
 ## What a long command changes in this process
 
-The first `serve` or `pair` in a process, and only those:
+The first command in a process installs a `tracing` subscriber writing to the log (`CANOA_LOG` as in `canoa`, default `info`), which is delivered to every running `serve` and `pair` as `err`. The first `serve` or `pair`, and only those, also:
 
-- installs a `tracing` subscriber writing to the log (`CANOA_LOG` as in `canoa`, default `info`), which is delivered to every running `serve` and `pair` as `err`;
 - puts this process's standard error on a pipe a thread reads for good, delivered the same way, so that an agent inheriting it is heard and never blocks. What the application itself writes to standard error goes there too, and no longer reaches where it went before;
 - on Windows, gives a process with no console one made with no window, by attaching to a helper's, so that a console program it starts opens no window of its own.
 
-These stay for the life of the process; stopping a host does not undo them.
+- on Unix, sets `SIGPIPE` aside when the application left it as the system gives it, as a Rust program's `main` does, so that writing to an agent that has died is an error and not the application's end; a handler of the application's own stays.
+
+The console comes before the pipe: attaching to one replaces the standard handles of a process started with none, as Explorer starts an application. These stay for the life of the process; stopping a host does not undo them, and the library is never to be unloaded, since its threads run on in it.
 
 ## Environment variables
 
@@ -66,6 +67,10 @@ These stay for the life of the process; stopping a host does not undo them.
 | `CANOA_WEB_DIST` | at build time, with feature `web`: the absolute directory of the site built in | none; the build stops without it |
 
 ## Gotchas
+
+- `provider`, `tool` and `launch` are refused as jobs, status 2: they change the process they run in (its directory, its standard input, its end), so they run only as a process of their own, through `--canoa-child`.
+- On Linux and macOS, while the Dart side has a process of its own running, Dart's process handling collects any child that ends, the host's among them. The host then cannot learn a child's status: a worktree request's `git` fails as if it had run too long, and an agent's stop signals a process id already collected. Not yet solved; it needs the host's children started outside the application's own process.
+- `held` naming the application's own process is an earlier host of its own that was given up on before it ended: the app waits it out and starts again.
 
 - The application's executable has to take `--canoa-child` before it starts anything else, or `canoa_ffi_child_main` is never reached. `app/native` adds that entry to the runner on Windows and Linux; on macOS it is a load-time entry in this crate, which has not been run.
 - The first argument is what decides: a host started with `program` names its own, and `--canoa-child` is not added.
