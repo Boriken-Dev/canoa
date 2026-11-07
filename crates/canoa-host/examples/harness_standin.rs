@@ -231,7 +231,8 @@ fn codex(args: &[String]) {
                         answer(
                             &id,
                             json!({"thread": {"id": thread, "cwd": cwd, "turns": []},
-                            "model": "standin-small", "cwd": cwd}),
+                            "model": "standin-small", "cwd": cwd, "approvalPolicy": "untrusted",
+                            "approvalsReviewer": "user", "sandbox": {"type": "readOnly", "networkAccess": false}}),
                         );
                     }
                     "turn/start" => {

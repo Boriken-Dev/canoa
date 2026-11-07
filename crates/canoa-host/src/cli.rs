@@ -277,6 +277,9 @@ struct AgentArgs {
     /// Take a network path (`\\host\share`) as a session's cwd or more directories.
     #[arg(long)]
     allow_network_paths: bool,
+    /// Offer the Bypass mode, which asks for nothing: for a person running the agent for themselves, as the app does.
+    #[arg(long)]
+    allow_bypass: bool,
 }
 
 impl AgentHarness {
@@ -325,6 +328,7 @@ impl AgentHarness {
         options.effort = common.effort;
         options.max_version = common.max_acp_version;
         options.max_sessions = common.max_sessions;
+        options.allow_bypass = common.allow_bypass;
         options.resume_roots.clone_from(&common.working_roots);
         options.working_roots = common.working_roots;
         options.client_mcp_servers = !common.no_client_mcp_servers;
@@ -968,7 +972,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
                 options.agent(),
                 settings,
                 std::io::stdin(),
-                crate::harness::KeptContent::new(std::io::stdout()),
+                std::io::stdout(),
             )
             .map_err(Failed::run)
         }

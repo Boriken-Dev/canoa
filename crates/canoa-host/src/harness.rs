@@ -7,7 +7,6 @@
 )]
 
 use std::ffi::OsString;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -66,6 +65,8 @@ pub(crate) struct AgentOptions {
     pub(crate) sandbox: Option<String>,
     /// Claude Code's permission prompts asked through ACP, rather than refused where nothing granted them.
     pub(crate) permission_prompts: bool,
+    /// Whether a client may put a session in Bypass, which asks for nothing. Off, the mode is not offered and is refused.
+    pub(crate) allow_bypass: bool,
     /// Claude Code plugins named in a session's `_meta`; their hooks and MCP servers run with nothing asked.
     pub(crate) client_plugins: bool,
     /// Directories a session's `cwd`, more directories and plugins must lie in; none takes any.
@@ -93,6 +94,7 @@ impl core::fmt::Debug for AgentOptions {
             .field("approval_policy", &self.approval_policy)
             .field("sandbox", &self.sandbox)
             .field("permission_prompts", &self.permission_prompts)
+            .field("allow_bypass", &self.allow_bypass)
             .field("client_plugins", &self.client_plugins)
             .field("working_roots", &self.working_roots)
             .field("resume_roots", &self.resume_roots)
@@ -118,6 +120,7 @@ impl AgentOptions {
             approval_policy: None,
             sandbox: None,
             permission_prompts: true,
+            allow_bypass: false,
             client_plugins: false,
             working_roots: Vec::new(),
             resume_roots: Vec::new(),
@@ -152,6 +155,7 @@ impl AgentOptions {
         launch.permission_mode.clone_from(&self.permission_mode);
         launch.setting_sources.clone_from(&self.setting_sources);
         launch.strict_mcp_config = self.strict_mcp_config;
+        launch.allow_bypass = self.allow_bypass;
         launch.permission_prompts = self.permission_prompts;
         launch.env.extend(self.env.iter().cloned());
         launch
@@ -168,6 +172,7 @@ impl AgentOptions {
         launch.approval_policy.clone_from(&self.approval_policy);
         launch.sandbox.clone_from(&self.sandbox);
         launch.working_roots.clone_from(&self.resume_roots);
+        launch.allow_bypass = self.allow_bypass;
         launch.env.extend(self.env.iter().cloned());
         launch
     }
@@ -182,73 +187,6 @@ impl AgentOptions {
         settings.network_paths = self.network_paths;
         settings.on_notice = Some(on_notice);
         settings
-    }
-}
-
-/// A translator's line as a client should read it. coqui-acp-harness ends a version 2 message, user's, agent's or
-/// thought, with an upsert whose `content` is `[]`, which ACP version 2 defines as clearing what was streamed into it:
-/// that `content` is left out, so the upsert names the message and changes nothing of it. Any other line is unchanged.
-pub(crate) fn kept_content(line: Vec<u8>) -> Vec<u8> {
-    const EMPTY: &[u8] = b"\"content\":[]";
-    if !line.windows(EMPTY.len()).any(|window| window == EMPTY) {
-        return line;
-    }
-    let Ok(mut message) = serde_json::from_slice::<serde_json::Value>(&line) else {
-        return line;
-    };
-    if message.get("method").and_then(serde_json::Value::as_str) != Some("session/update") {
-        return line;
-    }
-    let update = message
-        .pointer_mut("/params/update")
-        .and_then(serde_json::Value::as_object_mut)
-        .filter(|update| {
-            matches!(
-                update
-                    .get("sessionUpdate")
-                    .and_then(serde_json::Value::as_str),
-                Some("agent_message" | "user_message" | "agent_thought")
-            ) && update.get("content") == Some(&serde_json::Value::Array(Vec::new()))
-        });
-    match update {
-        Some(update) => {
-            update.remove("content");
-            serde_json::to_vec(&message).unwrap_or(line)
-        }
-        None => line,
-    }
-}
-
-/// Standard output for `canoa agent`, each line as [`kept_content`] has it.
-pub(crate) struct KeptContent<W: Write> {
-    out: W,
-    partial: Vec<u8>,
-}
-
-impl<W: Write> KeptContent<W> {
-    pub(crate) const fn new(out: W) -> Self {
-        Self {
-            out,
-            partial: Vec::new(),
-        }
-    }
-}
-
-impl<W: Write> Write for KeptContent<W> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.partial.extend_from_slice(bytes);
-        while let Some(at) = self.partial.iter().position(|byte| *byte == b'\n') {
-            let mut line: Vec<u8> = self.partial.drain(..=at).collect();
-            line.pop();
-            let mut line = kept_content(line);
-            line.push(b'\n');
-            self.out.write_all(&line)?;
-        }
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.out.flush()
     }
 }
 

@@ -153,6 +153,10 @@ pub struct HarnessOptions {
     pub approval_policy: Option<String>,
     /// Codex's sandbox: `read-only`, `workspace-write` or `danger-full-access`.
     pub sandbox: Option<String>,
+    /// Whether a client may put a session in Bypass, the mode that asks for nothing (`bypass = true`). Off, the `mode`
+    /// option does not offer it and a client that sets it is refused. A key paired to someone else's machine reaches this
+    /// entry, so on is the host person's decision for that entry: with it, that key could take full control of this machine.
+    pub bypass: bool,
 }
 
 /// Claude Code's permission modes, as `--permission-mode` takes them.
@@ -428,6 +432,7 @@ struct RawAgent {
     setting_sources: Option<Vec<String>>,
     approval_policy: Option<String>,
     sandbox: Option<String>,
+    bypass: Option<bool>,
     profiles: Option<Vec<String>>,
     listen: Option<String>,
     #[serde(default)]
@@ -443,6 +448,7 @@ struct RawAsks {
     setting_sources: Option<Vec<String>>,
     approval_policy: Option<String>,
     sandbox: Option<String>,
+    bypass: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -539,6 +545,7 @@ impl Config {
                 setting_sources: agent.setting_sources,
                 approval_policy: agent.approval_policy,
                 sandbox: agent.sandbox,
+                bypass: agent.bypass,
             };
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
@@ -553,6 +560,7 @@ impl Config {
                         (asks.setting_sources.is_some(), "setting_sources"),
                         (asks.approval_policy.is_some(), "approval_policy"),
                         (asks.sandbox.is_some(), "sandbox"),
+                        (asks.bypass.is_some(), "bypass"),
                     ] {
                         if set {
                             return Err(invalid(
@@ -762,6 +770,7 @@ fn harness_options(
         setting_sources: agent.setting_sources.clone(),
         approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
         sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
+        bypass: agent.bypass.unwrap_or(false),
     })
 }
 

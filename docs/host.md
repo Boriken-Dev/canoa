@@ -498,7 +498,13 @@ executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from c
 harness = "codex"
 approval_policy = "on-request"    # untrusted, on-failure, on-request or never
 sandbox = "workspace-write"       # read-only, workspace-write or danger-full-access
+bypass = false                    # true offers a paired client the Bypass mode, which asks for nothing
 ```
+
+`bypass` is off by default and the only thing that lets a paired client put a session in Bypass: a key paired to someone else
+reaches the entry, and with Bypass it could take full control of this machine. Turning it on is logged at `info` as
+configuration. The app's own Claude and Codex sources turn it on for themselves (`--allow-bypass`), since the person using
+the app is the person who configured it.
 
 On Windows the translators start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
 is untested. With `profiles`, the profile's environment is the command line's process

@@ -674,6 +674,32 @@ executable = "codex"
 }
 
 #[test]
+fn a_harness_entry_offers_bypass_only_when_its_canoa_cfg_says_so() {
+    let config = parse(
+        r#"
+[host.agents.Off]
+harness = "claude"
+[host.agents.On]
+harness = "codex"
+bypass = true
+"#,
+    )
+    .expect("parses");
+    let bypass = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
+        Some(EntryKind::Harness { options, .. }) => options.bypass,
+        _ => panic!("a harness"),
+    };
+    assert!(!bypass("Off"), "off unless the entry turns it on");
+    assert!(bypass("On"));
+    for text in [
+        "[host.agents.a]\nprogram = \"x\"\nbypass = true\n",
+        "[host.agents.a]\nharness = \"claude\"\nbypass = \"yes\"\n",
+    ] {
+        assert!(parse(text).is_err(), "{text}");
+    }
+}
+
+#[test]
 fn a_harness_entry_holds_its_command_lines_permissions_and_its_program_to_canoa_cfg() {
     let config = parse(
         r#"

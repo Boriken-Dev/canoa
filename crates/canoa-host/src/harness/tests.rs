@@ -1,7 +1,5 @@
 use std::ffi::OsStr;
 
-use serde_json::{Value, json};
-
 use super::*;
 
 fn args_of(launch: &coqui_acp_harness::Launch) -> Vec<String> {
@@ -157,52 +155,24 @@ fn its_debug_names_the_environment_and_never_shows_a_value() {
 }
 
 #[test]
-fn a_message_end_keeps_what_was_streamed_into_it() {
-    for kind in ["agent_message", "user_message", "agent_thought"] {
-        let end = json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s",
-            "update": {"sessionUpdate": kind, "messageId": "m", "content": []}}});
-        let kept: Value =
-            serde_json::from_slice(&kept_content(end.to_string().into_bytes())).expect("JSON");
+fn bypass_is_offered_only_when_the_options_allow_it() {
+    for allowed in [false, true] {
+        let mut options = AgentOptions::new(Harness::Claude);
+        options.allow_bypass = allowed;
+        let claude = options.claude_launch();
+        assert_eq!(claude.allow_bypass, allowed);
         assert_eq!(
-            kept["params"]["update"],
-            json!({"sessionUpdate": kind, "messageId": "m"}),
-            "{kind}: a patch with no content leaves the message's content as it is"
+            args_of(&claude.launch())
+                .iter()
+                .any(|arg| arg == "--allow-dangerously-skip-permissions"),
+            allowed
         );
+        let mut options = AgentOptions::new(Harness::Codex);
+        options.allow_bypass = allowed;
+        assert_eq!(options.codex_launch().allow_bypass, allowed);
     }
-    for untouched in [
-        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s",
-            "update": {"sessionUpdate": "agent_message", "messageId": "m", "content": [{"type": "text", "text": "x"}]}}}),
-        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s",
-            "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t", "content": []}}}),
-        json!({"jsonrpc": "2.0", "id": 3, "result": {"content": []}}),
-    ] {
-        let line = untouched.to_string().into_bytes();
-        assert_eq!(kept_content(line.clone()), line, "{untouched}");
-    }
-}
-
-#[test]
-fn what_canoa_agent_writes_keeps_message_ends_from_clearing_their_text() {
-    let mut written = Vec::new();
-    {
-        let mut out = KeptContent::new(&mut written);
-        let end = b"{\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message\",\"messageId\":\"m\",\"content\":[]}}}\n";
-        out.write_all(&end[..20]).expect("written");
-        out.write_all(&end[20..]).expect("written");
-        out.write_all(b"{\"id\":1,\"result\":{}}\n")
-            .expect("written");
-        out.flush().expect("flushed");
-    }
-    let lines: Vec<Value> = written
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .map(|line| serde_json::from_slice(line).expect("one JSON line"))
-        .collect();
-    assert_eq!(lines.len(), 2);
     assert!(
-        lines[0]["params"]["update"].get("content").is_none(),
-        "{}",
-        lines[0]
+        !AgentOptions::new(Harness::Claude).allow_bypass,
+        "off by default"
     );
-    assert_eq!(lines[1], json!({"id": 1, "result": {}}));
 }

@@ -948,6 +948,13 @@ fn harness_options(
     let chosen = |value: &Option<String>, default: &str| {
         Some(value.clone().unwrap_or_else(|| default.to_owned()))
     };
+    options.allow_bypass = asks.bypass;
+    if asks.bypass {
+        tracing::info!(
+            "host.agents.{}.bypass is on: a paired client may put a session in Bypass, which asks for nothing",
+            entry.name
+        );
+    }
     let weakened = |setting: &str, value: &Option<String>, loose: &[&str], strict: &str| {
         if let Some(value) = value.as_deref().filter(|value| loose.contains(value)) {
             tracing::warn!(

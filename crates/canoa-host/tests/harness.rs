@@ -154,6 +154,82 @@ fn claude_code_runs_in_the_host_and_asks_its_permission_through_acp() {
     );
 }
 
+/// The ids the `mode` option of a session/new answer offers, and the one it is in.
+fn modes_of(opened: &Value) -> (String, Vec<String>) {
+    let option = opened["configOptions"]
+        .as_array()
+        .expect("options")
+        .iter()
+        .find(|option| option["id"] == "mode")
+        .unwrap_or_else(|| panic!("a mode option in {opened}"));
+    let offered = option["options"]
+        .as_array()
+        .expect("values")
+        .iter()
+        .map(|value| value["value"].as_str().expect("an id").to_owned())
+        .collect();
+    (
+        option["currentValue"].as_str().expect("current").to_owned(),
+        offered,
+    )
+}
+
+/// A paired key reaches an entry whose person never asked for Bypass: without this, a key paired to someone else could
+/// take full control of the machine by choosing the mode that asks for nothing.
+#[test]
+fn a_paired_client_does_not_see_bypass_on_an_entry_that_has_it_off_and_is_refused_if_it_sets_it() {
+    for (key, harness, allowed) in [
+        ("", "claude", false),
+        ("bypass = false\n", "claude", false),
+        ("bypass = true\n", "claude", true),
+        ("", "codex", false),
+        ("bypass = true\n", "codex", true),
+    ] {
+        let scratch = Scratch::new();
+        let program = standin(&scratch, harness);
+        let (record, env) = env_of(&scratch);
+        let config = format!(
+            "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n{key}",
+            quoted(&program.to_string_lossy())
+        );
+        let host = Host::start_in(scratch, &config, 1, &env);
+        let client = support::key();
+        host.pair(&client);
+        let dir = cwd(&host.scratch);
+        let (offered, set) = with_link(host.url("Agent"), &client, host.peer, |rpc| {
+            rpc.initialize().expect("initialize is answered");
+            let opened = rpc
+                .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+            let session = opened["sessionId"].as_str().expect("an id").to_owned();
+            let set = rpc.request(
+                "session/set_config_option",
+                json!({"sessionId": session, "configId": "mode", "value": "bypass"}),
+            );
+            (modes_of(&opened).1, set)
+        })
+        .expect("a paired key is served");
+        assert_eq!(
+            offered.contains(&"bypass".to_owned()),
+            allowed,
+            "{harness} {key}: {offered:?}"
+        );
+        assert_eq!(set.is_ok(), allowed, "{harness} {key}: {set:?}");
+        let started = records(&record);
+        let flagged = started[0]["args"]
+            .as_array()
+            .expect("its arguments")
+            .iter()
+            .any(|arg| arg == "--allow-dangerously-skip-permissions");
+        if harness == "claude" {
+            assert_eq!(
+                flagged, allowed,
+                "Claude Code is started allowing it only then"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_clients_plugin_never_reaches_claude_code_on_an_entry_with_no_profile() {
     let scratch = Scratch::new();

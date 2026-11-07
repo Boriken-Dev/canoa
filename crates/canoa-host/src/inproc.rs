@@ -159,7 +159,7 @@ impl Write for ToClient {
                 continue;
             }
             self.lines
-                .send(crate::harness::kept_content(line))
+                .send(line)
                 .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))?;
         }
         if self.partial.len() > self.max_line {
