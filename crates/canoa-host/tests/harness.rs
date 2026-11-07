@@ -260,7 +260,7 @@ fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
         (
             "codex",
             "modes = [\"auto\"]\n",
-            vec!["manual", "auto", "plan"],
+            vec!["manual", "accept_edits", "auto", "plan"],
             "auto",
             true,
         ),
