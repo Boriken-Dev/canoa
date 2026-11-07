@@ -35,6 +35,7 @@ setting_sources = ["project"]         # claude only: of user, project, local; de
 approval_policy = "on-request"        # codex only: one of APPROVAL_POLICIES; default "on-request"
 sandbox = "workspace-write"           # codex only: one of SANDBOXES; default "workspace-write"
 bypass = false                        # offer the Bypass mode, which asks for nothing, to a paired client; default false
+modes = ["plan", "accept_edits"]      # the modes a paired client may choose, widening the default (the entry's own mode and stricter ones); Bypass still needs `bypass`
 
 [host.profiles.NAME]                  # a profile (see Profiles below), read as the person's own layer
 overlays = ["team"]                   # optional: AOS overlays the app installed in overlays/ beside this file
@@ -136,7 +137,7 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 #[non_exhaustive] pub enum Harness { Claude, Codex }   // Copy, Eq; canoa_host::harness::Harness
 pub const fn Harness::as_str(self) -> &'static str    // "claude", "codex"
 pub fn Harness::named(name: &str) -> Option<Harness>
-#[non_exhaustive] pub struct HarnessOptions { pub permission_mode, pub approval_policy, pub sandbox: Option<String>, pub setting_sources: Option<Vec<String>>, pub bypass: bool }   // Default, Eq
+#[non_exhaustive] pub struct HarnessOptions { pub permission_mode, pub approval_policy, pub sandbox: Option<String>, pub setting_sources: Option<Vec<String>>, pub bypass: bool, pub modes: Option<Vec<Mode>> }   // Default, Eq
 pub const PERMISSION_MODES: &[&str];   // default, acceptEdits, plan, dontAsk, bypassPermissions, auto, manual
 pub const SETTING_SOURCES: &[&str];    // user, project, local
 pub const APPROVAL_POLICIES: &[&str];  // untrusted, on-failure, on-request, never

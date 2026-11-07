@@ -501,6 +501,12 @@ sandbox = "workspace-write"       # read-only, workspace-write or danger-full-ac
 bypass = false                    # true offers a paired client the Bypass mode, which asks for nothing
 ```
 
+A paired client can choose only the mode the entry's own settings amount to and every stricter one (Plan, Manual, Accept edits,
+Auto, Bypass, loosest last), so it cannot loosen what canoa.cfg set: an entry with `permission_mode = "default"` or Codex's
+`on-request` with `workspace-write` offers it Plan and Manual (Plan, Manual and Accept edits for Codex). `modes = ["plan",
+"accept_edits"]` names the modes it may choose instead, which widens that, and is logged at `info` as configuration. Bypass
+follows `bypass` alone.
+
 `bypass` is off by default and the only thing that lets a paired client put a session in Bypass: a key paired to someone else
 reaches the entry, and with Bypass it could take full control of this machine. Turning it on is logged at `info` as
 configuration. The app's own Claude and Codex sources turn it on for themselves (`--allow-bypass`), since the person using

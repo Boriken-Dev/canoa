@@ -329,6 +329,8 @@ impl AgentHarness {
         options.max_version = common.max_acp_version;
         options.max_sessions = common.max_sessions;
         options.allow_bypass = common.allow_bypass;
+        // `canoa agent` is the person's own command line: it offers every mode, Bypass when asked for.
+        options.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
         options.resume_roots.clone_from(&common.working_roots);
         options.working_roots = common.working_roots;
         options.client_mcp_servers = !common.no_client_mcp_servers;

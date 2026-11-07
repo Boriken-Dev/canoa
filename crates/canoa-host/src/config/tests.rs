@@ -674,6 +674,37 @@ executable = "codex"
 }
 
 #[test]
+fn a_harness_entry_names_the_modes_a_client_may_choose_or_leaves_the_default() {
+    use coqui_acp_harness::Mode;
+    let config = parse(
+        r#"
+[host.agents.Default]
+harness = "claude"
+[host.agents.Named]
+harness = "codex"
+modes = ["plan", "accept_edits"]
+"#,
+    )
+    .expect("parses");
+    let modes = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
+        Some(EntryKind::Harness { options, .. }) => options.modes.clone(),
+        _ => panic!("a harness"),
+    };
+    assert_eq!(
+        modes("Default"),
+        None,
+        "a client is capped at the entry's own mode"
+    );
+    assert_eq!(modes("Named"), Some(vec![Mode::Plan, Mode::AcceptEdits]));
+    for text in [
+        "[host.agents.a]\nharness = \"claude\"\nmodes = [\"yolo\"]\n",
+        "[host.agents.a]\nprogram = \"x\"\nmodes = [\"plan\"]\n",
+    ] {
+        assert!(parse(text).is_err(), "{text}");
+    }
+}
+
+#[test]
 fn a_harness_entry_offers_bypass_only_when_its_canoa_cfg_says_so() {
     let config = parse(
         r#"

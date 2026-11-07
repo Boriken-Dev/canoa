@@ -230,6 +230,71 @@ fn a_paired_client_does_not_see_bypass_on_an_entry_that_has_it_off_and_is_refuse
     }
 }
 
+/// A paired key can only choose the mode canoa.cfg configured and stricter ones, unless the entry names more.
+#[test]
+fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
+    for (harness, key, offered, loosening, allowed) in [
+        ("claude", "", vec!["manual", "plan"], "accept_edits", false),
+        ("claude", "", vec!["manual", "plan"], "auto", false),
+        (
+            "claude",
+            "modes = [\"accept_edits\"]\n",
+            vec!["manual", "accept_edits", "plan"],
+            "accept_edits",
+            true,
+        ),
+        (
+            "claude",
+            "modes = [\"auto\"]\n",
+            vec!["manual", "auto", "plan"],
+            "bypass",
+            false,
+        ),
+        (
+            "codex",
+            "",
+            vec!["manual", "accept_edits", "plan"],
+            "auto",
+            false,
+        ),
+        (
+            "codex",
+            "modes = [\"auto\"]\n",
+            vec!["manual", "auto", "plan"],
+            "auto",
+            true,
+        ),
+    ] {
+        let scratch = Scratch::new();
+        let program = standin(&scratch, harness);
+        let (_, env) = env_of(&scratch);
+        let config = format!(
+            "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n{key}",
+            quoted(&program.to_string_lossy())
+        );
+        let host = Host::start_in(scratch, &config, 1, &env);
+        let client = support::key();
+        host.pair(&client);
+        let dir = cwd(&host.scratch);
+        let (seen, set) = with_link(host.url("Agent"), &client, host.peer, |rpc| {
+            rpc.initialize().expect("initialize is answered");
+            let opened = rpc
+                .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+            let session = opened["sessionId"].as_str().expect("an id").to_owned();
+            let set = rpc.request(
+                "session/set_config_option",
+                json!({"sessionId": session, "configId": "mode", "value": loosening}),
+            );
+            (modes_of(&opened).1, set)
+        })
+        .expect("a paired key is served");
+        let seen: Vec<String> = seen.into_iter().filter(|id| id != "custom").collect();
+        assert_eq!(seen, offered, "{harness} {key}");
+        assert_eq!(set.is_ok(), allowed, "{harness} {key} {loosening}: {set:?}");
+    }
+}
+
 #[test]
 fn a_clients_plugin_never_reaches_claude_code_on_an_entry_with_no_profile() {
     let scratch = Scratch::new();

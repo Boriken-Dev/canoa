@@ -157,6 +157,10 @@ pub struct HarnessOptions {
     /// option does not offer it and a client that sets it is refused. A key paired to someone else's machine reaches this
     /// entry, so on is the host person's decision for that entry: with it, that key could take full control of this machine.
     pub bypass: bool,
+    /// The modes a paired client may choose (`modes = ["manual", "accept_edits", ...]`), ids as `coqui_acp_harness::Mode`
+    /// names them. Unset, a client may choose the mode the entry's own settings amount to and every stricter one, so it
+    /// cannot loosen what canoa.cfg set; naming modes widens that, and Bypass still needs `bypass = true`.
+    pub modes: Option<Vec<coqui_acp_harness::Mode>>,
 }
 
 /// Claude Code's permission modes, as `--permission-mode` takes them.
@@ -433,6 +437,7 @@ struct RawAgent {
     approval_policy: Option<String>,
     sandbox: Option<String>,
     bypass: Option<bool>,
+    modes: Option<Vec<String>>,
     profiles: Option<Vec<String>>,
     listen: Option<String>,
     #[serde(default)]
@@ -449,6 +454,7 @@ struct RawAsks {
     approval_policy: Option<String>,
     sandbox: Option<String>,
     bypass: Option<bool>,
+    modes: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -546,6 +552,7 @@ impl Config {
                 approval_policy: agent.approval_policy,
                 sandbox: agent.sandbox,
                 bypass: agent.bypass,
+                modes: agent.modes,
             };
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
@@ -561,6 +568,7 @@ impl Config {
                         (asks.approval_policy.is_some(), "approval_policy"),
                         (asks.sandbox.is_some(), "sandbox"),
                         (asks.bypass.is_some(), "bypass"),
+                        (asks.modes.is_some(), "modes"),
                     ] {
                         if set {
                             return Err(invalid(
@@ -771,6 +779,26 @@ fn harness_options(
         approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
         sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
         bypass: agent.bypass.unwrap_or(false),
+        modes: match &agent.modes {
+            None => None,
+            Some(ids) => Some(
+                ids.iter()
+                    .map(|id| {
+                        coqui_acp_harness::Mode::from_id(id).ok_or_else(|| {
+                            invalid(
+                                name,
+                                &format!(
+                                    "modes holds only {}",
+                                    coqui_acp_harness::Mode::ALL
+                                        .map(coqui_acp_harness::Mode::id)
+                                        .join(", ")
+                                ),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        },
     })
 }
 

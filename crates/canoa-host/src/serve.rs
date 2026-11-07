@@ -949,6 +949,18 @@ fn harness_options(
         Some(value.clone().unwrap_or_else(|| default.to_owned()))
     };
     options.allow_bypass = asks.bypass;
+    options.modes.clone_from(&asks.modes);
+    if let Some(modes) = &asks.modes {
+        tracing::info!(
+            "host.agents.{}.modes is {}: a paired client may choose those, beyond the entry's own mode and stricter ones",
+            entry.name,
+            modes
+                .iter()
+                .map(|mode| mode.id())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     if asks.bypass {
         tracing::info!(
             "host.agents.{}.bypass is on: a paired client may put a session in Bypass, which asks for nothing",

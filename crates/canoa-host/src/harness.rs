@@ -67,6 +67,8 @@ pub(crate) struct AgentOptions {
     pub(crate) permission_prompts: bool,
     /// Whether a client may put a session in Bypass, which asks for nothing. Off, the mode is not offered and is refused.
     pub(crate) allow_bypass: bool,
+    /// The modes a client may choose; `None` is the mode the settings amount to and every stricter one.
+    pub(crate) modes: Option<Vec<coqui_acp_harness::Mode>>,
     /// Claude Code plugins named in a session's `_meta`; their hooks and MCP servers run with nothing asked.
     pub(crate) client_plugins: bool,
     /// Directories a session's `cwd`, more directories and plugins must lie in; none takes any.
@@ -95,6 +97,7 @@ impl core::fmt::Debug for AgentOptions {
             .field("sandbox", &self.sandbox)
             .field("permission_prompts", &self.permission_prompts)
             .field("allow_bypass", &self.allow_bypass)
+            .field("modes", &self.modes)
             .field("client_plugins", &self.client_plugins)
             .field("working_roots", &self.working_roots)
             .field("resume_roots", &self.resume_roots)
@@ -121,6 +124,7 @@ impl AgentOptions {
             sandbox: None,
             permission_prompts: true,
             allow_bypass: false,
+            modes: None,
             client_plugins: false,
             working_roots: Vec::new(),
             resume_roots: Vec::new(),
@@ -156,6 +160,7 @@ impl AgentOptions {
         launch.setting_sources.clone_from(&self.setting_sources);
         launch.strict_mcp_config = self.strict_mcp_config;
         launch.allow_bypass = self.allow_bypass;
+        launch.modes.clone_from(&self.modes);
         launch.permission_prompts = self.permission_prompts;
         launch.env.extend(self.env.iter().cloned());
         launch
@@ -173,6 +178,7 @@ impl AgentOptions {
         launch.sandbox.clone_from(&self.sandbox);
         launch.working_roots.clone_from(&self.resume_roots);
         launch.allow_bypass = self.allow_bypass;
+        launch.modes.clone_from(&self.modes);
         launch.env.extend(self.env.iter().cloned());
         launch
     }
