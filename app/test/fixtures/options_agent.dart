@@ -35,6 +35,34 @@ final class OptionsAgent {
   static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
   static const codexModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan')];
 
+  /// Mode values it refuses, as an agent refuses one it cannot take.
+  final refuseModes = <String>{};
+
+  /// What the person answered to each request it asked, by the request's id.
+  final answers = <Object?, Map<String, dynamic>>{};
+  final _asks = <void Function(Map<String, Object?>)>[];
+
+  /// Asks the last started copy's person for leave, as an agent does: [options] are ACP's, [rawInput] the tool's input.
+  void ask(int id, List<Map<String, Object?>> options, {Object? rawInput, String kind = 'edit', String title = 'Edit a.txt'}) {
+    _asks.last({
+      'jsonrpc': '2.0', 'id': id, 'method': 'session/request_permission',
+      'params': {
+        'sessionId': 'o1',
+        'toolCall': {'toolCallId': 't$id', 'title': title, 'kind': kind, 'rawInput': rawInput ?? {'file_path': 'a.txt'}},
+        'options': options,
+      },
+    });
+  }
+
+  /// The agent changes its own mode, and says so as an agent does.
+  void agentSets(String value) {
+    mode = value;
+    _asks.last({
+      'jsonrpc': '2.0', 'method': 'session/update',
+      'params': {'sessionId': 'o1', 'update': {'sessionUpdate': 'config_option_update', 'configOptions': options}},
+    });
+  }
+
   /// Whether a prompt's turn ends only when [finishTurn] is called.
   bool holdTurns = false;
   final _held = <void Function()>[];
@@ -86,6 +114,7 @@ final class OptionsAgent {
     void update(String session, Map<String, Object?> body) => incoming.add(jsonEncode({
       'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session, 'update': body},
     }));
+    _asks.add((message) => incoming.add(jsonEncode(message)));
     late final VerifiedAgent client;
     client = VerifiedAgent.fromChild(
       label: command.label,
@@ -97,7 +126,10 @@ final class OptionsAgent {
         final message = jsonDecode(line) as Map<String, dynamic>;
         final id = message['id'];
         final method = message['method'];
-        if (method == null) return;
+        if (method == null) {
+          if (id != null) answers[id] = message;
+          return;
+        }
         requests.add(message);
         final params = message['params'] as Map<String, dynamic>? ?? const {};
         switch (method) {
@@ -110,7 +142,7 @@ final class OptionsAgent {
             reply(id, {'sessionId': 'o1', 'configOptions': options});
           case 'session/set_config_option':
             final value = params['value'];
-            if (value == 'refuse-me') {
+            if (value == 'refuse-me' || (params['configId'] == 'mode' && refuseModes.contains(value))) {
               incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'error': {'code': -32602, 'message': 'That model is not available'}}));
               return;
             }

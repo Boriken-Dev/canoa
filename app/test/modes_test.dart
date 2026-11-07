@@ -153,14 +153,14 @@ void main() {
 
     test('Shift+Tab\'s order is the translators\' where the ids are theirs, and the agent\'s own otherwise', () {
       final claude = modeEntries(parseConfigOptions(OptionsAgent(modes: OptionsAgent.claudeModes).options)!.first)..shuffle();
-      var at = nextMode(claude, 'manual');
+      var at = nextMode(claude, 'manual')!;
       expect(at.value, 'accept_edits');
-      expect(nextMode(claude, 'bypass').value, 'manual');
-      at = nextMode(modeEntries(null), null);
+      expect(nextMode(claude, 'bypass')!.value, 'manual');
+      at = nextMode(modeEntries(null), null)!;
       expect((at.value, at.own), ('bypass', true));
       final own = modeEntries(const ConfigOption(id: 'mode', label: 'Mode', current: 'b', choices: [Choice('b', 'B'), Choice('a', 'A')]));
       expect([for (final entry in own) entry.value], ['b', 'a', 'bypass']);
-      expect(nextMode(own, 'b').value, 'a');
+      expect(nextMode(own, 'b')!.value, 'a');
     });
   });
 
@@ -187,11 +187,14 @@ void main() {
       expect(entry.mode, 'plan');
       final second = OptionsAgent(modes: OptionsAgent.claudeModes);
       final reopened = _store(ledger);
-      final client = await tester.runAsync(() => second.start(scripted)) as dynamic;
+      final client = await tester.runAsync(() => second.start(scripted, decider: reopened.askPermission)) as dynamic;
       final session = await tester.runAsync(() => reopened.reopen(entry, client)) as ChatSession;
       expect(second.mode, 'plan');
       expect(reopened.modeOf(session), 'plan');
-      expect(second.methods, containsAllInOrder(['session/load', 'session/set_config_option']));
+      // Nothing reaches the agent before its mode does: the first prompt comes after the choice.
+      await tester.runAsync(() => reopened.sendText('go on'));
+      expect(second.methods, containsAllInOrder(['session/load', 'session/set_config_option', 'session/prompt']));
+      expect(second.methods.where((method) => method == 'session/set_config_option'), hasLength(1), reason: 'applied once');
     });
 
     testWidgets('Canoa\'s own Bypass is kept too, and a reopened session is in it', (tester) async {
@@ -202,8 +205,11 @@ void main() {
       await pumpApp(tester, store, startAgent: agent.start);
       await _draft(tester);
       await send(tester, 'Say hello');
+      await pick(tester, 'option-mode', 'Plan');
       await pick(tester, 'option-mode', 'Bypass');
-      expect(ledger.entries.single.bypass, isTrue);
+      // Bypass is Canoa's and sits on Plan, which the ledger keeps beside it.
+      expect((ledger.entries.single.bypass, ledger.entries.single.mode), (true, 'plan'));
+      expect(agent.mode, 'plan');
       await finish(tester);
       await tester.runAsync(ledger.flush);
       await tester.pumpWidget(const SizedBox());
@@ -212,10 +218,18 @@ void main() {
       await tester.runAsync(ledger.load);
       final second = OptionsAgent(modes: OptionsAgent.codexModes);
       final reopened = _store(ledger);
-      final client = await tester.runAsync(() => second.start(scripted)) as dynamic;
+      final client = await tester.runAsync(() => second.start(scripted, decider: reopened.askPermission)) as dynamic;
       final session = await tester.runAsync(() => reopened.reopen(ledger.entries.single, client)) as ChatSession;
       expect(session.bypass, isTrue);
-      expect(reopened.inBypass(session), isTrue);
+      expect(second.mode, 'plan', reason: 'the agent is put back in the mode Bypass sat on');
+      // It still answers: a request that offers an allow is answered with no card, after the reopen.
+      second.ask(7, [
+        {'optionId': 'allow-once', 'name': 'Yes', 'kind': 'allow_once'},
+        {'optionId': 'reject', 'name': 'No', 'kind': 'reject_once'},
+      ]);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+      expect(second.answers[7]?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
+      expect(session.pendingPermissions, isEmpty);
     });
   });
 

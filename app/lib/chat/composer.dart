@@ -644,11 +644,13 @@ class _ModeChooser extends StatelessWidget {
     final bypass = store.inBypass(session);
     final pending = session.pending.values.any((choice) => choice.role == OptionRole.mode);
     final shown = entries.where((entry) => entry.value == current).firstOrNull;
-    final label = shown?.label ?? current ?? (session.isDraft ? 'Default' : 'Mode');
+    // Canoa's own Bypass sits on the agent's mode, which is said beside it.
+    final under = session.bypass ? entries.where((entry) => entry.value == store.underlyingMode(session)).firstOrNull : null;
+    final label = under == null ? (shown?.label ?? current ?? (session.isDraft ? 'Default' : 'Mode')) : 'Bypass over ${under.label}';
     return PopupMenuButton<Object?>(
       key: const Key('option-mode'),
       tooltip: _seenLabel(session.isDraft ? seen : null, 'Mode (Shift+Tab changes it)'),
-      enabled: session.status != SessionStatus.connecting,
+      enabled: store.canChangeMode(session) || session.isDraft,
       onSelected: (value) {
         if (value is ModeEntry) {
           unawaited(store.chooseMode(session, value));
@@ -659,7 +661,12 @@ class _ModeChooser extends StatelessWidget {
       itemBuilder: (context) => [
         if (session.isDraft) const PopupMenuItem<Object?>(value: null, child: Text('Default')),
         for (final entry in entries)
-          CheckedPopupMenuItem<Object?>(value: entry, checked: entry.value == current, child: Text(entry.label)),
+          CheckedPopupMenuItem<Object?>(
+            value: entry,
+            enabled: entry.selectable,
+            checked: entry.value == current,
+            child: Text(entry.label),
+          ),
       ],
       child: _Pill(
         label: pending && session.status == SessionStatus.working ? '$label (next turn)' : label,

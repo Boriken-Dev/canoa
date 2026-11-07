@@ -80,7 +80,9 @@ class PermissionCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'Bypass answers only a request that offers to allow, so this one is yours to answer.',
+              question.forPerson
+                  ? 'Bypass leaves a question or a plan to you, so this one is yours to answer.'
+                  : 'Bypass answers only a request that offers to allow, so this one is yours to answer.',
               style: small?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),

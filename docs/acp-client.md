@@ -51,10 +51,15 @@ Auto, Plan and Bypass (the table of what each sets is in the translators' header
 in the session list, so a session opened again, or after the app restarts, is put back in it before anything else is sent; Settings'
 **Mode of a new session** (`[permissions] default_mode`) is where a new one starts, and a profile's mode wins over it.
 
+Shift+Tab goes on from the mode last asked for, so quick presses do not repeat one, skips a mode the agent refused, leaves Bypass
+like any other mode, and does nothing while the session connects or is being opened again.
+
 **Bypass** asks for nothing. Where the agent has a mode that asks for nothing (`bypass`, `bypassPermissions`), that is the one
 chosen. Where it has none, Canoa provides it by answering the agent's requests itself: every request that offers an allow is
-answered, with `allow_once` when offered, else `allow_always`, and each answer is said in the conversation. A request that
-offers no allow is still the person's, and is shown with that said. A request already waiting when Bypass is chosen is
+answered, with `allow_once` when offered, else `allow_always`, and each answer is said in the conversation. Canoa's Bypass sits on the agent's own mode, which stays as it was: leaving Bypass returns to it, and the session list keeps both,
+so a reopened session is put back in that mode and in Bypass. When the agent is itself in a mode that asks for nothing, or says
+so by itself, Canoa answers nothing: what the agent still asks is the person's. A request that offers no allow, a question
+and a plan are still the person's, and are shown with that said. A request already waiting when Bypass is chosen is
 answered too. A request reaches only the conversation of the connection that sent it, whatever session id the agent chose. While
 Bypass is on, the mode control shows in the accent colour and a banner and a mark on the session's row say so; the banner's
 **Leave Bypass** ends it in one action. It is the chat's answer to the agent's requests and nothing else: it never reaches the

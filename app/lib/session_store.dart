@@ -50,7 +50,8 @@ class ChatMessage {
 /// A tool an agent wants to use, waiting on the person. Nothing answers it for them but Bypass, which answers a request that
 /// offers an allow before it would wait here.
 final class PermissionQuestion {
-  PermissionQuestion(this.title, this.kind, {this.detail, this.options = const [], this.bypassPassed = false});
+  PermissionQuestion(this.title, this.kind,
+      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false});
   final String title;
   final String? kind;
 
@@ -60,8 +61,11 @@ final class PermissionQuestion {
   /// The answers the agent offers, in its order.
   final List<AcpPermissionOption> options;
 
-  /// Whether Bypass was on and left this to the person, since the agent offered no option to allow.
+  /// Whether Bypass was on and left this to the person.
   final bool bypassPassed;
+
+  /// Whether it is a question or a plan for the person, which Bypass never answers.
+  final bool forPerson;
   final Completer<AcpDecision> _answer = Completer();
 }
 
@@ -175,8 +179,20 @@ class ChatSession {
   bool agentNames = false;
 
   /// Whether Canoa answers this session's permission requests that offer an allow, as the Bypass mode of an agent that has no
-  /// mode of its own that asks for nothing. Off unless the person chose it.
+  /// mode of its own that asks for nothing. Off unless the person chose it. It sits on the agent's own mode, which stays.
   bool bypass = false;
+
+  /// Whether the session is being opened again and its agent has not loaded it yet: nothing about its mode changes then.
+  bool opening = false;
+
+  /// The mode last asked for, until the agent has taken it or refused it, so a quick second Shift+Tab goes on from it.
+  String? targetMode;
+
+  /// Modes the agent refused, which Shift+Tab then skips.
+  final Set<String> refusedModes = {};
+
+  /// Changes of mode wait their turn here, so each starts from where the one before ended.
+  Future<void> modeQueue = Future.value();
 
   /// Whether a turn ended here since the person last chose this session.
   bool unread = false;
@@ -293,7 +309,7 @@ class SessionStore extends ChangeNotifier {
     if (!_attention.isClosed) _attention.add((session, kind));
   }
 
-  /// The mode [session] is in: Canoa's own Bypass, else what the agent's mode option says, a choice still waiting first. Null
+  /// The mode [session] is in as shown: Canoa's own Bypass, else the agent's mode option, a choice still waiting first. Null
   /// before an agent that has not said.
   String? modeOf(ChatSession session) {
     if (session.bypass) return ownBypass;
@@ -301,33 +317,41 @@ class SessionStore extends ChangeNotifier {
     return pending?.value ?? (session.isDraft ? null : modeOptionIn(session.options)?.current);
   }
 
-  /// Whether [session] is in a mode that asks for nothing: Canoa's own Bypass, or the agent's.
+  /// The agent's own mode, which Canoa's Bypass sits on top of: what the agent says it is in now, never a choice waiting.
+  String? underlyingMode(ChatSession session) => session.isDraft ? null : modeOptionIn(session.options)?.current;
+
+  /// Whether [session] is in a mode that asks for nothing, to show it: Canoa's own Bypass, or the agent's own as it says it
+  /// is in it now. A choice still waiting is not yet in effect.
   bool inBypass(ChatSession session) {
     if (session.bypass) return true;
-    final value = modeOf(session);
+    final value = underlyingMode(session);
     if (value == null) return false;
-    final label = modeOptionIn(optionsOf(session))?.choices.where((choice) => choice.value == value).firstOrNull?.label;
+    final label = modeOptionIn(session.options)?.choices.where((choice) => choice.value == value).firstOrNull?.label;
     return isBypassMode(value, label);
   }
 
-  /// Puts [session] in [entry]'s mode. Bypass answers every request that offers an allow, those already waiting included; a
-  /// request with no allow is still the person's.
+  /// Puts [session] in [entry]'s mode. Canoa's own Bypass answers every request that offers an allow, those already waiting
+  /// included, and sits on the agent's mode, which stays; a request with no allow, a question or a plan is still the person's.
   Future<void> chooseMode(ChatSession session, ModeEntry entry) async {
-    final wasBypass = inBypass(session);
+    if (!entry.selectable) return;
+    final wasAnswering = session.bypass;
     if (entry.own) {
-      if (session.bypass) return;
       session.pending.removeWhere((_, choice) => choice.role == OptionRole.mode);
       session.bypass = true;
     } else {
       session.bypass = false;
       final option = modeOptionIn(optionsOf(session));
-      if (option != null) await choose(session, option, entry.value);
+      if (option != null) {
+        await choose(session, option, entry.value);
+        // An agent that refuses a mode is not asked for it again by Shift+Tab.
+        final waiting = session.pending.values.any((choice) => choice.role == OptionRole.mode && choice.value == entry.value);
+        if (!waiting && !session.isDraft && underlyingMode(session) != entry.value) session.refusedModes.add(entry.value);
+      }
     }
-    final isBypass = inBypass(session);
-    if (isBypass && !wasBypass) {
+    if (session.bypass && !wasAnswering) {
       _note(session, 'Mode: Bypass. A request that offers to allow is allowed without asking you.');
       _answerWaiting(session);
-    } else if (!isBypass && wasBypass) {
+    } else if (!session.bypass && wasAnswering) {
       _note(session, 'Mode: ${shortText(entry.label) ?? entry.value}. Requests are asked again.');
     }
     _keepMode(session);
@@ -343,29 +367,51 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Puts [session] in the next of its modes, as Shift+Tab does.
+  /// Whether [session]'s mode can be changed now: not while it connects, nor while it is opened again and not yet loaded.
+  bool canChangeMode(ChatSession session) =>
+      session.status != SessionStatus.connecting && session.status != SessionStatus.preview && !session.opening;
+
+  /// Puts [session] in the next of its modes, as Shift+Tab does. Presses queue against the mode last asked for, not the one
+  /// the agent still shows, and a mode the agent refused is skipped.
   Future<void> cycleMode(ChatSession session) {
+    if (!canChangeMode(session)) return Future.value();
     final entries = modeEntries(modeOptionIn(optionsOf(session)));
-    return chooseMode(session, nextMode(entries, modeOf(session)));
+    final next = nextMode(entries, session.targetMode ?? modeOf(session), skip: session.refusedModes);
+    if (next == null) return Future.value();
+    session.targetMode = next.value;
+    return session.modeQueue = session.modeQueue.then((_) => chooseMode(session, next)).whenComplete(() {
+      if (session.targetMode == next.value) session.targetMode = null;
+    });
   }
 
-  /// Takes [session] out of Bypass, into the mode of the agent that asks the most: Manual where it has one.
+  /// Takes [session] out of Bypass. Canoa's own sat on the agent's mode, which holds again; an agent's own goes to Manual,
+  /// or the first mode it has that asks.
   Future<void> leaveBypass(ChatSession session) async {
-    final entries = [for (final entry in modeEntries(modeOptionIn(optionsOf(session)))) if (!entry.bypass) entry];
-    if (entries.isEmpty) {
+    if (session.bypass) {
       session.bypass = false;
+      _note(session, 'Bypass is off. Requests are asked again.');
       _keepMode(session);
+      _keepDraft(session);
       notifyListeners();
       return;
     }
+    final entries = [for (final entry in modeEntries(modeOptionIn(optionsOf(session)))) if (!entry.bypass && entry.selectable) entry];
+    if (entries.isEmpty) return;
     final preferred = entries.where((entry) => const {'manual', 'default'}.contains(entry.value)).firstOrNull ?? entries.first;
     await chooseMode(session, preferred);
   }
 
-  /// Answers the requests waiting in [session] that offer an allow.
+  /// Whether a request is a question or a plan for the person, whatever mode: Bypass leaves it to them.
+  static bool _isForPerson(AcpPermissionRequest request) {
+    if (request.kind == 'switch_mode') return true;
+    final input = request.rawInput;
+    return input is Map && input['questions'] is List;
+  }
+
+  /// Answers the requests waiting in [session] that offer an allow and are not a question or a plan.
   void _answerWaiting(ChatSession session) {
     for (final question in [...session.pendingPermissions]) {
-      final allow = bypassAnswer(question.options);
+      final allow = question.forPerson ? null : bypassAnswer(question.options);
       if (allow == null) continue;
       session.pendingPermissions.remove(question);
       question._answer.complete(AcpSelect(allow.optionId));
@@ -373,11 +419,11 @@ class SessionStore extends ChangeNotifier {
     }
   }
 
-  /// Notes in the ledger the mode [session] is in, to put it back when it is opened again.
+  /// Notes in the ledger the agent's mode, and whether Canoa's Bypass is on, to put both back when [session] is opened again.
   void _keepMode(ChatSession session) {
     final remote = session.remoteSessionId;
     final peerId = session.peerId;
-    if (ledger == null || remote == null || peerId == null || session.isDraft) return;
+    if (ledger == null || remote == null || peerId == null || session.isDraft || session.opening) return;
     final value = session.pending.values.where((choice) => choice.role == OptionRole.mode).firstOrNull?.value ??
         modeOptionIn(session.options)?.current;
     ledger!.setMode(peerId, remote, mode: value, bypass: session.bypass);
@@ -642,7 +688,8 @@ class SessionStore extends ChangeNotifier {
         _note(session, 'The agent offers no ${choice.role == OptionRole.other ? choice.id : choice.role.name} of ${shortText(choice.value) ?? 'that'} now, so it was not set.');
         continue;
       }
-      if (option.current != choice.value) await _set(session, option, choice.value);
+      // A mode is sent even when it is the one shown: what shows may not be what is in effect.
+      if (option.current != choice.value || choice.role == OptionRole.mode) await _set(session, option, choice.value);
       final took = session.options.where((each) => each.id == option.id).firstOrNull?.current == choice.value;
       if (took && choice.byPerson && session.source != null) {
         ledger?.rememberChoice(sourceKey(session.source!), choice.role, choice.value);
@@ -718,7 +765,8 @@ class SessionStore extends ChangeNotifier {
     // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about.
     if (request.toolCall != null) _applyTool(target, request.toolCall!);
     final title = shortText(request.title) ?? shortText(request.kind) ?? 'A tool';
-    if (inBypass(target)) {
+    final forPerson = _isForPerson(request);
+    if (target.bypass && !forPerson) {
       final allow = bypassAnswer(request.options);
       if (allow != null) {
         _note(target, 'Bypass allowed: $title (${shortText(allow.name) ?? allow.kind}).');
@@ -734,7 +782,8 @@ class SessionStore extends ChangeNotifier {
         ?describeToolInput(request.rawInput),
       ].join('\n').trim(),
       options: request.options,
-      bypassPassed: inBypass(target),
+      bypassPassed: target.bypass,
+      forPerson: forPerson,
     );
     target.pendingPermissions.add(question);
     _needs(target, AttentionKind.permission);
@@ -983,7 +1032,6 @@ class SessionStore extends ChangeNotifier {
       method: session.method,
       worktree: session.worktree,
     );
-    _keepMode(session);
   }
 
   /// Keeps what was said in [session] with its ledger entry, which the ledger does only when the person turned that on.
@@ -1085,7 +1133,7 @@ class SessionStore extends ChangeNotifier {
   /// the agent offers an option with that value, and the report goes on the session and, in one line, into it. [notes]
   /// are what the person was not shown of the layers, such as one left out, and go into it too.
   Future<void> applyProfile(ChatSession session, ProfileLaunch launch, PreparedProfile prepared,
-      {required String harness, List<LayerNote> notes = const []}) async {
+      {required String harness, List<LayerNote> notes = const [], bool keepOwnMode = false}) async {
     session.setup = launch.setup;
     for (final note in notes) {
       _note(session, 'Profile, ${note.layer}: ${note.text}');
@@ -1100,6 +1148,8 @@ class SessionStore extends ChangeNotifier {
     ]);
     final set = <String, String>{};
     for (final (id, value, key) in chosen) {
+      // A reopened session's own mode, kept from before, is put back after this and wins: it is not set twice.
+      if (keepOwnMode && key == 'mode') continue;
       final option = session.options.firstWhere((option) => option.id == id);
       await _set(session, option, value);
       final now = session.options.where((option) => option.id == id).firstOrNull;
@@ -1108,12 +1158,16 @@ class SessionStore extends ChangeNotifier {
     ProfileItem settled(ProfileItem item) {
       if (!const {'model', 'effort', 'mode'}.contains(item.key)) return item;
       final how = set[item.key];
+      if (keepOwnMode && item.key == 'mode') {
+        return ProfileItem(item.key, item.layer, ItemState.off, 'the mode this session was left in is used instead');
+      }
       return how != null
           ? ProfileItem(item.key, item.layer, ItemState.applied, how)
           : ProfileItem(item.key, item.layer, ItemState.unsupported, 'the agent offers no ${item.key} option with this value');
     }
     session.profile = ProfileReport(harness, [for (final item in launch.items) settled(item)]);
     _note(session, session.profile!.summary);
+    _keepMode(session);
     notifyListeners();
   }
 
@@ -1218,13 +1272,18 @@ class SessionStore extends ChangeNotifier {
       case Rendering.usage:
         session.usage = session.usage.applied(update.raw);
       case Rendering.choices when update.kind == 'config_option_update':
+        final before = modeOptionIn(session.options)?.current;
         _setOptions(session, update.raw['configOptions'], null);
         _rememberSource(session);
+        // A change the agent made by itself is where the session now is.
+        if (before != null && modeOptionIn(session.options)?.current != before) _keepMode(session);
       case Rendering.choices:
         if (update.raw['currentModeId'] case final String mode) {
+          final before = modeOptionIn(session.options)?.current;
           for (final option in session.options) {
             if (option.isMode) _setCurrent(session, option.id, mode);
           }
+          if (before != null && before != mode) _keepMode(session);
         }
       case Rendering.title:
         final title = shortText(update.raw['title']);
@@ -1601,20 +1660,25 @@ class SessionStore extends ChangeNotifier {
       websocketFallback: entry.fallback == null ? null : Uri.tryParse(entry.fallback!),
       method: entry.method,
       worktree: entry.worktree,
-    ))..bypass = entry.bypass;
+    ))
+      ..bypass = entry.bypass
+      ..opening = true;
     attachVerifiedClient(session.id, client, record: false);
     try {
       final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: launch?.setup ?? AcpSessionSetup.none);
       applyOpened(session, opened);
-      // The mode the person left it in goes back before anything else is sent.
-      if (entry.mode case final mode? when !entry.bypass) {
+      if (launch != null && prepared != null) {
+        await applyProfile(session, launch, prepared,
+            harness: harness ?? entry.harness, notes: notes, keepOwnMode: entry.mode != null);
+      }
+      // The mode the session was left in goes back, once, before anything is sent: it wins over the profile's. Under Canoa's
+      // own Bypass it is the agent's mode that Bypass sat on.
+      if (entry.mode case final mode?) {
         final id = modeOptionIn(session.options)?.id ?? OptionRole.mode.name;
         session.pending[id] = PendingChoice(id, OptionRole.mode, mode);
       }
       await _applyPending(session);
-      if (launch != null && prepared != null) {
-        await applyProfile(session, launch, prepared, harness: harness ?? entry.harness, notes: notes);
-      }
+      session.opening = false;
       if (!opened.replayed) {
         _note(session, 'The agent resumed this without sending what was said before.');
         if (entry.messages.isNotEmpty) {
@@ -1629,6 +1693,7 @@ class SessionStore extends ChangeNotifier {
       notifyListeners();
       return session;
     } catch (_) {
+      session.opening = false;
       forget(session);
       rethrow;
     }
