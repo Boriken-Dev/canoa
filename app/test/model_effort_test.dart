@@ -49,7 +49,7 @@ void main() {
     expect(store.selected?.isDraft, isTrue);
     expect(await menuOf(tester, 'option-model'), ['Default', 'Default model', 'Opus', 'Refused']);
     expect(await menuOf(tester, 'option-effort'), ['Default', 'Low', 'High']);
-    expect(await menuOf(tester, 'option-mode'), ['Default', 'Ask first', 'Accept edits']);
+    expect(await menuOf(tester, 'option-mode'), ['Default', 'Ask first', 'Accept edits', 'Bypass']);
     final tip = tester.widget<PopupMenuButton<String?>>(find.byKey(const Key('option-model'))).tooltip!;
     expect(tip, startsWith('Model, as its agent offered on '));
     expect(agent.starts, hasLength(1), reason: 'the new session has started nothing');
@@ -143,26 +143,6 @@ void main() {
     await settle(tester);
     final chosen = {for (final choice in store.selected!.pending.values) choice.role: choice.value};
     expect(chosen, {OptionRole.model: 'opus', OptionRole.effort: 'high'});
-    await finish(tester);
-  });
-
-  testWidgets('full access shows in the mode control, red, and turns off there', (tester) async {
-    final agent = OptionsAgent();
-    final store = _store();
-    await pumpApp(tester, store, startAgent: agent.start);
-    await _draft(tester);
-    await send(tester, 'Say hello');
-    await tester.tap(find.byKey(const Key('option-mode')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Full access…'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Turn on full access'));
-    await tester.pumpAndSettle();
-    expect(store.selected?.fullAccess, FullAccess.session);
-    final label = tester.widget<Text>(find.descendant(of: find.byKey(const Key('option-mode')), matching: find.text('Full access')));
-    expect(label.style?.color, Theme.of(tester.element(find.byKey(const Key('option-mode')))).colorScheme.error);
-    await pick(tester, 'option-mode', 'Turn off full access');
-    expect(store.selected?.fullAccess, isNull);
     await finish(tester);
   });
 

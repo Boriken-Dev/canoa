@@ -10,7 +10,8 @@ import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart' show ConfigOption, parseConfigOptions;
 
 final class OptionsAgent {
-  OptionsAgent({this.images = true, this.files = true, this.failStart});
+  OptionsAgent({this.images = true, this.files = true, this.failStart, this.modes = const [('ask', 'Ask first'), ('edits', 'Accept edits')]})
+      : mode = modes.isEmpty ? '' : modes.first.$1;
 
   /// What it says it takes with a prompt.
   final bool images, files;
@@ -25,7 +26,14 @@ final class OptionsAgent {
   final starts = <AgentCommand>[];
   final clients = <VerifiedAgent>[];
 
-  String model = 'default', effort = 'low', mode = 'ask';
+  String model = 'default', effort = 'low', mode;
+
+  /// The modes it offers, each with its label: Claude's translator offers five, Codex's four with no Bypass.
+  final List<(String, String)> modes;
+
+  /// Modes as `coqui-acp-claude` offers them, and as `coqui-acp-codex` does, with no Bypass.
+  static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
+  static const codexModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan')];
 
   /// Whether a prompt's turn ends only when [finishTurn] is called.
   bool holdTurns = false;
@@ -45,9 +53,8 @@ final class OptionsAgent {
   }
 
   List<Map<String, Object?>> get options => [
-    {'id': 'mode', 'name': 'Mode', 'category': 'mode', 'type': 'select', 'currentValue': mode, 'options': [
-      {'value': 'ask', 'name': 'Ask first'},
-      {'value': 'edits', 'name': 'Accept edits'},
+    if (modes.isNotEmpty) {'id': 'mode', 'name': 'Mode', 'category': 'mode', 'type': 'select', 'currentValue': mode, 'options': [
+      for (final (value, name) in modes) {'value': value, 'name': name},
     ]},
     {'id': 'model', 'name': 'Model', 'category': 'model', 'type': 'select', 'currentValue': model, 'options': [
       {'value': 'default', 'name': 'Default model'},
@@ -133,6 +140,10 @@ final class OptionsAgent {
             } else {
               end();
             }
+          case 'session/load' || 'session/resume':
+            // A reopened agent starts in its own default mode again, whatever the session was left in.
+            mode = modes.isEmpty ? '' : modes.first.$1;
+            reply(id, {'configOptions': options});
           default:
             if (id != null) reply(id, <String, Object?>{});
         }

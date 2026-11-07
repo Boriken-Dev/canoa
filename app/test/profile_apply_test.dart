@@ -291,7 +291,7 @@ command = "no-such-program"
   test("[agents.NAME.mcp] reads back as written, and keeping it keeps the rest of canoa.cfg", () {
     final parsed = CanoaConfig.parse('''
 [permissions]
-full_access = ["Claude"]
+default_mode = "plan"
 [notifications]
 finished = false
 [agents.Claude.mcp]
@@ -301,11 +301,11 @@ off = false
 ''');
     expect(parsed.agentMcp['Claude'], {'marker': true, 'team': 'sha256:${'a' * 64}', 'off': false});
     final changed = parsed.withAgentMcp('Codex', {'marker': false});
-    expect(changed.fullAccess, {'Claude'});
+    expect(changed.defaultMode, 'plan');
     expect(changed.notifications.finished, isFalse);
     // What saving Settings does with the profile tables the app holds.
     final saved = parsed.copyWith(look: parsed.look).withProfilesOf(changed);
-    expect(saved.fullAccess, {'Claude'});
+    expect(saved.defaultMode, 'plan');
     expect(saved.notifications.finished, isFalse);
     final reread = CanoaConfig.parse(changed.encode());
     expect(reread.agentMcp['Codex'], {'marker': false});

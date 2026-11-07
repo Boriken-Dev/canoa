@@ -23,6 +23,9 @@ void main() {
     expect(_preset('Codex').programPaths.keys, ['COQUI_ACP_CODEX_EXECUTABLE']);
     expect(_preset('Claude').args, contains('--allow-client-plugins'), reason: 'a profile\'s skills are a plugin');
     expect(_preset('Codex').args, isNot(contains('--allow-client-plugins')));
+    for (final label in ['Claude', 'Codex']) {
+      expect(_preset(label).args, contains('--allow-bypass'), reason: '$label: the person running it for themselves chooses the mode');
+    }
   });
 
   test('a host\'s own command runs as this app with its flag, or as the canoa the environment names', () {

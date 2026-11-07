@@ -202,6 +202,7 @@ void main() {
     ));
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('settings-profiles')));
     await tester.tap(find.byKey(const Key('settings-profiles')));
     await tester.pumpAndSettle();
     expect(find.text('Effective profile'), findsOneWidget);

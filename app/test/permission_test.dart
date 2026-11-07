@@ -1,5 +1,5 @@
-// The agent's own answers to a permission request, and full access: a choice the person makes, shown while it lasts, and never
-// an answer to a request that offers no way to allow.
+// The agent's own answers to a permission request, and Bypass: a mode the person chooses, shown while it lasts, and never an
+// answer to a request that offers no way to allow.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,9 +7,9 @@ import 'dart:io';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/local_agent.dart';
+import 'package:canoa/chat/modes.dart';
 import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -85,7 +85,7 @@ Future<void> _settle(WidgetTester tester) async {
 Future<(_Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, {CanoaConfig config = const CanoaConfig(), SessionStore? store}) async {
   await tester.binding.setSurfaceSize(const Size(1100, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final kept = store ?? SessionStore(includePreview: false, fullAccessAgents: config.fullAccess);
+  final kept = store ?? SessionStore(includePreview: false);
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(kept)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: kept, config: config));
@@ -147,128 +147,82 @@ void main() {
     });
   });
 
-  group('full access', () {
+  group('bypass', () {
+    final bypass = ModeEntry(ownBypass, 'Bypass', own: true);
+
     testWidgets('is off by default: a request shows, and no banner does', (tester) async {
-      expect(const CanoaConfig().fullAccess, isEmpty);
-      expect(CanoaConfig.parse('').fullAccess, isEmpty);
       final (agent, session, store) = await _shown(tester);
-      expect(session.fullAccess, isNull);
+      expect(session.bypass, isFalse);
+      expect(store.inBypass(session), isFalse);
       agent.ask(1, 'Edit a.txt', _all);
       await _settle(tester);
       expect(find.byType(PermissionCard), findsOneWidget);
-      expect(find.byKey(const Key('full-access-banner')), findsNothing);
-      expect(store.weakenings, isEmpty);
+      expect(find.byKey(const Key('bypass-banner')), findsNothing);
     });
 
-    testWidgets('turned on for a conversation, after saying what it does, answers allow once with no card', (tester) async {
-      final (agent, session, store) = await _shown(tester);
-      // Full access is beside the agent's mode, under the message.
+    testWidgets('chosen in the mode control asks nothing, and answers allow once with no card', (tester) async {
+      final (agent, session, _) = await _shown(tester);
       await tester.tap(find.byKey(const Key('option-mode')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Full access…'));
+      await tester.tap(find.text('Bypass').last);
       await tester.pumpAndSettle();
-      expect(find.textContaining('without asking you'), findsOneWidget);
-      await tester.tap(find.text('Turn on full access'));
-      await tester.pumpAndSettle();
-      expect(session.fullAccess, FullAccess.session);
-      expect(store.weakenings.single, contains('full access'));
-      expect(find.byKey(const Key('full-access-banner')), findsOneWidget);
-      expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Full access')), findsOneWidget,
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(session.bypass, isTrue);
+      expect(find.byKey(const Key('bypass-banner')), findsOneWidget);
+      expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Bypass')), findsOneWidget,
           reason: 'the session row says so too');
 
       agent.ask(2, 'Edit a.txt', _all);
       await _settle(tester);
       expect(find.byType(PermissionCard), findsNothing);
-      expect(agent.answerTo(2)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}},
-          reason: 'never the option the agent would remember');
-      expect(session.messages.last.text, contains('Full access allowed'));
+      expect(agent.answerTo(2)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
+      expect(session.messages.last.text, contains('Bypass allowed'));
     });
 
-    testWidgets('never answers a request that offers no allow, or only one the agent would remember', (tester) async {
+    testWidgets('answers a request that offers only an always allow, and never one that offers no allow', (tester) async {
       final (agent, session, store) = await _shown(tester);
-      store.setFullAccess(session, true);
+      await store.chooseMode(session, bypass);
       await tester.pump();
+      agent.ask(4, 'Edit b.txt', _alwaysOnly);
+      await _settle(tester);
+      expect(find.byType(PermissionCard), findsNothing);
+      expect(agent.answerTo(4)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-always'}});
       agent.ask(3, 'Edit a.txt', _noAllow);
       await _settle(tester);
       expect(find.byType(PermissionCard), findsOneWidget);
       expect(agent.answerTo(3), isNull);
+      expect(find.textContaining('Bypass answers only a request that offers to allow'), findsOneWidget);
       await tester.tap(_choice('No'));
       await _settle(tester);
-      agent.ask(4, 'Edit b.txt', _alwaysOnly);
-      await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
-      expect(agent.answerTo(4), isNull);
-      expect(find.textContaining('Full access answers only'), findsOneWidget);
+      expect(agent.answerTo(3)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject'}});
     });
 
-    testWidgets('is turned off in one action, and the next request shows', (tester) async {
+    testWidgets('answers the requests already waiting when it is chosen, except one with no allow', (tester) async {
       final (agent, session, store) = await _shown(tester);
-      store.setFullAccess(session, true);
+      agent.ask(5, 'Edit a.txt', _all);
+      agent.ask(6, 'Edit b.txt', _noAllow);
+      await _settle(tester);
+      expect(session.pendingPermissions, hasLength(2));
+      await store.chooseMode(session, bypass);
+      await _settle(tester);
+      expect(agent.answerTo(5)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
+      expect(agent.answerTo(6), isNull);
+      expect(session.pendingPermissions, hasLength(1));
+    });
+
+    testWidgets('is left in one action, and the next request shows', (tester) async {
+      final (agent, session, store) = await _shown(tester);
+      await store.chooseMode(session, bypass);
       await tester.pump();
-      await tester.tap(find.descendant(of: find.byKey(const Key('full-access-banner')), matching: find.text('Turn off')));
+      await tester.tap(find.descendant(of: find.byKey(const Key('bypass-banner')), matching: find.text('Leave Bypass')));
       await tester.pump();
-      expect(session.fullAccess, isNull);
-      expect(find.byKey(const Key('full-access-banner')), findsNothing);
-      expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Full access')), findsNothing);
+      expect(session.bypass, isFalse);
+      expect(find.byKey(const Key('bypass-banner')), findsNothing);
+      expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Bypass')), findsNothing);
       agent.ask(9, 'Edit a.txt', _all);
       await _settle(tester);
       expect(find.byType(PermissionCard), findsOneWidget);
       expect(agent.answerTo(9), isNull);
-    });
-
-    testWidgets('per agent, from canoa.cfg: its sessions start with it, logged, and turning it off there stops it for the agent', (tester) async {
-      final config = CanoaConfig.parse('[permissions]\nfull_access = ["Scripted"]\n');
-      expect(config.fullAccess, {'Scripted'});
-      expect(CanoaConfig.parse(config.encode()).fullAccess, {'Scripted'});
-      CanoaConfig? saved;
-      final store = SessionStore(includePreview: false, fullAccessAgents: config.fullAccess);
-      await tester.binding.setSurfaceSize(const Size(1100, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final agent = _Agent();
-      final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
-      await tester.pumpWidget(CanoaApp(store: store, config: config, writeConfig: (changed) async => saved = changed));
-      await tester.pump();
-      expect(session.fullAccess, FullAccess.agent);
-      expect(store.weakenings.single, contains('Scripted'));
-      agent.ask(10, 'Edit a.txt', _all);
-      await _settle(tester);
-      expect(agent.answerTo(10)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
-
-      await tester.tap(find.descendant(of: find.byKey(const Key('full-access-banner')), matching: find.text('Turn off')));
-      await _settle(tester);
-      expect(session.fullAccess, isNull);
-      expect(store.fullAccessAgents, isEmpty);
-      expect(saved?.fullAccess, isEmpty, reason: 'canoa.cfg no longer names the agent');
-    });
-
-    testWidgets('Settings turns it on for an agent only after saying what it does', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(900, 1400));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      CanoaConfig? saved;
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () async => saved = await showDialog<CanoaConfig>(
-          context: context,
-          builder: (_) => const SettingsDialog(config: CanoaConfig(), agents: ['Claude', 'Codex']),
-        ),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      expect(find.text('Off for every agent'), findsOneWidget);
-      await tester.tap(find.text('Full access'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Claude'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cancel').last);
-      await tester.pumpAndSettle();
-      expect(tester.widget<SwitchListTile>(find.widgetWithText(SwitchListTile, 'Claude')).value, isFalse);
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Claude'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Turn on full access'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      expect(saved?.fullAccess, {'Claude'});
     });
 
     testWidgets('a request reaches only the conversation of the agent that sent it, whatever session id it chose', (tester) async {
@@ -278,55 +232,14 @@ void main() {
       final a = await tester.runAsync(() => first.start(store, label: 'First')) as ChatSession;
       final b = await tester.runAsync(() => second.start(store, label: 'Second')) as ChatSession;
       expect(a.remoteSessionId, b.remoteSessionId, reason: 'both agents chose s1');
-      store.setFullAccess(a, true);
+      await store.chooseMode(a, bypass);
       second.ask(11, 'Edit a.txt', _all);
       await _settle(tester);
-      expect(second.answerTo(11), isNull, reason: 'the first conversation\'s full access is not the second\'s');
+      expect(second.answerTo(11), isNull, reason: 'the first conversation\'s mode is not the second\'s');
       expect(b.pendingPermissions, hasLength(1));
       expect(a.pendingPermissions, isEmpty);
       expect(a.toolEntries, isEmpty, reason: 'its tool is drawn in its own conversation');
       expect(b.toolEntries.keys, ['t11']);
-    });
-
-    testWidgets('an agent\'s setting reaches only sessions of the program run under that name', (tester) async {
-      final store = SessionStore(includePreview: false, fullAccessAgents: const {'Claude'});
-      final agent = _Agent();
-      // A connection whose agent calls itself Claude, which is not the program this app runs as Claude.
-      agent.client = VerifiedAgent.fromChild(
-        label: 'Elsewhere',
-        messages: agent.incoming.stream,
-        decider: store.askPermission,
-        close: () async {},
-        send: (line) async {
-          final message = jsonDecode(line) as Map<String, dynamic>;
-          if (message['method'] == 'initialize') {
-            agent.reply(message['id'], {'protocolVersion': 1, 'agentCapabilities': <String, Object?>{}});
-          } else if (message['method'] == 'session/new') {
-            agent.reply(message['id'], {'sessionId': 's1'});
-          }
-        },
-      );
-      await tester.runAsync(() async {
-        await agent.client.initialize();
-        await agent.client.openSession(cwd: '/work');
-      });
-      final session = store.addProviderSession(title: 'T', agent: 'Claude', peerId: agent.client.peerId, remoteSessionId: 's1');
-      store.attachVerifiedClient(session.id, agent.client);
-      expect(session.fullAccess, isNull);
-      store.setAgentFullAccess('Claude', false);
-      store.setAgentFullAccess('Claude', true);
-      expect(session.fullAccess, isNull);
-      expect(store.weakenings, hasLength(1), reason: 'turning it on for the agent is logged, and reaches no session here');
-    });
-
-    testWidgets('what an agent or a person named is shown and logged without what could disguise it', (tester) async {
-      final store = SessionStore(includePreview: false);
-      final agent = _Agent();
-      final session = await tester.runAsync(() => agent.start(store, label: 'Scripted')) as ChatSession;
-      session.title = 'evil\u202Etxt\nweakened: nothing';
-      store.setFullAccess(session, true);
-      expect(store.weakenings.single, isNot(contains('\n')));
-      expect(store.weakenings.single, isNot(contains('\u202E')));
     });
 
     testWidgets('questions past the most a conversation holds are cancelled and said', (tester) async {
@@ -338,12 +251,6 @@ void main() {
       expect(session.pendingPermissions, hasLength(maxPendingPermissions));
       expect(agent.answerTo(100 + maxPendingPermissions)?['result'], {'outcome': {'outcome': 'cancelled'}});
       expect(session.messages.where((message) => message.text.contains('more questions than')), isNotEmpty);
-    });
-
-    test('canoa.cfg refuses a full_access that is not a list of names', () {
-      expect(() => CanoaConfig.parse('[permissions]\nfull_access = "Claude"\n'), throwsFormatException);
-      expect(() => CanoaConfig.parse('[permissions]\nfull_access = [1]\n'), throwsFormatException);
-      expect(() => CanoaConfig.parse('[permissions]\nask = false\n'), throwsFormatException);
     });
   });
 

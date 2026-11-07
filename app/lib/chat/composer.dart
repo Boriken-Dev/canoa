@@ -10,6 +10,7 @@ import '../sources/sources.dart';
 import '../theme/look.dart';
 import 'agent_events.dart' show AgentCommandInfo, ConfigOption;
 import 'attachments.dart';
+import 'modes.dart';
 import 'session_options.dart';
 import 'transcript.dart' show CommandSuggestions;
 
@@ -46,8 +47,6 @@ final class ComposerKit {
     this.overlays = const [],
     this.pasteAsFile = defaultPasteAsFile,
     this.onSourceSettings,
-    this.onFullAccess,
-    this.onEndFullAccess,
     this.onProfile,
   });
 
@@ -76,9 +75,6 @@ final class ComposerKit {
 
   /// Opens Settings at its sources.
   final VoidCallback? onSourceSettings;
-
-  /// Turns full access on for a session, after asking; and ends it, as the banner does.
-  final void Function(ChatSession session)? onFullAccess, onEndFullAccess;
 
   /// Shows what a session was given of its profile.
   final void Function(ChatSession session)? onProfile;
@@ -213,8 +209,15 @@ class ComposerState extends State<Composer> {
     );
   }
 
-  /// Ctrl+V, or ⌘V on a Mac, pastes through [paste]; every other key goes on as usual.
+  /// Shift+Tab puts the session in its next mode; Ctrl+V, or ⌘V on a Mac, pastes through [paste]; every other key goes on as
+  /// usual.
   KeyEventResult onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.tab && HardwareKeyboard.instance.isShiftPressed &&
+        !HardwareKeyboard.instance.isControlPressed && !HardwareKeyboard.instance.isAltPressed &&
+        widget.session.status != SessionStatus.preview) {
+      unawaited(widget.store.cycleMode(widget.session));
+      return KeyEventResult.handled;
+    }
     if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyV || !widget.enabled) return KeyEventResult.ignored;
     final keys = HardwareKeyboard.instance;
     final mac = defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.iOS;
@@ -345,23 +348,28 @@ class AttachmentChips extends StatelessWidget {
 
 /// A compact control in the row under the message.
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, this.icon, this.danger = false, this.enabled = true});
+  const _Pill({required this.label, this.icon, this.danger = false, this.status = false, this.enabled = true});
 
   final String label;
   final IconData? icon;
-  final bool danger, enabled;
+
+  /// [danger] is for what is wrong; [status] for what is on, in the accent of the scheme, never the colour of an error.
+  final bool danger, status, enabled;
 
   @override
   Widget build(BuildContext context) {
     final look = context.look;
-    final color = danger ? Theme.of(context).colorScheme.error : (enabled ? null : look.muted);
+    final scheme = Theme.of(context).colorScheme;
+    final color = danger ? scheme.error : status ? scheme.tertiary : (enabled ? null : look.muted);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         if (icon != null) ...[Icon(icon, size: 16, color: color ?? look.muted), const SizedBox(width: 4)],
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 180),
-          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: color)),
+        Flexible(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: color)),
+          ),
         ),
         if (enabled) Icon(Icons.expand_more, size: 16, color: color ?? look.muted),
       ]),
@@ -372,6 +380,9 @@ class _Pill extends StatelessWidget {
 /// The row under the message.
 class _Controls extends StatelessWidget {
   const _Controls({required this.composer});
+
+  /// From this width the controls stay on one line.
+  static const double wideFrom = 600;
 
   final ComposerState composer;
 
@@ -384,7 +395,9 @@ class _Controls extends StatelessWidget {
     final draft = session.status == SessionStatus.draft;
     final options = store.optionsOf(session);
     final seen = store.optionsSeen(session);
-    final controls = <Widget>[
+    // The mode first at the bottom left, then Add; the model and effort sit beside Send, as Claude Code and Codex lay them out.
+    final left = <Widget>[
+      _ModeChooser(store: store, session: session, options: options, seen: seen),
       MenuAnchor(
         menuChildren: [
           MenuItemButton(
@@ -418,7 +431,8 @@ class _Controls extends StatelessWidget {
       ),
       if (draft) _SourceChooser(store: store, session: session, kit: kit),
       if (draft) _PlaceToggle(store: store, session: session, kit: kit),
-      _ModeChooser(store: store, session: session, kit: kit, options: options, seen: seen),
+    ];
+    final right = <Widget>[
       for (final role in const [OptionRole.model, OptionRole.effort])
         _OptionChooser(store: store, session: session, role: role, options: options, seen: seen),
       if (options.any((option) => roleOf(option) == OptionRole.other))
@@ -437,11 +451,27 @@ class _Controls extends StatelessWidget {
             onPressed: widget.enabled ? widget.onSend : null,
             icon: const Icon(Icons.arrow_upward_rounded),
           );
-    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+    return LayoutBuilder(builder: (context, box) {
       // On a narrow window the controls go on to a second line, and Send stays at the end.
-      Expanded(child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 2, runSpacing: 2, children: controls)),
-      send,
-    ]);
+      if (box.maxWidth < wideFrom) {
+        return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Expanded(child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 2, runSpacing: 2, children: [...left, ...right])),
+          send,
+        ]);
+      }
+      // Wide, it stays on one line: the row is as wide as the composer, and scales down rather than wrap or overflow.
+      return FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: box.maxWidth),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: left),
+            Row(mainAxisSize: MainAxisSize.min, children: [...right, send]),
+          ]),
+        ),
+      );
+    });
   }
 }
 
@@ -594,51 +624,48 @@ class _OptionChooser extends StatelessWidget {
   }
 }
 
-/// The agent's own session mode, and Canoa's full access beside it, shown red while it is on.
+/// The mode the session is in, at the composer's bottom left: the agent's own modes, and Bypass beside them where the agent has
+/// none that asks for nothing. Choosing one asks nothing; Shift+Tab in the message cycles them. While Bypass is on it shows in
+/// the accent of the scheme as a status.
 class _ModeChooser extends StatelessWidget {
-  const _ModeChooser({required this.store, required this.session, required this.kit, required this.options, this.seen});
+  const _ModeChooser({required this.store, required this.session, required this.options, this.seen});
 
   final SessionStore store;
   final ChatSession session;
-  final ComposerKit kit;
   final List<ConfigOption> options;
   final DateTime? seen;
 
   @override
   Widget build(BuildContext context) {
-    final option = optionIn(options, OptionRole.mode);
-    final pending = session.pending.values.where((choice) => choice.role == OptionRole.mode).firstOrNull;
-    final full = session.fullAccess != null;
-    final canFull = !session.isDraft && session.status != SessionStatus.preview && kit.onFullAccess != null;
-    if (option == null && pending == null && !full && !canFull) return const SizedBox.shrink();
-    final current = pending?.value ?? (session.isDraft ? null : option?.current);
-    final label = full ? 'Full access' : current == null ? (session.isDraft ? 'Default' : 'Mode') : _labelOf(option, current);
+    if (session.status == SessionStatus.preview) return const SizedBox.shrink();
+    final option = modeOptionIn(options);
+    final entries = modeEntries(option);
+    final current = store.modeOf(session);
+    final bypass = store.inBypass(session);
+    final pending = session.pending.values.any((choice) => choice.role == OptionRole.mode);
+    final shown = entries.where((entry) => entry.value == current).firstOrNull;
+    final label = shown?.label ?? current ?? (session.isDraft ? 'Default' : 'Mode');
     return PopupMenuButton<Object?>(
       key: const Key('option-mode'),
-      tooltip: _seenLabel(session.isDraft ? seen : null, 'Mode'),
+      tooltip: _seenLabel(session.isDraft ? seen : null, 'Mode (Shift+Tab changes it)'),
+      enabled: session.status != SessionStatus.connecting,
       onSelected: (value) {
-        if (value == #fullAccess) {
-          kit.onFullAccess?.call(session);
-        } else if (value == #endFullAccess) {
-          kit.onEndFullAccess?.call(session);
-        } else if (option != null && value is String) {
-          unawaited(store.choose(session, option, value));
-        } else if (value == null && pending != null) {
-          unawaited(store.choose(session, ConfigOption(id: pending.id, label: 'Mode', current: '', choices: const []), null));
+        if (value is ModeEntry) {
+          unawaited(store.chooseMode(session, value));
+        } else if (value == null) {
+          store.clearMode(session);
         }
       },
       itemBuilder: (context) => [
-        if (session.isDraft && option != null) const PopupMenuItem<Object?>(value: null, child: Text('Default')),
-        for (final choice in option?.choices ?? const [])
-          CheckedPopupMenuItem<Object?>(value: choice.value, checked: choice.value == current, child: Text(choice.label)),
-        if (canFull) ...[
-          if (option != null) const PopupMenuDivider(),
-          full
-              ? const PopupMenuItem<Object?>(value: #endFullAccess, child: Text('Turn off full access'))
-              : const PopupMenuItem<Object?>(value: #fullAccess, child: Text('Full access…')),
-        ],
+        if (session.isDraft) const PopupMenuItem<Object?>(value: null, child: Text('Default')),
+        for (final entry in entries)
+          CheckedPopupMenuItem<Object?>(value: entry, checked: entry.value == current, child: Text(entry.label)),
       ],
-      child: _Pill(label: label, icon: full ? Icons.gpp_maybe_outlined : Icons.tune, danger: full),
+      child: _Pill(
+        label: pending && session.status == SessionStatus.working ? '$label (next turn)' : label,
+        icon: bypass ? Icons.fast_forward_outlined : Icons.tune,
+        status: bypass,
+      ),
     );
   }
 }

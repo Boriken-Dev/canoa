@@ -43,19 +43,22 @@ nothing of it and cannot undo it. A request offering no option Canoa can read ca
 an id is answered cancelled without being shown, since the agent could take that id for either. A conversation holds at most 64
 questions waiting; the agent's further ones are answered cancelled, and the conversation says so.
 
-**Full access** answers a session's requests without asking. It is off unless the person turns it on, for one conversation (the
-header's **Full access…**, after a dialog that says what it does) or for an agent (Settings, or `[permissions] full_access` in
-canoa.cfg), whose sessions then start with it. An agent's setting reaches only sessions of the program this app runs under that
-label: a peer, a hosted agent or a browser's agent never gets it by calling itself that, and is given full access per
-conversation instead. A request reaches only the conversation of the connection that sent it, whatever session id the agent
-chose. While it is on, a banner on the conversation and a mark on its row say so, and the
-banner's **Turn off** ends it in one action, for the agent too where the agent's setting turned it on. Each time it is turned on
-is logged as `weakened: full access is on ...` and said in the conversation, and each request it answers is said there too.
+**Modes.** The mode a session is in shows at the composer's bottom left, as Claude Code's and Codex's own do, and is changed
+from its menu or with Shift+Tab in the message, which goes on to the next mode and round. Nothing is asked: choosing a mode is
+the whole act. The control offers the agent's own modes (the `mode` option, or an agent's `modes`), read from the agent and
+never assumed; `canoa agent claude` and `canoa agent codex` offer Canoa's five where their tool has them: Manual, Accept edits,
+Auto, Plan and Bypass (the table of what each sets is in the translators' headers, in coqui-acp). A session keeps its own mode
+in the session list, so a session opened again, or after the app restarts, is put back in it before anything else is sent; Settings'
+**Mode of a new session** (`[permissions] default_mode`) is where a new one starts, and a profile's mode wins over it.
 
-It answers only with an `allow_once` option. A request offering none, including one whose only allow is `allow_always`, which the
-agent would keep after full access ends, is shown to the person as before. A request already waiting when it is turned on stays
-for the person. Full access is the chat's answer to the agent's requests and nothing else: it never reaches the browser
-extension's grants for pages, tabs or tools, which stay [their own](acp-permissions.md#independent-browser-grants).
+**Bypass** asks for nothing. Where the agent has a mode that asks for nothing (`bypass`, `bypassPermissions`), that is the one
+chosen. Where it has none, Canoa provides it by answering the agent's requests itself: every request that offers an allow is
+answered, with `allow_once` when offered, else `allow_always`, and each answer is said in the conversation. A request that
+offers no allow is still the person's, and is shown with that said. A request already waiting when Bypass is chosen is
+answered too. A request reaches only the conversation of the connection that sent it, whatever session id the agent chose. While
+Bypass is on, the mode control shows in the accent colour and a banner and a mark on the session's row say so; the banner's
+**Leave Bypass** ends it in one action. It is the chat's answer to the agent's requests and nothing else: it never reaches the
+browser extension's grants for pages, tabs or tools, which stay [their own](acp-permissions.md#independent-browser-grants).
 
 ## The changes pane
 
@@ -100,7 +103,7 @@ has its modes there. A change goes to the agent with `session/set_config_option`
 and shows once the agent's answer or a `config_option_update` says so. A value the agent refuses stays as it was, and its
 reason is said in the conversation. A change made while a turn runs is sent before the next prompt, and says so meanwhile.
 Before an agent has started, the controls list what its source's agent offered when it last ran, kept with the session list,
-else only Default. Full access is in the mode control, in red while it is on.
+else only Default. The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own modes.
 
 ## What goes with a message
 
