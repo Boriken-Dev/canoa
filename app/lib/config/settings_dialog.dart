@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'canoa_config.dart';
+import '../chat/modes.dart';
 import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
 import '../sources/sources.dart';
 import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles, this.agents = const [],
+  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles,
       this.onAllowNotifications, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
   final CanoaConfig config;
 
@@ -21,9 +22,6 @@ class SettingsDialog extends StatefulWidget {
 
   /// Whether the dialog opens with its sources shown.
   final bool openSources;
-
-  /// The agents this app offers, by label, each of which full access can be turned on for.
-  final List<String> agents;
 
   /// Asks the browser for leave to notify, where it has to be asked; true when it was given.
   final Future<bool> Function()? onAllowNotifications;
@@ -159,21 +157,6 @@ class SettingsDialogState extends State<SettingsDialog> {
     harnesses: config.sessions.harnesses,
   );
 
-  Future<bool> _confirmFullAccess(String agent) async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Full access for $agent?'),
-          content: Text('Each request $agent makes that offers to allow once will be allowed without asking you, in every '
-              'conversation with it, until you turn this off here or on the conversation\'s banner.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Turn on full access')),
-          ],
-        ),
-      ) ??
-      false;
-
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Canoa settings'),
@@ -271,30 +254,19 @@ class SettingsDialogState extends State<SettingsDialog> {
           ],
         ),
         if (widget.presets.isNotEmpty || config.agents.isNotEmpty || widget.hosted.isNotEmpty) _sources(context),
-        if (widget.agents.isNotEmpty || config.fullAccess.isNotEmpty)
-          ExpansionTile(
-            key: const Key('settings-full-access'),
-            title: const Text('Full access'),
-            subtitle: Text(config.fullAccess.isEmpty ? 'Off for every agent' : 'On for ${config.fullAccess.join(', ')}'),
-            children: [
-              const ListTile(
-                dense: true,
-                subtitle: Text('An agent with full access has each request that offers to allow once allowed without asking you. '
-                    'A request offering no way to allow once is still asked. It changes nothing the browser lets pages or agents do.'),
-              ),
-              for (final agent in {...widget.agents, ...config.fullAccess})
-                SwitchListTile(
-                  title: Text(agent),
-                  value: config.fullAccess.contains(agent),
-                  onChanged: (on) async {
-                    if (on && !await _confirmFullAccess(agent)) return;
-                    final names = {...config.fullAccess};
-                    on ? names.add(agent) : names.remove(agent);
-                    setState(() => config = config.copyWith(fullAccess: names));
-                  },
-                ),
+        ListTile(
+          key: const Key('settings-default-mode'),
+          title: const Text('Mode of a new session'),
+          subtitle: const Text('Each session can change it from the composer, and keeps its own.'),
+          trailing: DropdownButton<String?>(
+            value: config.defaultMode,
+            onChanged: (mode) => setState(() => config = mode == null ? config.copyWith(clearDefaultMode: true) : config.copyWith(defaultMode: mode)),
+            items: [
+              const DropdownMenuItem<String?>(value: null, child: Text("The agent's own")),
+              for (final mode in modeOrder) DropdownMenuItem<String?>(value: mode, child: Text(modeLabels[mode] ?? mode)),
             ],
           ),
+        ),
         ListTile(
           title: const Text('Sessions remembered'),
           subtitle: const Text('The least recently used go first'),

@@ -44,8 +44,8 @@ class PermissionChoice extends StatelessWidget {
   }
 }
 
-/// What an agent is waiting on, with the answers it offers. It stays until the person answers: nothing answers it for them, and
-/// full access answers a request before it would wait here, never one already waiting.
+/// What an agent is waiting on, with the answers it offers. It stays until the person answers: nothing answers it for them but
+/// Bypass, which does so before the request would wait here.
 class PermissionCard extends StatelessWidget {
   const PermissionCard({super.key, required this.store, required this.session});
 
@@ -76,11 +76,11 @@ class PermissionCard extends StatelessWidget {
               style: small,
             ),
           ),
-        if (question.fullAccessPassed)
+        if (question.bypassPassed)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'Full access answers only a request that offers to allow once, so this one is yours to answer.',
+              'Bypass answers only a request that offers to allow, so this one is yours to answer.',
               style: small?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
@@ -176,60 +176,37 @@ class _ToApprove extends StatelessWidget {
   }
 }
 
-/// Says, for as long as it lasts, that a conversation's requests are answered without asking, with the one action that ends it.
-class FullAccessBanner extends StatelessWidget {
-  const FullAccessBanner({super.key, required this.session, required this.onTurnOff});
+/// Says, for as long as it lasts, that a conversation is in Bypass, with the one action that ends it. It is a status, in the
+/// colours of the mode's pill, not an alarm.
+class BypassBanner extends StatelessWidget {
+  const BypassBanner({super.key, required this.onLeave});
 
-  final ChatSession session;
-  final VoidCallback onTurnOff;
+  final VoidCallback onLeave;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final whose = session.fullAccess == FullAccess.agent ? 'for ${shortText(session.agent) ?? 'its agent'}' : 'in this conversation';
     return Material(
-      key: const Key('full-access-banner'),
-      color: scheme.errorContainer,
+      key: const Key('bypass-banner'),
+      color: scheme.tertiaryContainer,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Row(children: [
-          Icon(Icons.gpp_maybe_outlined, color: scheme.onErrorContainer),
+          Icon(Icons.fast_forward_outlined, color: scheme.onTertiaryContainer),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Full access $whose: each request that offers to allow once is allowed without asking you.',
-              style: TextStyle(color: scheme.onErrorContainer),
+              'Bypass: each request that offers to allow is allowed without asking you.',
+              style: TextStyle(color: scheme.onTertiaryContainer),
             ),
           ),
           TextButton(
-            onPressed: onTurnOff,
-            style: TextButton.styleFrom(foregroundColor: scheme.onErrorContainer),
-            child: const Text('Turn off'),
+            onPressed: onLeave,
+            style: TextButton.styleFrom(foregroundColor: scheme.onTertiaryContainer),
+            child: const Text('Leave Bypass'),
           ),
         ]),
       ),
     );
   }
 }
-
-/// Asks before full access is turned on for [session], saying what it does. True when the person turned it on.
-Future<bool> confirmFullAccess(BuildContext context, ChatSession session) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Full access for this conversation?'),
-        content: SizedBox(
-          width: 420,
-          child: Text(
-            'Each request ${shortText(session.agent) ?? 'the agent'} makes in this conversation that offers to allow once will be allowed without asking you, '
-            'and said in the conversation. A request offering no way to allow once is still yours to answer. It lasts until you turn '
-            'it off, and it changes nothing the browser lets pages or agents do.',
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Turn on full access')),
-        ],
-      ),
-    ) ??
-    false;

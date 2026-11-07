@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'chat/agent_events.dart';
 import 'chat/attachments.dart';
+import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'chat/update_record.dart';
 import 'drafts/draft_store.dart';
@@ -46,10 +47,10 @@ class ChatMessage {
   final Compaction? compaction;
 }
 
-/// A tool an agent wants to use, waiting on the person. Nothing answers it for them: full access answers a request before it
-/// would wait here, never one already waiting.
+/// A tool an agent wants to use, waiting on the person. Nothing answers it for them but Bypass, which answers a request that
+/// offers an allow before it would wait here.
 final class PermissionQuestion {
-  PermissionQuestion(this.title, this.kind, {this.detail, this.options = const [], this.fullAccessPassed = false});
+  PermissionQuestion(this.title, this.kind, {this.detail, this.options = const [], this.bypassPassed = false});
   final String title;
   final String? kind;
 
@@ -59,15 +60,15 @@ final class PermissionQuestion {
   /// The answers the agent offers, in its order.
   final List<AcpPermissionOption> options;
 
-  /// Whether full access was on and left this to the person, since the agent offered no option to allow once.
-  final bool fullAccessPassed;
+  /// Whether Bypass was on and left this to the person, since the agent offered no option to allow.
+  final bool bypassPassed;
   final Completer<AcpDecision> _answer = Completer();
 }
 
 /// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
 const int maxPendingQuestions = 16;
 
-/// An agent's question, waiting on the person. Nothing answers it for them; full access is for permission requests only.
+/// An agent's question, waiting on the person. Nothing answers it for them; Bypass is for permission requests only.
 final class AgentQuestion {
   AgentQuestion(this.request);
   final AcpElicitation request;
@@ -86,14 +87,6 @@ final class QueuedMessage {
 
 /// What a session needs the person for: a permission request, a question, or a turn it finished.
 enum AttentionKind { permission, question, finished }
-
-/// Where a session's full access comes from: turned on for it, or for its agent in canoa.cfg.
-enum FullAccess { session, agent }
-
-/// The option full access answers with: the first that allows once. An `allow_always` is never chosen for the person, since the
-/// agent would remember it after full access ends.
-AcpPermissionOption? fullAccessOption(List<AcpPermissionOption> options) =>
-    options.where((option) => option.kind == 'allow_once').firstOrNull;
 
 class ChatSession {
   ChatSession({
@@ -181,9 +174,9 @@ class ChatSession {
   /// Whether the agent may name the conversation, which it may until the person has.
   bool agentNames = false;
 
-  /// Whether this session's permission requests are answered without asking, and why; null when every one is asked. Off unless
-  /// the person turned it on, for this session or for its agent.
-  FullAccess? fullAccess;
+  /// Whether Canoa answers this session's permission requests that offer an allow, as the Bypass mode of an agent that has no
+  /// mode of its own that asks for nothing. Off unless the person chose it.
+  bool bypass = false;
 
   /// Whether a turn ended here since the person last chose this session.
   bool unread = false;
@@ -242,10 +235,9 @@ String titleFrom(String text) {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder, this.ledger, Set<String> fullAccessAgents = const {}, this.onWeakened,
+  SessionStore({bool includePreview = true, this.recorder, this.ledger, this.defaultMode,
       this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
-      : _fullAccessAgents = {...fullAccessAgents},
-        readFile = readFile ?? readLocalFile {
+      : readFile = readFile ?? readLocalFile {
     if (includePreview) {
       final first = createPreviewSession(title: 'Getting started', agent: 'Canoa preview');
       first.messages.addAll([
@@ -283,16 +275,9 @@ class SessionStore extends ChangeNotifier {
   /// A file's bytes, read when it is sent.
   final Future<List<int>> Function(String path) readFile;
 
-  /// Told each weakening as it happens, beside [weakenings]; by default the debug log.
-  final void Function(String)? onWeakened;
-
-  /// The most [weakenings] keeps, the oldest going first.
-  static const maxWeakenings = 200;
-
-  /// Each time something here was made to ask less than it does by default, in the words of a `weakened:` log line.
-  final List<String> weakenings = [];
-
-  final Set<String> _fullAccessAgents;
+  /// The mode a new session starts in, as an agent names it (one of [modeOrder] for the translators Canoa runs); null leaves
+  /// each agent's own. It wins over the person's last choice for the source, and a profile's mode wins over it.
+  String? defaultMode;
 
   final _attention = StreamController<(ChatSession, AttentionKind)>.broadcast();
 
@@ -308,74 +293,113 @@ class SessionStore extends ChangeNotifier {
     if (!_attention.isClosed) _attention.add((session, kind));
   }
 
-  /// The agents, by label, whose sessions start with full access.
-  Set<String> get fullAccessAgents => Set.unmodifiable(_fullAccessAgents);
-
-  void _weakened(String what) {
-    final line = 'weakened: $what';
-    weakenings.add(line);
-    if (weakenings.length > maxWeakenings) weakenings.removeAt(0);
-    (onWeakened ?? debugPrint)(line);
+  /// The mode [session] is in: Canoa's own Bypass, else what the agent's mode option says, a choice still waiting first. Null
+  /// before an agent that has not said.
+  String? modeOf(ChatSession session) {
+    if (session.bypass) return ownBypass;
+    final pending = session.pending.values.where((choice) => choice.role == OptionRole.mode).firstOrNull;
+    return pending?.value ?? (session.isDraft ? null : modeOptionIn(session.options)?.current);
   }
 
-  /// Turns full access on or off for [session]. On, each permission request it makes that offers to allow once is answered with
-  /// that option without asking, which is logged as a weakening and said in the conversation; a request already waiting stays
-  /// for the person. Off, every request is asked again.
-  void setFullAccess(ChatSession session, bool on) {
-    if (on == (session.fullAccess != null)) return;
-    if (on) {
-      session.fullAccess = FullAccess.session;
-      _weakened('full access is on for the conversation "${_named(session.title)}" with ${_named(session.agent)}: it allows what '
-          'it can without asking, looser than asking each time');
-      _note(session, 'Full access is on for this conversation: each request that offers to allow once is allowed without '
-          'asking you.');
+  /// Whether [session] is in a mode that asks for nothing: Canoa's own Bypass, or the agent's.
+  bool inBypass(ChatSession session) {
+    if (session.bypass) return true;
+    final value = modeOf(session);
+    if (value == null) return false;
+    final label = modeOptionIn(optionsOf(session))?.choices.where((choice) => choice.value == value).firstOrNull?.label;
+    return isBypassMode(value, label);
+  }
+
+  /// Puts [session] in [entry]'s mode. Bypass answers every request that offers an allow, those already waiting included; a
+  /// request with no allow is still the person's.
+  Future<void> chooseMode(ChatSession session, ModeEntry entry) async {
+    final wasBypass = inBypass(session);
+    if (entry.own) {
+      if (session.bypass) return;
+      session.pending.removeWhere((_, choice) => choice.role == OptionRole.mode);
+      session.bypass = true;
     } else {
-      session.fullAccess = null;
-      _note(session, 'Full access is off: every request is asked again.');
+      session.bypass = false;
+      final option = modeOptionIn(optionsOf(session));
+      if (option != null) await choose(session, option, entry.value);
     }
+    final isBypass = inBypass(session);
+    if (isBypass && !wasBypass) {
+      _note(session, 'Mode: Bypass. A request that offers to allow is allowed without asking you.');
+      _answerWaiting(session);
+    } else if (!isBypass && wasBypass) {
+      _note(session, 'Mode: ${shortText(entry.label) ?? entry.value}. Requests are asked again.');
+    }
+    _keepMode(session);
+    _keepDraft(session);
     notifyListeners();
   }
 
-  /// Turns full access on or off for [agent], by the label of a program this app runs: its sessions open now and those it opens
-  /// later, until it is turned off. A session reached any other way, whatever its agent calls itself, is not the program's.
-  void setAgentFullAccess(String agent, bool on) {
-    if (on ? !_fullAccessAgents.add(agent) : !_fullAccessAgents.remove(agent)) return;
-    if (on) {
-      _weakened('full access is on for the agent ${_named(agent)}: its sessions allow what they can without asking, looser than '
-          'asking each time');
-    }
-    for (final session in _sessions) {
-      if (session.agent != agent || !_runsAs(session, agent)) continue;
-      if (on && session.fullAccess == null) {
-        session.fullAccess = FullAccess.agent;
-        _note(session, 'Full access is on for ${_named(agent)}: each request that offers to allow once is allowed without '
-            'asking you.');
-      } else if (!on && session.fullAccess == FullAccess.agent) {
-        session.fullAccess = null;
-        _note(session, 'Full access is off for ${_named(agent)}: every request is asked again.');
-      }
-    }
+  /// Takes back a draft's choice of mode, Bypass included, so its agent's own default holds.
+  void clearMode(ChatSession session) {
+    session.pending.removeWhere((_, choice) => choice.role == OptionRole.mode);
+    session.bypass = false;
+    _keepDraft(session);
     notifyListeners();
   }
 
-  /// Whether [session] is served by the program this app runs as [agent].
-  bool _runsAs(ChatSession session, String agent) {
-    final client = _verifiedClients[session.id];
-    return client != null && client.isChild && client.peerId == 'local:$agent';
+  /// Puts [session] in the next of its modes, as Shift+Tab does.
+  Future<void> cycleMode(ChatSession session) {
+    final entries = modeEntries(modeOptionIn(optionsOf(session)));
+    return chooseMode(session, nextMode(entries, modeOf(session)));
+  }
+
+  /// Takes [session] out of Bypass, into the mode of the agent that asks the most: Manual where it has one.
+  Future<void> leaveBypass(ChatSession session) async {
+    final entries = [for (final entry in modeEntries(modeOptionIn(optionsOf(session)))) if (!entry.bypass) entry];
+    if (entries.isEmpty) {
+      session.bypass = false;
+      _keepMode(session);
+      notifyListeners();
+      return;
+    }
+    final preferred = entries.where((entry) => const {'manual', 'default'}.contains(entry.value)).firstOrNull ?? entries.first;
+    await chooseMode(session, preferred);
+  }
+
+  /// Answers the requests waiting in [session] that offer an allow.
+  void _answerWaiting(ChatSession session) {
+    for (final question in [...session.pendingPermissions]) {
+      final allow = bypassAnswer(question.options);
+      if (allow == null) continue;
+      session.pendingPermissions.remove(question);
+      question._answer.complete(AcpSelect(allow.optionId));
+      _note(session, 'Bypass allowed: ${question.title} (${shortText(allow.name) ?? allow.kind}).');
+    }
+  }
+
+  /// Notes in the ledger the mode [session] is in, to put it back when it is opened again.
+  void _keepMode(ChatSession session) {
+    final remote = session.remoteSessionId;
+    final peerId = session.peerId;
+    if (ledger == null || remote == null || peerId == null || session.isDraft) return;
+    final value = session.pending.values.where((choice) => choice.role == OptionRole.mode).firstOrNull?.value ??
+        modeOptionIn(session.options)?.current;
+    ledger!.setMode(peerId, remote, mode: value, bypass: session.bypass);
+  }
+
+  /// Puts a draft in the mode [value] names, which is Canoa's own Bypass where the agent has none that asks for nothing.
+  void _startInMode(ChatSession session, String? value) {
+    if (value == null) return;
+    final option = modeOptionIn(optionsOf(session));
+    final entries = modeEntries(option);
+    final entry = entries.where((entry) => entry.value == value).firstOrNull ??
+        (isBypassMode(value) ? entries.where((entry) => entry.bypass).firstOrNull : null);
+    if (entry != null && entry.own) {
+      session.bypass = true;
+    } else {
+      final id = option?.id ?? OptionRole.mode.name;
+      session.pending[id] = PendingChoice(id, OptionRole.mode, entry?.value ?? value);
+    }
   }
 
   /// A name an agent or a person gave, as it is shown and logged: one line, with nothing that could reorder what surrounds it.
   static String _named(String name) => shortText(name) ?? 'an unnamed one';
-
-  /// A session just given its agent, which starts with full access when that agent's setting says so.
-  void _startFullAccess(ChatSession session) {
-    if (session.fullAccess != null || !_fullAccessAgents.contains(session.agent) || !_runsAs(session, session.agent)) return;
-    session.fullAccess = FullAccess.agent;
-    _weakened('full access is on for the conversation "${_named(session.title)}" with ${_named(session.agent)}, as canoa.cfg says '
-        'for that agent: it allows what it can without asking, looser than asking each time');
-    _note(session, 'Full access is on for ${_named(session.agent)}: each request that offers to allow once is allowed without '
-        'asking you.');
-  }
 
   final List<ChatSession> _sessions = [];
   final Map<String, VerifiedAgent> _verifiedClients = {};
@@ -417,7 +441,7 @@ class SessionStore extends ChangeNotifier {
   /// is made then if [worktree]. It is kept between runs until it starts or is closed, and never noted in the ledger before.
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
-      ({String kind, String label})? keptSource}) {
+      ({String kind, String label})? keptSource, bool bypass = false}) {
     final session = ChatSession(
       id: 'local-${++_nextId}',
       title: title ?? draftTitle,
@@ -431,7 +455,8 @@ class SessionStore extends ChangeNotifier {
       ..draftId = id ?? newDraftId()
       ..draftText = text
       ..keptSource = source == null ? keptSource : null
-      ..agentNames = title == null;
+      ..agentNames = title == null
+      ..bypass = bypass;
     session.pending.addAll(pending);
     session.attachments.addAll(attachments.take(maxAttachments));
     _insert(session);
@@ -451,6 +476,7 @@ class SessionStore extends ChangeNotifier {
           ..agent = source.label;
         // Choices for another source's options mean nothing to this one's.
         session.pending.clear();
+        session.bypass = false;
       }
       if (cwd != null) session.cwd = cwd;
       if (worktree != null) session.wantsWorktree = worktree;
@@ -478,6 +504,7 @@ class SessionStore extends ChangeNotifier {
         overlays: record['overlays'] is List ? {for (final name in record['overlays'] as List) if (name is String) name} : null,
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
+        bypass: record['bypass'] == true,
         pending: {
           for (final choice in [
             for (final json in record['pending'] is List ? record['pending'] as List : const []) ?PendingChoice.fromJson(json),
@@ -505,6 +532,7 @@ class SessionStore extends ChangeNotifier {
       'text': session.draftText,
       if (!session.agentNames) 'title': session.title,
       'pending': [for (final choice in session.pending.values) choice.toJson()],
+      if (session.bypass) 'bypass': true,
     }, session.attachments);
   }
 
@@ -578,9 +606,13 @@ class SessionStore extends ChangeNotifier {
     final source = session.source;
     final memory = source == null ? null : ledger?.source(sourceKey(source));
     for (final role in const [OptionRole.mode, OptionRole.model, OptionRole.effort]) {
-      if (session.pending.values.any((choice) => choice.role == role)) continue;
-      final value = hints[role] ?? memory?.chosen[role.name];
+      if (session.pending.values.any((choice) => choice.role == role) || (role == OptionRole.mode && session.bypass)) continue;
+      final value = hints[role] ?? (role == OptionRole.mode ? defaultMode : null) ?? memory?.chosen[role.name];
       if (value == null) continue;
+      if (role == OptionRole.mode) {
+        _startInMode(session, value);
+        continue;
+      }
       final option = memory == null ? null : optionIn(memory.options, role);
       final id = option?.id ?? role.name;
       session.pending[id] = PendingChoice(id, role, value);
@@ -591,6 +623,15 @@ class SessionStore extends ChangeNotifier {
 
   /// Sends each choice made before the agent could take it, and says in [session] what it would not take.
   Future<void> _applyPending(ChatSession session) async {
+    // Bypass chosen before the agent was known is the agent's own, once it turns out to have one that asks for nothing.
+    if (session.bypass && !session.isDraft) {
+      final option = modeOptionIn(session.options);
+      final native = modeEntries(option).where((entry) => entry.bypass && !entry.own).firstOrNull;
+      if (option != null && native != null) {
+        session.bypass = false;
+        session.pending[option.id] = PendingChoice(option.id, OptionRole.mode, native.value);
+      }
+    }
     if (session.pending.isEmpty) return;
     final waiting = [...session.pending.values];
     session.pending.clear();
@@ -607,6 +648,7 @@ class SessionStore extends ChangeNotifier {
         ledger?.rememberChoice(sourceKey(session.source!), choice.role, choice.value);
       }
     }
+    _keepMode(session);
     notifyListeners();
   }
 
@@ -676,10 +718,10 @@ class SessionStore extends ChangeNotifier {
     // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about.
     if (request.toolCall != null) _applyTool(target, request.toolCall!);
     final title = shortText(request.title) ?? shortText(request.kind) ?? 'A tool';
-    if (target.fullAccess != null) {
-      final allow = fullAccessOption(request.options);
+    if (inBypass(target)) {
+      final allow = bypassAnswer(request.options);
       if (allow != null) {
-        _note(target, 'Full access allowed: $title (${shortText(allow.name) ?? 'allow once'}).');
+        _note(target, 'Bypass allowed: $title (${shortText(allow.name) ?? allow.kind}).');
         notifyListeners();
         return Future.value(AcpSelect(allow.optionId));
       }
@@ -692,7 +734,7 @@ class SessionStore extends ChangeNotifier {
         ?describeToolInput(request.rawInput),
       ].join('\n').trim(),
       options: request.options,
-      fullAccessPassed: target.fullAccess != null,
+      bypassPassed: inBypass(target),
     );
     target.pendingPermissions.add(question);
     _needs(target, AttentionKind.permission);
@@ -868,7 +910,6 @@ class SessionStore extends ChangeNotifier {
     final session = target;
     unawaited(_subscriptions.remove(localId)?.cancel());
     _verifiedClients[localId] = client;
-    _startFullAccess(session);
     session.status = SessionStatus.connected;
     _subscriptions[localId] = client.updates.listen(
       (update) {
@@ -942,6 +983,7 @@ class SessionStore extends ChangeNotifier {
       method: session.method,
       worktree: session.worktree,
     );
+    _keepMode(session);
   }
 
   /// Keeps what was said in [session] with its ledger entry, which the ledger does only when the person turned that on.
@@ -1559,11 +1601,17 @@ class SessionStore extends ChangeNotifier {
       websocketFallback: entry.fallback == null ? null : Uri.tryParse(entry.fallback!),
       method: entry.method,
       worktree: entry.worktree,
-    ));
+    ))..bypass = entry.bypass;
     attachVerifiedClient(session.id, client, record: false);
     try {
       final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: launch?.setup ?? AcpSessionSetup.none);
       applyOpened(session, opened);
+      // The mode the person left it in goes back before anything else is sent.
+      if (entry.mode case final mode? when !entry.bypass) {
+        final id = modeOptionIn(session.options)?.id ?? OptionRole.mode.name;
+        session.pending[id] = PendingChoice(id, OptionRole.mode, mode);
+      }
+      await _applyPending(session);
       if (launch != null && prepared != null) {
         await applyProfile(session, launch, prepared, harness: harness ?? entry.harness, notes: notes);
       }

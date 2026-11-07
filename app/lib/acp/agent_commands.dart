@@ -76,7 +76,7 @@ const List<AgentCommand> agentPresets = [
   AgentCommand(
     label: 'Claude',
     program: 'canoa',
-    args: ['agent', 'claude', '--allow-client-plugins'],
+    args: ['agent', 'claude', '--allow-client-plugins', '--allow-bypass'],
     requires: ['claude'],
     programPaths: {'COQUI_ACP_CLAUDE_EXECUTABLE': 'claude'},
     hosts: true,
@@ -84,7 +84,7 @@ const List<AgentCommand> agentPresets = [
   AgentCommand(
     label: 'Codex',
     program: 'canoa',
-    args: ['agent', 'codex'],
+    args: ['agent', 'codex', '--allow-bypass'],
     requires: ['codex'],
     programPaths: {'COQUI_ACP_CODEX_EXECUTABLE': 'codex'},
     hosts: true,

@@ -82,6 +82,8 @@ final class LedgerEntry {
     this.method,
     this.reopenBy,
     this.worktree,
+    this.mode,
+    this.bypass = false,
     this.messages = const [],
   });
 
@@ -116,6 +118,11 @@ final class LedgerEntry {
 
   /// The git worktree the session works in, on its own branch, when it was started in one.
   SessionWorktree? worktree;
+
+  /// The mode the person last put the session in, as its agent names it, and whether it is the Bypass Canoa provides: both
+  /// are put back when the session is opened again.
+  String? mode;
+  bool bypass;
 
   String get key => keyOf(peerId, sessionId);
   static String keyOf(String peerId, String sessionId) => '$peerId\n$sessionId';
@@ -156,6 +163,8 @@ final class LedgerEntry {
     'lastUsed': lastUsed.toUtc().toIso8601String(),
     'reopenBy': ?reopenBy,
     'worktree': ?worktree?.toJson(),
+    'mode': ?mode,
+    if (bypass) 'bypass': true,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
   };
 
@@ -186,6 +195,8 @@ final class LedgerEntry {
       method: text('method'),
       reopenBy: reopenBy == 'session/load' || reopenBy == 'session/resume' ? reopenBy : null,
       worktree: SessionWorktree.fromJson(json['worktree']),
+      mode: text('mode'),
+      bypass: json['bypass'] == true,
       messages: [
         if (json['messages'] case final List<dynamic> kept)
           for (final message in kept) ?KeptMessage.fromJson(message),
@@ -441,6 +452,16 @@ class SessionLedger extends ChangeNotifier {
     found.lastUsed = _clock();
     if (title != null) found.title = title;
     _apply();
+    _changed();
+  }
+
+  /// Notes the mode the person put a session in, to put it back when the session is opened again.
+  void setMode(String peerId, String sessionId, {String? mode, required bool bypass}) {
+    final found = find(peerId, sessionId);
+    if (found == null || (found.mode == mode && found.bypass == bypass)) return;
+    found
+      ..mode = mode
+      ..bypass = bypass;
     _changed();
   }
 

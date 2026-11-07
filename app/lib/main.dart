@@ -212,7 +212,7 @@ class _CanoaAppState extends State<CanoaApp> {
         context: above,
         builder: (_) => SettingsDialog(
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
-          onProfiles: _showProfiles, agents: [for (final agent in [...agentPresets, ...config.agents]) agent.label],
+          onProfiles: _showProfiles,
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
           presets: canRunLocalAgents ? agentPresets : const [],
           hosted: [
@@ -235,9 +235,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.embedLimit = changed.embedLimit;
     if (_checked) unawaited(_checkSources());
     store.ledger?.configure(changed.sessions);
-    for (final agent in {...store.fullAccessAgents, ...changed.fullAccess}) {
-      store.setAgentFullAccess(agent, changed.fullAccess.contains(agent));
-    }
+    store.defaultMode = changed.defaultMode;
     await widget.shell?.update(changed);
     try {
       await _write(changed);
@@ -249,20 +247,6 @@ class _CanoaAppState extends State<CanoaApp> {
           SnackBar(content: Text('Could not save canoa.cfg: $error')),
         );
       }
-    }
-  }
-  /// Ends full access for [agent], in its sessions and in canoa.cfg: the banner's one action, where the agent's setting turned it on.
-  Future<void> _endAgentFullAccess(String agent) async {
-    store.setAgentFullAccess(agent, false);
-    if (!config.fullAccess.contains(agent)) return;
-    final changed = config.copyWith(fullAccess: {...config.fullAccess}..remove(agent));
-    setState(() => config = changed);
-    try {
-      await _write(changed);
-    } on UnsupportedError {
-      // canoa.cfg in web/PWA deployments is read-only.
-    } catch (error) {
-      _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save canoa.cfg: $error')));
     }
   }
 
@@ -881,7 +865,7 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
     store = widget.store ??
-        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, fullAccessAgents: config.fullAccess,
+        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, defaultMode: config.defaultMode,
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.starter = _startDraft;
     store.addListener(_noteLast);
@@ -937,17 +921,6 @@ class _CanoaAppState extends State<CanoaApp> {
     overlays: config.overlays.keys.toList(),
     pasteAsFile: config.pasteAsFile,
     onSourceSettings: () => unawaited(_showSettings(sources: true)),
-    onFullAccess: (session) async {
-      final above = _navigator.currentContext;
-      if (above != null && above.mounted && await confirmFullAccess(above, session)) store.setFullAccess(session, true);
-    },
-    onEndFullAccess: (session) {
-      if (session.fullAccess == FullAccess.agent) {
-        unawaited(_endAgentFullAccess(session.agent));
-      } else {
-        store.setFullAccess(session, false);
-      }
-    },
     onProfile: (session) {
       final above = _navigator.currentContext;
       final report = session.profile;
@@ -971,7 +944,6 @@ class _CanoaAppState extends State<CanoaApp> {
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
           onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
-          onEndAgentFullAccess: _endAgentFullAccess,
           conversation: _conversation,
           kit: _kit,
         ),
@@ -983,7 +955,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
-    this.onHosting, this.onReopen, this.onEndAgentFullAccess, required this.conversation, this.kit = const ComposerKit(),
+    this.onHosting, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
   });
 
   final SessionStore store;
@@ -996,7 +968,6 @@ class _CanoaHome extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
-  final Future<void> Function(String agent)? onEndAgentFullAccess;
   final _ConversationHandle conversation;
 
   void _connect(BuildContext context) => unawaited(showCanoaConnectDialog(
@@ -1103,7 +1074,6 @@ class _CanoaHome extends StatelessWidget {
                   key: ValueKey(store.selectedId ?? 'empty'),
                   store: store,
                   narrow: narrow,
-                  onEndAgentFullAccess: onEndAgentFullAccess,
                   handle: conversation,
                   kit: kit,
                 ),
@@ -1204,14 +1174,14 @@ class _SessionRail extends StatelessWidget {
                   selected: active,
                   selectedTileColor: context.look.selected,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  leading: session.fullAccess == null
+                  leading: !store.inBypass(session)
                       ? const Icon(Icons.chat_bubble_outline, size: 21)
-                      : Icon(Icons.gpp_maybe_outlined, size: 21, color: Theme.of(context).colorScheme.error),
+                      : Icon(Icons.fast_forward_outlined, size: 21, color: Theme.of(context).colorScheme.tertiary),
                   title: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                   trailing: _SessionMark(session: session),
                   subtitle: Text(
                     [
-                      if (session.fullAccess != null) 'Full access',
+                      if (store.inBypass(session)) 'Bypass',
                       switch (session.status) {
                         SessionStatus.preview => 'Preview · offline',
                         SessionStatus.draft => 'New',
@@ -1297,7 +1267,7 @@ final class _ConversationHandle {
 
 class _Conversation extends StatefulWidget {
   const _Conversation({
-    super.key, required this.store, required this.narrow, this.onEndAgentFullAccess, required this.handle,
+    super.key, required this.store, required this.narrow, required this.handle,
     this.kit = const ComposerKit(),
   });
 
@@ -1307,8 +1277,6 @@ class _Conversation extends StatefulWidget {
   final SessionStore store;
   final bool narrow;
 
-  /// Ends full access for an agent, where its setting is what turned it on.
-  final Future<void> Function(String agent)? onEndAgentFullAccess;
 
   @override
   State<_Conversation> createState() => _ConversationState();
@@ -1596,20 +1564,8 @@ class _ConversationState extends State<_Conversation> {
           ]),
         ),
       ),
-      if (session?.fullAccess != null)
-        FullAccessBanner(
-          session: session!,
-          onTurnOff: () {
-            final agent = session.fullAccess == FullAccess.agent ? widget.onEndAgentFullAccess : null;
-            if (agent != null) {
-              unawaited(agent(session.agent));
-            } else if (session.fullAccess == FullAccess.agent) {
-              widget.store.setAgentFullAccess(session.agent, false);
-            } else {
-              widget.store.setFullAccess(session, false);
-            }
-          },
-        ),
+      if (session != null && widget.store.inBypass(session))
+        BypassBanner(onLeave: () => unawaited(widget.store.leaveBypass(session))),
       if (session == null)
         const Expanded(child: Center(child: Text('Create a conversation to begin.')))
       else if (session.isDraft)

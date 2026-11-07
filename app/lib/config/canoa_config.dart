@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
+import '../chat/modes.dart' show modeOrder;
 import '../ledger/session_ledger.dart';
 import '../profile/aos.dart' show normalizeName, validOverlayName;
 import '../profile/aos_catalog.dart' show holdsPassword;
@@ -73,7 +74,7 @@ final class CanoaConfig {
     this.profile = const Profile(),
     this.agentProfiles = const {},
     this.tables = const {},
-    this.fullAccess = const {},
+    this.defaultMode,
     this.notifications = const NotificationSettings(),
     this.hiddenSources = const {},
     this.pasteAsFile = defaultPasteAsFile,
@@ -117,9 +118,9 @@ final class CanoaConfig {
   /// `[overlays]`, `[profile]` and each `[agents.NAME.profile]` as they were read, so saving writes them back unchanged.
   final Map<String, Object?> tables;
 
-  /// `[permissions] full_access`: the agents, by label, whose sessions start with full access, which answers each permission request
-  /// that offers to allow once with that option and no question. Empty by default.
-  final Set<String> fullAccess;
+  /// `[permissions] default_mode`: the mode new sessions start in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`;
+  /// null leaves each agent's own. An older `full_access` list is read and dropped.
+  final String? defaultMode;
 
   final NotificationSettings notifications;
 
@@ -137,7 +138,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness, LedgerSettings? sessions, Set<String>? fullAccess,
+      LookId? look, String? brightness, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false,
       NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
@@ -156,7 +157,7 @@ final class CanoaConfig {
         profile: profile,
         agentProfiles: agentProfiles,
         tables: tables,
-        fullAccess: fullAccess ?? this.fullAccess,
+        defaultMode: clearDefaultMode ? null : defaultMode ?? this.defaultMode,
         notifications: notifications ?? this.notifications,
         hiddenSources: hiddenSources ?? this.hiddenSources,
         pasteAsFile: pasteAsFile,
@@ -181,7 +182,7 @@ final class CanoaConfig {
     profile: profile,
     agentProfiles: agentProfiles,
     tables: tables,
-    fullAccess: fullAccess,
+    defaultMode: defaultMode,
     notifications: notifications,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
@@ -398,7 +399,7 @@ final class CanoaConfig {
     profile: profile ?? this.profile,
     agentProfiles: agentProfiles ?? this.agentProfiles,
     tables: tables,
-    fullAccess: fullAccess,
+    defaultMode: defaultMode,
     notifications: notifications,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
@@ -440,7 +441,7 @@ final class CanoaConfig {
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages'});
-    final permissions = table('permissions', {'full_access'});
+    final permissions = table('permissions', {'default_mode', 'full_access'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
@@ -453,8 +454,12 @@ final class CanoaConfig {
     if (hidden is! List || hidden.any((name) => name is! String || name.trim().isEmpty)) {
       throw const FormatException('canoa.cfg: sources.hidden must be a list of preset names');
     }
-    final fullAccess = permissions['full_access'] ?? const <Object>[];
-    if (fullAccess is! List || fullAccess.any((name) => name is! String || name.trim().isEmpty)) {
+    final defaultMode = permissions['default_mode'];
+    if (defaultMode != null && (defaultMode is! String || !modeOrder.contains(defaultMode))) {
+      throw FormatException('canoa.cfg: permissions.default_mode must be one of ${modeOrder.join(', ')}');
+    }
+    final dropped = permissions['full_access'] ?? const <Object>[];
+    if (dropped is! List || dropped.any((name) => name is! String || name.trim().isEmpty)) {
       throw const FormatException('canoa.cfg: permissions.full_access must be a list of agent names');
     }
     bool flag(Map<String, dynamic> map, String key, bool fallback) {
@@ -576,7 +581,7 @@ final class CanoaConfig {
       localHost: flag(desktop, 'local_host', true),
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
-      fullAccess: {for (final name in fullAccess) name as String},
+      defaultMode: defaultMode as String?,
       hiddenSources: {for (final name in hidden) name as String},
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
       embedLimit: limit('embed_limit', defaultEmbedLimit),
@@ -626,7 +631,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${fullAccess.isEmpty ? '' : '\n[permissions]\nfull_access = ${jsonEncode(fullAccess.toList())}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${defaultMode == null ? '' : '\n[permissions]\ndefault_mode = ${jsonEncode(defaultMode)}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
