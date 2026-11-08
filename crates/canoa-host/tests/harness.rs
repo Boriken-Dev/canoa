@@ -38,7 +38,7 @@ fn records(file: &Path) -> Vec<Value> {
 
 /// A prompt whose one permission request is answered with the option of `kind`: the turn's answer and its updates.
 fn prompt_answering(
-    rpc: &support::Rpc<'_, coqui_web::websocket::Channel>,
+    rpc: &support::Rpc<'_, coqui_web_channel::websocket::Channel>,
     session: &str,
     text: &str,
     kind: &str,
@@ -549,7 +549,7 @@ fn the_command_line_ends_with_its_connection_and_with_the_host() {
     let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
-    let open = |rpc: &support::Rpc<'_, coqui_web::websocket::Channel>| {
+    let open = |rpc: &support::Rpc<'_, coqui_web_channel::websocket::Channel>| {
         rpc.initialize().expect("initialize is answered");
         rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
             .expect("a session opens");

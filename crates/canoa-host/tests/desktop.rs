@@ -17,9 +17,9 @@ use coqui_agentic_peer::auth::Identity;
 use coqui_agentic_peer::{auth, pairing};
 use coqui_peer_webcrypto::TrustStore;
 use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
-use coqui_web::Dialer as _;
-use coqui_web::websocket::{self, Frames};
-use coqui_web::{Channel as _, Kind, Limits};
+use coqui_web_channel::Dialer as _;
+use coqui_web_channel::websocket::{self, Frames};
+use coqui_web_channel::{Channel as _, Kind, Limits};
 use serde_json::{Value, json};
 use support::{Host, Scratch, WAIT, example, host_binary, quoted, running, with_link};
 

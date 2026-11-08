@@ -17,9 +17,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
-use coqui_web::Dialer as _;
-use coqui_web::websocket::{self, Frames};
-use coqui_web::{Channel, Kind, Limits};
+use coqui_web_channel::Dialer as _;
+use coqui_web_channel::websocket::{self, Frames};
+use coqui_web_channel::{Channel, Kind, Limits};
 use serde_json::{Value, json};
 
 pub const WAIT: Duration = Duration::from_secs(20);
@@ -343,7 +343,7 @@ impl<C: Channel> Rpc<'_, C> {
                     return serde_json::from_slice(&message).map_err(|error| error.to_string());
                 }
                 Ok(None) => return Err("the host closed the link".to_owned()),
-                Err(coqui_web::Failure::Timeout) => {}
+                Err(coqui_web_channel::Failure::Timeout) => {}
                 Err(failure) => return Err(failure.to_string()),
             }
         }

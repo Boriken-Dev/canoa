@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use coqui_agentic_peer::auth::Method;
 use coqui_agentic_peer::{auth, pairing};
-use coqui_web::websocket::{self, Frames};
-use coqui_web::{Channel as _, Failure, Limits};
+use coqui_web_channel::websocket::{self, Frames};
+use coqui_web_channel::{Channel as _, Failure, Limits};
 
 use crate::config::ImportSearch;
 use crate::home::{Home, LockError};

@@ -16,7 +16,7 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Instant;
 
-use coqui_web::{Channel, Failure};
+use coqui_web_channel::{Channel, Failure};
 
 use crate::provider::HostLine;
 use crate::serve::MAX_LINE;

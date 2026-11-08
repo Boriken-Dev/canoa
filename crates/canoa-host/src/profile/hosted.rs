@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
-use coqui_web::{Channel, Failure};
+use coqui_web_channel::{Channel, Failure};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};

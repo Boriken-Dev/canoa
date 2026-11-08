@@ -16,7 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use coqui_acp_harness::{Harness as Translator, Settings};
-use coqui_web::{Channel, Failure};
+use coqui_web_channel::{Channel, Failure};
 
 /// How often each direction looks up to see whether the other has ended.
 const POLL: Duration = Duration::from_millis(50);

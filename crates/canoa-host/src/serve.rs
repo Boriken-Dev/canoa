@@ -21,8 +21,8 @@ use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_agentic_peer::link::Prefilled;
 use coqui_agentic_peer::mux;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
-use coqui_web::websocket::{self, Frames};
-use coqui_web::{Channel, Failure, Limits};
+use coqui_web_channel::websocket::{self, Frames};
+use coqui_web_channel::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
 use crate::config::{Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin};
@@ -445,12 +445,13 @@ impl Serving {
         {
             method = off;
         }
-        for weakened in method.weakened() {
-            tracing::warn!(
-                "weakened: {} is {}, looser than {}",
-                weakened.setting,
-                weakened.value,
-                weakened.strict
+        // Only ServeOptions changes a method's settings here, so each one is configuration, not a surprise.
+        for setting in method.non_defaults() {
+            tracing::info!(
+                "non-default: {} is {}, default {}",
+                setting.setting,
+                setting.value,
+                setting.default
             );
         }
         let mut registry = Registry::new();

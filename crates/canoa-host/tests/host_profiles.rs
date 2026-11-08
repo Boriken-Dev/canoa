@@ -54,7 +54,7 @@ fn item<'a>(report: &'a Value, key: &str) -> &'a Value {
 }
 
 fn initialize_choosing(
-    rpc: &support::Rpc<'_, coqui_web::websocket::Channel>,
+    rpc: &support::Rpc<'_, coqui_web_channel::websocket::Channel>,
     meta: Value,
 ) -> Result<Value, Value> {
     rpc.request(

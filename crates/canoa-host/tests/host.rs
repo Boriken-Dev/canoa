@@ -47,7 +47,7 @@ fn hello(host: &Host, client: &Identity, entry: &str) -> Result<String, String> 
 }
 
 fn new_session(
-    rpc: &support::Rpc<'_, coqui_web::websocket::Channel>,
+    rpc: &support::Rpc<'_, coqui_web_channel::websocket::Channel>,
     cwd: &str,
 ) -> Result<Value, Value> {
     rpc.request("session/new", json!({"cwd": cwd, "mcpServers": []}))
@@ -534,15 +534,15 @@ fn a_client_of_the_other_method_is_refused_and_the_host_says_why() {
 }
 
 #[test]
-fn the_session_settings_are_the_hosts_to_choose_and_a_looser_one_is_said() {
+fn the_session_settings_are_the_hosts_to_choose_and_a_non_default_one_is_said() {
     let (host, log) = Host::start_logged_with(
         Scratch::new(),
         &agent_entry("fixture", ""),
         1,
         &["--key-limit", "18446744073709551615"],
     );
-    let written = log_holding(&log, &["weakened"]);
-    assert!(written.contains("weakened"), "{written}");
+    let written = log_holding(&log, &["non-default"]);
+    assert!(written.contains("non-default"), "{written}");
     let client = support::key();
     host.pair(&client);
     assert_eq!(

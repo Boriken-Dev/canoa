@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use coqui_agentic_peer::auth::Identity;
-use coqui_web::websocket::Channel;
+use coqui_web_channel::websocket::Channel;
 use serde_json::{Value, json};
 use support::{Host, Rpc, Scratch, WAIT, cwd, example, quoted, running, with_link};
 
