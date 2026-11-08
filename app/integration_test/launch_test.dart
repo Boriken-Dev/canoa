@@ -5,8 +5,8 @@
 //     flutter test integration_test/launch_test.dart -d windows   (or -d linux)
 //
 // STEP is `first` (no canoa.cfg at all), `flag` (`--no-local-host`), `config` (`[desktop] local_host = false`) or `hosted`
-// (an agent served, through a closed window). DIR is a new empty directory. `node` on PATH runs the scripted agent;
-// CANOA_TEST_NODE names Node 22 or later for the browser's WebCrypto; CANOA_TEST_APP is this app's directory (default: the
+// (an agent served, through a closed window). DIR is a new empty directory. The scripted agent and the browser's WebCrypto run on
+// CANOA_TEST_NODE (Node 22 or later, else `node` on PATH); CANOA_TEST_APP is this app's directory (default: the
 // working directory). CANOA_HOST has to be unset, as it is for a person. It spends nothing.
 import 'dart:convert';
 import 'dart:io';
@@ -95,12 +95,12 @@ void main() {
     final state = jsonEncode('--state=$dir/$marker.json');
     final entries = '''
 [host.agents.scripted]
-program = "node"
+program = ${jsonEncode(nodeProgram)}
 args = [$script, $state]
 listen = "127.0.0.1:$port"
 
 [host.agents.profiled]
-program = "node"
+program = ${jsonEncode(nodeProgram)}
 args = [$script, $state]
 listen = "127.0.0.1:$launchedPort"
 profiles = ["plain"]
