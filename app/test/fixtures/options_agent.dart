@@ -35,6 +35,18 @@ final class OptionsAgent {
   static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
   static const codexModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan')];
 
+  /// Whether `session/load` is answered only when [releaseLoad] is called, so a test can act while a session opens again.
+  bool holdLoad = false;
+  final _heldLoad = <void Function()>[];
+
+  void releaseLoad() {
+    final held = [..._heldLoad];
+    _heldLoad.clear();
+    for (final answer in held) {
+      answer();
+    }
+  }
+
   /// Mode values it refuses, as an agent refuses one it cannot take.
   final refuseModes = <String>{};
 
@@ -173,9 +185,16 @@ final class OptionsAgent {
               end();
             }
           case 'session/load' || 'session/resume':
-            // A reopened agent starts in its own default mode again, whatever the session was left in.
-            mode = modes.isEmpty ? '' : modes.first.$1;
-            reply(id, {'configOptions': options});
+            void answer() {
+              // A reopened agent starts in its own default mode again, whatever the session was left in.
+              mode = modes.isEmpty ? '' : modes.first.$1;
+              reply(id, {'configOptions': options});
+            }
+            if (holdLoad) {
+              _heldLoad.add(answer);
+            } else {
+              answer();
+            }
           default:
             if (id != null) reply(id, <String, Object?>{});
         }
