@@ -27,26 +27,26 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "ansi"] }
 # The stdio relay and the provider facade, on coqui-acp at one revision. Not published yet.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3583ba22b0125601964622f10c8f340ef2a65397" }
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3583ba22b0125601964622f10c8f340ef2a65397" }
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3583ba22b0125601964622f10c8f340ef2a65397" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
 # Claude Code and Codex as ACP agents, run in this process with no Node: their translators and what they share.
-coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3583ba22b0125601964622f10c8f340ef2a65397" }
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3583ba22b0125601964622f10c8f340ef2a65397" }
-coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "3583ba22b0125601964622f10c8f340ef2a65397" }
+coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.
-coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "e513bb769f99923b8a715b6b5596298dbe244016" }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "3cd5e04cfc7bc5d7a976a9e85d8eb808662db997" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "b6aa1f47ca956578ffcd20f936c43e8663ed059a" }
-coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "6d44feb0842b4318941d12b1c92a899c521ed814" }
+coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "a491a0034e0a9084c7aa3a5298f3b3c649ae7941" }
 coqui-web-channel = { git = "https://github.com/Boriken-Dev/coqui-web-channel.git", rev = "0b5b05c9af3417f6b13edc0fc7d9c86c02a63eca", default-features = false, features = ["websocket"] }
 # Loading a provider library; the revision coqui-acp-provider's kinds are built on.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "f193e1dd289315fffc628720271135a701f5bbce", features = ["provider", "load"] }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "fe9efd3797ec5e178e1f9381db0e65146d2c866e", features = ["provider", "load"] }
 # A provider's settings, as JSON, made a Guatiao value: only the adapter, no text format.
-guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "f193e1dd289315fffc628720271135a701f5bbce", default-features = false }
+guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "fe9efd3797ec5e178e1f9381db0e65146d2c866e", default-features = false }
 
 # coqui-acp-bridge takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
 # needs the one source coqui-acp patches it to.
 [patch.crates-io]
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "b6aa1f47ca956578ffcd20f936c43e8663ed059a" }
 # The published coqui-peer-tls still names coqui-peer's old field; this commit follows it.
-coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "365a6498af6389fe89cc50e0a51e6eb685996da2" }
+coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "50bd7ffc6ee75e9fdf1838d5668cfdbd07f286d1" }
