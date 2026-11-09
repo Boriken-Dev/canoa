@@ -83,7 +83,7 @@ impl ServeOptions {
         }
     }
 
-    /// What one key may carry in each direction, in bytes. No floor; above the default the host logs it as weakened.
+    /// What one key may carry in each direction, in bytes. No floor; above the default the host logs it as a non-default setting.
     #[must_use]
     pub const fn with_key_limit(mut self, bytes: u64) -> Self {
         self.key_limit = Some(bytes);
@@ -458,13 +458,21 @@ impl Serving {
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
         for entry in &config.entries {
-            let listener = websocket::Listener::bind(entry.listen, None)
+            // Every message after the proof is sealed in its session, so where the socket sits is the person's to choose.
+            let listener = websocket::Listener::bind_plain(entry.listen)
                 .and_then(|listener| Ok((listener.local_addr()?, listener)))
                 .map_err(|failure| ServeError::Listen {
                     entry: entry.name.clone(),
                     failure,
                 })?;
             let (bound, listener) = listener;
+            if listener.plain_beyond_loopback() {
+                tracing::info!(
+                    "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
+                    table_of(&entry.kind),
+                    entry.name
+                );
+            }
             let listener = listener
                 .with_limits(unproven_limits())
                 .with_frames(Frames::Binary)
@@ -503,26 +511,36 @@ impl Serving {
                     if let Origin::Source {
                         settings,
                         import_search,
+                        import_search_named,
                         ..
                     } = origin
                     {
                         if cfg!(windows) && *import_search == ImportSearch::Path {
-                            tracing::warn!(
-                                "weakened: host.providers.{}.import_search is path, looser than library: python3.dll and \
-                                 what else the source imports itself may come from the working directory or PATH; set \
-                                 import_dirs to where it is, or import_search = \"library\"",
-                                entry.name
-                            );
+                            if *import_search_named {
+                                tracing::info!(
+                                    "non-default: host.providers.{}.import_search is path, default library: python3.dll \
+                                     and what else the source imports itself may come from the working directory or PATH",
+                                    entry.name
+                                );
+                            } else {
+                                // The file does not say it: import_dirs names no directory, so the host fell back.
+                                tracing::warn!(
+                                    "host.providers.{}.import_search is path, because import_dirs names no directory: \
+                                     python3.dll and what else the source imports itself may come from the working \
+                                     directory or PATH; set import_dirs to where it is, or import_search = \"library\"",
+                                    entry.name
+                                );
+                            }
                         }
-                        // Guatiao's source cannot tell its host which weaker setting it took, so the host says it.
+                        // Guatiao's source cannot tell its host which non-default setting it took, so the host says it.
                         if settings
                             .as_map()
                             .get("isolation")
                             .and_then(|value| value.as_str())
                             == Some("inherit")
                         {
-                            tracing::warn!(
-                                "weakened: host.providers.{}.source_settings.isolation is inherit, looser than shipped",
+                            tracing::info!(
+                                "non-default: host.providers.{}.source_settings.isolation is inherit, default shipped",
                                 entry.name
                             );
                         }
@@ -933,6 +951,15 @@ fn prepare<C: Channel>(
     }
 }
 
+/// The table of canoa.cfg an entry of this kind is in.
+const fn table_of(kind: &EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Agent { .. } | EntryKind::Harness { .. } => "agents",
+        EntryKind::Provider { .. } => "providers",
+        EntryKind::Tool { .. } => "tools",
+    }
+}
+
 /// A harness entry's translator options. The host's scope already holds a client's `cwd` and more directories to the
 /// entry's roots and adds directories of its own after it, so the translator takes any; a resumed Codex thread's own
 /// directory, which no request shows the host, is held to the roots by the translator. What the command line asks before
@@ -968,10 +995,11 @@ fn harness_options(
             entry.name
         );
     }
-    let weakened = |setting: &str, value: &Option<String>, loose: &[&str], strict: &str| {
+    // The entry's own settings, so each is configuration; a client's choice stays within the entry's mode.
+    let non_default = |setting: &str, value: &Option<String>, loose: &[&str], default: &str| {
         if let Some(value) = value.as_deref().filter(|value| loose.contains(value)) {
-            tracing::warn!(
-                "weakened: host.agents.{}.{setting} is {value}, looser than {strict}: the command line acts with nothing \
+            tracing::info!(
+                "non-default: host.agents.{}.{setting} is {value}, default {default}: the command line acts with nothing \
                  asked",
                 entry.name
             );
@@ -979,7 +1007,7 @@ fn harness_options(
     };
     match harness {
         crate::Harness::Claude => {
-            weakened(
+            non_default(
                 "permission_mode",
                 &asks.permission_mode,
                 &["bypassPermissions", "acceptEdits", "auto"],
@@ -989,13 +1017,13 @@ fn harness_options(
             options.setting_sources.clone_from(&asks.setting_sources);
         }
         crate::Harness::Codex => {
-            weakened(
+            non_default(
                 "approval_policy",
                 &asks.approval_policy,
                 &["never", "on-failure"],
                 "on-request",
             );
-            weakened(
+            non_default(
                 "sandbox",
                 &asks.sandbox,
                 &["danger-full-access"],

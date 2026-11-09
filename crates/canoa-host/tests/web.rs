@@ -15,7 +15,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::Value;
-use support::{Host, Scratch, example, host_binary, method, quoted};
+use support::{Host, Scratch, example, host_binary, line_saying, log_holding, method, quoted};
 
 fn site() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -332,4 +332,48 @@ fn https_serves_the_site_with_the_certificate_given() {
         !received.starts_with(b"HTTP/1.1 200"),
         "no plain HTTP on an HTTPS listener"
     );
+}
+
+#[test]
+fn a_limit_above_its_default_and_a_connect_source_are_logged_as_configuration() {
+    let config = format!(
+        "{}[host.web]\ndir = {}\nlisten = \"127.0.0.1:0\"\nmax_requests = 5000\nconnect = [\"https://fonts.gstatic.com\"]\n",
+        agents(1),
+        quoted(&site().to_string_lossy())
+    );
+    let (_host, log) = Host::start_logged(Scratch::new(), &config, 1, &[]);
+    let written = log_holding(&log, &["host.web.max_requests", "host.web.connect"]);
+    for setting in ["host.web.max_requests is 5000", "host.web.connect lets"] {
+        let line = line_saying(&written, setting);
+        assert!(line.contains("INFO"), "the file asked for it: {line}");
+        assert!(line.contains("non-default"), "{line}");
+    }
+    assert!(!written.contains("host.web.max_connections "), "{written}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_key_file_other_users_can_read_is_a_warning_and_one_they_cannot_is_not() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let made =
+        rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("a certificate");
+    let serve = |mode: u32| {
+        let scratch = Scratch::new();
+        std::fs::write(scratch.0.join("web.crt"), made.cert.pem()).expect("the certificate");
+        let key = scratch.0.join("web.key");
+        std::fs::write(&key, made.signing_key.serialize_pem()).expect("the key");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(mode)).expect("a mode");
+        let config = format!(
+            "{}[host.web]\ndir = {}\nlisten = \"127.0.0.1:0\"\ncert = \"web.crt\"\nkey = \"web.key\"\n",
+            agents(1),
+            quoted(&site().to_string_lossy())
+        );
+        let (host, log) = Host::start_logged(scratch, &config, 1, &[]);
+        let _ = web_url(&host);
+        log_holding(&log, &[])
+    };
+    let open = serve(0o644);
+    let line = line_saying(&open, "may be read by other users");
+    assert!(line.contains("WARN"), "nobody asked for it: {line}");
+    assert!(!serve(0o600).contains("may be read by other users"));
 }

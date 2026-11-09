@@ -134,7 +134,7 @@ enum Command {
     /// Show a PIN and pair the native key that uses it, then end. Prints {"pin", "peer", "url"}, then {"paired"}.
     /// One wrong try ends it. A browser cannot pair this way: it connects once and is accepted by its id.
     Pair {
-        /// The loopback address to wait on.
+        /// The address to wait on; loopback unless you say otherwise.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
         /// How long to wait for the PIN to be used.
@@ -359,7 +359,6 @@ impl MethodArg {
         self,
         home: &Home,
         force: ForceArg,
-        front: &dyn Front,
     ) -> Result<auth::Identity, Failed> {
         let recorded = home.recorded().map_err(Failed::run)?;
         if let (Some(requested), Some(recorded)) = (self.method, recorded)
@@ -378,9 +377,9 @@ impl MethodArg {
                     ),
                 });
             }
-            front.say(&format!(
-                "weakened: method is {requested} while {who} runs on this home, looser than {recorded}: already-paired clients are refused after its next restart"
-            ));
+            tracing::info!(
+                "--force: method is {requested} while {who} runs on this home, which proves by {recorded}: already-paired clients are refused after its next restart"
+            );
         }
         self.identity(home)
     }
@@ -410,7 +409,7 @@ struct ServeArgs {
     config: ConfigArgs,
     #[command(flatten)]
     method: MethodArg,
-    /// What one key may carry in each direction, in bytes. Default 2^38; above it the log says it is weakened.
+    /// What one key may carry in each direction, in bytes. Default 2^38; above it the log lists it as a non-default setting.
     #[arg(long, value_name = "BYTES")]
     key_limit: Option<u64>,
     /// Under Noise, end a session at the key limit rather than changing keys, as WebCrypto always does.
@@ -712,14 +711,18 @@ fn pair(
     force: ForceArg,
     front: &dyn Front,
 ) -> Result<(), Failed> {
-    if !listen.ip().is_loopback() {
-        return Err(Failed::usage("pair listens only on loopback"));
-    }
     let home = home_of(front)?;
-    let identity = Arc::new(method.identity_unless_running(&home, force, front)?);
+    let identity = Arc::new(method.identity_unless_running(&home, force)?);
     let store = Arc::new(store(&home)?);
-    let listener = websocket::Listener::bind(listen, None).map_err(Failed::run)?;
+    // The PIN exchange runs inside the method's own session and takes one guess, so where the socket sits is the person's to
+    // choose.
+    let listener = websocket::Listener::bind_plain(listen).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
+    if listener.plain_beyond_loopback() {
+        tracing::info!(
+            "non-default: pair --listen is {bound}, default loopback: any machine that reaches it may try the PIN"
+        );
+    }
     // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake.
     let listener = listener
         .with_frames(Frames::Binary)
@@ -870,7 +873,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Id { method, force } => print(
             front,
             &method
-                .identity_unless_running(&home_of(front)?, force, front)?
+                .identity_unless_running(&home_of(front)?, force)?
                 .peer_id()
                 .to_string(),
         ),
@@ -929,14 +932,14 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
                 (Some(library), None) if line.source_settings.is_none() => Origin::Library(library),
                 (None, Some(file)) => {
                     let settings = line.source_settings.unwrap_or_default();
-                    let import_search = import_search
-                        .as_deref()
-                        .and_then(ImportSearch::named)
-                        .unwrap_or_else(|| ImportSearch::default_for(&settings));
+                    let named = import_search.as_deref().and_then(ImportSearch::named);
+                    let import_search =
+                        named.unwrap_or_else(|| ImportSearch::default_for(&settings));
                     Origin::Source {
                         file,
                         settings,
                         import_search,
+                        import_search_named: named.is_some(),
                     }
                 }
                 _ => return Err(Failed::usage("source settings go with --source alone")),

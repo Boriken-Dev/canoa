@@ -50,8 +50,8 @@ pub struct WebConfig {
     pub tls: Option<WebTls>,
     /// Host names a request may carry besides `localhost` and an IP address, as a proxy or a certificate names the host.
     pub hosts: Vec<String>,
-    /// Origins the page may connect to besides this host's entries (`https://fonts.gstatic.com`), each one a weakening
-    /// of the policy, which is logged.
+    /// Origins the page may connect to besides this host's entries (`https://fonts.gstatic.com`): each widens the page's
+    /// policy, and is logged as configuration.
     pub connect: Vec<String>,
     /// What one connection may take.
     pub limits: crate::web::Limits,
@@ -126,7 +126,8 @@ pub struct Entry {
     pub name: String,
     /// What runs for each connection.
     pub kind: EntryKind,
-    /// A loopback address; port 0 takes any free port.
+    /// Where it listens; port 0 takes any free port. Loopback unless the file says otherwise: the link is sealed by the
+    /// paired key's method, so another address is configuration (`serve` logs it), not an exception.
     pub listen: SocketAddr,
     /// Directories a session's `cwd` must be under. Empty takes any absolute path.
     pub working_roots: Vec<PathBuf>,
@@ -240,6 +241,8 @@ pub enum Origin {
         /// Where Windows looks for what the source imports itself (Python's `python3.dll`) that its own directory, the
         /// executable's and the system's leave missing.
         import_search: ImportSearch,
+        /// Whether `import_search` is in the file; false when it was taken from [`ImportSearch::default_for`].
+        import_search_named: bool,
     },
 }
 
@@ -252,7 +255,8 @@ pub enum ImportSearch {
     /// `library`: the source's `import_dirs` only.
     Library,
     /// `path`: `import_dirs`, then the Windows directory, the working directory and `PATH`, so whoever can write any of
-    /// them chooses the code the source loads. A weakening, which `serve` logs.
+    /// them chooses the code the source loads. `serve` logs it: as configuration when the file names it, as a warning when
+    /// it was taken as the default.
     Path,
 }
 
@@ -268,7 +272,7 @@ impl ImportSearch {
 
     /// The search a source entry takes when it names none: [`ImportSearch::Library`] when its `import_dirs` name at
     /// least one directory, since they say where to look; [`ImportSearch::Path`] otherwise, so a source that relied on
-    /// `PATH` still loads, and is logged as weakened.
+    /// `PATH` still loads, and is logged as a warning.
     #[must_use]
     pub fn default_for(settings: &Settings) -> Self {
         let listed = settings
@@ -672,6 +676,7 @@ impl Config {
                         file: file(source)?,
                         settings,
                         import_search,
+                        import_search_named: provider.import_search.is_some(),
                     }
                 }
             };
@@ -1045,12 +1050,6 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
             .parse::<SocketAddr>()
             .map_err(|_| invalid(&name, "listen is not an address and port"))?,
     };
-    if !listen.ip().is_loopback() {
-        return Err(invalid(
-            &name,
-            "listen must be a loopback address: this host serves this machine only, and a proxy that ends TLS can carry it further",
-        ));
-    }
     let mut working_roots = Vec::new();
     for root in common.working_roots {
         let root = PathBuf::from(root);
@@ -1112,6 +1111,8 @@ fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig,
         (None, None) => None,
         _ => return Err(refused("cert and key go together")),
     };
+    // Unlike an entry's link, the page is not sealed: whoever is on the path can rewrite the code that holds the person's
+    // key, and a browser gives plain HTTP no secure context for WebCrypto.
     if web.tls.is_none() && !web.listen.ip().is_loopback() {
         return Err(refused(
             "listen is beyond loopback, where plain HTTP is refused: give cert and key",

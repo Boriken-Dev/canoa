@@ -316,6 +316,13 @@ pub fn log_holding(log: &Path, expected: &[&str]) -> String {
     }
 }
 
+/// The log line holding `text`, which carries its level.
+pub fn line_saying<'a>(log: &'a str, text: &str) -> &'a str {
+    log.lines()
+        .find(|line| line.contains(text))
+        .unwrap_or_else(|| panic!("the log says {text}: {log}"))
+}
+
 /// An ACP conversation inside a sealed session.
 pub struct Rpc<'a, C: Channel> {
     channel: &'a Sealed<'a, C>,

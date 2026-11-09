@@ -39,7 +39,7 @@ const STOP_POLL: Duration = Duration::from_millis(25);
 #[cfg(feature = "web")]
 static BUILT: &[(&str, &[u8], &str)] = include!(concat!(env!("OUT_DIR"), "/web_site.rs"));
 
-/// What one connection may take. Every limit is a setting; a looser one than the default is logged as weakened.
+/// What one connection may take. Every limit is a setting; one above the default is logged as a non-default setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Limits {
@@ -146,49 +146,49 @@ impl Limits {
         self
     }
 
-    /// Each limit looser than the default, as `(setting, value, default)` in canoa.cfg's words.
-    fn weakened(&self) -> Vec<(&'static str, String, String)> {
-        let strict = Self::default();
-        let mut looser = Vec::new();
+    /// Each limit above its default, as `(setting, value, default)` in canoa.cfg's words.
+    fn non_defaults(&self) -> Vec<(&'static str, String, String)> {
+        let standard = Self::default();
+        let mut found = Vec::new();
         let mut count = |setting, value: usize, default: usize| {
             if value > default {
-                looser.push((setting, value.to_string(), default.to_string()));
+                found.push((setting, value.to_string(), default.to_string()));
             }
         };
         count(
             "max_connections",
             self.max_connections,
-            strict.max_connections,
+            standard.max_connections,
         );
         count(
             "max_connections_per_address",
             self.max_connections_per_address,
-            strict.max_connections_per_address,
+            standard.max_connections_per_address,
         );
         count(
             "max_request_bytes",
             self.max_request_bytes,
-            strict.max_request_bytes,
+            standard.max_request_bytes,
         );
-        count("max_requests", self.max_requests, strict.max_requests);
+        count("max_requests", self.max_requests, standard.max_requests);
         let mut time = |setting, value: Duration, default: Duration| {
             if value > default {
-                looser.push((
+                found.push((
                     setting,
                     value.as_secs().to_string(),
                     default.as_secs().to_string(),
                 ));
             }
         };
-        time("request_seconds", self.request_time, strict.request_time);
-        time("idle_seconds", self.idle_time, strict.idle_time);
-        time("send_seconds", self.send_time, strict.send_time);
+        time("request_seconds", self.request_time, standard.request_time);
+        time("idle_seconds", self.idle_time, standard.idle_time);
+        time("send_seconds", self.send_time, standard.send_time);
         time(
             "connection_seconds",
             self.connection_time,
-            strict.connection_time,
+            standard.connection_time,
         );
-        looser
+        found
     }
 
     /// The first limit that would serve nothing, in canoa.cfg's words.
@@ -353,15 +353,21 @@ impl WebServer {
             None => return Err(WebError::NoSite),
         };
         let tls = web.tls.as_ref().map(tls_config).transpose()?;
-        for (setting, value, default) in web.limits.weakened() {
-            tracing::warn!("weakened: host.web.{setting} is {value}, looser than {default}");
+        for (setting, value, default) in web.limits.non_defaults() {
+            tracing::info!("non-default: host.web.{setting} is {value}, default {default}");
+        }
+        if !web.listen.ip().is_loopback() {
+            tracing::info!(
+                "non-default: host.web.listen is {}, default loopback: the site is served over HTTPS",
+                web.listen
+            );
         }
         if !web.connect.iter().all(|source| connect_source(source)) {
             return Err(WebError::Connect);
         }
         for source in &web.connect {
-            tracing::warn!(
-                "weakened: host.web.connect lets the page connect to {source}, beyond this host's entries"
+            tracing::info!(
+                "non-default: host.web.connect lets the page connect to {source}, beyond this host's entries"
             );
         }
         let listener = TcpListener::bind(web.listen).map_err(|source| WebError::Listen {
@@ -582,8 +588,9 @@ fn tls_config(tls: &WebTls) -> Result<Arc<rustls::ServerConfig>, WebError> {
         .map_err(|_| failed(&tls.key, "holds no PEM private key".to_owned()))?;
     #[cfg(unix)]
     if readable_by_others(&tls.key) {
+        // Nothing in the file asked for this: it is the key file's mode.
         tracing::warn!(
-            "weakened: host.web.key {} may be read by other users, who could then serve this site as this host",
+            "host.web.key {} may be read by other users, who could then serve this site as this host",
             tls.key.display()
         );
     }

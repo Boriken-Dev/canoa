@@ -347,16 +347,31 @@ fn pair_tied_to_its_input_ends_when_it_closes() {
 }
 
 #[test]
-fn pair_listens_only_on_loopback() {
+fn pair_listens_beyond_loopback_when_told_to_and_says_so_as_configuration() {
     let scratch = Scratch::new();
-    let refused = Command::new(host_binary())
-        .args(["pair", "--listen", "0.0.0.0:0"])
+    let mut child = Command::new(host_binary())
+        .args(["pair", "--listen", "0.0.0.0:0", "--until-stdin-closes"])
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
-        .output()
-        .expect("pair runs");
-    assert_eq!(refused.status.code(), Some(2), "{refused:?}");
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("pair starts");
+    let mut first = String::new();
+    BufReader::new(child.stdout.take().expect("its output"))
+        .read_line(&mut first)
+        .expect("pair says its PIN");
+    assert!(first.contains("\"pin\""), "{first}");
+    drop(child.stdin.take());
+    let output = child.wait_with_output().expect("pair ends");
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    let line = said
+        .lines()
+        .find(|line| line.contains("pair --listen"))
+        .unwrap_or_else(|| panic!("the log names the address: {said}"));
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("loopback"),
-        "{refused:?}"
+        line.contains("INFO"),
+        "configuration, not a warning: {line}"
     );
+    assert!(line.contains("non-default"), "{line}");
 }

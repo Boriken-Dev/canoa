@@ -1,5 +1,5 @@
 //! A home a host runs on keeps its method: `id --method` and `pair --method` naming another are refused unless `--force`,
-//! which logs it as weakened. The same method, and a home no host runs on, are never refused.
+//! which logs it at info. The same method, and a home no host runs on, are never refused.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -83,13 +83,14 @@ fn a_running_standalone_host_refuses_another_method_for_id() {
 }
 
 #[test]
-fn force_changes_the_method_of_a_running_host_and_logs_it_as_weakened() {
+fn force_changes_the_method_of_a_running_host_and_logs_it_at_info() {
     let host = Host::start(&agent_entry(), 1);
     let forced = canoa(&host.home(), &["id", "--force", "--method", other().name()]);
     assert!(forced.status.success(), "{forced:?}");
     let said = said(&forced);
-    assert!(said.starts_with("weakened: "), "{said}");
-    assert!(said.contains("already-paired clients"), "{said}");
+    let line = support::line_saying(&said, "--force");
+    assert!(line.contains("INFO"), "typed on purpose: {line}");
+    assert!(line.contains("already-paired clients"), "{line}");
     assert_eq!(recorded(&host.home()), other().name());
 }
 
@@ -133,7 +134,11 @@ fn an_embedded_host_holding_the_home_refuses_another_method_too() {
     assert_eq!(recorded(&home), support::method().name());
     let forced = canoa(&home, &["id", "--force", "--method", other().name()]);
     assert!(forced.status.success(), "{forced:?}");
-    assert!(said(&forced).starts_with("weakened: "), "{forced:?}");
+    let line = said(&forced);
+    assert!(
+        support::line_saying(&line, "--force").contains("INFO"),
+        "{forced:?}"
+    );
     assert_eq!(recorded(&home), other().name());
     drop(lock);
 }
@@ -156,7 +161,11 @@ fn pair_is_guarded_the_same_way() {
     );
     assert_eq!(recorded(&home), support::method().name());
     let forced = pair(&["--force"]);
-    assert!(said(&forced).starts_with("weakened: "), "{forced:?}");
+    let line = said(&forced);
+    assert!(
+        support::line_saying(&line, "--force").contains("INFO"),
+        "{forced:?}"
+    );
     assert_eq!(recorded(&home), other().name());
     drop(lock);
 }

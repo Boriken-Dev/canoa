@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use coqui_agentic_peer::auth::Identity;
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, host_binary, log_holding, quoted, with_link};
+use support::{
+    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
+};
 
 fn agent_entry(name: &str, extra: &str) -> String {
     format!(
@@ -283,6 +285,13 @@ fn check_prints_entries_and_a_bad_configuration_exits_2() {
     );
 
     std::fs::write(&path, agent_entry("fixture", "listen = \"0.0.0.0:7999\"")).expect("written");
+    let beyond = run(&["check", "--config", &config_arg]);
+    assert!(beyond.status.success(), "{beyond:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&beyond.stdout).trim(),
+        "fixture agent 0.0.0.0:7999"
+    );
+    std::fs::write(&path, agent_entry("fixture", "listen = \"not an address\"")).expect("written");
     assert_eq!(
         run(&["serve", "--config", &config_arg]).status.code(),
         Some(2)
@@ -542,7 +551,11 @@ fn the_session_settings_are_the_hosts_to_choose_and_a_non_default_one_is_said() 
         &["--key-limit", "18446744073709551615"],
     );
     let written = log_holding(&log, &["non-default"]);
-    assert!(written.contains("non-default"), "{written}");
+    let line = line_saying(&written, "non-default");
+    assert!(
+        line.contains("INFO"),
+        "the command line asked for it: {line}"
+    );
     let client = support::key();
     host.pair(&client);
     assert_eq!(
@@ -552,7 +565,7 @@ fn the_session_settings_are_the_hosts_to_choose_and_a_non_default_one_is_said() 
 }
 
 #[test]
-fn a_source_whose_import_search_reaches_the_working_directory_and_path_is_said_to_be_weakened() {
+fn an_import_search_of_path_is_configuration_when_named_and_a_warning_when_taken_as_the_default() {
     let entry = |name: &str, extra: &str, settings: &str| {
         format!(
             "[host.providers.{name}]\nsource = \"guatiao_source_py.dll\"\nprovider = \"p\"\n{extra}[host.providers.{name}.source_settings]\n{settings}"
@@ -570,17 +583,21 @@ fn a_source_whose_import_search_reaches_the_working_directory_and_path_is_said_t
     ]
     .concat();
     let (_host, log) = Host::start_logged(Scratch::new(), &config, 4, &[]);
-    let said = |name: &str| {
-        format!("weakened: host.providers.{name}.import_search is path, looser than library")
-    };
+    let named = |name: &str| format!("host.providers.{name}.import_search is path");
     if cfg!(windows) {
-        let written = log_holding(&log, &[&said("defaulted"), &said("chosen")]);
-        assert!(written.contains(&said("defaulted")), "{written}");
+        let written = log_holding(&log, &[&named("defaulted"), &named("chosen")]);
+        let defaulted = line_saying(&written, &named("defaulted"));
         assert!(
-            written.contains("set import_dirs"),
-            "the log says how to narrow it: {written}"
+            defaulted.contains("WARN"),
+            "nobody asked for it: {defaulted}"
         );
-        assert!(written.contains(&said("chosen")), "{written}");
+        assert!(
+            defaulted.contains("set import_dirs"),
+            "the log says how to narrow it: {defaulted}"
+        );
+        let chosen = line_saying(&written, &named("chosen"));
+        assert!(chosen.contains("INFO"), "the file asked for it: {chosen}");
+        assert!(chosen.contains("non-default"), "{chosen}");
         for quiet in [
             "providers.listed.import_search",
             "providers.narrow.import_search",
@@ -596,7 +613,7 @@ fn a_source_whose_import_search_reaches_the_working_directory_and_path_is_said_t
 }
 
 #[test]
-fn a_source_that_inherits_the_hosts_environment_is_said_to_be_weakened() {
+fn a_source_that_inherits_the_hosts_environment_is_said_as_configuration() {
     let entry = |name: &str, settings: &str| {
         format!(
             "[host.providers.{name}]\nsource = \"guatiao_source_py.dll\"\nprovider = \"p\"\n[host.providers.{name}.source_settings]\n{settings}"
@@ -609,9 +626,11 @@ fn a_source_that_inherits_the_hosts_environment_is_said_to_be_weakened() {
     ]
     .concat();
     let (_host, log) = Host::start_logged(Scratch::new(), &config, 3, &[]);
-    let said = "weakened: host.providers.inherits.source_settings.isolation is inherit, looser than shipped";
+    let said = "host.providers.inherits.source_settings.isolation is inherit";
     let written = log_holding(&log, &[said]);
-    assert!(written.contains(said), "{written}");
+    let line = line_saying(&written, said);
+    assert!(line.contains("INFO"), "the file asked for it: {line}");
+    assert!(line.contains("non-default"), "{line}");
     // Every entry is bound, and so said, before the host prints where it listens.
     for quiet in [
         "providers.isolated.source_settings",
@@ -686,5 +705,60 @@ fn a_fresh_home_serves_by_the_default_method() {
     assert_eq!(
         value["method"],
         coqui_agentic_peer::auth::Method::DEFAULT.name()
+    );
+}
+
+#[test]
+fn an_entry_beyond_loopback_is_served_and_said_as_configuration() {
+    let (_host, log) = Host::start_logged(
+        Scratch::new(),
+        &[
+            agent_entry("everywhere", "listen = \"0.0.0.0:0\""),
+            agent_entry("here", ""),
+        ]
+        .concat(),
+        2,
+        &[],
+    );
+    let written = log_holding(&log, &["host.agents.everywhere.listen"]);
+    let line = line_saying(&written, "host.agents.everywhere.listen");
+    assert!(line.contains("INFO"), "the file asked for it: {line}");
+    assert!(line.contains("non-default"), "{line}");
+    assert!(
+        !written.contains("host.agents.here.listen"),
+        "loopback is the default and says nothing: {written}"
+    );
+}
+
+#[test]
+fn a_harness_entry_that_acts_without_asking_is_said_as_configuration() {
+    let (_host, log) = Host::start_logged(
+        Scratch::new(),
+        concat!(
+            "[host.agents.Claude]\nharness = \"claude\"\npermission_mode = \"acceptEdits\"\n",
+            "[host.agents.Codex]\nharness = \"codex\"\nsandbox = \"danger-full-access\"\n",
+            "[host.agents.Careful]\nharness = \"codex\"\n",
+        ),
+        3,
+        &[],
+    );
+    let written = log_holding(
+        &log,
+        &[
+            "host.agents.Claude.permission_mode",
+            "host.agents.Codex.sandbox",
+        ],
+    );
+    for setting in [
+        "host.agents.Claude.permission_mode is acceptEdits",
+        "host.agents.Codex.sandbox is danger-full-access",
+    ] {
+        let line = line_saying(&written, setting);
+        assert!(line.contains("INFO"), "the file asked for it: {line}");
+        assert!(line.contains("non-default"), "{line}");
+    }
+    assert!(
+        !written.contains("host.agents.Careful.sandbox"),
+        "{written}"
     );
 }

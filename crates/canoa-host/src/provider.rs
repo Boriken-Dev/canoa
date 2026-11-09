@@ -266,6 +266,7 @@ fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>),
             file,
             settings,
             import_search,
+            ..
         } => {
             // A language's runtime is often installed elsewhere than the source: Python's python3.dll, on Windows.
             registry.set_import_search(match import_search {
