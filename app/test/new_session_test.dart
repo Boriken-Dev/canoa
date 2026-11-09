@@ -111,6 +111,9 @@ void main() {
   });
 
   testWidgets('a preset that cannot run says what it is missing, in Settings and for a new session, and starts nothing', (tester) async {
+    final logged = <String>[];
+    final before = debugPrint;
+    debugPrint = (message, {wrapWidth}) => logged.add(message ?? '');
     final (store, starts, _, _) = await _app(tester, missing: {'claude'}, size: const Size(1280, 1400));
     await _openSources(tester);
     expect(find.text('Claude needs claude on PATH: claude was not found. '
@@ -129,7 +132,10 @@ void main() {
     await tester.tap(find.byTooltip('Send'));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
+    debugPrint = before;
     expect(find.textContaining('Not started: Claude needs claude on PATH'), findsWidgets);
+    expect(logged.where((line) => line.contains('Claude was not started: Claude needs claude on PATH')), hasLength(1),
+        reason: 'the reason on screen is in the log too');
     expect(starts.commands, isEmpty);
     expect(store.selected?.status, SessionStatus.draft);
     expect(find.widgetWithText(TextField, 'Fix it'), findsOneWidget, reason: 'the message stays to send again');

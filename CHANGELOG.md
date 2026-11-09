@@ -91,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- When a source cannot start, the app writes the reason it shows in the conversation to its log as well (`Canoa: NAME was not started: REASON`).
 - Opening or refreshing the store reads a catalog's icons with one `git ls-tree` per few thousand characters of paths and one `git cat-file --batch`, not a process pair for each icon.
 - The store offers Update and Remove only for an overlay it installed (its install record names the catalog); an overlay canoa.cfg names by hand from the same source is said to be, and left alone.
 - The store shows an entry's homepage and repository as links that open in the system's browser when tapped (a plain ASCII `http` or `https` address; anything else stays text), as the overlay specification asks.

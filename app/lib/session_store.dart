@@ -773,6 +773,7 @@ class SessionStore extends ChangeNotifier {
               ..title = draftTitle
               ..titleFromMessage = false;
           }
+          debugPrint('Canoa: ${session.source?.label ?? 'an agent'} was not started: ${reasonOf(error)}');
           if (_sessions.contains(session)) _note(session, 'Not started: ${reasonOf(error)}');
         }
         rethrow;
