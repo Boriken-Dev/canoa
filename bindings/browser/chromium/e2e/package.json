@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "What the real-browser runs need beyond the extension, which itself has no dependencies.",
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.2"
   }

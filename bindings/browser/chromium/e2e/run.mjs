@@ -11,7 +11,7 @@
 // wasm-bindgen --target web, and dart/page.js from app/tool/provider_page.dart through dart compile js.
 //
 // With a bridge, its companion is registered for this user during the run and removed after, replacing any registered before.
-// Needs `npm install` in examples/acp-echo, for its WebSocket server.
+// Needs `npm install` in e2e/, for the ws package its WebSocket server uses.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -28,7 +28,7 @@ import { lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
-const { WebSocketServer } = createRequire(import.meta.url)("../../../../examples/acp-echo/node_modules/ws");
+const { WebSocketServer } = createRequire(import.meta.url)("ws");
 const browser = process.env.CANOA_E2E_BROWSER;
 if (!browser) throw new Error("set CANOA_E2E_BROWSER");
 const bridge = process.env.CANOA_E2E_BRIDGE;
