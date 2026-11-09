@@ -107,6 +107,23 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('a tap outside a dialog closes it once, a tap on its text does not, a drag does not', (tester) async {
+    await conversation(tester);
+    await tester.tap(find.byTooltip('Canoa settings'));
+    await frames(tester);
+    await tester.tap(find.text('Brightness'));
+    await frames(tester);
+    expect(find.text('Canoa settings'), findsOneWidget);
+    await tester.dragFrom(const Offset(4, 4), const Offset(200, 200), kind: PointerDeviceKind.mouse);
+    await frames(tester);
+    expect(find.text('Canoa settings'), findsOneWidget, reason: 'a drag is not a tap');
+    await tester.tapAt(const Offset(4, 4));
+    await frames(tester);
+    expect(find.text('Canoa settings'), findsNothing);
+    expect(find.byTooltip('Canoa settings'), findsOneWidget, reason: 'the screen under it stays');
+    await finish(tester);
+  });
+
   testWidgets('a page over the screen selects and copies', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Builder(builder: (context) => TextButton(
