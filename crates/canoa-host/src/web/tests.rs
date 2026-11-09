@@ -380,10 +380,19 @@ fn files_are_served_from_the_directory_with_their_types_and_headers() {
         hashed.headers["cache-control"],
         "public, max-age=31536000, immutable"
     );
+}
 
-    let wasm = get(address, "/data/module.wasm");
+#[test]
+fn a_wasm_module_is_served_as_application_wasm() {
+    let outside = Outside::new("wasm");
+    // `\0asm` and version 1: an empty module, written here so the repository holds no binary.
+    let module = [0, 97, 115, 109, 1, 0, 0, 0];
+    std::fs::write(outside.site().join("module.wasm"), module).expect("a module");
+    let address = running(&loopback(&outside.site()), &[]);
+    let wasm = get(address, "/module.wasm");
+    assert_eq!(wasm.status, 200);
     assert_eq!(wasm.headers["content-type"], "application/wasm");
-    assert_eq!(wasm.body, [0, 97, 115, 109, 1, 0, 0, 0]);
+    assert_eq!(wasm.body, module);
 }
 
 #[test]
