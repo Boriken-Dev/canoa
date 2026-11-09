@@ -193,7 +193,7 @@ void main() {
           os: 'linux', shared: const {}, catalogPin: entry.pin);
       expect(preview.pinRefusal, allOf(contains('sha256:${'a' * 64}'), contains(digestOf(reviewTree)), contains('refused')));
       expect(preview.installable, isFalse);
-      await expectLater(installPreview(store, config, preview), throwsA(isA<StoreRefusal>()));
+      await expectLater(installPreview(store, config, preview, catalog: 'team'), throwsA(isA<StoreRefusal>()));
       expect(store.installed('stale'), isNull);
       expect(config.overlays, isEmpty);
     });
@@ -203,11 +203,12 @@ void main() {
       final entry = found.choose('team/docs-tools').entry;
       final source = installSource(entry);
       final first = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
-      var changed = await installPreview(store, config, first);
+      var changed = await installPreview(store, config, first, catalog: 'team');
       final pinned = changed.overlays['docs-tools']! as GitOverlay;
       expect(pinned.pin, first.update.digest, reason: 'install pins the tree digest');
       expect(store.installed('docs-tools')!.commit, first.update.commit, reason: 'and records the commit');
-      expect(entryState(changed, 'docs-tools', source), EntryState.installed);
+      expect(store.installed('docs-tools')!.catalog, 'team', reason: 'the record says the store installed it');
+      expect(entryState(changed, 'docs-tools', source, overlays: store), EntryState.installed);
 
       // The same overlay named by hand in canoa.cfg and installed from Settings, Profiles, in another home.
       final byHand = CanoaConfig.parse('[overlays]\ndocs-tools = { source = "${source.spec}", pin = "${pinned.pin}" }\n');
@@ -235,7 +236,7 @@ void main() {
       expect(update.update.changed, ['overlay.cfg']);
       expect(update.update.added, ['NEW.md']);
       expect(store.installed('docs-tools')!.commit, first.update.commit, reason: 'nothing changes until applied');
-      changed = await installPreview(store, changed, update, movePin: true);
+      changed = await installPreview(store, changed, update, catalog: 'team', movePin: true);
       expect((changed.overlays['docs-tools']! as GitOverlay).pin, update.update.digest, reason: 'pinned again');
       expect(File('${store.directoryOf('docs-tools')}/NEW.md').existsSync(), isTrue);
 
@@ -248,19 +249,37 @@ void main() {
 
     test('an update canoa.cfg\'s pin does not cover installs nothing until the pin is moved on purpose', () async {
       final source = installSource((await listing()).choose('team/docs-tools').entry);
-      // Named by hand, pinned, and installed from Settings, Profiles: the store finds it under the same source.
       final first = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
-      final byHand = CanoaConfig.parse('[overlays]\ndocs-tools = { source = "${source.spec}", pin = "${first.update.digest}" }\n');
-      await store.apply(await store.check('docs-tools', byHand.overlays['docs-tools']! as GitOverlay));
-      expect(entryState(byHand, 'docs-tools', source), EntryState.installed);
+      final pinned = await installPreview(store, config, first, catalog: 'team');
       team.write('overlays/docs-tools/overlay.cfg', '[env]\nDOCS = "two"\n');
       team.commit('update');
       final update = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
-      await expectLater(installPreview(store, byHand, update),
+      await expectLater(installPreview(store, pinned, update, catalog: 'team'),
           throwsA(isA<StoreRefusal>().having((e) => e.message, 'message', contains(first.update.digest))));
       expect(store.installed('docs-tools')!.digest, first.update.digest, reason: 'the pinned copy stays');
-      final moved = await installPreview(store, byHand, update, movePin: true);
+      final moved = await installPreview(store, pinned, update, catalog: 'team', movePin: true);
       expect((moved.overlays['docs-tools']! as GitOverlay).pin, update.update.digest);
+    });
+
+    test('an overlay named by hand from the store\'s source is neither updated nor removed by the store', () async {
+      final source = installSource((await listing()).choose('team/docs-tools').entry);
+      // Named by hand, pinned, and installed from Settings, Profiles: the same source, but not the store's doing.
+      final first = await previewOverlay(store, 'docs-tools', source, os: 'linux', shared: const {});
+      final byHand = CanoaConfig.parse('[overlays]\ndocs-tools = { source = "${source.spec}", pin = "${first.update.digest}" }\n');
+      await store.apply(await store.check('docs-tools', byHand.overlays['docs-tools']! as GitOverlay));
+      expect(store.installed('docs-tools')!.catalog, isNull);
+      expect(entryState(byHand, 'docs-tools', source, overlays: store), EntryState.byHand);
+      await expectLater(installPreview(store, byHand, first, catalog: 'team'),
+          throwsA(isA<StoreRefusal>().having((e) => e.message, 'message', contains('by hand'))));
+      await expectLater(removeInstalled(store, byHand, 'docs-tools', source), throwsA(isA<StoreRefusal>()));
+      expect(store.installed('docs-tools'), isNotNull, reason: 'nothing was removed');
+
+      // A later sync from Settings of an overlay the store installed leaves the store's record on it.
+      final other = CanoaConfig.parse('[catalogs]\nteam = "${team.location}@main#catalog.toml"\n');
+      final mine = await installPreview(store, other, first, catalog: 'team');
+      await store.apply(await store.check('docs-tools', mine.overlays['docs-tools']! as GitOverlay));
+      expect(store.installed('docs-tools')!.catalog, 'team');
+      expect(entryState(mine, 'docs-tools', source, overlays: store), EntryState.installed);
     });
 
     test('a preview that is not installed leaves no fetched history behind; an installed one keeps its', () async {
@@ -273,7 +292,7 @@ void main() {
       expect(cache.existsSync(), isFalse);
       final docs = await previewOverlay(store, 'docs-tools', installSource(found.choose('team/docs-tools').entry),
           os: 'linux', shared: const {});
-      await installPreview(store, config, docs);
+      await installPreview(store, config, docs, catalog: 'team');
       await discardPreview(store, 'docs-tools');
       expect(Directory('${temp.path}/home/overlays/.cache/docs-tools.git').existsSync(), isTrue);
       expect(store.installed('docs-tools'), isNotNull);
@@ -282,9 +301,9 @@ void main() {
     test('a name canoa.cfg gives another source is neither installed over nor removed', () async {
       final entry = (await listing()).choose('team/docs-tools').entry;
       final mine = CanoaConfig.parse('[overlays]\ndocs-tools = "${public.location}@main#docs"\n');
-      expect(entryState(mine, 'docs-tools', installSource(entry)), EntryState.taken);
+      expect(entryState(mine, 'docs-tools', installSource(entry), overlays: store), EntryState.taken);
       final preview = await previewOverlay(store, 'docs-tools', installSource(entry), os: 'linux', shared: const {});
-      await expectLater(installPreview(store, mine, preview), throwsA(isA<StoreRefusal>()));
+      await expectLater(installPreview(store, mine, preview, catalog: 'team'), throwsA(isA<StoreRefusal>()));
       await expectLater(removeInstalled(store, mine, 'docs-tools', installSource(entry)), throwsA(isA<StoreRefusal>()));
       expect(store.installed('docs-tools'), isNull);
     });
@@ -581,6 +600,25 @@ path = "s\u202Eh.sh"
       expect(overlays.records, isEmpty);
     });
 
+    testWidgets('an overlay named by hand from the entry source is said to be, and offers neither update nor remove',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final byHand = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
+          '[overlays]\ndocs-tools = "$teamRepo@main#overlays/docs-tools"\n');
+      await tester.pumpWidget(MaterialApp(
+        home: StorePage(config: byHand, home: MemoryHome(overlays), onSave: (changed) async => changed),
+      ));
+      await tester.pumpAndSettle();
+      await _decodeIcons(tester);
+      expect(find.text('Named in canoa.cfg by hand'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('store-entry-team-docs-tools')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-by-hand')), findsOneWidget);
+      expect(find.byKey(const Key('store-fetch')), findsNothing);
+      expect(find.byKey(const Key('store-remove')), findsNothing);
+    });
+
     testWidgets('install pins the digest in canoa.cfg; remove takes it out again', (tester) async {
       await open(tester, const Size(1280, 2400));
       await tester.tap(find.byKey(const Key('store-entry-team-docs-tools')));
@@ -592,6 +630,7 @@ path = "s\u202Eh.sh"
       await tester.tap(find.byKey(const Key('store-install')));
       await tester.pumpAndSettle();
       expect(overlays.records['docs-tools']!.digest, digest);
+      expect(overlays.records['docs-tools']!.catalog, 'team', reason: 'the record says which catalog the store used');
       expect(saved.last.overlays['docs-tools'], isA<GitOverlay>()
           .having((o) => o.pin, 'pin', digest).having((o) => o.spec, 'spec', '$teamRepo@main#overlays/docs-tools'));
 

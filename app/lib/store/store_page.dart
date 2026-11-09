@@ -196,6 +196,7 @@ class StorePageState extends State<StorePage> {
       null => null,
       EntryState.installed => 'Installed',
       EntryState.taken => 'Another overlay of this name is in canoa.cfg',
+      EntryState.byHand => 'Named in canoa.cfg by hand',
       EntryState.absent => null,
     };
     return Card(
@@ -219,7 +220,7 @@ class StorePageState extends State<StorePage> {
 
   EntryState? _state(CatalogEntry entry) {
     try {
-      return entryState(config, installName(entry), installSource(entry));
+      return entryState(config, installName(entry), installSource(entry), overlays: widget.home?.overlays);
     } on StoreRefusal {
       return null;
     }
@@ -370,7 +371,8 @@ class OverlayPageState extends State<OverlayPage> {
   }
 
   Future<void> _installing({required bool movePin}) => _run('Installing', () async {
-    final changed = await installPreview(widget.home!.overlays, config, preview!, movePin: movePin);
+    final changed = await installPreview(widget.home!.overlays, config, preview!,
+        catalog: widget.listed.label, movePin: movePin);
     final saved = await widget.onSave(changed);
     if (saved != null && mounted) {
       setState(() {
@@ -412,7 +414,7 @@ class OverlayPageState extends State<OverlayPage> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final target = _target;
-    final state = target == null ? null : entryState(config, target.$1, target.$2);
+    final state = target == null ? null : entryState(config, target.$1, target.$2, overlays: widget.home?.overlays);
     final found = preview;
     return PopScope(
       canPop: false,
@@ -431,6 +433,10 @@ class OverlayPageState extends State<OverlayPage> {
             else if (state == EntryState.taken)
               Text('canoa.cfg names ${namedAs(config, target!.$1)} from another source. The store neither installs over '
                   'it nor removes it.', key: const Key('store-taken'))
+            else if (state == EntryState.byHand)
+              Text('canoa.cfg names ${namedAs(config, target!.$1)} from this source, by hand. The store neither updates '
+                  'nor removes it; take the entry out of canoa.cfg to let the store manage it.',
+                  key: const Key('store-by-hand'))
             else if (widget.home == null)
               const Text('The desktop app fetches and installs overlays.')
             else if (found == null)

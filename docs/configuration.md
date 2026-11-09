@@ -296,8 +296,9 @@ its default.
   `[overlays]` as `{ source, pin }`, pinned to the digest checked. **Update** shows what an update changes first. A pin
   canoa.cfg already gives the overlay holds as it does for **Check for changes…**: a tree of another digest installs
   only once you choose **Update and move the pin…** and confirm the move, naming both digests. **Remove…** takes the
-  overlay out of `[overlays]` and deletes its files and fetched history. An overlay of the same name that canoa.cfg
-  names from another source is neither installed over nor removed. Nothing of an overlay runs, from the store or
+  overlay out of `[overlays]` and deletes its files and fetched history. The store records the catalog it installed an overlay
+  from; an overlay of the same name that canoa.cfg names from another source, or from the same source by hand, is
+  neither installed over, updated nor removed. Nothing of an overlay runs, from the store or
   otherwise. Catalogs are fetched into `overlays/.catalogs/LABEL.git`; what a page fetched and did not install is
   deleted when the page closes.
 - **Text from a catalog or a manifest** is shown as plain text, with every control, invisible or bidirectional

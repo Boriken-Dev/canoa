@@ -6,7 +6,7 @@ typedef OverlayFiles = Map<String, String>;
 /// An overlay installed on this computer: the commit it was fetched at and the tree digest of the files installed.
 final class InstalledOverlay {
   const InstalledOverlay({required this.name, required this.source, required this.commit, required this.files,
-      this.digest, this.skipped = const [], this.installed});
+      this.digest, this.skipped = const [], this.installed, this.catalog});
 
   factory InstalledOverlay.fromJson(String name, Map<String, dynamic> json) => InstalledOverlay(
     name: name,
@@ -16,6 +16,7 @@ final class InstalledOverlay {
     files: {for (final MapEntry(:key, :value) in (json['files'] as Map).entries) '$key': '$value'},
     skipped: [for (final path in (json['skipped'] as List?) ?? const []) '$path'],
     installed: DateTime.tryParse('${json['installed']}'),
+    catalog: json['catalog'] as String?,
   );
 
   final String name;
@@ -32,6 +33,10 @@ final class InstalledOverlay {
   final List<String> skipped;
   final DateTime? installed;
 
+  /// The label of the catalog whose store page installed it; null for an overlay named by hand, which the store neither
+  /// updates nor removes.
+  final String? catalog;
+
   Map<String, Object?> toJson() => {
     'source': source,
     'commit': commit,
@@ -39,6 +44,7 @@ final class InstalledOverlay {
     'files': files,
     'skipped': skipped,
     if (installed != null) 'installed': installed!.toUtc().toIso8601String(),
+    'catalog': ?catalog,
   };
 }
 
@@ -92,8 +98,9 @@ abstract interface class OverlayManager {
   /// whose digest is not the source's pin.
   Future<OverlayUpdate> check(String name, GitOverlay source);
 
-  /// Installs exactly what [update] showed.
-  Future<InstalledOverlay> apply(OverlayUpdate update);
+  /// Installs exactly what [update] showed. [catalog] records that the store installed it from the catalog so labelled; a
+  /// record already made for the same source keeps its own when none is given, so a sync from Settings leaves it.
+  Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog});
 
   /// Removes what [name] installed and fetched.
   Future<void> remove(String name);

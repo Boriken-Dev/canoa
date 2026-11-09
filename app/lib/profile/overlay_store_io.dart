@@ -99,9 +99,11 @@ final class OverlayStore implements OverlayManager {
   /// digest as they are written. The overlay's directory is replaced whole, so a file edited there is lost; the person's
   /// own additions belong in their own profile.
   @override
-  Future<InstalledOverlay> apply(OverlayUpdate update) async {
+  Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async {
     final name = update.name;
     _checkName(name);
+    final before = installed(name);
+    final label = catalog ?? (before?.source == update.source.spec ? before?.catalog : null);
     final cache = _cache(name);
     final staging = Directory(_path('.staging-$name'));
     if (staging.existsSync()) await staging.delete(recursive: true);
@@ -140,6 +142,7 @@ final class OverlayStore implements OverlayManager {
       files: update.files,
       skipped: update.skipped,
       installed: DateTime.now(),
+      catalog: label,
     );
     final file = File('${_path(name)}.json');
     final next = File('${file.path}.new');

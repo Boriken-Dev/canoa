@@ -58,7 +58,7 @@ final class FakeOverlays implements OverlayManager {
   }
 
   @override
-  Future<InstalledOverlay> apply(OverlayUpdate update) async => records[update.name] = InstalledOverlay(
+  Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async => records[update.name] = InstalledOverlay(
       name: update.name, source: update.source.spec, commit: update.commit, digest: update.digest, files: update.files);
 
   @override

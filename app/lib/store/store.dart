@@ -290,8 +290,12 @@ enum EntryState {
   /// No overlay of its identity is named.
   absent,
 
-  /// An overlay of its identity is named from this very source.
+  /// An overlay of its identity is named from this very source, and the store installed it.
   installed,
+
+  /// An overlay of its identity is named from this very source, but not by the store: the store neither updates nor
+  /// removes what a person named by hand.
+  byHand,
 
   /// An overlay of its identity is named from another source: the store neither installs over it nor removes it.
   taken,
@@ -301,14 +305,16 @@ enum EntryState {
 String? namedAs(CanoaConfig config, String name) =>
     config.overlays.keys.where((key) => aos.normalizeName(key) == aos.normalizeName(name)).firstOrNull;
 
-EntryState entryState(CanoaConfig config, String name, GitOverlay source) {
+/// How the entry [name] from [source] stands against `[overlays]` and what [overlays] recorded as installed by the store.
+EntryState entryState(CanoaConfig config, String name, GitOverlay source, {OverlayManager? overlays}) {
   final named = namedAs(config, name);
   if (named == null) return EntryState.absent;
   final present = config.overlays[named];
-  return present is GitOverlay && present.repo == source.repo && present.reference == source.reference &&
-          present.path == source.path
-      ? EntryState.installed
-      : EntryState.taken;
+  if (present is! GitOverlay || present.repo != source.repo || present.reference != source.reference ||
+      present.path != source.path) {
+    return EntryState.taken;
+  }
+  return overlays?.installed(named)?.catalog == null ? EntryState.byHand : EntryState.installed;
 }
 
 /// An overlay fetched, not installed, and what it would do, all from its own manifest and files.
@@ -444,28 +450,35 @@ String? pinMoved(CanoaConfig config, OverlayPreview preview) {
 /// pin canoa.cfg already gives it holds as it does for a sync from Settings, Profiles: a tree of another digest is
 /// installed only with [movePin], the person's choice to move it.
 Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, OverlayPreview preview,
-    {bool movePin = false}) async {
+    {required String catalog, bool movePin = false}) async {
   if (preview.pinRefusal case final why?) throw StoreRefusal(why);
   if (preview.refusal case final why?) throw StoreRefusal('Canoa would leave it out: $why');
   final name = preview.name;
   final named = namedAs(config, name);
-  if (named != null && entryState(config, name, preview.update.source) != EntryState.installed) {
-    throw StoreRefusal('canoa.cfg names $named from another source: remove it there first');
+  if (named != null) {
+    switch (entryState(config, name, preview.update.source, overlays: overlays)) {
+      case EntryState.installed || EntryState.absent:
+        break;
+      case EntryState.byHand:
+        throw StoreRefusal('canoa.cfg names $named by hand: remove it there first to let the store manage it');
+      case EntryState.taken:
+        throw StoreRefusal('canoa.cfg names $named from another source: remove it there first');
+    }
   }
   if (pinMoved(config, preview) case final pin? when !movePin) {
     throw StoreRefusal('canoa.cfg pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
   }
-  final record = await overlays.apply(preview.update);
+  final record = await overlays.apply(preview.update, catalog: catalog);
   return config.withOverlay(named ?? name, preview.update.source.pinnedTo(null), record.digest!);
 }
 
 /// Removes the overlay [name] the store installed from [source]: its files and fetched history, and its entry in
-/// `[overlays]`. One named from another source is refused, never removed.
+/// `[overlays]`. One named from another source, or by hand, is refused, never removed.
 Future<CanoaConfig> removeInstalled(OverlayManager overlays, CanoaConfig config, String name, GitOverlay source) async {
   final named = namedAs(config, name);
   if (named == null) return config;
-  if (entryState(config, name, source) != EntryState.installed) {
-    throw StoreRefusal('canoa.cfg names $named from another source: the store does not remove it');
+  if (entryState(config, name, source, overlays: overlays) != EntryState.installed) {
+    throw StoreRefusal('canoa.cfg names $named from another source or by hand: the store does not remove it');
   }
   await overlays.remove(named);
   return config.withoutOverlay(named);

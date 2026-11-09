@@ -209,10 +209,12 @@ final class MemoryOverlays implements OverlayManager {
       {for (final MapEntry(:key, :value) in update.files.entries) key: _blobs[value]!};
 
   @override
-  Future<InstalledOverlay> apply(OverlayUpdate update) async {
+  Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async {
     installedFiles[update.name] = await read(update);
+    final before = records[update.name];
     return records[update.name] = InstalledOverlay(name: update.name, source: update.source.spec, commit: update.commit,
-        digest: update.digest, files: update.files);
+        digest: update.digest, files: update.files,
+        catalog: catalog ?? (before?.source == update.source.spec ? before?.catalog : null));
   }
 
   @override
