@@ -14,6 +14,7 @@ import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'profile/apply.dart';
 import 'profile/profile_layers.dart' show LayerNote;
+import 'sources/known_options.dart';
 import 'sources/sources.dart';
 import 'worktree/worktree.dart';
 
@@ -677,16 +678,21 @@ class SessionStore extends ChangeNotifier {
     return images == null || files == null ? null : PromptTakes(images: images, files: files);
   }
 
-  /// The choices shown for [session]: the agent's own once it runs, else what its source's agent offered last time.
+  /// The choices shown for [session]: the agent's own once it runs; before, what its source's agent offered last time, and for
+  /// a role it has not, what the app knows the source's agent offers.
   List<ConfigOption> optionsOf(ChatSession session) {
     if (!session.isDraft) return session.options;
     final source = session.source;
-    return source == null ? const [] : ledger?.source(sourceKey(source))?.options ?? const [];
+    if (source == null) return const [];
+    return withKnown(ledger?.source(sourceKey(source))?.options ?? const [], knownOptions(source));
   }
 
-  /// When [session]'s source's choices were last seen, for a draft showing them; null otherwise.
+  /// When [session]'s source's choices were last seen, for a draft showing them; null otherwise, and when they are only what
+  /// the app knows.
   DateTime? optionsSeen(ChatSession session) =>
-      session.isDraft && session.source != null ? ledger?.source(sourceKey(session.source!))?.seen : null;
+      session.isDraft && session.source != null && (ledger?.source(sourceKey(session.source!))?.options.isNotEmpty ?? false)
+          ? ledger?.source(sourceKey(session.source!))?.seen
+          : null;
 
   /// Puts a person's choice for a draft as its source's default: the profile's [hints] by role where it gives one, else the
   /// last choice made for that source. Choices already made in the draft stay.
@@ -702,7 +708,7 @@ class SessionStore extends ChangeNotifier {
         _startInMode(session, value);
         continue;
       }
-      final option = memory == null ? null : optionIn(memory.options, role);
+      final option = optionIn(optionsOf(session), role);
       final id = option?.id ?? role.name;
       session.pending[id] = PendingChoice(id, role, value);
     }

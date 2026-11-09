@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
 import '../theme/look.dart';
-import 'agent_events.dart' show AgentCommandInfo, ConfigOption;
+import 'agent_events.dart' show AgentCommandInfo, Choice, ConfigOption;
 import 'attachments.dart';
 import 'modes.dart';
 import 'session_options.dart';
@@ -567,8 +567,10 @@ class _PlaceToggle extends StatelessWidget {
 }
 
 /// The label of [value] in [option], or [value] itself.
-String _labelOf(ConfigOption? option, String value) =>
-    option?.choices.where((choice) => choice.value == value).firstOrNull?.label ?? value;
+String _labelOf(ConfigOption? option, String value, OptionRole role) {
+  final choice = option?.choices.where((choice) => choice.value == value).firstOrNull ?? Choice(value, value);
+  return choiceLabel(role, choice);
+}
 
 String _seenLabel(DateTime? seen, String label) {
   if (seen == null) return label;
@@ -595,8 +597,16 @@ class _OptionChooser extends StatelessWidget {
     final pending = session.pending.values.where((choice) => choice.role == role).firstOrNull;
     final draft = session.isDraft;
     if (option == null && pending == null && !draft) return const SizedBox.shrink();
+    // Nothing is known of this agent's list until it runs: say so, rather than offer a lone Default.
+    if (option == null && pending == null) {
+      return Tooltip(
+        key: Key('option-${role.name}'),
+        message: 'Its ${name.toLowerCase()} choices are listed once the agent has started',
+        child: _Pill(label: '$name: after start', icon: role == OptionRole.model ? Icons.memory : Icons.speed, enabled: false),
+      );
+    }
     final current = pending?.value ?? (draft ? null : option?.current);
-    final label = current == null ? (draft ? 'Default' : name) : _labelOf(option, current);
+    final label = current == null ? (draft ? 'Default' : name) : _labelOf(option, current, role);
     return PopupMenuButton<String?>(
       key: Key('option-${role.name}'),
       tooltip: _seenLabel(draft ? seen : null, name),
@@ -614,7 +624,7 @@ class _OptionChooser extends StatelessWidget {
       itemBuilder: (context) => [
         if (draft) const PopupMenuItem<String?>(value: null, child: Text('Default')),
         for (final choice in option?.choices ?? const [])
-          CheckedPopupMenuItem<String?>(value: choice.value, checked: choice.value == current, child: Text(choice.label)),
+          CheckedPopupMenuItem<String?>(value: choice.value, checked: choice.value == current, child: Text(choiceLabel(role, choice))),
       ],
       child: _Pill(
         label: pending != null && session.status == SessionStatus.working ? '$label (next turn)' : label,
@@ -646,7 +656,7 @@ class _ModeChooser extends StatelessWidget {
     final shown = entries.where((entry) => entry.value == current).firstOrNull;
     // Canoa's own Bypass sits on the agent's mode, which is said beside it.
     final under = session.bypass ? entries.where((entry) => entry.value == store.underlyingMode(session)).firstOrNull : null;
-    final label = under == null ? (shown?.label ?? current ?? (session.isDraft ? 'Default' : 'Mode')) : 'Bypass over ${under.label}';
+    final label = under == null ? (shown?.label ?? (current == null ? null : choiceLabel(OptionRole.mode, Choice(current, current))) ?? (session.isDraft ? 'Default' : 'Mode')) : 'Bypass over ${under.label}';
     return PopupMenuButton<Object?>(
       key: const Key('option-mode'),
       tooltip: _seenLabel(session.isDraft ? seen : null, 'Mode (Shift+Tab changes it)'),
@@ -660,6 +670,9 @@ class _ModeChooser extends StatelessWidget {
       },
       itemBuilder: (context) => [
         if (session.isDraft) const PopupMenuItem<Object?>(value: null, child: Text('Default')),
+        // An agent the app knows nothing of lists its modes once it runs; Canoa's own Bypass works with any.
+        if (session.isDraft && option == null)
+          const PopupMenuItem<Object?>(enabled: false, child: Text('Its other modes: after it has started')),
         for (final entry in entries)
           CheckedPopupMenuItem<Object?>(
             value: entry,

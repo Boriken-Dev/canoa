@@ -15,6 +15,50 @@ const Map<String, String> modeLabels = {
   'bypass': 'Bypass',
 };
 
+/// The names of the modes other agents give by their own ids, such as Claude Code's `permissionMode`.
+const Map<String, String> _otherModeLabels = {
+  'default': 'Manual',
+  'acceptedits': 'Accept edits',
+  'bypasspermissions': 'Bypass',
+  'full_access': 'Bypass',
+  'full-access': 'Bypass',
+  'fullaccess': 'Bypass',
+  'yolo': 'Bypass',
+  'dontask': "Don't ask",
+};
+
+/// The names the efforts are shown under.
+const Map<String, String> effortLabels = {
+  'none': 'None',
+  'minimal': 'Minimal',
+  'low': 'Low',
+  'medium': 'Medium',
+  'high': 'High',
+  'xhigh': 'Extra high',
+  'max': 'Max',
+};
+
+/// [label] as a person reads it: a raw identifier (the id itself, or capitals throughout) in sentence case, the translators'
+/// and Claude Code's mode and effort ids by their names, and anything an agent worded itself as it is. A model keeps what the
+/// agent calls it, since its names are not words.
+String choiceLabel(OptionRole role, Choice choice) {
+  final value = choice.value, label = choice.label;
+  if (role == OptionRole.mode) {
+    final known = modeLabels[value] ?? _otherModeLabels[value.toLowerCase()];
+    if (known != null && _isRaw(label, value)) return known;
+  } else if (role == OptionRole.effort) {
+    final known = effortLabels[value.toLowerCase()];
+    if (known != null && _isRaw(label, value)) return known;
+  }
+  if (role == OptionRole.model || !_isRaw(label, value)) return label;
+  final words = label.replaceAll(RegExp(r'[_\-]+'), ' ').trim().toLowerCase();
+  return words.isEmpty ? label : '${words[0].toUpperCase()}${words.substring(1)}';
+}
+
+/// Whether [label] is [value] spelled as it is sent, or capitals throughout.
+bool _isRaw(String label, String value) =>
+    label == value || label.toLowerCase() == value.toLowerCase() || (label.toUpperCase() == label && label.contains(RegExp('[A-Z]')));
+
 /// The ids an agent may give a mode that asks for nothing: the translators' own, and the names Claude Code and others use.
 const Set<String> _bypassIds = {'bypass', 'bypasspermissions', 'full_access', 'full-access', 'fullaccess', 'yolo'};
 
@@ -44,7 +88,7 @@ final class ModeEntry {
 List<ModeEntry> modeEntries(ConfigOption? option) {
   final entries = [
     for (final choice in option?.choices ?? const <Choice>[])
-      ModeEntry(choice.value, choice.label, selectable: choice.value != 'custom'),
+      ModeEntry(choice.value, choiceLabel(OptionRole.mode, choice), selectable: choice.value != 'custom'),
   ];
   if (!entries.any((entry) => entry.bypass)) entries.add(const ModeEntry(ownBypass, 'Bypass', own: true));
   return entries;

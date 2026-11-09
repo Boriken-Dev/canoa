@@ -26,12 +26,12 @@ Future<void> _draft(WidgetTester tester) async {
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/model_effort_test.dart')));
 
-  testWidgets('before a source has run, model and effort offer only Default', (tester) async {
+  testWidgets('before an unknown source has run, model and effort say they come after it starts', (tester) async {
     final agent = OptionsAgent();
     await pumpApp(tester, _store(), startAgent: agent.start);
     await _draft(tester);
-    expect(await menuOf(tester, 'option-model'), ['Default']);
-    expect(await menuOf(tester, 'option-effort'), ['Default']);
+    expect(find.text('Model: after start'), findsOneWidget);
+    expect(find.text('Effort: after start'), findsOneWidget);
     expect(agent.starts, isEmpty);
     await finish(tester);
   });
