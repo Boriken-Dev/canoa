@@ -13,6 +13,8 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/examples.dart';
+
 final class _Agent {
   final incoming = StreamController<String>();
   final sent = <Map<String, dynamic>>[];
@@ -175,14 +177,7 @@ void main() {
     expect(session.pendingQuestions, isEmpty);
   });
 
-  final node = Platform.environment['CANOA_TEST_NODE'] ?? 'node';
-  bool runs() {
-    try {
-      return Process.runSync(node, ['--version'], runInShell: true).exitCode == 0;
-    } on ProcessException {
-      return false;
-    }
-  }
+  final scripted = exampleBinary('stdio_agent');
 
   test('the scripted agent\'s question, answered through the store as the form answers it', () async {
     final dir = Directory.systemTemp.createTempSync('canoa-ask-');
@@ -198,7 +193,7 @@ void main() {
     });
     final store = SessionStore(includePreview: false);
     final client = await startLocalAgent(
-      AgentCommand(label: 'Scripted', program: node, args: ['${Directory.current.path}/integration_test/scripted_agent.mjs', '--state=${dir.path}/s.json']),
+      AgentCommand(label: 'Scripted', program: scripted!, args: scriptedArgs('${dir.path}/s.json')),
       decider: store.askPermission,
       elicitor: store.askQuestion,
       workingDirectory: dir.path,
@@ -230,5 +225,5 @@ void main() {
     store.answerQuestion(session, const AcpElicitDecline());
     await second;
     expect(session.messages.last.text, 'You declined to answer.');
-  }, skip: runs() ? false : 'needs node', timeout: const Timeout(Duration(minutes: 1)));
+  }, skip: exampleMissing('stdio_agent'), timeout: const Timeout(Duration(minutes: 1)));
 }

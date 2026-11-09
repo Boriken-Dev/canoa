@@ -13,15 +13,7 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final _node = Platform.environment['CANOA_TEST_NODE'] ?? 'node';
-
-bool _runs(String program) {
-  try {
-    return Process.runSync(program, ['--version'], runInShell: true).exitCode == 0;
-  } on ProcessException {
-    return false;
-  }
-}
+import 'fixtures/examples.dart';
 
 /// The scripted agent as a child, with a session open in [store].
 Future<(VerifiedAgent, ChatSession)> _scripted(SessionStore store) async {
@@ -37,7 +29,7 @@ Future<(VerifiedAgent, ChatSession)> _scripted(SessionStore store) async {
     }
   });
   final client = await startLocalAgent(
-    AgentCommand(label: 'Scripted', program: _node, args: ['${Directory.current.path}/integration_test/scripted_agent.mjs', '--state=${dir.path}/s.json']),
+    AgentCommand(label: 'Scripted', program: exampleBinary('stdio_agent')!, args: scriptedArgs('${dir.path}/s.json')),
     decider: store.askPermission,
     workingDirectory: dir.path,
   );
@@ -70,7 +62,7 @@ void _allowAll(SessionStore store, ChatSession session) {
 }
 
 void main() {
-  final skip = _runs(_node) ? false : 'needs node';
+  final skip = exampleMissing('stdio_agent');
 
   test('a message written during a turn waits, and is sent when the turn ends', () async {
     final store = SessionStore(includePreview: false);

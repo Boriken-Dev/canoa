@@ -4,8 +4,8 @@
 //
 //   flutter test integration_test/embedded_host_test.dart -d windows   (or -d linux)
 //
-// The scripted agent and the browser's WebCrypto run on CANOA_TEST_NODE (Node 22 or later, else `node` on PATH); CANOA_TEST_APP
-// is this app's directory (default: the working directory). CANOA_HOST has to be unset, as it is for a person.
+// The scripted agent (canoa-host's stdio_agent example) and the browser's peer (its web_peer example) are found as
+// test/fixtures/examples.dart says. CANOA_HOST has to be unset, as it is for a person.
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,9 +25,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../test/fixtures/node_peer_bridge.dart';
+import '../test/fixtures/examples.dart';
+import '../test/fixtures/web_peer_bridge.dart';
 
-final String _appDir = (Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path).replaceAll(r'\', '/');
 
 /// The ids of the processes whose command line holds [marker], this test's own excepted.
 Future<List<int>> _processes(String marker) async {
@@ -71,18 +71,19 @@ void main() {
 
       final dir = await Directory.systemTemp.createTemp('canoa-embedded');
       final marker = 'canoa-embedded-marker-${DateTime.now().microsecondsSinceEpoch}';
-      final script = '$_appDir/integration_test/scripted_agent.mjs';
+      final agent = exampleBinary('stdio_agent');
+      if (agent == null) fail(exampleMissing('stdio_agent')!);
       final state = '${dir.path}${Platform.pathSeparator}$marker.json';
       final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg');
       await cfg.writeAsString('''
 [host.agents.scripted]
-program = ${_toml(nodeProgram)}
-args = [${_toml(script)}, ${_toml('--state=$state')}]
+program = ${_toml(agent)}
+args = ["--scripted", ${_toml('--state=$state')}]
 listen = "127.0.0.1:0"
 
 [host.agents.profiled]
-program = ${_toml(nodeProgram)}
-args = [${_toml(script)}, ${_toml('--state=$state')}]
+program = ${_toml(agent)}
+args = ["--scripted", ${_toml('--state=$state')}]
 listen = "127.0.0.1:0"
 profiles = ["plain"]
 
@@ -97,7 +98,7 @@ context = { text = "A profile, so that this entry starts through the host's own 
       final hosting = ValueNotifier<int>(0);
       final shell = TrayShell();
       await shell.initialize(const CanoaConfig(), onSettings: () {}, onHosting: () => hosting.value++);
-      final browser = await NodePeerBridge.start(script: '$_appDir/test/fixtures/node_peer.mjs');
+      final browser = await WebPeerBridge.start();
       addTearDown(() async {
         browser.kill();
         await host.stop();

@@ -7,14 +7,13 @@
 //
 //   flutter test integration_test/coding_task_test.dart -d windows   (or -d linux)
 //
-// `node` has to be on PATH, for the project's tests and the stand-in. CANOA_TEST_TASK_AGENT=Claude runs the Claude preset on the
+// CANOA_TEST_TASK_AGENT=Claude runs the Claude preset on the
 // person's own sign-in with `--setting-sources=project,local`, so that their user-level settings and CLAUDE.md stay out, and
-// spends the subscription; without it a
-// scripted stand-in (scripted_agent.mjs) plays the agent and nothing is spent. Reaching outside the temporary directory fails the
+// spends the subscription, and needs `node` on PATH for the project's tests; without it a scripted stand-in (canoa-host's
+// stdio_agent example, `--scripted`) plays the agent and nothing is spent, with no Node. Reaching outside the temporary directory fails the
 // test, whether asked (and refused) or done unasked. CANOA_TEST_SHOTS names a
 // directory for a screenshot of each step, and CANOA_TEST_UPDATES a file for the kind and shape of each distinct update. Neither
-// holds what was said, except the screenshots, which show the screen. CANOA_TEST_APP is this app's directory (default: the
-// working directory).
+// holds what was said, except the screenshots, which show the screen.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -34,10 +33,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import '../test/fixtures/examples.dart';
+
 final String? _real = Platform.environment['CANOA_TEST_TASK_AGENT'];
 final String? _shots = Platform.environment['CANOA_TEST_SHOTS'];
 final String? _updates = Platform.environment['CANOA_TEST_UPDATES'];
-final String _appDir = Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path;
 
 const _fix = 'The test in this repository fails. Find out why and fix the code, not the test. Then add a second test for the same '
     'function and run the tests with `node --test`.';
@@ -147,8 +147,8 @@ void main() {
     final agent = switch (preset) {
       null => AgentCommand(
         label: 'Scripted',
-        program: 'node',
-        args: ['$_appDir/integration_test/scripted_agent.mjs', '--state=${dir.path}/scripted.json'],
+        program: exampleBinary('stdio_agent') ?? fail(exampleMissing('stdio_agent')!),
+        args: scriptedArgs('${dir.path}/scripted.json'),
       ),
       // Claude through its preset, but without the person's user-level settings.
       final AgentCommand claude when claude.label == 'Claude' => AgentCommand(
@@ -395,7 +395,7 @@ void main() {
       debugPrint('SCRIPTED calls of the first session: ${calls.take(8).join(', ')}; of the second before its prompt: ${second.join(', ')}');
     }
 
-    final (exitCode, passing, failing) = await _nodeTest(repo);
+    final (exitCode, passing, failing) = _real == null ? (-1, -1, -1) : await _nodeTest(repo);
     final oldName = _mentioning(repo, 'addNumbers');
     final newName = _mentioning(repo, 'sum(');
     final maintainer = File('${repo.path}/README.md').readAsStringSync().contains('Maintainer: Ana Rivera');

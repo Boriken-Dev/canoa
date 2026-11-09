@@ -23,7 +23,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fixtures/node_peer_bridge.dart';
+import 'fixtures/web_peer_bridge.dart';
 
 final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
   final String path => File(path).absolute.path,
@@ -65,7 +65,7 @@ void main() {
   late String url;
   late String peer;
   late PeerMethod method;
-  NodePeerBridge? browser;
+  WebPeerBridge? browser;
 
   Future<ProcessResult> command(List<String> args) =>
       Process.run(_hostBinary!, args, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'});
@@ -95,7 +95,7 @@ void main() {
         break;
       }
     }
-    browser = await NodePeerBridge.start();
+    browser = await WebPeerBridge.start();
   });
 
   tearDownAll(() async {

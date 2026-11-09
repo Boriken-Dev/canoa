@@ -5,9 +5,9 @@
 //     flutter test integration_test/launch_test.dart -d windows   (or -d linux)
 //
 // STEP is `first` (no canoa.cfg at all), `flag` (`--no-local-host`), `config` (`[desktop] local_host = false`) or `hosted`
-// (an agent served, through a closed window). DIR is a new empty directory. The scripted agent and the browser's WebCrypto run on
-// CANOA_TEST_NODE (Node 22 or later, else `node` on PATH); CANOA_TEST_APP is this app's directory (default: the
-// working directory). CANOA_HOST has to be unset, as it is for a person. It spends nothing.
+// (an agent served, through a closed window). DIR is a new empty directory. The scripted agent (canoa-host's stdio_agent
+// example) and the browser's peer (its web_peer example) are found as test/fixtures/examples.dart says. CANOA_HOST has to be
+// unset, as it is for a person. It spends nothing.
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,9 +22,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../test/fixtures/node_peer_bridge.dart';
+import '../test/fixtures/examples.dart';
+import '../test/fixtures/web_peer_bridge.dart';
 
-final String _appDir = (Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path).replaceAll(r'\', '/');
 
 Future<bool> _answers(int port) async {
   try {
@@ -91,17 +91,19 @@ void main() {
 
     final (port, launchedPort) = (await freeLoopbackPort(), await freeLoopbackPort());
     final marker = 'canoa-launch-marker-${DateTime.now().microsecondsSinceEpoch}';
-    final script = jsonEncode('$_appDir/integration_test/scripted_agent.mjs');
+    final agent = exampleBinary('stdio_agent');
+    if (agent == null) fail(exampleMissing('stdio_agent')!);
+    final program = jsonEncode(agent);
     final state = jsonEncode('--state=$dir/$marker.json');
     final entries = '''
 [host.agents.scripted]
-program = ${jsonEncode(nodeProgram)}
-args = [$script, $state]
+program = $program
+args = ["--scripted", $state]
 listen = "127.0.0.1:$port"
 
 [host.agents.profiled]
-program = ${jsonEncode(nodeProgram)}
-args = [$script, $state]
+program = $program
+args = ["--scripted", $state]
 listen = "127.0.0.1:$launchedPort"
 profiles = ["plain"]
 
@@ -134,7 +136,7 @@ context = { text = "A profile, so that this entry starts through the host's own 
         await until(() => _answers(port), 'the entry to listen');
         await until(() => _answers(launchedPort), 'the launched entry to listen');
 
-        final browser = await NodePeerBridge.start(script: '$_appDir/test/fixtures/node_peer.mjs');
+        final browser = await WebPeerBridge.start();
         addTearDown(browser.kill);
         // Keys are managed from outside the running host, as `canoa accept` is.
         final keys = LibraryHostTool(CanoaNative.open(), home: home);

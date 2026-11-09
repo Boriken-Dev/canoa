@@ -1,10 +1,9 @@
 // Canoa's chat reaching the agents `canoa` serves, through the app's own connection code: connectVerifiedAcp, the
-// peer proof the web build runs, its sealed channel and VerifiedAgent, against the real host binary. The browser's WebCrypto
-// is web/canoa_peer_bridge.mjs run by Node, since the Dart VM has none.
+// peer proof the web build runs, its sealed channel and VerifiedAgent, against the real host binary. The browser's side
+// of the proof is the web_peer example, since the Dart VM has no WebCrypto.
 //
 // CANOA_TEST_HOST names a built canoa, with its examples (stdio_agent, echo_provider) in examples/ beside it, as
-// `cargo build -p canoa-host --bin canoa --examples` leaves them. CANOA_TEST_NODE names Node 22 or later (default
-// `node`). CANOA_TEST_METHOD (`noise` or `webcrypto`) is the method the host serves by, its default unless set; the browser
+// `cargo build -p canoa-host --bin canoa --examples` leaves them. CANOA_TEST_METHOD (`noise` or `webcrypto`) is the method the host serves by, its default unless set; the browser
 // proves by the method the host says. Without CANOA_TEST_HOST the tests are skipped.
 @Timeout(Duration(minutes: 2))
 library;
@@ -21,7 +20,7 @@ import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fixtures/node_peer_bridge.dart';
+import 'fixtures/web_peer_bridge.dart';
 
 // Absolute, since the provider's library is named in a canoa.cfg written to a temporary directory and read from there.
 final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
@@ -115,12 +114,12 @@ Future<bool> _running(int pid) async {
 void main() {
   final skip = _hostBinary == null ? 'CANOA_TEST_HOST names a built canoa' : null;
   late HostUnderTest host;
-  late NodePeerBridge browser;
+  late WebPeerBridge browser;
 
   setUpAll(() async {
     if (skip != null) return;
     host = await HostUnderTest.start();
-    browser = await NodePeerBridge.start();
+    browser = await WebPeerBridge.start();
   });
 
   tearDownAll(() async {

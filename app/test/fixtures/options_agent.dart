@@ -1,4 +1,4 @@
-// An in-memory ACP v1 agent, a stand-in like integration_test/scripted_agent.mjs: it offers a mode, a model and an effort
+// An in-memory ACP v1 agent, a stand-in like the scripted mode of canoa-host's stdio_agent example: it offers a mode, a model and an effort
 // as config options with their ACP categories, refuses the model `refuse-me` with -32602 as ACP says an agent refuses a
 // value, answers each prompt with one message, and records every request in order. `start` is shaped as the app's StartAgent,
 // so the app starts it in place of a process.

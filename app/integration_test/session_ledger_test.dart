@@ -1,5 +1,5 @@
 // Sessions from two harnesses outlive the app, are listed by harness, and one opens again, in the app's own window through its
-// widgets. The scripted stand-in (scripted_agent.mjs) plays three agents: one reporting Claude's adapter, which the built-in map
+// widgets. The scripted stand-in (canoa-host's stdio_agent example, `--scripted`) plays three agents: one reporting Claude's adapter, which the built-in map
 // names Claude Code; one reporting a name that canoa.cfg's [harnesses] maps to Pi; and one that reports no name and offers
 // neither session/load nor session/resume, which the list must say it cannot reopen.
 //
@@ -8,9 +8,8 @@
 //   CANOA_TEST_LEDGER_STEP=record flutter test integration_test/session_ledger_test.dart -d windows   (or -d linux)
 //   CANOA_TEST_LEDGER_STEP=reopen flutter test integration_test/session_ledger_test.dart -d windows
 //
-// The second fails if it runs in the process of the first, and deletes the directory when it passes. `node` has to be on PATH.
-// CANOA_TEST_SHOTS names a directory for a screenshot of each step; CANOA_TEST_APP is this app's directory (default: the
-// working directory).
+// The second fails if it runs in the process of the first, and deletes the directory when it passes.
+// CANOA_TEST_SHOTS names a directory for a screenshot of each step.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -25,18 +24,19 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import '../test/fixtures/examples.dart';
+
 final String? _dir = Platform.environment['CANOA_TEST_LEDGER_DIR'];
 final String? _step = Platform.environment['CANOA_TEST_LEDGER_STEP'];
 final String? _shots = Platform.environment['CANOA_TEST_SHOTS'];
-final String _appDir = (Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path).replaceAll(r'\', '/');
 
 const _claude = 'Stand-in Claude', _pi = 'Stand-in Pi', _plain = 'Stand-in plain';
 
 /// canoa.cfg for the three agents, each keeping its sessions in a file of its own under [dir].
 String _config(String dir) {
   String agent(String label, String state, List<String> extra) =>
-      '[agents.${jsonEncode(label)}]\nprogram = "node"\n'
-      'args = ${jsonEncode(['$_appDir/integration_test/scripted_agent.mjs', '--state=$dir/$state', ...extra])}\n\n';
+      '[agents.${jsonEncode(label)}]\nprogram = ${jsonEncode(exampleBinary('stdio_agent'))}\n'
+      'args = ${jsonEncode(scriptedArgs('$dir/$state', extra))}\n\n';
   return '${agent(_claude, 'claude.json', ['--name=@agentclientprotocol/claude-agent-acp', '--version=0.99.1'])}'
       '${agent(_pi, 'pi.json', ['--name=stand-in-pi', '--version=0.0.34'])}'
       '${agent(_plain, 'plain.json', ['--no-reopen'])}'

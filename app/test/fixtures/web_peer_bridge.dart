@@ -1,4 +1,4 @@
-// The page's peer bridge, web/canoa_peer_bridge.mjs, run by Node for tests in the Dart VM, which has no WebCrypto.
+// The page's peer bridge as crates/canoa-host's web_peer example, for tests in the Dart VM, which has no WebCrypto.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -6,12 +6,11 @@ import 'dart:typed_data';
 
 import 'package:canoa/auth/peer_proof.dart';
 
-/// Node 22 or later: CANOA_TEST_NODE, else `node`.
-final String nodeProgram = Platform.environment['CANOA_TEST_NODE'] ?? 'node';
+import 'examples.dart';
 
-/// The page's peer bridge in a Node process: one key of each method for the life of the process.
-final class NodePeerBridge implements PeerBridge {
-  NodePeerBridge._(this._process) {
+/// The page's peer bridge in a web_peer process: one key of each method for the life of the process.
+final class WebPeerBridge implements PeerBridge {
+  WebPeerBridge._(this._process) {
     _process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
       final answer = jsonDecode(line) as Map<String, dynamic>;
       final waiting = _waiting.remove(answer['id']);
@@ -25,9 +24,12 @@ final class NodePeerBridge implements PeerBridge {
     _process.stderr.transform(utf8.decoder).listen(stderr.write);
   }
 
-  /// [script] is node_peer.mjs, by default as seen from the app's directory.
-  static Future<NodePeerBridge> start({String script = 'test/fixtures/node_peer.mjs'}) async =>
-      NodePeerBridge._(await Process.start(nodeProgram, [script]));
+  /// Starts the built web_peer example; see [exampleBinary].
+  static Future<WebPeerBridge> start() async {
+    final program = exampleBinary('web_peer');
+    if (program == null) throw StateError(exampleMissing('web_peer') ?? 'web_peer is not built');
+    return WebPeerBridge._(await Process.start(program, const []));
+  }
 
   final Process _process;
   final _waiting = <int, Completer<Object?>>{};

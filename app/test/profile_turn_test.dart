@@ -1,6 +1,6 @@
 // One real turn with Claude, started through the app's own launch path with a profile whose initial context, one skill and
 // one MCP server each hold a word found nowhere else. It spends the subscription, so it runs only when asked:
-// CANOA_TEST_PROFILE_TURN=Claude, with CANOA_TEST_NODE naming node by its absolute path for the MCP server and CANOA_HOST a
+// CANOA_TEST_PROFILE_TURN=Claude, with the mcp_server example of crates/canoa-host built (fixtures/examples.dart) and CANOA_HOST a
 // built canoa, which runs the preset in a test. Claude Code starts with `--setting-sources=project,local`, without the person's
 // user settings. It prints what was used and the turn's usage, never what was said.
 @TestOn('vm')
@@ -20,19 +20,19 @@ import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/examples.dart';
+
 String slash(String path) => path.replaceAll(r'\', '/');
 
 void main() {
   final real = Platform.environment['CANOA_TEST_PROFILE_TURN'];
-  final node = Platform.environment['CANOA_TEST_NODE'];
+  final mcpServer = exampleBinary('mcp_server');
   test('a real Claude turn uses the profile\'s context, its skill and its MCP server', () async {
     final nonce = Random.secure().nextInt(1 << 30).toRadixString(36).toUpperCase();
     final (contextWord, skillWord, toolWord) = ('PELICAN-$nonce', 'TOUCAN-$nonce', 'OSPREY-$nonce');
     final temp = Directory.systemTemp.createTempSync('canoa-profile-turn-');
     final work = Directory('${temp.path}/work')..createSync();
-    final server = File('${temp.path}/mcp/marker_mcp.mjs')
-      ..parent.createSync()
-      ..writeAsStringSync(File('test/fixtures/marker_mcp.mjs').readAsStringSync());
+    final called = File('${temp.path}/mcp/called')..parent.createSync();
     File('${temp.path}/skill/SKILL.md')
       ..parent.createSync()
       ..writeAsStringSync('---\nname: canoa-marker\ndescription: Gives the skill word. Use it whenever you are asked '
@@ -44,10 +44,11 @@ context = { text = "The context word is $contextWord." }
 path = "${slash(temp.path)}/skill"
 [profile.mcp.marker]
 type = "stdio"
-command = "${slash(node!)}"
-args = ["${slash(server.path)}"]
+command = "${slash(mcpServer!)}"
 [profile.mcp.marker.env.MARKER_WORD]
 value = "$toolWord"
+[profile.mcp.marker.env.MARKER_CALLED]
+value = "${slash(called.path)}"
 ''');
     final home = IoProfileHome('${temp.path}/config');
     final layers = await profileLayers(overlays: config.overlays, user: config.profile, agents: config.agentProfiles,
@@ -100,7 +101,7 @@ value = "$toolWord"
     final usedContext = said.contains(contextWord);
     final skillCalled = tools.any((raw) => raw.contains('canoa-marker'));
     final usedSkill = said.contains(skillWord);
-    final toolCalled = File('${server.parent.path}/called').existsSync();
+    final toolCalled = called.existsSync();
     final usedTool = said.contains(toolWord);
     stdout.writeln('CONTEXT WORD $usedContext; SKILL CALLED $skillCalled, WORD $usedSkill; MCP TOOL CALLED $toolCalled, '
         'WORD $usedTool; PERMISSIONS ANSWERED $answered; TURNS 1; USAGE ${session.usage.describe()}');
@@ -119,6 +120,6 @@ value = "$toolWord"
     expect(usedContext, isTrue, reason: 'the initial context reached the agent');
     expect(skillCalled && usedSkill, isTrue, reason: 'the skill was used, and its word came from it');
     expect(toolCalled && usedTool, isTrue, reason: 'the MCP server was called, with its environment');
-  }, skip: real == null || node == null ? 'set CANOA_TEST_PROFILE_TURN and CANOA_TEST_NODE' : false,
+  }, skip: real == null || mcpServer == null ? 'set CANOA_TEST_PROFILE_TURN and build the mcp_server example' : false,
       timeout: const Timeout(Duration(minutes: 8)));
 }

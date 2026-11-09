@@ -15,6 +15,8 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/examples.dart';
+
 /// An agent in memory, speaking v1, whose requests offer what a test gives them.
 final class _Agent {
   final incoming = StreamController<String>();
@@ -255,7 +257,7 @@ void main() {
   });
 
   // The stand-in the coding-task test runs, as a real child: its requests offer every kind, and it remembers an "always" itself.
-  final node = Platform.environment['CANOA_TEST_NODE'] ?? 'node';
+  final scripted = exampleBinary('stdio_agent');
   test('against the scripted agent, an always answer is the agent\'s to remember', () async {
     final dir = Directory.systemTemp.createTempSync('canoa-perm-');
     // The agent works in it, and Windows keeps it until the process has gone.
@@ -271,7 +273,7 @@ void main() {
     });
     final store = SessionStore(includePreview: false);
     final client = await startLocalAgent(
-      AgentCommand(label: 'Scripted', program: node, args: ['${Directory.current.path}/integration_test/scripted_agent.mjs', '--state=${dir.path}/s.json']),
+      AgentCommand(label: 'Scripted', program: scripted!, args: scriptedArgs('${dir.path}/s.json')),
       decider: store.askPermission,
       workingDirectory: dir.path,
     );
@@ -302,13 +304,5 @@ void main() {
     store.removeListener(watch);
     expect(session.messages.any((message) => message.text == 'Renamed everywhere.'), isTrue);
     expect(asked, isFalse, reason: 'the agent remembered the edit, and asked nothing');
-  }, skip: _runs(node) ? false : 'needs node', timeout: const Timeout(Duration(minutes: 1)));
-}
-
-bool _runs(String program) {
-  try {
-    return Process.runSync(program, ['--version'], runInShell: true).exitCode == 0;
-  } on ProcessException {
-    return false;
-  }
+  }, skip: exampleMissing('stdio_agent'), timeout: const Timeout(Duration(minutes: 1)));
 }

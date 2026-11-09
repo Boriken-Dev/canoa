@@ -4,8 +4,7 @@
 //   flutter test integration_test/desktop_test.dart -d windows   (or -d linux)
 //
 // CANOA_TEST_HOST names a built canoa, with its examples beside it as `cargo build -p canoa-host --bin canoa
-// --examples` leaves them; CANOA_TEST_NODE names Node 22 or later, for the browser's WebCrypto; CANOA_TEST_APP is this app's
-// directory, where the Node fixture is (default: the working directory). Without CANOA_TEST_HOST the test is skipped.
+// --examples` leaves them, web_peer among them for the browser's proof. Without CANOA_TEST_HOST the test is skipped.
 import 'dart:io';
 
 import 'package:canoa/acp/connect.dart';
@@ -21,10 +20,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../test/fixtures/node_peer_bridge.dart';
+import '../test/fixtures/web_peer_bridge.dart';
 
 final String? _hostBinary = Platform.environment['CANOA_TEST_HOST'];
-final String _appDir = Platform.environment['CANOA_TEST_APP'] ?? Directory.current.path;
 
 /// `gdbus call` on the session bus, its output.
 Future<String> _gdbus(List<String> args) async {
@@ -116,7 +114,7 @@ void main() {
       final shell = TrayShell();
       await shell.initialize(config, onSettings: () {}, onHosting: () => hosting.value++);
       expect(await windowManager.getTitle(), 'Canoa', reason: 'the runner titles it with the project name');
-      final browser = await NodePeerBridge.start(script: '$_appDir/test/fixtures/node_peer.mjs');
+      final browser = await WebPeerBridge.start();
       addTearDown(() async {
         browser.kill();
         await host.stop();

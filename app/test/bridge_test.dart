@@ -1,10 +1,9 @@
 // Canoa's chat reaching agents a real coqui-acp-bridge serves under each method, through the app's own connection code: the
-// PIN pairing and peer proof the web build runs, its sealed channel and VerifiedAgent. The browser's WebCrypto is
-// web/canoa_peer_bridge.mjs run by Node, since the Dart VM has none.
+// PIN pairing and peer proof the web build runs, its sealed channel and VerifiedAgent. The browser's side of the proof is
+// canoa-host's web_peer example, since the Dart VM has no WebCrypto.
 //
 // CANOA_TEST_BRIDGE names a built coqui-acp-bridge; CANOA_TEST_HOST a built canoa, whose stdio_agent example (in
-// examples/ beside it) is the agent served. CANOA_TEST_NODE names Node 22 or later (default `node`). Without both the tests
-// are skipped.
+// examples/ beside it) is the agent served. Without both the tests are skipped.
 @Timeout(Duration(minutes: 2))
 library;
 
@@ -17,7 +16,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fixtures/node_peer_bridge.dart';
+import 'fixtures/web_peer_bridge.dart';
 
 final String? _bridge = Platform.environment['CANOA_TEST_BRIDGE'];
 final String? _host = Platform.environment['CANOA_TEST_HOST'];
@@ -51,7 +50,7 @@ Future<void> _listening(int port) async {
 void main() {
   final skip = _bridge == null || _host == null ? 'CANOA_TEST_BRIDGE and CANOA_TEST_HOST name built programs' : null;
   late Directory dir;
-  late NodePeerBridge browser;
+  late WebPeerBridge browser;
   final started = <Process>[];
 
   Map<String, String> home() => {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'};
@@ -108,7 +107,7 @@ void main() {
   setUp(() async {
     if (skip != null) return;
     dir = await Directory.systemTemp.createTemp('canoa-bridge-test');
-    browser = await NodePeerBridge.start();
+    browser = await WebPeerBridge.start();
   });
 
   tearDown(() async {

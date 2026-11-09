@@ -1,8 +1,7 @@
 // A profile through the real launch path of a harness installed here: the preset's adapter is started, its session
 // opened with what the profile gives it, and the report printed. No prompt is sent, so nothing is spent. Runs only when
-// asked: CANOA_TEST_PROFILE_HARNESS=Claude, Codex or Pi, with CANOA_TEST_NODE naming node by its absolute path for the MCP
-// server, or CANOA_TEST_MCP_SERVER a stdio MCP server program (crates/canoa-host's mcp_server example) for Claude and Codex,
-// which then run with no Node through CANOA_HOST, a built canoa.
+// asked: CANOA_TEST_PROFILE_HARNESS=Claude, Codex or Pi. The MCP server is crates/canoa-host's mcp_server example, found as
+// fixtures/examples.dart says or named by CANOA_TEST_MCP_SERVER; Claude and Codex run through CANOA_HOST, a built canoa.
 @TestOn('vm')
 library;
 
@@ -17,6 +16,8 @@ import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/examples.dart';
 
 String slash(String path) => path.replaceAll(r'\', '/');
 
@@ -33,14 +34,10 @@ const expected = {
 
 void main() {
   final harness = Platform.environment['CANOA_TEST_PROFILE_HARNESS'];
-  final node = Platform.environment['CANOA_TEST_NODE'];
-  final mcpServer = Platform.environment['CANOA_TEST_MCP_SERVER'];
+  final mcpServer = Platform.environment['CANOA_TEST_MCP_SERVER'] ?? exampleBinary('mcp_server');
   test('a harness installed here opens a session with the profile, and shows what applied', () async {
     final temp = Directory.systemTemp.createTempSync('canoa-profile-harness-');
     final work = Directory('${temp.path}/work')..createSync();
-    final server = File('${temp.path}/mcp/marker_mcp.mjs')
-      ..parent.createSync()
-      ..writeAsStringSync(File('test/fixtures/marker_mcp.mjs').readAsStringSync());
     File('${temp.path}/skill/SKILL.md')
       ..parent.createSync()
       ..writeAsStringSync('---\nname: canoa-marker\ndescription: Gives the skill word.\n---\nThe skill word is TOUCAN.\n');
@@ -53,8 +50,8 @@ value = "set"
 path = "${slash(temp.path)}/skill"
 [profile.mcp.marker]
 type = "stdio"
-command = "${slash(mcpServer ?? node!)}"
-args = [${mcpServer == null ? '"${slash(server.path)}"' : ''}]
+command = "${slash(mcpServer!)}"
+args = []
 ''');
     final home = IoProfileHome('${temp.path}/config');
     final layers = await profileLayers(overlays: config.overlays, user: config.profile, agents: config.agentProfiles,
@@ -91,8 +88,8 @@ args = [${mcpServer == null ? '"${slash(server.path)}"' : ''}]
     final items = {for (final item in session.profile!.items) item.key: item.state};
     expect(items['env.CANOA_PROFILE_PROBE'], ItemState.applied);
     expected[harness]!.forEach((key, state) => expect(items[key], state, reason: key));
-  }, skip: harness == null || (node == null && mcpServer == null)
-          ? 'set CANOA_TEST_PROFILE_HARNESS, and CANOA_TEST_NODE or CANOA_TEST_MCP_SERVER'
+  }, skip: harness == null || mcpServer == null
+          ? 'set CANOA_TEST_PROFILE_HARNESS, and build the mcp_server example or set CANOA_TEST_MCP_SERVER'
           : false,
       timeout: const Timeout(Duration(minutes: 6)));
 }

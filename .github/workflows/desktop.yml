@@ -29,9 +29,6 @@ jobs:
           channel: stable
           cache: true
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
       - name: Linux native dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -66,7 +63,6 @@ jobs:
         working-directory: app
         shell: bash
         env:
-          CANOA_TEST_NODE: node
           CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
         run: |
           cargo build -p canoa-host --bin canoa --examples
@@ -81,7 +77,6 @@ jobs:
         working-directory: app
         shell: bash
         env:
-          CANOA_TEST_NODE: node
           CXXFLAGS: ${{ matrix.platform == 'linux' && '-Wno-error=deprecated-declarations' || '' }}
         run: |
           export CANOA_TEST_APP="$PWD"
