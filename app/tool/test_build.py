@@ -87,6 +87,26 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(build.restore_lock(b"new dependency\n", root))
             self.assertEqual(lock.read_bytes(), b"new dependency\n")
 
+    def test_a_build_configured_before_the_runner_changed_is_removed(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp)
+            (app / "windows").mkdir()
+            lists = app / "windows" / "CMakeLists.txt"
+            cache = app / "build" / "windows" / "arm64" / "CMakeCache.txt"
+            cache.parent.mkdir(parents=True)
+            lists.write_text("")
+            cache.write_text("")
+            os.utime(lists, (1000, 1000))
+            os.utime(cache, (2000, 2000))
+            self.assertFalse(build.clear_stale_build("windows", app))
+            self.assertTrue(cache.exists())
+            os.utime(lists, (3000, 3000))
+            self.assertTrue(build.clear_stale_build("windows", app))
+            self.assertFalse((app / "build" / "windows").exists())
+            self.assertFalse(build.clear_stale_build("windows", app))
+
     def test_built_executable_is_found_by_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = Path(tmp)

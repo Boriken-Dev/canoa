@@ -80,6 +80,23 @@ def ensure_runner(platform: str, app: Path = APP) -> None:
         shutil.copyfile(icon, target)
 
 
+def clear_stale_build(platform: str, app: Path = APP) -> bool:
+    """Remove build/<platform> when it was configured before the runner's CMakeLists.txt last changed.
+
+    A configure from before name_runner.sh renamed the executable keeps naming the old `canoa` target, and CMake
+    then fails with `No target "canoa"`. The directory is generated output, so the next build recreates it.
+    """
+    lists = app / platform / "CMakeLists.txt"
+    build = app / "build" / platform
+    if not lists.is_file() or not build.is_dir():
+        return False
+    caches = list(build.glob("*/CMakeCache.txt")) + list(build.glob("CMakeCache.txt"))
+    if caches and all(cache.stat().st_mtime >= lists.stat().st_mtime for cache in caches):
+        return False
+    shutil.rmtree(build)
+    return True
+
+
 def committed_lock(root: Path = ROOT) -> bytes:
     return subprocess.run(
         ["git", "-C", str(root), "show", f"HEAD:{LOCK.as_posix()}"],
@@ -115,6 +132,8 @@ def build_desktop(platform: str, debug: bool, run: bool) -> None:
     mode = "--debug" if debug else "--release"
     try:
         ensure_runner(platform)
+        if platform != "macos" and clear_stale_build(platform):
+            print(f"Removed app/build/{platform}, configured before the runner was named")
         if run:
             subprocess.run([flutter_program(), "run", "-d", platform, mode], check=True, cwd=APP)
             return
