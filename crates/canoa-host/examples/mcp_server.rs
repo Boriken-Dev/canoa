@@ -1,5 +1,7 @@
-//! A tiny MCP server on its standard streams, the stdio server of the host's profile tests. Its one tool, `probe`, answers
-//! the SHA-256 of `PROBE_TOKEN` in its environment and its arguments, so a test sees what reached it without the value.
+//! A tiny MCP server on its standard streams, the stdio server of the host's and the app's profile tests. Its tool `probe`
+//! answers the SHA-256 of `PROBE_TOKEN` in its environment and its arguments, so a test sees what reached it without the
+//! value. Its tool `marker` answers the value of `MARKER_WORD` and, when `MARKER_CALLED` names a file, appends the tool's
+//! name to it, so a test can tell the tool was called and the environment reached it.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -28,7 +30,24 @@ fn main() {
                 "serverInfo": {"name": "probe", "version": "0"},
             }),
             Some("tools/list") => {
-                json!({"tools": [{"name": "probe", "inputSchema": {"type": "object"}}]})
+                json!({"tools": [
+                    {"name": "probe", "inputSchema": {"type": "object"}},
+                    {"name": "marker", "description": "Returns the marker word.",
+                     "inputSchema": {"type": "object", "properties": {}}},
+                ]})
+            }
+            Some("tools/call") if message["params"]["name"] == "marker" => {
+                if let Some(called) = std::env::var_os("MARKER_CALLED")
+                    && let Ok(mut file) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(called)
+                {
+                    let _ = writeln!(file, "marker");
+                }
+                let word = std::env::var("MARKER_WORD")
+                    .unwrap_or_else(|_| "(MARKER_WORD is not set)".to_owned());
+                json!({"content": [{"type": "text", "text": word}]})
             }
             Some("tools/call") => {
                 let token = std::env::var("PROBE_TOKEN").ok().map(|token| {

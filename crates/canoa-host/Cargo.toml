@@ -66,6 +66,9 @@ win32job = "2.0.3"
 url = "2.5"
 # A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+# The peers the web_peer example plays the page of, and its base64; already in the graph through coqui-acp-bridge.
+coqui-peer-noise.workspace = true
+data-encoding = { version = "2", default-features = false, features = ["std"] }
 
 # Fixtures the tests run, built by `cargo test` into target/<profile>/examples.
 [[example]]
@@ -87,6 +90,9 @@ name = "mcp_server"
 
 [[example]]
 name = "harness_standin"
+
+[[example]]
+name = "web_peer"
 
 [lints.rust]
 missing_docs = "warn"
