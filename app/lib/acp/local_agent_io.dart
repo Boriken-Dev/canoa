@@ -18,6 +18,8 @@ const Duration _leaving = Duration(seconds: 2);
 final bool _useShell = Platform.isWindows;
 
 Future<String?> _find(String program) async {
+  // A program named by its full path is found when the file is there; `where` and `which` look only along PATH.
+  if (File(program).isAbsolute && File(program).existsSync()) return program;
   final finder = Platform.isWindows ? 'where' : 'which';
   try {
     final found = await Process.run(finder, [program], runInShell: _useShell);
