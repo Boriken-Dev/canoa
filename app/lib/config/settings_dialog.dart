@@ -8,7 +8,7 @@ import '../theme/look.dart';
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles,
-      this.onAllowNotifications, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
+      this.onAllowNotifications, this.onPreview, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
   final CanoaConfig config;
 
   /// The built-in sources, which can be hidden from a new session but not changed.
@@ -25,6 +25,9 @@ class SettingsDialog extends StatefulWidget {
 
   /// Asks the browser for leave to notify, where it has to be asked; true when it was given.
   final Future<bool> Function()? onAllowNotifications;
+
+  /// Told the dialog's look and brightness each time either is picked, so the app can show them before they are saved.
+  final void Function(CanoaConfig preview)? onPreview;
 
   /// The session list, whose kept text Settings can clear.
   final SessionLedger? ledger;
@@ -166,16 +169,20 @@ class SettingsDialogState extends State<SettingsDialog> {
         ListTile(
           title: const Text('Look'),
           trailing: DropdownButton<LookId>(
+            key: const Key('settings-look'),
             value: config.look,
             items: [for (final look in LookId.values) DropdownMenuItem(value: look, child: Text(look.label))],
             onChanged: (value) {
-              if (value != null) setState(() => config = config.copyWith(look: value));
+              if (value == null) return;
+              setState(() => config = config.copyWith(look: value));
+              widget.onPreview?.call(config);
             },
           ),
         ),
         ListTile(
           title: const Text('Brightness'),
           trailing: DropdownButton<String>(
+            key: const Key('settings-brightness'),
             value: config.brightness,
             items: const [
               DropdownMenuItem(value: 'dark', child: Text('Dark')),
@@ -183,7 +190,9 @@ class SettingsDialogState extends State<SettingsDialog> {
               DropdownMenuItem(value: 'system', child: Text('Follow the system')),
             ],
             onChanged: (value) {
-              if (value != null) setState(() => config = config.copyWith(brightness: value));
+              if (value == null) return;
+              setState(() => config = config.copyWith(brightness: value));
+              widget.onPreview?.call(config);
             },
           ),
         ),

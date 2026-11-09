@@ -168,6 +168,9 @@ class _CanoaAppState extends State<CanoaApp> {
   // One of each at a time: a second copy would hold a configuration the first one changes.
   bool _hostingOpen = false, _settingsOpen = false;
 
+  /// The look and brightness being tried in Settings, which are the app's until it closes; never written.
+  CanoaConfig? _preview;
+
   Future<void> _showHosting() async {
     final host = widget.host;
     if (host == null || _hostingOpen) return;
@@ -213,6 +216,7 @@ class _CanoaAppState extends State<CanoaApp> {
         builder: (_) => SettingsDialog(
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
           onProfiles: _showProfiles,
+          onPreview: (preview) => setState(() => _preview = preview),
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
           presets: canRunLocalAgents ? agentPresets : const [],
           hosted: [
@@ -226,6 +230,8 @@ class _CanoaAppState extends State<CanoaApp> {
       );
     } finally {
       _settingsOpen = false;
+      // However Settings closed, the look it previewed goes; a save sets the chosen one in the same frame, below.
+      if (_preview != null && mounted) setState(() => _preview = null);
     }
     if (fromDialog == null || !mounted) return;
     // [host] and the profile tables stay as the app has them now: Hosting may have changed one, and an overlay installed
@@ -936,9 +942,9 @@ class _CanoaAppState extends State<CanoaApp> {
       scaffoldMessengerKey: _messenger,
       title: 'Canoa',
       debugShowCheckedModeBanner: false,
-      theme: themeFor(config.look, Brightness.light),
-      darkTheme: themeFor(config.look, Brightness.dark),
-      themeMode: config.themeMode,
+      theme: themeFor((_preview ?? config).look, Brightness.light),
+      darkTheme: themeFor((_preview ?? config).look, Brightness.dark),
+      themeMode: (_preview ?? config).themeMode,
       home: AnimatedBuilder(
         animation: store,
         builder: (context, _) => _CanoaHome(
