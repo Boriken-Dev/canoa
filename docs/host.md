@@ -7,7 +7,7 @@ WebSocket of its own, on loopback unless its `listen` says otherwise:
   protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
   [Claude and ChatGPT](#claude-and-chatgpt).
 - **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as
-  `gemini --acp`, or `canoa agent claude` itself (with `--allow-client-plugins` when a profile gives it skills).
+  `agy acp`, or `canoa agent claude` itself (with `--allow-client-plugins` when a profile gives it skills).
 - **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
   library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
   libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.

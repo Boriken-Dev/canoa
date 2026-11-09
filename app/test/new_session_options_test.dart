@@ -50,6 +50,38 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('Antigravity offers what agy acp advertises: three modes, its models and its thinking levels', (tester) async {
+    await pumpApp(tester, _store());
+    await _draft(tester, 'Antigravity');
+    expect(await menuOf(tester, 'option-mode'), ['Default', 'Manual', 'Accept edits', 'Plan', 'Bypass']);
+    expect(await menuOf(tester, 'option-model'),
+        ['Default', 'Gemini 4 Argon', 'Gemini 3.8 Flash', 'Claude Opus 5.5', 'Claude Sonnet 5.5', 'GPT-OSS 120B (Medium)']);
+    expect(await menuOf(tester, 'option-effort'), ['Default', 'Low', 'Medium', 'High']);
+    await finish(tester);
+  });
+
+  testWidgets("Grok offers its models and efforts, and only Canoa's own Bypass of the modes it cannot list yet", (tester) async {
+    await pumpApp(tester, _store());
+    await _draft(tester, 'Grok');
+    expect(await menuOf(tester, 'option-model'), ['Default', 'Grok 4.6', 'Grok 4.5']);
+    expect(await menuOf(tester, 'option-effort'), ['Default', 'Low', 'Medium', 'High', 'Extra high']);
+    expect(await menuOf(tester, 'option-mode'), ['Default', 'Its other modes: after it has started', 'Bypass']);
+    await finish(tester);
+  });
+
+  testWidgets('there is no Gemini preset, and Antigravity and Grok are offered', (tester) async {
+    await pumpApp(tester, _store());
+    await newSession(tester);
+    await tester.tap(find.byKey(const Key('new-session-source')));
+    await frames(tester);
+    expect(find.byKey(const Key('source Gemini')), findsNothing);
+    expect(find.byKey(const Key('source Antigravity')), findsWidgets);
+    expect(find.byKey(const Key('source Grok')), findsWidgets);
+    await tester.tapAt(const Offset(2, 2));
+    await frames(tester);
+    await finish(tester);
+  });
+
   testWidgets('an agent the app knows nothing of says its choices come after it starts, not a lone Default', (tester) async {
     await pumpApp(tester, _store());
     await _draft(tester, 'Scripted');

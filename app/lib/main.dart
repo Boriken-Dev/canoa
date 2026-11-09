@@ -503,7 +503,9 @@ class _CanoaAppState extends State<CanoaApp> {
 
   Future<SourceCheck> _check(AgentSource source) async {
     if (widget.checkSource case final check?) return check(source);
-    if (source.command case final command?) return checkCommand(command, findProgram);
+    if (source.command case final command?) {
+      return checkCommand(command, (program) => findProgram(program, searchDirs: program == command.program ? command.searchDirs : const []));
+    }
     final host = widget.host;
     final serving = host?.listening.any((listening) => listening.name == source.hostEntry) ?? false;
     return serving

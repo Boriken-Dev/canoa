@@ -17,7 +17,40 @@ const Duration _leaving = Duration(seconds: 2);
 /// A `.cmd` such as `npx` on Windows can only be started through a shell.
 final bool _useShell = Platform.isWindows;
 
-Future<String?> _find(String program) async {
+/// [directory] with `~` and `%NAME%` filled in, or null when a variable is not set.
+String? _expand(String directory) {
+  var out = directory;
+  if (out == '~' || out.startsWith('~/')) {
+    final home = environmentVariable(Platform.isWindows ? 'USERPROFILE' : 'HOME');
+    if (home == null) return null;
+    out = '$home${out.substring(1)}';
+  }
+  for (final match in RegExp(r'%([A-Za-z0-9_]+)%').allMatches(out).toList()) {
+    final value = environmentVariable(match[1]!);
+    if (value == null) return null;
+    out = out.replaceAll(match[0]!, value);
+  }
+  return out;
+}
+
+/// [program] in one of [directories], as an installer leaves it.
+String? _findIn(String program, List<String> directories) {
+  final names = Platform.isWindows ? ['$program.exe', '$program.cmd', '$program.bat', '$program.com'] : [program];
+  for (final directory in directories) {
+    final expanded = _expand(directory);
+    if (expanded == null) continue;
+    for (final name in names) {
+      final file = File('$expanded/$name');
+      if (file.existsSync()) return file.path;
+    }
+  }
+  return null;
+}
+
+Future<String?> _find(String program, [List<String> searchDirs = const []]) async =>
+    await _findOnPath(program) ?? _findIn(program, searchDirs);
+
+Future<String?> _findOnPath(String program) async {
   // A program named by its full path is found when the file is there; `where` and `which` look only along PATH.
   if (File(program).isAbsolute && File(program).existsSync()) return program;
   final finder = Platform.isWindows ? 'where' : 'which';
@@ -35,8 +68,8 @@ Future<String?> _find(String program) async {
   }
 }
 
-/// [program]'s absolute path, as PATH finds it, or null.
-Future<String?> findProgram(String program) => _find(program);
+/// [program]'s absolute path, as PATH finds it, else in [searchDirs] where its installer puts it, or null.
+Future<String?> findProgram(String program, {List<String> searchDirs = const []}) => _find(program, searchDirs);
 
 /// This process's environment variable [name]; on Windows names compare without case.
 String? environmentVariable(String name) {
@@ -56,7 +89,7 @@ String? defaultWorkingDirectory() {
 /// Whether what it needs is on this computer, so nothing is offered that cannot start.
 Future<bool> isInstalled(AgentCommand command) async {
   for (final program in commandNeeds(command)) {
-    if (await _find(program) == null) return false;
+    if (await _find(program, program == command.program ? command.searchDirs : const []) == null) return false;
   }
   return true;
 }
@@ -117,11 +150,13 @@ Future<VerifiedAgent> startLocalAgent(
     if (path == null) throw AcpFailure('${entry.value} is not installed');
     environment[entry.key] = path;
   }
-  final (program, args) = invocation(
+  var (program, args) = invocation(
     command,
     executable: Platform.resolvedExecutable,
     hostProgram: environmentVariable('CANOA_HOST'),
   );
+  // A program its installer left off PATH starts from where it was found.
+  if (!command.hosts && command.searchDirs.isNotEmpty) program = await _find(program, command.searchDirs) ?? program;
   final Process process;
   try {
     process = await Process.start(

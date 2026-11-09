@@ -28,6 +28,7 @@ const Map<String, String> builtInHarnesses = {
   '@agentclientprotocol/claude-agent-acp': 'Claude Code',
   '@agentclientprotocol/codex-acp': 'Codex',
   'gemini-cli': 'Gemini',
+  'Antigravity ACP Server': 'Antigravity',
   'pi-acp': 'Pi',
   'OpenCode': 'OpenCode',
   grokName: 'Grok',

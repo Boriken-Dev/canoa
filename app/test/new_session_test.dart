@@ -56,9 +56,9 @@ void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/new_session_test.dart')));
 
   test('hidden presets and attachment limits go into canoa.cfg and come back', () {
-    const config = CanoaConfig(hiddenSources: {'Gemini', 'Pi'}, pasteAsFile: 100, embedLimit: 2048);
+    const config = CanoaConfig(hiddenSources: {'Antigravity', 'Pi'}, pasteAsFile: 100, embedLimit: 2048);
     final read = CanoaConfig.parse(config.encode());
-    expect(read.hiddenSources, {'Gemini', 'Pi'});
+    expect(read.hiddenSources, {'Antigravity', 'Pi'});
     expect((read.pasteAsFile, read.embedLimit), (100, 2048));
     expect((const CanoaConfig().pasteAsFile, const CanoaConfig().embedLimit), (8000, 1024 * 1024));
     expect(() => CanoaConfig.parse('[sources]\nhidden = [1]\n'), throwsFormatException);
@@ -93,21 +93,21 @@ void main() {
     expect([mine.label, mine.program, ...mine.args], ['Mine', 'my-agent', '--acp', 'a b']);
 
     await newSession(tester);
-    expect(await _offered(tester), containsAll(['Claude', 'Codex', 'Gemini', 'Pi', 'Mine']));
+    expect(await _offered(tester), containsAll(['Claude', 'Codex', 'Antigravity', 'Grok', 'Pi', 'Mine']));
   });
 
   testWidgets('a preset hidden in Settings is not offered', (tester) async {
     final (_, _, _, written) = await _app(tester, size: const Size(1280, 1400));
     await _openSources(tester);
-    await tester.tap(find.byKey(const Key('source-offered Gemini')));
+    await tester.tap(find.byKey(const Key('source-offered Antigravity')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
-    expect(written.last.hiddenSources, {'Gemini'});
+    expect(written.last.hiddenSources, {'Antigravity'});
     await newSession(tester);
     final offered = await _offered(tester);
-    expect(offered, isNot(contains('Gemini')));
-    expect(offered, containsAll(['Claude', 'Codex', 'Pi', 'Scripted']));
+    expect(offered, isNot(contains('Antigravity')));
+    expect(offered, containsAll(['Claude', 'Codex', 'Grok', 'Pi', 'Scripted']));
   });
 
   testWidgets('a preset that cannot run says what it is missing, in Settings and for a new session, and starts nothing', (tester) async {

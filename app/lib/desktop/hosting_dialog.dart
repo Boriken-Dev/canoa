@@ -485,7 +485,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
             controller: command,
             decoration: const InputDecoration(
               labelText: 'Command',
-              hintText: 'gemini --acp',
+              hintText: 'agy acp',
             ),
           ),
           TextField(

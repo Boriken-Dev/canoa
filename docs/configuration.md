@@ -21,9 +21,9 @@ Configuration tables:
 - [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200)
 - [notifications] permission, question, finished: which of these, in a conversation the person is not looking at, reach them as a notification outside the window; each on by default. See [below](#when-a-conversation-needs-you).
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
-- [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
+- [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
-- [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Gemini"]`. A preset is never changed, only hidden.
+- [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
 - [attachments] paste_as_file (characters, default 8000): a longer paste goes with the message as an attachment of its own; embed_limit (bytes, default 1048576): a larger file goes as a link to it rather than as the agent's embedded context.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
 - [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store).
@@ -34,7 +34,7 @@ The session list is `sessions.json` beside canoa.cfg on a desktop, and this orig
 
 **New session**, Ctrl+N (⌘N on a Mac) or the palette opens a new session in the middle of the window: its folder (recent folders, or **Open folder…**) above the message box, and in the row under the box `+`, the **source**, **Local** or **Worktree**, the agent's **mode**, **model** and **effort**, the **overlays** it starts with, and Send. It is in the side list at once, as New, with nothing started: no agent, no connection and no worktree. One left untouched is shown again rather than another made, and a new one starts from the source and folder chosen last.
 
-A source is a program with its arguments and what else it needs: the presets (Claude Code and Codex through their ACP adapters, Gemini, Pi), the commands under `[agents.NAME]`, and the agent entries of the `canoa` this app runs. Settings → Sources lists them with where each program was found, hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
+A source is a program with its arguments and what else it needs: the presets (Claude Code and Codex through their ACP adapters, Antigravity as `agy acp`, Grok as `grok agent stdio`, Pi), the commands under `[agents.NAME]`, and the agent entries of the `canoa` this app runs. Settings → Sources lists them with where each program was found (on PATH, else where its installer puts it: `%LOCALAPPDATA%\agy\bin` for `agy` on Windows, `~/.grok/bin` for `grok`), hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
 
 The first message starts it: the worktree is made, the profile is prepared (its dialog shown only when it has more than a model, effort or mode to approve), the agent started or the host reached, `session/new` sent with the folder, the profile and its MCP servers, the model, effort and mode chosen set, and then the message sent with what goes with it. A start that fails says why, takes back the worktree it made, and leaves the message to send again. Until then the session is kept in `drafts/` beside canoa.cfg, with what is written in it and what goes with it, and comes back after a restart; closing it leaves nothing there or in the session list. The session list notes it once it has started.
 
@@ -151,7 +151,7 @@ Claude Code and Codex are run by `canoa agent claude` and `canoa agent codex`, t
 protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), with no Node; the desktop app runs them from its own
 executable, and a `[host.agents]` entry with `harness` runs them inside the host.
 
-| Part | Claude Code (`canoa agent claude`) | Codex (`canoa agent codex`) | Gemini CLI | Pi (`pi-acp`) | Another agent |
+| Part | Claude Code (`canoa agent claude`) | Codex (`canoa agent codex`) | Gemini CLI (a command you add) | Pi (`pi-acp`) | Another agent |
 | --- | --- | --- | --- | --- | --- |
 | Environment | the process of `claude` | the process of `codex app-server` | the agent's process | the agent's process | the agent's process |
 | Initial context | ACP `systemPrompt`, appended: `claude --append-system-prompt` | ACP `systemPrompt`, appended: the thread's developer instructions | not supported | not supported | ACP `systemPrompt` when it advertises it |

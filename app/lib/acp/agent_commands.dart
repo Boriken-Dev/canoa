@@ -8,6 +8,7 @@ final class AgentCommand {
     this.args = const [],
     this.requires = const [],
     this.programPaths = const {},
+    this.searchDirs = const [],
     this.hosts = false,
   });
 
@@ -24,6 +25,10 @@ final class AgentCommand {
 
   /// Environment variables naming a program by its full path, resolved when it starts.
   final Map<String, String> programPaths;
+
+  /// Where the tool's own installer puts [program], looked in when PATH does not have it: `~` is the home directory, and a
+  /// `%NAME%` an environment variable (the directory is skipped where it is not set).
+  final List<String> searchDirs;
 }
 
 /// The program and arguments that run [command]. A host's own command runs as [hostProgram], a `canoa` the environment
@@ -89,6 +94,10 @@ const List<AgentCommand> agentPresets = [
     programPaths: {'COQUI_ACP_CODEX_EXECUTABLE': 'codex'},
     hosts: true,
   ),
-  AgentCommand(label: 'Gemini', program: 'gemini', args: ['--acp']),
+  // Antigravity's CLI, which replaced Gemini CLI: `agy acp` is its ACP server. Its Windows installer puts it in
+  // %LOCALAPPDATA%gyin; where the Linux and macOS installers do is not confirmed, so there it is found on PATH only.
+  AgentCommand(label: 'Antigravity', program: 'agy', args: ['acp'], searchDirs: ['%LOCALAPPDATA%/agy/bin']),
+  // xAI's Grok CLI in its ACP mode; its installers put it in ~/.grok/bin.
+  AgentCommand(label: 'Grok', program: 'grok', args: ['agent', 'stdio'], searchDirs: ['~/.grok/bin']),
   AgentCommand(label: 'Pi', program: 'npx', args: ['-y', 'pi-acp@0.0.34'], requires: ['pi']),
 ];

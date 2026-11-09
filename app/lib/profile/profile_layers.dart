@@ -15,7 +15,7 @@ const builtInProfile = Profile();
 const overlayManifestFile = 'overlay.cfg';
 
 /// The AOS harness id of each of Canoa's agent presets, whose `[harness.<id>]` hints apply to it.
-const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Gemini': 'gemini-cli', 'Pi': 'pi'};
+const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Grok': 'grok', 'Pi': 'pi'};
 
 /// Why a layer is not in the merge, or what to know about one that is.
 final class LayerNote {
