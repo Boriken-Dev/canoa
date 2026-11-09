@@ -22,6 +22,7 @@ final class WebPeerBridge implements PeerBridge {
       }
     });
     _process.stderr.transform(utf8.decoder).listen(stderr.write);
+    unawaited(_process.stdin.done.then<void>((_) {}, onError: (Object _) {}));
   }
 
   /// Starts the built web_peer example; see [exampleBinary].
@@ -39,9 +40,17 @@ final class WebPeerBridge implements PeerBridge {
     final id = _next++;
     final answer = Completer<Object?>();
     _waiting[id] = answer;
-    _process.stdin.writeln(jsonEncode({'id': id, 'op': op, 'args': args}));
+    try {
+      _process.stdin.writeln(jsonEncode({'id': id, 'op': op, 'args': args}));
+    } on Object catch (error) {
+      _waiting.remove(id);
+      answer.completeError(StateError('web_peer has gone: $error'));
+    }
     return answer.future;
   }
+
+  /// A call nobody waits for: a process already ended is no failure of the test.
+  void _forget(Future<Object?> call) => unawaited(call.then<void>((_) {}, onError: (Object _) {}));
 
   Uint8List _bytes(Object? text) => base64Decode(text as String);
 
@@ -65,7 +74,7 @@ final class WebPeerBridge implements PeerBridge {
   }
 
   @override
-  void abort(String token) => unawaited(_call('abort', [token]));
+  void abort(String token) => _forget(_call('abort', [token]));
   @override
   Future<Uint8List> seal(String session, Uint8List message) async =>
       _bytes(await _call('seal', [session, base64Encode(message)]));
@@ -78,7 +87,7 @@ final class WebPeerBridge implements PeerBridge {
   @override
   Future<Uint8List> closeRecord(String session) async => _bytes(await _call('closeRecord', [session]));
   @override
-  void closeSession(String session) => unawaited(_call('closeSession', [session]));
+  void closeSession(String session) => _forget(_call('closeSession', [session]));
 
   void kill() => _process.kill();
 }
