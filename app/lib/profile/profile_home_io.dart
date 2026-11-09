@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:coqui_aos/coqui_aos.dart' as aos;
+import 'package:coqui_aos/io.dart' as aos_io;
+
 import 'apply.dart';
-import 'aos.dart';
+import 'aos_support.dart';
 import 'overlay_store_io.dart';
 import 'overlays.dart';
 import 'profile.dart';
@@ -62,37 +65,8 @@ final class IoProfileHome implements ProfileHome, SessionFiles {
   }
 
   @override
-  Future<List<AosTreeEntry>> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 * 1024 * 1024}) async {
-    final out = <AosTreeEntry>[];
-    var files = 0, bytes = 0;
-    Future<void> walk(String dir, List<List<int>> prefix) async {
-      final children = Directory(dir).listSync(followLinks: false)
-        ..sort((a, b) => a.path.compareTo(b.path));
-      for (final child in children) {
-        final components = [...prefix, utf8.encode(child.path.split(Platform.pathSeparator).last)];
-        final type = FileSystemEntity.typeSync(child.path, followLinks: false);
-        final kind = switch (type) {
-          FileSystemEntityType.link => AosEntryKind.symlink,
-          FileSystemEntityType.directory => AosEntryKind.dir,
-          FileSystemEntityType.file => AosEntryKind.file,
-          _ => AosEntryKind.special,
-        };
-        final entry = AosTreeEntry(components, kind);
-        if (kind == AosEntryKind.file && !entry.isExcluded) {
-          files++;
-          bytes += File(child.path).lengthSync();
-          if (files > maxFiles || bytes > maxBytes) throw AosException('too-large', entry.path);
-          out.add(AosTreeEntry(components, kind, await File(child.path).readAsBytes()));
-          continue;
-        }
-        out.add(entry);
-        if (kind == AosEntryKind.dir && !entry.isExcluded) await walk(child.path, components);
-      }
-    }
-
-    await walk(directory, []);
-    return out;
-  }
+  Future<ReadTree> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 * 1024 * 1024}) =>
+      aos.readTree(const aos_io.IoFileSystem(), directory, treeSettings(maxFiles, maxBytes));
 
   @override
   Future<String?> readSecret(String path, {String? within}) async {

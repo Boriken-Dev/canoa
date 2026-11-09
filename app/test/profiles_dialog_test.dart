@@ -4,7 +4,7 @@
 import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/profile/aos.dart';
+import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home.dart';
@@ -36,9 +36,8 @@ path = "setup.sh"
 
 const teamFiles = {'overlay.cfg': teamManifest, 'skills/review/SKILL.md': '# Review\n', 'setup.sh': 'true\n'};
 
-String get teamDigest => digestEntries([
-  for (final MapEntry(:key, :value) in teamFiles.entries) AosTreeEntry.file(key, utf8.encode(value)),
-]).digest;
+String get teamDigest =>
+    '${treeOfFiles({for (final MapEntry(:key, :value) in teamFiles.entries) key: utf8.encode(value)}).digest.digest}';
 
 final class FakeOverlays implements OverlayManager {
   final records = <String, InstalledOverlay>{};
@@ -100,10 +99,10 @@ final class FakeHome implements ProfileHome {
   @override
   Future<String?> readSecret(String path, {String? within}) async => files[path];
   @override
-  Future<List<AosTreeEntry>> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 << 20}) async => [
+  Future<ReadTree> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 << 20}) async => treeOfFiles({
     for (final MapEntry(:key, :value) in files.entries)
-      if (key.startsWith('$directory/')) AosTreeEntry.file(key.substring(directory.length + 1), utf8.encode(value)),
-  ];
+      if (key.startsWith('$directory/')) key.substring(directory.length + 1): utf8.encode(value),
+  });
 }
 
 String layerOf(WidgetTester tester, String key) => tester.widget<Text>(find.byKey(Key('profile-layer-$key'))).data!;

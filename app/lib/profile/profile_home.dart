@@ -1,4 +1,4 @@
-import 'aos.dart';
+import 'aos_support.dart';
 import 'overlays.dart';
 import 'project_trust.dart';
 
@@ -24,10 +24,10 @@ abstract interface class ProfileHome {
   /// A file's bytes, or null when it cannot be read.
   Future<List<int>?> readBytes(String path);
 
-  /// Every entry under [directory], read without following a link: a link or junction is an entry of its own, never
-  /// entered, and an excluded directory (`.git`, `node_modules`, ...) is not entered either. Throws `too-large` past
-  /// [maxFiles] files or [maxBytes] bytes, before the rest is read.
-  Future<List<AosTreeEntry>> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 * 1024 * 1024});
+  /// Every member under [directory] with its bytes, and the tree's digest, read without following a link: a link or
+  /// junction is refused, and an excluded directory (`.git`, `node_modules`, ...) is not entered. Throws an `AosError`
+  /// `too-large` past [maxFiles] files or [maxBytes] bytes.
+  Future<ReadTree> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 * 1024 * 1024});
 
   /// A file's text for a secret, or null when it cannot be read as UTF-8, or when [within] is given and the file, its
   /// links resolved, is not inside that directory.

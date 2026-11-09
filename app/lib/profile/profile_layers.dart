@@ -1,6 +1,8 @@
 import 'dart:convert';
 
-import 'aos.dart';
+import 'package:coqui_aos/coqui_aos.dart' as aos;
+
+import 'aos_support.dart';
 import 'overlay_layer.dart';
 import 'profile.dart';
 import 'profile_home.dart';
@@ -58,13 +60,13 @@ Future<ProfileLayers> profileLayers({
   String? workingDirectory,
   Profile? session,
   String? harness,
-  IconLimits iconLimits = const IconLimits(),
+  aos.Settings? iconLimits,
 }) async {
   harness ??= presetHarnesses[agent];
   final layers = <Layer>[const Layer(LayerId(LayerKind.builtIn), builtInProfile)];
   final notes = <LayerNote>[];
   final found = <String, Layer>{};
-  final manifests = <String, Map<String, Object?>>{};
+  final manifests = <String, aos.Document>{};
   final names = <String, String>{};
   for (final MapEntry(key: name, value: source) in overlays.entries) {
     final id = LayerId(LayerKind.overlay, name);
@@ -72,12 +74,12 @@ Future<ProfileLayers> profileLayers({
       notes.add(LayerNote(id, 'Overlays are read by the desktop app'));
       continue;
     }
-    if (!validOverlayName(name)) {
+    if (!aos.validOverlayName(name)) {
       notes.add(LayerNote(id, 'Not a valid overlay identity: a letter, then letters, digits, _, . or -, ending in a '
           'letter or digit, and not user, project or a device name'));
       continue;
     }
-    final normalized = normalizeName(name);
+    final normalized = aos.normalizeName(name);
     if (names[normalized] case final other?) {
       notes.add(LayerNote(id, 'The same overlay as $other, once names are compared as AOS compares them: left out'));
       continue;
@@ -118,20 +120,19 @@ Future<ProfileLayers> profileLayers({
         directory = there;
         expected = pin;
     }
-    final List<AosTreeEntry> tree;
+    final ReadTree read;
     try {
-      tree = await home.readTree(directory);
+      read = await home.readTree(directory);
+    } on aos.AosError catch (error) {
+      notes.add(LayerNote(id, 'Its files cannot be read (${error.message}): left out'));
+      continue;
     } on Object catch (error) {
       notes.add(LayerNote(id, 'Its files cannot be read ($error): left out'));
       continue;
     }
-    if (source is GitOverlay && tree.any((entry) => entry.isExcluded)) {
-      notes.add(LayerNote(id, 'Its installed copy holds files that are no part of an overlay: left out until synced'));
-      continue;
-    }
     final Layer layer;
     try {
-      layer = overlayLayer(identity: name, root: directory, os: home.os, tree: tree, harness: harness,
+      layer = overlayLayer(identity: name, root: directory, os: home.os, tree: read.tree, harness: harness,
           iconLimits: iconLimits, pinned: switch (source) {
             GitOverlay(:final pin) => pin != null,
             DirOverlay(:final pin) => pin != null,
@@ -148,12 +149,12 @@ Future<ProfileLayers> profileLayers({
     found[normalized] = layer;
     manifests[normalized] = layer.aos!.manifest;
   }
-  var (visited, missing) = (<String>[], <(String, String)>[]);
+  var resolution = const aos.Resolution(installOrder: [], missing: []);
   while (true) {
     try {
-      (visited, missing) = resolveRequires(manifests, manifests.keys.toList());
+      resolution = aos.resolve(manifests, manifests.keys.toList());
       break;
-    } on AosCycle catch (cycle) {
+    } on aos.Cycle catch (cycle) {
       for (final identity in cycle.chain.toSet()) {
         if (manifests.remove(identity) != null) {
           notes.add(LayerNote(LayerId(LayerKind.overlay, names[identity] ?? identity),
@@ -162,11 +163,11 @@ Future<ProfileLayers> profileLayers({
       }
     }
   }
-  for (final (by, name) in missing) {
+  for (final (by, name) in resolution.missing) {
     notes.add(LayerNote(LayerId(LayerKind.overlay, names[by] ?? by),
         'Requires $name, which [overlays] does not name: it applies without it'));
   }
-  layers.addAll([for (final identity in compositionOrder(manifests, visited)) found[identity]!]);
+  layers.addAll([for (final identity in aos.compositionOrder(manifests, resolution.installOrder)) found[identity]!]);
   layers.add(Layer(const LayerId(LayerKind.user), user, dir: home?.configDir));
   ProjectLayer? project;
   if (workingDirectory != null && home != null) {

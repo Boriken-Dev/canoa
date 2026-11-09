@@ -3,7 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-import '../profile/aos.dart';
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 
 /// An overlay's or a catalog's icon as AOS lets a store show one: PNG or WebP only, its size and the dimensions in its
 /// header checked against [limits] before anything decodes it, decoded at no more than twice [size] on a side, and
@@ -11,7 +11,7 @@ import '../profile/aos.dart';
 /// [name], never another image.
 class StillIcon extends StatefulWidget {
   const StillIcon({super.key, required this.name, required this.path, required this.bytes, this.size = 40,
-      this.limits = const IconLimits()});
+      this.limits});
 
   /// The overlay's name, for the placeholder.
   final String name;
@@ -20,7 +20,7 @@ class StillIcon extends StatefulWidget {
   final String? path;
   final List<int>? bytes;
   final double size;
-  final IconLimits limits;
+  final aos.Settings? limits;
 
   @override
   State<StillIcon> createState() => _StillIconState();
@@ -58,7 +58,7 @@ class _StillIconState extends State<StillIcon> {
     final path = widget.path, bytes = widget.bytes;
     if (path == null || bytes == null) return;
     try {
-      final header = checkIcon(path, bytes, limits: widget.limits);
+      final header = aos.readIcon(Uint8List.fromList(bytes), path, widget.limits ?? aos.defaultSettings);
       // The longer side decodes to at most twice the space shown, keeping the aspect ratio.
       final side = (widget.size * 2).ceil();
       final wide = header.width >= header.height;

@@ -2,9 +2,9 @@
 /// canoa reads the same schema (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds both.
 library;
 
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:toml/toml.dart';
 
-import 'aos.dart' show AosEnvironment, AosException, AosSource, SourceKind, isSensitive, parseSource;
 import 'overlay_layer.dart';
 
 /// The longest skill, MCP server, header or overlay name.
@@ -37,7 +37,7 @@ const reservedEnvSuffixes = ['_BASE_URL', '_PROXY'];
 /// AOS specification names sensitive ([isSensitive]).
 bool isReservedEnv(String name) {
   final upper = name.toUpperCase();
-  return isSensitive(name) || reservedEnv.contains(upper) || reservedEnvPrefixes.any(upper.startsWith) ||
+  return aos.isSensitiveVariable(name) || reservedEnv.contains(upper) || reservedEnvPrefixes.any(upper.startsWith) ||
       reservedEnvSuffixes.any(upper.endsWith);
 }
 
@@ -601,14 +601,14 @@ final class EffectiveProfile {
   Future<Map<String, Secret>> environment({
     required String? Function(String name) lookup,
     required Future<String?> Function(String path, {String? within}) readFile,
-    Map<String, AosEnvironment>? after,
+    Map<String, BuiltEnvironment>? after,
   }) async {
     final built = buildOverlayEnvironment(aos, shareEnv, lookup, after: after);
     final out = <String, Secret>{};
     for (final MapEntry(:key, :value) in env.entries) {
       if (value.layer.kind == LayerKind.overlay && aos.any((layer) => layer.identity == value.layer.name)) {
         // An optional reference that could not be resolved leaves its variable unset.
-        if (built.values[key] case final found?) out[key] = Secret(found);
+        if (built.owned(key) case final found?) out[key] = Secret(found);
         continue;
       }
       out[key] = await resolveValue('env.$key', value.value, value.dir,
@@ -741,20 +741,20 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
 sealed class OverlaySource {
   const OverlaySource();
 
-  /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [parseSource] does, and holds it to what Canoa
+  /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [aos.Source.parse] does, and holds it to what Canoa
   /// fetches: a Git repository at a named ref. Throws [ProfileException] with key `overlays` for what canoa refuses
   /// too: what the specification refuses, a source that is not Git or names no ref, a scheme not in lowercase, a
   /// plaintext `http` or `git` transport at anything but a full commit id, another host's share, a ref git would refuse.
   static GitOverlay parseGit(String source) {
     Never refused() => throw const ProfileException('value', key: 'overlays');
-    final AosSource parsed;
+    final aos.Source parsed;
     try {
-      parsed = parseSource(source);
-    } on AosException {
+      parsed = aos.Source.parse(source);
+    } on aos.AosError {
       refused();
     }
     final reference = parsed.reference;
-    if (parsed.kind != SourceKind.git || reference == null) refused();
+    if (parsed.kind != 'git' || reference == null) refused();
     final repo = parsed.location;
     if (repo.runes.any((rune) => _isControl(rune) || _isSpace(rune))) refused();
     final scheme = repo.indexOf('://');

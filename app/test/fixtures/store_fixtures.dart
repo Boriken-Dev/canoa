@@ -4,11 +4,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:canoa/profile/aos.dart';
+import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home.dart';
 import 'package:canoa/profile/project_trust.dart';
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter_test/flutter_test.dart';
 
 final hasGit = () {
@@ -183,11 +184,11 @@ final class MemoryOverlays implements OverlayManager {
       for (final MapEntry(:key, :value) in all.entries)
         if (key.startsWith(prefix)) key.substring(prefix.length): value,
     };
-    final digest = digestEntries([for (final MapEntry(:key, :value) in files.entries) AosTreeEntry.file(key, value)]).digest;
+    final digest = '${treeOfFiles(files).digest.digest}';
     if (source.pin case final pin? when !sameDigest(pin, digest)) throw const OverlayException('pin');
     final blobs = <String, String>{};
     for (final MapEntry(:key, :value) in files.entries) {
-      final id = sha256Digest(value);
+      final id = '${aos.Digest.of(Uint8List.fromList(value))}';
       _blobs[id] = value;
       blobs[key] = id;
     }
@@ -259,11 +260,8 @@ final class MemoryHome implements ProfileHome {
   @override
   Future<String?> readSecret(String path, {String? within}) async => null;
   @override
-  Future<List<AosTreeEntry>> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 << 20}) async {
+  Future<ReadTree> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 << 20}) async {
     final name = directory.split('/').last;
-    return [
-      for (final MapEntry(:key, :value) in (overlays.installedFiles[name] ?? const <String, List<int>>{}).entries)
-        AosTreeEntry.file(key, value),
-    ];
+    return treeOfFiles(overlays.installedFiles[name] ?? const <String, List<int>>{});
   }
 }

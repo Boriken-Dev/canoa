@@ -14,6 +14,12 @@ dependencies:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp
       ref: b1bbd1ac316ccabcb946d713d854579434036f1e
+  # Agent overlays: reading, validating, digests, composition and the environment, shared with the other consumers.
+  coqui_aos:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-aos.git
+      path: dart
+      ref: 815aa3ce43ebc92613b8032041f7ced7c3901ec6
   coqui_web:
     git:
       url: https://github.com/Boriken-Dev/coqui-web.git

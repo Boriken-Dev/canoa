@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/profile/aos.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
@@ -142,7 +141,7 @@ void main() {
       expect(installed.commit, first);
       expect(installed.digest, install.digest, reason: 'the record keeps the tree digest installed');
       final dir = store.directoryOf('team');
-      expect(digestEntries(await IoProfileHome('${temp.path}/home').readTree(dir)).digest, install.digest);
+      expect('${(await IoProfileHome('${temp.path}/home').readTree(dir)).digest.digest}', install.digest);
       expect(File('$dir/overlay.cfg').readAsStringSync(), contains('"one"'));
       expect(File('$dir/secret.txt').existsSync(), isFalse);
       expect(File('$dir/../secret.txt').existsSync(), isFalse);
@@ -443,8 +442,8 @@ remove = true
       Directory('$dir/.git').createSync();
       File('$dir/.git/config').writeAsStringSync('[core]\n');
       result = await layers();
-      expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'user']);
-      expect(result.notes.last.text, contains('no part of an overlay'));
+      expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'overlay:o', 'user'],
+          reason: 'an excluded name is no part of the overlay: the digest leaves it out, and nothing reads it');
       Directory('$dir/.git').deleteSync(recursive: true);
 
       File('$dir/overlay.cfg').writeAsStringSync('[env]\nMODE = "changed"\n');
