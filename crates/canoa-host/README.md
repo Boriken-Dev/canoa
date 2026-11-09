@@ -6,7 +6,7 @@
 [![Docs](https://img.shields.io/docsrs/canoa-host)](https://docs.rs/canoa-host)
 [![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/test.yml)](https://github.com/Boriken-Dev/canoa/actions/workflows/test.yml)
 
-**Serves the agents canoa.cfg names to keys you paired, on this machine's loopback, and to nobody else.** An entry is a
+**Serves the agents canoa.cfg names to keys you paired, on this machine's loopback unless a `listen` says otherwise.** An entry is a
 program that speaks the Agent Client Protocol on its standard streams, or a Guatiao `agent_provider` from a library or
 from a source such as Python's, served through `coqui-acp-provider`'s facade. Each entry listens on a WebSocket of its own; a client proves a key the trust
 store accepts, and every message after that is sealed in the session the proof ended in. See the
@@ -132,7 +132,7 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg wa
   connection. It is trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A provider source** runs code and loads more: for Python, the interpreter the system or `import_dirs` finds, its
   `site-packages`, and every directory and manifest its settings name; with `isolation = "inherit"`, which `serve` logs
-  as weakened, the host's `PYTHONPATH` too. On Windows, when the narrow search leaves an import the source names missing,
+  as configuration, the host's `PYTHONPATH` too. On Windows, when the narrow search leaves an import the source names missing,
   such as `python3.dll`, it is looked for in `import_dirs`, the working directory and on `PATH` as well. What it prints
   goes to the host's log, never to the client.
 - **A stdio agent** is the program the file names, found as the operating system finds a command.

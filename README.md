@@ -65,7 +65,7 @@ The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based
 
 ## The host
 
-`canoa serve` offers each `[host]` entry of canoa.cfg, a stdio ACP agent or a Guatiao provider, to keys you paired, on loopback only. The desktop app starts it, starts it again if it ends, and ends it with its agents on quit. See [the host](https://boriken-dev.github.io/canoa/host/).
+`canoa serve` offers each `[host]` entry of canoa.cfg, a stdio ACP agent or a Guatiao provider, to keys you paired, on loopback unless an entry's `listen` says otherwise. The desktop app starts it, starts it again if it ends, and ends it with its agents on quit. See [the host](https://boriken-dev.github.io/canoa/host/).
 
 ## Development
 

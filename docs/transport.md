@@ -32,7 +32,7 @@ These are transport locations, **not authentication evidence**. Both must resolv
 4. Run the same coqui-peer-compatible verified identity handshake on the chosen channel. WSS certificate validation or a WebTransport browser certificate pin is not a substitute for that identity proof.
 5. Resuming a lost agent session requires a separate explicit ACP reconnect/resume operation after a new authenticated connection. Never replay an uncertain prompt or action automatically.
 
-Plain WS is available only with explicit local-development opt-in and a loopback address; production connections require encryption.
+Plain WS is fine where the link is sealed in-band, as Canoa's paired Noise or WebCrypto channel is; an unsealed plain WS is for local development, on a loopback address.
 
 ## Platform support
 

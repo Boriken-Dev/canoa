@@ -274,8 +274,8 @@ icon_max_height = 1024
 ```
 
 A label is yours, a valid overlay name unique among your catalogs; it never comes from the catalog. Each `[store]`
-limit is a setting with the specification's default and no floor; one set above its default is shown in the store as
-looser than the default.
+limit is a setting with the specification's default and no floor; one set above its default is listed in the store with
+its default.
 
 - **A listing** shows each overlay's icon, name, summary, tags, its catalog's label and its source (with no user
   information or query). It searches by words and filters by tags. A name two catalogs offer is shown once per catalog,
@@ -287,7 +287,7 @@ looser than the default.
   what the overlay itself says (its name, description, `[about]` and icon, from its own files), the commit and tree
   digest, and what it would do as Settings → Profiles would apply it: its environment, skills, MCP servers and context,
   what Canoa does not apply (setup, env scripts, dependencies, commands, the `bin`/`lib` defaults), each setup and
-  whether it says it needs the network, the overlays it requires, what none of your layers shares, and its weakenings.
+  whether it says it needs the network, the overlays it requires, what none of your layers shares, and its non-default settings.
   A tag or a summary is never taken as evidence of any of it.
 - **A catalog's pin** is checked against the tree fetched: one that does not match is shown as a refusal and the
   overlay cannot be installed from that entry. An entry with no pin is shown as unpinned.

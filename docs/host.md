@@ -1,7 +1,7 @@
 # The host
 
 `canoa` serves agents to Canoa's chat on this machine. Each entry of canoa.cfg's `[host]` table is one agent, on a
-loopback WebSocket of its own:
+WebSocket of its own, on loopback unless its `listen` says otherwise:
 
 - **Claude Code or Codex**: the installed `claude` or `codex`, served by the host's own translators of their stdio
   protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
@@ -68,9 +68,9 @@ is TOML unless its first line is `#!json` or `#!yaml`.
 | `isolated` | the standard library of `home` (else of the installation `python3.dll` came from) and `paths`, nothing else | everything beside `canoa`, the installation's `site-packages`, the environment |
 | `inherit` | the environment as well, as a `python` started from the host would | nothing |
 
-`inherit` is weaker: whoever sets the host's environment chooses the code a library runs. `canoa serve` says so in its
-log when it starts, once per entry: `weakened: host.providers.NAME.source_settings.isolation is inherit, looser than
-shipped`. The first source a process adds decides `isolation` and `home`; each connection is a process of its own.
+With `inherit`, whoever sets the host's environment chooses the code a library runs. `canoa serve` lists it in its
+log when it starts, once per entry, as configuration: `non-default: host.providers.NAME.source_settings.isolation is
+inherit, default shipped`. The first source a process adds decides `isolation` and `home`; each connection is a process of its own.
 
 What a provider prints, to standard output or standard error, goes to the host's log, up to 1 MiB per connection, and
 never to the client: the host and the provider's process speak ACP over a loopback socket of their own, which the process
@@ -81,8 +81,9 @@ entry's `import_search` says where else it may come from: `library` looks only i
 directory, `canoa`'s and the system's); `path` also in the Windows directory, the provider's working directory
 (canoa.cfg's) and every directory on `PATH`, so whoever can write any of those chooses the Python that loads. Without
 `import_search` an entry whose `import_dirs` names a directory takes `library`, and one that names none takes `path`,
-which keeps a Python on `PATH` working. `canoa serve` logs every entry on `path` when it starts:
-`weakened: host.providers.NAME.import_search is path, looser than library`, with how to narrow it. On Linux and macOS the
+which keeps a Python on `PATH` working. `canoa serve` logs every entry on `path` when it starts: as configuration
+(`non-default: host.providers.NAME.import_search is path, default library`) when the file says `path`, as a warning
+when the host took it because `import_dirs` names no directory, with how to narrow it. On Linux and macOS the
 source links that Python's shared library, found where the loader looks, or through `LD_LIBRARY_PATH` or
 `DYLD_FALLBACK_LIBRARY_PATH`; `import_dirs` and `import_search` change nothing there.
 
@@ -336,7 +337,7 @@ once and pair each browser again: its Noise key is a new key.
 While a host runs on a home, `canoa id --method X` and `canoa pair --method X` refuse to change the home's method: the
 host's next restart (it restarts on every `canoa.cfg` change) would come up with the other identity and refuse every
 client already paired. The refusal names the running host and ends with status 3; `--force` changes the method anyway and
-logs it as `weakened`. Naming the method the home already has is never refused, and a home no host runs on changes freely.
+logs it at `info`. Naming the method the home already has is never refused, and a home no host runs on changes freely.
 
 A browser pairs by connecting once:
 
@@ -388,7 +389,7 @@ What it serves and refuses:
   connections to the site and the host's entries alone. Inline and evaluated script are refused, so the site must be
   built with `flutter build web --csp --no-web-resources-cdn`. That build still fetches its fonts from
   `https://fonts.gstatic.com`, and without them Flutter draws no text: until the app carries its own fonts, add
-  `connect = ["https://fonts.gstatic.com"]` to `[host.web]`, which the host logs as a weakening.
+  `connect = ["https://fonts.gstatic.com"]` to `[host.web]`, which the host logs as configuration.
 - **Not the host's own files.** A site directory that holds canoa.cfg's directory or the host's identity and trust store
   is refused.
 - **Requests for this host only.** A request whose `Host` is not `localhost`, an IP address or a name in `[host.web]
@@ -397,8 +398,8 @@ What it serves and refuses:
   and refuses to start without them. The page it serves still connects to the entries' loopback addresses, so a browser
   on another machine needs a proxy carrying those as well.
 - **Limits**: connections at once and from one address, how long a connection lasts, the size and time of a request,
-  requests per connection, how long a write may stall, each a setting of `[host.web]` with a default; a looser one than
-  the default is logged as weakened. A file whose name holds a hash is cached for a year, any other file is checked
+  requests per connection, how long a write may stall, each a setting of `[host.web]` with a default; one above
+  the default is logged as configuration. A file whose name holds a hash is cached for a year, any other file is checked
   each time.
 
 **On a machine others use**, the browser keeps the page's key under the page's origin, `http://127.0.0.1:7800` by
@@ -410,9 +411,10 @@ The API header lists every setting.
 
 ## What the host allows
 
-- **Nothing beyond loopback.** An entry's address that is not loopback is refused, and so is the web app's, unless it
-  serves HTTPS. The proof does not depend on TLS, so a proxy that ends TLS can carry a connection further and can neither
-  read nor change it.
+- **Loopback by default.** An entry listens on loopback unless its `listen` names another address, which `serve` logs as
+  configuration: the proof does not depend on TLS, and every message after it is sealed, so a connection that is carried
+  further can neither be read nor changed. The web app is refused beyond loopback unless it serves HTTPS, since its
+  page is not sealed and whoever is on the path could rewrite the code that holds your key.
 - **Nothing without a paired, proven key.** Every message after the proof is sealed in the session it ended in. An
   entry's `peers` narrows it to some paired keys.
 - **No program a client names.** ACP's `session/new` can list a stdio MCP server, which an agent starts as a program
@@ -442,7 +444,7 @@ The API header lists every setting.
 - **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
   and in the system's directories only. For a source, an import it names itself that those leave missing, such as
   `python3.dll`, is looked for in `import_dirs` and, with `import_search = "path"` (the default when `import_dirs` names no
-  directory, and logged as weakened), the Windows directory, the provider's working directory (canoa.cfg's) and every
+  directory, and logged as a warning), the Windows directory, the provider's working directory (canoa.cfg's) and every
   directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
   opened with the narrow search again, so its other imports come from where they did.
 - **A stdio agent** is the program the file names, with the host's environment and working directory, and its profile's
@@ -482,7 +484,7 @@ to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. A re
 no request shows the host, is held to `working_roots` by the translator. What the command line asks before it acts is
 the entry's, never the configuration of the person on the host's machine, which a paired key would otherwise get:
 Claude Code runs with `permission_mode = "default"` and Codex with `approval_policy = "on-request"` and
-`sandbox = "workspace-write"` unless the entry names others, and a looser one is logged as `weakened`. Claude Code's own
+`sandbox = "workspace-write"` unless the entry names others, and another is logged as configuration. Claude Code's own
 allow rules in the settings it loads (`setting_sources`, its default when unset) still apply. Permission prompts reach the
 client as `session/request_permission` with the command line's own options (Claude Code: allow once, always allow with
 the rule it suggests, reject; Codex: its own decisions).

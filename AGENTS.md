@@ -32,7 +32,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 ## Rules
 
 - Canoa is one implementation of an interoperable concept. No proprietary agent gateway is required.
-- Prefer WebTransport over HTTPS, with explicit WSS fallback on connection/path timeout or failure; plain WS is a deliberate loopback-only development exception. Do not retry unacknowledged agent operations automatically.
+- Prefer WebTransport over HTTPS, with explicit WSS fallback on connection/path timeout or failure; plain WS is fine where the link is sealed in-band (the paired Noise or WebCrypto channel), and unsealed plain WS stays a loopback-only development exception. Do not retry unacknowledged agent operations automatically.
 - Browser clients must authenticate peer identity through an independently implementable versioned wire profile; a claimed peer ID or TLS hostname alone is not proof of pairing.
 - The extension owns its permissions for webpages and agents independently of the native host.
 - Permissions are scoped by verified peer, client origin, tab/document and capability, and default to deny. Navigation and revocation close the access.
