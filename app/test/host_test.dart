@@ -327,11 +327,11 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
     }, skip: skip);
 
     test('a canoa.cfg the host refuses is said in its words and not retried', () async {
-      await config.writeAsString('[host.agents.fixture]\nprogram = "x"\nlisten = "0.0.0.0:7999"\n');
+      await config.writeAsString('[host.agents.fixture]\nprogram = "x"\nlisten = "not an address"\n');
       expect(await supervisor.check(config.path), isNotNull);
       await supervisor.apply(configPath: config.path);
       await until(() => supervisor.phase == HostPhase.failed, 'the host to refuse it');
-      expect(supervisor.problem, contains('loopback'));
+      expect(supervisor.problem, contains('listen'));
     }, skip: skip);
   });
 

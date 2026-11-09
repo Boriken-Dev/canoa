@@ -1,8 +1,8 @@
 import 'package:coqui_web/coqui_web.dart';
 import 'client.dart';
 
-/// The endpoints the chat dials for an agent it pins. Plain WebSocket is taken on loopback only, where `canoa` listens:
-/// the peer proof does not depend on the transport, and every message after it is sealed in the session it ends in.
+/// The endpoints the chat dials for an agent it pins. Plain WebSocket is taken on loopback only, where `canoa` listens by
+/// default: the peer proof does not depend on the transport, and every message after it is sealed in the session it ends in.
 WebEndpoints chatEndpoints({
   required String webSocket,
   String webTransport = '',
