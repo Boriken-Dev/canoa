@@ -8,6 +8,7 @@ import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/profiles_dialog.dart' show EffectiveTable, OverlayReportView, visible;
+import 'links.dart';
 import 'store.dart';
 import 'store_icon.dart';
 
@@ -509,11 +510,18 @@ class OverlayPageState extends State<OverlayPage> {
     ]),
   );
 
+  /// The address a Homepage or Repository field names, when it is a plain web address.
+  static Uri? _linkOf(String key, String value) => key == 'Homepage' || key == 'Repository' ? webLink(value) : null;
+
   Widget _fields(Map<String, Object?> fields) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       for (final MapEntry(:key, :value) in fields.entries)
-        if (value != null) _field(key, '$value'),
+        if (value != null)
+          if (_linkOf(key, '$value') case final uri?)
+            LinkField(key: Key('store-link-${key.toLowerCase()}'), label: key, uri: uri, shown: oneLine('$value'))
+          else
+            _field(key, '$value'),
     ],
   );
 

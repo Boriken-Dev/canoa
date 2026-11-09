@@ -306,8 +306,8 @@ its default.
   holds a password is refused, in `[catalogs]` and from a catalog.
 
 Only git sources with a branch, tag or commit install: an entry whose source is a directory, a URL that is not git, or
-git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown as text to
-copy, never fetched. A web build lists no catalog.
+git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown whole as links that open in the system's browser when tapped, never fetched by
+Canoa; one that is not a plain ASCII `http` or `https` address stays text. A web build lists no catalog.
 
 ### Trusting a project
 

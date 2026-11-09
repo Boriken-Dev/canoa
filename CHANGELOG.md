@@ -91,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The store shows an entry's homepage and repository as links that open in the system's browser when tapped (a plain ASCII `http` or `https` address; anything else stays text), as the overlay specification asks.
 - A reopened session whose agent refuses, or no longer offers, the mode it was left in is given the profile's mode, and the profile report no longer says the kept mode replaced it.
 - The web app draws its text under the host's strict policy with no `connect` source: it carries Roboto and points Flutter's fallback fonts at the site, so its build fetches nothing from `fonts.gstatic.com`.
 - A hosted profile read a version 2 agent's capabilities and name from version 1's places (`agentCapabilities`, `agentInfo`), so a version 2 client was told the agent took no context, skills or MCP servers: version 2's `capabilities` and `info` are read now.
