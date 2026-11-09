@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-pub mod aos;
 mod child;
 pub mod cli;
 pub mod config;

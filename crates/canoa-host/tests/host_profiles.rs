@@ -233,10 +233,10 @@ fn install_overlay(scratch: &Scratch) {
         ),
     )
     .expect("written");
-    let tree = canoa_host::aos::read_tree(&root, 64, 64 << 20).expect("read");
-    let digest = canoa_host::aos::digest_entries(&tree)
-        .expect("a digest")
-        .digest;
+    let (_, digest) =
+        coqui_aos::read_tree(&coqui_aos::StdFs, &root, &coqui_aos::Settings::default())
+            .expect("read");
+    let digest = digest.digest.to_string();
     std::fs::write(
         scratch.0.join("overlays").join("team.json"),
         json!({"source": "fixture", "commit": "0", "digest": digest, "files": {}}).to_string(),

@@ -98,29 +98,23 @@ fn every_source_vector_parses_or_is_refused() {
 }
 
 /// The overlays of a case as layers, in composition order, and the refusals; a manifest's `requires` and `priority`
-/// order them as `canoa_host::aos` composes them.
+/// order them as `coqui_aos` composes them.
 fn overlay_layers(case: &Value) -> (Vec<Layer>, Vec<Value>) {
-    use canoa_host::aos::{self, EntryKind, TreeEntry};
     use canoa_host::profile::{OverlayInput, overlay_layer};
+    use coqui_aos::{self as aos, OverlayTree};
     let os = case["os"].as_str().expect("os");
     let mut layers = std::collections::BTreeMap::new();
     let mut manifests = std::collections::BTreeMap::new();
     let mut refused = Vec::new();
     for overlay in case["overlays"].as_array().expect("overlays") {
         let identity = overlay["identity"].as_str().expect("identity");
-        let tree: Vec<TreeEntry> = overlay["files"]
-            .as_object()
-            .expect("files")
-            .iter()
-            .map(|(path, text)| TreeEntry {
-                components: path
-                    .split('/')
-                    .map(|name| name.as_bytes().to_vec())
-                    .collect(),
-                kind: EntryKind::File,
-                data: text.as_str().expect("text").as_bytes().to_vec(),
-            })
-            .collect();
+        let tree = OverlayTree::from_texts(
+            overlay["files"]
+                .as_object()
+                .expect("files")
+                .iter()
+                .map(|(path, text)| (path.clone(), text.as_str().expect("text"))),
+        );
         let mut input =
             OverlayInput::new(identity, overlay["root"].as_str().expect("root"), os, &tree);
         input.harness = case["harness"].as_str();
@@ -137,7 +131,9 @@ fn overlay_layers(case: &Value) -> (Vec<Layer>, Vec<Value>) {
         }
     }
     let requested: Vec<String> = manifests.keys().cloned().collect();
-    let (visited, _) = aos::resolve(&manifests, &requested).expect("no cycle");
+    let visited = aos::resolve(&manifests, &requested)
+        .expect("no cycle")
+        .install_order;
     let order = aos::composition_order(&manifests, &visited);
     let mut out: Vec<Layer> = order
         .iter()

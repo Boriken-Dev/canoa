@@ -14,17 +14,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
+use coqui_aos::{self as aos, Limit, OverlayTree, Settings, StdFs};
 use coqui_web_channel::{Channel, Failure};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
-use sha2::{Digest as _, Sha256};
 
-use super::overlay::{base_of, build, granted, resolve_path};
+use super::overlay::{Built, build_each, granted, resolve_path};
 use super::{
     Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput, Secret,
     Sourced, merge, overlay_layer, resolve,
 };
-use crate::aos::{self, EntryKind, TreeEntry};
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
 
@@ -33,12 +32,18 @@ pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
 
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
-/// What one skill's directory may hold.
-const MAX_SKILL_FILES: usize = 1024;
-const MAX_SKILL_BYTES: u64 = 16 * 1024 * 1024;
-/// What one installed overlay may hold.
-const MAX_OVERLAY_FILES: usize = 4096;
-const MAX_OVERLAY_BYTES: u64 = 64 * 1024 * 1024;
+/// What one skill's directory may hold: 1024 files, 16 MiB.
+fn skill_limits() -> Settings {
+    Settings::default()
+        .tree_files(Limit::at(1024))
+        .tree_bytes(Limit::at(16 * 1024 * 1024))
+}
+
+/// Whether two digests are the same, comparing the hexadecimal digits without regard to case; false when either is not
+/// `sha256:` and 64 of them.
+fn same_digest(a: &str, b: &str) -> bool {
+    matches!((aos::Digest::parse(a), aos::Digest::parse(b)), (Ok(a), Ok(b)) if a == b)
+}
 /// The plugin Claude Code is given a profile's skills in.
 const CLAUDE_PLUGIN: &str = "canoa-profile";
 /// Where Codex reads skills inside each directory it is given as `additionalDirectories`.
@@ -186,31 +191,25 @@ pub(crate) fn choose(offer: &Offer, first: &[u8]) -> Result<usize, Refusal> {
 struct ReadOverlay {
     identity: String,
     root: String,
-    tree: Vec<TreeEntry>,
+    tree: OverlayTree,
 }
 
 impl ReadOverlay {
     /// A member file's bytes, by `/`-separated path: what the digest covered.
     fn file(&self, path: &str) -> Option<&[u8]> {
-        self.tree
-            .iter()
-            .find(|entry| {
-                entry.kind == EntryKind::File
-                    && !entry.is_excluded()
-                    && entry.components.join(&b'/') == path.as_bytes()
-            })
-            .map(|entry| entry.data.as_slice())
+        self.tree.bytes(path)
     }
 
     /// The member files under `prefix/`, by path below it.
     fn under(&self, prefix: &str) -> BTreeMap<String, Vec<u8>> {
         let prefix = format!("{prefix}/");
         self.tree
-            .iter()
-            .filter(|entry| entry.kind == EntryKind::File && !entry.is_excluded())
-            .filter_map(|entry| {
-                let path = String::from_utf8(entry.components.join(&b'/')).ok()?;
-                Some((path.strip_prefix(&prefix)?.to_owned(), entry.data.clone()))
+            .paths()
+            .filter_map(|path| {
+                Some((
+                    path.strip_prefix(&prefix)?.to_owned(),
+                    self.tree.bytes(path)?.to_vec(),
+                ))
             })
             .collect()
     }
@@ -350,26 +349,19 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
             continue;
         };
         let root = store.join(identity);
-        let tree = match aos::read_tree(&root, MAX_OVERLAY_FILES, MAX_OVERLAY_BYTES) {
-            Ok(tree) => tree,
+        let (tree, digest) = match aos::read_tree(&StdFs, &root, &Settings::default()) {
+            Ok(read) => read,
             Err(error) => {
                 leave_out(&format!(
                     "its files cannot be read ({}: {})",
-                    error.code, error.subject
+                    error.class, error.subject
                 ));
                 continue;
             }
         };
-        if tree.iter().any(TreeEntry::is_excluded) {
-            leave_out("its installed copy holds files that are no part of an overlay: sync it");
+        if !same_digest(&digest.digest.to_string(), expected) {
+            leave_out("its files are not those its record's digest names: sync it");
             continue;
-        }
-        match aos::digest_entries(&tree) {
-            Ok(digest) if aos::same_digest(&digest.digest, expected) => {}
-            _ => {
-                leave_out("its files are not those its record's digest names: sync it");
-                continue;
-            }
         }
         out.push(ReadOverlay {
             identity: identity.clone(),
@@ -662,9 +654,7 @@ fn mcp_digest(layer: &LayerId, server: &McpServer, program: Option<&str>) -> Str
     if let Some(program) = program {
         definition["program"] = json!(program);
     }
-    let hash = Sha256::digest(serde_json::to_vec(&definition).unwrap_or_default());
-    let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("sha256:{hex}")
+    aos::Digest::of(&serde_json::to_vec(&definition).unwrap_or_default()).to_string()
 }
 
 /// The program a stdio server's `command` names, absolute: as written when absolute, from its layer's directory when it
@@ -718,24 +708,27 @@ fn runnable(path: &Path) -> bool {
 }
 
 /// Each overlay's environment as it stood once that overlay applied, by identity: what its MCP servers' text reads.
-fn environments_after<'a>(
+fn environments_after(
     effective: &Effective,
-    base: aos::Base<'a>,
-) -> BTreeMap<String, Result<aos::Environment<'a>, String>> {
-    let mut out = BTreeMap::new();
-    for (index, layer) in effective.aos.iter().enumerate() {
-        let built = build(&effective.aos[..=index], &effective.share_env, base)
-            .map_err(|error| error.to_string());
-        out.insert(layer.identity.clone(), built);
-    }
-    out
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> BTreeMap<String, Result<Built, String>> {
+    build_each(&effective.aos, &effective.share_env, lookup)
+        .into_iter()
+        .zip(&effective.aos)
+        .map(|(built, layer)| {
+            (
+                layer.identity.clone(),
+                built.map_err(|error| error.to_string()),
+            )
+        })
+        .collect()
 }
 
 fn ready_mcp(
     name: &str,
     sourced: &Sourced<McpServer>,
     effective: &Effective,
-    after: &BTreeMap<String, Result<aos::Environment<'_>, String>>,
+    after: &BTreeMap<String, Result<Built, String>>,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> ReadyMcp {
     let layer = sourced.layer.clone();
@@ -758,7 +751,7 @@ fn ready_mcp(
                     Some(Err(why)) => return Err(why.clone()),
                     None => return Err("its overlay's environment was not built".to_owned()),
                 };
-                let lookup = |variable: &str| -> Result<Option<String>, aos::AosError> {
+                let lookup = |variable: &str| -> Result<Option<String>, aos::Error> {
                     let same = |name: &str| {
                         variable == name || windows && variable.eq_ignore_ascii_case(name)
                     };
@@ -773,7 +766,7 @@ fn ready_mcp(
                 aos::substitute(text, &lookup).map(Some).map_err(|error| {
                     format!(
                         "its text cannot be substituted ({}: {})",
-                        error.code, error.subject
+                        error.class, error.subject
                     )
                 })
             }
@@ -936,28 +929,21 @@ fn skill_files(
                 .ok_or("its layer has no directory")?
                 .join(path)
         };
-        let tree = aos::read_tree(&path, MAX_SKILL_FILES, MAX_SKILL_BYTES).map_err(|error| {
-            format!(
-                "its files cannot be read ({}: {})",
-                error.code, error.subject
-            )
-        })?;
-        if tree
-            .iter()
-            .any(|entry| matches!(entry.kind, EntryKind::Symlink | EntryKind::Special))
-        {
-            return Err("its directory holds a link or a special file".to_owned());
-        }
-        tree.into_iter()
-            .filter(|entry| entry.kind == EntryKind::File && !entry.is_excluded())
-            .filter_map(|entry| {
-                Some((
-                    String::from_utf8(entry.components.join(&b'/')).ok()?,
-                    entry.data,
-                ))
-            })
+        let (tree, _) =
+            aos::read_tree(&StdFs, &path, &skill_limits()).map_err(|error| match error.class {
+                aos::Class::Symlink | aos::Class::SpecialFile => {
+                    "its directory holds a link or a special file".to_owned()
+                }
+                _ => format!(
+                    "its files cannot be read ({}: {})",
+                    error.class, error.subject
+                ),
+            })?;
+        tree.paths()
+            .filter_map(|path| Some((path.to_owned(), tree.bytes(path)?.to_vec())))
             .collect()
     };
+
     if files.contains_key("SKILL.md") {
         Ok(files)
     } else {
@@ -1126,9 +1112,7 @@ fn parts_for(
         }
     }
 
-    let windows = cfg!(windows);
-    let base = base_of(&effective.share_env, windows, lookup);
-    let after = environments_after(&effective, &base);
+    let after = environments_after(&effective, lookup);
     let mut servers = Vec::new();
     let mut names = Vec::new();
     for (name, sourced) in &effective.mcp {
@@ -1140,7 +1124,7 @@ fn parts_for(
                 .host
                 .allow_mcp
                 .get(name)
-                .is_some_and(|digest| aos::same_digest(digest, &ready.digest));
+                .is_some_and(|digest| same_digest(digest, &ready.digest));
         let mut item = if let Some(why) = &ready.refused {
             Item::new(key, &ready.layer, State::Refused, why.clone())
         } else if !allowed {

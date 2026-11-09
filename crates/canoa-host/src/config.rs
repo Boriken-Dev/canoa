@@ -848,7 +848,7 @@ fn profile_of(
         Some(toml::Value::Array(items)) => items
             .into_iter()
             .map(|item| match item {
-                toml::Value::String(text) if crate::aos::valid_overlay_name(&text) => Ok(text),
+                toml::Value::String(text) if coqui_aos::valid_overlay_name(&text) => Ok(text),
                 _ => Err(refused(
                     "overlays holds a name that is not an overlay's".to_owned(),
                 )),

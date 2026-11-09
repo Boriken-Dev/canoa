@@ -17,7 +17,7 @@ use super::{
     Change, Context, EnvValue, Layer, LayerId, LayerKind, McpServer, Profile, ProfileError, Skill,
     is_reserved_env,
 };
-use crate::aos::{self, Environment, Facts, Limits, NonDefault, Overlay, TreeEntry};
+use coqui_aos::{self as aos, Environment, Facts, NonDefaultSetting, OverlayTree, Settings};
 
 /// An AOS overlay as Canoa applies it: what building its environment needs, and what Canoa does not apply.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,14 +60,14 @@ pub struct OverlayInput<'a> {
     pub harness: Option<&'a str>,
     /// Whether canoa.cfg pins it by digest; checking the digest is the caller's.
     pub pinned: bool,
-    /// Its tree, as [`aos::read_tree`] reads it or a source's objects hold it.
-    pub tree: &'a [TreeEntry],
+    /// Its files and their bytes, as [`aos::read_tree`] reads them or a source's objects hold them.
+    pub tree: &'a OverlayTree,
 }
 
 impl<'a> OverlayInput<'a> {
     /// The overlay `identity` at `root`, holding `tree`, for `os`.
     #[must_use]
-    pub fn new(identity: &'a str, root: &'a str, os: &'a str, tree: &'a [TreeEntry]) -> Self {
+    pub fn new(identity: &'a str, root: &'a str, os: &'a str, tree: &'a OverlayTree) -> Self {
         Self {
             identity,
             root,
@@ -127,7 +127,7 @@ pub struct OverlayReport {
     /// Required references that cannot be resolved, as `<variable>: <reference>`: no session can start with it.
     pub unresolved: Vec<String>,
     /// Its non-default settings, each time it is activated.
-    pub non_defaults: Vec<NonDefault>,
+    pub non_defaults: Vec<NonDefaultSetting>,
 }
 
 impl OverlayReport {
@@ -143,7 +143,7 @@ impl OverlayReport {
             "non_defaults": self
                 .non_defaults
                 .iter()
-                .map(|non_default| json!([non_default.id, non_default.subject]))
+                .map(|non_default| json!([non_default.id.as_str(), non_default.subject]))
                 .collect::<Vec<_>>(),
         })
     }
@@ -223,28 +223,28 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
     if !aos::valid_overlay_name(input.identity) {
         return Err(refused("name", input.identity));
     }
-    let digest =
-        aos::digest_entries(input.tree).map_err(|error| refused("digest", error.to_string()))?;
-    let members: BTreeMap<String, &[u8]> = input
+    let digest = tree_digest(input.tree).map_err(|error| refused("digest", error.to_string()))?;
+    let files: BTreeSet<String> = input
         .tree
-        .iter()
-        .filter(|entry| entry.kind == aos::EntryKind::File && !entry.is_excluded())
-        .map(|entry| {
-            let path = entry.components.join(&b'/');
-            (
-                String::from_utf8_lossy(&path).into_owned(),
-                entry.data.as_slice(),
-            )
-        })
+        .paths()
+        .filter(|path| aos::valid_relative_path(path))
+        .map(str::to_owned)
         .collect();
-    let files: BTreeSet<String> = members.keys().cloned().collect();
-    let manifest = match members.get("overlay.cfg") {
-        Some(bytes) => aos::read_document(bytes, Limits::default())
+    let member = |path: &str| {
+        files
+            .contains(path)
+            .then(|| input.tree.bytes(path))
+            .flatten()
+    };
+    let paths = OverlayTree::from_paths(files.iter().cloned());
+    let settings = Settings::default();
+    let manifest = match member("overlay.cfg") {
+        Some(bytes) => aos::read_document(bytes, &settings)
             .map_err(|error| refused("manifest", error.to_string()))?,
         None => Map::new(),
     };
     // `about` is store metadata: a problem in it never stops an overlay, and Canoa applies nothing of it.
-    if let Some(issue) = aos::validate(&manifest, Some(&files))
+    if let Some(issue) = aos::validate(&manifest, Some(&paths))
         .iter()
         .find(|issue| !aos::applies(core::slice::from_ref(issue)))
     {
@@ -270,16 +270,16 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         }
         env.insert(name.to_owned(), value);
     };
-    for file in aos::env_files_of(&manifest, &files) {
-        if !aos::os_matches(file.os.as_deref(), input.os) {
+    for file in aos::env_files_of(&manifest, &paths) {
+        if !on_os(&file, input.os) {
             continue;
         }
-        let bytes = *members
-            .get(&file.path)
-            .ok_or_else(|| refused("env-file", format!("{}: missing-file", file.path)))?;
-        let invalid = |code: &str| refused("env-file", format!("{}: {code}", file.path));
-        if file.dotenv {
-            for line in aos::parse_dotenv(bytes).map_err(|error| invalid(error.code))? {
+        let path = file.get("path").and_then(Value::as_str).unwrap_or("");
+        let bytes =
+            member(path).ok_or_else(|| refused("env-file", format!("{path}: missing-file")))?;
+        let invalid = |code: &str| refused("env-file", format!("{path}: {code}"));
+        if file.get("format").and_then(Value::as_str) == Some("dotenv") {
+            for line in aos::parse_dotenv(bytes).map_err(|error| invalid(error.class.as_str()))? {
                 let value = if line.literal {
                     EnvValue::Value(line.text)
                 } else {
@@ -288,8 +288,8 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                 set(&line.name, value, &mut env);
             }
         } else {
-            let mapping = aos::read_document(bytes, Limits::default())
-                .map_err(|error| invalid(error.code))?;
+            let mapping = aos::read_document(bytes, &settings)
+                .map_err(|error| invalid(error.class.as_str()))?;
             let wrapped = Map::from_iter([("env".to_owned(), Value::Object(mapping.clone()))]);
             if !aos::validate(&wrapped, None).is_empty() {
                 return Err(invalid("invalid-env-file"));
@@ -298,17 +298,18 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                 set(name, env_value(value), &mut env);
             }
         }
-        texts.insert(file.path.clone(), bytes.to_vec());
+        texts.insert(path.to_owned(), bytes.to_vec());
     }
     for (name, value) in entries(manifest.get("env")) {
         set(name, env_value(value), &mut env);
     }
     let mut applied = manifest.clone();
-    let defaults = aos::default_paths(&manifest, &files);
+    let defaults = aos::default_paths(&manifest, &paths);
     for addition in &defaults {
         not_applied.push(format!(
             "paths: {}/ on {}, which a layer from elsewhere may not change",
-            addition.path, addition.variable
+            text_of(addition, "path"),
+            text_of(addition, "variable")
         ));
     }
     if !defaults.is_empty() {
@@ -321,12 +322,15 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         }
     }
     let mut lists: IndexMap<String, Vec<(String, bool)>> = IndexMap::new();
-    for addition in aos::paths_of(&applied, &files) {
-        if aos::os_matches(addition.os.as_deref(), input.os) {
+    for addition in aos::paths_of(&applied, &paths) {
+        if on_os(&addition, input.os) {
             lists
-                .entry(addition.variable.clone())
+                .entry(text_of(&addition, "variable").to_owned())
                 .or_default()
-                .push((addition.path.clone(), addition.append));
+                .push((
+                    text_of(&addition, "path").to_owned(),
+                    text_of(&addition, "position") == "append",
+                ));
         }
     }
     for (variable, paths) in lists {
@@ -340,13 +344,41 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         .map(|(name, value)| (name, Change::Set(value)))
         .collect();
 
-    for name in aos::skills_of(&manifest, &files) {
+    for name in aos::skills_of(&manifest, &paths) {
         profile.skills.insert(
             name.clone(),
             Change::Set(Skill::new(format!("skills/{name}"))),
         );
     }
 
+    let insecure: BTreeSet<String> = match probe(
+        &Probed {
+            manifest: &applied,
+            files: &files,
+            texts: &texts,
+            identity: input.identity,
+            root: input.root,
+            os: input.os,
+            pinned: input.pinned,
+        },
+        &[],
+    ) {
+        Ok(found) => found
+            .non_defaults
+            .into_iter()
+            .filter(|setting| setting.id == aos::NonDefaultId::InsecureTransport)
+            .map(|setting| setting.subject)
+            .collect(),
+        // Without a report, every plain `http` server counts as one to another host.
+        Err(_) => servers_of(&applied)
+            .filter(|server| {
+                text_of(server, "url")
+                    .to_ascii_lowercase()
+                    .starts_with("http://")
+            })
+            .map(|server| text_of(server, "name").to_owned())
+            .collect(),
+    };
     let servers = applied
         .get_mut("mcp")
         .and_then(|mcp| mcp.get_mut("servers"))
@@ -417,7 +449,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                 .unwrap_or("")
                 .to_owned();
             let mut headers = IndexMap::new();
-            let plain = aos::is_insecure_url(&url);
+            let plain = insecure.contains(&name);
             for (header, variable) in entries(server.get("headers_env")) {
                 if plain {
                     not_applied.push(format!(
@@ -454,7 +486,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
     }
 
     profile.contexts.extend(
-        aos::rules_of(&manifest, &files)
+        aos::rules_of(&manifest, &paths)
             .into_iter()
             .map(Context::File),
     );
@@ -470,7 +502,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         profile.contexts.push(Context::Text(routing.join("\n")));
     }
     profile.contexts.extend(
-        aos::context_of(&manifest, &files)
+        aos::context_of(&manifest, &paths)
             .into_iter()
             .map(Context::File),
     );
@@ -553,7 +585,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         identity: input.identity.to_owned(),
         root: input.root.to_owned(),
         os: input.os.to_owned(),
-        digest: digest.digest,
+        digest: digest.digest.to_string(),
         pinned: input.pinned,
         manifest: applied,
         files,
@@ -570,22 +602,106 @@ pub(crate) fn granted(shared: &IndexMap<String, LayerId>, name: &str, windows: b
         .any(|shared| shared == name || windows && shared.eq_ignore_ascii_case(name))
 }
 
-/// The facts an overlay's references resolve against: the `env` provider alone, and only the variables the person's
-/// own layers share.
-fn facts(
-    os: &str,
-    shared: &IndexMap<String, LayerId>,
-    lookup: &dyn Fn(&str) -> Option<String>,
-) -> Facts {
+/// A text field of a mapping, empty when it is absent or not text.
+fn text_of<'a>(entry: &'a Value, key: &str) -> &'a str {
+    entry.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+/// Whether a path addition or env file applies on `os`: its `os` list names it, or it has none.
+fn on_os(entry: &Value, os: &str) -> bool {
+    let list: Option<Vec<String>> = entry.get("os").map(|names| match names {
+        Value::Array(names) => names
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        Value::String(name) => vec![name.clone()],
+        _ => Vec::new(),
+    });
+    aos::os_matches(list.as_deref(), os)
+}
+
+/// The entries of `mcp.servers`.
+fn servers_of(manifest: &Map<String, Value>) -> impl Iterator<Item = &Value> {
+    manifest
+        .get("mcp")
+        .and_then(|mcp| mcp.get("servers"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+}
+
+/// The digest of a tree whose every file's bytes it holds.
+fn tree_digest(tree: &OverlayTree) -> Result<aos::TreeDigest, aos::Error> {
+    let mut entries = Vec::new();
+    for path in tree.paths() {
+        let bytes = tree
+            .bytes(path)
+            .ok_or_else(|| aos::Error::new(aos::Class::Io, path))?;
+        entries.push((path, aos::TreeEntry::File(bytes.to_vec())));
+    }
+    aos::digest_entries(
+        entries
+            .iter()
+            .map(|(path, entry)| (path.split('/').map(str::as_bytes).collect(), entry)),
+    )
+}
+
+/// What `coqui_aos::effective` says of an overlay for the view. The manifest is read less the references it must
+/// have and nothing shares (the view lists those as unresolved, and they would fail the call). `shared` are the
+/// variables the person's own layers share, each granted and read as empty text.
+/// The parts of an overlay a probe reads.
+struct Probed<'a> {
+    manifest: &'a Map<String, Value>,
+    files: &'a BTreeSet<String>,
+    texts: &'a BTreeMap<String, Vec<u8>>,
+    identity: &'a str,
+    root: &'a str,
+    os: &'a str,
+    pinned: bool,
+}
+
+fn probe(overlay: &Probed<'_>, shared: &[String]) -> Result<aos::Effective, aos::Error> {
+    let Probed {
+        manifest,
+        files,
+        texts,
+        identity,
+        root,
+        os,
+        pinned,
+    } = *overlay;
+    let mut manifest = manifest.clone();
+    if let Some(Value::Object(env)) = manifest.get_mut("env") {
+        env.retain(|_, entry| {
+            let Some(entry) = entry.as_object() else {
+                return true;
+            };
+            let reference = entry.contains_key("provider") || entry.contains_key("secret");
+            let optional = entry.get("optional") == Some(&Value::Bool(true));
+            let is_shared = entry.get("provider").and_then(Value::as_str) == Some("env")
+                && entry
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .is_some_and(|key| shared.iter().any(|name| name == key));
+            !reference || optional || is_shared
+        });
+    }
     let mut facts = Facts::new(os);
-    facts
-        .grants
-        .insert("env".to_owned(), shared.keys().cloned().collect());
+    facts.root = root.to_owned();
+    facts.identity = identity.to_owned();
+    facts.pinned = pinned;
+    facts.grants.insert("env".to_owned(), shared.to_vec());
     facts.host_env = shared
-        .keys()
-        .filter_map(|name| lookup(name).map(|value| (name.clone(), value)))
+        .iter()
+        .map(|name| (name.clone(), String::new()))
         .collect();
-    facts
+    facts.base_env = facts.host_env.clone();
+    facts.tree = texts.iter().fold(
+        OverlayTree::from_paths(files.iter().cloned()),
+        |tree, (path, bytes)| tree.with_bytes(path, bytes.clone()),
+    );
+    aos::effective(&manifest, &facts)
 }
 
 /// An overlay's report, with what the person's own layers share as its grants.
@@ -595,12 +711,36 @@ pub(crate) fn report(
     shared: &IndexMap<String, LayerId>,
 ) -> OverlayReport {
     let windows = aos.os == "windows";
-    let mut non_defaults = Vec::new();
-    if !aos.pinned {
-        non_defaults.push(NonDefault::new("unpinned", ""));
-    }
-    let facts = facts(&aos.os, shared, &|_| None);
-    let ungranted = aos::grants_report(&aos.manifest, &facts, &mut non_defaults);
+    let names: Vec<String> = shared.keys().cloned().collect();
+    // An overlay whose environment cannot be built starts no session; its view then lists no grants.
+    let (ungranted, non_defaults) = probe(
+        &Probed {
+            manifest: &aos.manifest,
+            files: &aos.files,
+            texts: &aos.texts,
+            identity: &aos.identity,
+            root: &aos.root,
+            os: &aos.os,
+            pinned: aos.pinned,
+        },
+        &names,
+    )
+    .map(|found| (found.ungranted, found.non_defaults))
+    .unwrap_or_default();
+    // Canoa runs no script, setup or install, so what only those would make non-default is not Canoa's to report.
+    let non_defaults = non_defaults
+        .into_iter()
+        .filter(|setting| {
+            matches!(
+                setting.id,
+                aos::NonDefaultId::Unpinned
+                    | aos::NonDefaultId::EnvPassthrough
+                    | aos::NonDefaultId::SecretRead
+                    | aos::NonDefaultId::EnvSensitive
+                    | aos::NonDefaultId::InsecureTransport
+            )
+        })
+        .collect();
     let unresolved = aos
         .references
         .iter()
@@ -612,8 +752,6 @@ pub(crate) fn report(
         })
         .map(|(variable, reference, _)| format!("{variable}: {reference}"))
         .collect();
-    non_defaults.sort();
-    non_defaults.dedup();
     OverlayReport {
         layer: layer.clone(),
         digest: aos.digest.clone(),
@@ -624,69 +762,165 @@ pub(crate) fn report(
     }
 }
 
-fn reason(code: &str) -> &'static str {
-    match code {
-        "undefined-variable" => "an overlay's placeholder names a variable that is not set",
-        "secret-placeholder" => {
+fn reason(class: aos::Class) -> &'static str {
+    match class {
+        aos::Class::UndefinedVariable => {
+            "an overlay's placeholder names a variable that is not set"
+        }
+        aos::Class::SecretPlaceholder => {
             "an overlay's placeholder reads a secret, or a variable of this computer none of your layers shares"
         }
-        "unresolved-reference" => {
+        aos::Class::UnresolvedReference => {
             "an overlay reads a variable none of your layers shares, or one that is not set, or a secret Canoa does not hold"
         }
-        "invalid-pattern" => "an overlay's placeholder has a pattern that is not valid",
-        "invalid-reference" => "an overlay names a secret file that is not a relative path",
-        "missing-file" | "invalid-env-file" => "an overlay's env file cannot be read",
-        "env-path-conflict" => "an overlay sets a variable both by env and by a path addition",
-        "reserved-variable" => "an overlay sets a variable the consumer sets",
+        aos::Class::InvalidPattern => "an overlay's placeholder has a pattern that is not valid",
+        aos::Class::InvalidReference => {
+            "an overlay names a secret file that is not a relative path"
+        }
+        aos::Class::MissingFile | aos::Class::InvalidEnvFile => {
+            "an overlay's env file cannot be read"
+        }
+        aos::Class::EnvPathConflict => {
+            "an overlay sets a variable both by env and by a path addition"
+        }
+        aos::Class::ReservedVariable => "an overlay sets a variable the consumer sets",
         _ => "an overlay's environment cannot be built",
     }
 }
 
-/// Builds the AOS overlays' environment, lowest first, over this process's environment as `lookup` reads it: every
-/// root variable first, then each overlay's env files, `env` and path additions. A placeholder reads only what the
-/// overlays set and the variables the person's own layers share; any other variable of this process is seen by a path
-/// addition and `if_unset`, never by a placeholder.
-pub(crate) fn build<'a>(
-    layers: &[AosLayer],
-    shared: &IndexMap<String, LayerId>,
-    base: aos::Base<'a>,
-) -> Result<Environment<'a>, ProfileError> {
-    let Some(first) = layers.first() else {
-        return Ok(Environment::new(cfg!(windows)));
-    };
-    let windows = first.os == "windows";
-    let mut env = Environment::with_base(windows, base);
-    for layer in layers {
-        env.set(&aos::root_variable(&layer.identity), &layer.root, false);
-    }
-    let lookup = |name: &str| base(name).map(|(value, _)| value);
-    let facts = facts(&first.os, shared, &lookup);
-    for layer in layers {
-        let read = |path: &str| layer.texts.get(path).cloned();
-        let overlay = Overlay {
-            identity: &layer.identity,
-            manifest: &layer.manifest,
-            files: &layer.files,
-            root: &layer.root,
-            state: None,
-            read: &read,
-        };
-        aos::apply_overlay(&mut env, &overlay, &facts, &mut Vec::new()).map_err(|error| {
-            ProfileError::Resolve {
-                key: format!("overlay:{}.env.{}", layer.identity, error.subject),
-                what: reason(error.code),
-            }
-        })?;
-    }
-    Ok(env)
+/// An environment built from the overlays, and the variables of this process it started from that no layer of the
+/// person's shares.
+#[derive(Debug)]
+pub(crate) struct Built {
+    env: Environment,
+    base: BTreeMap<String, String>,
 }
 
-/// The base a build reads this process's environment through: each variable's value, readable by a placeholder only
-/// when the person's own layers share it.
-pub(crate) fn base_of<'a>(
-    shared: &'a IndexMap<String, LayerId>,
-    windows: bool,
-    lookup: &'a dyn Fn(&str) -> Option<String>,
-) -> impl Fn(&str) -> Option<(String, bool)> + 'a {
-    move |name: &str| lookup(name).map(|value| (value, granted(shared, name, windows)))
+impl Built {
+    /// A variable an overlay set, or one the person shares; none for one only this process holds.
+    pub(crate) fn owned(&self, name: &str) -> Option<&str> {
+        let value = self.env.get(name)?;
+        (self.base.get(name).map(String::as_str) != Some(value)).then_some(value)
+    }
+
+    /// What a placeholder reads, as the environment answers one.
+    pub(crate) fn lookup(&self, name: &str) -> Result<Option<String>, aos::Error> {
+        if self.env.is_secret(name) {
+            return Err(aos::Error::new(aos::Class::SecretPlaceholder, name));
+        }
+        Ok(self.env.get(name).map(str::to_owned))
+    }
+}
+
+/// Every word of a document's text: the names of the variables it can read or set.
+fn words(value: &Value, out: &mut BTreeSet<String>) {
+    fn add(text: &str, out: &mut BTreeSet<String>) {
+        out.extend(
+            text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .filter(|word| !word.is_empty() && !word.starts_with(|c: char| c.is_ascii_digit()))
+                .map(str::to_owned),
+        );
+    }
+    match value {
+        Value::String(text) => add(text, out),
+        Value::Array(items) => {
+            for item in items {
+                words(item, out);
+            }
+        }
+        Value::Object(map) => {
+            for (key, item) in map {
+                add(key, out);
+                words(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Builds the AOS overlays' environment after each overlay in turn, lowest first, over this process's environment as
+/// `lookup` reads it. A placeholder reads only what the overlays set and the variables the person's own layers share;
+/// any other variable of this process is seen by a path addition and `if_unset`, never by a placeholder. Only the
+/// variables an overlay's text names are read from the process.
+pub(crate) fn build_each(
+    layers: &[AosLayer],
+    shared: &IndexMap<String, LayerId>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Vec<Result<Built, ProfileError>> {
+    let windows = layers.first().is_some_and(|first| first.os == "windows");
+    let mut named = BTreeSet::new();
+    for layer in layers {
+        words(&Value::Object(layer.manifest.clone()), &mut named);
+        for text in layer.texts.values() {
+            let text = String::from_utf8_lossy(text).into_owned();
+            words(&Value::String(text), &mut named);
+        }
+    }
+    let mut base = BTreeMap::new();
+    let mut process = Environment::new(Vec::new(), windows);
+    for name in named {
+        if let Some(value) = lookup(&name) {
+            let unshared = !granted(shared, &name, windows);
+            process.set(&name, value.clone(), unshared);
+            if unshared {
+                base.insert(name, value);
+            }
+        }
+    }
+    let names: Vec<String> = shared.keys().cloned().collect();
+    let host_env: BTreeMap<String, String> = names
+        .iter()
+        .filter_map(|name| lookup(name).map(|value| (name.clone(), value)))
+        .collect();
+    let active: Vec<(&Map<String, Value>, Facts)> = layers
+        .iter()
+        .map(|layer| {
+            let mut facts = Facts::new(layer.os.clone());
+            facts.root = layer.root.clone();
+            facts.identity = layer.identity.clone();
+            facts.pinned = layer.pinned;
+            facts.grants.insert("env".to_owned(), names.clone());
+            facts.host_env = host_env.clone();
+            let paths = OverlayTree::from_paths(layer.files.iter().cloned());
+            facts.tree = layer.texts.iter().fold(paths, |tree, (path, bytes)| {
+                tree.with_bytes(path, bytes.clone())
+            });
+            (&layer.manifest, facts)
+        })
+        .collect();
+    (0..layers.len())
+        .map(|last| {
+            let composed = aos::composed_environment(
+                &active[..=last],
+                process.clone(),
+                &BTreeMap::new(),
+                &mut Vec::new(),
+            );
+            match composed.env {
+                Ok(env) => Ok(Built {
+                    env,
+                    base: base.clone(),
+                }),
+                Err(error) => Err(ProfileError::Resolve {
+                    key: format!("overlay:{}.env.{}", layers[last].identity, error.subject),
+                    what: reason(error.class),
+                }),
+            }
+        })
+        .collect()
+}
+
+/// The environment after every overlay: what a session starts with.
+pub(crate) fn build(
+    layers: &[AosLayer],
+    shared: &IndexMap<String, LayerId>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<Built, ProfileError> {
+    match build_each(layers, shared, lookup).pop() {
+        Some(built) => built,
+        None => Ok(Built {
+            env: Environment::new(Vec::new(), cfg!(windows)),
+            base: BTreeMap::new(),
+        }),
+    }
 }

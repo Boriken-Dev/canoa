@@ -80,11 +80,11 @@ pub const RESERVED_ENV_PREFIXES: &[&str] = &[
 pub const RESERVED_ENV_SUFFIXES: &[&str] = &["_BASE_URL", "_PROXY"];
 
 /// Whether an overlay or a project may not set `name`: [`RESERVED_ENV`] and its prefixes and suffixes, and every
-/// variable the AOS specification names sensitive ([`crate::aos::is_sensitive`]).
+/// variable the AOS specification names sensitive ([`coqui_aos::is_sensitive_variable`]).
 #[must_use]
 pub fn is_reserved_env(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    crate::aos::is_sensitive(name)
+    coqui_aos::is_sensitive_variable(name)
         || RESERVED_ENV.contains(&upper.as_str())
         || RESERVED_ENV_PREFIXES
             .iter()
@@ -1113,18 +1113,16 @@ impl Effective {
         &self,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Vec<(String, Secret)>, ProfileError> {
-        let windows = self.aos.first().is_some_and(|aos| aos.os == "windows");
         let lookup: &dyn Fn(&str) -> Option<String> = &lookup;
-        let base = overlay::base_of(&self.share_env, windows, lookup);
-        let built = overlay::build(&self.aos, &self.share_env, &base)?;
+        let built = overlay::build(&self.aos, &self.share_env, lookup)?;
         let mut out = Vec::new();
         for (name, value) in &self.env {
             let from_overlay = value.layer.kind == LayerKind::Overlay
                 && self.aos.iter().any(|aos| aos.identity == value.layer.name);
             if from_overlay {
                 // An optional reference that could not be resolved leaves its variable unset.
-                if let Some(found) = built.values().get(name) {
-                    out.push((name.clone(), Secret(found.clone())));
+                if let Some(found) = built.owned(name) {
+                    out.push((name.clone(), Secret(found.to_owned())));
                 }
                 continue;
             }
@@ -1313,7 +1311,7 @@ pub enum OverlaySource {
 }
 
 impl OverlaySource {
-    /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [`crate::aos::parse_source`] does, and holds
+    /// Parses an AOS source string, `[git+]<repository>@<ref>[#<path>]`, as [`coqui_aos::Source::parse`] does, and holds
     /// it to what Canoa fetches: a Git repository at a named ref. The path is what follows the first `#`, without
     /// leading or trailing `/`.
     ///
@@ -1325,8 +1323,8 @@ impl OverlaySource {
     /// at anything but a [`full_commit_id`]; and a ref git would refuse.
     pub fn parse_git(source: &str) -> Result<Self, ProfileError> {
         let refused = || invalid("overlays", Rule::Value);
-        let parsed = crate::aos::parse_source(source).map_err(|_| refused())?;
-        let (crate::aos::SourceKind::Git, Some(reference)) = (parsed.kind, parsed.reference) else {
+        let parsed = coqui_aos::Source::parse(source).map_err(|_| refused())?;
+        let (coqui_aos::SourceKind::Git, Some(reference)) = (parsed.kind, parsed.reference) else {
             return Err(refused());
         };
         let repo = parsed.location;

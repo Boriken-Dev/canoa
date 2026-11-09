@@ -1,5 +1,7 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use coqui_aos as aos;
+
 use super::*;
 use crate::config::Config;
 
@@ -397,8 +399,13 @@ fn install_overlay(temp: &Temp) -> String {
          args = [\"serve.mjs\"]\nenv = { WHO = \"${TEAM}-bot\", WHERE = \"${AOS_OVERLAY_ROOT}\" }\n\
          env_passthrough = [\"NOT_SHARED\"]\n",
     );
-    let tree = aos::read_tree(&temp.0.join("overlays/team"), 64, 1 << 20).expect("read");
-    let digest = aos::digest_entries(&tree).expect("a digest").digest;
+    let (_, digest) = aos::read_tree(
+        &aos::StdFs,
+        &temp.0.join("overlays/team"),
+        &aos::Settings::default(),
+    )
+    .expect("read");
+    let digest = digest.digest.to_string();
     temp.write(
         "overlays/team.json",
         &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
