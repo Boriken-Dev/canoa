@@ -226,7 +226,7 @@ the commit, the tree digest, every file it adds, changes or removes, and its `ov
 apply, and what is applied is that commit's files, checked against the digest as they are written. Applying **pins**
 the overlay in canoa.cfg by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
 have another digest installs nothing until you change the pin. Each time profiles are built the installed copy is
-digested again, and one whose files changed, or that holds an entry no overlay has (`.git`, `node_modules`, ...), is
+digested again, and one whose files changed is
 left out until synced. An overlay with no pin, or a `{ dir = "..." }` with none, is reported as `unpinned` each time.
 A pin is a SHA-256 over every file's bytes as published, the same on every platform; the commit is kept beside it.
 The ref is a branch, a tag, or a whole commit id, which names that commit even if a branch or tag carries the same
