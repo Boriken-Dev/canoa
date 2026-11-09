@@ -54,7 +54,7 @@ To upgrade the browser method, update its canonical Coqui source and tests first
 
 ## Smoke testing remote chat
 
-Use the [authenticated ACP echo fixture](../examples/acp-echo/README.md) to verify the WebSocket path from the connection dialog. It requires trusted TLS, explicit Coqui peer allowlisting, and a pinned server key. This is diagnostic only, not a deployed agent service.
+Use `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`; see [`crates/canoa-host`](../crates/canoa-host/README.md)) to verify the WebSocket path from the connection dialog. The host proves its key to the app and the app's key must be accepted with `canoa accept`. This is diagnostic only, not a deployed agent service.
 
 ## Agents on this computer
 
@@ -94,11 +94,11 @@ The desktop app carries its host as a library, built by its own plugin `native/`
 
 A desktop build is made from a runner `flutter create --platforms=windows,linux --project-name canoa .` generates in `app/` (it is not committed). Run `sh tool/name_runner.sh` there before the first build: the generated executable is `canoa`, the command-line program's name, which Windows reads as the same file, so the script makes it `CanoaUI` (`CanoaUI.exe`), and titles the window Canoa. The build needs cargo and the whole tree, since `native/` builds the host's library with the runner, and no `canoa` goes beside it. People see **Canoa**; only the file is `CanoaUI`.
 
-`integration_test/desktop_test.dart` runs the app on a real desktop (`flutter test integration_test/desktop_test.dart -d windows`, or `-d linux`) with `CANOA_TEST_HOST`, `CANOA_TEST_NODE` and `CANOA_TEST_APP` as `test/host_test.dart` describes. `integration_test/embedded_host_test.dart` does the same from the library alone, with no `canoa` on disk; `test/host_library_test.dart` runs the library in a plain test process with `CANOA_TEST_LIBRARY`.
+`integration_test/desktop_test.dart` runs the app on a real desktop (`flutter test integration_test/desktop_test.dart -d windows`, or `-d linux`) with `CANOA_TEST_HOST` as `test/host_test.dart` describes. `integration_test/embedded_host_test.dart` does the same from the library alone, with no `canoa` on disk; `test/host_library_test.dart` runs the library in a plain test process with `CANOA_TEST_LIBRARY`.
 
 ## A coding task, end to end
 
-`integration_test/coding_task_test.dart` does what a person would, in the desktop window and through its widgets only: it makes a throwaway Node project with a failing test, runs an agent there, has it fix the test, add one and rename a function, allows every question but one, stops a turn and continues it, attaches a file, closes the conversation and opens it again from **Earlier conversations**. Then it checks the project on disk, and that every kind of update the agent sent has a rendering of its own. Anything reaching outside the project's temporary directory fails the test: a question about it is refused and counted, and a tool that ran there unasked is counted too.
+`integration_test/coding_task_test.dart` does what a person would, in the desktop window and through its widgets only: it makes a throwaway project with a failing test, runs an agent there, has it fix the test, add one and rename a function, allows every question but one, stops a turn and continues it, attaches a file, closes the conversation and opens it again from **Earlier conversations**. Then it checks the project on disk, and that every kind of update the agent sent has a rendering of its own. Anything reaching outside the project's temporary directory fails the test: a question about it is refused and counted, and a tool that ran there unasked is counted too.
 
 ```sh
 cd app
@@ -108,6 +108,6 @@ CANOA_TEST_TASK_AGENT=Claude flutter test integration_test/coding_task_test.dart
 
 With `Claude`, the test runs the preset with `--setting-sources=project,local`: Claude Code then starts without your user-level settings, while your login still applies. The preset people use is unchanged.
 
-`node` has to be on PATH. `CANOA_TEST_SHOTS=<dir>` keeps a screenshot of each step, and `CANOA_TEST_UPDATES=<file>` the kind and shape of each distinct update. The file dialog is the one thing the test answers for the person: it picks the attached file itself. Reopening here is done after closing a conversation; after quitting, `integration_test/session_ledger_test.dart` does it.
+The scripted agent is the `stdio_agent` example of `crates/canoa-host` (`cargo build -p canoa-host --examples`), run with `--scripted`; the scripted run needs no Node, and only the Claude run needs `node` on PATH, for the project's own tests. `CANOA_TEST_SHOTS=<dir>` keeps a screenshot of each step, and `CANOA_TEST_UPDATES=<file>` the kind and shape of each distinct update. The file dialog is the one thing the test answers for the person: it picks the attached file itself. Reopening here is done after closing a conversation; after quitting, `integration_test/session_ledger_test.dart` does it.
 
 Outside the test, `CANOA_EVENT_LOG=<file>` makes the app append the kind, shape and rendering of each distinct ACP update it receives, as a JSON line. A shape keeps the protocol's own words, such as a tool's `kind`, and replaces every other string with `"string"`, so nothing anyone wrote is kept. `test/fixtures/coding_task_updates.jsonl` is that record from a real Claude run, with the v2 kinds that run did not send (`plan_update`, `tool_call_content_chunk`, `notice`, the two compaction updates and a replayed attachment) from a run with the scripted stand-in; `test/chat_test.dart` replays it and fails if any kind would reach the fallback, which shows nothing.

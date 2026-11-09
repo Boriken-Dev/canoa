@@ -15,10 +15,9 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
 | `app/native/` | The app's own plugin: builds `crates/canoa-ffi` with the desktop runner and declares its C ABI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
-| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app |
+| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app; `examples/` holds the programs the tests run (`stdio_agent`, also scripted with `--scripted`; `web_peer`, the page's peer; `mcp_server`; `harness_standin`) |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe` |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
-| `examples/acp-echo/` | A paired WSS ACP v2 test endpoint, not an agent |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
 | `tools/` | Offline dependency mirroring |
 
@@ -53,26 +52,25 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 CANOA_TEST_PYTHON=python3 cargo test -p canoa-host --test python_source   # a Python with its shared library; ignored without
 (cd app && flutter analyze && flutter test)
 node --test --test-force-exit "app/test/*.test.mjs"
-(cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST, CANOA_TEST_NODE, CANOA_TEST_APP
-# the chat's connection code against the real host; needs Node 22 or later
+(cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST
+# the chat's connection code against the real host
 cargo build -p canoa-host --bin canoa --examples
-(cd app && CANOA_TEST_HOST=../target/debug/canoa CANOA_TEST_NODE=node flutter test test/host_test.dart)
+(cd app && CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_test.dart)
 # the host as a library in a test process, and a standalone canoa on the same home
 cargo build -p canoa-ffi --lib
 (cd app && CANOA_TEST_LIBRARY=../target/debug/canoa_ffi.dll CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_library_test.dart)   # libcanoa_ffi.so on Linux
-# the built app hosting the scripted agent from its library, with no canoa on disk; needs node on PATH and a runner
-(cd app && CANOA_TEST_NODE=node flutter test integration_test/embedded_host_test.dart -d windows)   # or -d linux
+# the built app hosting the scripted agent from its library, with no canoa on disk; needs a runner and the examples built
+(cd app && flutter test integration_test/embedded_host_test.dart -d windows)   # or -d linux
 # main.dart's own main in the built app, one step a run on a new empty DIR: first (no canoa.cfg), flag, config, hosted
-(cd app && CANOA_TEST_LAUNCH_STEP=first CANOA_CONFIG=DIR/canoa.cfg COQUI_AGENTIC_PEER_HOME=DIR/home CANOA_TEST_NODE=node flutter test integration_test/launch_test.dart -d windows)
+(cd app && CANOA_TEST_LAUNCH_STEP=first CANOA_CONFIG=DIR/canoa.cfg COQUI_AGENTIC_PEER_HOME=DIR/home flutter test integration_test/launch_test.dart -d windows)
 (cd bindings/browser/chromium && npm test)
-(cd examples/acp-echo && npm install && npm test)   # needs OpenSSL
 mkdocs build --strict
 ```
 
 `flutter pub get` with an older Flutter rewrites `app/pubspec.lock`: restore it before committing.
 
 A coding task through the desktop window, its widgets only (fix a failing test, stop and continue, attach, refuse one question,
-close and reopen from Earlier conversations), then checked on disk. It needs `node` on PATH and a runner from `flutter create
+close and reopen from Earlier conversations), then checked on disk. It needs the examples built (the real-Claude run also needs `node` on PATH) and a runner from `flutter create
 --platforms=windows .` (or `linux`) renamed by `sh app/tool/name_runner.sh app`; screenshots go to `CANOA_TEST_SHOTS`, each distinct update's kind and shape to
 `CANOA_TEST_UPDATES`:
 
@@ -88,5 +86,5 @@ text. `test/fixtures/coding_task_updates.jsonl` is that record from a real run, 
 ## CI and release
 
 Checks run on a developer's own machines, by the commands above. `test.yml`, `flutter.yml`, `browser.yml`, `desktop.yml`,
-`acp-reference.yml`, `offline.yml` and `deps.yml` run only when started by hand. `docs.yml` publishes Pages from `main`.
+`offline.yml` and `deps.yml` run only when started by hand. `docs.yml` publishes Pages from `main`.
 `release.yml` gates a `v*` tag, running `test.yml`, and publishes no package yet. Pushing a `v*` tag needs the owner's consent for that release.

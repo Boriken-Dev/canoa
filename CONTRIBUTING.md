@@ -31,9 +31,6 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 # Chromium extension (Node 22 or later)
 (cd bindings/browser/chromium && npm test)
 
-# ACP echo fixture (Node 22 or later, OpenSSL)
-(cd examples/acp-echo && npm install && npm test)
-
 # Documentation
 mkdocs build --strict
 ```

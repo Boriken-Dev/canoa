@@ -76,11 +76,13 @@ canoa peers            # a client that connected once is waiting
 canoa accept <PEER>    # pair it, after comparing the id with the one the client shows
 ```
 
+To try `serve` with nothing else installed, `cargo build -p canoa-host --examples` builds `stdio_agent`, a small ACP agent that echoes prompts: name its path as an entry's `program`.
+
 The library reads the same file:
 
 ```rust
 let config = canoa_host::Config::from_str_in(
-    "[host.agents.echo]\nprogram = \"node\"\nargs = [\"agent.mjs\"]\n",
+    "[host.agents.echo]\nprogram = \"stdio_agent\"\n",
     std::path::Path::new("."),
 )?;
 assert_eq!(config.entries[0].name, "echo");
