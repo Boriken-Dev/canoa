@@ -195,7 +195,8 @@ team = "sha256:..."          # an overlay's or a project's server, allowed at th
 
 An overlay is an [Agent Overlay Specification](https://github.com/Boriken-Dev/agent-overlay-spec) (AOS) v0 overlay: a
 directory whose files take effect by convention (`skills/<name>/SKILL.md`, `CONTEXT.md`, `rules/<name>.md`, the file
-`env`), with an optional `overlay.cfg` manifest, TOML, or JSON after a `#!json` line; YAML is refused. Canoa reads the
+`env`), with an optional `overlay.cfg` manifest, TOML, or JSON or YAML after a `#!json` or `#!yaml` line (a YAML tag,
+anchor, alias or merge key is refused). Canoa reads the
 manifest statically and validates it; one it cannot read or that is not valid leaves the overlay out, except that a
 problem in `[about]`, store metadata, never does. Canoa applies:
 

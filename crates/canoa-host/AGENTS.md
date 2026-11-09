@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` and `coqui-acp-provider` (coqui-acp `3583ba2`), `coqui-agentic-peer` (`e513bb7`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web-channel` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` and `coqui-acp-provider` (coqui-acp `3583ba2`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`e513bb7`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web-channel` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Origin`, `Settings`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `aos`, `cli`, `config`, `harness`, `home`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Origin`, `Settings`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -329,7 +329,7 @@ pub const MAX_SECRET_FILE: u64 = 1024 * 1024;
 pub const RESERVED_ENV: &[&str];            // PATH, HOME, NODE_OPTIONS, CLAUDE_CONFIG_DIR, ...: 42 names
 pub const RESERVED_ENV_PREFIXES: &[&str];   // LD_, DYLD_, PYTHON, GIT_, NPM_CONFIG_, CANOA_, COQUI_
 pub const RESERVED_ENV_SUFFIXES: &[&str];   // _BASE_URL, _PROXY
-pub fn is_reserved_env(name: &str) -> bool  // any of those, without case, and every name aos::is_sensitive names
+pub fn is_reserved_env(name: &str) -> bool  // any of those, without case, and every name coqui_aos::is_sensitive_variable names
 pub fn full_commit_id(reference: &str) -> bool   // 40 or 64 lower-case hex digits
 
 #[non_exhaustive] pub enum LayerKind { BuiltIn, Overlay, User, Project, Agent, Session }   // Copy, Ord: lowest first
@@ -367,7 +367,7 @@ pub fn OverlaySource::parse_git(source: &str) -> Result<OverlaySource, ProfileEr
 pub fn OverlayInput::new(identity, root, os, tree) -> OverlayInput   // no harness, not pinned
 pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal>   // reads nothing but input.tree
 #[non_exhaustive] pub struct AosLayer { pub identity, root, os, digest: String, pub pinned: bool, pub manifest: Map<String, Value>, pub files: BTreeSet<String>, pub texts: BTreeMap<String, Vec<u8>>, pub references: Vec<(String, String, bool)>, pub not_applied: Vec<String> }
-#[non_exhaustive] pub struct OverlayReport { pub layer: LayerId, pub digest: String, pub not_applied, ungranted, unresolved: Vec<String>, pub non_defaults: Vec<aos::NonDefault> }   pub fn OverlayReport::view(&self) -> Value
+#[non_exhaustive] pub struct OverlayReport { pub layer: LayerId, pub digest: String, pub not_applied, ungranted, unresolved: Vec<String>, pub non_defaults: Vec<coqui_aos::NonDefaultSetting> }   pub fn OverlayReport::view(&self) -> Value
 #[non_exhaustive] pub struct OverlayRefusal { pub code: &'static str, pub subject: String }   // code: name, digest, manifest, invalid, env-file, reserved
 
 #[non_exhaustive] pub enum ProfileError { Parse { line, column }, Invalid { key: String, rule: Rule }, Resolve { key: String, what: &'static str } }
@@ -381,42 +381,21 @@ pub const fn ProfileError::code(&self) -> &'static str     // "parse", "name", "
 - **Paths** are judged on the text, the same on every platform. In a confined layer (overlay, project) a path is relative and stays below its directory: no leading `/`, `\` or `~`, no `:`, no `..` segment. Elsewhere any non-empty path without NUL.
 - **Errors** never quote a value: `Invalid.key` names the setting (`env.A`, `mcp.a.headers.T`), or for a refused name the table holding it (`env`, `mcp.a.env`). The first refusal in a document is, in order: anything serde refuses (an unknown key, a wrong type, a key twice) as `Parse`; then `model`, `effort`, `mode`, `context`, `unset`, then `env`, `skills` and `mcp` entries in the document's order.
 - **`resolve`** reads `FromEnv` through `lookup` and `FromFile` from `dir` (an absolute path only outside a confined layer), less one final `\n` or `\r\n`. The path is canonicalized and that path is what is read; for a confined layer it must be under `dir` canonicalized, so a link out of the project is refused. It must be a regular file of at most `MAX_SECRET_FILE` bytes, UTF-8. Call it only when a session starts.
-- **`parse_git`** reads an AOS source string (`aos::parse_source`): the path follows the first `#`, without leading or trailing `/`, and must be an AOS relative path; the ref follows the last `@` when it holds no `/`, `:` or `\`. Refused besides what AOS refuses: a source that is not Git, or names no ref; a repository holding a space or control character, or a scheme other than `https`, `http`, `ssh`, `git`, `file` in lowercase; `file://` with a host, or a path opening with `\\` or `//` (another host's share); `http://` or `git://` at a ref that is not a `full_commit_id`, since nothing else checks what a plaintext transport carries; a ref `git check-ref-format` refuses, or one opening with `-`. `Dir` is never parsed here.
+- **`parse_git`** reads an AOS source string (`coqui_aos::Source::parse`): the path follows the first `#`, without leading or trailing `/`, and must be an AOS relative path; the ref follows the last `@` when it holds no `/`, `:` or `\`. Refused besides what AOS refuses: a source that is not Git, or names no ref; a repository holding a space or control character, or a scheme other than `https`, `http`, `ssh`, `git`, `file` in lowercase; `file://` with a host, or a path opening with `\\` or `//` (another host's share); `http://` or `git://` at a ref that is not a `full_commit_id`, since nothing else checks what a plaintext transport carries; a ref `git check-ref-format` refuses, or one opening with `-`. `Dir` is never parsed here.
 - **`overlay_layer`** makes the layer of an AOS overlay from its tree, whose digest it computes: the root variable `<NAME>_OVERLAY_ROOT` (a `Value`), then each env file's and `env`'s variables as written, then path additions per variable, merged as any layer's; skills `skills/<name>`; MCP servers (a command with a separator made absolute under the root; `env_passthrough` and `headers_env` as optional `env:` references; no header over plain `http` to another host); `contexts` from rules, routing lines, `context` and the harness's `context`; `model` and `effort` from `[harness.<input.harness>]`. Mapping entries are taken in key byte order. Refused whole: a name AOS refuses, a tree it cannot digest, an unreadable or invalid `overlay.cfg` (problems under `/about` alone never refuse), a missing or unreadable env file, a variable `is_reserved_env` names. Not applied, and listed in `not_applied`: the `bin` and `lib` defaults, env scripts, setup, dependencies, `runtime`, `scripts`, `mcp.skills`, an MCP `timeout` and working directory, other harnesses' hints and the harness's own keys.
 - **An AOS layer in a merge** adds an `OverlayReport` (grants: the merged `share_env`, as `env` provider keys) to `overlays`, and its `AosLayer` to `aos`. `unset = ["context"]` also takes back every `contexts` entry below. `Effective::environment` builds the overlays' environment first, lowest first, over this process's environment through `lookup`: every root variable, then each overlay's env files, `env` and path additions with substitution. A placeholder reads what overlays set and the shared variables only; any other variable is seen by a path addition and `if_unset`, never a placeholder. A variable an overlay won takes the built value (an optional reference not resolved leaves it out); an error is `Resolve` with key `overlay:<identity>.env.<subject>`. The view adds `contexts` and `overlays` when there are any.
 
-## AOS overlays (`canoa_host::aos`)
+## AOS overlays (`coqui-aos`)
 
-The Agent Overlay Specification v0 (edition `0.1.0-draft`, vectors of agent-overlay-spec `061b8f5` in `tests/vectors/aos/`, `effective.json` with the spec's `non_defaults` key from `8b879dc`): manifest reader (TOML, and JSON after `#!json`; YAML and other formats `unsupported-format`), validator, integrity, resolver and environment. No env script, setup or package manager is run. Every function is static except `read_tree`, which reads a directory.
+`canoa_host` has no AOS module of its own: overlays are read, validated, digested, composed and their environment built by the [`coqui-aos`](https://github.com/Boriken-Dev/coqui-aos) crate (a git dependency at one revision; its `AGENTS.md` is the API header), which passes the specification's conformance vectors in full. What is Canoa's own is how a profile uses them (`profile::overlay_layer`, `profile::hosted`), held to `tests/vectors/profile.json`:
 
-```rust
-pub struct AosError { pub code: &'static str, pub subject: String }   // the vectors' class; subject: a variable, path or format, never a value
-pub struct Limits { pub max_bytes: usize, pub max_depth: usize }       // Default: 1 MiB, 64
-pub fn read_document(bytes: &[u8], limits: Limits) -> Result<Map<String, Value>, AosError>
-pub fn parse_dotenv(bytes: &[u8]) -> Result<Vec<DotenvLine>, AosError>     DotenvLine { name, text, literal }
-pub fn read_dotenv(bytes: &[u8], env: &mut Environment) -> Result<IndexMap<String, String>, AosError>
-pub fn substitute(text: &str, lookup: &dyn Fn(&str) -> Result<Option<String>, AosError>) -> Result<String, AosError>   // too-large, too-deep, too-complex past SubstLimits
-pub fn substitute_with(text, lookup, limits: SubstLimits) -> Result<String, AosError>   SubstLimits { max_value: 1 MiB, max_depth: 32, max_steps: 10_000_000 }
-pub fn is_insecure_url(url: &str) -> bool   // plain http to a host other than localhost, [::1] or an IPv4 address in 127.0.0.0/8
-pub fn validate(doc: &Map<String, Value>, files: Option<&BTreeSet<String>>) -> Vec<Issue>   Issue { code, at }   // sorted by pointer
-pub fn applies(issues: &[Issue]) -> bool                // only problems under /about
-pub fn valid_overlay_name, normalize_name, root_variable, state_variable, is_relative_path, is_reserved_variable, is_sensitive, is_env_name
-pub fn parse_source(text: &str) -> Result<Source, AosError>   Source { kind: SourceKind (Git, Url, Directory), location, reference, path }
-pub fn digest_entries(entries: &[TreeEntry]) -> Result<TreeDigest, AosError>   TreeEntry { components: Vec<Vec<u8>>, kind: EntryKind, data }, TreeDigest { digest, lines }
-pub fn read_tree(root: &Path, max_files: usize, max_bytes: u64) -> Result<Vec<TreeEntry>, AosError>   // never follows a link or junction
-pub fn sha256_digest(data: &[u8]) -> String     pub fn same_digest(a: &str, b: &str) -> bool
-pub fn resolve(overlays: &BTreeMap<String, Map<String, Value>>, requested: &[String]) -> Result<Resolved, Vec<String>>   // Err: the cycle
-pub fn composition_order(overlays, active: &[String]) -> Vec<String>   // (priority, name, identity), by code point
-pub fn rules_of, context_of, skills_of(manifest, files) -> Vec<String>;  paths_of -> Vec<PathAddition>;  env_files_of -> Vec<EnvFile>
-pub struct Environment<'a>   new(windows), with_base(windows, base: &dyn Fn(&str) -> Option<(String, bool)>), get, set(name, value, secret), lookup, is_secret, values()
-pub struct Facts { os, grants, host_env, secrets, secret_files, providers }   Facts::new(os): only the env provider
-pub struct Overlay<'a> { identity, manifest, files, root, state, read: &dyn Fn(&str) -> Option<Vec<u8>> }
-pub fn apply_overlay(env: &mut Environment, overlay: &Overlay, facts: &Facts, non_defaults: &mut Vec<NonDefault>) -> Result<(), AosError>
-pub fn grants_report(manifest, facts, non_defaults) -> Vec<String>   // not granted: <provider>:<key>, secret:<name>, env:<variable>
-```
+- **Reading.** `overlay.cfg` is read by `coqui_aos::read_document` at the default `Settings`: TOML, JSON after `#!json`, YAML after `#!yaml` (a tag, anchor, alias or merge key is refused). An `OVERLAY.md` is not read yet (plan `overlay_md`): it is a file of the tree and nothing more, and the overlay applies with no manifest. Mapping order is the document's order; every order Canoa shows is key byte order.
+- **A tree** is a `coqui_aos::OverlayTree` (every member's path and bytes), as `coqui_aos::read_tree` reads a directory (`OverlayInput::tree`); `overlay_layer` digests it again with `digest_entries`. A path under an excluded name is not in a tree `read_tree` returns, so it is neither digested nor delivered.
+- **Limits** are `coqui_aos::Settings`: an installed overlay at the defaults (4096 files, 64 MiB), a host-profile skill's directory at 1024 files and 16 MiB.
+- **The environment** is `coqui_aos::composed_environment` over the overlays in composition order, once after each overlay (`build_each`), from an `Environment` of the process variables an overlay's text names (any word of its manifest or env files), each marked secret unless a layer of the person's own shares it: a placeholder reads what overlays set and the shared variables only, while a path addition and `if_unset` still see the rest. `Built::owned` is a variable an overlay set (one the process already had with that value is not). A refusal is `ProfileError::Resolve` with key `overlay:<identity>.env.<subject>`.
+- **The report** (`OverlayReport`) is `coqui_aos::effective` over the manifest less its env files and its required references nothing shares, which the report lists as `unresolved`: `ungranted` and `non_defaults` are the specification's for what Canoa applies (`unpinned`, `env-passthrough`, `secret-read`, `env-sensitive`, `insecure-transport`; not `env-script`, `setup-network`, `deps-network` and the rest, since nothing runs). When that call refuses (a partial lock, an env-path conflict) the report lists none, since the environment would refuse too.
+- **A server over plain `http`** to another host (`insecure-transport` in that report) never gets `headers_env`.
 
-- `[about]` is validated (its own pointer), never applied; Canoa's app shows a valid `summary` and `icon` only.
-- Mapping order carries no meaning: `serde_json::Map` iteration is what a caller gets.
 ## Worktrees
 
 No public API: what `serve` answers on an agent or tool entry with `working_roots` and `worktrees` on (the default), before its agent starts. Off, or with no root, each is `-32602`.
