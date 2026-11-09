@@ -24,6 +24,13 @@ __pycache__/
 /app/build/
 /app/.flutter-plugins*
 
+# Runners `flutter create` generates (python app/tool/build.py desktop); never committed
+/app/windows/
+/app/linux/
+/app/macos/
+/app/.metadata
+/app/.gitignore
+
 # Built extension UI
 /bindings/browser/chromium/ui/
 /bindings/browser/firefox/ui/

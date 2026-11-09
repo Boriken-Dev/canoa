@@ -15,7 +15,7 @@
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app has a multi-session **offline preview** and a tested ACP v2 client for verified connections; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **An authenticated WSS ACP v2 endpoint, `canoa serve` with the `stdio_agent` example, is now integration-tested; production agent pairing, general-purpose live agent services, remote MCP and debugging transport are not yet available.** No packages have been released.
+> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app is a multi-session chat: the desktop app hosts and runs agents (Claude, Codex, Pi, any ACP agent) itself, and the web app and extension connect to a host over a verified ACP v2 link; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Pairing, `canoa serve` and the desktop app's hosting work and are tested; see the [roadmap](docs/roadmap.md) for what is not yet available.** No packages have been released.
 
 ## Features and direction
 
@@ -43,15 +43,11 @@
 ## Try the current UI
 
 ```sh
-cd app
-flutter pub get
-flutter run -d chrome
-# Standalone web / Wasm builds:
-flutter build web --release
-flutter build web --release --wasm
+python app/tool/build.py desktop          # builds the desktop app and prints the path of CanoaUI
+python app/tool/build.py desktop --run    # or runs it (needs flutter and cargo on PATH)
 ```
 
-The UI starts with offline preview sessions. A manually pinned Coqui peer connection can now be tested against `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`, a canoa.cfg with `[host.agents.echo]` naming `target/debug/examples/stdio_agent` as its `program`, then `canoa accept` for the key that connects), which is not a production agent. To package it for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/canoa/browser/) before loading it as unpacked.
+The desktop app carries the host as a library and lives in the tray. For the web app, `(cd app && flutter build web --release --csp --no-web-resources-cdn)` then `canoa serve --web app/build/web`; see [getting started](https://boriken-dev.github.io/canoa/getting-started/). A manually pinned Coqui peer connection can also be tested against `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`, a canoa.cfg with `[host.agents.echo]` naming `target/debug/examples/stdio_agent` as its `program`, then `canoa accept` for the key that connects), which is not a production agent. To package the UI for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/canoa/browser/) before loading it as unpacked.
 
 Canoa is one implementation on two shared libraries: [coqui-web](https://github.com/Boriken-Dev/coqui-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
 

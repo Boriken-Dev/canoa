@@ -363,7 +363,7 @@ and holds the window open for `CANOA_TEST_HOLD` seconds. What has been run:
 
 ## Building desktop runners
 
-This repository keeps the canonical Flutter code in app/. Flutter's platform runner directories must be generated before native desktop builds:
+This repository keeps the canonical Flutter code in app/. `python app/tool/build.py desktop` does everything below for this machine's platform and prints the built executable (`--run` runs it, `--debug` builds debug). By hand, Flutter's platform runner directories must be generated before native desktop builds:
 
     cd app
     flutter create --org dev.boriken --platforms=windows,linux,macos --project-name canoa .

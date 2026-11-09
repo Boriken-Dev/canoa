@@ -10,31 +10,44 @@
 
 ```sh
 git clone https://github.com/Boriken-Dev/canoa.git
-cd Canoa
+cd canoa
 cargo test --workspace --all-features
 cargo doc --workspace --no-deps --all-features
 ```
 
 The Rust crate currently implements only an in-memory registry and explicit grants, not network identity verification.
 
-## Flutter app
+## Desktop app
+
+The desktop app is the whole product on one machine: it carries the host as a library, so it runs the agents canoa.cfg names (Claude, Codex, Pi or any ACP agent) itself, with no `canoa` program installed. It needs `flutter` and `cargo` on PATH, and on Linux the system libraries listed in [configuration](configuration.md#building-desktop-runners).
+
+```sh
+python app/tool/build.py desktop          # builds, then prints the path of CanoaUI (CanoaUI.exe on Windows)
+python app/tool/build.py desktop --run    # runs it with flutter run instead
+python app/tool/build.py desktop --debug  # a debug build; --platform windows|linux|macos names the platform (default: this machine's)
+```
+
+The first run generates the platform's runner (`flutter create`) in `app/`, names the executable `CanoaUI` and, on Windows, gives it Canoa's icon; none of that is committed. `app/pubspec.lock` is put back if Flutter rewrites it. Closing the window leaves Canoa in the tray; see [the desktop section of the app's README](https://github.com/Boriken-Dev/canoa/blob/main/app/README.md#desktop-tray-and-canoacfg) and [the host](host.md#in-the-desktop-app) for hosting and pairing.
+
+## Web app
+
+```sh
+(cd app && flutter build web --release --csp --no-web-resources-cdn)   # app/build/web; the host's policy needs --csp
+canoa serve --web app/build/web                                           # served on loopback
+```
+
+The web app has no agents of its own: it connects to a host by its printed URL and peer id, proves its key, and the host's owner accepts that key with `canoa accept`. See [the web app](host.md#the-web-app). `python app/tool/build.py pwa` makes the same bundle without `--csp`, for any other static server; `--wasm` output may need COOP/COEP headers and a compatible browser. For development, `cd app && flutter run -d chrome`.
+
+## Tests
 
 ```sh
 cd app
 flutter pub get
-flutter run -d chrome
-flutter test
 flutter analyze
+flutter test
 ```
 
-The UI opens with sample sessions. Sending a message only adds it to the local preview, **not** to a remote agent.
-
-```sh
-flutter build web --release
-flutter build web --release --wasm
-```
-
-For the standalone PWA, deploy the generated `app/build/web` bundle under a server that supports the renderer requirements. Flutter's Wasm output may need COOP/COEP headers and a compatible browser.
+`flutter pub get` with an older Flutter rewrites `app/pubspec.lock`: restore it before committing.
 
 ## Chromium extension
 

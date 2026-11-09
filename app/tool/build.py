@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Build the shared Canoa Flutter UI for the PWA or an extension."""
+"""Build the Canoa Flutter UI for the PWA, an extension or the desktop."""
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 APP = Path(__file__).resolve().parents[1]
 ROOT = APP.parent
@@ -17,6 +19,113 @@ def flutter_program() -> str:
     if flutter is None:
         raise RuntimeError("Flutter is not on PATH")
     return flutter
+
+
+# What `flutter create` leaves in app/ once a platform's runner exists.
+RUNNER_MARKERS = {
+    "windows": Path("windows/runner/CMakeLists.txt"),
+    "linux": Path("linux/runner/CMakeLists.txt"),
+    "macos": Path("macos/Runner.xcodeproj/project.pbxproj"),
+}
+HOST_PLATFORMS = {"win32": "windows", "linux": "linux", "darwin": "macos"}
+LOCK = Path("app/pubspec.lock")
+
+
+def host_platform() -> str:
+    return HOST_PLATFORMS.get(sys.platform, "linux")
+
+
+def require_tools() -> None:
+    # The app's native/ plugin runs cargo to build the host library with the runner.
+    for tool in ("flutter", "cargo"):
+        if shutil.which(tool) is None:
+            raise RuntimeError(f"{tool} is not on PATH (a desktop build needs flutter and cargo)")
+
+
+def runner_missing(platform: str, app: Path = APP) -> bool:
+    return not (app / RUNNER_MARKERS[platform]).is_file()
+
+
+def sh_program() -> str:
+    sh = shutil.which("sh")
+    if sh is None:
+        # Git for Windows keeps its sh beside sed, off the PATH of a PowerShell window.
+        git = shutil.which("git")
+        candidate = Path(git).resolve().parents[1] / "usr" / "bin" / "sh.exe" if git else None
+        if candidate is None or not candidate.is_file():
+            raise RuntimeError("sh is not on PATH (name_runner.sh needs it; Git for Windows has one)")
+        sh = str(candidate)
+    return sh
+
+
+def ensure_runner(platform: str, app: Path = APP) -> None:
+    """Generate the platform's runner when missing, then name it as tool/name_runner.sh does (safe to repeat)."""
+    if runner_missing(platform, app):
+        widget_test = app / "test" / "widget_test.dart"
+        had_widget_test = widget_test.exists()
+        subprocess.run(
+            [flutter_program(), "create", "--org", "dev.boriken", f"--platforms={platform}",
+             "--project-name", "canoa", "."],
+            check=True, cwd=app,
+        )
+        if not had_widget_test:
+            widget_test.unlink(missing_ok=True)
+    sh = sh_program()
+    # The script's sed sits beside sh in Git for Windows.
+    env = dict(os.environ, PATH=str(Path(sh).parent) + os.pathsep + os.environ.get("PATH", ""))
+    subprocess.run([sh, str(app / "tool" / "name_runner.sh"), str(app)], check=True, env=env)
+    icon = app / "assets" / "icons" / "canoa.ico"
+    target = app / "windows" / "runner" / "resources" / "app_icon.ico"
+    if platform == "windows" and (not target.is_file() or target.read_bytes() != icon.read_bytes()):
+        shutil.copyfile(icon, target)
+
+
+def committed_lock(root: Path = ROOT) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(root), "show", f"HEAD:{LOCK.as_posix()}"],
+        check=True, capture_output=True,
+    ).stdout
+
+
+def restore_lock(before: bytes | None, root: Path = ROOT) -> bool:
+    """Put git's pubspec.lock back if a tool rewrote it; one already edited by hand is left alone."""
+    lock = root / LOCK
+    committed = committed_lock(root)
+    if before != committed or lock.read_bytes() == committed:
+        return False
+    lock.write_bytes(committed)
+    return True
+
+
+def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None:
+    mode = "Debug" if debug else "Release"
+    patterns = {
+        "windows": f"build/windows/*/runner/{mode}/CanoaUI.exe",
+        "linux": f"build/linux/*/{mode.lower()}/bundle/CanoaUI",
+        "macos": f"build/macos/Build/Products/{mode}/Canoa.app/Contents/MacOS/CanoaUI",
+    }
+    found = sorted(app.glob(patterns[platform]))
+    return found[0] if found else None
+
+
+def build_desktop(platform: str, debug: bool, run: bool) -> None:
+    require_tools()
+    lock = ROOT / LOCK
+    before = lock.read_bytes() if lock.is_file() else None
+    mode = "--debug" if debug else "--release"
+    try:
+        ensure_runner(platform)
+        if run:
+            subprocess.run([flutter_program(), "run", "-d", platform, mode], check=True, cwd=APP)
+            return
+        subprocess.run([flutter_program(), "build", platform, mode], check=True, cwd=APP)
+    finally:
+        if restore_lock(before):
+            print("Restored app/pubspec.lock")
+    exe = built_executable(platform, debug)
+    if exe is None:
+        raise RuntimeError(f"flutter build {platform} left no CanoaUI under app/build")
+    print(f"Built {exe}")
 
 
 def flutter_args(kind: str, wasm: bool) -> list[str]:
@@ -66,16 +175,30 @@ def package_debug_extension(source: Path, destination: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("pwa", "chromium"))
+    parser.add_argument("kind", choices=("pwa", "chromium", "desktop"))
     parser.add_argument(
         "--wasm", action="store_true",
         help="Build Flutter web with --wasm (extension compatibility must be checked)",
     )
     parser.add_argument("--debug", action="store_true",
-        help="Package a separate Chromium debugger extension with CDP permission")
+        help="chromium: package a separate extension with CDP permission; desktop: a debug build")
+    parser.add_argument("--run", action="store_true", help="desktop: run the app with flutter run, not build it")
+    parser.add_argument("--platform", choices=tuple(RUNNER_MARKERS),
+        help="desktop: the platform (default: this machine's; Flutter cannot cross-build)")
     opts = parser.parse_args()
-    if opts.debug and opts.kind != "chromium":
-        parser.error("--debug is only valid for chromium")
+    if opts.debug and opts.kind not in ("chromium", "desktop"):
+        parser.error("--debug is only valid for chromium and desktop")
+    if (opts.run or opts.platform) and opts.kind != "desktop":
+        parser.error("--run and --platform are only valid for desktop")
+    if opts.kind == "desktop":
+        platform = opts.platform or host_platform()
+        if platform != host_platform():
+            parser.error(f"a {platform} build needs a {platform} machine")
+        try:
+            build_desktop(platform, opts.debug, opts.run)
+        except RuntimeError as error:
+            sys.exit(f"build.py: {error}")
+        return
     subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
     if opts.kind == "chromium":
