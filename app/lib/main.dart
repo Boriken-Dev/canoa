@@ -58,6 +58,7 @@ import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
 import 'worktree/local.dart';
 import 'worktree/worktree.dart';
+import 'selectable.dart';
 
 Future<void> main(List<String> args) async {
   // The executable's own entry takes this before Flutter starts; reaching here means a runner built without it, which must
@@ -178,7 +179,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (above == null) return;
     _hostingOpen = true;
     try {
-      await showDialog<void>(
+      await showSelectableDialog<void>(
         context: above,
         builder: (_) => HostingDialog(supervisor: host, config: config, onSave: _saveHosting),
       );
@@ -211,7 +212,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _settingsOpen = true;
     final CanoaConfig? fromDialog;
     try {
-      fromDialog = await showDialog<CanoaConfig>(
+      fromDialog = await showSelectableDialog<CanoaConfig>(
         context: above,
         builder: (_) => SettingsDialog(
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
@@ -260,7 +261,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _showProfiles() async {
     final above = _navigator.currentContext;
     if (above == null) return;
-    await showDialog<void>(
+    await showSelectableDialog<void>(
       context: above,
       builder: (_) => ProfilesDialog(
         config: config,
@@ -373,7 +374,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!approve) return (prepared, const <String>{}, layers.notes);
     final above = _navigator.currentContext;
     if (above == null || !above.mounted) throw StateError('Canoa UI closed');
-    final choice = await showDialog<ProfileStartChoice>(
+    final choice = await showSelectableDialog<ProfileStartChoice>(
       context: above,
       builder: (_) => ProfileStartDialog(
         agent: agent, prepared: prepared, harness: presetHarnesses[agent],
@@ -457,7 +458,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (choice == WorktreeChoice.discard && state != null && shown != null && state.listing == shown.listing) break;
       final above = _navigator.currentContext;
       if (above == null || !above.mounted) return;
-      choice = await showDialog<WorktreeChoice>(
+      choice = await showSelectableDialog<WorktreeChoice>(
         context: above,
         builder: (_) => WorktreeCloseDialog(worktree: worktree, state: state, problem: problem),
       );
@@ -933,7 +934,7 @@ class _CanoaAppState extends State<CanoaApp> {
       final above = _navigator.currentContext;
       final report = session.profile;
       if (above == null || report == null) return;
-      unawaited(showDialog<void>(context: above, builder: (_) => ProfileReportDialog(report: report)));
+      unawaited(showSelectableDialog<void>(context: above, builder: (_) => ProfileReportDialog(report: report)));
     },
   );
 
@@ -1009,7 +1010,7 @@ class _CanoaHome extends StatelessWidget {
 
   Future<void> _palette(BuildContext context) {
     final session = store.selected;
-    return showDialog<void>(
+    return showSelectableDialog<void>(
       context: context,
       builder: (_) => CommandPalette(items: [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
@@ -1065,7 +1066,7 @@ class _CanoaHome extends StatelessWidget {
       final narrow = constraints.maxWidth < 730 ||
           Uri.base.queryParameters['view'] == 'panel';
 
-      return Scaffold(
+      return Selectable(child: Scaffold(
         drawer: narrow
             ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen)))
             : null,
@@ -1089,7 +1090,7 @@ class _CanoaHome extends StatelessWidget {
             ],
           ),
         ),
-      );
+      ));
     });
   }
 }
@@ -1363,7 +1364,7 @@ class _ConversationState extends State<_Conversation> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (sheet) => FractionallySizedBox(
+      builder: (sheet) => Selectable(child: FractionallySizedBox(
         heightFactor: 0.9,
         child: ListenableBuilder(
           listenable: widget.store,
@@ -1377,7 +1378,7 @@ class _ConversationState extends State<_Conversation> {
             onClose: () => Navigator.pop(sheet),
           ),
         ),
-      ),
+      )),
     ));
   }
 
@@ -1428,7 +1429,7 @@ class _ConversationState extends State<_Conversation> {
 
   Future<void> _showEarlier(ChatSession session) async {
     final messenger = ScaffoldMessenger.of(context);
-    final picked = await showDialog<AcpSessionInfo>(
+    final picked = await showSelectableDialog<AcpSessionInfo>(
       context: context,
       builder: (context) => EarlierConversations(list: (cursor) => widget.store.earlierSessions(session, cursor: cursor)),
     );
@@ -1495,7 +1496,7 @@ class _ConversationState extends State<_Conversation> {
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
       if (session != null && changesOf(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
       if (session?.profile case final report?)
-        ('Profile', Icons.tune, () => unawaited(showDialog<void>(
+        ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
           context: context,
           builder: (_) => ProfileReportDialog(report: report),
         ))),

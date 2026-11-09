@@ -4,6 +4,7 @@ import '../session_store.dart';
 import '../theme/look.dart';
 import 'agent_events.dart';
 import 'diff.dart';
+import '../selectable.dart';
 
 /// One file a session's tools changed, as the agent reported it: what it showed before the first change and after the last, and
 /// any patches it wrote. Built from ACP updates alone, so it is what the agent sent, never the file on disk.
@@ -171,7 +172,7 @@ class ChangesPane extends StatelessWidget {
 
   Future<void> _comment(BuildContext context, FileChange file, ChangeLine line) async {
     final at = line.now != null ? '${file.path}:${line.now}' : '${file.path}, removed line ${line.old}';
-    final text = await showDialog<String>(context: context, builder: (context) => _CommentDialog(at: at));
+    final text = await showSelectableDialog<String>(context: context, builder: (context) => _CommentDialog(at: at));
     if (text == null || text.trim().isEmpty) return;
     onComment('$at: `${line.text}`\n${text.trim()}\n');
   }

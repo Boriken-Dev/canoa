@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../selectable.dart';
 
 /// The modifier of every shortcut: Command on a Mac, Control elsewhere.
 bool get _onMac => defaultTargetPlatform == TargetPlatform.macOS;
@@ -34,7 +35,7 @@ List<ShortcutLine> get shortcutHelp {
 }
 
 /// The keyboard shortcuts, for the person to read.
-Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
+Future<void> showShortcutHelp(BuildContext context) => showSelectableDialog<void>(
   context: context,
   builder: (context) => AlertDialog(
     title: const Text('Keyboard shortcuts'),

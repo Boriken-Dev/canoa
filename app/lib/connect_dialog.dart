@@ -7,6 +7,7 @@ import 'package:coqui_acp/page.dart';
 import 'acp/browser_connect.dart';
 import 'acp/served_host.dart';
 import 'auth/browser_peer.dart';
+import 'selectable.dart';
 
 /// Explicit, out-of-band connection configuration for a pinned peer.
 /// No trust-on-first-use is performed from the connection dialog.
@@ -57,7 +58,7 @@ Future<void> showCanoaConnectDialog(
   PeerMethod? method,
   bool inBrowser = kIsWeb,
   Future<ServedHost?> Function() servedHost = loadServedHost,
-}) => showDialog<void>(
+}) => showSelectableDialog<void>(
   context: context,
   builder: (_) => _ConnectDialog(
     onConnect: onConnect,

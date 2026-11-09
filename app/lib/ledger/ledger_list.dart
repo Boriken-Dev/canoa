@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
 import 'session_ledger.dart';
+import '../selectable.dart';
 
 /// The ledger's sessions that are not open now, grouped by harness, with a filter by harness. Each opens again where its agent
 /// offers that, says why where it does not, and can be removed from the list, which never deletes the agent's own session.
@@ -46,7 +47,7 @@ class _LedgerListState extends State<LedgerList> {
 
   Future<void> _remove(LedgerEntry entry) async {
     final title = entry.title ?? 'This session';
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showSelectableDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Remove from Canoa\'s list?'),

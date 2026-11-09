@@ -132,6 +132,11 @@ Markdown as the text it shows, a code block as its code, a folded thought or sum
 Copy and Select all. Each message and each code block has a copy button. In the message being written, Ctrl+A selects only
 its text, and the text field keeps its own Cut, Copy and Paste.
 
+Everything else is selectable too: the side list, the header, the settings, every dialog and sheet, and each page opened over
+the screen (the overlay store) is a selection of its own, so Select all inside a dialog never reaches the screen behind it.
+A drag never runs from one selection into another (the screen, the conversation, the plan, the changes pane). Not selectable
+on purpose: menus (a menu item is a command) and tooltips.
+
 ## A queue while the agent works
 
 A message written while a turn runs (Enter, or **Queue** beside Stop) waits in a queue under the conversation, with what goes

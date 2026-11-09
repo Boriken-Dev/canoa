@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../session_store.dart';
 import '../theme/look.dart';
+import '../selectable.dart';
 
 /// The messages written while the agent worked, in the order they go, each editable and removable. While the queue is held,
 /// after a turn that was stopped or failed, it says so and waits for the person to send the next or clear them.
@@ -12,7 +13,7 @@ class QueuePanel extends StatelessWidget {
   final ChatSession session;
 
   Future<void> _edit(BuildContext context, QueuedMessage message) async {
-    final text = await showDialog<String>(context: context, builder: (_) => _EditQueued(text: message.text));
+    final text = await showSelectableDialog<String>(context: context, builder: (_) => _EditQueued(text: message.text));
     if (text != null) store.editQueued(session, message, text);
   }
 

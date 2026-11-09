@@ -11,6 +11,7 @@ import '../profile/profiles_dialog.dart' show EffectiveTable, OverlayReportView,
 import 'links.dart';
 import 'store.dart';
 import 'store_icon.dart';
+import '../selectable.dart';
 
 /// Saves a changed canoa.cfg and gives the configuration saved, or null when it was not.
 typedef SaveConfig = Future<CanoaConfig?> Function(CanoaConfig changed);
@@ -109,7 +110,7 @@ class StorePageState extends State<StorePage> {
   }
 
   Future<void> _open(ListedEntry listed) async {
-    final saved = await Navigator.of(context).push<CanoaConfig>(MaterialPageRoute(
+    final saved = await Navigator.of(context).push<CanoaConfig>(selectablePage(
       builder: (_) => OverlayPage(listed: listed, catalog: listing!.catalogOf(listed), config: config, home: widget.home,
           onSave: widget.onSave),
     ));
@@ -352,7 +353,7 @@ class OverlayPageState extends State<OverlayPage> {
     final shown = preview!;
     final moved = pinMoved(config, shown);
     if (moved != null) {
-      final yes = await showDialog<bool>(
+      final yes = await showSelectableDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Move the pin?'),
@@ -384,7 +385,7 @@ class OverlayPageState extends State<OverlayPage> {
 
   Future<void> _remove() async {
     final (name, source) = _target!;
-    final yes = await showDialog<bool>(
+    final yes = await showSelectableDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Remove ${namedAs(config, name) ?? name}?'),
@@ -653,6 +654,6 @@ class OverlayPageState extends State<OverlayPage> {
 /// Opens the store over [context], and gives the configuration as the store left it.
 Future<CanoaConfig?> showStore(BuildContext context,
         {required CanoaConfig config, required ProfileHome? home, required SaveConfig onSave}) =>
-    Navigator.of(context).push<CanoaConfig>(MaterialPageRoute(
+    Navigator.of(context).push<CanoaConfig>(selectablePage(
       builder: (_) => StorePage(config: config, home: home, onSave: onSave),
     ));

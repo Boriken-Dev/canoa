@@ -8,6 +8,7 @@ import '../config/canoa_config.dart';
 import '../theme/look.dart';
 import 'host_supervisor.dart';
 import 'host_tool.dart';
+import '../selectable.dart';
 
 /// Checks and saves a changed canoa.cfg, then serves it: what is wrong with it, or null once it is saved.
 typedef SaveHosting = Future<String?> Function(CanoaConfig changed);
@@ -74,7 +75,7 @@ class _HostingDialogState extends State<HostingDialog> {
   }
 
   Future<void> _add() async {
-    final added = await showDialog<_NewAgent>(context: context, builder: (_) => const _AddAgentDialog());
+    final added = await showSelectableDialog<_NewAgent>(context: context, builder: (_) => const _AddAgentDialog());
     if (added == null) return;
     await _run(() async {
       final port = await widget.freePort();
@@ -174,7 +175,7 @@ class _HostingDialogState extends State<HostingDialog> {
   }
 
   Future<bool> _confirm({required String title, required List<Widget> body, required String action}) async =>
-      await showDialog<bool>(
+      await showSelectableDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text(title),

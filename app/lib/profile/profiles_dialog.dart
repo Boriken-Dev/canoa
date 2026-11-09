@@ -12,6 +12,7 @@ import 'profile.dart';
 import 'profile_home.dart';
 import 'profile_layers.dart';
 import 'project_trust.dart';
+import '../selectable.dart';
 
 /// The effective profile of each agent, every value beside the layer it came from; the overlays, which install and sync
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
@@ -93,7 +94,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
     final home = widget.home!;
     final update = await home.overlays.check(name, source);
     if (!mounted) return;
-    final apply = await showDialog<bool>(context: context, builder: (_) => OverlayUpdateDialog(update: update));
+    final apply = await showSelectableDialog<bool>(context: context, builder: (_) => OverlayUpdateDialog(update: update));
     if (apply != true) return;
     final record = await home.overlays.apply(update);
     final pinned = await widget.onPin?.call(name, record.digest!);
@@ -103,7 +104,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
   Future<void> _trust(ProjectLayer project) async {
     final bytes = project.profile;
     if (bytes == null) return;
-    final yes = await showDialog<bool>(
+    final yes = await showSelectableDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Trust this directory?'),
