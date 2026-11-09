@@ -1,16 +1,16 @@
 {
   "coqui-peer-webcrypto.mjs": {
     "source": "https://github.com/Boriken-Dev/coqui-peer-webcrypto",
-    "commit": "4fda67f3353d041075ebe2ce372df6dc5e9f5d01",
+    "commit": "a491a0034e0a9084c7aa3a5298f3b3c649ae7941",
     "path": "bindings/js/coqui-peer-webcrypto/src/index.mjs",
     "git_blob_sha1": "885a349a604bd1bb58c2b298c6e6f0fe36376e20",
     "profile": "dev.boriken.coqui.peer-webcrypto/v1"
   },
   "coqui-peer-noise.mjs": {
     "source": "https://github.com/Boriken-Dev/coqui-peer-noise",
-    "commit": "bbae116da1bf23f05213f6b503e0811b53c3c3e6",
+    "commit": "169db79428af8f5824c7f151f8fa4601f34854dc",
     "path": "bindings/js/coqui-peer-noise/src/index.mjs",
-    "git_blob_sha1": "fac301e05a3ac682fa20aa631bf738d55208d61c",
+    "git_blob_sha1": "c4909a88ab6c448a8efd515f937a583a5f229050",
     "profile": "dev.boriken.coqui.peer-noise/v1"
   }
 }
