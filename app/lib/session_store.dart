@@ -1184,9 +1184,11 @@ class SessionStore extends ChangeNotifier {
 
   /// Finishes applying a profile to [session], just opened with [launch]'s setup: the model, effort and mode are set where
   /// the agent offers an option with that value, and the report goes on the session and, in one line, into it. [notes]
-  /// are what the person was not shown of the layers, such as one left out, and go into it too.
+  /// are what the person was not shown of the layers, such as one left out, and go into it too. A reopened session's
+  /// [keptMode], the one it was left in, is put back instead of the profile's, which is applied only if the agent does not
+  /// take the kept one.
   Future<void> applyProfile(ChatSession session, ProfileLaunch launch, PreparedProfile prepared,
-      {required String harness, List<LayerNote> notes = const [], bool keepOwnMode = false}) async {
+      {required String harness, List<LayerNote> notes = const [], String? keptMode}) async {
     session.setup = launch.setup;
     for (final note in notes) {
       _note(session, 'Profile, ${note.layer}: ${note.text}');
@@ -1200,9 +1202,7 @@ class SessionStore extends ChangeNotifier {
         (option.id, option.category, [for (final choice in option.choices) choice.value], option.isMode),
     ]);
     final set = <String, String>{};
-    for (final (id, value, key) in chosen) {
-      // A reopened session's own mode, kept from before, is put back after this and wins: it is not set twice.
-      if (keepOwnMode && key == 'mode') continue;
+    Future<void> setChosen(String id, String value, String key) async {
       final option = session.options.firstWhere((option) => option.id == id);
       await _set(session, option, value);
       final now = session.options.where((option) => option.id == id).firstOrNull;
@@ -1211,10 +1211,25 @@ class SessionStore extends ChangeNotifier {
         if (key == 'mode') session.chosenMode = value;
       }
     }
+    for (final (id, value, key) in chosen) {
+      // The kept mode wins over the profile's: it is put back below, and the profile's only if the agent did not take it.
+      if (keptMode != null && key == 'mode') continue;
+      await setChosen(id, value, key);
+    }
+    var keptTaken = false;
+    if (keptMode != null) {
+      await _restoreMode(session, keptMode);
+      keptTaken = keptMode == 'custom' || modeOptionIn(session.options)?.current == keptMode;
+      if (!keptTaken) {
+        for (final (id, value, key) in chosen) {
+          if (key == 'mode') await setChosen(id, value, key);
+        }
+      }
+    }
     ProfileItem settled(ProfileItem item) {
       if (!const {'model', 'effort', 'mode'}.contains(item.key)) return item;
       final how = set[item.key];
-      if (keepOwnMode && item.key == 'mode') {
+      if (keptTaken && item.key == 'mode') {
         return ProfileItem(item.key, item.layer, ItemState.off, 'the mode this session was left in is applied instead');
       }
       return how != null
@@ -1225,6 +1240,13 @@ class SessionStore extends ChangeNotifier {
     _note(session, session.profile!.summary);
     _keepMode(session);
     notifyListeners();
+  }
+
+  /// Sends the mode a reopened [session] was left in. Under Canoa's own Bypass it is the agent's mode that Bypass sat on.
+  Future<void> _restoreMode(ChatSession session, String mode) async {
+    final id = modeOptionIn(session.options)?.id ?? OptionRole.mode.name;
+    session.pending[id] = PendingChoice(id, OptionRole.mode, mode);
+    await _applyPending(session);
   }
 
   /// Says in [session] that its agent, reached elsewhere, was given no profile.
@@ -1725,13 +1747,11 @@ class SessionStore extends ChangeNotifier {
       applyOpened(session, opened);
       if (launch != null && prepared != null) {
         await applyProfile(session, launch, prepared,
-            harness: harness ?? entry.harness, notes: notes, keepOwnMode: entry.mode != null);
+            harness: harness ?? entry.harness, notes: notes, keptMode: entry.mode);
       }
-      // The mode the session was left in goes back, once, before anything is sent: it wins over the profile's. Under Canoa's
-      // own Bypass it is the agent's mode that Bypass sat on.
-      if (entry.mode case final mode?) {
-        final id = modeOptionIn(session.options)?.id ?? OptionRole.mode.name;
-        session.pending[id] = PendingChoice(id, OptionRole.mode, mode);
+      // The mode the session was left in goes back, once, before anything is sent: it wins over the profile's.
+      if (launch == null || prepared == null || launch.items.isEmpty) {
+        if (entry.mode case final mode?) await _restoreMode(session, mode);
       }
       await _applyPending(session);
       session.opening = false;
