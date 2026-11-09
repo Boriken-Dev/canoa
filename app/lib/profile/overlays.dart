@@ -131,4 +131,8 @@ abstract interface class FetchedTree {
   /// The regular file at [path], `/`-separated from the repository's root, or null when there is none (a directory, a
   /// link or a submodule is none). Its bytes are read only when it holds at most [maxBytes].
   Future<TreeFile?> file(String path, {required int maxBytes});
+
+  /// [file] for each of [paths], in as few reads as the transport allows: a map holding every path asked, null where
+  /// there is no regular file.
+  Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes});
 }

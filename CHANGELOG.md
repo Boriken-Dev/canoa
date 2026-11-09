@@ -91,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Opening or refreshing the store reads a catalog's icons with one `git ls-tree` per few thousand characters of paths and one `git cat-file --batch`, not a process pair for each icon.
 - The store offers Update and Remove only for an overlay it installed (its install record names the catalog); an overlay canoa.cfg names by hand from the same source is said to be, and left alone.
 - The store shows an entry's homepage and repository as links that open in the system's browser when tapped (a plain ASCII `http` or `https` address; anything else stays text), as the overlay specification asks.
 - A reopened session whose agent refuses, or no longer offers, the mode it was left in is given the profile's mode, and the profile report no longer says the kept mode replaced it.

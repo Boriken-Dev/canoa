@@ -115,24 +115,27 @@ Future<LoadedCatalog> loadCatalog(OverlayManager overlays, String label, GitOver
   final kept = all.keys.take(settings.catalogMaxEntries).toList();
   final catalog = StoreCatalog(name: read.name, description: read.description, homepage: read.homepage,
       entries: {for (final name in kept) name: all[name]!}, refused: read.overlays.refused, ignored: read.ignored);
-  // Each icon file is read once, however many entries name it, and no more files than the limit.
-  final byPath = <String, CatalogIcon>{};
-  final icons = <String, CatalogIcon>{};
+  // Each icon file is read once, however many entries name it, and no more files than the limit, all in one batch.
+  final wanted = <String>{};
+  final pathOf = <String, String?>{};
   final folder = _dirname(source.path);
   for (final entry in catalog.entries.values) {
     final icon = entry.about['icon'];
     if (icon is! String) continue;
     final path = folder.isEmpty ? icon : '$folder/$icon';
-    if (byPath[path] case final known?) {
-      icons[entry.name] = known;
-      continue;
+    if (!wanted.contains(path) && wanted.length >= settings.catalogMaxIcons) {
+      pathOf[entry.name] = null;
+    } else {
+      wanted.add(path);
+      pathOf[entry.name] = path;
     }
-    if (byPath.length >= settings.catalogMaxIcons) {
-      icons[entry.name] = (bytes: null, refused: 'icon-limit');
-      continue;
-    }
-    icons[entry.name] = byPath[path] = await _icon(tree, path, settings);
   }
+  final fetched = wanted.isEmpty ? const <String, TreeFile?>{} : await tree.readFiles(wanted.toList(), maxBytes: settings.iconMaxBytes);
+  final byPath = {for (final path in wanted) path: _icon(fetched[path], path, settings)};
+  final icons = <String, CatalogIcon>{
+    for (final MapEntry(key: name, value: path) in pathOf.entries)
+      name: path == null ? (bytes: null, refused: 'icon-limit') : byPath[path]!,
+  };
   return LoadedCatalog(label: label, source: source, commit: tree.commit, catalog: catalog, icons: icons,
       leftOut: all.length - kept.length);
 }
@@ -140,9 +143,8 @@ Future<LoadedCatalog> loadCatalog(OverlayManager overlays, String label, GitOver
 CatalogEntry catalogEntryOf(String name, aos.CatalogEntry entry) =>
     CatalogEntry(name, entry.source, pin: entry.pin, description: entry.description, about: entry.about ?? const {});
 
-Future<CatalogIcon> _icon(FetchedTree tree, String path, StoreSettings settings) async {
+CatalogIcon _icon(TreeFile? found, String path, StoreSettings settings) {
   try {
-    final found = await tree.file(path, maxBytes: settings.iconMaxBytes);
     if (found == null) return (bytes: null, refused: 'icon-missing');
     final bytes = found.bytes;
     if (bytes == null) return (bytes: null, refused: 'icon-too-large');

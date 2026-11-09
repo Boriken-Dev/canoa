@@ -187,6 +187,29 @@ void main() {
       expect(Directory(store.directoryOf('review')).existsSync(), isFalse);
     });
 
+    test('many files are read in a few git processes and come out as one at a time gives them', () async {
+      // Enough long names that one command line could not hold them all on Windows.
+      final names = [for (var i = 0; i < 400; i++) 'icons/${'long-directory-name-' * 3}$i.png'];
+      for (final name in names) {
+        team.write(name, png(16 + name.length % 7, 16));
+      }
+      team.write('icons/big.png', List<int>.filled(5000, 7));
+      team.commit('many icons');
+      final tree = await store.fetchCatalog('team', config.catalogs['team']!);
+      final asked = [...names, 'icons/big.png', 'icons', 'icons/missing.png', '../escape.png', 'catalog.toml'];
+      final batch = await tree.readFiles(asked, maxBytes: 4000);
+      expect(batch.keys.toSet(), asked.toSet(), reason: 'every path asked is answered');
+      for (final path in asked) {
+        final single = await tree.file(path, maxBytes: 4000);
+        expect(batch[path]?.size, single?.size, reason: path);
+        expect(batch[path]?.bytes, single?.bytes, reason: path);
+      }
+      expect(batch['icons/big.png'], (size: 5000, bytes: null), reason: 'larger than asked: size only');
+      expect(batch['icons'], isNull, reason: 'a directory is no file');
+      expect(batch['icons/missing.png'], isNull);
+      expect(batch[names.first]!.bytes, isNotEmpty);
+    });
+
     test('a catalog pin that does not match the fetched tree is a refusal, and installs nothing', () async {
       final entry = (await listing()).choose('stale').entry;
       final preview = await previewOverlay(store, installName(entry), installSource(entry),
@@ -341,6 +364,14 @@ void main() {
       final loaded = await loadCatalog(overlays, 'many', source, const StoreSettings());
       expect(loaded.icons.values.every((icon) => icon.bytes != null), isTrue);
       expect(overlays.trees['many']!.reads.where((path) => path == 'i0.png'), hasLength(1));
+    });
+
+    test('every icon is asked for in one batch, not file by file', () async {
+      final overlays = many(5, icon: (i) => 'i$i.png');
+      await loadCatalog(overlays, 'many', source, const StoreSettings());
+      final tree = overlays.trees['many']!;
+      expect(tree.batches, hasLength(1));
+      expect(tree.batches.single, ['i0.png', 'i1.png', 'i2.png', 'i3.png', 'i4.png']);
     });
 
     test('no more icon files are read than [store] catalog_max_icons, nor entries listed than catalog_max_entries',

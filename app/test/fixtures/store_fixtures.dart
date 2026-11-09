@@ -144,6 +144,9 @@ final class MemoryTree implements FetchedTree {
 
   /// Every path read, in order.
   final reads = <String>[];
+
+  /// The paths each call of [files] was given.
+  final batches = <List<String>>[];
   @override
   final String commit;
   @override
@@ -152,6 +155,12 @@ final class MemoryTree implements FetchedTree {
     final bytes = files[path];
     if (bytes == null) return null;
     return (size: bytes.length, bytes: bytes.length > maxBytes ? null : bytes);
+  }
+
+  @override
+  Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes}) async {
+    batches.add(paths);
+    return {for (final path in paths) path: await file(path, maxBytes: maxBytes)};
   }
 }
 

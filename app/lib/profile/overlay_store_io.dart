@@ -472,6 +472,50 @@ final class _GitTree implements FetchedTree {
     final bytes = (await _store._blobs(_cache, [fields[2]]))[fields[2]]!;
     return (size: size, bytes: bytes.length > maxBytes ? null : bytes);
   }
+
+  /// The most characters of paths one `ls-tree` is given: Windows ends a command line at 32767 characters.
+  static const _pathBudget = 8000;
+
+  /// Reads the paths with one `ls-tree` per [_pathBudget] characters of them and one `cat-file --batch` for every blob
+  /// wanted, where [file] spends two processes on each path.
+  @override
+  Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes}) async {
+    final out = <String, TreeFile?>{for (final path in paths) path: null};
+    final found = <String, ({String id, int size})>{};
+    final valid = {for (final path in paths) if (aos.validRelativePath(path)) path}.toList();
+    var at = 0;
+    while (at < valid.length) {
+      var length = 0;
+      final chunk = <String>[];
+      while (at < valid.length && (chunk.isEmpty || length + valid[at].length + 1 <= _pathBudget)) {
+        length += valid[at].length + 1;
+        chunk.add(valid[at++]);
+      }
+      final listed = await _store._run(['--git-dir=$_cache', 'ls-tree', '-l', '-z', '--full-tree', commit, '--', ...chunk],
+          binary: true);
+      if (listed.exitCode != 0) throw const OverlayException('git ls-tree failed');
+      final asked = chunk.toSet();
+      for (final record in utf8.decode(listed.stdout as List<int>, allowMalformed: true).split('\u0000')) {
+        final tab = record.indexOf('\t');
+        if (tab < 0 || !asked.contains(record.substring(tab + 1))) continue;
+        final fields = record.substring(0, tab).split(RegExp(' +'));
+        if (fields.length != 4 || fields[1] != 'blob' || (fields[0] != '100644' && fields[0] != '100755')) continue;
+        final size = int.tryParse(fields[3]);
+        if (size != null) found[record.substring(tab + 1)] = (id: fields[2], size: size);
+      }
+    }
+    final wanted = {for (final entry in found.values) if (entry.size <= maxBytes) entry.id}.toList();
+    final blobs = await _store._blobs(_cache, wanted);
+    for (final MapEntry(key: path, value: entry) in found.entries) {
+      if (entry.size > maxBytes) {
+        out[path] = (size: entry.size, bytes: null);
+      } else {
+        final bytes = blobs[entry.id]!;
+        out[path] = (size: entry.size, bytes: bytes.length > maxBytes ? null : bytes);
+      }
+    }
+    return out;
+  }
 }
 
 /// [program] as a full path: itself when it names a path, else the first match in an absolute directory of `PATH`.
