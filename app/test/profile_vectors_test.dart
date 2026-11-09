@@ -3,7 +3,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:canoa/profile/aos.dart';
+import 'package:canoa/profile/aos_support.dart';
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -63,7 +64,7 @@ void main() {
     test('overlay: ${vector['name']}', () async {
       final os = vector['os'] as String;
       final layers = <String, Layer>{};
-      final manifests = <String, Map<String, Object?>>{};
+      final manifests = <String, aos.Document>{};
       final refused = <Map<String, Object?>>[];
       for (final overlay in (vector['overlays'] as List).cast<Map<dynamic, dynamic>>()) {
         final identity = overlay['identity'] as String;
@@ -74,21 +75,20 @@ void main() {
             os: os,
             harness: vector['harness'] as String?,
             pinned: overlay['pinned'] == true,
-            tree: [
-              for (final MapEntry(:key, :value) in (overlay['files'] as Map).entries)
-                AosTreeEntry.file('$key', utf8.encode('$value')),
-            ],
+            tree: treeOfFiles({
+              for (final MapEntry(:key, :value) in (overlay['files'] as Map).entries) '$key': utf8.encode('$value'),
+            }).tree,
           );
-          manifests[normalizeName(identity)] = layer.aos!.manifest;
-          layers[normalizeName(identity)] = layer;
+          manifests[aos.normalizeName(identity)] = layer.aos!.manifest;
+          layers[aos.normalizeName(identity)] = layer;
         } on OverlayRefusal catch (refusal) {
           refused.add({'identity': identity, 'code': refusal.code, 'subject': refusal.subject});
         }
       }
       expect(refused, vector['refused']);
-      final (visited, _) = resolveRequires(manifests, manifests.keys.toList());
+      final visited = aos.resolve(manifests, manifests.keys.toList()).installOrder;
       final ordered = [
-        for (final identity in compositionOrder(manifests, visited)) layers[identity]!,
+        for (final identity in aos.compositionOrder(manifests, visited)) layers[identity]!,
         if (vector['user'] case final String user)
           Layer(const LayerId(LayerKind.user), Profile.parse(user, LayerKind.user)),
       ];

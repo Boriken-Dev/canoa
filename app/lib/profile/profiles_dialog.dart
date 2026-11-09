@@ -1,11 +1,11 @@
 import 'dart:convert';
 
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
 import '../store/store_icon.dart';
 import '../store/store_page.dart';
-import 'aos.dart';
 import 'overlay_layer.dart';
 import 'overlays.dart';
 import 'profile.dart';
@@ -420,11 +420,11 @@ class OverlayReportView extends StatelessWidget {
 /// the still pixels of its first frame, or a placeholder drawn from its name.
 class OverlayIcon extends StatelessWidget {
   const OverlayIcon({super.key, required this.name, required this.path, required this.bytes,
-      this.limits = const IconLimits()});
+      this.limits});
   final String name;
   final String path;
   final List<int> bytes;
-  final IconLimits limits;
+  final aos.Settings? limits;
 
   @override
   Widget build(BuildContext context) => StillIcon(name: name, path: path, bytes: bytes, size: 32, limits: limits);

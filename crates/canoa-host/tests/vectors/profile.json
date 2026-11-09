@@ -1722,6 +1722,10 @@
             "unresolved": [],
             "non_defaults": [
               [
+                "env-passthrough",
+                "TOOL_TOKEN"
+              ],
+              [
                 "insecure-transport",
                 "remote"
               ],

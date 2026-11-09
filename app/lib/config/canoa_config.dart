@@ -1,13 +1,13 @@
 import 'dart:convert' show jsonEncode;
 
+import 'package:coqui_aos/coqui_aos.dart' show normalizeName, validOverlayName;
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
 import '../chat/modes.dart' show modeOrder;
 import '../ledger/session_ledger.dart';
-import '../profile/aos.dart' show normalizeName, validOverlayName;
-import '../profile/aos_catalog.dart' show holdsPassword;
+import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';

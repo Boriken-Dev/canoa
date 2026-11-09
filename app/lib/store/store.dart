@@ -6,10 +6,12 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 
 import '../config/canoa_config.dart';
-import '../profile/aos.dart';
-import '../profile/aos_catalog.dart';
+import '../profile/aos_support.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/overlays.dart';
 import '../profile/profile.dart';
@@ -26,6 +28,34 @@ final class StoreRefusal implements Exception {
 /// A catalog's icon for one entry: its bytes once the header passed the limits, or the class it was refused by.
 typedef CatalogIcon = ({List<int>? bytes, String? refused});
 
+/// One entry of a catalog as the store shows it: its name there, where it comes from and what the catalog claims.
+final class CatalogEntry {
+  const CatalogEntry(this.name, this.source, {this.pin, this.description, this.about = const {}});
+
+  final String name;
+  final aos.Source source;
+  final String? pin;
+  final String? description;
+
+  /// The valid fields of the entry's `about`.
+  final Map<String, Object> about;
+}
+
+/// A catalog as the store keeps it: its entries by name, in byte order of their names.
+final class StoreCatalog {
+  const StoreCatalog({required this.entries, required this.refused, required this.ignored, this.name, this.description,
+      this.homepage});
+
+  final String? name, description, homepage;
+  final Map<String, CatalogEntry> entries;
+
+  /// `(name, class)` of each entry refused.
+  final List<(String, String)> refused;
+
+  /// The pointers of the fields left out.
+  final List<String> ignored;
+}
+
 /// One catalog as the store read it, or why it could not.
 final class LoadedCatalog {
   const LoadedCatalog({required this.label, required this.source, this.commit, this.catalog, this.problem,
@@ -37,7 +67,7 @@ final class LoadedCatalog {
   final String label;
   final GitOverlay source;
   final String? commit;
-  final AosCatalog? catalog;
+  final StoreCatalog? catalog;
 
   /// Why the whole catalog is left out.
   final String? problem;
@@ -70,17 +100,21 @@ Future<LoadedCatalog> loadCatalog(OverlayManager overlays, String label, GitOver
     return failed('Its file holds ${file.size} bytes, more than the ${settings.catalogMaxBytes} [store] allows',
         tree.commit);
   }
-  final AosCatalog read;
+  final aos.Catalog read;
   try {
-    read = readCatalog(source.path, bytes,
-        base: AosSource(SourceKind.git, source.repo, source.reference, source.path), limits: settings.catalogLimits);
-  } on AosException catch (error) {
-    return failed('It is not a catalog Canoa reads (${error.code})', tree.commit);
+    read = aos.readCatalog(Uint8List.fromList(bytes), source.path,
+        'git+${source.repo}@${source.reference}${source.path.isEmpty ? '' : '#${source.path}'}', settings.catalogLimits);
+  } on aos.AosError catch (error) {
+    return failed('It is not a catalog Canoa reads (${error.errorClass})', tree.commit);
   }
   // Entries are in byte order of their names: those past the limit are left out, and counted.
-  final kept = read.entries.keys.take(settings.catalogMaxEntries).toList();
-  final catalog = AosCatalog(form: read.form, name: read.name, description: read.description, homepage: read.homepage,
-      entries: {for (final name in kept) name: read.entries[name]!}, refused: read.refused, ignored: read.ignored);
+  final all = <String, CatalogEntry>{
+    for (final name in read.overlays.entries.keys.toList()..sort((a, b) => compareBytes(utf8.encode(a), utf8.encode(b))))
+      name: catalogEntryOf(name, read.overlays.entries[name]!),
+  };
+  final kept = all.keys.take(settings.catalogMaxEntries).toList();
+  final catalog = StoreCatalog(name: read.name, description: read.description, homepage: read.homepage,
+      entries: {for (final name in kept) name: all[name]!}, refused: read.overlays.refused, ignored: read.ignored);
   // Each icon file is read once, however many entries name it, and no more files than the limit.
   final byPath = <String, CatalogIcon>{};
   final icons = <String, CatalogIcon>{};
@@ -100,8 +134,11 @@ Future<LoadedCatalog> loadCatalog(OverlayManager overlays, String label, GitOver
     icons[entry.name] = byPath[path] = await _icon(tree, path, settings);
   }
   return LoadedCatalog(label: label, source: source, commit: tree.commit, catalog: catalog, icons: icons,
-      leftOut: read.entries.length - kept.length);
+      leftOut: all.length - kept.length);
 }
+
+CatalogEntry catalogEntryOf(String name, aos.CatalogEntry entry) =>
+    CatalogEntry(name, entry.source, pin: entry.pin, description: entry.description, about: entry.about ?? const {});
 
 Future<CatalogIcon> _icon(FetchedTree tree, String path, StoreSettings settings) async {
   try {
@@ -109,44 +146,70 @@ Future<CatalogIcon> _icon(FetchedTree tree, String path, StoreSettings settings)
     if (found == null) return (bytes: null, refused: 'icon-missing');
     final bytes = found.bytes;
     if (bytes == null) return (bytes: null, refused: 'icon-too-large');
-    checkIcon(path, bytes, limits: settings.iconLimits);
+    aos.readIcon(Uint8List.fromList(bytes), path, settings.iconLimits);
     return (bytes: bytes, refused: null);
-  } on AosException catch (error) {
-    return (bytes: null, refused: error.code);
+  } on aos.AosError catch (error) {
+    return (bytes: null, refused: error.errorClass);
   }
 }
 
 /// [source] as a store shows it: without user information or query, which can hold a credential.
-String displaySource(AosSource source) {
-  var location = source.location;
-  final scheme = location.indexOf('://');
-  if (scheme >= 0) {
-    final start = scheme + 3;
-    var end = location.indexOf(RegExp(r'[/?#]'), start);
-    if (end < 0) end = location.length;
-    final at = location.lastIndexOf('@', end - 1);
-    if (at >= start) location = location.substring(0, start) + location.substring(at + 1);
-    final query = location.indexOf('?');
-    if (query >= 0) location = location.substring(0, query);
-  }
-  return '$location${source.reference == null ? '' : '@${source.reference}'}'
-      '${source.path == null ? '' : '#${source.path}'}';
+String displaySource(aos.Source source) => source.shown();
+
+/// One entry in a listing of several catalogs.
+final class ListedEntry {
+  const ListedEntry(this.label, this.entry, {required this.shown});
+
+  /// The label of the catalog it comes from, the person's own name for that catalog.
+  final String label;
+  final CatalogEntry entry;
+
+  /// Its name as shown: `<label>/<name>` when more than one catalog offers its identity, else its name.
+  final String shown;
+
+  String get identity => aos.normalizeName(entry.name);
 }
 
 /// The listing of every catalog read, searchable.
 final class StoreListing {
-  StoreListing(this.catalogs) : listing = listCatalogs([
-    for (final loaded in catalogs)
-      if (loaded.catalog case final catalog?) (loaded.label, catalog),
-  ]);
+  StoreListing(this.catalogs) : listing = aos.listCatalogs([for (final loaded in catalogs) ?_read(loaded)]) {
+    entries = [
+      for (final listed in listing.entries)
+        ListedEntry(listed.catalog, catalogs.firstWhere((loaded) => loaded.label == listed.catalog).catalog!.entries[listed.name]!,
+            shown: listed.shown),
+    ];
+  }
+
+  static (String, aos.Catalog)? _read(LoadedCatalog loaded) {
+    final catalog = loaded.catalog;
+    if (catalog == null) return null;
+    // listCatalogs reads names only: the entries need no source.
+    final read = aos.Catalog(
+      form: 'minimal',
+      name: null,
+      description: null,
+      homepage: null,
+      skills: null,
+      overlays: aos.CatalogSection()
+        ..entries.addAll({
+          for (final entry in catalog.entries.values)
+            entry.name: aos.CatalogEntry(source: entry.source, pin: entry.pin, description: entry.description, about: entry.about),
+        }),
+      ignored: const [],
+    );
+    return (loaded.label, read);
+  }
 
   final List<LoadedCatalog> catalogs;
-  final CatalogListing listing;
+  final aos.Listing listing;
+
+  /// Every entry, in the order [aos.listCatalogs] lists them.
+  late final List<ListedEntry> entries;
 
   /// The [count] tags the most entries carry, the most used first, then by name.
   List<String> topTags(int count) {
     final uses = <String, int>{};
-    for (final listed in listing.entries) {
+    for (final listed in entries) {
       for (final tag in _tags(listed.entry).toSet()) {
         uses.update(tag, (n) => n + 1, ifAbsent: () => 1);
       }
@@ -158,7 +221,7 @@ final class StoreListing {
 
   /// Every tag the listed entries carry, sorted.
   late final List<String> tags =
-      {for (final listed in listing.entries) ..._tags(listed.entry)}.toList()..sort();
+      {for (final listed in entries) ..._tags(listed.entry)}.toList()..sort();
 
   LoadedCatalog catalogOf(ListedEntry listed) => catalogs.firstWhere((loaded) => loaded.label == listed.label);
 
@@ -167,9 +230,15 @@ final class StoreListing {
   List<ListedEntry> search(String text, {Set<String> tags = const {}}) {
     final words = text.toLowerCase().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
     return [
-      for (final listed in listing.entries)
+      for (final listed in entries)
         if (tags.every(_tags(listed.entry).contains) && words.every(_haystack(listed).contains)) listed,
     ];
+  }
+
+  /// The entry [requested] names, as `<name>` or `<label>/<name>`. Throws [aos.AosError] `not-found` or `ambiguous`.
+  ListedEntry choose(String requested) {
+    final chosen = aos.chooseListed(listing, requested);
+    return entries.firstWhere((listed) => listed.label == chosen.catalog && listed.entry.name == chosen.name);
   }
 
   static List<String> _tags(CatalogEntry entry) => [
@@ -191,7 +260,7 @@ final class StoreListing {
 /// form, which is the same AOS identity.
 String installName(CatalogEntry entry) {
   if (isEntryName(entry.name)) return entry.name;
-  final normalized = normalizeName(entry.name);
+  final normalized = aos.normalizeName(entry.name);
   if (isEntryName(normalized)) return normalized;
   throw StoreRefusal('Canoa names an overlay with 1 to 64 letters, digits, - or _, and ${entry.name} has no such form');
 }
@@ -199,7 +268,7 @@ String installName(CatalogEntry entry) {
 /// The git source Canoa installs [entry] from, held to what an overlay named by hand in canoa.cfg is held to.
 GitOverlay installSource(CatalogEntry entry) {
   final source = entry.source;
-  if (source.kind != SourceKind.git) {
+  if (source.kind != 'git') {
     throw const StoreRefusal('Canoa installs overlays from git only, and this source is not git');
   }
   final reference = source.reference;
@@ -230,7 +299,7 @@ enum EntryState {
 
 /// [name] as `[overlays]` has it, when an overlay of the same AOS identity is named there.
 String? namedAs(CanoaConfig config, String name) =>
-    config.overlays.keys.where((key) => normalizeName(key) == normalizeName(name)).firstOrNull;
+    config.overlays.keys.where((key) => aos.normalizeName(key) == aos.normalizeName(name)).firstOrNull;
 
 EntryState entryState(CanoaConfig config, String name, GitOverlay source) {
   final named = namedAs(config, name);
@@ -251,7 +320,7 @@ final class OverlayPreview {
   final OverlayUpdate update;
 
   /// Its `overlay.cfg` as read, or empty when it has none or it cannot be read.
-  final Map<String, Object?> manifest;
+  final aos.Document manifest;
 
   /// The valid fields of its own `[about]`.
   final Map<String, Object> about;
@@ -307,44 +376,49 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   required Map<String, LayerId> shared,
   String? catalogPin,
   String? harness,
-  IconLimits iconLimits = const IconLimits(),
+  aos.Settings? iconLimits,
 }) async {
   final update = await overlays.check(name, source.pinnedTo(null));
   final files = await overlays.read(update);
-  final tree = [for (final MapEntry(:key, :value) in files.entries) AosTreeEntry.file(key, value)];
-  if (!sameDigest(digestEntries(tree).digest, update.digest)) {
+  final ReadTree read;
+  try {
+    read = treeOfFiles(files);
+  } on aos.AosError catch (error) {
+    throw StoreRefusal('The files read cannot be an overlay (${error.errorClass})');
+  }
+  if (!sameDigest('${read.digest.digest}', update.digest)) {
     throw const StoreRefusal('The files read do not have the digest fetched');
   }
   String? pinRefusal;
   if (catalogPin != null && !sameDigest(catalogPin, update.digest)) {
     pinRefusal = 'The catalog pins $catalogPin, and what was fetched is ${update.digest}: refused';
   }
-  Map<String, Object?> manifest = const {};
+  aos.Document manifest = const {};
   if (files['overlay.cfg'] case final bytes?) {
     try {
-      manifest = readDocument(bytes);
-    } on AosException {
+      manifest = aos.readDocument(Uint8List.fromList(bytes), aos.defaultSettings);
+    } on aos.AosError {
       manifest = const {};
     }
   }
   final ignored = <String>[];
-  final about = manifest.containsKey('about') ? storeAbout(manifest['about'], '/about', ignored) ?? const {} : const <String, Object>{};
+  final about = manifest.containsKey('about') ? _storeAbout(manifest['about'], '/about', ignored) ?? const {} : const <String, Object>{};
   List<int>? icon;
   String? iconRefused;
   if (about['icon'] case final String path) {
     try {
-      final bytes = files[path] ?? (throw const AosException('icon-missing'));
-      checkIcon(path, bytes, limits: iconLimits);
+      final bytes = files[path] ?? (throw aos.AosError('icon-missing'));
+      aos.readIcon(Uint8List.fromList(bytes), path, iconLimits ?? aos.defaultSettings);
       icon = bytes;
-    } on AosException catch (error) {
-      iconRefused = error.code;
+    } on aos.AosError catch (error) {
+      iconRefused = error.errorClass;
     }
   }
   Layer? layer;
   OverlayReport? report;
   String? refusal;
   try {
-    layer = overlayLayer(identity: name, root: overlays.directoryOf(name), os: os, tree: tree, harness: harness,
+    layer = overlayLayer(identity: name, root: overlays.directoryOf(name), os: os, tree: read.tree, harness: harness,
         pinned: true, iconLimits: iconLimits);
     report = overlayReport(layer.id, layer.aos!, shared);
   } on OverlayRefusal catch (error) {
@@ -405,3 +479,21 @@ String tagLine(Map<String, Object> about) => [for (final tag in (about['tags'] a
 
 /// [bytes] as text for showing, never interpreted.
 String plainText(List<int> bytes) => utf8.decode(bytes, allowMalformed: true);
+
+/// What a store shows of an `about` table at [at]: each invalid or unknown field left out and its pointer added to
+/// [ignored]; null when nothing is left, or when it is not a table, which is then left out whole.
+Map<String, Object>? _storeAbout(Object? about, String at, List<String> ignored) {
+  if (about is! Map<String, Object>) {
+    ignored.add(at);
+    return null;
+  }
+  final shown = <String, Object>{};
+  for (final MapEntry(key: field, :value) in about.entries) {
+    if (aos.aboutFieldValid(field, value)) {
+      shown[field] = value;
+    } else {
+      ignored.add('$at/${field.replaceAll('~', '~0').replaceAll('/', '~1')}');
+    }
+  }
+  return shown.isEmpty ? null : shown;
+}

@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'aos.dart';
+import 'package:coqui_aos/coqui_aos.dart' as aos;
+
+import 'aos_support.dart';
 import 'overlays.dart';
 import 'profile.dart';
 
@@ -106,7 +108,7 @@ final class OverlayStore implements OverlayManager {
     await staging.create(recursive: true);
     try {
       final blobs = await _blobs(cache, update.files.values.toSet().toList());
-      final written = <AosTreeEntry>[];
+      final written = <String, List<int>>{};
       for (final MapEntry(key: path, value: blob) in update.files.entries) {
         final bytes = blobs[blob]!;
         final file = File('${staging.path}${Platform.pathSeparator}${path.replaceAll('/', Platform.pathSeparator)}');
@@ -114,10 +116,10 @@ final class OverlayStore implements OverlayManager {
         // Exclusive: a name the file system takes for one already written fails the install rather than replacing it.
         await file.create(exclusive: true);
         await file.writeAsBytes(bytes, flush: true);
-        written.add(AosTreeEntry.file(path, bytes));
+        written[path] = bytes;
       }
       // The copy used is the copy hashed.
-      if (!sameDigest(digestEntries(written).digest, update.digest)) {
+      if (!sameDigest('${treeOfFiles(written).digest.digest}', update.digest)) {
         throw const OverlayException('The files read do not have the digest shown: nothing was installed');
       }
     } on Object {
@@ -175,7 +177,7 @@ final class OverlayStore implements OverlayManager {
       '${_path('.catalogs')}${Platform.pathSeparator}$label.git';
 
   void _checkLabel(String label) {
-    if (!isEntryName(label) || !validOverlayName(label)) {
+    if (!isEntryName(label) || !aos.validOverlayName(label)) {
       throw const OverlayException('A catalog label is a valid overlay name of at most 64 letters, digits, - or _');
     }
   }
@@ -239,7 +241,7 @@ final class OverlayStore implements OverlayManager {
   /// equal without ASCII case refuse the whole overlay. Entries under an excluded name are left out, never installed.
   Future<(OverlayFiles, List<String>, String)> _list(String cache, String commit, String path) async {
     final prefix = path.isEmpty ? <int>[] : utf8.encode('$path/');
-    final entries = <(AosTreeEntry, String)>[];
+    final entries = <(_Listed, String)>[];
     final folded = <String, String>{};
     var count = 0, bytes = 0;
     void take(List<int> line) {
@@ -251,10 +253,10 @@ final class OverlayStore implements OverlayManager {
       final relative = full.sublist(prefix.length);
       final (mode, type, blob) = (fields[0], fields[1], fields[2]);
       final kind = mode == '120000'
-          ? AosEntryKind.symlink
+          ? _Kind.symlink
           : type == 'blob'
-          ? AosEntryKind.file
-          : AosEntryKind.special;
+          ? _Kind.file
+          : _Kind.special;
       final components = <List<int>>[[]];
       for (final byte in relative) {
         if (byte == 0x2f) {
@@ -263,8 +265,8 @@ final class OverlayStore implements OverlayManager {
           components.last.add(byte);
         }
       }
-      final entry = AosTreeEntry(components, kind);
-      if (!entry.isExcluded && kind != AosEntryKind.file) {
+      final entry = _Listed(components, kind);
+      if (!entry.isExcluded && kind != _Kind.file) {
         throw const OverlayException('The source holds a link or a submodule, which no overlay has');
       }
       if (!entry.isExcluded) {
@@ -277,7 +279,7 @@ final class OverlayStore implements OverlayManager {
           }
         }
       }
-      if (kind == AosEntryKind.file && !entry.isExcluded) {
+      if (kind == _Kind.file && !entry.isExcluded) {
         count++;
         bytes += int.tryParse(fields[3]) ?? 0;
         if (count > maxFiles) throw OverlayException('The overlay holds more than $maxFiles files');
@@ -308,19 +310,25 @@ final class OverlayStore implements OverlayManager {
     if (await lister.exitCode != 0) throw const OverlayException('git ls-tree failed');
     final members = [
       for (final (entry, blob) in entries)
-        if (entry.kind == AosEntryKind.file && !entry.isExcluded) (entry, blob),
+        if (entry.kind == _Kind.file && !entry.isExcluded) (entry, blob),
     ];
     if (members.isEmpty) throw const OverlayException('The source has no files at that path and commit');
     final blobs = await _blobs(cache, {for (final (_, blob) in members) blob}.toList());
     final String digest;
     try {
-      digest = digestEntries([
+      digest = '${aos.digestEntries([
         for (final (entry, blob) in entries)
-          AosTreeEntry(entry.components, entry.kind,
-              entry.kind == AosEntryKind.file && !entry.isExcluded ? blobs[blob]! : const []),
-      ]).digest;
-    } on AosException catch (error) {
-      throw OverlayException('The source cannot be an overlay (${error.code}: ${error.subject})');
+          (
+            [for (final part in entry.components) Uint8List.fromList(part)],
+            switch (entry.kind) {
+              _Kind.file => aos.FileEntry(entry.isExcluded ? Uint8List(0) : Uint8List.fromList(blobs[blob]!)),
+              _Kind.symlink => const aos.SymlinkEntry(),
+              _Kind.special => const aos.SpecialEntry(),
+            },
+          ),
+      ]).digest}';
+    } on aos.AosError catch (error) {
+      throw OverlayException('The source cannot be an overlay (${error.errorClass}: ${error.subject})');
     }
     return (
       {for (final (entry, blob) in members) entry.path: blob},
@@ -442,7 +450,7 @@ final class _GitTree implements FetchedTree {
 
   @override
   Future<TreeFile?> file(String path, {required int maxBytes}) async {
-    if (!isRelativePath(path)) return null;
+    if (!aos.validRelativePath(path)) return null;
     final listed = await _store._run(['--git-dir=$_cache', 'ls-tree', '-l', '-z', '--full-tree', commit, '--', path],
         binary: true);
     if (listed.exitCode != 0) throw const OverlayException('git ls-tree failed');
@@ -475,4 +483,22 @@ String _find(String program) {
     }
   }
   throw OverlayException('$program is not in an absolute directory of PATH');
+}
+
+/// How git lists an entry.
+enum _Kind { file, symlink, special }
+
+/// One entry of a source's tree: its name as bytes by component, and what it is.
+final class _Listed {
+  _Listed(this.components, this.kind);
+
+  final List<List<int>> components;
+  final _Kind kind;
+
+  String get path => components.map((part) => utf8.decode(part, allowMalformed: true)).join('/');
+
+  /// Under an excluded name, which is no part of an overlay.
+  bool get isExcluded =>
+      components.any((part) => aos.excludedComponents.contains(utf8.decode(part, allowMalformed: true))) ||
+      kind == _Kind.file && components.last.length >= 4 && path.endsWith('.pyc');
 }

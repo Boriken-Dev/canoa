@@ -7,9 +7,10 @@ import 'dart:convert';
 
 import 'package:coqui_acp/coqui_acp.dart'
     show AcpMcpHttp, AcpMcpServer, AcpMcpStdio, AcpMcpTransport, AcpSessionSetup;
+import 'package:coqui_aos/coqui_aos.dart' as pkg;
 import 'package:crypto/crypto.dart';
 
-import 'aos.dart';
+import 'aos_support.dart';
 import 'overlay_layer.dart';
 import 'profile.dart';
 import 'profile_home.dart';
@@ -216,7 +217,7 @@ Future<PreparedProfile> prepareProfile(
   required Future<String?> Function(String program) findProgram,
 }) async {
   final effective = layers.effective;
-  final after = <String, AosEnvironment>{};
+  final after = <String, BuiltEnvironment>{};
   final environment = await effective.environment(lookup: lookup, readFile: home.readSecret, after: after);
   final problems = <ProfileItem>[];
   AosLayer? aosOf(LayerId layer) =>
@@ -312,19 +313,18 @@ Future<PreparedSkill> _skillFromDisk(String name, Sourced<Skill> skill, ProfileH
       return PreparedSkill(name, skill.layer, refused: 'its directory, links resolved, is outside its layer');
     }
   }
-  final List<AosTreeEntry> tree;
+  final ReadTree read;
   try {
-    tree = await home.readTree(directory, maxFiles: maxSkillFiles, maxBytes: maxSkillBytes);
+    read = await home.readTree(directory, maxFiles: maxSkillFiles, maxBytes: maxSkillBytes);
+  } on pkg.AosError catch (error) {
+    if (error.errorClass == 'symlink' || error.errorClass == 'special-file') {
+      return PreparedSkill(name, skill.layer, refused: 'its directory holds a link or a special file');
+    }
+    return PreparedSkill(name, skill.layer, refused: 'its files cannot be read (${error.message})');
   } on Object catch (error) {
     return PreparedSkill(name, skill.layer, refused: 'its files cannot be read ($error)');
   }
-  if (tree.any((entry) => entry.kind == AosEntryKind.symlink || entry.kind == AosEntryKind.special)) {
-    return PreparedSkill(name, skill.layer, refused: 'its directory holds a link or a special file');
-  }
-  final files = {
-    for (final entry in tree)
-      if (entry.kind == AosEntryKind.file && !entry.isExcluded) entry.path: entry.data,
-  };
+  final files = {for (final path in read.tree.paths()) path: read.tree.bytes(path)!.toList()};
   return files.containsKey('SKILL.md')
       ? PreparedSkill(name, skill.layer, files: files)
       : PreparedSkill(name, skill.layer, refused: 'its directory holds no SKILL.md');
@@ -334,7 +334,7 @@ Future<PreparedMcp> _prepareMcp(
   String name,
   Sourced<McpServer> sourced,
   EffectiveProfile effective,
-  Map<String, AosEnvironment> after,
+  Map<String, BuiltEnvironment> after,
   ProfileHome home,
   String? Function(String) lookup,
   Future<String?> Function(String) findProgram,
@@ -348,16 +348,16 @@ Future<PreparedMcp> _prepareMcp(
   final windows = home.os == 'windows';
   final withheld = <String>[];
 
-  // One value, or null when it is left out (and said in [withheld]). Throws [ProfileException] or [AosException].
+  // One value, or null when it is left out (and said in [withheld]). Throws [ProfileException] or [pkg.AosError].
   Future<String?> value(String key, String label, EnvValue raw) async {
     switch (raw) {
       case EnvText(:final text) when aos != null:
         // An overlay's text reads what that overlay's environment held once it applied, and its own root and name.
         final env = after[aos.identity];
-        return substitute(text, (variable) {
+        return pkg.substitute(text, (variable) {
           if (variable == 'AOS_OVERLAY_ROOT' || windows && variable.toUpperCase() == 'AOS_OVERLAY_ROOT') return aos.root;
           if (variable == 'AOS_OVERLAY_NAME' || windows && variable.toUpperCase() == 'AOS_OVERLAY_NAME') {
-            return normalizeName(aos.identity);
+            return pkg.normalizeName(aos.identity);
           }
           return env?.lookup(variable);
         });
@@ -446,9 +446,9 @@ Future<PreparedMcp> _prepareMcp(
   } on ProfileException catch (error) {
     return PreparedMcp(name: name, layer: layer, shown: _shown(server), digest: digest, isHttp: server is McpHttp,
         refused: '$error');
-  } on AosException catch (error) {
+  } on pkg.AosError catch (error) {
     return PreparedMcp(name: name, layer: layer, shown: _shown(server), digest: digest, isHttp: server is McpHttp,
-        refused: 'its text cannot be substituted (${error.code}: ${error.subject})');
+        refused: 'its text cannot be substituted (${error.errorClass}: ${error.subject})');
   }
 }
 

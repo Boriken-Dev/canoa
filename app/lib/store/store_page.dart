@@ -1,10 +1,9 @@
 import 'dart:async';
 
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
-import '../profile/aos.dart';
-import '../profile/aos_catalog.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
@@ -87,7 +86,7 @@ class StorePageState extends State<StorePage> {
     final name = label.text.trim(), spec = source.text.trim();
     final CanoaConfig changed;
     try {
-      if (config.catalogs.keys.any((key) => normalizeName(key) == normalizeName(name))) {
+      if (config.catalogs.keys.any((key) => aos.normalizeName(key) == aos.normalizeName(name))) {
         throw const FormatException('Another catalog has that label');
       }
       changed = config.withCatalog(name, spec);
@@ -228,7 +227,7 @@ class StorePageState extends State<StorePage> {
   Widget _catalogTile(LoadedCatalog catalog) {
     final read = catalog.catalog;
     final lines = [
-      displaySource(AosSource(SourceKind.git, catalog.source.repo, catalog.source.reference, catalog.source.path)),
+      displaySource(aos.Source('git', catalog.source.repo, catalog.source.reference, catalog.source.path)),
       if (catalog.commit case final commit?) 'At commit $commit',
       ?catalog.problem,
       if (read != null) ...[
@@ -533,7 +532,7 @@ class OverlayPageState extends State<OverlayPage> {
     final error = TextStyle(color: Theme.of(context).colorScheme.error);
     final manifestName = found.manifest['name'];
     final description = found.manifest['description'];
-    final named = config.overlays.keys.map(normalizeName).toSet();
+    final named = config.overlays.keys.map(aos.normalizeName).toSet();
     final layer = found.layer;
     final moved = pinMoved(config, found);
     Widget files(String label, List<String> paths) =>
@@ -558,7 +557,7 @@ class OverlayPageState extends State<OverlayPage> {
           'Authors': (about['authors'] as List?)?.join(', '),
           'Tags': (about['tags'] as List?)?.join(', '),
         }),
-        _field('Source', displaySource(parseSource(update.source.spec))),
+        _field('Source', displaySource(aos.Source.parse(update.source.spec))),
         _field('Commit', update.commit),
         _field('Tree digest', update.digest, key: const Key('store-digest')),
         if (found.pinRefusal case final why?)
@@ -601,7 +600,7 @@ class OverlayPageState extends State<OverlayPage> {
               '${network ? 'says it needs the network' : 'declares no network'}; Canoa does not run it'),
               style: text.bodySmall),
         for (final name in found.requires)
-          Text(oneLine(named.contains(normalizeName(name))
+          Text(oneLine(named.contains(aos.normalizeName(name))
               ? 'requires $name, which canoa.cfg names'
               : 'requires $name, which canoa.cfg does not name: install it too, or this applies without it'),
               style: text.bodySmall),
