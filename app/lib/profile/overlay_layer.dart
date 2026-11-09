@@ -70,13 +70,13 @@ final class OverlayRefusal implements Exception {
   }} ($subject)';
 }
 
-/// An AOS overlay's report in the view: what Canoa does not apply, what is not granted, and its weakenings.
+/// An AOS overlay's report in the view: what Canoa does not apply, what is not granted, and its non-default settings.
 final class OverlayReport {
-  const OverlayReport(this.layer, this.digest, this.notApplied, this.ungranted, this.unresolved, this.weakenings);
+  const OverlayReport(this.layer, this.digest, this.notApplied, this.ungranted, this.unresolved, this.nonDefaults);
   final LayerId layer;
   final String digest;
   final List<String> notApplied, ungranted, unresolved;
-  final List<AosWeakening> weakenings;
+  final List<AosNonDefault> nonDefaults;
 
   Map<String, Object?> toJson() => {
     'layer': '$layer',
@@ -84,7 +84,7 @@ final class OverlayReport {
     'not_applied': notApplied,
     'ungranted': ungranted,
     'unresolved': unresolved,
-    'weakenings': [for (final w in weakenings) [w.id, w.subject]],
+    'non_defaults': [for (final w in nonDefaults) [w.id, w.subject]],
   };
 }
 
@@ -383,14 +383,14 @@ AosFacts _facts(String os, Map<String, LayerId> shared, String? Function(String)
 /// An overlay's report, with what the person's own layers share as its grants.
 OverlayReport overlayReport(LayerId layer, AosLayer aos, Map<String, LayerId> shared) {
   final windows = aos.os == 'windows';
-  final weakenings = <AosWeakening>[if (!aos.pinned) const AosWeakening('unpinned', '')];
-  final ungranted = grantsReport(aos.manifest, _facts(aos.os, shared, (_) => null), weakenings);
+  final nonDefaults = <AosNonDefault>[if (!aos.pinned) const AosNonDefault('unpinned', '')];
+  final ungranted = grantsReport(aos.manifest, _facts(aos.os, shared, (_) => null), nonDefaults);
   final unresolved = [
     for (final (variable, reference, optional) in aos.references)
       if (!optional && !(reference.startsWith('env:') && _shared(shared, reference.substring(4), windows)))
         '$variable: $reference',
   ];
-  final sorted = weakenings.toSet().toList()..sort();
+  final sorted = nonDefaults.toSet().toList()..sort();
   return OverlayReport(layer, aos.digest, aos.notApplied, ungranted, unresolved, sorted);
 }
 

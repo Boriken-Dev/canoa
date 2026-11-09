@@ -17,7 +17,7 @@ use super::{
     Change, Context, EnvValue, Layer, LayerId, LayerKind, McpServer, Profile, ProfileError, Skill,
     is_reserved_env,
 };
-use crate::aos::{self, Environment, Facts, Limits, Overlay, TreeEntry, Weakening};
+use crate::aos::{self, Environment, Facts, Limits, NonDefault, Overlay, TreeEntry};
 
 /// An AOS overlay as Canoa applies it: what building its environment needs, and what Canoa does not apply.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,7 +112,7 @@ fn refused(code: &'static str, subject: impl Into<String>) -> OverlayRefusal {
     }
 }
 
-/// An AOS overlay's report in the view: what Canoa does not apply, what is not granted, and its weakenings.
+/// An AOS overlay's report in the view: what Canoa does not apply, what is not granted, and its non-default settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OverlayReport {
@@ -126,8 +126,8 @@ pub struct OverlayReport {
     pub ungranted: Vec<String>,
     /// Required references that cannot be resolved, as `<variable>: <reference>`: no session can start with it.
     pub unresolved: Vec<String>,
-    /// Its weakenings, each time it is activated.
-    pub weakenings: Vec<Weakening>,
+    /// Its non-default settings, each time it is activated.
+    pub non_defaults: Vec<NonDefault>,
 }
 
 impl OverlayReport {
@@ -140,10 +140,10 @@ impl OverlayReport {
             "not_applied": self.not_applied,
             "ungranted": self.ungranted,
             "unresolved": self.unresolved,
-            "weakenings": self
-                .weakenings
+            "non_defaults": self
+                .non_defaults
                 .iter()
-                .map(|weakening| json!([weakening.id, weakening.subject]))
+                .map(|non_default| json!([non_default.id, non_default.subject]))
                 .collect::<Vec<_>>(),
         })
     }
@@ -595,12 +595,12 @@ pub(crate) fn report(
     shared: &IndexMap<String, LayerId>,
 ) -> OverlayReport {
     let windows = aos.os == "windows";
-    let mut weakenings = Vec::new();
+    let mut non_defaults = Vec::new();
     if !aos.pinned {
-        weakenings.push(Weakening::new("unpinned", ""));
+        non_defaults.push(NonDefault::new("unpinned", ""));
     }
     let facts = facts(&aos.os, shared, &|_| None);
-    let ungranted = aos::grants_report(&aos.manifest, &facts, &mut weakenings);
+    let ungranted = aos::grants_report(&aos.manifest, &facts, &mut non_defaults);
     let unresolved = aos
         .references
         .iter()
@@ -612,15 +612,15 @@ pub(crate) fn report(
         })
         .map(|(variable, reference, _)| format!("{variable}: {reference}"))
         .collect();
-    weakenings.sort();
-    weakenings.dedup();
+    non_defaults.sort();
+    non_defaults.dedup();
     OverlayReport {
         layer: layer.clone(),
         digest: aos.digest.clone(),
         not_applied: aos.not_applied.clone(),
         ungranted,
         unresolved,
-        weakenings,
+        non_defaults,
     }
 }
 

@@ -185,18 +185,19 @@ pub struct Overlay<'a> {
     pub read: &'a dyn Fn(&str) -> Option<Vec<u8>>,
 }
 
-/// A weakening: a choice looser than the default, reported with an identifier and a subject, never a value.
+/// A non-default setting of an overlay: a choice other than the default, reported with an identifier and a subject, never a
+/// value.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
-pub struct Weakening {
+pub struct NonDefault {
     /// `unpinned`, `env-sensitive`, `env-passthrough`, `secret-read`, `insecure-transport`, ...
     pub id: &'static str,
     /// The variable, reference, server or path; empty for `unpinned`.
     pub subject: String,
 }
 
-impl Weakening {
-    /// The weakening `id` about `subject`.
+impl NonDefault {
+    /// The non-default setting `id` about `subject`.
     #[must_use]
     pub fn new(id: &'static str, subject: &str) -> Self {
         Self {
@@ -526,7 +527,7 @@ fn apply_mapping(
     mapping: &Map<String, Value>,
     facts: &Facts,
     root: &str,
-    weakenings: &mut Vec<Weakening>,
+    non_defaults: &mut Vec<NonDefault>,
 ) -> Result<(), AosError> {
     let windows = env.windows();
     let before = env.clone();
@@ -560,16 +561,16 @@ fn apply_mapping(
             };
             secret = true;
             match entry.get("provider").and_then(Value::as_str) {
-                Some("env") => weakenings.push(Weakening::new(
+                Some("env") => non_defaults.push(NonDefault::new(
                     "env-passthrough",
                     entry.get("key").and_then(Value::as_str).unwrap_or(""),
                 )),
-                _ => weakenings.push(Weakening::new("secret-read", &reference_name(entry))),
+                _ => non_defaults.push(NonDefault::new("secret-read", &reference_name(entry))),
             }
             value
         };
         if is_sensitive(name) {
-            weakenings.push(Weakening::new("env-sensitive", name));
+            non_defaults.push(NonDefault::new("env-sensitive", name));
         }
         env.set(name, &value, secret);
     }
@@ -581,7 +582,7 @@ fn apply_paths(
     paths: &[PathAddition],
     root: &str,
     os: &str,
-    weakenings: &mut Vec<Weakening>,
+    non_defaults: &mut Vec<NonDefault>,
 ) {
     let windows = env.windows();
     let separator = if windows { ";" } else { ":" };
@@ -606,7 +607,7 @@ fn apply_paths(
             && !["PATH", "PYTHONPATH", "NODE_PATH"]
                 .contains(&variable.to_ascii_uppercase().as_str())
         {
-            weakenings.push(Weakening::new("env-sensitive", &variable));
+            non_defaults.push(NonDefault::new("env-sensitive", &variable));
         }
         let (mut prepend, mut append, mut seen) = (Vec::new(), Vec::new(), BTreeSet::new());
         for entry in entries {
@@ -633,8 +634,8 @@ fn apply_paths(
 
 /// Applies one overlay to `env`: its env files that apply on this OS, then `env`, then `paths`, each with its defaults
 /// first, every text value substituted against the environment as it stands. The overlay's root variable is the
-/// caller's to set first, with every other active overlay's. Env scripts are not run. Weakenings found are added to
-/// `weakenings`.
+/// caller's to set first, with every other active overlay's. Env scripts are not run. Non-default settings found are added to
+/// `non_defaults`.
 ///
 /// # Errors
 ///
@@ -645,7 +646,7 @@ pub fn apply_overlay(
     env: &mut Environment,
     overlay: &Overlay<'_>,
     facts: &Facts,
-    weakenings: &mut Vec<Weakening>,
+    non_defaults: &mut Vec<NonDefault>,
 ) -> Result<(), AosError> {
     env.extra = alloc::vec![
         ("AOS_OVERLAY_ROOT".to_owned(), overlay.root.to_owned()),
@@ -658,7 +659,7 @@ pub fn apply_overlay(
         env.extra
             .push(("AOS_OVERLAY_STATE".to_owned(), state.to_owned()));
     }
-    let result = apply_inner(env, overlay, facts, weakenings);
+    let result = apply_inner(env, overlay, facts, non_defaults);
     env.extra.clear();
     result
 }
@@ -667,7 +668,7 @@ fn apply_inner(
     env: &mut Environment,
     overlay: &Overlay<'_>,
     facts: &Facts,
-    weakenings: &mut Vec<Weakening>,
+    non_defaults: &mut Vec<NonDefault>,
 ) -> Result<(), AosError> {
     let manifest = overlay.manifest;
     let paths = paths_of(manifest, overlay.files);
@@ -712,7 +713,7 @@ fn apply_inner(
                         .map_err(|error| refuse(error, &line.name))?
                 };
                 if is_sensitive(&line.name) {
-                    weakenings.push(Weakening::new("env-sensitive", &line.name));
+                    non_defaults.push(NonDefault::new("env-sensitive", &line.name));
                 }
                 env.set(&line.name, &value, false);
             }
@@ -728,22 +729,22 @@ fn apply_inner(
             {
                 return Err(AosError::new("env-path-conflict", name));
             }
-            apply_mapping(env, &mapping, facts, overlay.root, weakenings)?;
+            apply_mapping(env, &mapping, facts, overlay.root, non_defaults)?;
         }
     }
-    apply_mapping(env, own, facts, overlay.root, weakenings)?;
-    apply_paths(env, &paths, overlay.root, &facts.os, weakenings);
+    apply_mapping(env, own, facts, overlay.root, non_defaults)?;
+    apply_paths(env, &paths, overlay.root, &facts.os, non_defaults);
     Ok(())
 }
 
 /// What an overlay's MCP servers and optional references read that is not granted, as `<provider>:<key>`,
 /// `secret:<name>` or `env:<variable>`, sorted; the granted reads and plain `http` to a remote host are added to
-/// `weakenings`.
+/// `non_defaults`.
 #[must_use]
 pub fn grants_report(
     manifest: &Map<String, Value>,
     facts: &Facts,
-    weakenings: &mut Vec<Weakening>,
+    non_defaults: &mut Vec<NonDefault>,
 ) -> Vec<String> {
     let mut ungranted = BTreeSet::new();
     let host_grants = facts.grants.get("env").cloned().unwrap_or_default();
@@ -767,12 +768,12 @@ pub fn grants_report(
             if !granted(entry, facts) {
                 ungranted.insert(reference_name(entry));
             } else if entry.get("provider").and_then(Value::as_str) == Some("env") {
-                weakenings.push(Weakening::new(
+                non_defaults.push(NonDefault::new(
                     "env-passthrough",
                     entry.get("key").and_then(Value::as_str).unwrap_or(""),
                 ));
             } else {
-                weakenings.push(Weakening::new("secret-read", &reference_name(entry)));
+                non_defaults.push(NonDefault::new("secret-read", &reference_name(entry)));
             }
         }
         let headers = server
@@ -791,7 +792,7 @@ pub fn grants_report(
             .chain(headers)
         {
             if host_grants.contains(&name) {
-                weakenings.push(Weakening::new("env-passthrough", &name));
+                non_defaults.push(NonDefault::new("env-passthrough", &name));
             } else {
                 ungranted.insert(format!("env:{name}"));
             }
@@ -801,7 +802,7 @@ pub fn grants_report(
             .and_then(Value::as_str)
             .is_some_and(super::is_insecure_url)
         {
-            weakenings.push(Weakening::new(
+            non_defaults.push(NonDefault::new(
                 "insecure-transport",
                 server.get("name").and_then(Value::as_str).unwrap_or(""),
             ));

@@ -300,7 +300,7 @@ final class OverlayPreview {
 
 /// Fetches [source] as [name] and computes what installing it would do, touching nothing installed: the manifest and
 /// files are read from the fetched tree, the layer is the one Settings, Profiles would make of it, and the report is
-/// its weakenings and what Canoa does not apply. A catalog's [catalogPin] must match the tree fetched, or installing is
+/// its non-default settings and what Canoa does not apply. A catalog's [catalogPin] must match the tree fetched, or installing is
 /// refused; canoa.cfg's own pin is held by [installPreview].
 Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitOverlay source, {
   required String os,

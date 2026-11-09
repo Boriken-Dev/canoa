@@ -65,14 +65,14 @@ AosFacts _facts(Map<dynamic, dynamic> value) {
   );
 }
 
-const _appliedWeakenings = {'unpinned', 'env-sensitive', 'env-passthrough', 'secret-read', 'insecure-transport'};
+const _appliedNonDefaults = {'unpinned', 'env-sensitive', 'env-passthrough', 'secret-read', 'insecure-transport'};
 const _envErrors = {
   'unresolved-reference', 'invalid-reference', 'missing-file', 'invalid-env-file', 'env-path-conflict',
   'reserved-variable', 'undefined-variable', 'secret-placeholder', 'invalid-pattern',
 };
 
-List<List<String>> _weakeningList(Iterable<AosWeakening> list) {
-  final set = {for (final w in list) if (_appliedWeakenings.contains(w.id)) '${w.id}\u0000${w.subject}'}.toList()..sort();
+List<List<String>> _nonDefaultList(Iterable<AosNonDefault> list) {
+  final set = {for (final w in list) if (_appliedNonDefaults.contains(w.id)) '${w.id}\u0000${w.subject}'}.toList()..sort();
   return [for (final pair in set) pair.split('\u0000')];
 }
 
@@ -330,7 +330,7 @@ void main() {
         final env = _environment(facts['base_env'], windows: aosFacts.os == 'windows');
         env.set(rootVariable(identity), root);
         if (facts['state'] case final String state) env.set(stateVariable(identity), state);
-        final found = <AosWeakening>[if (facts['pinned'] != true) const AosWeakening('unpinned', '')];
+        final found = <AosNonDefault>[if (facts['pinned'] != true) const AosNonDefault('unpinned', '')];
         try {
           applyOverlay(
             env,
@@ -347,8 +347,8 @@ void main() {
         final ungranted = grantsReport(manifest, aosFacts, found);
         expect(env.values, expected['env']);
         expect(ungranted, expected['ungranted']);
-        expect(_weakeningList(found), _weakeningList([
-          for (final pair in (expected['weakenings'] as List).cast<List<dynamic>>()) AosWeakening('${pair[0]}', '${pair[1]}'),
+        expect(_nonDefaultList(found), _nonDefaultList([
+          for (final pair in (expected['non_defaults'] as List).cast<List<dynamic>>()) AosNonDefault('${pair[0]}', '${pair[1]}'),
         ]));
       });
     }

@@ -2,7 +2,7 @@ import '../profile/aos.dart';
 import '../profile/aos_catalog.dart';
 
 /// canoa.cfg `[store]`: how much of a catalog and of an icon the store reads. Each is a setting with the AOS
-/// specification's recommended default and no floor; a value above the default is a weakening the store shows.
+/// specification's recommended default and no floor; a value above the default is configuration the store lists.
 final class StoreSettings {
   const StoreSettings({
     this.catalogMaxBytes = defaultCatalogMaxBytes,
@@ -33,15 +33,15 @@ final class StoreSettings {
   AosLimits get catalogLimits => AosLimits(maxBytes: catalogMaxBytes, maxDepth: catalogMaxDepth);
   IconLimits get iconLimits => IconLimits(maxBytes: iconMaxBytes, maxWidth: iconMaxWidth, maxHeight: iconMaxHeight);
 
-  /// Each limit set looser than its default, as `<key> = <value>`.
-  List<String> get weakenings => [
-    if (catalogMaxBytes > defaultCatalogLimits.maxBytes) 'catalog_max_bytes = $catalogMaxBytes',
-    if (catalogMaxDepth > defaultCatalogLimits.maxDepth) 'catalog_max_depth = $catalogMaxDepth',
-    if (catalogMaxEntries > defaultCatalogMaxEntries) 'catalog_max_entries = $catalogMaxEntries',
-    if (catalogMaxIcons > defaultCatalogMaxIcons) 'catalog_max_icons = $catalogMaxIcons',
-    if (iconMaxBytes > defaultIconMaxBytes) 'icon_max_bytes = $iconMaxBytes',
-    if (iconMaxWidth > defaultIconMaxSide) 'icon_max_width = $iconMaxWidth',
-    if (iconMaxHeight > defaultIconMaxSide) 'icon_max_height = $iconMaxHeight',
+  /// Each limit set above its default, as `<key> = <value> (default <default>)`.
+  List<String> get nonDefaults => [
+    if (catalogMaxBytes > defaultCatalogLimits.maxBytes) 'catalog_max_bytes = $catalogMaxBytes (default ${defaultCatalogLimits.maxBytes})',
+    if (catalogMaxDepth > defaultCatalogLimits.maxDepth) 'catalog_max_depth = $catalogMaxDepth (default ${defaultCatalogLimits.maxDepth})',
+    if (catalogMaxEntries > defaultCatalogMaxEntries) 'catalog_max_entries = $catalogMaxEntries (default $defaultCatalogMaxEntries)',
+    if (catalogMaxIcons > defaultCatalogMaxIcons) 'catalog_max_icons = $catalogMaxIcons (default $defaultCatalogMaxIcons)',
+    if (iconMaxBytes > defaultIconMaxBytes) 'icon_max_bytes = $iconMaxBytes (default $defaultIconMaxBytes)',
+    if (iconMaxWidth > defaultIconMaxSide) 'icon_max_width = $iconMaxWidth (default $defaultIconMaxSide)',
+    if (iconMaxHeight > defaultIconMaxSide) 'icon_max_height = $iconMaxHeight (default $defaultIconMaxSide)',
   ];
 
   /// `[store]` as canoa.cfg has it. Throws [FormatException] for an unknown key or a value that is not a whole number,

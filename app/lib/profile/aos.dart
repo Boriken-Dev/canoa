@@ -2027,14 +2027,14 @@ final class AosOverlay {
   final List<int>? Function(String path) read;
 }
 
-/// A weakening, reported with an identifier and a subject, never a value.
-final class AosWeakening implements Comparable<AosWeakening> {
-  const AosWeakening(this.id, this.subject);
+/// A non-default setting of an overlay, reported with an identifier and a subject, never a value.
+final class AosNonDefault implements Comparable<AosNonDefault> {
+  const AosNonDefault(this.id, this.subject);
   final String id, subject;
   @override
-  int compareTo(AosWeakening other) => id == other.id ? subject.compareTo(other.subject) : id.compareTo(other.id);
+  int compareTo(AosNonDefault other) => id == other.id ? subject.compareTo(other.subject) : id.compareTo(other.id);
   @override
-  bool operator ==(Object other) => other is AosWeakening && other.id == id && other.subject == subject;
+  bool operator ==(Object other) => other is AosNonDefault && other.id == id && other.subject == subject;
   @override
   int get hashCode => Object.hash(id, subject);
 }
@@ -2080,7 +2080,7 @@ String? _secretValue(Map<dynamic, dynamic> entry, AosFacts facts, bool windows) 
 AosException _as(AosException error, String name) => AosException(error.code, name);
 
 void _applyMapping(AosEnvironment env, Map<String, Object?> mapping, AosFacts facts, String root,
-    List<AosWeakening> weakenings) {
+    List<AosNonDefault> nonDefaults) {
   final windows = env.windows;
   final before = env.copy();
   for (final MapEntry(key: name, value: raw) in mapping.entries) {
@@ -2104,17 +2104,17 @@ void _applyMapping(AosEnvironment env, Map<String, Object?> mapping, AosFacts fa
         throw AosException('unresolved-reference', name);
       }
       secret = true;
-      weakenings.add(entry['provider'] == 'env'
-          ? AosWeakening('env-passthrough', '${entry['key']}')
-          : AosWeakening('secret-read', _referenceName(entry)));
+      nonDefaults.add(entry['provider'] == 'env'
+          ? AosNonDefault('env-passthrough', '${entry['key']}')
+          : AosNonDefault('secret-read', _referenceName(entry)));
       value = found;
     }
-    if (isSensitive(name)) weakenings.add(AosWeakening('env-sensitive', name));
+    if (isSensitive(name)) nonDefaults.add(AosNonDefault('env-sensitive', name));
     env.set(name, value, secret: secret);
   }
 }
 
-void _applyPaths(AosEnvironment env, List<PathAddition> paths, String root, String os, List<AosWeakening> weakenings) {
+void _applyPaths(AosEnvironment env, List<PathAddition> paths, String root, String os, List<AosNonDefault> nonDefaults) {
   final windows = env.windows;
   final separator = windows ? ';' : ':';
   final grouped = <String, (String, List<PathAddition>)>{};
@@ -2124,7 +2124,7 @@ void _applyPaths(AosEnvironment env, List<PathAddition> paths, String root, Stri
   }
   for (final (variable, entries) in grouped.values) {
     if (isSensitive(variable) && !const {'PATH', 'PYTHONPATH', 'NODE_PATH'}.contains(_asciiUpper(variable))) {
-      weakenings.add(AosWeakening('env-sensitive', variable));
+      nonDefaults.add(AosNonDefault('env-sensitive', variable));
     }
     final prepend = <String>[], append = <String>[];
     final seen = <String>{};
@@ -2142,20 +2142,20 @@ void _applyPaths(AosEnvironment env, List<PathAddition> paths, String root, Stri
 /// Applies one overlay to [env]: its env files that apply on this OS, then `env`, then `paths`, each with its defaults
 /// first, every text value substituted as it is set. Env scripts are not run. Throws the applying and substitution
 /// classes, the subject being the variable being set or the env file.
-void applyOverlay(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<AosWeakening> weakenings) {
+void applyOverlay(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<AosNonDefault> nonDefaults) {
   env._extra = [
     ('AOS_OVERLAY_ROOT', overlay.root),
     ('AOS_OVERLAY_NAME', normalizeName(overlay.identity)),
     if (overlay.state case final state?) ('AOS_OVERLAY_STATE', state),
   ];
   try {
-    _applyInner(env, overlay, facts, weakenings);
+    _applyInner(env, overlay, facts, nonDefaults);
   } finally {
     env._extra = [];
   }
 }
 
-void _applyInner(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<AosWeakening> weakenings) {
+void _applyInner(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<AosNonDefault> nonDefaults) {
   final manifest = overlay.manifest;
   final paths = pathsOf(manifest, overlay.files);
   final listed = {for (final entry in paths) _asciiUpper(entry.variable)};
@@ -2184,7 +2184,7 @@ void _applyInner(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<Ao
         } on AosException catch (error) {
           throw _as(error, line.name);
         }
-        if (isSensitive(line.name)) weakenings.add(AosWeakening('env-sensitive', line.name));
+        if (isSensitive(line.name)) nonDefaults.add(AosNonDefault('env-sensitive', line.name));
         env.set(line.name, value);
       }
     } else {
@@ -2198,11 +2198,11 @@ void _applyInner(AosEnvironment env, AosOverlay overlay, AosFacts facts, List<Ao
       for (final name in mapping.keys) {
         if (listed.contains(_asciiUpper(name))) throw AosException('env-path-conflict', name);
       }
-      _applyMapping(env, mapping, facts, overlay.root, weakenings);
+      _applyMapping(env, mapping, facts, overlay.root, nonDefaults);
     }
   }
-  _applyMapping(env, own, facts, overlay.root, weakenings);
-  _applyPaths(env, paths, overlay.root, facts.os, weakenings);
+  _applyMapping(env, own, facts, overlay.root, nonDefaults);
+  _applyPaths(env, paths, overlay.root, facts.os, nonDefaults);
 }
 
 /// Whether plain `http` to [url] goes to another computer: its host is neither `localhost`, `[::1]` nor an IPv4 address in
@@ -2226,8 +2226,8 @@ bool isInsecureUrl(String url) {
 }
 
 /// What an overlay's MCP servers and optional references read that is not granted, sorted; granted reads and plain
-/// `http` to another host are added to [weakenings].
-List<String> grantsReport(Map<String, Object?> manifest, AosFacts facts, List<AosWeakening> weakenings) {
+/// `http` to another host are added to [nonDefaults].
+List<String> grantsReport(Map<String, Object?> manifest, AosFacts facts, List<AosNonDefault> nonDefaults) {
   final ungranted = <String>{};
   final hostGrants = facts.grants['env'] ?? const [];
   final servers = manifest['mcp'] is Map && (manifest['mcp']! as Map)['servers'] is List
@@ -2239,21 +2239,21 @@ List<String> grantsReport(Map<String, Object?> manifest, AosFacts facts, List<Ao
       if (!_granted(value, facts)) {
         ungranted.add(_referenceName(value));
       } else {
-        weakenings.add(value['provider'] == 'env'
-            ? AosWeakening('env-passthrough', '${value['key']}')
-            : AosWeakening('secret-read', _referenceName(value)));
+        nonDefaults.add(value['provider'] == 'env'
+            ? AosNonDefault('env-passthrough', '${value['key']}')
+            : AosNonDefault('secret-read', _referenceName(value)));
       }
     }
     final headers = server['headers_env'] is Map ? [for (final v in (server['headers_env'] as Map).values) '$v'] : <String>[];
     for (final name in [..._strings(server['env_passthrough']), ...headers]) {
       if (hostGrants.contains(name)) {
-        weakenings.add(AosWeakening('env-passthrough', name));
+        nonDefaults.add(AosNonDefault('env-passthrough', name));
       } else {
         ungranted.add('env:$name');
       }
     }
     if (server['url'] case final String url when isInsecureUrl(url)) {
-      weakenings.add(AosWeakening('insecure-transport', '${server['name'] ?? ''}'));
+      nonDefaults.add(AosNonDefault('insecure-transport', '${server['name'] ?? ''}'));
     }
   }
   for (final entry in (manifest['env'] is Map ? (manifest['env']! as Map).values : const [])) {

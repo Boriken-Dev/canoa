@@ -20,7 +20,7 @@ use alloc::string::String;
 
 pub(crate) use apply::default_paths;
 pub use apply::{
-    Base, EnvFile, Environment, Facts, Missing, Overlay, PathAddition, Resolved, Weakening,
+    Base, EnvFile, Environment, Facts, Missing, NonDefault, Overlay, PathAddition, Resolved,
     apply_overlay, composition_order, context_of, env_files_of, grants_report, os_matches,
     paths_of, resolve, rules_of, skills_of,
 };

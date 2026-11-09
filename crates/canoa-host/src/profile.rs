@@ -859,7 +859,7 @@ pub struct Effective {
     pub refused: Vec<Refused>,
     /// What AOS overlays add to the initial context, in their order, each with its layer.
     pub contexts: Vec<Sourced<Context>>,
-    /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its weakenings.
+    /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its non-default settings.
     pub overlays: Vec<OverlayReport>,
     /// The AOS overlays, lowest first, whose environment is built when a session starts.
     pub aos: Vec<AosLayer>,

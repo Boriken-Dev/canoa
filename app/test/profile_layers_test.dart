@@ -431,13 +431,13 @@ remove = true
 
       var result = await layers();
       expect(result.layers.map((layer) => '${layer.id}'), ['built-in', 'overlay:o', 'user']);
-      List<Object?> weakenings() => ((result.effective.view()['overlays'] as List).single as Map)['weakenings'] as List;
-      expect(weakenings(), [['unpinned', '']]);
+      List<Object?> nonDefaults() => ((result.effective.view()['overlays'] as List).single as Map)['non_defaults'] as List;
+      expect(nonDefaults(), [['unpinned', '']]);
 
       config = CanoaConfig.parse(config.withOverlayPin('o', installed.digest!).encode());
       expect((config.overlays['o']! as GitOverlay).pin, installed.digest, reason: 'the pin is kept in canoa.cfg');
       result = await layers();
-      expect(weakenings(), isEmpty);
+      expect(nonDefaults(), isEmpty);
 
       final dir = home.overlays.directoryOf('o');
       Directory('$dir/.git').createSync();

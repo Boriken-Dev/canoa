@@ -1561,7 +1561,7 @@
             ],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -1720,7 +1720,7 @@
               "env:HOME_DIR"
             ],
             "unresolved": [],
-            "weakenings": [
+            "non_defaults": [
               [
                 "insecure-transport",
                 "remote"
@@ -1801,7 +1801,7 @@
             "not_applied": [],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -1926,7 +1926,7 @@
             ],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -1983,7 +1983,7 @@
             "unresolved": [
               "TOKEN: env:TOKEN"
             ],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -2038,7 +2038,7 @@
             "not_applied": [],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -2099,7 +2099,7 @@
             "not_applied": [],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -2166,7 +2166,7 @@
             "not_applied": [],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           },
           {
             "layer": "overlay:a",
@@ -2174,7 +2174,7 @@
             "not_applied": [],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },
@@ -2227,7 +2227,7 @@
             "not_applied": [],
             "ungranted": [],
             "unresolved": [],
-            "weakenings": []
+            "non_defaults": []
           }
         ]
       },

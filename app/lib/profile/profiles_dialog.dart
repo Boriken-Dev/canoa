@@ -393,7 +393,7 @@ class EffectiveTable extends StatelessWidget {
   }
 }
 
-/// An AOS overlay's report: its digest, what Canoa does not apply yet, what is not granted, and its weakenings.
+/// An AOS overlay's report: its digest, what Canoa does not apply yet, what is not granted, and its non-default settings.
 class OverlayReportView extends StatelessWidget {
   const OverlayReportView({super.key, required this.report});
   final OverlayReport report;
@@ -405,8 +405,8 @@ class OverlayReportView extends StatelessWidget {
       for (final item in report.notApplied) '  $item: not applied by Canoa yet',
       for (final item in report.ungranted) '  $item: none of your layers shares it, so it is left unset',
       for (final item in report.unresolved) '  $item: none of your layers shares it, so no session can start',
-      for (final weakening in report.weakenings)
-        '  weakening ${weakening.id}${weakening.subject.isEmpty ? '' : ': ${weakening.subject}'}',
+      for (final nonDefault in report.nonDefaults)
+        '  non-default ${nonDefault.id}${nonDefault.subject.isEmpty ? '' : ': ${nonDefault.subject}'}',
     ];
     return Padding(
       padding: const EdgeInsets.only(top: 4),

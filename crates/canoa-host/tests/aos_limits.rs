@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use canoa_host::aos::{self, Environment, Facts, Weakening};
+use canoa_host::aos::{self, Environment, Facts, NonDefault};
 use serde_json::{Map, json};
 
 fn lookup_in<'a>(
@@ -71,7 +71,7 @@ fn only_a_loopback_address_or_localhost_is_this_computer_for_plain_http() {
     let insecure = |url: &str| {
         let mut found = Vec::new();
         let _ = aos::grants_report(&manifest(url), &Facts::new("linux"), &mut found);
-        found.contains(&Weakening::new("insecure-transport", "s"))
+        found.contains(&NonDefault::new("insecure-transport", "s"))
     };
     for remote in [
         "http://127.0.0.1.attacker.example/mcp",

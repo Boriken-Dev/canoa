@@ -385,7 +385,7 @@ void main() {
     expect(again.catalogs['team']!.spec, 'https://example.invalid/c.git@main#catalog.toml');
     expect(again.store.iconMaxBytes, 1024);
     expect(config.withoutCatalog('team').catalogs, isEmpty);
-    expect(const StoreSettings(iconMaxWidth: 4096).weakenings, ['icon_max_width = 4096']);
+    expect(const StoreSettings(iconMaxWidth: 4096).nonDefaults, ['icon_max_width = 4096 (default 1024)']);
     for (final bad in [
       '[catalogs]\nteam = "https://example.invalid/c.git@main"\n',
       '[catalogs]\n"my catalog" = "https://example.invalid/c.git@main#c.toml"\n',

@@ -401,8 +401,8 @@ fn facts(value: &Value) -> Facts {
     facts
 }
 
-/// The weakenings Canoa reports: those of what it applies, never of setup, env scripts or dependencies it does not run.
-const APPLIED_WEAKENINGS: &[&str] = &[
+/// The non_defaults Canoa reports: those of what it applies, never of setup, env scripts or dependencies it does not run.
+const APPLIED_NON_DEFAULTS: &[&str] = &[
     "unpinned",
     "env-sensitive",
     "env-passthrough",
@@ -410,11 +410,11 @@ const APPLIED_WEAKENINGS: &[&str] = &[
     "insecure-transport",
 ];
 
-fn weakenings(list: &[aos::Weakening]) -> Value {
+fn non_defaults(list: &[aos::NonDefault]) -> Value {
     let set: BTreeSet<(String, String)> = list
         .iter()
-        .filter(|weakening| APPLIED_WEAKENINGS.contains(&weakening.id))
-        .map(|weakening| (weakening.id.to_owned(), weakening.subject.clone()))
+        .filter(|non_default| APPLIED_NON_DEFAULTS.contains(&non_default.id))
+        .map(|non_default| (non_default.id.to_owned(), non_default.subject.clone()))
         .collect();
     Value::Array(
         set.into_iter()
@@ -621,7 +621,7 @@ fn effective() {
         };
         let mut found = Vec::new();
         if facts_value["pinned"] != true {
-            found.push(aos::Weakening::new("unpinned", ""));
+            found.push(aos::NonDefault::new("unpinned", ""));
         }
         match aos::apply_overlay(&mut env, &overlay, &facts, &mut found) {
             Err(error) => {
@@ -639,20 +639,20 @@ fn effective() {
                 let ungranted = aos::grants_report(manifest, &facts, &mut found);
                 assert_eq!(env_json(&env), expect["env"], "{id}: env");
                 assert_eq!(json!(ungranted), expect["ungranted"], "{id}: ungranted");
-                let expected: Vec<aos::Weakening> = expect["weakenings"]
+                let expected: Vec<aos::NonDefault> = expect["non_defaults"]
                     .as_array()
-                    .expect("weakenings")
+                    .expect("non_defaults")
                     .iter()
                     .filter_map(|pair| {
                         let id = pair[0].as_str()?;
-                        let id = APPLIED_WEAKENINGS.iter().find(|known| **known == id)?;
-                        Some(aos::Weakening::new(id, pair[1].as_str()?))
+                        let id = APPLIED_NON_DEFAULTS.iter().find(|known| **known == id)?;
+                        Some(aos::NonDefault::new(id, pair[1].as_str()?))
                     })
                     .collect();
                 assert_eq!(
-                    weakenings(&found),
-                    weakenings(&expected),
-                    "{id}: weakenings"
+                    non_defaults(&found),
+                    non_defaults(&expected),
+                    "{id}: non_defaults"
                 );
             }
         }

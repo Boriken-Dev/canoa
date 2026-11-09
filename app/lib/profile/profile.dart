@@ -561,7 +561,7 @@ final class EffectiveProfile {
   /// What AOS overlays add to the initial context, in their order, each with its layer.
   final contexts = <Sourced<ProfileContext>>[];
 
-  /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its weakenings.
+  /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its non-default settings.
   final overlays = <OverlayReport>[];
 
   /// The AOS overlays, lowest first, whose environment is built when a session starts.

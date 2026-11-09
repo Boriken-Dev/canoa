@@ -177,8 +177,8 @@ class StorePageState extends State<StorePage> {
               const SizedBox(height: 8),
               _addForm(),
               if (problem != null) Text(visible(problem!), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              for (final weakening in config.store.weakenings)
-                Text('[store] $weakening: looser than the default', style: text.bodySmall),
+              for (final nonDefault in config.store.nonDefaults)
+                Text('[store] $nonDefault', style: text.bodySmall),
             ],
           ],
         ),
@@ -593,7 +593,7 @@ class OverlayPageState extends State<OverlayPage> {
             OverlayReportView(report: OverlayReport(report.layer, report.digest, [
               for (final line in report.notApplied)
                 if (!line.endsWith('hints for another harness')) line,
-            ], report.ungranted, report.unresolved, report.weakenings)),
+            ], report.ungranted, report.unresolved, report.nonDefaults)),
         ],
         for (final id in found.harnesses) Text(oneLine('harness.$id: hints for $id agents only'), style: text.bodySmall),
         for (final (path, os, network) in found.setup)
