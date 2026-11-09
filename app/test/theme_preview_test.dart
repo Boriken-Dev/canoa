@@ -16,7 +16,7 @@ ThemeMode _mode(WidgetTester tester) => tester.widget<MaterialApp>(find.byType(M
 
 Future<List<CanoaConfig>> _open(WidgetTester tester) async {
   final written = await pumpApp(tester, SessionStore(includePreview: false),
-      config: const CanoaConfig(look: LookId.bubbles, brightness: 'dark'));
+      config: const CanoaConfig(look: LookId.canoa, brightness: 'dark'));
   await tester.tap(find.byTooltip('Canoa settings'));
   await frames(tester);
   return written;
@@ -37,7 +37,7 @@ Future<void> _preview(WidgetTester tester) async {
 void main() {
   testWidgets('picking a look or brightness changes the app at once, with Settings still open', (tester) async {
     final written = await _open(tester);
-    expect(_look(tester), LookId.bubbles);
+    expect(_look(tester), LookId.canoa);
     await _preview(tester);
     expect(find.text('Canoa settings'), findsOneWidget);
     expect(_look(tester), LookId.terminal);
@@ -53,7 +53,7 @@ void main() {
       await close();
       await frames(tester);
       expect(find.text('Canoa settings'), findsNothing);
-      expect(_look(tester), LookId.bubbles);
+      expect(_look(tester), LookId.canoa);
       expect(_mode(tester), ThemeMode.dark);
       expect(written, isEmpty);
       await finish(tester);
@@ -71,7 +71,7 @@ void main() {
       await frames(tester);
       await tester.tap(find.byTooltip('Canoa settings'));
       await frames(tester);
-      expect(tester.widget<DropdownButton<LookId>>(find.byKey(const Key('settings-look'))).value, LookId.bubbles);
+      expect(tester.widget<DropdownButton<LookId>>(find.byKey(const Key('settings-look'))).value, LookId.canoa);
       await finish(tester);
     });
   });

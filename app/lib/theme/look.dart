@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 
 /// The looks a person can choose, named for how they look.
 enum LookId {
-  bubbles('Bubbles'),
-  document('Document'),
+  canoa('Canoa'),
   terminal('Terminal');
 
   const LookId(this.label);
@@ -99,52 +98,8 @@ final class CanoaLook extends ThemeExtension<CanoaLook> {
   }
 }
 
-const _bubblesDark = CanoaLook(
-  id: LookId.bubbles,
-  rail: Color(0xFF17242D),
-  bar: Color(0xFF15222C),
-  selected: Color(0xFF294952),
-  user: Color(0xFF235853),
-  agent: Color(0xFF1D2B34),
-  notice: Color(0xFF26333D),
-  composer: Color(0xFF1B3039),
-  muted: Color(0xFFABBEC8),
-  accent: Color(0xFF6DE2D2),
-  added: Color(0xFF1E4D3A),
-  removed: Color(0xFF5A2A2E),
-  code: Color(0xFF0F1A21),
-  messageWidth: 720,
-  gap: 14,
-  padding: 14,
-  radius: 16,
-  bodySize: 15,
-  railWidth: 272,
-);
-
-const _bubblesLight = CanoaLook(
-  id: LookId.bubbles,
-  rail: Color(0xFFE4EEEE),
-  bar: Color(0xFFEFF5F5),
-  selected: Color(0xFFC6E4E0),
-  user: Color(0xFFBFE6E0),
-  agent: Color(0xFFFFFFFF),
-  notice: Color(0xFFDDE7E9),
-  composer: Color(0xFFFFFFFF),
-  muted: Color(0xFF4F6570),
-  accent: Color(0xFF0E7C70),
-  added: Color(0xFFCDEFD9),
-  removed: Color(0xFFF8D4D4),
-  code: Color(0xFFEDF2F3),
-  messageWidth: 720,
-  gap: 14,
-  padding: 14,
-  radius: 16,
-  bodySize: 15,
-  railWidth: 272,
-);
-
-const _documentDark = CanoaLook(
-  id: LookId.document,
+const _canoaDark = CanoaLook(
+  id: LookId.canoa,
   rail: Color(0xFF1C1B19),
   bar: Color(0xFF232220),
   selected: Color(0xFF3A3733),
@@ -166,8 +121,8 @@ const _documentDark = CanoaLook(
   agentInBubble: false,
 );
 
-const _documentLight = CanoaLook(
-  id: LookId.document,
+const _canoaLight = CanoaLook(
+  id: LookId.canoa,
   rail: Color(0xFFF1EDE4),
   bar: Color(0xFFFAF7F1),
   selected: Color(0xFFE4DDCE),
@@ -244,8 +199,7 @@ const _terminalLight = CanoaLook(
 CanoaLook lookFor(LookId id, Brightness brightness) {
   final dark = brightness == Brightness.dark;
   return switch (id) {
-    LookId.bubbles => dark ? _bubblesDark : _bubblesLight,
-    LookId.document => dark ? _documentDark : _documentLight,
+    LookId.canoa => dark ? _canoaDark : _canoaLight,
     LookId.terminal => dark ? _terminalDark : _terminalLight,
   };
 }
@@ -258,10 +212,8 @@ ThemeData themeFor(LookId id, Brightness brightness) {
     brightness: brightness,
     colorScheme: ColorScheme.fromSeed(seedColor: look.accent, brightness: brightness),
     scaffoldBackgroundColor: switch ((id, dark)) {
-      (LookId.bubbles, true) => const Color(0xFF101820),
-      (LookId.bubbles, false) => const Color(0xFFF6FAFA),
-      (LookId.document, true) => const Color(0xFF262523),
-      (LookId.document, false) => const Color(0xFFFFFDF8),
+      (LookId.canoa, true) => const Color(0xFF262523),
+      (LookId.canoa, false) => const Color(0xFFFFFDF8),
       (LookId.terminal, true) => const Color(0xFF0A0B0A),
       (LookId.terminal, false) => const Color(0xFFF8F9F6),
     },
@@ -272,5 +224,5 @@ ThemeData themeFor(LookId id, Brightness brightness) {
 }
 
 extension CanoaLookOf on BuildContext {
-  CanoaLook get look => Theme.of(this).extension<CanoaLook>() ?? _bubblesDark;
+  CanoaLook get look => Theme.of(this).extension<CanoaLook>() ?? _canoaDark;
 }

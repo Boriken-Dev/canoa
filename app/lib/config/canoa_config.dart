@@ -65,7 +65,7 @@ final class CanoaConfig {
     this.preferWebTransport = true,
     this.connectTimeout = 10,
     this.cdn = 'none',
-    this.look = LookId.bubbles,
+    this.look = LookId.canoa,
     this.brightness = 'dark',
     this.agents = const [],
     this.host,
@@ -476,7 +476,7 @@ final class CanoaConfig {
     if (cdn is! String || !{'none', 'local'}.contains(cdn)) {
       throw const FormatException('canoa.cfg: assets.cdn must be none or local');
     }
-    final lookName = appearance['look'] ?? LookId.bubbles.name;
+    final lookName = appearance['look'] ?? LookId.canoa.name;
     final look = lookName is String ? LookId.named(lookName) : null;
     if (look == null) {
       throw FormatException('canoa.cfg: appearance.look must be one of ${LookId.values.map((id) => id.name).join(', ')}');

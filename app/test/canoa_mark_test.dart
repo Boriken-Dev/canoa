@@ -34,7 +34,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final store = SessionStore();
     addTearDown(store.dispose);
-    await tester.pumpWidget(CanoaApp(store: store, config: CanoaConfig(look: LookId.bubbles)));
+    await tester.pumpWidget(CanoaApp(store: store, config: CanoaConfig(look: LookId.canoa)));
     await tester.pumpAndSettle();
     final mark = tester.widget<CanoaMark>(find.byType(CanoaMark));
     expect(mark.color, tester.element(find.byType(CanoaMark)).look.accent);

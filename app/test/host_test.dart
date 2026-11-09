@@ -57,7 +57,7 @@ final class HostUnderTest {
     final config = File('${dir.path}/canoa.cfg');
     await config.writeAsString('''
 [appearance]
-look = "bubbles"
+look = "canoa"
 
 [host.agents.fixture]
 program = ${jsonEncode(_example('stdio_agent', library: false))}
