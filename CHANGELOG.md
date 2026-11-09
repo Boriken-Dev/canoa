@@ -91,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The web app draws its text under the host's strict policy with no `connect` source: it carries Roboto and points Flutter's fallback fonts at the site, so its build fetches nothing from `fonts.gstatic.com`.
 - A hosted profile read a version 2 agent's capabilities and name from version 1's places (`agentCapabilities`, `agentInfo`), so a version 2 client was told the agent took no context, skills or MCP servers: version 2's `capabilities` and `info` are read now.
 - Saving Settings, pinning, installing or removing an overlay, a catalog change, or keeping MCP choices no longer drops `[permissions] full_access` and `[notifications]` from the Canoa.cfg it saves.
 - A session with an agent on `canoa-host`'s plain WebSocket on loopback is taken into the chat's list: it refused any `ws://` endpoint, though the dialer allows one on loopback.

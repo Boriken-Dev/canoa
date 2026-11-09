@@ -387,9 +387,8 @@ What it serves and refuses:
   never listed. A path with no extension that names no file is one of the app's routes, answered with `index.html`.
 - **A strict Content-Security-Policy** on every answer: scripts, styles, images and fonts from the site alone, and
   connections to the site and the host's entries alone. Inline and evaluated script are refused, so the site must be
-  built with `flutter build web --csp --no-web-resources-cdn`. That build still fetches its fonts from
-  `https://fonts.gstatic.com`, and without them Flutter draws no text: until the app carries its own fonts, add
-  `connect = ["https://fonts.gstatic.com"]` to `[host.web]`, which the host logs as configuration.
+  built with `flutter build web --csp --no-web-resources-cdn`. The app carries its Roboto font and looks for any other
+  beside the page, so that build fetches nothing from outside the site.
 - **Not the host's own files.** A site directory that holds canoa.cfg's directory or the host's identity and trust store
   is refused.
 - **Requests for this host only.** A request whose `Host` is not `localhost`, an IP address or a name in `[host.web]

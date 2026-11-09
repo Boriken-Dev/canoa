@@ -55,3 +55,14 @@ flutter:
   assets:
     - assets/icons/canoa_tray.png
     - assets/icons/canoa.ico
+  # Roboto is the web build's default family; CanvasKit fetches it from fonts.gstatic.com unless the app declares it.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-regular.ttf
+        - asset: assets/fonts/Roboto-italic.ttf
+          style: italic
+        - asset: assets/fonts/Roboto-medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-bold.ttf
+          weight: 700

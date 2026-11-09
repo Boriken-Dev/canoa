@@ -6,11 +6,11 @@
 //   dart compile js -O1 -o <dir>/page.js tool/peer_page.dart        (in app/)
 //   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_HOST=path/to/canoa CANOA_E2E_AGENT=path/to/stdio_agent \
 //   CANOA_E2E_WEB=app/build/web CANOA_E2E_APP_PAGE=<dir> [CANOA_E2E_METHOD=noise] [CANOA_E2E_SHOT=<file.png>] \
-//   [CANOA_E2E_CONNECT=https://fonts.gstatic.com] node e2e/served.mjs
+//   [CANOA_E2E_CONNECT=https://origin.example] node e2e/served.mjs
 //
 // The agent must echo a prompt as `echo: TEXT`, as canoa's stdio_agent example does. CANOA_E2E_SHOT keeps a picture of
 // the app as it started. CANOA_E2E_CONNECT, comma-separated, is [host.web] connect: origins the page may reach besides the
-// entries, such as the one Flutter's web build fetches its fonts from when the app does not bundle them.
+// entries; the app needs none.
 import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
