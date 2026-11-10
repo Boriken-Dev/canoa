@@ -483,7 +483,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "agent-client-protocol",
  "futures",
@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-api"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "guatiao",
  "guatiao-channel",
@@ -503,7 +503,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-bridge"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "clap",
  "coqui-agentic-peer",
@@ -522,7 +522,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-claude"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-codex"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -545,12 +545,15 @@ dependencies = [
 [[package]]
 name = "coqui-acp-harness"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "base64 0.22.1",
  "coqui-acp-api",
  "rustix",
+ "serde",
  "serde_json",
+ "time",
+ "ureq",
  "uuid",
  "win32job",
 ]
@@ -558,7 +561,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-provider"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=b4bbbe5fb004a57b1835279924237877e60051cc#b4bbbe5fb004a57b1835279924237877e60051cc"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=981a64ad05a4039f674d9ca204bf4aaeb6db7398#981a64ad05a4039f674d9ca204bf4aaeb6db7398"
 dependencies = [
  "agent-client-protocol",
  "coqui-acp-api",
@@ -2239,6 +2242,7 @@ version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -2964,6 +2968,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7be76686bdf7198002062423ca0d8cf9b75a27c8e1de804513b97e97b555d9d"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "percent-encoding",
+ "rustls",
+ "rustls-pki-types",
+ "ureq-proto",
+ "utf8-zero",
+ "webpki-roots",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622dce33c252115466d83f63e9744a18f12b4406aae51a01c15ad8fcf1185eb3"
+dependencies = [
+ "base64 0.23.1",
+ "http",
+ "httparse",
+ "log",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2974,6 +3006,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8_iter"
@@ -3071,6 +3109,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
