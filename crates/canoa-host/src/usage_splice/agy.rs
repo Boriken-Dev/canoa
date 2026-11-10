@@ -64,12 +64,57 @@ pub(crate) struct Antigravity {
     /// Whether a private agent may be started: not for an entry whose profiles give the agent an environment of its own,
     /// since the account it reads would then be the host's, not the connection's.
     pub(crate) private: bool,
+    /// Whether each connection reads a quota of its own: for an entry with profiles, whose connections may run as
+    /// different accounts, so no connection is answered from another's reading.
+    pub(crate) per_connection: bool,
+    /// How a private agent is started and recorded with the host, so stopping the host ends it and none starts while it
+    /// stops; none, and no private agent is started.
+    pub(crate) starter: Option<Starter>,
 }
 
-#[derive(Debug, Default)]
+/// A process the host started for a reading, and what to call once it has ended.
+pub(crate) type Started = (Arc<BridgeAgent>, Box<dyn FnOnce() + Send>);
+
+/// Starts an agent through the host, which records it: `Ok(None)` once the host is stopping.
+#[derive(Clone)]
+pub(crate) struct Starter(pub(crate) Arc<StartFn>);
+
+/// What a [`Starter`] calls.
+pub(crate) type StartFn =
+    dyn Fn(&OsString, &[OsString]) -> std::io::Result<Option<Started>> + Send + Sync;
+
+impl core::fmt::Debug for Starter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Starter")
+    }
+}
+
+/// Runs its closure when dropped, also while a panic unwinds.
+struct Finally<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for Finally<F> {
+    fn drop(&mut self) {
+        if let Some(finish) = self.0.take() {
+            finish();
+        }
+    }
+}
+
+#[derive(Default)]
 struct Private {
     busy: bool,
     last: Option<Instant>,
+    /// Requests that came while a private agent was reading, answered when it ends.
+    waiting: Vec<Box<dyn FnOnce() + Send>>,
+}
+
+impl core::fmt::Debug for Private {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Private")
+            .field("busy", &self.busy)
+            .field("waiting", &self.waiting.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// An entry's agy usage: the buckets every connection read, shared by them.
@@ -120,21 +165,26 @@ impl Quota {
     }
 
     /// Reads with a private agent on a thread of its own and runs `done` after, unless that is not allowed now: no
-    /// directory to work in, an entry that gives its agent an environment, a reading already under way, or one started less
-    /// than [`CACHE`] ago. `false` says nothing was started and `done` will not run.
+    /// directory to work in or no way to start it through the host, an entry that gives its agent an environment, or one
+    /// started less than [`CACHE`] ago. A request that comes while one is reading waits for it. `false` says nothing was
+    /// started and `done` will not run.
     pub(crate) fn read_privately(self: &Arc<Self>, done: impl FnOnce() + Send + 'static) -> bool {
         let Some(directory) = self
             .command
             .state_dir
             .as_ref()
-            .filter(|_| self.command.private)
+            .filter(|_| self.command.private && self.command.starter.is_some())
             .map(|state| state.join("usage-read"))
         else {
             return false;
         };
         {
             let mut private = lock(&self.private);
-            if private.busy || private.last.is_some_and(|at| at.elapsed() < CACHE) {
+            if private.busy {
+                private.waiting.push(Box::new(done));
+                return true;
+            }
+            if private.last.is_some_and(|at| at.elapsed() < CACHE) {
                 return false;
             }
             private.busy = true;
@@ -144,14 +194,31 @@ impl Quota {
         let started = thread::Builder::new()
             .name("canoa-agy-private".to_owned())
             .spawn(move || {
+                // Whatever ends the reading, a panic included, frees the next one and answers who waited.
+                let _finish = Finally(Some(|| {
+                    let waiting = {
+                        let mut private = lock(&quota.private);
+                        private.busy = false;
+                        core::mem::take(&mut private.waiting)
+                    };
+                    done();
+                    for answer in waiting {
+                        answer();
+                    }
+                }));
                 if let Err(why) = quota.private_reading(&directory) {
                     tracing::debug!("antigravity usage, private agent: {why}");
                 }
-                lock(&quota.private).busy = false;
-                done();
             });
         if started.is_err() {
-            lock(&self.private).busy = false;
+            let waiting = {
+                let mut private = lock(&self.private);
+                private.busy = false;
+                core::mem::take(&mut private.waiting)
+            };
+            for answer in waiting {
+                answer();
+            }
             return false;
         }
         true
@@ -164,29 +231,36 @@ impl Quota {
             .map_err(|error| error.kind().to_string())?
             .to_string_lossy()
             .into_owned();
-        let agent = BridgeAgent::spawn(
-            &self.command.program,
-            &self.command.args,
-            crate::serve::MAX_LINE,
-        )
-        .map_err(|error| format!("could not start: {}", error.kind()))?;
+        let starter = self.command.starter.as_ref().ok_or("no host to start it")?;
+        let (agent, forget) = (starter.0)(&self.command.program, &self.command.args)
+            .map_err(|error| format!("could not start: {}", error.kind()))?
+            .ok_or("the host is stopping")?;
+        let _ended = Finally(Some({
+            let agent = Arc::clone(&agent);
+            move || {
+                let _ = agent.stop();
+                forget();
+            }
+        }));
         let (to_agent, inbound) = mpsc::channel::<Vec<u8>>();
         let (outbound, from_agent) = mpsc::channel::<Vec<u8>>();
         let driver = Driver {
             inbound: Mutex::new(inbound),
-            outbound: Mutex::new(outbound),
+            outbound: Mutex::new(Some(outbound)),
         };
         let end = Instant::now() + PRIVATE_LIMIT;
         let pid = agent.pid();
-        let outcome = thread::scope(|scope| {
-            scope.spawn(|| relay(&driver, &agent));
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                relay(&driver, &agent);
+                // The agent ended or the link did: nothing more will come, which the conversation must hear.
+                driver.hang_up();
+            });
             let outcome = self.converse(&to_agent, &from_agent, &cwd, pid, end);
             // The link ends, and with it the relay.
             drop(to_agent);
             outcome
-        });
-        let _ = agent.stop();
-        outcome
+        })
     }
 
     fn converse(
@@ -264,7 +338,17 @@ pub(crate) fn models_of(result: &Value) -> Vec<AcpModel> {
 /// A [`Channel`] whose peer is the host itself: what the relay reads from the agent's output and what it writes to its input.
 struct Driver {
     inbound: Mutex<mpsc::Receiver<Vec<u8>>>,
-    outbound: Mutex<mpsc::Sender<Vec<u8>>>,
+    outbound: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+}
+
+impl Driver {
+    /// Lets go of the way to the conversation, which then hears that nothing more comes.
+    fn hang_up(&self) {
+        self.outbound
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+    }
 }
 
 impl Channel for Driver {
@@ -272,6 +356,8 @@ impl Channel for Driver {
         self.outbound
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .ok_or(Failure::PathLost)?
             .send(message.to_vec())
             .map_err(|_| Failure::PathLost)
     }
@@ -322,8 +408,14 @@ impl Link {
     }
 
     /// Queues the answer to the usage request `id`: the entry's report as it stands now.
-    pub(crate) fn answer(&self, inference: &Inference, id: &Value, account: Option<&str>) {
-        let report = inference.report(unix_now(), account);
+    pub(crate) fn answer(
+        &self,
+        inference: &Inference,
+        quota: &Quota,
+        id: &Value,
+        account: Option<&str>,
+    ) {
+        let report = inference.report_with(unix_now(), account, Some(quota));
         if let Some(bytes) = answer_of(&report, id) {
             self.push(bytes);
         }
@@ -370,7 +462,7 @@ impl Reading {
     }
 
     /// Runs `job` on a thread of its own unless a reading of this connection is under way.
-    fn spawn(self: &Arc<Self>, job: impl FnOnce(&Self) + Send + 'static) -> bool {
+    pub(crate) fn spawn(self: &Arc<Self>, job: impl FnOnce(&Self) + Send + 'static) -> bool {
         if self
             .busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -382,13 +474,18 @@ impl Reading {
         let started = thread::Builder::new()
             .name("canoa-agy-usage".to_owned())
             .spawn(move || {
+                // However the job ends, a panic included, the next one may start and a request that waited is answered
+                // with what there is.
+                let again = Arc::clone(&me);
+                let _release = Finally(Some(move || {
+                    again.busy.store(false, Ordering::SeqCst);
+                    again.flush_waiters();
+                }));
                 job(&me);
-                me.busy.store(false, Ordering::SeqCst);
-                // A request that came while the job ended is answered with what it found.
-                me.flush_waiters();
             });
         if started.is_err() {
             self.busy.store(false, Ordering::SeqCst);
+            self.flush_waiters();
             return false;
         }
         true
@@ -430,7 +527,7 @@ impl Reading {
         let waiting = core::mem::take(&mut *lock(&self.waiters));
         for id in waiting {
             self.link
-                .answer(&self.inference, &id, self.account.as_deref());
+                .answer(&self.inference, &self.quota, &id, self.account.as_deref());
         }
     }
 
@@ -484,7 +581,12 @@ impl Reading {
 
     /// Answers the usage request `id` after a reading: the one under way, or a new one.
     pub(crate) fn ask(self: &Arc<Self>, id: Value) {
-        lock(&self.waiters).push(id);
+        self.wait_for(id);
         self.spawn(Self::read_quietly);
+    }
+
+    /// Holds the usage request `id` until the reading under way ends.
+    pub(crate) fn wait_for(&self, id: Value) {
+        lock(&self.waiters).push(id);
     }
 }

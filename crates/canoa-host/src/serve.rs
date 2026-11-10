@@ -31,7 +31,7 @@ use crate::inproc::{self, InProcess};
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
-use crate::usage_splice::Antigravity;
+use crate::usage_splice::{Antigravity, Starter};
 use crate::worktree::Worktrees;
 
 /// Worktree requests one connection may make before its first ACP message.
@@ -242,7 +242,7 @@ struct Shared {
     store: Arc<TrustStore>,
     registry: Registry,
     unproven: Gate,
-    agents: Mutex<Agents>,
+    agents: Arc<Mutex<Agents>>,
     /// Held while agents are being ended, so that whoever else ends them returns only once they have.
     ending: Mutex<()>,
     /// Set by [`Stopper::stop`]: every listener and link ends.
@@ -324,6 +324,32 @@ impl Shared {
     }
 }
 
+/// How an agent started only to read its usage is started: recorded with the others, so that stopping the host ends it and
+/// none starts while it stops. The second part of what it hands back forgets the agent once it has ended.
+fn private_starter(agents: &Arc<Mutex<Agents>>) -> Starter {
+    let agents = Arc::clone(agents);
+    Starter(Arc::new(move |program, args| {
+        let mut held = agents.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.stopping {
+            return Ok(None);
+        }
+        let agent = Arc::new(BridgeAgent::spawn(program, args, MAX_LINE)?);
+        held.next += 1;
+        let key = held.next;
+        held.running.insert(key, Process::Agent(Arc::clone(&agent)));
+        drop(held);
+        let agents = Arc::clone(&agents);
+        let forget: Box<dyn FnOnce() + Send> = Box::new(move || {
+            agents
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .running
+                .remove(&key);
+        });
+        Ok(Some((agent, forget)))
+    }))
+}
+
 /// Stops what a [`Serving`] runs, from another thread.
 #[derive(Clone)]
 pub struct Stopper(Arc<Shared>);
@@ -347,17 +373,22 @@ impl Stopper {
     /// free them, or use [`Stopper::stop`].
     pub fn stop_agents(&self) {
         let _ending = self.0.ending.lock().unwrap_or_else(PoisonError::into_inner);
-        let running = {
-            let mut agents = self.0.agents.lock().unwrap_or_else(PoisonError::into_inner);
-            agents.stopping = true;
-            core::mem::take(&mut agents.running)
-        };
-        for process in running.values() {
-            process.signal();
-        }
-        for process in running.values() {
-            process.stop();
-        }
+        end_all(&self.0.agents);
+    }
+}
+
+/// Marks the host as stopping, so no agent starts after, and ends every agent recorded, all signalled before any is stopped.
+fn end_all(agents: &Mutex<Agents>) {
+    let running = {
+        let mut agents = agents.lock().unwrap_or_else(PoisonError::into_inner);
+        agents.stopping = true;
+        core::mem::take(&mut agents.running)
+    };
+    for process in running.values() {
+        process.signal();
+    }
+    for process in running.values() {
+        process.stop();
     }
 }
 
@@ -466,6 +497,7 @@ impl Serving {
                 setting.default
             );
         }
+        let agents = Arc::new(Mutex::new(Agents::default()));
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
@@ -513,6 +545,8 @@ impl Serving {
                                     args: args.clone(),
                                     state_dir: options.state_dir.clone(),
                                     private: profiles.is_empty(),
+                                    per_connection: !profiles.is_empty(),
+                                    starter: Some(private_starter(&agents)),
                                 }),
                                 None => scope,
                             }
@@ -660,7 +694,7 @@ impl Serving {
                 store,
                 registry,
                 unproven: Gate::new(MAX_UNPROVEN),
-                agents: Mutex::new(Agents::default()),
+                agents,
                 ending: Mutex::new(()),
                 stopped: Arc::new(AtomicBool::new(false)),
                 program_args: options.program_args.clone(),
@@ -1152,6 +1186,41 @@ fn give_provider<C: Channel>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_the_host_ends_an_agent_started_for_a_reading_and_refuses_the_next() {
+        let agents = Arc::new(Mutex::new(Agents::default()));
+        let starter = private_starter(&agents);
+        let (program, args): (OsString, Vec<OsString>) = if cfg!(windows) {
+            (
+                "ping".into(),
+                vec!["-n".into(), "60".into(), "127.0.0.1".into()],
+            )
+        } else {
+            ("sleep".into(), vec!["60".into()])
+        };
+        let (agent, _forget) = (starter.0)(&program, &args)
+            .expect("it starts")
+            .expect("the host is not stopping");
+        assert_eq!(agents.lock().expect("lock").running.len(), 1);
+        assert!(
+            agent.try_status().expect("status").is_none(),
+            "it is running"
+        );
+        end_all(&agents);
+        let until = std::time::Instant::now() + core::time::Duration::from_secs(10);
+        while agent.try_status().expect("status").is_none() && std::time::Instant::now() < until {
+            std::thread::sleep(core::time::Duration::from_millis(50));
+        }
+        assert!(
+            agent.try_status().expect("status").is_some(),
+            "stopping the host ended it"
+        );
+        assert!(
+            (starter.0)(&program, &args).expect("no error").is_none(),
+            "none starts while the host stops"
+        );
+    }
 
     #[test]
     fn a_provider_command_line_holds_no_setting() {

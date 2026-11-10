@@ -3,7 +3,8 @@
 //! lists the fixture's models in the answer. It never reads a prompt's text and keeps no account of its own.
 //!
 //! `CANOA_TEST_AGY_LOG=FILE` appends one line per event, led by its process id (`start`, `cwd PATH`, `new`, `prompt`, `end`), so a test can tell
-//! what the host started and ended. `_fixture/reads` answers how many status requests were served.
+//! what the host started and ended. With `CANOA_TEST_AGY_EXITS` set, a `session/new` for the host's `usage-read` directory
+//! ends the process unanswered. `_fixture/reads` answers how many status requests were served.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
@@ -48,6 +49,16 @@ pub fn run(args: &[String]) {
         let result = match method {
             "initialize" => json!({"protocolVersion": 1, "agentCapabilities": {}}),
             "session/new" => {
+                // `CANOA_TEST_AGY_EXITS=1`: an agent started for a reading (its directory is the host's `usage-read`) ends
+                // without answering, as agy would if it crashed.
+                if std::env::var_os("CANOA_TEST_AGY_EXITS").is_some()
+                    && message["params"]["cwd"]
+                        .as_str()
+                        .is_some_and(|cwd| cwd.ends_with("usage-read"))
+                {
+                    log("exits");
+                    std::process::exit(0);
+                }
                 log(&format!(
                     "cwd {}",
                     message["params"]["cwd"].as_str().unwrap_or("")

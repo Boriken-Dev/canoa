@@ -550,7 +550,21 @@ fn quota_entry(state_dir: Option<std::path::PathBuf>, private: bool) -> Quota {
         args: Vec::new(),
         state_dir,
         private,
+        per_connection: false,
+        starter: Some(plain_starter()),
     })
+}
+
+/// A starter that records nothing: the program is started as it is.
+fn plain_starter() -> Starter {
+    Starter(Arc::new(|program, args| {
+        let agent = Arc::new(coqui_acp_bridge::agent::Agent::spawn(
+            program,
+            args,
+            crate::serve::MAX_LINE,
+        )?);
+        Ok(Some((agent, Box::new(|| {}))))
+    }))
 }
 
 #[test]
@@ -599,7 +613,10 @@ fn read_buckets_and_an_inferred_hit_are_one_report_with_a_revision_that_only_gro
         .map(|bucket| bucket.id.as_str())
         .collect();
     assert_eq!(ids, ["agy:model-b", "inferred"]);
-    assert_eq!(inference.revision(1_000), replaced.revision);
+    assert_eq!(
+        inference.revision(1_000, Some(quota.as_ref())),
+        replaced.revision
+    );
 }
 
 #[test]
@@ -707,4 +724,186 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
     // The reading is current, so a request is answered at once from it.
     let asked = report_of(&splice);
     assert_eq!(asked["buckets"], report["buckets"]);
+}
+
+fn per_connection_entry() -> Arc<Inference> {
+    Arc::new(Inference::new(None).with_antigravity(Antigravity {
+        program: "canoa-test-no-such-agy".into(),
+        args: Vec::new(),
+        state_dir: None,
+        private: false,
+        per_connection: true,
+        starter: None,
+    }))
+}
+
+#[test]
+fn connections_of_an_entry_with_profiles_never_answer_from_each_others_readings() {
+    serve_status();
+    let inference = per_connection_entry();
+    let first =
+        Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(std::process::id());
+    let second = Splice::new(Arc::clone(&inference), Some("work".to_owned()));
+    initialize(&first, true, plain_answer());
+    initialize(&second, true, plain_answer());
+    read_client(
+        &first,
+        &json!({"id": 5, "method": "session/new", "params": {"cwd": "/work"}}),
+    );
+    from_agent(&first, &json!({"id": 5, "result": {"sessionId": "s"}}));
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    let told = std::cell::Cell::new(false);
+    while !told.get() && std::time::Instant::now() < until {
+        first.tick(|message| {
+            let notice: Value = serde_json::from_slice(message).expect("JSON");
+            told.set(told.get() || notice["params"]["report"]["buckets"] != json!([]));
+            Ok(())
+        });
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        report_of(&first)["buckets"]
+            .as_array()
+            .is_some_and(|buckets| buckets.len() >= 2)
+    );
+    // The first connection's reading is current, and says nothing to the second.
+    assert_eq!(report_of(&second)["buckets"], json!([]));
+    assert_eq!(report_of(&second)["revision"], 0);
+}
+
+#[test]
+fn notices_from_two_threads_go_in_order_and_the_told_revision_only_grows() {
+    let inference = Arc::new(Inference::new(None));
+    let splice = Arc::new(Splice::new(Arc::clone(&inference), Some("work".to_owned())));
+    initialize(&splice, true, plain_answer());
+    let sent = Arc::new(Mutex::new(Vec::<u64>::new()));
+    let moving = {
+        let inference = Arc::clone(&inference);
+        std::thread::spawn(move || {
+            for at in 0..200_i64 {
+                // A new retry-after each time is a change, which the report numbers.
+                let text = format!("Error 429 Retry-After: {}", 1_000 + at);
+                inference.observe(&text, 1_000);
+                std::thread::sleep(Duration::from_micros(200));
+            }
+        })
+    };
+    let readers: Vec<_> = (0..4)
+        .map(|_| {
+            let (splice, sent) = (Arc::clone(&splice), Arc::clone(&sent));
+            std::thread::spawn(move || {
+                for _ in 0..400 {
+                    splice.tick(|message| {
+                        let notice: Value = serde_json::from_slice(message).expect("JSON");
+                        let revision = notice["params"]["report"]["revision"]
+                            .as_u64()
+                            .expect("a revision");
+                        // A send that takes a moment is where an older notice would overtake a newer one.
+                        std::thread::sleep(Duration::from_micros(300));
+                        lock(&sent).push(revision);
+                        Ok(())
+                    });
+                }
+            })
+        })
+        .collect();
+    moving.join().expect("the changes end");
+    for reader in readers {
+        reader.join().expect("a reader ends");
+    }
+    let sent = lock(&sent);
+    assert!(sent.len() > 1, "{sent:?}");
+    assert!(
+        sent.windows(2).all(|pair| pair[0] < pair[1]),
+        "notices are in order and none repeats: {sent:?}"
+    );
+}
+
+#[test]
+fn a_panic_in_a_reading_frees_the_connection_and_answers_the_request_that_waited() {
+    let inference = Arc::new(Inference::new(None).with_quota(quota_entry(None, false)));
+    let quota = inference.quota.clone().expect("a quota");
+    let link = Arc::new(Link::default());
+    let reading = Arc::new(Reading::new(
+        Arc::clone(&inference),
+        quota,
+        Arc::clone(&link),
+        Some("work".to_owned()),
+        std::process::id(),
+    ));
+    reading.wait_for(json!(7));
+    assert!(reading.spawn(|_| panic!("a reading that goes wrong")));
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while link.take().is_empty() && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Free again: another job starts.
+    let (ran, done) = std::sync::mpsc::channel();
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    let mut tries = 0;
+    while done.try_recv().is_err() && std::time::Instant::now() < until {
+        let ran = ran.clone();
+        if reading.spawn(move |_| {
+            let _ = ran.send(());
+        }) {
+            tries += 1;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(tries >= 1, "the connection took no further reading");
+}
+
+#[test]
+fn a_panic_in_a_private_reading_still_answers_who_asked() {
+    let state = std::env::temp_dir().join(format!("canoa-panic-test-{}", std::process::id()));
+    let quota = Arc::new(Quota::new(Antigravity {
+        program: "x".into(),
+        args: Vec::new(),
+        state_dir: Some(state.clone()),
+        private: true,
+        per_connection: false,
+        starter: Some(Starter(Arc::new(|_, _| panic!("the host's starter broke")))),
+    }));
+    let (ended, wait) = std::sync::mpsc::channel();
+    assert!(quota.read_privately(move || {
+        let _ = ended.send(());
+    }));
+    wait.recv_timeout(Duration::from_secs(10))
+        .expect("the request is answered although the reading panicked");
+    let _ = std::fs::remove_dir_all(&state);
+}
+
+#[test]
+fn a_request_that_comes_while_a_private_agent_reads_waits_for_it() {
+    let state = std::env::temp_dir().join(format!("canoa-wait-test-{}", std::process::id()));
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let gate = Mutex::new(gate);
+    let quota = Arc::new(Quota::new(Antigravity {
+        program: "x".into(),
+        args: Vec::new(),
+        state_dir: Some(state.clone()),
+        private: true,
+        per_connection: false,
+        starter: Some(Starter(Arc::new(move |_, _| {
+            let _ = gate.lock().expect("gate").recv();
+            Err(std::io::Error::other("no agent here"))
+        }))),
+    }));
+    let answered = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+    let note = |who: &'static str| {
+        let answered = Arc::clone(&answered);
+        move || lock(&answered).push(who)
+    };
+    assert!(quota.read_privately(note("first")));
+    // The second comes while the first reads, and the reading is not current: it is held, not given the old report.
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(quota.read_privately(note("second")));
+    assert!(lock(&answered).is_empty());
+    release.send(()).expect("released");
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while lock(&answered).len() < 2 && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(lock(&answered).len(), 2);
+    let _ = std::fs::remove_dir_all(&state);
 }

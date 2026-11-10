@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 mod agy;
 mod members;
 
-pub(crate) use agy::{Antigravity, Quota};
+pub(crate) use agy::{Antigravity, Quota, Starter};
 use agy::{Link, Reading};
 
 /// JSON-RPC's code for a message the receiver cannot place.
@@ -101,8 +101,11 @@ pub(crate) struct Inference {
     /// `None` is [`DEFAULT_LIMIT_PHRASES`]; a list replaces them, and an empty one reads nothing.
     phrases: Option<Vec<String>>,
     held: Mutex<Held>,
-    /// Set for an entry whose agy's quota is read.
+    /// Set for an entry whose agy's quota is read, one quota for all its connections.
     quota: Option<Arc<Quota>>,
+    /// Set for an entry whose connections may run as different accounts (it has profiles): each connection reads a quota of
+    /// its own, so none is answered from another's reading.
+    per_connection: Option<Antigravity>,
 }
 
 impl Inference {
@@ -111,6 +114,7 @@ impl Inference {
             phrases,
             held: Mutex::new(Held::default()),
             quota: None,
+            per_connection: None,
         }
     }
 
@@ -119,16 +123,39 @@ impl Inference {
         self.phrases.clone()
     }
 
-    /// This entry's agy reads its quota too.
+    /// This entry's agy reads its quota too, one for its connections.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_quota(mut self, quota: Quota) -> Self {
         self.quota = Some(Arc::new(quota));
         self
     }
 
+    /// This entry's agy reads its quota as `command` says: one shared by the connections, or one for each when
+    /// `per_connection`.
+    #[must_use]
+    pub(crate) fn with_antigravity(mut self, command: Antigravity) -> Self {
+        if command.per_connection {
+            self.per_connection = Some(command);
+        } else {
+            self.quota = Some(Arc::new(Quota::new(command)));
+        }
+        self
+    }
+
+    /// The quota a new connection reads into.
+    fn quota_for(&self) -> Option<Arc<Quota>> {
+        self.quota.clone().or_else(|| {
+            self.per_connection
+                .clone()
+                .map(|command| Arc::new(Quota::new(command)))
+        })
+    }
+
     /// Whether anything can be read at all: with no phrases and no quota the host stays out of the agent's way entirely.
     fn active(&self) -> bool {
         self.quota.is_some()
+            || self.per_connection.is_some()
             || self
                 .phrases
                 .as_ref()
@@ -186,35 +213,43 @@ impl Inference {
     }
 
     /// The entry's report at `now`: numbered by the host, under the entry's `account`.
+    #[cfg(test)]
     pub(crate) fn report(&self, now: i64, account: Option<&str>) -> UsageReport {
+        self.report_with(now, account, self.quota.as_deref())
+    }
+
+    /// The same, with the buckets of `quota`, which is a connection's own where the entry gives each one.
+    pub(crate) fn report_with(
+        &self,
+        now: i64,
+        account: Option<&str>,
+        quota: Option<&Quota>,
+    ) -> UsageReport {
         let mut held = lock(&self.held);
         held.expire(now);
-        let mut report = self
-            .quota
-            .as_ref()
-            .map_or_else(UsageReport::new, |quota| quota.report(now));
+        let mut report = quota.map_or_else(UsageReport::new, |quota| quota.report(now));
         if let Some(hit) = held.hit.clone() {
             let inferred = UsageReport::inferred(hit);
             report.observed_at = report.observed_at.max(inferred.observed_at);
             report.buckets.extend(inferred.buckets);
             report.limit = inferred.limit;
         }
-        report.sources = if self.quota.is_some() {
+        report.sources = if quota.is_some() {
             vec![Source::Reported, Source::Inferred]
         } else {
             vec![Source::Inferred]
         };
         report.account = account.map(ToOwned::to_owned);
         // Each part's count only grows, so the sum does.
-        report.revision = held.revision + self.quota.as_ref().map_or(0, |quota| quota.revision());
+        report.revision = held.revision + quota.map_or(0, Quota::revision);
         report
     }
 
     /// The report's revision at `now`, after letting go of a hit that lapsed.
-    fn revision(&self, now: i64) -> u64 {
+    fn revision(&self, now: i64, quota: Option<&Quota>) -> u64 {
         let mut held = lock(&self.held);
         held.expire(now);
-        held.revision + self.quota.as_ref().map_or(0, |quota| quota.revision())
+        held.revision + quota.map_or(0, Quota::revision)
     }
 }
 
@@ -304,6 +339,10 @@ pub(crate) struct Splice {
     link: Arc<Link>,
     /// The connection's own agy, once its process is known.
     reading: Option<Arc<Reading>>,
+    /// The quota read for this connection: the entry's, or its own where the entry gives each connection one.
+    quota: Option<Arc<Quota>>,
+    /// Held while a notice is built, sent and noted as told, so notices go out in order.
+    notifying: Mutex<()>,
 }
 
 impl Drop for Splice {
@@ -331,19 +370,22 @@ struct Notice {
 
 impl Splice {
     pub(crate) fn new(inference: Arc<Inference>, account: Option<String>) -> Self {
+        let quota = inference.quota_for();
         Self {
             inference,
             account,
             conn: Mutex::new(Conn::default()),
             link: Arc::new(Link::default()),
             reading: None,
+            quota,
+            notifying: Mutex::new(()),
         }
     }
 
     /// This connection's agent is the process `pid`, which is where its quota is read from, if the entry reads one.
     #[must_use]
     pub(crate) fn agent(mut self, pid: u32) -> Self {
-        if let Some(quota) = &self.inference.quota {
+        if let Some(quota) = &self.quota {
             self.reading = Some(Arc::new(Reading::new(
                 Arc::clone(&self.inference),
                 Arc::clone(quota),
@@ -396,9 +438,7 @@ impl Splice {
                 }
                 None
             }
-            "session/new" | "session/load"
-                if conn.stand == Stand::Host && self.inference.quota.is_some() =>
-            {
+            "session/new" | "session/load" if conn.stand == Stand::Host && self.quota.is_some() => {
                 if conn.opens.len() < MAX_OPEN {
                     conn.opens.insert(key);
                 }
@@ -411,7 +451,7 @@ impl Splice {
                 }
                 let opened = conn.opened;
                 drop(conn);
-                if let Some(quota) = &self.inference.quota {
+                if let Some(quota) = &self.quota {
                     // The figures are the agent's, which serves them while a session is open; a request after a reading
                     // younger than the cache is answered from it, and one that needs a reading waits for it.
                     if !quota.fresh() {
@@ -422,14 +462,19 @@ impl Splice {
                         let link = Arc::clone(&self.link);
                         let inference = Arc::clone(&self.inference);
                         let (waiting, account) = (id.clone(), self.account.clone());
+                        let figures = Arc::clone(quota);
                         if quota.read_privately(move || {
-                            link.answer(&inference, &waiting, account.as_deref());
+                            link.answer(&inference, &figures, &waiting, account.as_deref());
                         }) {
                             return Some(Client::Held);
                         }
                     }
                 }
-                let report = self.inference.report(unix_now(), self.account.as_deref());
+                let report = self.inference.report_with(
+                    unix_now(),
+                    self.account.as_deref(),
+                    self.quota.as_deref(),
+                );
                 answer_of(&report, id).map(Client::Answer)
             }
             _ => None,
@@ -503,7 +548,7 @@ impl Splice {
         }
         if conn.initializes.contains(&key) {
             drop(conn);
-            return Self::initialized(&mut value, key, self.inference.quota.is_some());
+            return Self::initialized(&mut value, key, self.quota.is_some());
         }
         if conn.opens.contains(&key) {
             drop(conn);
@@ -655,11 +700,13 @@ impl Splice {
             if !(conn.notify && conn.stand == Stand::Host) {
                 return None;
             }
-            if self.inference.revision(now) == conn.told {
+            if self.inference.revision(now, self.quota.as_deref()) == conn.told {
                 return None;
             }
         }
-        let report = self.inference.report(now, self.account.as_deref());
+        let report =
+            self.inference
+                .report_with(now, self.account.as_deref(), self.quota.as_deref());
         let revision = report.revision;
         let message = json!({"jsonrpc": "2.0", "method": USAGE_NOTIFICATION,
             "params": {"report": serde_json::to_value(&report).ok()?}});
@@ -718,10 +765,14 @@ impl Splice {
     /// Sends the notice the client is owed, if any. One that does not go is owed still, since the client's last-told
     /// revision did not move.
     fn notify_if_owed(&self, send: &impl Fn(&[u8]) -> Result<(), Failure>) {
+        // The relay's thread and the connection's tick both come here: one at a time, so a notice built from an older
+        // report is never sent after a newer one, and `told` only grows.
+        let _one = lock(&self.notifying);
         if let Some(notice) = self.notice(unix_now())
             && send(&notice.bytes).is_ok()
         {
-            lock(&self.conn).told = notice.revision;
+            let mut conn = lock(&self.conn);
+            conn.told = conn.told.max(notice.revision);
         }
     }
 }

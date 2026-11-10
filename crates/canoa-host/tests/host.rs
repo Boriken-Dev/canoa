@@ -1144,6 +1144,9 @@ fn an_agys_buckets_appear_after_a_session_and_go_only_to_the_client_that_asked()
         assert_eq!(before["buckets"], json!([]), "{before}");
         assert_eq!(before["account"], "agy", "{before}");
         seen.extend([started, before]);
+        // Each connection of an entry with profiles reads its own quota: the watcher is told of its own session's reading,
+        // and the other client's is its own.
+        new_session(rpc, &dir).expect("a session opens");
 
         with_link(host.url("agy"), &quiet, host.peer, |other| {
             other
@@ -1355,4 +1358,40 @@ fn live_a_real_agys_quota_is_read_with_no_session_open() {
         "{text}"
     );
     assert!(!text.contains('@'), "no account detail in the report");
+}
+
+#[test]
+fn a_private_agent_that_ends_early_is_not_waited_for() {
+    let scratch = Scratch::new();
+    let agy_log = scratch.0.join("agy.log");
+    let (host, _) = Host::start_logged(
+        scratch,
+        &agy_entry("agy", ""),
+        1,
+        &[
+            ("CANOA_TEST_AGY_LOG", agy_log.clone().into()),
+            ("CANOA_TEST_AGY_EXITS", "1".into()),
+        ],
+    );
+    let client = support::key();
+    host.pair(&client);
+    let began = Instant::now();
+    let report = with_link(host.url("agy"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(false)).expect("answered");
+        rpc.request("_coqui_acp/usage", json!({}))
+            .expect("answered, though the agent started for it ended without a reading")
+    })
+    .expect("a paired key is served");
+    assert!(
+        began.elapsed() < Duration::from_secs(15),
+        "the request waited out the reading's whole limit: {:?}",
+        began.elapsed()
+    );
+    assert_eq!(report["buckets"], json!([]), "{report}");
+    assert!(
+        std::fs::read_to_string(&agy_log)
+            .unwrap_or_default()
+            .contains("exits"),
+        "the agent started for the reading ended itself"
+    );
 }

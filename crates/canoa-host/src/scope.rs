@@ -20,7 +20,7 @@ use coqui_web_channel::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;
-use crate::usage_splice::{Antigravity, Client, Inference, Quota, Splice};
+use crate::usage_splice::{Antigravity, Client, Inference, Splice};
 use crate::worktree::Worktrees;
 
 /// JSON-RPC's code for a message that is not JSON.
@@ -72,7 +72,7 @@ impl Scope {
     /// This scope reading an Antigravity agent's quota too, as `command` runs it.
     #[must_use]
     pub(crate) fn antigravity(mut self, command: Antigravity) -> Self {
-        self.usage = Arc::new(Inference::new(self.usage.phrases()).with_quota(Quota::new(command)));
+        self.usage = Arc::new(Inference::new(self.usage.phrases()).with_antigravity(command));
         self
     }
 
