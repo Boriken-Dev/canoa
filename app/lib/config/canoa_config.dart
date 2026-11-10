@@ -6,6 +6,7 @@ import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
 import '../chat/modes.dart' show modeOrder;
+import '../chat/usage.dart' show defaultWarnPermille;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/profile.dart';
@@ -79,7 +80,11 @@ final class CanoaConfig {
     this.hiddenSources = const {},
     this.pasteAsFile = defaultPasteAsFile,
     this.embedLimit = defaultEmbedLimit,
+    this.warnPermille = defaultWarnPermille,
   });
+
+  /// `[usage] warn_permille`: from this many thousandths used, the usage control shows a status (800 is 80%).
+  final int warnPermille;
 
   /// `[attachments] paste_as_file`: the most characters a paste puts in the message; a longer one goes as an attachment.
   final int pasteAsFile;
@@ -162,6 +167,7 @@ final class CanoaConfig {
         hiddenSources: hiddenSources ?? this.hiddenSources,
         pasteAsFile: pasteAsFile,
         embedLimit: embedLimit,
+        warnPermille: warnPermille,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -187,6 +193,7 @@ final class CanoaConfig {
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
+    warnPermille: warnPermille,
   );
 
   /// What `[host]` names for canoa to serve, agents first, as written. canoa itself checks each one.
@@ -404,6 +411,7 @@ final class CanoaConfig {
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
+    warnPermille: warnPermille,
   );
 
   static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
@@ -445,10 +453,15 @@ final class CanoaConfig {
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
+    final usage = table('usage', {'warn_permille'});
     int limit(String key, int fallback) {
       final raw = attachments[key] ?? fallback;
       if (raw is! int || raw < 0) throw FormatException('canoa.cfg: attachments.$key must be a whole number, 0 or more');
       return raw;
+    }
+    final warn = usage['warn_permille'] ?? defaultWarnPermille;
+    if (warn is! int || warn < 0 || warn > 1000) {
+      throw const FormatException('canoa.cfg: usage.warn_permille must be a whole number from 0 to 1000');
     }
     final hidden = sources['hidden'] ?? const <Object>[];
     if (hidden is! List || hidden.any((name) => name is! String || name.trim().isEmpty)) {
@@ -585,6 +598,7 @@ final class CanoaConfig {
       hiddenSources: {for (final name in hidden) name as String},
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
       embedLimit: limit('embed_limit', defaultEmbedLimit),
+      warnPermille: warn,
       notifications: NotificationSettings(
         permission: flag(notifications, 'permission', true),
         question: flag(notifications, 'question', true),
@@ -631,7 +645,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${defaultMode == null ? '' : '\n[permissions]\ndefault_mode = ${jsonEncode(defaultMode)}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${warnPermille == defaultWarnPermille ? '' : '\n[usage]\nwarn_permille = $warnPermille\n'}${defaultMode == null ? '' : '\n[permissions]\ndefault_mode = ${jsonEncode(defaultMode)}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

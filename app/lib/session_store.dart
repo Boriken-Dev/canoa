@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'acp/client.dart';
 import 'acp/local_agent.dart' show readLocalFile;
+import 'acp/usage_wire.dart' show UsageNotice;
 import 'package:coqui_web/coqui_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -10,6 +11,7 @@ import 'chat/attachments.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'chat/update_record.dart';
+import 'chat/usage.dart';
 import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'profile/apply.dart';
@@ -167,6 +169,15 @@ class ChatSession {
   List<PlanEntry> plan = const [];
   List<AgentCommandInfo> commands = const [];
   SessionUsage usage = const SessionUsage();
+
+  /// What the agent last said of the account's allowances, once it has said; null while it has not.
+  UsageReport? usageReport;
+
+  /// Whether this session's agent reports usage, which decides whether the control shows at all.
+  bool reportsUsage = false;
+
+  /// What this session has spent, as the agent last said.
+  UsageSpend? spend;
 
   /// Commands the agent ran, which a tool's card shows.
   final Map<String, TerminalView> terminals = {};
@@ -494,6 +505,7 @@ class SessionStore extends ChangeNotifier {
   final Map<String, VerifiedAgent> _verifiedClients = {};
   final Map<String, StreamSubscription<AcpSessionUpdate>> _subscriptions = {};
   final Map<String, StreamSubscription<AcpEvent>> _turnSubscriptions = {};
+  final Map<String, StreamSubscription<UsageNotice>> _usageSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -1060,7 +1072,42 @@ class SessionStore extends ChangeNotifier {
         notifyListeners();
       }
     });
+    _watchUsage(session, client);
     if (record) _record(session, client);
+    notifyListeners();
+  }
+
+  /// Follows the usage [client] reports for [session]: the account's allowances for every session on it, and the spend of the
+  /// one the report names. Nothing is shown for an agent that advertised no usage.
+  void _watchUsage(ChatSession session, VerifiedAgent client) {
+    unawaited(_usageSubscriptions.remove(session.id)?.cancel());
+    session.usageReport = null;
+    session.reportsUsage = client.reportsUsage;
+    if (!session.reportsUsage) return;
+    _usageSubscriptions[session.id] = client.usageNotices.listen((notice) => _usageArrived(session, notice.sessionId, notice.report));
+    unawaited(refreshUsage(session));
+  }
+
+  /// Asks the agent of [session] for its report now, as it does after each turn.
+  Future<void> refreshUsage(ChatSession session) async {
+    final client = _verifiedClients[session.id];
+    if (client == null || client.isClosed || !session.reportsUsage) return;
+    final report = await client.fetchUsage(sessionId: session.remoteSessionId);
+    if (report != null) _usageArrived(session, session.remoteSessionId, report);
+  }
+
+  /// Takes [report] for [session]: the newest by revision wins, and the spend is kept only when it is this session's.
+  void _usageArrived(ChatSession session, String? named, UsageReport report) {
+    final mine = session.remoteSessionId;
+    final own = report.spend != null && (named == mine || report.spend!.sessionId == mine);
+    if (own) session.spend = report.spend;
+    final held = session.usageReport;
+    if (held != null && held.revision > report.revision) {
+      notifyListeners();
+      return;
+    }
+    session.usageReport = report.supported ? report.withSpend(null) : null;
+    if (!report.supported) session.reportsUsage = false;
     notifyListeners();
   }
 
@@ -1476,6 +1523,7 @@ class SessionStore extends ChangeNotifier {
   /// A turn of [session] ended, stopped or failed when [held] says why. The next queued message goes, unless the turn did not
   /// end as it should: then the queue waits for the person, who may send it, edit it or clear it.
   void _turnEnded(ChatSession session, String? held) {
+    if (session.reportsUsage) unawaited(refreshUsage(session));
     if (session.queue.isEmpty) return;
     session.queueHeld = held;
     // After the update that ended the turn has been dispatched: an answer to the next prompt could otherwise arrive inside it.
@@ -1806,6 +1854,7 @@ class SessionStore extends ChangeNotifier {
       unawaited(drafts?.remove(id));
     }
     unawaited(_subscriptions.remove(session.id)?.cancel());
+    unawaited(_usageSubscriptions.remove(session.id)?.cancel());
     unawaited(_turnSubscriptions.remove(session.id)?.cancel());
     _verifiedClients.remove(session.id);
     _sessions.remove(session);
@@ -1896,6 +1945,10 @@ class SessionStore extends ChangeNotifier {
       unawaited(subscription.cancel());
     }
     _subscriptions.clear();
+    for (final subscription in _usageSubscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _usageSubscriptions.clear();
     _verifiedClients.clear();
     unawaited(_attention.close());
     super.dispose();

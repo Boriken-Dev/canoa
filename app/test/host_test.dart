@@ -13,7 +13,9 @@ import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
+import 'package:canoa/acp/usage_wire.dart' show UsageNotice;
 import 'package:canoa/auth/peer_proof.dart';
+import 'package:canoa/chat/usage.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/worktree/host.dart';
@@ -66,6 +68,10 @@ program = ${jsonEncode(_example('stdio_agent', library: false))}
 library = ${jsonEncode(_example('echo_provider', library: true))}
 provider = "echo_provider"
 
+[host.agents.usage]
+program = ${jsonEncode(_example('stdio_agent', library: false))}
+args = ["--scripted", "--usage", "--usage-claims=the-agents-own"]
+
 [host.agents.trees]
 program = ${jsonEncode(_example('stdio_agent', library: false))}
 working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
@@ -80,7 +86,7 @@ working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
     final urls = <String, String>{};
     String? peer;
     String? method;
-    await for (final line in lines.take(3).timeout(const Duration(seconds: 30))) {
+    await for (final line in lines.take(4).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry['url'] as String;
       peer = entry['peer'] as String;
@@ -173,6 +179,29 @@ void main() {
       expect(await turn(client, opened.id, 'hello'), 'echo: hello');
       expect(await turn(client, opened.id, 'ask to write'), 'the person chose allow');
       expect(asked.single.title, 'Write a file');
+    } finally {
+      await client.close();
+    }
+  }, skip: skip);
+
+  test("a scripted agent's quota reaches the app under the host's account, not the agent's", () async {
+    final client = await connect('usage');
+    try {
+      expect(client.reportsUsage, isTrue);
+      final opened = await client.openSession(cwd: host.dir.path);
+      final notices = <UsageNotice>[];
+      final listening = client.usageNotices.listen(notices.add);
+      expect(await turn(client, opened.id, 'quota 620'), 'quota 620');
+      await listening.cancel();
+      final notice = notices.single;
+      expect(notice.sessionId, opened.id);
+      expect(notice.report.account, 'usage', reason: "the entry's name, whatever the agent named");
+      final bucket = notice.report.buckets.single;
+      expect((bucket.id, bucket.used, bucket.limit, bucket.unit), ('five_hour', 620, 1000, UsageUnit.permille));
+      expect(bucket.fractionPermille, 620);
+      final asked = await client.fetchUsage();
+      expect(asked?.account, 'usage');
+      expect(asked?.buckets.single.used, 620);
     } finally {
       await client.close();
     }

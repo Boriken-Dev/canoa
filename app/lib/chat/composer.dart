@@ -13,6 +13,7 @@ import 'attachments.dart';
 import 'modes.dart';
 import 'session_options.dart';
 import 'transcript.dart' show CommandSuggestions;
+import 'usage.dart';
 
 /// What was copied: an image, files by their paths, or text.
 abstract interface class ClipboardReader {
@@ -46,6 +47,7 @@ final class ComposerKit {
     this.clipboard = const TextClipboard(),
     this.overlays = const [],
     this.pasteAsFile = defaultPasteAsFile,
+    this.warnPermille = defaultWarnPermille,
     this.onSourceSettings,
     this.onProfile,
   });
@@ -72,6 +74,9 @@ final class ComposerKit {
   /// canoa.cfg's overlays, by name, in their order.
   final List<String> overlays;
   final int pasteAsFile;
+
+  /// From this many thousandths used, the usage control shows a status.
+  final int warnPermille;
 
   /// Opens Settings at its sources.
   final VoidCallback? onSourceSettings;
@@ -348,13 +353,16 @@ class AttachmentChips extends StatelessWidget {
 
 /// A compact control in the row under the message.
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, this.icon, this.danger = false, this.status = false, this.enabled = true});
+  const _Pill({required this.label, this.icon, this.danger = false, this.status = false, this.enabled = true, this.maxWidth = 180});
 
   final String label;
   final IconData? icon;
 
   /// [danger] is for what is wrong; [status] for what is on, in the accent of the scheme, never the colour of an error.
   final bool danger, status, enabled;
+
+  /// The widest the label gets before it is cut short.
+  final double maxWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -367,7 +375,7 @@ class _Pill extends StatelessWidget {
         if (icon != null) ...[Icon(icon, size: 16, color: color ?? look.muted), const SizedBox(width: 4)],
         Flexible(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 180),
+            constraints: BoxConstraints(maxWidth: maxWidth),
             child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: color)),
           ),
         ),
@@ -398,6 +406,7 @@ class _Controls extends StatelessWidget {
     // The mode first at the bottom left, then Add; the model and effort sit beside Send, as Claude Code and Codex lay them out.
     final left = <Widget>[
       _ModeChooser(store: store, session: session, options: options, seen: seen),
+      _UsagePill(session: session, warnPermille: kit.warnPermille),
       MenuAnchor(
         menuChildren: [
           MenuItemButton(
@@ -685,6 +694,113 @@ class _ModeChooser extends StatelessWidget {
         label: pending && session.status == SessionStatus.working ? '$label (next turn)' : label,
         icon: bypass ? Icons.fast_forward_outlined : Icons.tune,
         status: bypass,
+      ),
+    );
+  }
+}
+
+/// How much of the account's usage allowance is used, beside the mode: the bucket that matters most with its refill, and a menu
+/// of every bucket the agent reported. Hidden for an agent that reports none. In the accent of the scheme from the configured
+/// fraction used (a status), and in the colour of an error once a bucket is exhausted.
+class _UsagePill extends StatelessWidget {
+  const _UsagePill({required this.session, required this.warnPermille});
+
+  final ChatSession session;
+  final int warnPermille;
+
+  @override
+  Widget build(BuildContext context) {
+    if (session.status == SessionStatus.preview || !session.reportsUsage) return const SizedBox.shrink();
+    final report = session.usageReport;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final headline = report == null ? null : headlineOf(report, now);
+    final level = headline == null ? UsageLevel.calm : levelOf(headline, now, warnPermille: warnPermille);
+    final text = report == null ? 'No usage yet' : pillText(report, now);
+    return MenuAnchor(
+      menuChildren: [UsageMenu(report: report, now: now)],
+      builder: (context, controller, _) => InkWell(
+        key: const Key('usage'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => controller.isOpen ? controller.close() : controller.open(),
+        child: Tooltip(
+          message: 'Usage of the account behind this agent',
+          child: _Pill(
+            label: text,
+            icon: Icons.data_usage,
+            danger: level == UsageLevel.danger,
+            status: level == UsageLevel.warn,
+            maxWidth: 320,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the usage control's menu lists: every bucket, the most pressing first, with what is known of it.
+class UsageMenu extends StatelessWidget {
+  const UsageMenu({super.key, required this.report, required this.now});
+
+  final UsageReport? report;
+
+  /// Unix seconds.
+  final int now;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.look;
+    final report = this.report;
+    final small = TextStyle(fontSize: 11.5, color: look.muted);
+    final buckets = report == null ? const <UsageBucket>[] : ordered(report, now);
+    final hit = report?.limit;
+    return SelectionArea(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 240, maxWidth: 380),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (buckets.isEmpty) Text('Nothing reported yet', key: const Key('usage-empty'), style: small),
+              for (final bucket in buckets)
+                Padding(
+                  key: Key('usage-bucket ${bucket.id}'),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      bucketLine(bucket, now),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: switch (levelOf(bucket, now)) {
+                          UsageLevel.danger => Theme.of(context).colorScheme.error,
+                          UsageLevel.warn => Theme.of(context).colorScheme.tertiary,
+                          UsageLevel.calm => null,
+                        },
+                      ),
+                    ),
+                    for (final line in bucketDetails(bucket, now)) Text(line, style: small),
+                  ]),
+                ),
+              if (hit != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    [
+                      'Last refusal',
+                      if (hit.text != null) hit.text!,
+                      if (hit.retryAfter != null) 'retry after ${spanText(hit.retryAfter!.inSeconds)}',
+                      if (hit.resetsAt != null && hit.resetsAt! > now) 'back in ${spanText(hit.resetsAt! - now)}',
+                    ].join(' · '),
+                    style: small,
+                  ),
+                ),
+              if (report?.account case final account?) Text('Account: $account', style: small),
+              if (report != null && report.sources.isNotEmpty && !report.sources.contains('reported'))
+                Text('The agent reports no figures: these are inferred from its errors', style: small),
+            ],
+          ),
+        ),
       ),
     );
   }

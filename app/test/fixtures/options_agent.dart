@@ -107,6 +107,22 @@ final class OptionsAgent {
     ]},
   ];
 
+  /// The usage report it advertises the extension for and answers `_coqui_acp/usage` with, as the model writes it; none, and it
+  /// advertises nothing and answers the method as an agent without it does, with -32601.
+  Map<String, Object?>? usage;
+
+  /// What the client said of the extension in `initialize`.
+  Object? usageOptIn;
+
+  /// Tells the last started copy a report changed, as an agent does: for [session] when one is named.
+  void pushUsage(Map<String, Object?> report, {String? session}) {
+    usage = report;
+    _asks.last({
+      'jsonrpc': '2.0', 'method': '_coqui_acp/usage_update',
+      'params': {'sessionId': ?session, 'report': report},
+    });
+  }
+
   /// The methods received, in order.
   List<String> get methods => [for (final request in requests) request['method'] as String];
 
@@ -146,10 +162,18 @@ final class OptionsAgent {
         final params = message['params'] as Map<String, dynamic>? ?? const {};
         switch (method) {
           case 'initialize':
+            usageOptIn = ((params['clientCapabilities'] ?? params['capabilities']) as Map?)?['_meta'];
             reply(id, {'protocolVersion': 1, 'agentCapabilities': {
               'loadSession': true,
               'promptCapabilities': {'image': images, 'embeddedContext': files},
+              if (usage != null) '_meta': {'dev.boriken.coqui.acp/usage': {'version': 1, 'sources': ['reported'], 'spend': true}},
             }, 'agentInfo': {'name': 'options-agent', 'version': '1.0.0'}});
+          case '_coqui_acp/usage':
+            if (usage == null) {
+              incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'error': {'code': -32601, 'message': 'no such method'}}));
+            } else {
+              reply(id, usage);
+            }
           case 'session/new':
             reply(id, {'sessionId': 'o1', 'configOptions': options});
           case 'session/set_config_option':

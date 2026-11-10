@@ -929,6 +929,7 @@ class _CanoaAppState extends State<CanoaApp> {
     clipboard: widget.clipboard ?? const SystemClipboard(),
     overlays: config.overlays.keys.toList(),
     pasteAsFile: config.pasteAsFile,
+    warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(sources: true)),
     onProfile: (session) {
       final above = _navigator.currentContext;

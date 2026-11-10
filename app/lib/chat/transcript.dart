@@ -508,7 +508,7 @@ class SessionControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final look = context.look;
-    final usage = session.usage.describe();
+    final usage = session.usage.describe(spend: session.spend);
     if (usage == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),

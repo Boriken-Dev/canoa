@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'usage.dart';
+
 // What an agent reports beyond its messages. All of it comes from the agent, so every field is checked for its type and bounded:
 // a wrong one is ignored rather than trusted, and an agent cannot grow this without limit.
 
@@ -384,10 +386,14 @@ final class SessionUsage {
     );
   }
 
-  String? describe() {
+  /// The context used, then what the session has spent: [spend] when the agent reported it, else the cost its usage update gave.
+  /// A cost nobody reported stays absent.
+  String? describe({UsageSpend? spend}) {
+    final spent = spendText(spend);
     final parts = <String>[
       if (used != null && size != null && size! > 0) '${(100 * used! / size!).clamp(0, 100).round()}% of context',
-      if (cost != null) '${cost!.toStringAsFixed(2)} ${currency ?? ''}'.trim(),
+      if (spent != null && spent.isNotEmpty) spent,
+      if (cost != null && spend?.costMicroUsd == null) '${cost!.toStringAsFixed(2)} ${currency ?? ''}'.trim(),
     ];
     return parts.isEmpty ? null : parts.join(' · ');
   }

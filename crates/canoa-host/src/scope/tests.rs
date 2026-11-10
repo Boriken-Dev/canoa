@@ -354,3 +354,22 @@ fn what_is_not_a_usage_report_passes_untouched() {
     let bytes = serde_json::to_vec(&report).expect("JSON");
     assert_eq!(Scope::default().stamp(&bytes).as_ref(), bytes.as_slice());
 }
+
+#[test]
+fn stamping_changes_the_account_of_every_vector_report_and_nothing_else() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("../../tests/vectors/usage.json")).expect("JSON");
+    let scope = Scope::default().account("work".to_owned());
+    let reports = vectors["roundtrip"].as_array().expect("a list");
+    assert!(reports.len() >= 7);
+    for vector in reports {
+        let report = vector["report"].clone();
+        let notice =
+            json!({"jsonrpc": "2.0", "method": USAGE_NOTIFICATION, "params": {"report": report}});
+        let bytes = serde_json::to_vec(&notice).expect("JSON");
+        let stamped: Value = serde_json::from_slice(&scope.stamp(&bytes)).expect("JSON");
+        let mut expected = report;
+        expected["account"] = json!("work");
+        assert_eq!(stamped["params"]["report"], expected, "{}", vector["name"]);
+    }
+}

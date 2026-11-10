@@ -4,6 +4,9 @@ import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:coqui_web/coqui_web.dart';
 
+import '../chat/usage.dart';
+import 'usage_wire.dart';
+
 export 'package:coqui_acp/coqui_acp.dart';
 
 /// A proven peer, and the channel that keeps everything after the proof with that peer.
@@ -25,6 +28,9 @@ final class AgentIdentity {
 
   /// Grok's ACP sends no `agentInfo`, only `_meta.grokShell` and `_meta.agentVersion`.
   bool grokShell = false;
+
+  /// The usage extension, when the agent advertised it.
+  UsageSupport? usage;
 
   /// The method that opens an earlier session again, as the client would pick it, or null when the agent offers none.
   String? reopenBy;
@@ -72,6 +78,7 @@ final class AgentIdentity {
       }
       return at == true || at is Map;
     }
+    usage = UsageSupport.parse(capabilities is Map ? capabilities['_meta'] : null);
     reopenBy = version == 2
         ? 'session/resume'
         : says(const ['loadSession'])
@@ -92,7 +99,7 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
-  VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity,
+  VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
       AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false}) {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
@@ -108,6 +115,17 @@ final class VerifiedAgent {
 
   /// What the agent said about itself when it was initialized.
   final AgentIdentity identity;
+
+  final UsageWire _usage;
+
+  /// Whether the agent advertised the usage extension.
+  bool get reportsUsage => identity.usage != null;
+
+  /// The reports the agent sends when one changes.
+  Stream<UsageNotice> get usageNotices => _usage.notices;
+
+  /// Asks the agent for its report, with [sessionId]'s spend; null when it has none to give.
+  Future<UsageReport?> fetchUsage({String? sessionId}) => reportsUsage ? _usage.fetch(sessionId: sessionId) : Future<UsageReport?>.value();
 
   static Future<VerifiedAgent> open(
     WebChannel channel, {
@@ -126,10 +144,11 @@ final class VerifiedAgent {
       }
       final proven = actual.channel;
       final identity = AgentIdentity();
+      final usage = UsageWire(proven.send);
       return VerifiedAgent._(
         (decider, elicitor) => AcpClient(
-          incoming: proven.messages.map(identity._inspect),
-          send: proven.send,
+          incoming: proven.messages.map(identity._inspect).map(usage.incoming),
+          send: (message) => proven.send(usage.outgoing(message)),
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,
@@ -138,6 +157,7 @@ final class VerifiedAgent {
         ),
         actual.peerId,
         identity,
+        usage,
         decider,
         elicitor: elicitor,
       );
@@ -157,10 +177,11 @@ final class VerifiedAgent {
     AgentElicitor? elicitor,
   }) {
     final identity = AgentIdentity();
+    final usage = UsageWire(send);
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
-        incoming: messages.map(identity._inspect),
-        send: send,
+        incoming: messages.map(identity._inspect).map(usage.incoming),
+        send: (message) => send(usage.outgoing(message)),
         closeSource: close,
         decider: decider,
         elicitor: elicitor,
@@ -171,6 +192,7 @@ final class VerifiedAgent {
       ),
       'local:$label',
       identity,
+      usage,
       decider,
       elicitor: elicitor,
       isChild: true,
@@ -186,10 +208,11 @@ final class VerifiedAgent {
       throw const AcpFailure('The browser has not proven who this agent is');
     }
     final identity = AgentIdentity();
+    final usage = UsageWire(connection.send);
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
-        incoming: connection.messages.map(identity._inspect),
-        send: connection.send,
+        incoming: connection.messages.map(identity._inspect).map(usage.incoming),
+        send: (message) => connection.send(usage.outgoing(message)),
         closeSource: connection.close,
         decider: decider,
         elicitor: elicitor,
@@ -198,6 +221,7 @@ final class VerifiedAgent {
       ),
       peer,
       identity,
+      usage,
       decider,
       elicitor: elicitor,
     );
@@ -240,6 +264,7 @@ final class VerifiedAgent {
     try {
       await _client.close();
     } finally {
+      _usage.close();
       final actions = [..._afterClose];
       _afterClose.clear();
       for (final action in actions) {
