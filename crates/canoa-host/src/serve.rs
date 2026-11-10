@@ -137,6 +137,8 @@ pub enum ServeError {
         /// Why.
         failure: Failure,
     },
+    /// The proof could not be built from the options.
+    Proof(String),
 }
 
 impl fmt::Display for ServeError {
@@ -148,6 +150,7 @@ impl fmt::Display for ServeError {
             Self::Listen { entry, failure } => {
                 write!(f, "host entry {entry} could not listen: {failure}")
             }
+            Self::Proof(reason) => write!(f, "the proof could not be built: {reason}"),
         }
     }
 }
@@ -477,17 +480,19 @@ impl Serving {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
-        let mut method =
-            Proof::new(identity).with_initiators(Trust::Store(TrustStore::clone(&store)));
+        // Turning the key change off is every method's to do: WebCrypto has none and takes only `false`, and ends a session at
+        // its limit.
+        let mut builder =
+            Proof::builder(identity).initiators(Trust::Store(TrustStore::clone(&store)));
         if let Some(bytes) = options.key_limit {
-            method = method.with_key_limit(bytes);
+            builder = builder.key_limit(bytes);
         }
-        // Turning the key change off is every method's to do: WebCrypto has none, and ends a session at its limit.
-        if !options.rekey
-            && let Ok(off) = method.clone().with_rekey(false)
-        {
-            method = off;
+        if !options.rekey {
+            builder = builder.rekey(false);
         }
+        let method = builder
+            .build()
+            .map_err(|error| ServeError::Proof(error.to_string()))?;
         // Only ServeOptions changes a method's settings here, so each one is configuration, not a surprise.
         for setting in method.non_defaults() {
             tracing::info!(

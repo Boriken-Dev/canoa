@@ -415,7 +415,10 @@ pub fn with_link<R>(
         .with_limits(Limits::default().with_max_message(method().record_length(MAX)))
         .dial(Kind::WebSocket, &url, WAIT)
         .map_err(|failure| failure.to_string())?;
-    let proof = Proof::new(identity.clone()).with_responders(Trust::pinned([host]));
+    let proof = Proof::builder(identity.clone())
+        .responders(Trust::pinned([host]))
+        .build()
+        .map_err(|error| error.to_string())?;
     let established = auth::prove_out(&proof, &channel, WAIT, method().record_length(MAX))
         .map_err(|error| error.to_string())?;
     let sealed = Sealed::new(&channel, established.session);

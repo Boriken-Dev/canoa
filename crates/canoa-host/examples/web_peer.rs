@@ -124,13 +124,19 @@ impl Peer {
         let expected: PeerId = expected.parse().map_err(failed)?;
         let run = match method {
             "webcrypto" => {
-                let method = coqui_peer_webcrypto::WebCrypto::new(self.web.clone())
-                    .with_responders(coqui_peer_webcrypto::Trust::pinned([expected]));
+                let method = coqui_peer_webcrypto::WebCrypto::builder()
+                    .identity(self.web.clone())
+                    .responders(coqui_peer_webcrypto::Trust::pinned([expected]))
+                    .build()
+                    .map_err(failed)?;
                 Run::WebCrypto(Some(method.initiate().map_err(failed)?))
             }
             "noise" => {
-                let method = coqui_peer_noise::Noise::new(self.noise.clone())
-                    .with_responders(coqui_peer_noise::Trust::pinned([expected]));
+                let method = coqui_peer_noise::Noise::builder()
+                    .identity(self.noise.clone())
+                    .responders(coqui_peer_noise::Trust::pinned([expected]))
+                    .build()
+                    .map_err(failed)?;
                 Run::Noise(Some(method.initiate().map_err(failed)?))
             }
             other => return Err(format!("{other} is not a proof method")),
@@ -141,7 +147,10 @@ impl Peer {
     }
 
     fn pair(&mut self, pin: &str) -> Result<String, Failure> {
-        let handshake = coqui_peer_noise::PairingMethod::new(self.noise.clone())
+        let handshake = coqui_peer_noise::PairingMethod::builder()
+            .identity(self.noise.clone())
+            .build()
+            .map_err(failed)?
             .initiate()
             .map_err(failed)?;
         let token = self.token("p");
