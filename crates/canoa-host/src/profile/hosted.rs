@@ -1421,6 +1421,8 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
 impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
     /// An answer to `initialize` or a session request gets the report; the first also settles what each session is given.
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
+        let stamped = self.scope.stamp(message);
+        let message = &*stamped;
         let mut hold = self.hold();
         if hold.pending.is_empty() {
             drop(hold);

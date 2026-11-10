@@ -762,3 +762,91 @@ fn a_harness_entry_that_acts_without_asking_is_said_as_configuration() {
         "{written}"
     );
 }
+
+/// A stdio agent entry running `stdio_agent --scripted --usage`, which claims `claims` as its account when it is given one.
+fn usage_entry(name: &str, claims: Option<&str>) -> String {
+    let mut args = vec!["--scripted".to_owned(), "--usage".to_owned()];
+    args.extend(claims.map(|claims| format!("--usage-claims={claims}")));
+    let args = args
+        .iter()
+        .map(|arg| quoted(arg))
+        .collect::<Vec<_>>()
+        .join(", ");
+    agent_entry(name, &format!("args = [{args}]"))
+}
+
+#[test]
+fn a_usage_report_reaches_the_client_under_the_hosts_account() {
+    let config = [
+        usage_entry("work", None),
+        usage_entry("liar", Some("the-agents")),
+    ]
+    .concat();
+    let host = Host::start(&config, 2);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    for (entry, claimed) in [("work", false), ("liar", true)] {
+        with_link(host.url(entry), &client, host.peer, |rpc| {
+            // The client names an account of its own; the host's is the one the agent is given and the report leaves with.
+            let capabilities = json!({"_meta": {"dev.boriken.coqui.acp/usage": {"notify": true, "account": "mine"}}});
+            let started = rpc
+                .request("initialize", json!({"protocolVersion": 1, "clientCapabilities": capabilities}))
+                .expect("initialize is answered");
+            assert_eq!(
+                started["agentCapabilities"]["_meta"]["dev.boriken.coqui.acp/usage"]["version"],
+                1,
+                "{started}"
+            );
+            let session = new_session(rpc, &dir).expect("a session opens");
+            let session = session["sessionId"].as_str().expect("an id");
+            rpc.prompt(session, "quota 620").expect("the turn ends");
+            let notice = rpc
+                .updates
+                .borrow()
+                .iter()
+                .find(|update| update["method"] == "_coqui_acp/usage_update")
+                .cloned()
+                .expect("the agent told this client, which asked");
+            let report = &notice["params"]["report"];
+            assert_eq!(report["account"], entry, "{notice}");
+            assert_eq!(report["buckets"][0]["used"], 620, "{notice}");
+            assert_eq!(report["buckets"][0]["id"], "five_hour", "{notice}");
+            assert_eq!(notice["params"]["sessionId"], session);
+            let asked = rpc
+                .request("_coqui_acp/usage", json!({}))
+                .expect("a client may ask without a session");
+            assert_eq!(asked["account"], entry, "claimed: {claimed}: {asked}");
+            assert_eq!(asked["buckets"][0]["used"], 620, "{asked}");
+        })
+        .expect("a paired key is served");
+    }
+}
+
+#[test]
+fn a_client_that_did_not_ask_is_sent_no_usage_notice_and_still_may_ask() {
+    let host = Host::start(&usage_entry("work", None), 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("work"), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        rpc.prompt(session, "quota 1000").expect("the turn ends");
+        assert!(
+            !rpc.updates
+                .borrow()
+                .iter()
+                .any(|update| update["method"] == "_coqui_acp/usage_update"),
+            "{:?}",
+            rpc.updates.borrow()
+        );
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(asked["account"], "work", "{asked}");
+        assert_eq!(asked["buckets"][0]["status"], "exhausted", "{asked}");
+    })
+    .expect("a paired key is served");
+}

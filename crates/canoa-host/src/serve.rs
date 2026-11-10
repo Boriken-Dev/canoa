@@ -490,7 +490,7 @@ impl Serving {
                             program: program.clone(),
                             args: args.clone(),
                         },
-                        scope: Scope::new(entry.working_roots.clone()),
+                        scope: Scope::new(entry.working_roots.clone()).account(entry.name.clone()),
                         offer: hosted::offer(
                             profiles,
                             &config.profiles,
@@ -576,7 +576,7 @@ impl Serving {
                             executable.as_ref(),
                             asks,
                         ))),
-                        scope: Scope::new(entry.working_roots.clone()),
+                        scope: Scope::new(entry.working_roots.clone()).account(entry.name.clone()),
                         offer: hosted::offer(
                             profiles,
                             &config.profiles,
@@ -593,7 +593,7 @@ impl Serving {
                             program: options.provider_program.as_os_str().to_owned(),
                             args: tool_args(&options.program_args, &entry.name, spec),
                         },
-                        scope: Scope::new(entry.working_roots.clone()),
+                        scope: Scope::new(entry.working_roots.clone()).account(entry.name.clone()),
                         offer: None,
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },

@@ -325,6 +325,7 @@ dependencies = [
  "canoa",
  "clap",
  "coqui-acp",
+ "coqui-acp-api",
  "coqui-acp-bridge",
  "coqui-acp-claude",
  "coqui-acp-codex",

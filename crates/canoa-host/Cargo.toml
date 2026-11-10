@@ -28,6 +28,7 @@ web = []
 canoa = { path = "../canoa" }
 clap.workspace = true
 coqui-acp.workspace = true
+coqui-acp-api.workspace = true
 coqui-acp-bridge.workspace = true
 coqui-acp-claude.workspace = true
 coqui-acp-codex.workspace = true

@@ -7,8 +7,10 @@
 //! Claude's adapter asks one; `Rename` is stopped by a cancel; a prompt with an attachment follows it; one saying `fails`
 //! also sends v2's plan_update, tool_call_content_chunk, notice and compaction updates. It offers a mode, a model and an
 //! effort as config options with their ACP categories, refuses the model `refuse-me` with -32602, and notes each session
-//! request and prompt in order in its state, under the session's `calls`. `--name=` and `--version=` are what it says of
-//! itself, and `--no-reopen` leaves out session/load and session/list.
+//! request and prompt in order in its state, under the session's `calls`. With `--usage` it also speaks the usage extension: a
+//! prompt `quota N` sets its five-hour window to N thousandths used (exhausted at 1000) and tells a client that asked;
+//! `--usage-claims=ID` makes it report under that account instead of the one it was given. `--name=` and `--version=` are what
+//! it says of itself, and `--no-reopen` leaves out session/load and session/list.
 
 use std::collections::HashMap;
 use std::io::{BufRead as _, Write as _};
@@ -42,6 +44,46 @@ struct Shared {
     forms: Mutex<bool>,
     /// The id of the prompt being answered.
     turn: Mutex<Option<Value>>,
+    /// The usage extension, when this agent speaks it.
+    usage: Option<Usage>,
+}
+
+/// What the usage extension keeps: the client's opt-in and the one window it reports.
+struct Usage {
+    claims: Option<String>,
+    state: Mutex<UsageState>,
+}
+
+#[derive(Default)]
+struct UsageState {
+    notify: bool,
+    account: Option<String>,
+    revision: u64,
+    used: Option<u64>,
+    exhausted: bool,
+}
+
+const USAGE_CAPABILITY: &str = "dev.boriken.coqui.acp/usage";
+
+impl Usage {
+    /// The whole report, as the extension spells it.
+    fn report(&self) -> Value {
+        let state = lock(&self.state);
+        let account = self.claims.clone().or_else(|| state.account.clone());
+        let mut report = json!({"supported": true, "sources": ["reported"], "revision": state.revision,
+            "observed_at": 1_788_900_000, "buckets": []});
+        if let Some(account) = account {
+            report["account"] = json!(account);
+        }
+        if let Some(used) = state.used {
+            report["buckets"] = json!([{"id": "five_hour", "label": "5 hours", "models": {"kind": "all"},
+                "unit": "permille", "used": used, "limit": 1000,
+                "refill": {"kind": "fixed_window", "length": [18000, 0], "resets_at": 1_788_915_000},
+                "status": if state.exhausted { "exhausted" } else { "ok" },
+                "observed_at": 1_788_900_000, "source": "reported"}]);
+        }
+        report
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -305,6 +347,26 @@ impl Shared {
             })
             .collect();
         self.remember(session, "user", &text, &attached);
+        if let Some(usage) = &self.usage {
+            if let Some(used) = text
+                .strip_prefix("quota ")
+                .and_then(|n| n.trim().parse::<u64>().ok())
+            {
+                let notify = {
+                    let mut state = lock(&usage.state);
+                    state.used = Some(used);
+                    state.exhausted = used >= 1000;
+                    state.revision += 1;
+                    state.notify
+                };
+                if notify {
+                    self.send(json!({"method": "_coqui_acp/usage_update",
+                        "params": {"sessionId": session, "report": usage.report()}}));
+                }
+                self.say(session, &format!("quota {used}"));
+                return "end_turn";
+            }
+        }
         if let Some(said) = text.strip_prefix("Say ") {
             self.say(session, said);
             return "end_turn";
@@ -481,18 +543,34 @@ impl Shared {
                     .cloned()
                     .unwrap_or(Value::Null);
                 *lock(&self.forms) = !capabilities["elicitation"]["form"].is_null();
+                if let Some(usage) = &self.usage {
+                    let asked = &capabilities["_meta"][USAGE_CAPABILITY];
+                    let mut state = lock(&usage.state);
+                    state.notify = asked["notify"] == true;
+                    state.account = asked["account"].as_str().map(str::to_owned);
+                }
                 let agent = if self.reopens {
                     json!({"loadSession": true, "promptCapabilities": {"embeddedContext": true, "image": true},
                            "sessionCapabilities": {"list": {}}})
                 } else {
                     json!({"promptCapabilities": {"embeddedContext": true, "image": true}})
                 };
+                let mut agent = agent;
+                if self.usage.is_some() {
+                    agent["_meta"] = json!({USAGE_CAPABILITY: {"version": 1, "sources": ["reported"], "spend": false}});
+                }
                 let mut result = json!({"protocolVersion": 1, "agentCapabilities": agent});
                 if let Some(info) = &self.agent_info {
                     result["agentInfo"] = info.clone();
                 }
                 self.send(json!({"id": id, "result": result}));
             }
+            ("_coqui_acp/usage", Some(id)) => match &self.usage {
+                Some(usage) => self.send(json!({"id": id, "result": usage.report()})),
+                None => self.send(
+                    json!({"id": id, "error": {"code": -32601, "message": "no such method"}}),
+                ),
+            },
             ("session/new", Some(id)) => {
                 let created = self.with_state(|state| {
                     if !state.is_object() {
@@ -617,6 +695,10 @@ pub fn run(args: &[String]) {
         chosen: Mutex::new(HashMap::new()),
         forms: Mutex::new(false),
         turn: Mutex::new(None),
+        usage: args.iter().any(|arg| arg == "--usage").then(|| Usage {
+            claims: option_of(args, "usage-claims"),
+            state: Mutex::new(UsageState::default()),
+        }),
     });
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { return };

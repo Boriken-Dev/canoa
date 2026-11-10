@@ -234,3 +234,123 @@ fn any_bytes_give_a_verdict() {
     let deep = "[".repeat(10_000);
     let _ = scope.check(deep.as_bytes());
 }
+
+fn initialize(version: u64, key: &str, meta: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": version, key: {"fs": {}, "_meta": meta}}})
+}
+
+#[test]
+fn the_usage_opt_in_reaches_the_agent_with_the_hosts_account_and_not_the_clients() {
+    let scope = Scope::default().account("work".to_owned());
+    let asked =
+        json!({USAGE_CAPABILITY: {"notify": true, "account": "mine"}, "claudeCode": {"x": 1}});
+    let sent = forwarded(&scope, &initialize(1, "clientCapabilities", asked.clone()));
+    assert_eq!(
+        sent["params"]["clientCapabilities"]["_meta"],
+        json!({USAGE_CAPABILITY: {"notify": true, "account": "work"}})
+    );
+    // Version 2 names the client's capabilities as `capabilities`.
+    let sent = forwarded(&scope, &initialize(2, "capabilities", asked));
+    assert_eq!(
+        sent["params"]["capabilities"]["_meta"],
+        json!({USAGE_CAPABILITY: {"notify": true, "account": "work"}})
+    );
+    // No notice is sent to a client that did not ask, and one that sent no capabilities at all is still given the account.
+    let silent = forwarded(
+        &scope,
+        &initialize(1, "clientCapabilities", json!({"other": 1})),
+    );
+    assert_eq!(
+        silent["params"]["clientCapabilities"]["_meta"],
+        json!({USAGE_CAPABILITY: {"notify": false, "account": "work"}})
+    );
+    let bare = forwarded(
+        &scope,
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}),
+    );
+    assert_eq!(
+        bare["params"]["clientCapabilities"]["_meta"][USAGE_CAPABILITY]["account"],
+        "work"
+    );
+}
+
+#[test]
+fn a_scope_without_an_account_passes_only_the_clients_wish_for_notices() {
+    let scope = Scope::default();
+    let sent = forwarded(
+        &scope,
+        &initialize(
+            1,
+            "clientCapabilities",
+            json!({USAGE_CAPABILITY: {"notify": true, "account": "mine"}}),
+        ),
+    );
+    assert_eq!(
+        sent["params"]["clientCapabilities"]["_meta"],
+        json!({USAGE_CAPABILITY: {"notify": true}})
+    );
+    let none = forwarded(
+        &scope,
+        &initialize(1, "clientCapabilities", json!({"other": 1})),
+    );
+    assert!(
+        none["params"]["clientCapabilities"].get("_meta").is_none(),
+        "{none}"
+    );
+}
+
+#[test]
+fn the_usage_opt_in_is_read_only_from_initialize() {
+    let scope = Scope::default().account("work".to_owned());
+    let moved = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {
+        "cwd": "/work", "mcpServers": [], "clientCapabilities": {"_meta": {USAGE_CAPABILITY: {"notify": true}}}}});
+    let sent = forwarded(&scope, &moved);
+    assert!(
+        sent["params"]["clientCapabilities"].get("_meta").is_none(),
+        "{sent}"
+    );
+}
+
+#[test]
+fn a_usage_report_leaves_under_the_hosts_account() {
+    let scope = Scope::default().account("work".to_owned());
+    let report = json!({"supported": true, "account": "the-agents", "revision": 1, "observed_at": 0, "buckets": []});
+    let notice =
+        json!({"jsonrpc": "2.0", "method": USAGE_NOTIFICATION, "params": {"report": report}});
+    let answer = json!({"jsonrpc": "2.0", "id": 4, "result": report});
+    for (message, path) in [
+        (notice, "/params/report/account"),
+        (answer, "/result/account"),
+    ] {
+        let bytes = serde_json::to_vec(&message).expect("JSON");
+        let stamped = scope.stamp(&bytes);
+        let stamped: Value = serde_json::from_slice(&stamped).expect("JSON");
+        assert_eq!(stamped.pointer(path), Some(&json!("work")), "{stamped}");
+    }
+    // A report that names none is given the account too.
+    let bare = json!({"jsonrpc": "2.0", "id": 5, "result": {"supported": false, "buckets": []}});
+    let bytes = serde_json::to_vec(&bare).expect("JSON");
+    let stamped = scope.stamp(&bytes);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&stamped).expect("JSON")["result"]["account"],
+        "work"
+    );
+}
+
+#[test]
+fn what_is_not_a_usage_report_passes_untouched() {
+    let scope = Scope::default().account("work".to_owned());
+    for message in [
+        json!({"jsonrpc": "2.0", "id": 1, "result": {"supported": "yes", "buckets": []}}),
+        json!({"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "s", "note": "supported"}}),
+        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"text": "supported buckets"}}),
+        json!({"jsonrpc": "2.0", "method": "x", "params": {"supported": true, "buckets": []}}),
+    ] {
+        let bytes = serde_json::to_vec(&message).expect("JSON");
+        assert_eq!(scope.stamp(&bytes).as_ref(), bytes.as_slice(), "{message}");
+    }
+    let report = json!({"jsonrpc": "2.0", "id": 1, "result": {"supported": true, "buckets": []}});
+    let bytes = serde_json::to_vec(&report).expect("JSON");
+    assert_eq!(Scope::default().stamp(&bytes).as_ref(), bytes.as_slice());
+}

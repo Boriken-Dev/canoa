@@ -1,8 +1,12 @@
 //! What a client may send a stdio agent through this host. ACP lets `session/new` name a stdio MCP server, which the agent then
 //! starts as a program on this machine with no question asked; `_meta` may carry an agent's private launch options. Neither
 //! reaches the agent: the program the host was told to run is the only one a client gets started.
+//!
+//! The one `_meta` that does is the usage extension's opt-in on `initialize`, rebuilt by the host: the client's wish for
+//! notifications and the host's own account id, never an account the client names. The agent's usage reports leave with that
+//! account too.
 
-use alloc::borrow::ToOwned;
+use alloc::borrow::{Cow, ToOwned};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -10,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Instant;
 
+use coqui_acp_api::{USAGE_CAPABILITY, USAGE_NOTIFICATION};
 use coqui_web_channel::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
@@ -30,6 +35,8 @@ const REPLY_POLL: Duration = Duration::from_millis(10);
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Scope {
     roots: Vec<PathBuf>,
+    /// The host's id for the account this entry's agent runs on, which it tells the agent and puts on every usage report.
+    account: Option<String>,
 }
 
 /// What becomes of one message from the client.
@@ -43,7 +50,17 @@ pub(crate) enum Verdict {
 
 impl Scope {
     pub(crate) const fn new(roots: Vec<PathBuf>) -> Self {
-        Self { roots }
+        Self {
+            roots,
+            account: None,
+        }
+    }
+
+    /// This scope with `account` as the id usage is reported under.
+    #[must_use]
+    pub(crate) fn account(mut self, account: String) -> Self {
+        self.account = Some(account);
+        self
     }
 
     /// Parses `message` and decides. What passes is the host's own serialization, so a parser that read duplicate keys
@@ -59,7 +76,9 @@ impl Scope {
                 "one JSON-RPC object per message",
             )));
         };
+        let notify = asks_usage_notices(object);
         strip_meta(object);
+        self.tell_usage(object, notify);
         let id = object.get("id").cloned();
         let is_request = object.contains_key("method") && id.is_some();
         if Worktrees::is_request(message) {
@@ -86,6 +105,67 @@ impl Scope {
             Ok(bytes) => Verdict::Forward(bytes),
             Err(_) => Verdict::Refuse(None),
         }
+    }
+
+    /// Puts the usage extension's opt-in back on an `initialize` that `strip_meta` cleared: the client's own wish for
+    /// notifications, and the account only the host names.
+    fn tell_usage(&self, object: &mut Map<String, Value>, notify: bool) {
+        if object.get("method").and_then(Value::as_str) != Some("initialize")
+            || !(notify || self.account.is_some())
+        {
+            return;
+        }
+        let Some(Value::Object(params)) = object.get_mut("params") else {
+            return;
+        };
+        let key = if params.get("protocolVersion").and_then(Value::as_u64) >= Some(2) {
+            "capabilities"
+        } else {
+            "clientCapabilities"
+        };
+        let capabilities = params.entry(key).or_insert_with(|| json!({}));
+        let Some(capabilities) = capabilities.as_object_mut() else {
+            return;
+        };
+        let mut opt_in = Map::new();
+        opt_in.insert("notify".to_owned(), Value::Bool(notify));
+        if let Some(account) = &self.account {
+            opt_in.insert("account".to_owned(), Value::String(account.clone()));
+        }
+        capabilities.insert("_meta".to_owned(), json!({ USAGE_CAPABILITY: opt_in }));
+    }
+
+    /// An agent's message to the client with the host's account on the usage report it carries, whatever account the agent
+    /// named: the notification's report, and the answer to `_coqui_acp/usage`, which is the object that has a `supported`
+    /// and a `buckets`. Anything else, and every message when this scope names no account, passes as it came.
+    pub(crate) fn stamp<'a>(&self, message: &'a [u8]) -> Cow<'a, [u8]> {
+        let Some(account) = &self.account else {
+            return Cow::Borrowed(message);
+        };
+        // A cheap look first: most of an agent's messages are streamed text.
+        if !contains(message, b"supported") && !contains(message, USAGE_NOTIFICATION.as_bytes()) {
+            return Cow::Borrowed(message);
+        }
+        let Ok(mut value) = serde_json::from_slice::<Value>(message) else {
+            return Cow::Borrowed(message);
+        };
+        let report = if value.get("method").and_then(Value::as_str) == Some(USAGE_NOTIFICATION) {
+            value.pointer_mut("/params/report")
+        } else if value.get("method").is_none() {
+            value.get_mut("result")
+        } else {
+            None
+        };
+        let Some(report) = report.and_then(Value::as_object_mut) else {
+            return Cow::Borrowed(message);
+        };
+        if !(report.get("supported").is_some_and(Value::is_boolean)
+            && report.get("buckets").is_some_and(Value::is_array))
+        {
+            return Cow::Borrowed(message);
+        }
+        report.insert("account".to_owned(), Value::String(account.clone()));
+        serde_json::to_vec(&value).map_or(Cow::Borrowed(message), Cow::Owned)
     }
 
     fn check_params(&self, params: &Map<String, Value>) -> Result<(), &'static str> {
@@ -148,6 +228,29 @@ fn check_server(server: &Value) -> Result<(), &'static str> {
     }
 }
 
+/// Whether an `initialize` asks for usage notifications in its usage opt-in, which is in the `_meta` the host removes.
+fn asks_usage_notices(object: &Map<String, Value>) -> bool {
+    object.get("method").and_then(Value::as_str) == Some("initialize")
+        && ["clientCapabilities", "capabilities"].iter().any(|key| {
+            object
+                .get("params")
+                .and_then(|params| params.get(*key))
+                .and_then(|capabilities| {
+                    capabilities
+                        .get("_meta")?
+                        .get(USAGE_CAPABILITY)?
+                        .get("notify")
+                })
+                == Some(&Value::Bool(true))
+        })
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
 /// Removes `_meta` at every depth: an agent may give it private meaning, such as options for how it starts a program.
 fn strip_meta(object: &mut Map<String, Value>) {
     object.remove("_meta");
@@ -194,7 +297,7 @@ impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
 
 impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
-        self.inner.send(message)
+        self.inner.send(&self.scope.stamp(message))
     }
 
     /// A refused message reads as a timeout, after which the channel is still usable, so a caller polling for its own
