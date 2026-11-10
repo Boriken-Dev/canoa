@@ -60,8 +60,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "1326e02c075925f158509fcc639c7360bb696dca"
-      resolved-ref: "1326e02c075925f158509fcc639c7360bb696dca"
+      ref: "b4bbbe5fb004a57b1835279924237877e60051cc"
+      resolved-ref: "b4bbbe5fb004a57b1835279924237877e60051cc"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
