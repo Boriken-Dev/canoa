@@ -347,25 +347,24 @@ impl Shared {
             })
             .collect();
         self.remember(session, "user", &text, &attached);
-        if let Some(usage) = &self.usage {
-            if let Some(used) = text
+        if let Some(usage) = &self.usage
+            && let Some(used) = text
                 .strip_prefix("quota ")
                 .and_then(|n| n.trim().parse::<u64>().ok())
-            {
-                let notify = {
-                    let mut state = lock(&usage.state);
-                    state.used = Some(used);
-                    state.exhausted = used >= 1000;
-                    state.revision += 1;
-                    state.notify
-                };
-                if notify {
-                    self.send(json!({"method": "_coqui_acp/usage_update",
-                        "params": {"sessionId": session, "report": usage.report()}}));
-                }
-                self.say(session, &format!("quota {used}"));
-                return "end_turn";
+        {
+            let notify = {
+                let mut state = lock(&usage.state);
+                state.used = Some(used);
+                state.exhausted = used >= 1000;
+                state.revision += 1;
+                state.notify
+            };
+            if notify {
+                self.send(json!({"method": "_coqui_acp/usage_update",
+                    "params": {"sessionId": session, "report": usage.report()}}));
             }
+            self.say(session, &format!("quota {used}"));
+            return "end_turn";
         }
         if let Some(said) = text.strip_prefix("Say ") {
             self.say(session, said);
