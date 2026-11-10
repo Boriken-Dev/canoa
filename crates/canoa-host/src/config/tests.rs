@@ -679,13 +679,70 @@ executable = "codex"
 }
 
 #[test]
-fn the_keys_the_provider_kind_has_no_setting_for_are_refused() {
-    for key in ["modes = [\"plan\"]", "setting_sources = [\"project\"]"] {
-        let text = format!("[host.agents.a]\nharness = \"claude\"\n{key}\n");
-        assert!(
-            matches!(parse(&text), Err(ConfigError::Parse { .. })),
-            "{text}"
-        );
+fn a_harness_entry_names_the_modes_a_client_may_choose_or_leaves_the_default() {
+    use coqui_acp_harness::Mode;
+    let config = parse(
+        r#"
+[host.agents.Default]
+harness = "claude"
+[host.agents.Named]
+harness = "codex"
+modes = ["plan", "accept_edits"]
+"#,
+    )
+    .expect("parses");
+    let modes = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
+        Some(EntryKind::Harness { options, .. }) => options.modes.clone(),
+        _ => panic!("a harness"),
+    };
+    assert_eq!(
+        modes("Default"),
+        None,
+        "a client is capped at the entry's own mode"
+    );
+    assert_eq!(modes("Named"), Some(vec![Mode::Plan, Mode::AcceptEdits]));
+    for text in [
+        "[host.agents.a]\nharness = \"claude\"\nmodes = [\"yolo\"]\n",
+        "[host.agents.a]\nprogram = \"x\"\nmodes = [\"plan\"]\n",
+        "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nmodes = [\"plan\"]\n",
+        "[host.agents.a]\nharness = \"claude\"\nmodes = [\"plan\"]\nsettings = { modes = [\"auto\"] }\n",
+    ] {
+        assert!(parse(text).is_err(), "{text}");
+    }
+}
+
+#[test]
+fn setting_sources_belong_to_claude_and_name_user_project_or_local() {
+    let config = parse(
+        "[host.agents.a]\nharness = \"claude\"\nsetting_sources = [\"project\"]\n[host.agents.b]\nharness = \"claude\"\nsetting_sources = []\n",
+    )
+    .expect("parses");
+    let sources = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
+        Some(EntryKind::Harness { options, .. }) => options.setting_sources.clone(),
+        _ => panic!("a harness"),
+    };
+    assert_eq!(sources("a"), Some(vec!["project".to_owned()]));
+    assert_eq!(sources("b"), Some(Vec::new()), "none is not unset");
+    for (text, what) in [
+        (
+            "[host.agents.a]\nharness = \"claude\"\nsetting_sources = [\"elsewhere\"]\n",
+            "setting_sources",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\nsetting_sources = [\"user\"]\n",
+            "setting_sources",
+        ),
+        (
+            "[host.agents.a]\nprogram = \"x\"\nsetting_sources = [\"user\"]\n",
+            "harness",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nsetting_sources = [\"user\"]\nsettings = { setting_sources = [] }\n",
+            "twice",
+        ),
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains(what), "{text}: {error}");
     }
 }
 

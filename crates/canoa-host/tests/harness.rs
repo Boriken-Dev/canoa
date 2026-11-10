@@ -233,7 +233,7 @@ fn a_paired_client_does_not_see_bypass_on_an_entry_that_has_it_off_and_is_refuse
     }
 }
 
-/// A paired key can only choose the mode canoa.cfg configured and stricter ones.
+/// A paired key can only choose the mode canoa.cfg configured and stricter ones, unless the entry names more.
 #[test]
 fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
     for (harness, key, offered, loosening, allowed) in [
@@ -245,6 +245,27 @@ fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
             vec!["manual", "accept_edits", "plan"],
             "auto",
             false,
+        ),
+        (
+            "claude",
+            "modes = [\"accept_edits\"]\n",
+            vec!["manual", "accept_edits", "plan"],
+            "accept_edits",
+            true,
+        ),
+        (
+            "claude",
+            "modes = [\"auto\"]\n",
+            vec!["manual", "auto", "plan"],
+            "bypass",
+            false,
+        ),
+        (
+            "codex",
+            "modes = [\"auto\"]\n",
+            vec!["manual", "accept_edits", "auto", "plan"],
+            "auto",
+            true,
         ),
         (
             "codex",
@@ -766,4 +787,47 @@ fn a_thread_recorded_outside_the_roots_is_not_resumed_with_or_without_a_profile(
             "profile {profile}: a thread recorded in the roots was refused"
         );
     }
+}
+
+/// `setting_sources` reaches Claude Code as its flag, and a source it does not take stops the host from starting.
+#[test]
+fn an_entrys_setting_sources_reach_claude_code_and_a_bad_one_is_refused() {
+    for (key, flag) in [
+        (
+            "[\"project\", \"local\"]",
+            "--setting-sources=project,local",
+        ),
+        ("[]", "--setting-sources="),
+    ] {
+        let scratch = Scratch::new();
+        let claude = standin(&scratch, "claude");
+        let (record, env) = env_of(&scratch);
+        let config = format!(
+            "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\nsetting_sources = {key}\n",
+            quoted(&claude.to_string_lossy())
+        );
+        let host = Host::start_in(scratch, &config, 1, &env);
+        let client = support::key();
+        host.pair(&client);
+        let dir = cwd(&host.scratch);
+        with_link(host.url("Claude"), &client, host.peer, |rpc| {
+            rpc.initialize().expect("initialize is answered");
+            rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+        })
+        .expect("a paired key is served");
+        let started = records(&record);
+        assert!(
+            started[0]["args"]
+                .as_array()
+                .expect("arguments")
+                .contains(&json!(flag)),
+            "{key}: {:?}",
+            started[0]["args"]
+        );
+    }
+    let refused = bind_refused(
+        "[host.agents.Agent]\nharness = \"claude\"\nsettings = { setting_sources = [\"elsewhere\"] }\n",
+    );
+    assert!(refused.contains("host entry Agent"), "{refused}");
 }

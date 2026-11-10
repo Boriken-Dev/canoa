@@ -32,9 +32,11 @@ usage = "antigravity"                 # optional, with program: read the agent's
 harness = "claude"                    # "claude", "codex" (built in) or the id of an outside provider that library or source loads; takes no args
 executable = "/opt/claude/bin/claude" # claude and codex: a name found as the OS finds a command, or a path from the file's directory
 permission_mode = "default"           # claude only: one of PERMISSION_MODES; default "default"
+setting_sources = ["project"]         # claude only: of user, project, local; [] loads none; default Claude Code's own
 approval_policy = "on-request"        # codex only: one of APPROVAL_POLICIES; default "on-request"
 sandbox = "workspace-write"           # codex only: one of SANDBOXES; default "workspace-write"
 bypass = false                        # claude and codex: offer the Bypass mode, which asks for nothing, to a paired client; default false
+modes = ["plan", "accept_edits"]      # claude and codex: the modes a paired client may choose, widening the default (the entry's own mode and stricter ones); Bypass still needs `bypass`
 
 [host.agents.OUTSIDE]                 # an outside acp_harness provider
 harness = "acp_echo_harness_echo_harness"  # its id; library or source is required for an id the host does not carry
@@ -141,15 +143,16 @@ pub fn Settings::as_map(&self) -> &serde_json::Map<String, Value>
 ```
 
 - `entries` keeps the file's order, every agent before every provider, every provider before every tool. A file with no `[host]` gives no entries.
-- An agent names `program` (with optional `args`) or `harness` (a provider id, not empty), one of the two; a `harness` other than `claude` or `codex` with no `library` or `source`, `args` with `harness`, and `executable`, `permission_mode`, `approval_policy`, `sandbox`, `bypass`, `library`, `source`, `source_settings`, `import_search` or `settings` with `program` are refused, and so is another harness's key or a value not in its list. `executable`, `permission_mode`, `approval_policy`, `sandbox` and `bypass` are the `claude` and `codex` providers' settings (`bypass` is `allow_bypass`) and are refused for any other id, which takes `settings`; one the entry's `settings` also holds is refused as set twice. `modes` and `setting_sources` are no keys (the providers have no setting for them) and are refused as unknown keys. The `library` or `source`, `source_settings` and `import_search` keys read as a provider entry's. An `executable` holding `/` or `\` is made absolute against the file's directory, since the command line runs in a session's directory, which a client chooses. A harness entry is an `agent` in `check`'s and `serve`'s lines.
+- An agent names `program` (with optional `args`) or `harness` (a provider id, not empty), one of the two; a `harness` other than `claude` or `codex` with no `library` or `source`, `args` with `harness`, and `executable`, `permission_mode`, `approval_policy`, `sandbox`, `bypass`, `library`, `source`, `source_settings`, `import_search` or `settings` with `program` are refused, and so is another harness's key or a value not in its list. `executable`, `permission_mode`, `approval_policy`, `sandbox`, `bypass`, `setting_sources` and `modes` are the `claude` and `codex` providers' settings (`bypass` is `allow_bypass`; `setting_sources` is Claude Code's alone) and are refused for any other id, which takes `settings`; one the entry's `settings` also holds is refused as set twice. A `modes` list is logged at `info` when the host starts. The `library` or `source`, `source_settings` and `import_search` keys read as a provider entry's. An `executable` holding `/` or `\` is made absolute against the file's directory, since the command line runs in a session's directory, which a client chooses. A harness entry is an `agent` in `check`'s and `serve`'s lines.
 
 ```rust
 #[non_exhaustive] pub enum Harness { Claude, Codex }   // Copy, Eq; canoa_host::harness::Harness: what `canoa agent claude|codex` serves on standard streams; not an entry's harness, which is a provider id
 pub const fn Harness::as_str(self) -> &'static str    // "claude", "codex"
 pub fn Harness::named(name: &str) -> Option<Harness>
-#[non_exhaustive] pub struct HarnessOptions { pub permission_mode, pub approval_policy, pub sandbox: Option<String>, pub bypass: bool }   // Default, Eq
+#[non_exhaustive] pub struct HarnessOptions { pub permission_mode, pub approval_policy, pub sandbox: Option<String>, pub bypass: bool, pub setting_sources: Option<Vec<String>>, pub modes: Option<Vec<Mode>> }   // Default, Eq
 pub const BUILT_IN_HARNESSES: &[&str];  // claude, codex: the acp_harness providers compiled into the host
 pub const PERMISSION_MODES: &[&str];   // default, acceptEdits, plan, dontAsk, bypassPermissions, auto, manual
+pub const SETTING_SOURCES: &[&str];    // user, project, local
 pub const APPROVAL_POLICIES: &[&str];  // untrusted, on-failure, on-request, never
 pub const SANDBOXES: &[&str];          // read-only, workspace-write, danger-full-access
 ```

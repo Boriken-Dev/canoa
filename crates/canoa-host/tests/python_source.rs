@@ -374,12 +374,22 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         let id = "acp_echo_harness_echo_harness";
         let refused = bind_refused(
             &python,
-            &named_entry(&python, "unknown", "no_such_harness", &[harness.clone()]),
+            &named_entry(
+                &python,
+                "unknown",
+                "no_such_harness",
+                std::slice::from_ref(&harness),
+            ),
         );
         assert!(refused.contains("host entry unknown"), "{refused}");
         let refused = bind_refused(
             &python,
-            &named_entry(&python, "wrong", "acp_echo_echo", &[echo.clone()]),
+            &named_entry(
+                &python,
+                "wrong",
+                "acp_echo_echo",
+                std::slice::from_ref(&echo),
+            ),
         );
         assert!(refused.contains("host entry wrong"), "{refused}");
         // Two entries, the second loading a file that does not offer the first's id.

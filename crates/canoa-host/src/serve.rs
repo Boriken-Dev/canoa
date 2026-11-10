@@ -1112,6 +1112,27 @@ fn harness_settings(
             serde_json::Value::String(executable.to_string_lossy().into_owned()),
         );
     }
+    if let Some(sources) = &asks.setting_sources {
+        map.insert(
+            "setting_sources".to_owned(),
+            serde_json::Value::from(sources.clone()),
+        );
+    }
+    if let Some(modes) = &asks.modes {
+        map.insert(
+            "modes".to_owned(),
+            serde_json::Value::from(modes.iter().map(|mode| mode.id()).collect::<Vec<_>>()),
+        );
+        tracing::info!(
+            "host.agents.{}.modes is {}: a paired client may choose those, beyond the entry's own mode and stricter ones",
+            entry.name,
+            modes
+                .iter()
+                .map(|mode| mode.id())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     if asks.bypass {
         map.insert("allow_bypass".to_owned(), serde_json::Value::Bool(true));
         tracing::info!(

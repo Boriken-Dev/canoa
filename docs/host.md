@@ -502,6 +502,7 @@ the rule it suggests, reject; Codex: its own decisions).
 [host.agents.claude]
 harness = "claude"
 permission_mode = "default"       # default, acceptEdits, plan, dontAsk, bypassPermissions, auto or manual
+setting_sources = ["project"]     # of user, project, local; unset is Claude Code's own
 executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from canoa.cfg's directory
 
 [host.agents.codex]
@@ -513,8 +514,9 @@ bypass = false                    # true offers a paired client the Bypass mode,
 
 A paired client can choose only the mode the entry's own settings amount to and every stricter one (Plan, Manual, Accept edits,
 Auto, Bypass, loosest last), so it cannot loosen what canoa.cfg set: an entry with `permission_mode = "default"` or Codex's
-`on-request` with `workspace-write` offers it Plan and Manual (Plan, Manual and Accept edits for Codex). Bypass follows
-`bypass` alone.
+`on-request` with `workspace-write` offers it Plan and Manual (Plan, Manual and Accept edits for Codex). `modes = ["plan",
+"accept_edits"]` names the modes it may choose instead, which widens that, and is logged at `info` as configuration. Bypass
+follows `bypass` alone.
 
 `bypass` is off by default and the only thing that lets a paired client put a session in Bypass: a key paired to someone else
 reaches the entry, and with Bypass it could take full control of this machine. Turning it on is logged at `info` as
@@ -544,8 +546,7 @@ dirs = ["harness"]
 `executable`, `permission_mode`, `approval_policy`, `sandbox` and `bypass` are the `claude` and `codex` providers' settings
 and belong to those two ids; another id takes `settings` alone. Loading runs the provider's code with the host's rights,
 in the host's process, so a provider that crashes takes the host with it. Canoa passes no account, so the provider runs on
-the harness's own sign-in, and the prompt cache lifetime is the harness's default. `modes` and `setting_sources` are no
-longer keys: the providers have no setting for them.
+the harness's own sign-in, and the prompt cache lifetime is the harness's default.
 
 **What the host no longer hears.** The provider kind has no route for a harness's notices (a version it was not tested
 with, a program that exited) or for why a program ended, so the host's log no longer carries them for a harness entry,

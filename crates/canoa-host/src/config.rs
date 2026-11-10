@@ -160,7 +160,16 @@ pub struct HarnessOptions {
     /// option does not offer it and a client that sets it is refused. A key paired to someone else's machine reaches this
     /// entry, so on is the host person's decision for that entry: with it, that key could take full control of this machine.
     pub bypass: bool,
+    /// The setting sources Claude Code loads, of `user`, `project` and `local`; empty loads none, `None` its own default.
+    pub setting_sources: Option<Vec<String>>,
+    /// The modes a paired client may choose (`modes = ["manual", "accept_edits", ...]`), ids as `coqui_acp_harness::Mode`
+    /// names them. Unset, a client may choose the mode the entry's own settings amount to and every stricter one, so it
+    /// cannot loosen what canoa.cfg set; naming modes widens that, and Bypass still needs `bypass = true`.
+    pub modes: Option<Vec<coqui_acp_harness::Mode>>,
 }
+
+/// Claude Code's setting sources.
+pub const SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 
 /// Claude Code's permission modes, as `--permission-mode` takes them.
 pub const PERMISSION_MODES: &[&str] = &[
@@ -476,6 +485,8 @@ struct RawAgent {
     approval_policy: Option<String>,
     sandbox: Option<String>,
     bypass: Option<bool>,
+    setting_sources: Option<Vec<String>>,
+    modes: Option<Vec<String>>,
     profiles: Option<Vec<String>>,
     usage: Option<String>,
     listen: Option<String>,
@@ -492,6 +503,8 @@ struct RawAsks {
     approval_policy: Option<String>,
     sandbox: Option<String>,
     bypass: Option<bool>,
+    setting_sources: Option<Vec<String>>,
+    modes: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -602,6 +615,8 @@ impl Config {
                 approval_policy: agent.approval_policy,
                 sandbox: agent.sandbox,
                 bypass: agent.bypass,
+                setting_sources: agent.setting_sources,
+                modes: agent.modes,
             };
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
@@ -616,6 +631,8 @@ impl Config {
                         (asks.approval_policy.is_some(), "approval_policy"),
                         (asks.sandbox.is_some(), "sandbox"),
                         (asks.bypass.is_some(), "bypass"),
+                        (asks.setting_sources.is_some(), "setting_sources"),
+                        (asks.modes.is_some(), "modes"),
                         (agent.library.is_some(), "library"),
                         (agent.source.is_some(), "source"),
                         (agent.source_settings.is_some(), "source_settings"),
@@ -708,6 +725,8 @@ impl Config {
                             (asks.approval_policy.is_some(), "approval_policy"),
                             (asks.sandbox.is_some(), "sandbox"),
                             (asks.bypass.is_some(), "bypass"),
+                            (asks.setting_sources.is_some(), "setting_sources"),
+                            (asks.modes.is_some(), "modes"),
                             (agent.executable.is_some(), "executable"),
                         ] {
                             if set {
@@ -947,7 +966,10 @@ fn harness_options(
     agent: &RawAsks,
     settings: Option<&Settings>,
 ) -> Result<HarnessOptions, ConfigError> {
-    let claudes = [("permission_mode", agent.permission_mode.is_some())];
+    let claudes = [
+        ("permission_mode", agent.permission_mode.is_some()),
+        ("setting_sources", agent.setting_sources.is_some()),
+    ];
     let codexs = [
         ("approval_policy", agent.approval_policy.is_some()),
         ("sandbox", agent.sandbox.is_some()),
@@ -968,6 +990,8 @@ fn harness_options(
             ("permission_mode", agent.permission_mode.is_some()),
             ("approval_policy", agent.approval_policy.is_some()),
             ("sandbox", agent.sandbox.is_some()),
+            ("setting_sources", agent.setting_sources.is_some()),
+            ("modes", agent.modes.is_some()),
         ] {
             if set && settings.as_map().contains_key(key) {
                 return Err(invalid(
@@ -990,7 +1014,40 @@ fn harness_options(
         )),
         _ => Ok(value.clone()),
     };
+    if let Some(sources) = &agent.setting_sources
+        && sources
+            .iter()
+            .any(|source| !SETTING_SOURCES.contains(&source.as_str()))
+    {
+        return Err(invalid(
+            name,
+            &format!("setting_sources holds only {}", SETTING_SOURCES.join(", ")),
+        ));
+    }
+    let modes = agent
+        .modes
+        .as_ref()
+        .map(|ids| {
+            ids.iter()
+                .map(|id| {
+                    coqui_acp_harness::Mode::from_id(id).ok_or_else(|| {
+                        invalid(
+                            name,
+                            &format!(
+                                "modes holds only {}",
+                                coqui_acp_harness::Mode::ALL
+                                    .map(coqui_acp_harness::Mode::id)
+                                    .join(", ")
+                            ),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
     Ok(HarnessOptions {
+        setting_sources: agent.setting_sources.clone(),
+        modes,
         permission_mode: one_of(&agent.permission_mode, PERMISSION_MODES, "permission_mode")?,
         approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
         sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
