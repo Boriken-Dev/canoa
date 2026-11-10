@@ -6,7 +6,7 @@
 //! `ps` elsewhere. Both run on a worker thread, bounded in time and size. A snapshot that cannot be had leaves the agent's
 //! own process alone, which is the answer for an agent that is not below anything.
 
-use alloc::collections::BTreeSet;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -26,31 +26,66 @@ pub(crate) fn members(root: u32) -> Vec<u32> {
     snapshot().map_or_else(|| alloc::vec![root], |listing| tree(&listing, root))
 }
 
-/// The members among the rows of `listing`, each `PID PPID` or `PID PPID PGID`; a row that is anything else is skipped.
+/// The members among the rows of `listing`, each `PID PPID PGID CREATED` with `-` (or nothing) for a column the system does
+/// not give; a row that is anything else is skipped. A row's parent id may name a process that has since ended and been
+/// given to another, so a child counts only if it was created at or after its parent, which the root's descendants all
+/// are; an unrelated process that took the id of a dead parent is older than the parent that now holds it, or younger only
+/// by being unrelated, and a table without creation times takes parents at their word.
 fn tree(listing: &str, root: u32) -> Vec<u32> {
-    let rows: Vec<(u32, u32, Option<u32>)> = listing
+    let rows: Vec<Row> = listing
         .lines()
         .filter_map(|line| {
-            let mut fields = line.split_whitespace().map(str::parse::<u32>);
-            let pid = fields.next()?.ok()?;
-            let parent = fields.next()?.ok()?;
-            let group = fields.next().and_then(Result::ok);
-            Some((pid, parent, group))
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse().ok()?;
+            let parent = fields.next()?.parse().ok()?;
+            let group = fields.next().and_then(|field| field.parse().ok());
+            let created = fields.next().and_then(|field| field.parse().ok());
+            Some(Row {
+                pid,
+                parent,
+                group,
+                created,
+            })
         })
         .collect();
-    let mut found: BTreeSet<u32> = BTreeSet::from([root]);
+    let mut found: BTreeMap<u32, Option<u64>> = BTreeMap::new();
+    found.insert(
+        root,
+        rows.iter()
+            .find(|row| row.pid == root)
+            .and_then(|row| row.created),
+    );
     loop {
         let before = found.len();
-        for (pid, parent, group) in &rows {
-            if found.contains(parent) || *group == Some(root) {
-                found.insert(*pid);
+        for row in &rows {
+            if found.contains_key(&row.pid) {
+                continue;
+            }
+            let younger = |parent: Option<u64>| match (row.created, parent) {
+                (Some(own), Some(parent)) => own >= parent,
+                _ => true,
+            };
+            let below = found
+                .get(&row.parent)
+                .is_some_and(|parent| younger(*parent));
+            let grouped = row.group == Some(root) && younger(found[&root]);
+            if below || grouped {
+                found.insert(row.pid, row.created);
             }
         }
         if found.len() == before {
             break;
         }
     }
-    found.into_iter().collect()
+    found.into_keys().collect()
+}
+
+/// One row of the process table.
+struct Row {
+    pid: u32,
+    parent: u32,
+    group: Option<u32>,
+    created: Option<u64>,
 }
 
 #[cfg(windows)]
@@ -70,8 +105,8 @@ fn snapshot() -> Option<String> {
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId | \
-             ForEach-Object { '{0} {1}' -f $_.ProcessId, $_.ParentProcessId }",
+            "Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate | \
+             ForEach-Object { if ($_.CreationDate) { '{0} {1} - {2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToFileTimeUtc() } }",
         ])
         .creation_flags(NO_WINDOW);
     run(&mut command)
@@ -133,6 +168,21 @@ mod tests {
     fn rows_that_are_not_numbers_are_skipped() {
         let listing = "PID PPID\n10 1\n\nnot a row\n20 10\n";
         assert_eq!(tree(listing, 10), [10, 20]);
+    }
+
+    #[test]
+    fn an_orphan_of_a_dead_parent_whose_id_was_reused_is_not_a_member() {
+        // The agent is 10, started at 500. 20 is its child (600) and 30 that child's (700). 60 was started at 100 by an
+        // earlier process that had id 10 and ended; its parent id now names the agent. 70 is started later by 60.
+        let listing = "\
+10 1 - 500\n\
+20 10 - 600\n\
+30 20 - 700\n\
+60 10 - 100\n\
+70 60 - 800\n";
+        assert_eq!(tree(listing, 10), [10, 20, 30]);
+        // Without creation times a parent is taken at its word.
+        assert_eq!(tree("10 1\n60 10\n", 10), [10, 60]);
     }
 
     #[test]
