@@ -204,7 +204,7 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 - `max_peers` connections per entry at once; past it a proven peer is turned away. Past `MAX_UNPROVEN` handshakes at once across entries, a new connection is dropped.
 
 ```rust
-#[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure } }
+#[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure }, Proof(String) }
 ```
 
 ## The web app (`canoa_host::web`)
