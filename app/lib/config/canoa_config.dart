@@ -218,6 +218,7 @@ final class CanoaConfig {
     List<String> args = const [],
     required String listen,
     List<String> workingRoots = const [],
+    String? usage,
   }) {
     if (!HostEntry.isName(name)) {
       throw ArgumentError.value(name, 'name', 'Use 1 to 64 letters, digits, - or _');
@@ -233,6 +234,7 @@ final class CanoaConfig {
       if (args.isNotEmpty) 'args': args,
       'listen': listen,
       if (workingRoots.isNotEmpty) 'working_roots': workingRoots,
+      'usage': ?usage,
     };
     copy['agents'] = table;
     return withHost(copy);

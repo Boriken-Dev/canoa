@@ -10,6 +10,7 @@ final class AgentCommand {
     this.programPaths = const {},
     this.searchDirs = const [],
     this.hosts = false,
+    this.usage,
   });
 
   final String label;
@@ -26,6 +27,11 @@ final class AgentCommand {
   /// Environment variables naming a program by its full path, resolved when it starts.
   final Map<String, String> programPaths;
 
+  /// What the host reads of this agent's usage when it serves it, canoa.cfg's `usage` key on a `[host.agents]` entry:
+  /// `antigravity` for an agent that serves its quota from its own process and reports nothing over ACP. Null reads only
+  /// its failed turns.
+  final String? usage;
+
   /// Where the tool's own installer puts [program], looked in when PATH does not have it: `~` is the home directory, and a
   /// `%NAME%` an environment variable (the directory is skipped where it is not set).
   final List<String> searchDirs;
@@ -39,6 +45,22 @@ final class AgentCommand {
   if (hostProgram != null && hostProgram.isNotEmpty) return (hostProgram, command.args);
   return (executable, [canoaChildFlag, ...command.args]);
 }
+
+/// The `usage` canoa.cfg's host entry for [command] gets: the command's own, else the one of the preset it is, found by
+/// program name (without a directory or extension) and arguments, so `agy acp` typed by a person is the Antigravity preset.
+String? usageFor(AgentCommand command) {
+  if (command.usage != null) return command.usage;
+  String name(String program) =>
+      program.split(RegExp(r'[\\/]')).last.toLowerCase().replaceFirst(RegExp(r'\.(exe|cmd|bat)$'), '');
+  for (final preset in agentPresets) {
+    if (preset.usage == null || preset.hosts) continue;
+    if (name(preset.program) == name(command.program) && _sameArgs(preset.args, command.args)) return preset.usage;
+  }
+  return null;
+}
+
+bool _sameArgs(List<String> a, List<String> b) =>
+    a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((same) => same);
 
 /// A command as a person typed it: words split on spaces, with quotes around any that hold one. Null for nothing, or an open quote.
 AgentCommand? parseCommand(String text) {
@@ -96,7 +118,7 @@ const List<AgentCommand> agentPresets = [
   ),
   // Antigravity's CLI, which replaced Gemini CLI: `agy acp` is its ACP server. Its Windows installer puts it in
   // %LOCALAPPDATA%gyin; where the Linux and macOS installers do is not confirmed, so there it is found on PATH only.
-  AgentCommand(label: 'Antigravity', program: 'agy', args: ['acp'], searchDirs: ['%LOCALAPPDATA%/agy/bin']),
+  AgentCommand(label: 'Antigravity', program: 'agy', args: ['acp'], searchDirs: ['%LOCALAPPDATA%/agy/bin'], usage: 'antigravity'),
   // xAI's Grok CLI in its ACP mode; its installers put it in ~/.grok/bin.
   AgentCommand(label: 'Grok', program: 'grok', args: ['agent', 'stdio'], searchDirs: ['~/.grok/bin']),
   AgentCommand(label: 'Pi', program: 'npx', args: ['-y', 'pi-acp@0.0.34'], requires: ['pi']),

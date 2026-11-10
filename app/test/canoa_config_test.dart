@@ -81,6 +81,11 @@ provider = "echo_provider"
       ('echo', 'provider', 'echo_provider.dll', '', null),
     ]);
     expect(before.hostEntries, hasLength(1), reason: 'the original is not changed');
+    final reading = CanoaConfig.parse(
+      before.withHostAgent(name: 'agy', program: 'agy', args: ['acp'], listen: '127.0.0.1:7812', usage: 'antigravity').encode(),
+    );
+    expect(((reading.host!['agents'] as Map)['agy'] as Map)['usage'], 'antigravity');
+    expect(((saved.host!['agents'] as Map)['mine'] as Map).containsKey('usage'), isFalse);
     expect(() => saved.withHostAgent(name: 'mine', program: 'x', listen: '127.0.0.1:1'), throwsArgumentError);
     expect(() => saved.withHostAgent(name: 'echo', program: 'x', listen: '127.0.0.1:1'), throwsArgumentError);
     expect(() => saved.withHostAgent(name: 'no spaces', program: 'x', listen: '127.0.0.1:1'), throwsArgumentError);

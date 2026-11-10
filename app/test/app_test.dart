@@ -106,6 +106,14 @@ void main() {
       expect(parsed?.label, 'my-agent');
     });
 
+    test('reads its usage from the preset it is, whatever the directory or extension', () {
+      expect(usageFor(parseCommand('agy acp')!), 'antigravity');
+      expect(usageFor(parseCommand(r'"C:\Users\me\AppData\Local\agy\bin\agy.exe" acp')!), 'antigravity');
+      expect(usageFor(parseCommand('agy chat')!), isNull);
+      expect(usageFor(parseCommand('my-agent --acp')!), isNull);
+      expect(usageFor(agentPresets.firstWhere((preset) => preset.label == 'Antigravity')), 'antigravity');
+    });
+
     test('is refused when it is not one', () {
       expect(parseCommand(''), isNull);
       expect(parseCommand('   '), isNull);

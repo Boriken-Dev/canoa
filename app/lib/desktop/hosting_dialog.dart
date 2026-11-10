@@ -86,6 +86,7 @@ class _HostingDialogState extends State<HostingDialog> {
           args: added.command.args,
           listen: '127.0.0.1:$port',
           workingRoots: [if (added.root.isNotEmpty) added.root],
+          usage: usageFor(added.command),
         ),
       );
     });
