@@ -81,10 +81,15 @@ final class CanoaConfig {
     this.pasteAsFile = defaultPasteAsFile,
     this.embedLimit = defaultEmbedLimit,
     this.warnPermille = defaultWarnPermille,
+    this.limitPhrases,
   });
 
   /// `[usage] warn_permille`: from this many thousandths used, the usage control shows a status (800 is 80%).
   final int warnPermille;
+
+  /// `[usage] limit_phrases`, which only `canoa` reads (the phrases it takes as a usage limit in a failed turn of an agent that
+  /// reports none): kept as written so saving settings never loses it. `null` is unset.
+  final List<String>? limitPhrases;
 
   /// `[attachments] paste_as_file`: the most characters a paste puts in the message; a longer one goes as an attachment.
   final int pasteAsFile;
@@ -168,6 +173,7 @@ final class CanoaConfig {
         pasteAsFile: pasteAsFile,
         embedLimit: embedLimit,
         warnPermille: warnPermille,
+        limitPhrases: limitPhrases,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -194,6 +200,7 @@ final class CanoaConfig {
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
     warnPermille: warnPermille,
+    limitPhrases: limitPhrases,
   );
 
   /// What `[host]` names for canoa to serve, agents first, as written. canoa itself checks each one.
@@ -412,6 +419,7 @@ final class CanoaConfig {
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
     warnPermille: warnPermille,
+    limitPhrases: limitPhrases,
   );
 
   static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
@@ -429,7 +437,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'sources', 'attachments'}
+            'permissions', 'notifications', 'catalogs', 'store', 'sources', 'attachments', 'usage'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -453,7 +461,7 @@ final class CanoaConfig {
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
-    final usage = table('usage', {'warn_permille'});
+    final usage = table('usage', {'warn_permille', 'limit_phrases'});
     int limit(String key, int fallback) {
       final raw = attachments[key] ?? fallback;
       if (raw is! int || raw < 0) throw FormatException('canoa.cfg: attachments.$key must be a whole number, 0 or more');
@@ -462,6 +470,10 @@ final class CanoaConfig {
     final warn = usage['warn_permille'] ?? defaultWarnPermille;
     if (warn is! int || warn < 0 || warn > 1000) {
       throw const FormatException('canoa.cfg: usage.warn_permille must be a whole number from 0 to 1000');
+    }
+    final phrases = usage['limit_phrases'];
+    if (phrases != null && (phrases is! List || phrases.any((phrase) => phrase is! String))) {
+      throw const FormatException('canoa.cfg: usage.limit_phrases must be a list of text');
     }
     final hidden = sources['hidden'] ?? const <Object>[];
     if (hidden is! List || hidden.any((name) => name is! String || name.trim().isEmpty)) {
@@ -599,6 +611,7 @@ final class CanoaConfig {
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
       embedLimit: limit('embed_limit', defaultEmbedLimit),
       warnPermille: warn,
+      limitPhrases: phrases == null ? null : [for (final phrase in phrases as List) phrase as String],
       notifications: NotificationSettings(
         permission: flag(notifications, 'permission', true),
         question: flag(notifications, 'question', true),
@@ -645,7 +658,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${warnPermille == defaultWarnPermille ? '' : '\n[usage]\nwarn_permille = $warnPermille\n'}${defaultMode == null ? '' : '\n[permissions]\ndefault_mode = ${jsonEncode(defaultMode)}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null ? '' : '\n[permissions]\ndefault_mode = ${jsonEncode(defaultMode)}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

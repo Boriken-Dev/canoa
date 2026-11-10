@@ -36,6 +36,9 @@ pub struct Config {
     pub profiles: IndexMap<String, HostProfile>,
     /// `[host.web]`: where the web app is served; `None` when the file has no such table.
     pub web: Option<WebConfig>,
+    /// `[usage] limit_phrases`: the words that make a failed turn of an agent that reports no usage a limit. `None` is
+    /// unset, which means coqui-acp-api's defaults; a list replaces them, and an empty one infers nothing.
+    pub limit_phrases: Option<Vec<String>>,
 }
 
 /// `[host.web]`: the web app on a listener of its own, beside the entries.
@@ -380,6 +383,15 @@ impl core::error::Error for ConfigError {
 struct RawFile {
     #[serde(default)]
     host: Option<RawHost>,
+    #[serde(default)]
+    usage: Option<RawUsage>,
+}
+
+/// `[usage]`: the app reads `warn_permille`, so only the key the host acts on is named and the others are let go by.
+#[derive(Deserialize)]
+struct RawUsage {
+    #[serde(default)]
+    limit_phrases: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -511,8 +523,22 @@ impl Config {
     pub fn from_str_in(text: &str, base: &Path) -> Result<Self, ConfigError> {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let raw: RawFile = toml::from_str(text).map_err(|error| parse_error(text, &error))?;
+        let limit_phrases = raw.usage.and_then(|usage| usage.limit_phrases);
+        if limit_phrases
+            .iter()
+            .flatten()
+            .any(|phrase| phrase.trim().is_empty())
+        {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "[usage] limit_phrases holds an empty phrase, which would match every failed turn".to_owned(),
+            });
+        }
         let Some(host) = raw.host else {
-            return Ok(Self::default());
+            return Ok(Self {
+                limit_phrases,
+                ..Self::default()
+            });
         };
         for origin in &host.origins {
             if origin.is_empty() || origin.chars().any(|c| c.is_control() || c.is_whitespace()) {
@@ -719,6 +745,7 @@ impl Config {
             entries,
             profiles,
             web,
+            limit_phrases,
         })
     }
 

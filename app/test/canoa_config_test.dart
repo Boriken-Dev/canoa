@@ -88,6 +88,20 @@ provider = "echo_provider"
     expect(removed.hostEntries.map((entry) => entry.name), ['echo']);
   });
 
+  test('keeps the usage limit phrases canoa reads, unset, a list or empty, when settings are saved', () {
+    expect(CanoaConfig.parse('').limitPhrases, isNull);
+    expect(CanoaConfig.parse('[usage]\nwarn_permille = 500').encode(), isNot(contains('limit_phrases')));
+    final listed = CanoaConfig.parse('[usage]\nwarn_permille = 500\nlimit_phrases = ["out of credits", "429"]');
+    expect(listed.limitPhrases, ['out of credits', '429']);
+    final saved = CanoaConfig.parse(listed.copyWith(startHidden: true).encode());
+    expect(saved.limitPhrases, ['out of credits', '429']);
+    expect(saved.warnPermille, 500);
+    // An empty list is a setting of its own: it infers nothing, and must not turn into unset.
+    expect(CanoaConfig.parse(CanoaConfig.parse('[usage]\nlimit_phrases = []').encode()).limitPhrases, isEmpty);
+    expect(() => CanoaConfig.parse('[usage]\nlimit_phrases = "quota"'), throwsFormatException);
+    expect(() => CanoaConfig.parse('[usage]\nlimit_phrases = [1]'), throwsFormatException);
+  });
+
   test('rejects unknown or mistyped settings', () {
     expect(() => CanoaConfig.parse('[desktop]\nstart_hidden = "yes"'),
         throwsFormatException);

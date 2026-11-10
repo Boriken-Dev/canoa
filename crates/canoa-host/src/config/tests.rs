@@ -806,3 +806,37 @@ sandbox = "read-only"
         assert!(error.contains(what), "{text}: {error}");
     }
 }
+
+#[test]
+fn usage_limit_phrases_are_unset_a_list_or_empty() {
+    assert_eq!(parse("").expect("parses").limit_phrases, None);
+    // The app's own key in the same table is let go by.
+    let unset = parse("[usage]\nwarn_permille = 500\n").expect("parses");
+    assert_eq!(unset.limit_phrases, None);
+    let set = parse("[usage]\nlimit_phrases = [\"over quota\", \"429\"]\n").expect("parses");
+    assert_eq!(
+        set.limit_phrases,
+        Some(vec!["over quota".to_owned(), "429".to_owned()])
+    );
+    let none =
+        parse("[usage]\nlimit_phrases = []\n[host.agents.a]\nprogram = \"x\"\n").expect("parses");
+    assert_eq!(none.limit_phrases, Some(Vec::new()));
+    assert_eq!(none.entries.len(), 1);
+}
+
+#[test]
+fn an_empty_usage_phrase_is_refused() {
+    for text in [
+        "[usage]\nlimit_phrases = [\"\"]\n",
+        "[usage]\nlimit_phrases = [\" \"]\n",
+    ] {
+        assert!(
+            matches!(parse(text), Err(ConfigError::Invalid { .. })),
+            "{text}"
+        );
+    }
+    assert!(matches!(
+        parse("[usage]\nlimit_phrases = \"quota\"\n"),
+        Err(ConfigError::Parse { .. })
+    ));
+}
