@@ -9,6 +9,7 @@ pub mod config;
 pub mod harness;
 pub mod home;
 mod inproc;
+mod kind;
 pub mod peers;
 pub mod profile;
 pub mod provider;

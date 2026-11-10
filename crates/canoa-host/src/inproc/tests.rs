@@ -1,8 +1,12 @@
 use std::sync::mpsc::{Receiver, Sender};
 
-use coqui_acp_harness::event::{Stop, TurnEnd};
-use coqui_acp_harness::{
-    AgentInfo, ConfigOption, Conversation, Event, EventSink, HarnessError, OpenRequest, Takes,
+use coqui_acp_api::Environment;
+use coqui_acp_api::guatiao::Secret;
+use coqui_acp_api::guatiao::library::Object;
+use coqui_acp_api::{
+    AccountCatalog, AccountRef, Channel as Provided, ExportPage, HarnessInfo, ImportReport,
+    LoginOutcome, LoginPrompter, LoginRequest, RenewReport, RenewRequest, Requirement,
+    SessionExport, SessionImport,
 };
 use serde_json::{Value, json};
 
@@ -63,20 +67,13 @@ impl Client {
             .expect("sent");
     }
 
-    /// Messages until one with this id, which it answers.
-    fn answer(&self, id: u64) -> (Value, Vec<Value>) {
-        let mut before = Vec::new();
-        loop {
-            let line = self
-                .seen
-                .recv_timeout(Duration::from_secs(20))
-                .expect("an answer in time");
-            let message: Value = serde_json::from_slice(&line).expect("one JSON message per line");
-            if message.get("id") == Some(&json!(id)) && message.get("method").is_none() {
-                return (message, before);
-            }
-            before.push(message);
-        }
+    /// The next message the client was sent.
+    fn next(&self) -> Value {
+        let line = self
+            .seen
+            .recv_timeout(Duration::from_secs(20))
+            .expect("a message in time");
+        serde_json::from_slice(&line).expect("one JSON message")
     }
 }
 
@@ -95,164 +92,173 @@ fn connection() -> (Memory, Client) {
     )
 }
 
-/// A translator whose sessions say `hello` to each prompt, and count how many of them were closed.
+/// What the stand-in provider saw of its connections.
 #[derive(Default)]
-struct Hello {
-    closed: Arc<Mutex<u32>>,
-    /// Its prompts panic.
-    panics: bool,
+struct Seen {
+    /// The status each `close` carried, in order.
+    closes: Mutex<Vec<u32>>,
+    /// Requests it was started with that held a working root.
+    roots: Mutex<Vec<Vec<String>>>,
 }
 
-struct HelloSession {
-    events: EventSink,
-    closed: Arc<Mutex<u32>>,
-    panics: bool,
+/// A provider whose connection answers each message `echo` with `{"echo": ...}`, answers `end` by ending the connection with a
+/// failure, `big` with a message over any limit, and closes the sink when the host closes.
+struct Stand {
+    seen: Arc<Seen>,
+    /// It refuses to start a connection.
+    refuses: bool,
 }
 
-impl Translator for Hello {
-    fn info(&self) -> AgentInfo {
-        AgentInfo::new("hello", "Hello", "0")
+struct StandChannel {
+    sink: Mutex<Object<dyn ChannelSink>>,
+    seen: Arc<Seen>,
+}
+
+impl Provided for StandChannel {
+    fn send(&self, bytes: &[u8]) -> Result<(), ProviderError> {
+        let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        let message: Value = serde_json::from_slice(bytes)
+            .map_err(|_| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, "not JSON"))?;
+        match message["method"].as_str() {
+            Some("end") => {
+                sink.closed(
+                    u32::from(Status::GUATIAO_ERR_INTERNAL),
+                    "the program exited with 3",
+                );
+                Ok(())
+            }
+            Some("big") => {
+                // A sink that refuses a message ends the connection with its status and message.
+                if let Err(refused) = sink.receive(&vec![b' '; 2 * 1024 * 1024]) {
+                    sink.closed(u32::from(refused.status), refused.message());
+                }
+                Ok(())
+            }
+            _ => sink.receive(&serde_json::to_vec(&json!({"echo": message})).expect("JSON")),
+        }
     }
 
-    fn takes(&self) -> Takes {
-        Takes::new()
+    fn close(&self, status: u32, _reason: &str) {
+        self.seen
+            .closes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(status);
+        self.sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .closed(status, "");
+    }
+}
+
+impl AcpHarness for Stand {
+    fn describe(&self) -> Result<HarnessInfo, ProviderError> {
+        Ok(HarnessInfo::new("Stand", vec![1]))
     }
 
-    fn open(
+    fn accounts(&self) -> Result<AccountCatalog, ProviderError> {
+        Ok(AccountCatalog::new())
+    }
+
+    fn start(
         &self,
-        _request: OpenRequest,
-        events: EventSink,
-    ) -> Result<Box<dyn Conversation>, HarnessError> {
-        Ok(Box::new(HelloSession {
-            events,
-            closed: Arc::clone(&self.closed),
-            panics: self.panics,
-        }))
+        request: StartRequest,
+        spawner: Object<dyn ProcessSpawner>,
+        sink: Object<dyn ChannelSink>,
+        keeper: Object<dyn AccountKeeper>,
+    ) -> Result<Object<dyn coqui_acp_api::Channel>, ProviderError> {
+        drop((spawner, keeper));
+        if self.refuses {
+            return Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"));
+        }
+        self.seen
+            .roots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.working_roots.clone());
+        Ok(StandChannel {
+            sink: Mutex::new(sink),
+            seen: Arc::clone(&self.seen),
+        }
+        .into_object())
+    }
+
+    fn refusal(
+        &self,
+        _requirements: Vec<Requirement>,
+        _environment: Secret<Environment>,
+        _account: Option<AccountRef>,
+    ) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
+    fn program(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
+    fn import_session(
+        &self,
+        _session: SessionImport,
+        _spawner: Object<dyn ProcessSpawner>,
+        _keeper: Object<dyn AccountKeeper>,
+    ) -> Result<ImportReport, ProviderError> {
+        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
+    }
+
+    fn export_session(
+        &self,
+        _export: SessionExport,
+        _spawner: Object<dyn ProcessSpawner>,
+        _keeper: Object<dyn AccountKeeper>,
+    ) -> Result<ExportPage, ProviderError> {
+        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
+    }
+
+    fn login(
+        &self,
+        _request: LoginRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+        _prompter: Object<dyn LoginPrompter>,
+    ) -> Result<LoginOutcome, ProviderError> {
+        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
+    }
+
+    fn renew(
+        &self,
+        _request: RenewRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<RenewReport, ProviderError> {
+        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
     }
 }
 
-impl Conversation for HelloSession {
-    fn session_id(&self) -> String {
-        "s1".to_owned()
-    }
-
-    fn options(&self) -> Vec<ConfigOption> {
-        Vec::new()
-    }
-
-    fn prompt(&self, _content: Vec<coqui_acp_harness::event::Content>) -> Result<(), HarnessError> {
-        assert!(!self.panics, "a translator that panics");
-        self.events.send(Event::MessageChunk {
-            message: "m1".to_owned(),
-            text: "hello".to_owned(),
-        });
-        self.events
-            .send(Event::TurnEnd(TurnEnd::stopped(Stop::EndTurn)));
-        Ok(())
-    }
-
-    fn interrupt(&self) -> Result<(), HarnessError> {
-        Ok(())
-    }
-
-    fn set_option(&self, _id: &str, _value: &str) -> Result<Vec<ConfigOption>, HarnessError> {
-        Ok(Vec::new())
-    }
-
-    fn close(&self) {
-        *self.closed.lock().unwrap_or_else(PoisonError::into_inner) += 1;
-    }
+fn stand() -> (Arc<Stand>, Arc<Seen>) {
+    let seen = Arc::new(Seen::default());
+    (
+        Arc::new(Stand {
+            seen: Arc::clone(&seen),
+            refuses: false,
+        }),
+        seen,
+    )
 }
 
-fn cwd() -> String {
-    std::env::temp_dir().to_string_lossy().into_owned()
+fn served(
+    channel: Arc<Memory>,
+    harness: Arc<Stand>,
+    control: Arc<InProcess>,
+) -> thread::JoinHandle<End> {
+    thread::spawn(move || {
+        let request = StartRequest::builder().working_root("/root").build();
+        serve_kind(&*channel, &*harness, request, 1024 * 1024, &control)
+    })
 }
 
-fn open_session(client: &Client) {
-    client.say(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}));
-    let (initialized, _) = client.answer(1);
-    assert_eq!(
-        initialized["result"]["agentInfo"]["name"], "hello",
-        "{initialized}"
-    );
-    client.say(&json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": cwd(), "mcpServers": []}}));
-    let (opened, _) = client.answer(2);
-    assert_eq!(opened["result"]["sessionId"], "s1", "{opened}");
-}
-
-fn served(channel: Memory, agent: Arc<Hello>, control: Arc<InProcess>) -> thread::JoinHandle<End> {
-    thread::spawn(move || serve(&channel, agent, Settings::new(), 1024 * 1024, &control))
-}
-
-#[test]
-fn a_turn_reaches_the_client_and_its_close_closes_the_agents_sessions() {
-    let (channel, client) = connection();
-    let agent = Arc::new(Hello::default());
-    let closed = Arc::clone(&agent.closed);
-    let running = served(channel, agent, InProcess::new());
-    open_session(&client);
-    client.say(
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
-        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}}),
-    );
-    let (answered, updates) = client.answer(3);
-    assert_eq!(answered["result"]["stopReason"], "end_turn", "{answered}");
-    assert!(
-        updates
-            .iter()
-            .any(|update| update["params"]["update"]["content"]["text"] == "hello"),
-        "{updates:?}"
-    );
-    client.send.send(None).expect("closed");
-    assert_eq!(running.join().expect("served"), End::PeerClosed);
-    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
-}
-
-#[test]
-fn stopping_it_ends_the_connection_and_returns_once_its_sessions_are_closed() {
-    let (channel, client) = connection();
-    let agent = Arc::new(Hello::default());
-    let closed = Arc::clone(&agent.closed);
-    let control = InProcess::new();
-    let running = served(channel, agent, Arc::clone(&control));
-    open_session(&client);
-    control.stop();
-    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
-    assert_eq!(running.join().expect("served"), End::Stopped);
-    drop(client);
-}
-
-#[test]
-fn a_message_holding_a_line_break_ends_the_connection() {
-    let (channel, client) = connection();
-    let running = served(channel, Arc::new(Hello::default()), InProcess::new());
-    client
-        .send
-        .send(Some(b"{\"jsonrpc\": \"2.0\",\n\"id\": 1}".to_vec()))
-        .expect("sent");
-    assert_eq!(running.join().expect("served"), End::Protocol);
-}
-
-#[test]
-fn a_client_that_takes_nothing_more_ends_the_connection_and_the_agents_sessions() {
-    let (channel, client) = connection();
-    let agent = Arc::new(Hello::default());
-    let closed = Arc::clone(&agent.closed);
-    let channel = Arc::new(channel);
-    let shared = Arc::clone(&channel);
-    let control = InProcess::new();
-    let running = {
-        let control = Arc::clone(&control);
-        thread::spawn(move || serve(&*shared, agent, Settings::new(), 1024 * 1024, &control))
-    };
-    open_session(&client);
-    channel.refuse_sends.store(true, Ordering::SeqCst);
-    client.say(
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
-        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}}),
-    );
-    assert_eq!(running.join().expect("served"), End::Failed);
-    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
+fn closes(seen: &Seen) -> Vec<u32> {
+    seen.closes
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
 }
 
 /// How `running` ended, when it ended within `wait` without panicking.
@@ -265,23 +271,77 @@ fn ends_within(running: thread::JoinHandle<End>, wait: Duration) -> Option<End> 
 }
 
 #[test]
+fn a_message_reaches_the_provider_and_its_answer_the_client_and_the_clients_close_closes_the_connection()
+ {
+    let (channel, client) = connection();
+    let (harness, seen) = stand();
+    let running = served(Arc::new(channel), harness, InProcess::new());
+    client.say(&json!({"method": "echo", "id": 1}));
+    assert_eq!(client.next()["echo"]["id"], 1);
+    client.send.send(None).expect("closed");
+    assert_eq!(running.join().expect("served"), End::PeerClosed);
+    assert_eq!(closes(&seen), [0], "the host closed it in order");
+    assert_eq!(
+        seen.roots.lock().expect("lock").as_slice(),
+        [vec!["/root".to_owned()]],
+        "the request reached the provider"
+    );
+}
+
+#[test]
+fn a_message_holding_a_line_break_reaches_the_provider_whole() {
+    let (channel, client) = connection();
+    let (harness, _seen) = stand();
+    let running = served(Arc::new(channel), harness, InProcess::new());
+    client
+        .send
+        .send(Some(b"{\"method\": \"echo\",\n\"id\": 7}".to_vec()))
+        .expect("sent");
+    assert_eq!(client.next()["echo"]["id"], 7);
+    client.send.send(None).expect("closed");
+    assert_eq!(running.join().expect("served"), End::PeerClosed);
+}
+
+#[test]
+fn stopping_it_closes_the_connection_and_returns_once_the_provider_has_said_it_is_closed() {
+    let (channel, client) = connection();
+    let (harness, seen) = stand();
+    let control = InProcess::new();
+    let running = served(Arc::new(channel), harness, Arc::clone(&control));
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
+    control.stop();
+    assert_eq!(closes(&seen), [0]);
+    assert_eq!(running.join().expect("served"), End::Stopped);
+    drop(client);
+}
+
+#[test]
+fn a_client_that_takes_nothing_more_ends_the_connection_and_closes_the_provider() {
+    let (channel, client) = connection();
+    let (harness, seen) = stand();
+    let channel = Arc::new(channel);
+    let running = served(Arc::clone(&channel), harness, InProcess::new());
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
+    channel.refuse_sends.store(true, Ordering::SeqCst);
+    client.say(&json!({"method": "echo", "id": 2}));
+    assert_eq!(running.join().expect("served"), End::Failed);
+    assert_eq!(closes(&seen).len(), 1, "the provider was closed once");
+    assert_ne!(closes(&seen), [0], "and told the client was gone");
+}
+
+#[test]
 fn stopping_it_while_the_client_takes_nothing_returns_at_once() {
     let (channel, client) = connection();
-    let agent = Arc::new(Hello::default());
-    let closed = Arc::clone(&agent.closed);
+    let (harness, seen) = stand();
     let channel = Arc::new(channel);
-    let shared = Arc::clone(&channel);
     let control = InProcess::new();
-    let running = {
-        let control = Arc::clone(&control);
-        thread::spawn(move || serve(&*shared, agent, Settings::new(), 1024 * 1024, &control))
-    };
-    open_session(&client);
+    let running = served(Arc::clone(&channel), harness, Arc::clone(&control));
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
     channel.stall_sends.store(true, Ordering::SeqCst);
-    client.say(
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
-        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}}),
-    );
+    client.say(&json!({"method": "echo", "id": 2}));
     thread::sleep(Duration::from_millis(300));
     let asked = Instant::now();
     control.stop();
@@ -290,7 +350,7 @@ fn stopping_it_while_the_client_takes_nothing_returns_at_once() {
         "stop waited {:?} on a client that takes nothing",
         asked.elapsed()
     );
-    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
+    assert_eq!(closes(&seen).len(), 1);
     assert_eq!(
         ends_within(running, Duration::from_secs(5)),
         Some(End::Stopped)
@@ -298,56 +358,66 @@ fn stopping_it_while_the_client_takes_nothing_returns_at_once() {
 }
 
 #[test]
-fn a_translator_thread_that_panics_leaves_the_connection_to_end_as_usual() {
+fn a_provider_that_ends_the_connection_with_a_failure_ends_the_serving() {
     let (channel, client) = connection();
-    let agent = Arc::new(Hello {
-        panics: true,
-        ..Hello::default()
-    });
-    let closed = Arc::clone(&agent.closed);
-    let running = served(channel, agent, InProcess::new());
-    open_session(&client);
-    client.say(
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
-        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}}),
-    );
-    thread::sleep(Duration::from_millis(300));
-    client.send.send(None).expect("closed");
+    let (harness, seen) = stand();
+    let running = served(Arc::new(channel), harness, InProcess::new());
+    client.say(&json!({"method": "end"}));
     assert_eq!(
         ends_within(running, Duration::from_secs(10)),
-        Some(End::PeerClosed)
+        Some(End::AgentFailed)
     );
-    assert_eq!(*closed.lock().unwrap_or_else(PoisonError::into_inner), 1);
+    assert!(closes(&seen).is_empty(), "the host closed nothing");
+    drop(client);
+}
+
+#[test]
+fn a_message_of_the_providers_over_the_limit_ends_the_connection() {
+    let (channel, client) = connection();
+    let (harness, _seen) = stand();
+    let running = served(Arc::new(channel), harness, InProcess::new());
+    client.say(&json!({"method": "big"}));
+    assert_eq!(
+        ends_within(running, Duration::from_secs(10)),
+        Some(End::Protocol)
+    );
+    drop(client);
+}
+
+#[test]
+fn a_provider_that_refuses_to_start_ends_the_serving() {
+    let (channel, client) = connection();
+    let seen = Arc::new(Seen::default());
+    let harness = Arc::new(Stand {
+        seen,
+        refuses: true,
+    });
+    let control = InProcess::new();
+    let running = served(Arc::new(channel), harness, Arc::clone(&control));
+    assert_eq!(running.join().expect("served"), End::AgentFailed);
+    // Stopping waits for nothing: the serving finished.
+    let asked = Instant::now();
+    control.stop();
+    assert!(asked.elapsed() < Duration::from_secs(1));
+    drop(client);
 }
 
 #[test]
 fn a_panic_on_the_thread_that_serves_ends_the_connection_and_stopping_it_waits_for_nothing() {
     let (channel, client) = connection();
+    let (harness, seen) = stand();
     let channel = Arc::new(channel);
-    let shared = Arc::clone(&channel);
     let control = InProcess::new();
-    let running = {
-        let control = Arc::clone(&control);
-        thread::spawn(move || {
-            serve(
-                &*shared,
-                Arc::new(Hello::default()),
-                Settings::new(),
-                1024 * 1024,
-                &control,
-            )
-        })
-    };
-    // A session open holds the agent's output on a thread of its own, which a panic does not end.
-    open_session(&client);
+    let running = served(Arc::clone(&channel), harness, Arc::clone(&control));
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
     channel.panic_receive.store(true, Ordering::SeqCst);
-    client
-        .say(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "s1"}}));
     let ended = ends_within(running, Duration::from_secs(10));
     assert!(
-        matches!(ended, Some(End::AgentFailed)),
+        matches!(ended, Some(End::Failed | End::AgentFailed)),
         "the connection ended as {ended:?}"
     );
+    assert_eq!(closes(&seen).len(), 1, "the provider was closed");
     let asked = Instant::now();
     control.stop();
     assert!(

@@ -633,23 +633,28 @@ executable = "codex"
     assert_eq!(
         config.entry("Claude").expect("there").kind,
         EntryKind::Harness {
-            harness: crate::Harness::Claude,
+            harness: "claude".to_owned(),
+            origin: None,
             executable: None,
             options: HarnessOptions::default(),
+            settings: None,
             profiles: vec!["plain".to_owned()],
         }
     );
     assert_eq!(
         config.entry("Codex").expect("there").kind,
         EntryKind::Harness {
-            harness: crate::Harness::Codex,
+            harness: "codex".to_owned(),
+            origin: None,
             executable: Some("codex".into()),
             options: HarnessOptions::default(),
+            settings: None,
             profiles: Vec::new(),
         }
     );
     for (text, what) in [
         ("[host.agents.a]\nharness = \"gemini\"\n", "harness"),
+        ("[host.agents.a]\nharness = \"\"\n", "harness"),
         (
             "[host.agents.a]\nharness = \"claude\"\nprogram = \"claude\"\n",
             "program or harness",
@@ -674,34 +679,110 @@ executable = "codex"
 }
 
 #[test]
-fn a_harness_entry_names_the_modes_a_client_may_choose_or_leaves_the_default() {
-    use coqui_acp_harness::Mode;
+fn the_keys_the_provider_kind_has_no_setting_for_are_refused() {
+    for key in ["modes = [\"plan\"]", "setting_sources = [\"project\"]"] {
+        let text = format!("[host.agents.a]\nharness = \"claude\"\n{key}\n");
+        assert!(
+            matches!(parse(&text), Err(ConfigError::Parse { .. })),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn an_outside_harness_is_a_provider_id_with_a_library_or_a_source_and_its_own_settings() {
     let config = parse(
         r#"
-[host.agents.Default]
-harness = "claude"
-[host.agents.Named]
-harness = "codex"
-modes = ["plan", "accept_edits"]
+[host.agents.Echo]
+harness = "echo_harness"
+library = "providers/echo.dll"
+settings = { title = "Echo" }
+profiles = ["plain"]
+[host.agents.Py]
+harness = "py_harness"
+source = "source.dll"
+import_search = "library"
+[host.agents.Py.source_settings]
+dirs = ["manifests"]
+[host.profiles.plain]
 "#,
     )
     .expect("parses");
-    let modes = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
-        Some(EntryKind::Harness { options, .. }) => options.modes.clone(),
-        _ => panic!("a harness"),
+    let Some(EntryKind::Harness {
+        harness,
+        origin,
+        settings,
+        options,
+        ..
+    }) = config.entry("Echo").map(|entry| &entry.kind)
+    else {
+        panic!("a harness");
     };
+    assert_eq!(harness, "echo_harness");
     assert_eq!(
-        modes("Default"),
-        None,
-        "a client is capped at the entry's own mode"
+        origin,
+        &Some(Origin::Library(
+            std::path::absolute(base().join("providers/echo.dll")).expect("absolute")
+        ))
     );
-    assert_eq!(modes("Named"), Some(vec![Mode::Plan, Mode::AcceptEdits]));
-    for text in [
-        "[host.agents.a]\nharness = \"claude\"\nmodes = [\"yolo\"]\n",
-        "[host.agents.a]\nprogram = \"x\"\nmodes = [\"plan\"]\n",
+    assert_eq!(
+        settings.as_ref().and_then(|s| s.as_map().get("title")),
+        Some(&serde_json::json!("Echo"))
+    );
+    assert_eq!(options, &HarnessOptions::default());
+    let Some(EntryKind::Harness { origin, .. }) = config.entry("Py").map(|entry| &entry.kind)
+    else {
+        panic!("a harness");
+    };
+    assert!(matches!(
+        origin,
+        Some(Origin::Source {
+            import_search: ImportSearch::Library,
+            import_search_named: true,
+            ..
+        })
+    ));
+    for (text, what) in [
+        // Nothing loads an id the host does not carry.
+        ("[host.agents.a]\nharness = \"echo\"\n", "library or source"),
+        (
+            "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nsource = \"s\"\n",
+            "exclude",
+        ),
+        (
+            "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nimport_search = \"path\"\n",
+            "import_search",
+        ),
+        (
+            "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\npermission_mode = \"plan\"\n",
+            "permission_mode",
+        ),
+        (
+            "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nexecutable = \"e\"\n",
+            "executable",
+        ),
+        (
+            "[host.agents.a]\nprogram = \"x\"\nlibrary = \"l\"\n",
+            "harness",
+        ),
+        (
+            "[host.agents.a]\nprogram = \"x\"\nsettings = { a = 1 }\n",
+            "harness",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\npermission_mode = \"plan\"\nsettings = { permission_mode = \"auto\" }\n",
+            "twice",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nbypass = true\nsettings = { allow_bypass = false }\n",
+            "twice",
+        ),
     ] {
-        assert!(parse(text).is_err(), "{text}");
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains(what), "{text}: {error}");
     }
+    // The built-in ids take a settings table too.
+    assert!(parse("[host.agents.a]\nharness = \"claude\"\nsettings = { model = \"m\" }\n").is_ok());
 }
 
 #[test]
@@ -738,7 +819,6 @@ fn a_harness_entry_holds_its_command_lines_permissions_and_its_program_to_canoa_
 harness = "claude"
 executable = "bin/claude"
 permission_mode = "acceptEdits"
-setting_sources = ["project"]
 [host.agents.Codex]
 harness = "codex"
 executable = "codex-nightly"
@@ -761,7 +841,6 @@ sandbox = "read-only"
         "a path is taken from canoa.cfg's directory, never a session's"
     );
     assert_eq!(options.permission_mode.as_deref(), Some("acceptEdits"));
-    assert_eq!(options.setting_sources, Some(vec!["project".to_owned()]));
     let Some(EntryKind::Harness {
         executable,
         options,
@@ -793,10 +872,6 @@ sandbox = "read-only"
         (
             "[host.agents.a]\nharness = \"codex\"\nsandbox = \"open\"\n",
             "sandbox",
-        ),
-        (
-            "[host.agents.a]\nharness = \"claude\"\nsetting_sources = [\"elsewhere\"]\n",
-            "setting_sources",
         ),
         (
             "[host.agents.a]\nprogram = \"x\"\nsandbox = \"read-only\"\n",

@@ -230,7 +230,7 @@ fn a_paired_client_does_not_see_bypass_on_an_entry_that_has_it_off_and_is_refuse
     }
 }
 
-/// A paired key can only choose the mode canoa.cfg configured and stricter ones, unless the entry names more.
+/// A paired key can only choose the mode canoa.cfg configured and stricter ones.
 #[test]
 fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
     for (harness, key, offered, loosening, allowed) in [
@@ -238,16 +238,9 @@ fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
         ("claude", "", vec!["manual", "plan"], "auto", false),
         (
             "claude",
-            "modes = [\"accept_edits\"]\n",
+            "permission_mode = \"acceptEdits\"\n",
             vec!["manual", "accept_edits", "plan"],
-            "accept_edits",
-            true,
-        ),
-        (
-            "claude",
-            "modes = [\"auto\"]\n",
-            vec!["manual", "auto", "plan"],
-            "bypass",
+            "auto",
             false,
         ),
         (
@@ -256,13 +249,6 @@ fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
             vec!["manual", "accept_edits", "plan"],
             "auto",
             false,
-        ),
-        (
-            "codex",
-            "modes = [\"auto\"]\n",
-            vec!["manual", "accept_edits", "auto", "plan"],
-            "auto",
-            true,
         ),
     ] {
         let scratch = Scratch::new();

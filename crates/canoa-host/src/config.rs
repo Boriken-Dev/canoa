@@ -143,16 +143,15 @@ pub struct Entry {
     pub max_peers: usize,
 }
 
-/// What a harness entry's command line asks before it acts. Each one unset is the host's own value, never the person's
-/// configuration on this machine: Claude Code's permission mode `default`, Codex's approval policy `on-request` and
-/// sandbox `workspace-write`.
+/// What a `claude` or `codex` harness entry's keys ask before the command line acts. Each one unset is the host's own value,
+/// never the person's configuration on this machine: Claude Code's permission mode `default`, Codex's approval policy
+/// `on-request` and sandbox `workspace-write`. They are the provider's settings of the same names; an outside provider
+/// takes its own through `settings`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HarnessOptions {
     /// Claude Code's permission mode: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, `auto` or `manual`.
     pub permission_mode: Option<String>,
-    /// The setting sources Claude Code loads, of `user`, `project` and `local`; empty loads none, `None` its own default.
-    pub setting_sources: Option<Vec<String>>,
     /// Codex's approval policy: `untrusted`, `on-failure`, `on-request` or `never`.
     pub approval_policy: Option<String>,
     /// Codex's sandbox: `read-only`, `workspace-write` or `danger-full-access`.
@@ -161,10 +160,6 @@ pub struct HarnessOptions {
     /// option does not offer it and a client that sets it is refused. A key paired to someone else's machine reaches this
     /// entry, so on is the host person's decision for that entry: with it, that key could take full control of this machine.
     pub bypass: bool,
-    /// The modes a paired client may choose (`modes = ["manual", "accept_edits", ...]`), ids as `coqui_acp_harness::Mode`
-    /// names them. Unset, a client may choose the mode the entry's own settings amount to and every stricter one, so it
-    /// cannot loosen what canoa.cfg set; naming modes widens that, and Bypass still needs `bypass = true`.
-    pub modes: Option<Vec<coqui_acp_harness::Mode>>,
 }
 
 /// Claude Code's permission modes, as `--permission-mode` takes them.
@@ -177,8 +172,6 @@ pub const PERMISSION_MODES: &[&str] = &[
     "auto",
     "manual",
 ];
-/// Claude Code's setting sources.
-pub const SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 /// Codex's approval policies.
 pub const APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
 /// Codex's sandboxes.
@@ -217,15 +210,21 @@ pub enum EntryKind {
         /// How the host reads this agent's usage when the agent reports none itself; `None` reads only its failed turns.
         usage: Option<UsageSource>,
     },
-    /// A coding agent's own command line that the host serves as an ACP agent itself, in its own process, with no adapter.
+    /// An `acp_harness` provider, chosen by its id and run in this process: the host is the ACP client's end, and the provider
+    /// starts the agent's program through the host's spawner. `claude` and `codex` are built in; any other id is an outside
+    /// provider that `origin` loads.
     Harness {
-        /// Which command line.
-        harness: crate::Harness,
-        /// Its program: a name the operating system finds as a command, or a path made absolute from canoa.cfg's directory;
-        /// `claude` or `codex` when `None`.
+        /// The provider's id.
+        harness: String,
+        /// Where an outside provider's code comes from; `None` is the built-in provider of that id.
+        origin: Option<Origin>,
+        /// The `claude` or `codex` provider's program: a name the operating system finds as a command, or a path made absolute
+        /// from canoa.cfg's directory; the provider's own (`claude`, `codex`) when `None`.
         executable: Option<OsString>,
-        /// What the command line asks before it acts, as canoa.cfg sets it.
+        /// What the `claude` or `codex` provider asks before it acts, as canoa.cfg sets it.
         options: HarnessOptions,
+        /// The provider's own configuration (`settings`), checked against the schema it declares when the host starts.
+        settings: Option<Settings>,
         /// The `[host.profiles]` a client may choose among, as an agent's.
         profiles: Vec<String>,
     },
@@ -467,13 +466,16 @@ struct RawAgent {
     program: Option<String>,
     args: Option<Vec<String>>,
     harness: Option<String>,
+    library: Option<String>,
+    source: Option<String>,
+    source_settings: Option<toml::Table>,
+    import_search: Option<String>,
+    settings: Option<toml::Table>,
     executable: Option<String>,
     permission_mode: Option<String>,
-    setting_sources: Option<Vec<String>>,
     approval_policy: Option<String>,
     sandbox: Option<String>,
     bypass: Option<bool>,
-    modes: Option<Vec<String>>,
     profiles: Option<Vec<String>>,
     usage: Option<String>,
     listen: Option<String>,
@@ -487,11 +489,9 @@ struct RawAgent {
 /// A harness entry's keys for what its command line asks, taken out of [`RawAgent`].
 struct RawAsks {
     permission_mode: Option<String>,
-    setting_sources: Option<Vec<String>>,
     approval_policy: Option<String>,
     sandbox: Option<String>,
     bypass: Option<bool>,
-    modes: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -599,11 +599,9 @@ impl Config {
             };
             let asks = RawAsks {
                 permission_mode: agent.permission_mode,
-                setting_sources: agent.setting_sources,
                 approval_policy: agent.approval_policy,
                 sandbox: agent.sandbox,
                 bypass: agent.bypass,
-                modes: agent.modes,
             };
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
@@ -615,11 +613,14 @@ impl Config {
                     }
                     for (set, key) in [
                         (asks.permission_mode.is_some(), "permission_mode"),
-                        (asks.setting_sources.is_some(), "setting_sources"),
                         (asks.approval_policy.is_some(), "approval_policy"),
                         (asks.sandbox.is_some(), "sandbox"),
                         (asks.bypass.is_some(), "bypass"),
-                        (asks.modes.is_some(), "modes"),
+                        (agent.library.is_some(), "library"),
+                        (agent.source.is_some(), "source"),
+                        (agent.source_settings.is_some(), "source_settings"),
+                        (agent.import_search.is_some(), "import_search"),
+                        (agent.settings.is_some(), "settings"),
                     ] {
                         if set {
                             return Err(invalid(
@@ -651,16 +652,58 @@ impl Config {
                     if agent.usage.is_some() {
                         return Err(invalid(&name, "usage goes with program, not harness"));
                     }
-                    let Some(harness) = crate::Harness::named(&harness) else {
-                        return Err(invalid(&name, "harness is claude or codex"));
-                    };
+                    if harness.is_empty() {
+                        return Err(invalid(&name, "harness must not be empty"));
+                    }
                     if agent.args.is_some() {
                         return Err(invalid(&name, "args go with program; a harness takes none"));
                     }
                     if agent.executable.as_deref() == Some("") {
                         return Err(invalid(&name, "executable is empty"));
                     }
-                    let options = harness_options(&name, harness, &asks)?;
+                    let origin = origin_of(
+                        &name,
+                        base,
+                        &directory,
+                        OriginKeys {
+                            library: agent.library.as_deref(),
+                            source: agent.source.as_deref(),
+                            source_settings: agent.source_settings,
+                            import_search: agent.import_search.as_deref(),
+                        },
+                    )?;
+                    let built_in = BUILT_IN_HARNESSES.contains(&harness.as_str());
+                    if origin.is_none() && !built_in {
+                        return Err(invalid(
+                            &name,
+                            "harness is claude, codex, or the id of an outside provider that library or source loads",
+                        ));
+                    }
+                    let settings = agent
+                        .settings
+                        .map(|table| settings_of(&name, table))
+                        .transpose()?;
+                    let options = if built_in {
+                        harness_options(&name, &harness, &asks, settings.as_ref())?
+                    } else {
+                        for (set, key) in [
+                            (asks.permission_mode.is_some(), "permission_mode"),
+                            (asks.approval_policy.is_some(), "approval_policy"),
+                            (asks.sandbox.is_some(), "sandbox"),
+                            (asks.bypass.is_some(), "bypass"),
+                            (agent.executable.is_some(), "executable"),
+                        ] {
+                            if set {
+                                return Err(invalid(
+                                    &name,
+                                    &format!(
+                                        "{key} goes with harness claude or codex; an outside provider takes its own settings"
+                                    ),
+                                ));
+                            }
+                        }
+                        HarnessOptions::default()
+                    };
                     // A path is canoa.cfg's, as a provider's library is: the command line runs in a session's directory,
                     // which a client chooses.
                     let executable = agent.executable.map(|executable| {
@@ -672,8 +715,10 @@ impl Config {
                     });
                     EntryKind::Harness {
                         harness,
+                        origin,
                         executable,
                         options,
+                        settings,
                         profiles: offered,
                     }
                 }
@@ -691,52 +736,19 @@ impl Config {
             if provider.provider.is_empty() {
                 return Err(invalid(&name, "provider must not be empty"));
             }
-            let file = |path: &str| {
-                if path.is_empty() {
-                    return Err(invalid(&name, "library or source must not be empty"));
-                }
-                let path = base.join(path);
-                Ok(std::path::absolute(&path).unwrap_or(path))
-            };
-            let origin = match (
-                &provider.library,
-                &provider.source,
-                provider.source_settings,
-            ) {
-                (Some(_), Some(_), _) => {
-                    return Err(invalid(&name, "library and source exclude each other"));
-                }
-                (None, None, _) => {
-                    return Err(invalid(&name, "a provider needs library or source"));
-                }
-                (Some(_), None, Some(_)) => {
-                    return Err(invalid(
-                        &name,
-                        "source_settings go with source, not library",
-                    ));
-                }
-                (Some(_), None, None) if provider.import_search.is_some() => {
-                    return Err(invalid(
-                        &name,
-                        "import_search goes with source, not library",
-                    ));
-                }
-                (Some(library), None, None) => Origin::Library(file(library)?),
-                (None, Some(source), settings) => {
-                    let mut settings = settings_of(&name, settings.unwrap_or_default())?;
-                    absolute_paths(&name, &directory, &mut settings)?;
-                    let import_search = match provider.import_search.as_deref() {
-                        None => ImportSearch::default_for(&settings),
-                        Some(text) => ImportSearch::named(text)
-                            .ok_or_else(|| invalid(&name, "import_search is library or path"))?,
-                    };
-                    Origin::Source {
-                        file: file(source)?,
-                        settings,
-                        import_search,
-                        import_search_named: provider.import_search.is_some(),
-                    }
-                }
+            let Some(origin) = origin_of(
+                &name,
+                base,
+                &directory,
+                OriginKeys {
+                    library: provider.library.as_deref(),
+                    source: provider.source.as_deref(),
+                    source_settings: provider.source_settings,
+                    import_search: provider.import_search.as_deref(),
+                },
+            )?
+            else {
+                return Err(invalid(&name, "a provider needs library or source"));
             };
             let settings = provider
                 .settings
@@ -795,30 +807,107 @@ fn invalid(name: &str, what: &str) -> ConfigError {
     }
 }
 
-/// `base` made absolute; an empty one is the current directory, as a path joined to it is taken from there.
-/// A harness entry's own keys, each checked against what its command line takes, and refused for the other harness.
+/// The harnesses the host carries: providers of `acp_harness` registered in this process.
+pub const BUILT_IN_HARNESSES: &[&str] = &["claude", "codex"];
+
+/// The keys that say where an outside provider's code is.
+struct OriginKeys<'a> {
+    library: Option<&'a str>,
+    source: Option<&'a str>,
+    source_settings: Option<toml::Table>,
+    import_search: Option<&'a str>,
+}
+
+/// Where an entry's provider is loaded from, `None` when the entry names no library or source. Relative paths are taken
+/// from `base`, canoa.cfg's directory.
+fn origin_of(
+    name: &str,
+    base: &Path,
+    directory: &Path,
+    keys: OriginKeys<'_>,
+) -> Result<Option<Origin>, ConfigError> {
+    let file = |path: &str| {
+        if path.is_empty() {
+            return Err(invalid(name, "library or source must not be empty"));
+        }
+        let path = base.join(path);
+        Ok(std::path::absolute(&path).unwrap_or(path))
+    };
+    match (keys.library, keys.source, keys.source_settings) {
+        (Some(_), Some(_), _) => Err(invalid(name, "library and source exclude each other")),
+        (None, None, None) if keys.import_search.is_none() => Ok(None),
+        (None, None, _) => Err(invalid(
+            name,
+            "source_settings and import_search go with source",
+        )),
+        (Some(_), None, Some(_)) => {
+            Err(invalid(name, "source_settings go with source, not library"))
+        }
+        (Some(_), None, None) if keys.import_search.is_some() => {
+            Err(invalid(name, "import_search goes with source, not library"))
+        }
+        (Some(library), None, None) => Ok(Some(Origin::Library(file(library)?))),
+        (None, Some(source), settings) => {
+            let mut settings = settings_of(name, settings.unwrap_or_default())?;
+            absolute_paths(name, directory, &mut settings)?;
+            let import_search = match keys.import_search {
+                None => ImportSearch::default_for(&settings),
+                Some(text) => ImportSearch::named(text)
+                    .ok_or_else(|| invalid(name, "import_search is library or path"))?,
+            };
+            Ok(Some(Origin::Source {
+                file: file(source)?,
+                settings,
+                import_search,
+                import_search_named: keys.import_search.is_some(),
+            }))
+        }
+    }
+}
+
+/// A `claude` or `codex` entry's own keys, each checked against what the provider takes, and refused for the other one.
+/// A key that `settings` also holds is refused: the entry would say it twice.
 fn harness_options(
     name: &str,
-    harness: crate::Harness,
+    harness: &str,
     agent: &RawAsks,
+    settings: Option<&Settings>,
 ) -> Result<HarnessOptions, ConfigError> {
-    let claudes = [
-        ("permission_mode", agent.permission_mode.is_some()),
-        ("setting_sources", agent.setting_sources.is_some()),
-    ];
+    let claudes = [("permission_mode", agent.permission_mode.is_some())];
     let codexs = [
         ("approval_policy", agent.approval_policy.is_some()),
         ("sandbox", agent.sandbox.is_some()),
     ];
-    let theirs = match harness {
-        crate::Harness::Claude => codexs,
-        crate::Harness::Codex => claudes,
+    let theirs = if harness == "claude" {
+        &codexs[..]
+    } else {
+        &claudes[..]
     };
     if let Some((key, _)) = theirs.iter().find(|(_, set)| *set) {
         return Err(invalid(
             name,
-            &format!("{key} is not a setting of harness {}", harness.as_str()),
+            &format!("{key} is not a setting of harness {harness}"),
         ));
+    }
+    if let Some(settings) = settings {
+        for (key, set) in [
+            ("permission_mode", agent.permission_mode.is_some()),
+            ("approval_policy", agent.approval_policy.is_some()),
+            ("sandbox", agent.sandbox.is_some()),
+        ] {
+            if set && settings.as_map().contains_key(key) {
+                return Err(invalid(
+                    name,
+                    &format!("{key} is set twice: as a key and in settings"),
+                ));
+            }
+        }
+        if agent.bypass.is_some() && settings.as_map().contains_key("allow_bypass") {
+            return Err(invalid(
+                name,
+                "bypass is set twice: as a key and as allow_bypass in settings",
+            ));
+        }
     }
     let one_of = |value: &Option<String>, allowed: &[&str], key: &str| match value {
         Some(value) if !allowed.contains(&value.as_str()) => Err(invalid(
@@ -827,45 +916,15 @@ fn harness_options(
         )),
         _ => Ok(value.clone()),
     };
-    if let Some(sources) = &agent.setting_sources
-        && sources
-            .iter()
-            .any(|source| !SETTING_SOURCES.contains(&source.as_str()))
-    {
-        return Err(invalid(
-            name,
-            &format!("setting_sources holds only {}", SETTING_SOURCES.join(", ")),
-        ));
-    }
     Ok(HarnessOptions {
         permission_mode: one_of(&agent.permission_mode, PERMISSION_MODES, "permission_mode")?,
-        setting_sources: agent.setting_sources.clone(),
         approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
         sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
         bypass: agent.bypass.unwrap_or(false),
-        modes: match &agent.modes {
-            None => None,
-            Some(ids) => Some(
-                ids.iter()
-                    .map(|id| {
-                        coqui_acp_harness::Mode::from_id(id).ok_or_else(|| {
-                            invalid(
-                                name,
-                                &format!(
-                                    "modes holds only {}",
-                                    coqui_acp_harness::Mode::ALL
-                                        .map(coqui_acp_harness::Mode::id)
-                                        .join(", ")
-                                ),
-                            )
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-        },
     })
 }
 
+/// `base` made absolute; an empty one is the current directory, as a path joined to it is taken from there.
 fn directory_of(base: &Path) -> PathBuf {
     if base.as_os_str().is_empty() {
         return std::env::current_dir().unwrap_or_default();

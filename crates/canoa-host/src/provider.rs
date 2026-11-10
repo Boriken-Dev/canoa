@@ -166,9 +166,9 @@ impl fmt::Display for ProviderError {
             Self::Load(why) => write!(f, "the library did not load: {why}"),
             Self::Source(why) => write!(f, "the source was not added: {why}"),
             Self::Missing => f.write_str("nothing loaded offers a provider by that id"),
-            Self::WrongKind => {
-                f.write_str("that provider is not an agent_provider of this version")
-            }
+            Self::WrongKind => f.write_str(
+                "that provider is not of the kind this entry needs, at this version of it",
+            ),
             Self::NeedsConfiguration => {
                 f.write_str("that provider needs a configuration: give the entry a settings table")
             }
@@ -254,9 +254,13 @@ fn serve_on(
         .map_err(|error| ProviderError::Facade(error.to_string()))
 }
 
-fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>), ProviderError> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
-    match &options.origin {
+/// Loads the library or adds the source `origin` names to `registry`, whose providers it then offers.
+///
+/// # Errors
+///
+/// [`ProviderError::Load`] or [`ProviderError::Source`] with the loader's words.
+pub(crate) fn open(registry: &mut Registry, origin: &Origin) -> Result<(), ProviderError> {
+    match origin {
         Origin::Library(library) => {
             registry
                 .load_file(library)
@@ -286,6 +290,12 @@ fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>),
             }
         }
     }
+    Ok(())
+}
+
+fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>), ProviderError> {
+    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    open(&mut registry, &options.origin)?;
     let offer = registry
         .offer::<dyn AgentProvider>(&options.provider)
         .ok_or(ProviderError::Missing)?
@@ -306,7 +316,7 @@ fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>),
 }
 
 /// `settings` as a Guatiao map.
-fn map_of(settings: &Settings) -> Result<Map, String> {
+pub(crate) fn map_of(settings: &Settings) -> Result<Map, String> {
     let mut map = Map::new();
     for (key, value) in settings.as_map() {
         let value = guatiao_serde::adapt::to_value_in(value, Alloc::rust())

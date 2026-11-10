@@ -15,6 +15,7 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
+use coqui_acp_api::guatiao::library::Registry as Providers;
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
@@ -25,9 +26,12 @@ use coqui_web_channel::websocket::{self, Frames};
 use coqui_web_channel::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
-use crate::config::{Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin, UsageSource};
-use crate::harness::AgentOptions;
+use crate::config::{
+    BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin, Settings,
+    UsageSource,
+};
 use crate::inproc::{self, InProcess};
+use crate::kind;
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
@@ -139,6 +143,13 @@ pub enum ServeError {
     },
     /// The proof could not be built from the options.
     Proof(String),
+    /// A harness entry's provider could not be loaded, found, or configured.
+    Harness {
+        /// The entry.
+        entry: String,
+        /// Why; names a setting, never a value.
+        what: String,
+    },
 }
 
 impl fmt::Display for ServeError {
@@ -151,6 +162,12 @@ impl fmt::Display for ServeError {
                 write!(f, "host entry {entry} could not listen: {failure}")
             }
             Self::Proof(reason) => write!(f, "the proof could not be built: {reason}"),
+            Self::Harness { entry, what } => {
+                write!(
+                    f,
+                    "host entry {entry}: its harness provider is unusable: {what}"
+                )
+            }
         }
     }
 }
@@ -210,8 +227,8 @@ enum Agent {
         program: OsString,
         args: Vec<OsString>,
     },
-    /// A harness's translator, in this process.
-    Harness(Box<AgentOptions>),
+    /// An `acp_harness` provider, in this process.
+    Harness(Arc<kind::Harness>),
 }
 
 /// What runs for one entry's connections.
@@ -503,6 +520,7 @@ impl Serving {
             );
         }
         let agents = Arc::new(Mutex::new(Agents::default()));
+        let harnesses = harness_registry(config)?;
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
@@ -573,42 +591,8 @@ impl Serving {
                 } => {
                     let mut line = HostLine::default();
                     line.settings.clone_from(settings);
-                    if let Origin::Source {
-                        settings,
-                        import_search,
-                        import_search_named,
-                        ..
-                    } = origin
-                    {
-                        if cfg!(windows) && *import_search == ImportSearch::Path {
-                            if *import_search_named {
-                                tracing::info!(
-                                    "non-default: host.providers.{}.import_search is path, default library: python3.dll \
-                                     and what else the source imports itself may come from the working directory or PATH",
-                                    entry.name
-                                );
-                            } else {
-                                // The file does not say it: import_dirs names no directory, so the host fell back.
-                                tracing::warn!(
-                                    "host.providers.{}.import_search is path, because import_dirs names no directory: \
-                                     python3.dll and what else the source imports itself may come from the working \
-                                     directory or PATH; set import_dirs to where it is, or import_search = \"library\"",
-                                    entry.name
-                                );
-                            }
-                        }
-                        // Guatiao's source cannot tell its host which non-default setting it took, so the host says it.
-                        if settings
-                            .as_map()
-                            .get("isolation")
-                            .and_then(|value| value.as_str())
-                            == Some("inherit")
-                        {
-                            tracing::info!(
-                                "non-default: host.providers.{}.source_settings.isolation is inherit, default shipped",
-                                entry.name
-                            );
-                        }
+                    say_origin(entry, origin);
+                    if let Origin::Source { settings, .. } = origin {
                         line.source_settings = Some(settings.clone());
                     }
                     (
@@ -629,29 +613,64 @@ impl Serving {
                 }
                 EntryKind::Harness {
                     harness,
+                    origin,
                     executable,
                     options: asks,
+                    settings,
                     profiles,
-                } => (
-                    "agent",
-                    Run::Agent {
-                        agent: Agent::Harness(Box::new(harness_options(
-                            entry,
-                            *harness,
-                            executable.as_ref(),
-                            asks,
-                        ))),
-                        scope: Scope::new(entry.working_roots.clone())
-                            .account(entry.name.clone())
-                            .limit_phrases(config.limit_phrases.clone()),
-                        offer: hosted::offer(
-                            profiles,
-                            &config.profiles,
-                            options.provider_program.as_os_str().to_owned(),
-                        ),
-                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
-                    },
-                ),
+                } => {
+                    if let Some(origin) = origin {
+                        say_origin(entry, origin);
+                    }
+                    let configured = harness_settings(
+                        entry,
+                        harness,
+                        executable.as_ref(),
+                        asks,
+                        settings.as_ref(),
+                    );
+                    let refused = |what: String| ServeError::Harness {
+                        entry: entry.name.clone(),
+                        what,
+                    };
+                    let registry = harnesses
+                        .as_ref()
+                        .ok_or_else(|| refused("no providers".to_owned()))?;
+                    let roots = entry
+                        .working_roots
+                        .iter()
+                        .map(|root| root.to_string_lossy().into_owned())
+                        .collect();
+                    let provider = kind::Harness::new(
+                        registry,
+                        harness,
+                        &configured,
+                        !profiles.is_empty(),
+                        roots,
+                    )
+                    .map_err(|error| refused(error.to_string()))?;
+                    for (setting, value, default) in provider.non_defaults() {
+                        tracing::info!(
+                            "non-default: host.agents.{}: {setting} is {value}, default {default}",
+                            entry.name
+                        );
+                    }
+                    (
+                        "agent",
+                        Run::Agent {
+                            agent: Agent::Harness(Arc::new(provider)),
+                            scope: Scope::new(entry.working_roots.clone())
+                                .account(entry.name.clone())
+                                .limit_phrases(config.limit_phrases.clone()),
+                            offer: hosted::offer(
+                                profiles,
+                                &config.profiles,
+                                options.provider_program.as_os_str().to_owned(),
+                            ),
+                            worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
+                        },
+                    )
+                }
                 // A stdio agent like any other, so the scope applies to its clients and its processes end with the link.
                 EntryKind::Tool { spec } => (
                     "tool",
@@ -1029,124 +1048,184 @@ const fn table_of(kind: &EntryKind) -> &'static str {
     }
 }
 
-/// A harness entry's translator options. The host's scope already holds a client's `cwd` and more directories to the
-/// entry's roots and adds directories of its own after it, so the translator takes any; a resumed Codex thread's own
-/// directory, which no request shows the host, is held to the roots by the translator. What the command line asks before
-/// it acts is the entry's, else the host's own, never the person's configuration on this machine: a paired key reaches it.
-fn harness_options(
+/// What loading `origin` for `entry` departs from the defaults in, said as configuration where the file asked for it, and as
+/// a warning where the host fell back.
+fn say_origin(entry: &Entry, origin: &Origin) {
+    let Origin::Source {
+        settings,
+        import_search,
+        import_search_named,
+        ..
+    } = origin
+    else {
+        return;
+    };
+    let table = table_of(&entry.kind);
+    if cfg!(windows) && *import_search == ImportSearch::Path {
+        if *import_search_named {
+            tracing::info!(
+                "non-default: host.{table}.{}.import_search is path, default library: python3.dll                  and what else the source imports itself may come from the working directory or PATH",
+                entry.name
+            );
+        } else {
+            // The file does not say it: import_dirs names no directory, so the host fell back.
+            tracing::warn!(
+                "host.{table}.{}.import_search is path, because import_dirs names no directory:                  python3.dll and what else the source imports itself may come from the working                  directory or PATH; set import_dirs to where it is, or import_search = \"library\"",
+                entry.name
+            );
+        }
+    }
+    // Guatiao's source cannot tell its host which non-default setting it took, so the host says it.
+    if settings
+        .as_map()
+        .get("isolation")
+        .and_then(|value| value.as_str())
+        == Some("inherit")
+    {
+        tracing::info!(
+            "non-default: host.{table}.{}.source_settings.isolation is inherit, default shipped",
+            entry.name
+        );
+    }
+}
+
+/// Every `acp_harness` provider this configuration's entries name: the built-in ones, and what each outside origin loads.
+/// `None` when no entry is a harness.
+fn harness_registry(config: &Config) -> Result<Option<Arc<Providers>>, ServeError> {
+    let mut wanted = config
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, EntryKind::Harness { .. }))
+        .peekable();
+    if wanted.peek().is_none() {
+        return Ok(None);
+    }
+    let refused = |entry: &Entry, error: crate::ProviderError| ServeError::Harness {
+        entry: entry.name.clone(),
+        what: error.to_string(),
+    };
+    let mut registry = kind::registry().map_err(|error| ServeError::Harness {
+        entry: String::new(),
+        what: error.to_string(),
+    })?;
+    for entry in wanted {
+        if let EntryKind::Harness {
+            origin: Some(origin),
+            ..
+        } = &entry.kind
+        {
+            crate::provider::open(&mut registry, origin).map_err(|error| refused(entry, error))?;
+        }
+    }
+    Ok(Some(Arc::new(registry)))
+}
+
+/// The settings a harness entry's provider is configured with: the entry's `settings`, then the entry's own keys of the
+/// same names, and for the built-in `claude` and `codex` the host's own values where nothing is set, never the person's
+/// configuration on this machine, because a paired key reaches it. What a client may choose stays within the entry's mode.
+/// A setting that acts with nothing asked is logged as configuration.
+fn harness_settings(
     entry: &Entry,
-    harness: crate::Harness,
+    harness: &str,
     executable: Option<&OsString>,
     asks: &HarnessOptions,
-) -> AgentOptions {
-    let mut options = AgentOptions::new(harness);
-    options.executable = executable.cloned();
-    options.resume_roots.clone_from(&entry.working_roots);
-    let chosen = |value: &Option<String>, default: &str| {
-        Some(value.clone().unwrap_or_else(|| default.to_owned()))
-    };
-    options.allow_bypass = asks.bypass;
-    options.modes.clone_from(&asks.modes);
-    if let Some(modes) = &asks.modes {
-        tracing::info!(
-            "host.agents.{}.modes is {}: a paired client may choose those, beyond the entry's own mode and stricter ones",
-            entry.name,
-            modes
-                .iter()
-                .map(|mode| mode.id())
-                .collect::<Vec<_>>()
-                .join(", ")
+    own: Option<&Settings>,
+) -> Settings {
+    let mut map = own.map(|own| own.as_map().clone()).unwrap_or_default();
+    if !BUILT_IN_HARNESSES.contains(&harness) {
+        return Settings::new(map);
+    }
+    if let Some(executable) = executable {
+        map.insert(
+            "executable".to_owned(),
+            serde_json::Value::String(executable.to_string_lossy().into_owned()),
         );
     }
     if asks.bypass {
+        map.insert("allow_bypass".to_owned(), serde_json::Value::Bool(true));
         tracing::info!(
             "host.agents.{}.bypass is on: a paired client may put a session in Bypass, which asks for nothing",
             entry.name
         );
     }
     // The entry's own settings, so each is configuration; a client's choice stays within the entry's mode.
-    let non_default = |setting: &str, value: &Option<String>, loose: &[&str], default: &str| {
-        if let Some(value) = value.as_deref().filter(|value| loose.contains(value)) {
+    let mut chosen = |key: &str, from_key: Option<&String>, loose: &[&str], default: &str| {
+        let (value, label) = match (from_key, map.get(key).and_then(serde_json::Value::as_str)) {
+            (Some(value), _) => (value.clone(), format!("host.agents.{}.{key}", entry.name)),
+            (None, Some(value)) => (
+                value.to_owned(),
+                format!("host.agents.{}.settings.{key}", entry.name),
+            ),
+            (None, None) => (default.to_owned(), String::new()),
+        };
+        if loose.contains(&value.as_str()) {
             tracing::info!(
-                "non-default: host.agents.{}.{setting} is {value}, default {default}: the command line acts with nothing \
-                 asked",
-                entry.name
+                "non-default: {label} is {value}, default {default}: the command line acts with nothing asked"
             );
         }
+        map.insert(key.to_owned(), serde_json::Value::String(value));
     };
-    match harness {
-        crate::Harness::Claude => {
-            non_default(
-                "permission_mode",
-                &asks.permission_mode,
-                &["bypassPermissions", "acceptEdits", "auto"],
-                "default",
-            );
-            options.permission_mode = chosen(&asks.permission_mode, "default");
-            options.setting_sources.clone_from(&asks.setting_sources);
-        }
-        crate::Harness::Codex => {
-            non_default(
-                "approval_policy",
-                &asks.approval_policy,
-                &["never", "on-failure"],
-                "on-request",
-            );
-            non_default(
-                "sandbox",
-                &asks.sandbox,
-                &["danger-full-access"],
-                "workspace-write",
-            );
-            options.approval_policy = chosen(&asks.approval_policy, "on-request");
-            options.sandbox = chosen(&asks.sandbox, "workspace-write");
-        }
+    if harness == "claude" {
+        chosen(
+            "permission_mode",
+            asks.permission_mode.as_ref(),
+            &["bypassPermissions", "acceptEdits", "auto"],
+            "default",
+        );
+    } else {
+        chosen(
+            "approval_policy",
+            asks.approval_policy.as_ref(),
+            &["never", "on-failure"],
+            "on-request",
+        );
+        chosen(
+            "sandbox",
+            asks.sandbox.as_ref(),
+            &["danger-full-access"],
+            "workspace-write",
+        );
     }
-    options
+    Settings::new(map)
 }
 
-/// Serves one connection with a harness's translator in this process, which [`Stopper::stop_agents`] ends like any agent.
-/// With a profile, its environment goes to the command line's process, and Claude Code takes the plugin the host writes
-/// for its skills: the host removes every `_meta` a client sends, so that plugin is the only one that can reach it.
+/// Serves one connection with an `acp_harness` provider in this process, which [`Stopper::stop_agents`] ends like any agent.
+/// With a profile, its environment goes to the provider's program, and the provider lets Claude Code take the plugin the
+/// host writes for its skills: the host removes every `_meta` a client sends, so that plugin is the only one that can reach
+/// it.
 fn give_harness<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
     peer: &PeerId,
-    options: &AgentOptions,
+    harness: &kind::Harness,
     scope: &Scope,
     connection: Option<&Connection>,
 ) {
-    let mut options = options.clone();
-    if let Some(connection) = connection {
-        options.env = connection
-            .env()
-            .iter()
-            .map(|(name, value)| (OsString::from(name), OsString::from(value.expose())))
-            .collect();
-        options.client_plugins = true;
-    }
     let control = InProcess::new();
     let key = match shared.record(|| Ok((Process::Translator(Arc::clone(&control)), ()))) {
         Ok(Some((key, ()))) => key,
         Ok(None) | Err(_) => return,
     };
-    let entry = served.name.clone();
-    let notice: coqui_acp_harness::acp::NoticeHook =
-        Arc::new(move |text: &str| tracing::info!(entry, "{text}"));
-    let settings = options.settings(notice);
+    let (provider, request) = harness.connection(connection.map(|connection| {
+        connection
+            .env()
+            .iter()
+            .map(|(name, value)| (name.clone(), value.expose().to_owned()))
+            .collect()
+    }));
     let end = match connection {
-        Some(connection) => inproc::serve(
+        Some(connection) => inproc::serve_kind(
             &Hosted::in_process(channel, scope, connection),
-            options.agent(),
-            settings,
+            &*provider,
+            request,
             MAX_LINE,
             &control,
         ),
-        None => inproc::serve(
+        None => inproc::serve_kind(
             &Scoped::new(channel, scope),
-            options.agent(),
-            settings,
+            &*provider,
+            request,
             MAX_LINE,
             &control,
         ),
