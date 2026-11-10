@@ -1,5 +1,6 @@
 //! A provider written in Python, coqui-acp's `examples/provider-python` echo, served by the built `canoa` from one
-//! canoa.cfg entry through Guatiao's source of Python libraries. The source is a `cdylib` built against a Python, so this
+//! canoa.cfg entry through Guatiao's source of Python libraries, as an `agent_provider` behind the ACP facade and as an
+//! `acp_harness` provider chosen by id beside the built-in Claude. The source is a `cdylib` built against a Python, so this
 //! test builds it from Cargo's checkout of Guatiao at the workspace's revision, with the Python `CANOA_TEST_PYTHON` names.
 //! Without that variable the test is ignored, and a run counts it as not run.
 #![allow(
@@ -123,6 +124,14 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
     /// Builds guatiao-source-py from a copy of Guatiao's checkout, since a build writes beside its manifest. The copy is
     /// named after the checkout's directory, which Cargo names by revision, so another pin builds from a copy of its own.
     fn build_source(python: &Python, guatiao: &Path) -> PathBuf {
+        // The tests run in parallel and share one copy and one build.
+        static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        BUILT
+            .get_or_init(|| build_source_once(python, guatiao))
+            .clone()
+    }
+
+    fn build_source_once(python: &Python, guatiao: &Path) -> PathBuf {
         let revision = guatiao
             .file_name()
             .expect("Cargo's checkout is a directory of its own");
@@ -132,6 +141,8 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         let copy = scratch.join("guatiao");
         if !copy.join("Cargo.toml").is_file() {
             copy_tree(&guatiao.join("crates"), &copy.join("crates"));
+            // The source's tests name the echo kind of Guatiao's examples by path.
+            copy_tree(&guatiao.join("examples"), &copy.join("examples"));
             std::fs::copy(guatiao.join("Cargo.toml"), copy.join("Cargo.toml")).expect("copied");
         }
         let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -228,6 +239,32 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         )
     }
 
+    /// A canoa.cfg harness entry `python` that chooses the `acp_harness` provider `id`, loaded from the manifests in `dirs`
+    /// through the source built against `python`.
+    fn harness_entry(python: &Python, id: &str, dirs: &[PathBuf]) -> String {
+        let guatiao = checkout("guatiao");
+        let coqui_acp = checkout("coqui-acp-api");
+        let source = build_source(python, &guatiao);
+        let list = |paths: &[PathBuf]| {
+            let quoted: Vec<String> = paths
+                .iter()
+                .map(|path| quoted(&path.to_string_lossy()))
+                .collect();
+            format!("[{}]", quoted.join(", "))
+        };
+        format!(
+            "[host.agents.python]\nharness = {}\nsource = {}\n\
+             [host.agents.python.source_settings]\ndirs = {}\npaths = {}\n",
+            quoted(id),
+            quoted(&source.to_string_lossy()),
+            list(dirs),
+            list(&[
+                guatiao.join("bindings/python/guatiao/src"),
+                coqui_acp.join("crates/coqui-acp-api/python"),
+            ]),
+        )
+    }
+
     /// The text of each prompt's turn, in one session.
     fn turns(host: &Host, client: &Identity, prompts: &[&str]) -> Vec<String> {
         let dir = cwd(&host.scratch);
@@ -261,6 +298,46 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
             turns(&host, &client, &["hello", "again"]),
             ["echo: hello", "echo: again"]
         );
+    }
+
+    /// The Python echo is an `acp_harness` provider chosen by its id, with no Canoa rebuild; the built-in Claude is chosen
+    /// by its id too, in the same canoa.cfg.
+    #[test]
+    fn a_python_harness_provider_and_the_built_in_claude_are_chosen_by_id_through_one_path() {
+        let python = python();
+        let coqui_acp = checkout("coqui-acp-api");
+        let scratch = Scratch::new();
+        let claude = scratch
+            .0
+            .join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(crate::support::example("harness_standin", false), &claude).expect("copied");
+        let mut config = harness_entry(
+            &python,
+            "acp_echo_harness_echo_harness",
+            &[coqui_acp.join("examples/provider-python/harness")],
+        );
+        config.push_str(&format!(
+            "[host.agents.claude]\nharness = \"claude\"\nexecutable = {}\n",
+            quoted(&claude.to_string_lossy())
+        ));
+        let host = Host::start_in(scratch, &config, 2, &environment(&python));
+        let client = crate::support::key();
+        host.pair(&client);
+        assert_eq!(
+            turns(&host, &client, &["hello", "again"]),
+            ["echo: hello", "echo: again"]
+        );
+        let dir = cwd(&host.scratch);
+        let initialized = with_link(host.url("claude"), &client, host.peer, |rpc| {
+            let initialized = rpc.initialize().expect("initialize is answered");
+            let opened = rpc
+                .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+            assert!(opened["sessionId"].is_string(), "{opened}");
+            initialized
+        })
+        .expect("a paired key is served");
+        assert_eq!(initialized["agentInfo"]["name"], "coqui-acp-claude");
     }
 
     #[test]
