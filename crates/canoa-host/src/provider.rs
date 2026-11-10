@@ -152,6 +152,9 @@ pub enum ProviderError {
     TakesNoSettings,
     /// The settings do not fit the provider's schema, or the provider refused them. Names a setting, never a value.
     Settings(String),
+    /// The settings do not fit the provider's schema: a setting it does not declare, or of another type. Names a setting,
+    /// never a value.
+    Schema(String),
     /// The first line of standard input was not the host's settings.
     HostLine(&'static str),
     /// Standard input and output could not carry ACP.
@@ -176,6 +179,7 @@ impl fmt::Display for ProviderError {
                 "that provider takes no configuration: remove the entry's settings table",
             ),
             Self::Settings(why) => write!(f, "the provider's settings were refused: {why}"),
+            Self::Schema(why) => write!(f, "the provider's settings do not fit its schema: {why}"),
             Self::HostLine(why) => write!(f, "the host's settings did not arrive: {why}"),
             Self::Transport(error) => write!(f, "standard input and output did not start: {error}"),
             Self::Facade(why) => write!(f, "the ACP facade failed: {why}"),
@@ -262,6 +266,8 @@ fn serve_on(
 pub(crate) fn open(registry: &mut Registry, origin: &Origin) -> Result<(), ProviderError> {
     match origin {
         Origin::Library(library) => {
+            // The search is the registry's, not the file's: a library gets the safe one whatever was set before.
+            registry.set_import_search(ImportSearch::Library);
             registry
                 .load_file(library)
                 .map_err(|error| ProviderError::Load(error.to_string()))?;
@@ -412,5 +418,17 @@ mod tests {
             }
         );
         assert!(!shown.contains("SECRET"), "{shown}");
+    }
+
+    #[test]
+    fn a_library_is_opened_with_the_safe_search_whatever_a_source_set_before() {
+        let mut registry = Registry::new("test", "1");
+        registry.set_import_search(ImportSearch::Path);
+        // The file is not there; the search was chosen before the load tried it.
+        let _ = open(
+            &mut registry,
+            &Origin::Library(PathBuf::from("no-such-library")),
+        );
+        assert!(matches!(registry.import_search(), ImportSearch::Library));
     }
 }

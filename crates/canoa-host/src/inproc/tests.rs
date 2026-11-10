@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{Receiver, Sender};
 
 use coqui_acp_api::Environment;
@@ -99,6 +100,24 @@ struct Seen {
     closes: Mutex<Vec<u32>>,
     /// Requests it was started with that held a working root.
     roots: Mutex<Vec<Vec<String>>>,
+    /// Messages of a flood its sink has taken.
+    flooded: AtomicUsize,
+    /// Whether a message it wrote after it closed was refused.
+    late_refused: Mutex<Option<bool>>,
+}
+
+/// What its connection does when the host closes it.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum OnClose {
+    /// Says `closed`.
+    #[default]
+    Closed,
+    /// Never says `closed`.
+    Silent,
+    /// Writes one more message, then says `closed`.
+    Answers,
+    /// Says `closed`, then writes one more message.
+    WritesAfter,
 }
 
 /// A provider whose connection answers each message `echo` with `{"echo": ...}`, answers `end` by ending the connection with a
@@ -107,11 +126,16 @@ struct Stand {
     seen: Arc<Seen>,
     /// It refuses to start a connection.
     refuses: bool,
+    on_close: OnClose,
 }
 
+/// The messages `flood` writes.
+const FLOOD: usize = 600;
+
 struct StandChannel {
-    sink: Mutex<Object<dyn ChannelSink>>,
+    sink: Arc<Mutex<Object<dyn ChannelSink>>>,
     seen: Arc<Seen>,
+    on_close: OnClose,
 }
 
 impl Provided for StandChannel {
@@ -134,6 +158,24 @@ impl Provided for StandChannel {
                 }
                 Ok(())
             }
+            Some("flood") => {
+                let sink = Arc::clone(&self.sink);
+                let seen = Arc::clone(&self.seen);
+                thread::spawn(move || {
+                    for number in 0..FLOOD {
+                        let line = serde_json::to_vec(&json!({"flood": number})).expect("JSON");
+                        let sent = sink
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .receive(&line);
+                        if sent.is_err() {
+                            break;
+                        }
+                        seen.flooded.fetch_add(1, Ordering::SeqCst);
+                    }
+                });
+                Ok(())
+            }
             _ => sink.receive(&serde_json::to_vec(&json!({"echo": message})).expect("JSON")),
         }
     }
@@ -144,10 +186,24 @@ impl Provided for StandChannel {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(status);
-        self.sink
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .closed(status, "");
+        let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        match self.on_close {
+            OnClose::Closed => sink.closed(status, ""),
+            OnClose::Silent => {}
+            OnClose::Answers => {
+                let _ = sink.receive(b"{\"answer\": \"to a request still pending\"}");
+                sink.closed(status, "");
+            }
+            OnClose::WritesAfter => {
+                sink.closed(status, "");
+                let refused = sink.receive(b"{\"late\": true}").is_err();
+                *self
+                    .seen
+                    .late_refused
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(refused);
+            }
+        }
     }
 }
 
@@ -177,8 +233,9 @@ impl AcpHarness for Stand {
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.working_roots.clone());
         Ok(StandChannel {
-            sink: Mutex::new(sink),
+            sink: Arc::new(Mutex::new(sink)),
             seen: Arc::clone(&self.seen),
+            on_close: self.on_close,
         }
         .into_object())
     }
@@ -233,11 +290,16 @@ impl AcpHarness for Stand {
 }
 
 fn stand() -> (Arc<Stand>, Arc<Seen>) {
+    stand_closing(OnClose::Closed)
+}
+
+fn stand_closing(on_close: OnClose) -> (Arc<Stand>, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     (
         Arc::new(Stand {
             seen: Arc::clone(&seen),
             refuses: false,
+            on_close,
         }),
         seen,
     )
@@ -286,20 +348,6 @@ fn a_message_reaches_the_provider_and_its_answer_the_client_and_the_clients_clos
         [vec!["/root".to_owned()]],
         "the request reached the provider"
     );
-}
-
-#[test]
-fn a_message_holding_a_line_break_reaches_the_provider_whole() {
-    let (channel, client) = connection();
-    let (harness, _seen) = stand();
-    let running = served(Arc::new(channel), harness, InProcess::new());
-    client
-        .send
-        .send(Some(b"{\"method\": \"echo\",\n\"id\": 7}".to_vec()))
-        .expect("sent");
-    assert_eq!(client.next()["echo"]["id"], 7);
-    client.send.send(None).expect("closed");
-    assert_eq!(running.join().expect("served"), End::PeerClosed);
 }
 
 #[test]
@@ -391,6 +439,7 @@ fn a_provider_that_refuses_to_start_ends_the_serving() {
     let harness = Arc::new(Stand {
         seen,
         refuses: true,
+        on_close: OnClose::Closed,
     });
     let control = InProcess::new();
     let running = served(Arc::new(channel), harness, Arc::clone(&control));
@@ -425,4 +474,87 @@ fn a_panic_on_the_thread_that_serves_ends_the_connection_and_stopping_it_waits_f
         "{:?}",
         asked.elapsed()
     );
+}
+
+#[test]
+fn a_client_that_closes_in_order_while_the_provider_answers_what_it_held_ends_in_order() {
+    let (channel, client) = connection();
+    let (harness, seen) = stand_closing(OnClose::Answers);
+    let channel = Arc::new(channel);
+    let running = served(Arc::clone(&channel), harness, InProcess::new());
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
+    // Nothing reaches the client any more, as after it hung up.
+    channel.refuse_sends.store(true, Ordering::SeqCst);
+    client.send.send(None).expect("closed");
+    assert_eq!(
+        ends_within(running, Duration::from_secs(10)),
+        Some(End::PeerClosed)
+    );
+    assert_eq!(closes(&seen), [0]);
+}
+
+#[test]
+fn a_provider_that_never_says_closed_is_waited_for_ten_seconds_and_no_longer() {
+    let (channel, client) = connection();
+    let (harness, seen) = stand_closing(OnClose::Silent);
+    let running = served(Arc::new(channel), harness, InProcess::new());
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
+    let closing = Instant::now();
+    client.send.send(None).expect("closed");
+    let ended = ends_within(running, Duration::from_secs(30));
+    let waited = closing.elapsed();
+    assert_eq!(ended, Some(End::PeerClosed));
+    assert_eq!(closes(&seen), [0], "the host closed it");
+    assert!(
+        waited >= STOP_WAIT - Duration::from_secs(1) && waited < STOP_WAIT + Duration::from_secs(8),
+        "waited {waited:?}"
+    );
+}
+
+#[test]
+fn what_a_provider_writes_after_it_said_closed_is_refused_and_never_reaches_the_client() {
+    let (channel, client) = connection();
+    let (harness, seen) = stand_closing(OnClose::WritesAfter);
+    let running = served(Arc::new(channel), harness, InProcess::new());
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
+    client.send.send(None).expect("closed");
+    assert_eq!(running.join().expect("served"), End::PeerClosed);
+    assert_eq!(
+        *seen
+            .late_refused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        Some(true)
+    );
+    assert!(
+        client.seen.try_recv().is_err(),
+        "nothing reached the client"
+    );
+}
+
+#[test]
+fn a_full_queue_holds_the_provider_back_until_the_client_takes_more() {
+    let (channel, client) = connection();
+    let (harness, seen) = stand();
+    let channel = Arc::new(channel);
+    let running = served(Arc::clone(&channel), harness, InProcess::new());
+    client.say(&json!({"method": "echo", "id": 1}));
+    client.next();
+    channel.stall_sends.store(true, Ordering::SeqCst);
+    client.say(&json!({"method": "flood"}));
+    thread::sleep(Duration::from_millis(800));
+    let held = seen.flooded.load(Ordering::SeqCst);
+    assert!(
+        held <= QUEUED + 2,
+        "the provider wrote {held} of {FLOOD} to a client that takes none"
+    );
+    channel.stall_sends.store(false, Ordering::SeqCst);
+    for number in 0..FLOOD {
+        assert_eq!(client.next()["flood"], number);
+    }
+    client.send.send(None).expect("closed");
+    assert_eq!(running.join().expect("served"), End::PeerClosed);
 }

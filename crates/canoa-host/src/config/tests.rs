@@ -939,3 +939,63 @@ fn an_agent_entry_names_where_its_usage_is_read_from() {
         );
     }
 }
+
+#[test]
+fn claude_and_codex_are_built_in_and_a_library_or_source_cannot_stand_for_them() {
+    for text in [
+        "[host.agents.a]\nharness = \"claude\"\nlibrary = \"l.dll\"\n",
+        "[host.agents.a]\nharness = \"codex\"\nsource = \"s.dll\"\n",
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains("built in"), "{text}: {error}");
+    }
+}
+
+#[test]
+fn the_settings_of_a_built_in_harness_are_held_to_what_its_keys_are() {
+    let config = parse(
+        "[host.agents.a]\nharness = \"claude\"\nsettings = { executable = \"bin/claude\", permission_mode = \"plan\" }\n",
+    )
+    .expect("parses");
+    let Some(EntryKind::Harness {
+        settings: Some(settings),
+        ..
+    }) = config.entry("a").map(|entry| &entry.kind)
+    else {
+        panic!("a harness with settings");
+    };
+    assert_eq!(
+        settings.as_map()["executable"],
+        serde_json::json!(directory_of(&base()).join("bin/claude").to_string_lossy()),
+        "a relative path is canoa.cfg's, never a session's"
+    );
+    for (text, what) in [
+        (
+            "[host.agents.a]\nharness = \"claude\"\nexecutable = \"x\"\nsettings = { executable = \"y\" }\n",
+            "twice",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nsettings = { permission_mode = 3 }\n",
+            "text",
+        ),
+        (
+            "[host.agents.a]\nharness = \"claude\"\nsettings = { permission_mode = \"yolo\" }\n",
+            "permission_mode",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\nsettings = { sandbox = \"open\" }\n",
+            "sandbox",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\nsettings = { approval_policy = true }\n",
+            "text",
+        ),
+        (
+            "[host.agents.a]\nharness = \"codex\"\nsettings = { executable = \"\" }\n",
+            "executable",
+        ),
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains(what), "{text}: {error}");
+    }
+}

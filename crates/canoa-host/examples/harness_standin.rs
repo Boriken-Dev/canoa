@@ -229,9 +229,17 @@ fn codex(args: &[String]) {
                         if let Some(dir) = params["cwd"].as_str() {
                             cwd = PathBuf::from(dir);
                         }
+                        // A resumed thread keeps the directory it was recorded in, which the request does not show.
+                        let recorded = match (
+                            params["threadId"].is_string(),
+                            std::env::var("STANDIN_THREAD_CWD"),
+                        ) {
+                            (true, Ok(dir)) => PathBuf::from(dir),
+                            _ => cwd.clone(),
+                        };
                         answer(
                             &id,
-                            json!({"thread": {"id": thread, "cwd": cwd, "turns": []},
+                            json!({"thread": {"id": thread, "cwd": recorded, "turns": []},
                             "model": "standin-small", "cwd": cwd, "approvalPolicy": "untrusted",
                             "approvalsReviewer": "user", "sandbox": {"type": "readOnly", "networkAccess": false}}),
                         );

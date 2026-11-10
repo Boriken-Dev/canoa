@@ -15,7 +15,6 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
-use coqui_acp_api::guatiao::library::Registry as Providers;
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
@@ -38,6 +37,8 @@ use crate::scope::{Scope, Scoped};
 use crate::usage_splice::{Antigravity, Starter};
 use crate::worktree::Worktrees;
 
+/// Requests a harness provider's connection works on at once, unless the entry's `settings` say otherwise.
+const HARNESS_MAX_REQUESTS: u64 = 64;
 /// Worktree requests one connection may make before its first ACP message.
 const MAX_WORKTREE_REQUESTS: usize = 16;
 
@@ -520,7 +521,6 @@ impl Serving {
             );
         }
         let agents = Arc::new(Mutex::new(Agents::default()));
-        let harnesses = harness_registry(config)?;
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
@@ -633,16 +633,18 @@ impl Serving {
                         entry: entry.name.clone(),
                         what,
                     };
-                    let registry = harnesses
-                        .as_ref()
-                        .ok_or_else(|| refused("no providers".to_owned()))?;
+                    // Each entry has a registry of its own: an id resolves from that entry's file, never another's.
+                    let registry = Arc::new(
+                        kind::registry(origin.as_ref())
+                            .map_err(|error| refused(error.to_string()))?,
+                    );
                     let roots = entry
                         .working_roots
                         .iter()
                         .map(|root| root.to_string_lossy().into_owned())
                         .collect();
                     let provider = kind::Harness::new(
-                        registry,
+                        &registry,
                         harness,
                         &configured,
                         !profiles.is_empty(),
@@ -1089,37 +1091,6 @@ fn say_origin(entry: &Entry, origin: &Origin) {
     }
 }
 
-/// Every `acp_harness` provider this configuration's entries name: the built-in ones, and what each outside origin loads.
-/// `None` when no entry is a harness.
-fn harness_registry(config: &Config) -> Result<Option<Arc<Providers>>, ServeError> {
-    let mut wanted = config
-        .entries
-        .iter()
-        .filter(|entry| matches!(entry.kind, EntryKind::Harness { .. }))
-        .peekable();
-    if wanted.peek().is_none() {
-        return Ok(None);
-    }
-    let refused = |entry: &Entry, error: crate::ProviderError| ServeError::Harness {
-        entry: entry.name.clone(),
-        what: error.to_string(),
-    };
-    let mut registry = kind::registry().map_err(|error| ServeError::Harness {
-        entry: String::new(),
-        what: error.to_string(),
-    })?;
-    for entry in wanted {
-        if let EntryKind::Harness {
-            origin: Some(origin),
-            ..
-        } = &entry.kind
-        {
-            crate::provider::open(&mut registry, origin).map_err(|error| refused(entry, error))?;
-        }
-    }
-    Ok(Some(Arc::new(registry)))
-}
-
 /// The settings a harness entry's provider is configured with: the entry's `settings`, then the entry's own keys of the
 /// same names, and for the built-in `claude` and `codex` the host's own values where nothing is set, never the person's
 /// configuration on this machine, because a paired key reaches it. What a client may choose stays within the entry's mode.
@@ -1148,6 +1119,9 @@ fn harness_settings(
             entry.name
         );
     }
+    // Requests a connection works on at once: what the host always allowed, not the provider's smaller default.
+    map.entry("max_requests".to_owned())
+        .or_insert_with(|| serde_json::Value::from(HARNESS_MAX_REQUESTS));
     // The entry's own settings, so each is configuration; a client's choice stays within the entry's mode.
     let mut chosen = |key: &str, from_key: Option<&String>, loose: &[&str], default: &str| {
         let (value, label) = match (from_key, map.get(key).and_then(serde_json::Value::as_str)) {
@@ -1208,11 +1182,12 @@ fn give_harness<C: Channel>(
         Ok(None) | Err(_) => return,
     };
     let (provider, request) = harness.connection(connection.map(|connection| {
-        connection
+        let environment = connection
             .env()
             .iter()
             .map(|(name, value)| (name.clone(), value.expose().to_owned()))
-            .collect()
+            .collect();
+        (environment, connection.skills())
     }));
     let end = match connection {
         Some(connection) => inproc::serve_kind(
@@ -1270,6 +1245,39 @@ fn give_provider<C: Channel>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_built_in_harness_keeps_the_request_limit_the_host_always_had_unless_the_entry_sets_one() {
+        let config = Config::from_str_in(
+            "[host.agents.a]\nharness = \"claude\"\n[host.agents.b]\nharness = \"codex\"\nsettings = { max_requests = 8 }\n",
+            std::path::Path::new("/canoa"),
+        )
+        .expect("parses");
+        let limit = |name: &str| {
+            let entry = config.entry(name).expect("there");
+            let EntryKind::Harness {
+                harness,
+                executable,
+                options,
+                settings,
+                ..
+            } = &entry.kind
+            else {
+                panic!("a harness");
+            };
+            harness_settings(
+                entry,
+                harness,
+                executable.as_ref(),
+                options,
+                settings.as_ref(),
+            )
+            .as_map()["max_requests"]
+                .clone()
+        };
+        assert_eq!(limit("a"), serde_json::json!(HARNESS_MAX_REQUESTS));
+        assert_eq!(limit("b"), serde_json::json!(8));
+    }
 
     #[test]
     fn stopping_the_host_ends_an_agent_started_for_a_reading_and_refuses_the_next() {

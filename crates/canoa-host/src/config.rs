@@ -673,6 +673,12 @@ impl Config {
                         },
                     )?;
                     let built_in = BUILT_IN_HARNESSES.contains(&harness.as_str());
+                    if built_in && origin.is_some() {
+                        return Err(invalid(
+                            &name,
+                            "claude and codex are built in: library and source load an outside provider under its own id",
+                        ));
+                    }
                     if origin.is_none() && !built_in {
                         return Err(invalid(
                             &name,
@@ -683,6 +689,17 @@ impl Config {
                         .settings
                         .map(|table| settings_of(&name, table))
                         .transpose()?;
+                    let settings = if built_in {
+                        built_in_settings(
+                            &name,
+                            &harness,
+                            settings,
+                            agent.executable.is_some(),
+                            &directory,
+                        )?
+                    } else {
+                        settings
+                    };
                     let options = if built_in {
                         harness_options(&name, &harness, &asks, settings.as_ref())?
                     } else {
@@ -863,6 +880,63 @@ fn origin_of(
             }))
         }
     }
+}
+
+/// The `settings` of a `claude` or `codex` entry: each of its keys that an entry key also says is caught as set twice, a mode,
+/// policy or sandbox must be text and one the provider takes, and a relative `executable` is made absolute against canoa.cfg's
+/// directory, as the entry's own key is, since the command line runs in a session's directory, which a client chooses.
+fn built_in_settings(
+    name: &str,
+    harness: &str,
+    settings: Option<Settings>,
+    executable_key: bool,
+    directory: &Path,
+) -> Result<Option<Settings>, ConfigError> {
+    let Some(settings) = settings else {
+        return Ok(None);
+    };
+    let mut map = settings.as_map().clone();
+    if executable_key && map.contains_key("executable") {
+        return Err(invalid(
+            name,
+            "executable is set twice: as a key and in settings",
+        ));
+    }
+    let checked: &[(&str, &[&str])] = if harness == "claude" {
+        &[("permission_mode", PERMISSION_MODES)]
+    } else {
+        &[
+            ("approval_policy", APPROVAL_POLICIES),
+            ("sandbox", SANDBOXES),
+        ]
+    };
+    for (key, allowed) in checked {
+        match map.get(*key) {
+            None => {}
+            Some(serde_json::Value::String(value)) if allowed.contains(&value.as_str()) => {}
+            Some(serde_json::Value::String(_)) => {
+                return Err(invalid(
+                    name,
+                    &format!("settings.{key} is one of {}", allowed.join(", ")),
+                ));
+            }
+            Some(_) => return Err(invalid(name, &format!("settings.{key} must be text"))),
+        }
+    }
+    match map.get("executable") {
+        None => {}
+        Some(serde_json::Value::String(path)) if path.is_empty() => {
+            return Err(invalid(name, "settings.executable is empty"));
+        }
+        Some(serde_json::Value::String(path)) => {
+            if path.contains(['/', '\\']) && !Path::new(path).is_absolute() {
+                let absolute = directory.join(path).to_string_lossy().into_owned();
+                map.insert("executable".to_owned(), serde_json::Value::String(absolute));
+            }
+        }
+        Some(_) => return Err(invalid(name, "settings.executable must be text")),
+    }
+    Ok(Some(Settings::new(map)))
 }
 
 /// A `claude` or `codex` entry's own keys, each checked against what the provider takes, and refused for the other one.

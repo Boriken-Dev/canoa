@@ -9,7 +9,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -129,7 +129,6 @@ impl Ending {
 /// The provider's messages, queued for the client. A full queue holds the provider back until the client takes more.
 struct ToClientSink {
     lines: Option<SyncSender<Vec<u8>>>,
-    gone: Arc<AtomicBool>,
     oversize: Arc<AtomicBool>,
     ending: Arc<Ending>,
     max_line: usize,
@@ -151,20 +150,10 @@ impl ChannelSink for ToClientSink {
         let Some(lines) = &self.lines else {
             return Err(kind_gone("the connection is closed"));
         };
-        let mut line = bytes.to_vec();
-        loop {
-            match lines.try_send(line) {
-                Ok(()) => return Ok(()),
-                Err(TrySendError::Full(back)) => {
-                    if self.gone.load(Ordering::SeqCst) {
-                        return Err(kind_gone("the client is gone"));
-                    }
-                    line = back;
-                    thread::sleep(Duration::from_millis(2));
-                }
-                Err(TrySendError::Disconnected(_)) => return Err(kind_gone("the client is gone")),
-            }
-        }
+        // Waits while the queue is full, so the provider feels a slow client; ends when the delivering thread is gone.
+        lines
+            .send(bytes.to_vec())
+            .map_err(|_| kind_gone("the client is gone"))
     }
 
     fn closed(&mut self, status: u32, reason: &str) {
@@ -209,7 +198,6 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
     let ending = Arc::new(Ending::default());
     let sink = ToClientSink {
         lines: Some(lines),
-        gone: Arc::clone(&gone),
         oversize: Arc::clone(&oversize),
         ending: Arc::clone(&ending),
         max_line,
@@ -290,6 +278,8 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
         let delivered = outbound.join().unwrap_or(Some(End::Failed));
         // A provider that ended the connection by itself says how in `closed`; one the host closed echoes the host's.
         match (host_end, said, delivered) {
+            // The client closed in order: what the provider still said had nowhere to go, which is no failure.
+            (End::PeerClosed, ..) => End::PeerClosed,
             (End::AgentFailed, Some((status, reason)), _) => {
                 if status == u32::from(Status::GUATIAO_OK) {
                     End::PeerClosed
