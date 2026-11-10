@@ -486,9 +486,11 @@ carries, registered in its own process, and any other id is an outside provider 
 loads (see below). The host runs the chosen provider in its own process for each connection and gives it a spawner, which
 starts the command line as a child of the host, ended with everything it started when the connection or the host ends (a
 job object on Windows, a process group elsewhere). The scope above applies before it: a client's `cwd` and more
-directories are held to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. Without a profile the
-roots go to the provider too, which holds a resumed Codex thread's own directory, which no request shows the host, to
-them. What the command line asks before it acts is
+directories are held to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. The roots go to the
+provider too, which holds a resumed Codex thread's own directory, which no request shows the host, to them. With a profile
+they go with one more directory, the one the connection's skills are written under (a `canoa-profile-` directory of the
+system's temporary one, removed with the connection), since the provider is told to work there too. An entry with no
+`working_roots` takes any directory, with or without a profile. What the command line asks before it acts is
 the entry's, never the configuration of the person on the host's machine, which a paired key would otherwise get:
 Claude Code runs with `permission_mode = "default"` and Codex with `approval_policy = "on-request"` and
 `sandbox = "workspace-write"` unless the entry names others, and another is logged as configuration. Claude Code's own
@@ -544,6 +546,15 @@ and belong to those two ids; another id takes `settings` alone. Loading runs the
 in the host's process, so a provider that crashes takes the host with it. Canoa passes no account, so the provider runs on
 the harness's own sign-in, and the prompt cache lifetime is the harness's default. `modes` and `setting_sources` are no
 longer keys: the providers have no setting for them.
+
+**What the host no longer hears.** The provider kind has no route for a harness's notices (a version it was not tested
+with, a program that exited) or for why a program ended, so the host's log no longer carries them for a harness entry,
+as it did when the translator ran in the host. A provider that ends a connection with a failure still has its status and
+reason logged at `info`. Each connection works on at most 64 requests at once, as before; the entry's `settings` can say
+`max_requests` for another number. Each entry loads its provider into a registry of its own, so an id is resolved from that
+entry's file and no other, and `claude` and `codex` cannot be replaced by a `library` or `source`. How an instance
+departs from its provider's defaults (`settings = { allow_bypass = true }`, `max_requests`, the mode keys) is logged at
+`info` as configuration when the host starts.
 
 **What the terms say.** Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
 does not prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription",
