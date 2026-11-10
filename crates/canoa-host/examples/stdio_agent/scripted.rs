@@ -10,7 +10,9 @@
 //! request and prompt in order in its state, under the session's `calls`. With `--usage` it also speaks the usage extension: a
 //! prompt `quota N` sets its five-hour window to N thousandths used (exhausted at 1000) and tells a client that asked;
 //! `--usage-claims=ID` makes it report under that account instead of the one it was given. `--name=` and `--version=` are what
-//! it says of itself, and `--no-reopen` leaves out session/load and session/list.
+//! it says of itself, and `--no-reopen` leaves out session/load and session/list. A prompt `fail TEXT` is answered with a
+//! JSON-RPC error whose message is TEXT, `fail-data TEXT` with a plain message and TEXT in the error's data, and `refuse TEXT`
+//! says TEXT and ends the turn `refusal`: how a limit reaches a client from an agent that reports no usage.
 
 use std::collections::HashMap;
 use std::io::{BufRead as _, Write as _};
@@ -88,6 +90,18 @@ impl Usage {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The text blocks of a prompt, joined.
+fn prompt_text(blocks: &Value) -> String {
+    blocks
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "text")
+        .filter_map(|block| block["text"].as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn option_of(args: &[String], name: &str) -> Option<String> {
@@ -329,13 +343,8 @@ impl Shared {
     }
 
     fn prompt(&self, session: &str, blocks: &Value) -> &'static str {
+        let text = prompt_text(blocks);
         let blocks = blocks.as_array().cloned().unwrap_or_default();
-        let text = blocks
-            .iter()
-            .filter(|block| block["type"] == "text")
-            .filter_map(|block| block["text"].as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
         let attached: Vec<String> = blocks
             .iter()
             .filter(|block| block["type"] == "resource")
@@ -365,6 +374,10 @@ impl Shared {
             }
             self.say(session, &format!("quota {used}"));
             return "end_turn";
+        }
+        if let Some(said) = text.strip_prefix("refuse ") {
+            self.say(session, said);
+            return "refusal";
         }
         if let Some(said) = text.strip_prefix("Say ") {
             self.say(session, said);
@@ -615,6 +628,23 @@ impl Shared {
                 let shared = Arc::clone(self);
                 let blocks = params["prompt"].clone();
                 std::thread::spawn(move || {
+                    let text = prompt_text(&blocks);
+                    let failure = text
+                        .strip_prefix("fail ")
+                        .map(|said| json!({"code": -32603, "message": said}))
+                        .or_else(|| {
+                            text.strip_prefix("fail-data ").map(|said| {
+                                json!({"code": -32603, "message": "Internal error", "data": {"details": said}})
+                            })
+                        });
+                    if let Some(error) = failure {
+                        let mut turn = lock(&shared.turn);
+                        if turn.as_ref() == Some(&id) {
+                            shared.send(json!({"id": id, "error": error}));
+                        }
+                        *turn = None;
+                        return;
+                    }
                     let stop = shared.prompt(&session, &blocks);
                     let mut turn = lock(&shared.turn);
                     if turn.as_ref() == Some(&id) {

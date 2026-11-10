@@ -850,3 +850,221 @@ fn a_client_that_did_not_ask_is_sent_no_usage_notice_and_still_may_ask() {
     })
     .expect("a paired key is served");
 }
+
+/// A stdio agent entry running `stdio_agent --scripted` with no usage extension, so it reports nothing.
+fn silent_entry(name: &str) -> String {
+    agent_entry(name, "args = [\"--scripted\"]")
+}
+
+const USAGE_KEY: &str = "dev.boriken.coqui.acp/usage";
+/// An antigravity failed turn, as users quote it.
+const AGY_TEXT: &str = "Agent execution terminated due to error. Error: HTTP 429 Too Many Requests { \"error\": { \"code\": 429, \"message\": \"Resource has been exhausted (e.g. check quota).\", \"status\": \"RESOURCE_EXHAUSTED\" } }";
+/// A LiteLLM gateway's 429, which names its reset.
+const GATEWAY_TEXT: &str =
+    "Rate limit exceeded for api_key: tokens. Limit reset at: 2099-01-01T00:00:00Z";
+
+fn asking(notify: bool) -> Value {
+    json!({"protocolVersion": 1, "clientCapabilities": {"_meta": {USAGE_KEY: {"notify": notify}}}})
+}
+
+type Rpc<'a> = support::Rpc<'a, coqui_web_channel::websocket::Channel>;
+
+fn usage_updates(rpc: &Rpc<'_>) -> Vec<Value> {
+    rpc.updates
+        .borrow()
+        .iter()
+        .filter(|update| update["method"] == "_coqui_acp/usage_update")
+        .cloned()
+        .collect()
+}
+
+/// The usage notices once there are `count` of them: a notice follows the answer to the turn that caused it.
+fn usage_notices(rpc: &Rpc<'_>, count: usize) -> Vec<Value> {
+    let until = Instant::now() + Duration::from_secs(10);
+    while usage_updates(rpc).len() < count && Instant::now() < until {
+        if let Ok(message) = rpc.next_message(Duration::from_millis(200))
+            && message.get("method").is_some()
+        {
+            rpc.updates.borrow_mut().push(message);
+        }
+    }
+    usage_updates(rpc)
+}
+
+/// One prompt, answered or failed.
+fn say(rpc: &Rpc<'_>, session: &str, text: &str) -> Result<Value, Value> {
+    rpc.request(
+        "session/prompt",
+        json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]}),
+    )
+}
+
+#[test]
+fn a_limit_in_a_failed_turn_of_an_agent_that_reports_nothing_reaches_the_client_as_an_inferred_bucket()
+ {
+    let host = Host::start(&silent_entry("plain"), 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("plain"), &client, host.peer, |rpc| {
+        let started = rpc
+            .request("initialize", asking(true))
+            .expect("initialize is answered");
+        let capability = &started["agentCapabilities"]["_meta"][USAGE_KEY];
+        assert_eq!(capability["sources"], json!(["inferred"]), "{started}");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        let before = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("the host answers for the agent");
+        assert_eq!(before["supported"], true, "{before}");
+        assert_eq!(before["buckets"], json!([]), "{before}");
+        assert_eq!(before["account"], "plain", "{before}");
+
+        rpc.updates.borrow_mut().clear();
+        let failed = say(rpc, session, &format!("fail {AGY_TEXT}")).expect_err("the turn failed");
+        assert!(
+            failed["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("RESOURCE_EXHAUSTED")),
+            "the error reaches the client as it came: {failed}"
+        );
+        let notices = usage_notices(rpc, 1);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        let report = &notices[0]["params"]["report"];
+        assert_eq!(report["account"], "plain", "{report}");
+        assert_eq!(report["buckets"][0]["id"], "inferred", "{report}");
+        assert_eq!(report["buckets"][0]["status"], "exhausted", "{report}");
+        assert_eq!(report["buckets"][0]["source"], "inferred", "{report}");
+        assert_eq!(report["revision"], 1, "{report}");
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(&asked, report, "the notice and the answer are one report");
+
+        // A gateway that names its reset, with the words in the error's data.
+        rpc.updates.borrow_mut().clear();
+        let failed = say(rpc, session, &format!("fail-data {GATEWAY_TEXT}"));
+        assert!(failed.is_err(), "{failed:?}");
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(asked["limit"]["resets_at"], 4_070_908_800_i64, "{asked}");
+        assert_eq!(asked["revision"], 2, "{asked}");
+        assert_eq!(usage_notices(rpc, 1).len(), 1);
+
+        // A refusal says its words in the turn.
+        rpc.updates.borrow_mut().clear();
+        let refused = say(rpc, session, "refuse You have hit your usage limit").expect("an answer");
+        assert_eq!(refused["stopReason"], "refusal", "{refused}");
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(asked["buckets"][0]["evidence"], "usage limit", "{asked}");
+    })
+    .expect("a paired key is served");
+}
+
+#[test]
+fn a_client_that_did_not_ask_is_told_nothing_of_an_inferred_limit_and_still_may_ask() {
+    let host = Host::start(&silent_entry("plain"), 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("plain"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(false)).expect("answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        let _ = say(rpc, session, "fail Error 429");
+        assert!(usage_updates(rpc).is_empty());
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(asked["buckets"][0]["status"], "exhausted", "{asked}");
+    })
+    .expect("a paired key is served");
+}
+
+#[test]
+fn no_phrases_means_nothing_is_inferred_and_the_agent_is_left_alone() {
+    let config = format!("{}\n[usage]\nlimit_phrases = []\n", silent_entry("plain"));
+    let host = Host::start(&config, 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("plain"), &client, host.peer, |rpc| {
+        let started = rpc.request("initialize", asking(true)).expect("answered");
+        assert!(
+            started["agentCapabilities"]["_meta"][USAGE_KEY].is_null(),
+            "{started}"
+        );
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        let _ = say(rpc, session, &format!("fail {AGY_TEXT}"));
+        assert!(usage_updates(rpc).is_empty());
+        // The request goes to the agent, which has no such method.
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect_err("the agent refuses it");
+        assert_eq!(asked["code"], -32601, "{asked}");
+    })
+    .expect("a paired key is served");
+}
+
+#[test]
+fn a_phrase_list_of_the_deployment_replaces_the_defaults() {
+    let config = format!(
+        "{}\n[usage]\nlimit_phrases = [\"out of credits\"]\n",
+        silent_entry("plain")
+    );
+    let host = Host::start(&config, 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("plain"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(false)).expect("answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        for (text, buckets) in [("fail Error 429", 0), ("fail You are out of credits", 1)] {
+            let _ = say(rpc, session, text);
+            let asked = rpc
+                .request("_coqui_acp/usage", json!({}))
+                .expect("answered");
+            assert_eq!(
+                asked["buckets"].as_array().map(Vec::len),
+                Some(buckets),
+                "{text}: {asked}"
+            );
+        }
+    })
+    .expect("a paired key is served");
+}
+
+#[test]
+fn an_agent_that_reports_usage_is_passed_through_untouched_by_a_failed_turn() {
+    let host = Host::start(&usage_entry("work", None), 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("work"), &client, host.peer, |rpc| {
+        let started = rpc.request("initialize", asking(true)).expect("answered");
+        assert_eq!(
+            started["agentCapabilities"]["_meta"][USAGE_KEY]["sources"],
+            json!(["reported"]),
+            "{started}"
+        );
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        rpc.prompt(session, "quota 620").expect("the turn ends");
+        rpc.updates.borrow_mut().clear();
+        let _ = say(rpc, session, &format!("fail {AGY_TEXT}"));
+        assert!(usage_updates(rpc).is_empty(), "{:?}", rpc.updates.borrow());
+        let asked = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(asked["buckets"][0]["id"], "five_hour", "{asked}");
+        assert_eq!(asked["buckets"][0]["used"], 620, "{asked}");
+        assert_eq!(asked["account"], "work", "{asked}");
+    })
+    .expect("a paired key is served");
+}

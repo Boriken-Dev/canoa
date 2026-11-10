@@ -303,6 +303,40 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('shows the report the host infers for an agent that reports nothing', (tester) async {
+      // Shaped as canoa makes it: source inferred throughout, no label, no figures, coverage and refill unknown.
+      final agent = OptionsAgent()
+        ..usage = {
+          ..._report([
+            {
+              'id': 'inferred',
+              'models': {'kind': 'unknown'},
+              'unit': 'tokens',
+              'refill': {'kind': 'unknown'},
+              'status': 'exhausted',
+              'observed_at': _now - 30,
+              'source': 'inferred',
+              'evidence': 'Error 429',
+            },
+          ], account: 'agy'),
+          'sources': ['inferred'],
+        };
+      await _started(tester, agent, _store());
+      expect(_shown(tester), contains('limit reached'));
+      expect(_colour(tester), isNotNull);
+      await open(tester);
+      expect(find.text('inferred from "Error 429", not reported by the agent'), findsOneWidget);
+      expect(find.text('Account: agy'), findsOneWidget);
+      await finish(tester);
+    });
+
+    testWidgets('says "No usage yet" for an inferring host that has seen no limit', (tester) async {
+      final agent = OptionsAgent()..usage = {..._report([]), 'sources': ['inferred']};
+      await _started(tester, agent, _store());
+      expect(_shown(tester), 'No usage yet');
+      await finish(tester);
+    });
+
     testWidgets('says a window past its end was reset, not yet reported', (tester) async {
       final agent = OptionsAgent()..usage = _report([_bucket('five_hour', label: '5 hours', used: 900, refill: _window(-5))]);
       await _started(tester, agent, _store());

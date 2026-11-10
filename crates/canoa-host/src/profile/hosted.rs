@@ -26,6 +26,7 @@ use super::{
 };
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
+use crate::usage_splice::Splice;
 
 /// The `_meta` key a client names a profile under in `initialize`, and the host's report under in its answers.
 pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
@@ -1322,6 +1323,7 @@ pub(crate) struct Hosted<'a, C: Channel + ?Sized> {
     scope: &'a Scope,
     connection: &'a Connection,
     hold: Mutex<Hold>,
+    splice: Splice,
 }
 
 impl<C: Channel + ?Sized> core::fmt::Debug for Hosted<'_, C> {
@@ -1342,6 +1344,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 pending: BTreeMap::new(),
                 parts: None,
             }),
+            splice: scope.splice(),
         }
     }
 
@@ -1418,9 +1421,9 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
     }
 }
 
-impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
+impl<C: Channel + ?Sized> Hosted<'_, C> {
     /// An answer to `initialize` or a session request gets the report; the first also settles what each session is given.
-    fn send(&self, message: &[u8]) -> Result<(), Failure> {
+    fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
         let stamped = self.scope.stamp(message);
         let message = &*stamped;
         let mut hold = self.hold();
@@ -1473,6 +1476,13 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             Err(_) => self.inner.send(message),
         }
     }
+}
+
+impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
+    /// The agent's message to the client: profiled, and with this host's say on usage when the agent reports none.
+    fn send(&self, message: &[u8]) -> Result<(), Failure> {
+        self.splice.relay(message, |sent| self.send_profiled(sent))
+    }
 
     /// The launch line first; then the client's messages, a refused one reading as a timeout as [`crate::scope`] has it.
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
@@ -1508,7 +1518,13 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             Verdict::Refuse(answer) => Err(answer.unwrap_or_default()),
         };
         match forwarded {
-            Ok(bytes) => Ok(Some(bytes)),
+            Ok(bytes) => match self.splice.read_client(&bytes) {
+                Some(answer) => {
+                    self.reply(&answer)?;
+                    Err(Failure::Timeout)
+                }
+                None => Ok(Some(bytes)),
+            },
             Err(answer) => {
                 if !answer.is_empty() {
                     self.reply(&answer)?;

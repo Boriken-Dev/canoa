@@ -8,6 +8,7 @@
 
 use alloc::borrow::{Cow, ToOwned};
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::time::Duration;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ use coqui_web_channel::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;
+use crate::usage_splice::{Inference, Splice};
 use crate::worktree::Worktrees;
 
 /// JSON-RPC's code for a message that is not JSON.
@@ -37,6 +39,8 @@ pub(crate) struct Scope {
     roots: Vec<PathBuf>,
     /// The host's id for the account this entry's agent runs on, which it tells the agent and puts on every usage report.
     account: Option<String>,
+    /// What the entry's failed turns have shown of its limits, for an agent that reports none; shared by its connections.
+    usage: Arc<Inference>,
 }
 
 /// What becomes of one message from the client.
@@ -49,11 +53,25 @@ pub(crate) enum Verdict {
 }
 
 impl Scope {
-    pub(crate) const fn new(roots: Vec<PathBuf>) -> Self {
+    pub(crate) fn new(roots: Vec<PathBuf>) -> Self {
         Self {
             roots,
             account: None,
+            usage: Arc::new(Inference::default()),
         }
+    }
+
+    /// This scope reading failed turns of an agent that reports no usage with `phrases`: `None` for coqui-acp's defaults, a
+    /// list instead of them, an empty one not at all.
+    #[must_use]
+    pub(crate) fn limit_phrases(mut self, phrases: Option<Vec<String>>) -> Self {
+        self.usage = Arc::new(Inference::new(phrases));
+        self
+    }
+
+    /// One connection's share in the entry's inferred usage.
+    pub(crate) fn splice(&self) -> Splice {
+        Splice::new(Arc::clone(&self.usage), self.account.clone())
     }
 
     /// This scope with `account` as the id usage is reported under.
@@ -277,11 +295,16 @@ fn error(id: &Value, code: i64, message: &str) -> Vec<u8> {
 pub(crate) struct Scoped<'a, C: Channel + ?Sized> {
     inner: &'a C,
     scope: &'a Scope,
+    splice: Splice,
 }
 
 impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
-    pub(crate) const fn new(inner: &'a C, scope: &'a Scope) -> Self {
-        Self { inner, scope }
+    pub(crate) fn new(inner: &'a C, scope: &'a Scope) -> Self {
+        Self {
+            inner,
+            scope,
+            splice: scope.splice(),
+        }
     }
 
     fn reply(&self, message: &[u8]) -> Result<(), Failure> {
@@ -297,7 +320,8 @@ impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
 
 impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
-        self.inner.send(&self.scope.stamp(message))
+        self.splice
+            .relay(message, |sent| self.inner.send(&self.scope.stamp(sent)))
     }
 
     /// A refused message reads as a timeout, after which the channel is still usable, so a caller polling for its own
@@ -307,7 +331,13 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
             return Ok(None);
         };
         match self.scope.check(&message) {
-            Verdict::Forward(bytes) => Ok(Some(bytes)),
+            Verdict::Forward(bytes) => match self.splice.read_client(&bytes) {
+                Some(answer) => {
+                    self.reply(&answer)?;
+                    Err(Failure::Timeout)
+                }
+                None => Ok(Some(bytes)),
+            },
             Verdict::Refuse(answer) => {
                 if let Some(answer) = answer {
                     self.reply(&answer)?;
