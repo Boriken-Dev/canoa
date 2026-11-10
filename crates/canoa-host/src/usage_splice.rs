@@ -8,6 +8,9 @@
 //! belongs to a connection and keeps what that client asked and which turns are open. A reader of the agent that reports real
 //! figures would feed the same [`Inference`] report, which is why the report and the reading of a turn are apart.
 //!
+//! What the host reads is the agent's own words, which may echo what a client sent: a client whose prompt makes the agent
+//! fail with its own text can set the entry's shared limit.
+//!
 //! The rule for how long a hit holds: a reset time the text gave ends it then; failing that a retry-after ends it that long
 //! after it was seen; with neither it stays until a turn of the agent ends well. A later success does not clear a hit whose
 //! reset has not passed, since a gateway may accept one request in a window it refused the one before.
@@ -193,8 +196,12 @@ pub(crate) enum Outcome {
 /// What one message of the agent's said, applied only once it was sent on.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Event {
-    /// The answer to `initialize` `id`, which did or did not advertise the usage capability.
-    Initialized { id: String, advertised: bool },
+    /// The answer to `initialize` `id`: `Some(advertised)` says whether the agent advertised the usage capability, and
+    /// `None` that the answer gave no capabilities to read, so the host stays out.
+    Initialized {
+        id: String,
+        advertised: Option<bool>,
+    },
     /// A piece of text the agent said in `session`.
     Said { session: String, text: String },
     /// The answer to the `session/prompt` `id`.
@@ -207,6 +214,8 @@ pub(crate) struct Seen {
     /// The message with the host's changes; `None` goes on as it came.
     pub(crate) rewritten: Option<Vec<u8>>,
     pub(crate) event: Option<Event>,
+    /// The message is the agent's claim to speak for usage, which only an agent that advertised it may make: it goes no further.
+    pub(crate) hush: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -227,6 +236,8 @@ struct Conn {
     notify: bool,
     /// Ids of `initialize` requests waiting for their answer.
     initializes: BTreeSet<String>,
+    /// Ids of usage requests this host answered itself, whose answer only it may give.
+    answered: BTreeSet<String>,
     /// Ids of `session/prompt` requests waiting for theirs, with the session each is for.
     prompts: BTreeMap<String, String>,
     /// What the agent said in a session during its open turn.
@@ -263,7 +274,8 @@ impl Splice {
         if !self.inference.active()
             || !(contains(message, b"initialize")
                 || contains(message, b"session/prompt")
-                || contains(message, USAGE_METHOD.as_bytes()))
+                || contains(message, USAGE_METHOD.as_bytes())
+                || !lock(&self.conn).answered.is_empty())
         {
             return None;
         }
@@ -271,7 +283,10 @@ impl Splice {
         let id = value.get("id")?;
         let key = id.to_string();
         let mut conn = lock(&self.conn);
-        match value.get("method").and_then(Value::as_str)? {
+        let method = value.get("method").and_then(Value::as_str)?;
+        // A client may use an id again once its first request is answered.
+        conn.answered.remove(&key);
+        match method {
             "initialize" => {
                 conn.notify = asks_notices(&value);
                 if conn.initializes.len() < MAX_OPEN {
@@ -279,14 +294,20 @@ impl Splice {
                 }
                 None
             }
-            "session/prompt" if conn.stand != Stand::Agent => {
+            "session/prompt" if conn.stand == Stand::Host => {
                 let session = value.pointer("/params/sessionId")?.as_str()?.to_owned();
                 if conn.prompts.len() < MAX_OPEN {
+                    // What the agent said in an earlier turn of this session is not this turn's.
+                    conn.said.remove(&session);
                     conn.prompts.insert(key, session);
                 }
                 None
             }
-            method if method == USAGE_METHOD && conn.stand != Stand::Agent => {
+            // Until the agent's own answer shows it does not report usage, the request is the agent's to answer.
+            method if method == USAGE_METHOD && conn.stand == Stand::Host => {
+                if conn.answered.len() < MAX_OPEN {
+                    conn.answered.insert(key);
+                }
                 drop(conn);
                 let report = self.inference.report(unix_now(), self.account.as_deref());
                 let answer = match serde_json::to_value(&report) {
@@ -305,25 +326,36 @@ impl Splice {
         let pass = Seen {
             rewritten: None,
             event: None,
+            hush: false,
         };
         if !self.inference.active() {
             return pass;
         }
-        let (open, waiting) = {
+        let (stand, open, waiting) = {
             let conn = lock(&self.conn);
             (
+                conn.stand,
                 !conn.prompts.is_empty(),
-                !conn.initializes.is_empty() || !conn.prompts.is_empty(),
+                !conn.initializes.is_empty()
+                    || !conn.prompts.is_empty()
+                    || !conn.answered.is_empty(),
             )
         };
+        if stand == Stand::Agent {
+            return pass;
+        }
+        let notice = contains(message, USAGE_NOTIFICATION.as_bytes());
         let chunk = open && contains(message, b"agent_message_chunk");
-        let answer = waiting && contains(message, b"\"id\"") && !contains(message, b"\"method\"");
-        if !(chunk || answer) {
+        let answer = waiting && contains(message, b"\"id\"");
+        if !(notice || chunk || answer) {
             return pass;
         }
         let Ok(mut value) = serde_json::from_slice::<Value>(message) else {
             return pass;
         };
+        if notice && value.get("method").and_then(Value::as_str) == Some(USAGE_NOTIFICATION) {
+            return Seen { hush: true, ..pass };
+        }
         if chunk && value.get("method").and_then(Value::as_str) == Some("session/update") {
             let update = &value["params"]["update"];
             if update["sessionUpdate"] == "agent_message_chunk"
@@ -338,6 +370,7 @@ impl Splice {
                         session: session.to_owned(),
                         text: text.to_owned(),
                     }),
+                    hush: false,
                 };
             }
             return pass;
@@ -349,6 +382,9 @@ impl Splice {
             return pass;
         };
         let conn = lock(&self.conn);
+        if conn.answered.contains(&key) {
+            return Seen { hush: true, ..pass };
+        }
         if conn.initializes.contains(&key) {
             drop(conn);
             return Self::initialized(&mut value, key);
@@ -361,6 +397,7 @@ impl Splice {
                     outcome: outcome_of(&value),
                     id: key,
                 }),
+                hush: false,
             };
         }
         pass
@@ -371,7 +408,11 @@ impl Splice {
         let Some(result) = value.get_mut("result").and_then(Value::as_object_mut) else {
             return Seen {
                 rewritten: None,
-                event: None,
+                event: Some(Event::Initialized {
+                    id,
+                    advertised: None,
+                }),
+                hush: false,
             };
         };
         let key = if result.get("protocolVersion").and_then(Value::as_u64) >= Some(2) {
@@ -390,8 +431,9 @@ impl Splice {
                 rewritten: None,
                 event: Some(Event::Initialized {
                     id,
-                    advertised: true,
+                    advertised: Some(true),
                 }),
+                hush: false,
             };
         }
         let capabilities = result.entry(key).or_insert_with(|| json!({}));
@@ -405,11 +447,12 @@ impl Splice {
         });
         let rewritten = added.and_then(|()| serde_json::to_vec(&*value).ok());
         Seen {
-            event: rewritten.as_ref().map(|_| Event::Initialized {
+            event: Some(Event::Initialized {
                 id,
-                advertised: false,
+                advertised: rewritten.as_ref().map(|_| false),
             }),
             rewritten,
+            hush: false,
         }
     }
 
@@ -420,14 +463,17 @@ impl Splice {
         match event {
             Event::Initialized { id, advertised } => {
                 conn.initializes.remove(&id);
-                conn.stand = if advertised {
-                    Stand::Agent
-                } else {
-                    Stand::Host
-                };
+                match advertised {
+                    Some(true) => conn.stand = Stand::Agent,
+                    Some(false) => conn.stand = Stand::Host,
+                    None => {}
+                }
             }
             Event::Said { session, text } => {
-                if conn.said.len() < MAX_OPEN || conn.said.contains_key(&session) {
+                // Only a session with a turn open: a replay of another is not words of this turn.
+                if conn.prompts.values().any(|open| *open == session)
+                    && (conn.said.len() < MAX_OPEN || conn.said.contains_key(&session))
+                {
                     let said = conn.said.entry(session).or_default();
                     if said.len() < MAX_SAID {
                         let room = MAX_SAID - said.len();
@@ -486,6 +532,9 @@ impl Splice {
             return send(message);
         }
         let seen = self.inspect(message);
+        if seen.hush {
+            return Ok(());
+        }
         send(seen.rewritten.as_deref().unwrap_or(message))?;
         if let Some(event) = seen.event {
             self.commit(event);

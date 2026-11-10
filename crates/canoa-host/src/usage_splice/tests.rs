@@ -410,3 +410,131 @@ fn the_lapse_of_a_hit_is_told_to_a_client_that_asked() {
         "the hit lapsed"
     );
 }
+
+fn usage_notice() -> Value {
+    json!({"jsonrpc": "2.0", "method": USAGE_NOTIFICATION, "params": {"report": {
+        "supported": true, "sources": ["reported"], "revision": 9, "observed_at": 1, "buckets": []}}})
+}
+
+#[test]
+fn the_agents_own_usage_notice_is_dropped_while_the_host_speaks_for_it() {
+    let splice = splice(None);
+    initialize(&splice, true, plain_answer());
+    assert!(from_agent(&splice, &usage_notice()).is_empty());
+    // An answer of the agent's to a request the host answered itself is dropped too.
+    let asked = read_client(
+        &splice,
+        &json!({"id": 41, "method": USAGE_METHOD, "params": {}}),
+    );
+    assert!(asked.is_some());
+    let forged =
+        json!({"id": 41, "result": {"supported": true, "buckets": [], "sources": ["reported"]}});
+    assert!(from_agent(&splice, &forged).is_empty());
+    // The client may use the id again for a request that does go to the agent.
+    assert!(
+        read_client(
+            &splice,
+            &json!({"id": 41, "method": "session/new", "params": {}})
+        )
+        .is_none()
+    );
+    assert_eq!(
+        from_agent(&splice, &json!({"id": 41, "result": {"sessionId": "s"}})).len(),
+        1
+    );
+}
+
+#[test]
+fn an_agent_that_advertises_usage_may_send_its_notices() {
+    let splice = splice(None);
+    let theirs = json!({"protocolVersion": 1, "agentCapabilities": {"_meta": {USAGE_CAPABILITY: {"version": 1}}}});
+    initialize(&splice, true, theirs);
+    assert_eq!(from_agent(&splice, &usage_notice()).len(), 1);
+}
+
+#[test]
+fn a_usage_request_before_the_initialize_answer_goes_to_the_agent() {
+    let splice = splice(None);
+    let capabilities = json!({"_meta": {USAGE_CAPABILITY: {"notify": false}}});
+    assert!(
+        read_client(
+            &splice,
+            &json!({"id": 0, "method": "initialize",
+        "params": {"protocolVersion": 1, "clientCapabilities": capabilities}})
+        )
+        .is_none()
+    );
+    assert!(
+        read_client(
+            &splice,
+            &json!({"id": 1, "method": USAGE_METHOD, "params": {}})
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn an_initialize_that_failed_leaves_the_host_out_of_it() {
+    for answer in [
+        json!({"id": 0, "error": {"code": -32603, "message": "no"}}),
+        json!({"id": 0}),
+    ] {
+        let splice = splice(None);
+        let capabilities = json!({"_meta": {USAGE_CAPABILITY: {"notify": true}}});
+        assert!(
+            read_client(
+                &splice,
+                &json!({"id": 0, "method": "initialize",
+            "params": {"protocolVersion": 1, "clientCapabilities": capabilities}})
+            )
+            .is_none()
+        );
+        assert_eq!(from_agent(&splice, &answer).len(), 1);
+        assert!(lock(&splice.conn).initializes.is_empty(), "{answer}");
+        assert!(
+            read_client(
+                &splice,
+                &json!({"id": 1, "method": USAGE_METHOD, "params": {}})
+            )
+            .is_none()
+        );
+        prompt(&splice, 2, "s1");
+        assert!(lock(&splice.conn).prompts.is_empty());
+    }
+}
+
+#[test]
+fn an_initialize_answer_with_a_nested_method_key_is_still_read() {
+    let splice = splice(None);
+    let mut answer = plain_answer();
+    answer["agentInfo"] = json!({"name": "x", "method": "y"});
+    let sent = initialize(&splice, false, answer);
+    assert_eq!(
+        sent["result"]["agentCapabilities"]["_meta"][USAGE_CAPABILITY]["sources"],
+        json!(["inferred"]),
+        "{sent}"
+    );
+}
+
+#[test]
+fn words_said_in_a_session_with_no_open_turn_are_not_kept() {
+    let splice = splice(None);
+    initialize(&splice, false, plain_answer());
+    let chunk = |session: &str, text: &str| {
+        json!({"method": "session/update", "params": {"sessionId": session,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}})
+    };
+    prompt(&splice, 1, "b");
+    // A replay of session a during b's turn.
+    from_agent(&splice, &chunk("a", "You have hit your usage limit."));
+    from_agent(
+        &splice,
+        &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+    );
+    prompt(&splice, 2, "a");
+    from_agent(
+        &splice,
+        &json!({"id": 2, "result": {"stopReason": "refusal"}}),
+    );
+    assert_eq!(report_of(&splice)["buckets"], json!([]));
+}
