@@ -476,20 +476,23 @@ The host never sees, stores or forwards a vendor credential, and never reuses a 
 
 | | Claude | ChatGPT |
 | --- | --- | --- |
-| Entry | `harness = "claude"`, which runs `claude` in stream-json mode inside the host (`executable` names another) | `harness = "codex"`, which starts `codex app-server` inside the host (`executable` names another) |
+| Entry | `harness = "claude"`, whose provider runs `claude` in stream-json mode inside the host (`executable` names another) | `harness = "codex"`, whose provider starts `codex app-server` inside the host (`executable` names another) |
 | On standard streams | `canoa agent claude` | `canoa agent codex` |
 | Sign-in | `claude` signed in on this machine: a subscription, or an API key | `codex` signed in with a ChatGPT plan, or an API key |
 | Protocol it drives | `claude -p --input-format stream-json --output-format stream-json`, `--resume` | `codex app-server`'s JSON-RPC |
 
-**A harness entry.** The host runs coqui-acp's translator in its own process for each connection, which starts the
-command line as a child of the host, ended with everything it started when the connection or the host ends (a job object
-on Windows, a process group elsewhere). The scope above applies before it: a client's `cwd` and more directories are held
-to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. A resumed Codex thread's own directory, which
-no request shows the host, is held to `working_roots` by the translator. What the command line asks before it acts is
+**A harness entry.** `harness` names an `acp_harness` provider by its id; `claude` and `codex` are the ones the host
+carries, registered in its own process, and any other id is an outside provider that the entry's `library` or `source`
+loads (see below). The host runs the chosen provider in its own process for each connection and gives it a spawner, which
+starts the command line as a child of the host, ended with everything it started when the connection or the host ends (a
+job object on Windows, a process group elsewhere). The scope above applies before it: a client's `cwd` and more
+directories are held to `working_roots`, its `_meta` removed, and its stdio MCP servers refused. Without a profile the
+roots go to the provider too, which holds a resumed Codex thread's own directory, which no request shows the host, to
+them. What the command line asks before it acts is
 the entry's, never the configuration of the person on the host's machine, which a paired key would otherwise get:
 Claude Code runs with `permission_mode = "default"` and Codex with `approval_policy = "on-request"` and
 `sandbox = "workspace-write"` unless the entry names others, and another is logged as configuration. Claude Code's own
-allow rules in the settings it loads (`setting_sources`, its default when unset) still apply. Permission prompts reach the
+allow rules in the settings it loads still apply. Permission prompts reach the
 client as `session/request_permission` with the command line's own options (Claude Code: allow once, always allow with
 the rule it suggests, reject; Codex: its own decisions).
 
@@ -497,7 +500,6 @@ the rule it suggests, reject; Codex: its own decisions).
 [host.agents.claude]
 harness = "claude"
 permission_mode = "default"       # default, acceptEdits, plan, dontAsk, bypassPermissions, auto or manual
-setting_sources = ["project"]     # of user, project, local; unset is Claude Code's own
 executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from canoa.cfg's directory
 
 [host.agents.codex]
@@ -509,21 +511,39 @@ bypass = false                    # true offers a paired client the Bypass mode,
 
 A paired client can choose only the mode the entry's own settings amount to and every stricter one (Plan, Manual, Accept edits,
 Auto, Bypass, loosest last), so it cannot loosen what canoa.cfg set: an entry with `permission_mode = "default"` or Codex's
-`on-request` with `workspace-write` offers it Plan and Manual (Plan, Manual and Accept edits for Codex). `modes = ["plan",
-"accept_edits"]` names the modes it may choose instead, which widens that, and is logged at `info` as configuration. Bypass
-follows `bypass` alone.
+`on-request` with `workspace-write` offers it Plan and Manual (Plan, Manual and Accept edits for Codex). Bypass follows
+`bypass` alone.
 
 `bypass` is off by default and the only thing that lets a paired client put a session in Bypass: a key paired to someone else
 reaches the entry, and with Bypass it could take full control of this machine. Turning it on is logged at `info` as
 configuration. The app's own Claude and Codex sources turn it on for themselves (`--allow-bypass`), since the person using
 the app is the person who configured it.
 
-On Windows the translators start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
+On Windows the providers start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
 is untested. With `profiles`, the profile's environment is the command line's process
-environment, never its command line; its skills are the host's own Claude Code plugin, the only plugin the translator
+environment, never its command line; its skills are the host's own Claude Code plugin, the only plugin the provider
 takes, since the host removes every client's `_meta`; context, MCP servers and Codex's skills go as the
-[profile table](configuration.md#applying-a-profile) says. The translators are tested with Claude Code 2.1.318 and Codex
+[profile table](configuration.md#applying-a-profile) says. The providers are tested with Claude Code 2.1.318 and Codex
 0.164.0 and 0.166.0; another version runs, with a notice.
+
+**An outside harness.** Any provider of the `acp_harness` kind, in any language Guatiao loads, is chosen the same way, by
+its id, and needs no rebuild of Canoa. The entry names where its code is, as a provider entry does, and the provider's own
+configuration:
+
+```toml
+[host.agents.echo]
+harness = "acp_echo_harness_echo_harness"   # the provider's id
+source = "guatiao_source_py.dll"            # or library = "..."; relative paths are from canoa.cfg's directory
+settings = { title = "Echo" }               # optional: the provider's configuration, checked against its schema at start
+[host.agents.echo.source_settings]          # as for a provider entry
+dirs = ["harness"]
+```
+
+`executable`, `permission_mode`, `approval_policy`, `sandbox` and `bypass` are the `claude` and `codex` providers' settings
+and belong to those two ids; another id takes `settings` alone. Loading runs the provider's code with the host's rights,
+in the host's process, so a provider that crashes takes the host with it. Canoa passes no account, so the provider runs on
+the harness's own sign-in, and the prompt cache lifetime is the harness's default. `modes` and `setting_sources` are no
+longer keys: the providers have no setting for them.
 
 **What the terms say.** Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
 does not prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription",

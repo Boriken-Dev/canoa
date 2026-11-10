@@ -53,7 +53,7 @@ CANOA_WEB_DIST="$PWD/app/build/web" cargo build --release -p canoa-host --featur
 ```toml
 # canoa.cfg
 [host.agents.claude]
-harness = "claude"                 # the installed claude, served by the host itself; or "codex"
+harness = "claude"                 # the installed claude, served by the host itself; "codex", or an outside acp_harness provider's id with library or source
 listen = "127.0.0.1:7801"
 working_roots = ["/home/me/src"]
 
