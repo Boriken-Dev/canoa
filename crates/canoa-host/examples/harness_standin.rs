@@ -28,7 +28,8 @@ fn record(entry: &Value) {
         .append(true)
         .open(path)
     {
-        let _ = writeln!(file, "{entry}");
+        // One write per line: two processes append to this file, and `writeln!` may write the newline separately.
+        let _ = file.write_all(format!("{entry}\n").as_bytes());
     }
 }
 
