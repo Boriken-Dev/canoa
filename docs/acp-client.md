@@ -110,6 +110,16 @@ reason is said in the conversation. A change made while a turn runs is sent befo
 Before an agent has started, the controls list what its source's agent offered when it last ran, kept with the session list,
 else only Default. The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own modes.
 
+## Usage
+
+An agent that advertises coqui-acp's usage extension (`dev.boriken.coqui.acp/usage` in its capabilities' `_meta`) gets a control right after the mode: the account's allowance that matters most, with how it refills. It is hidden for an agent that advertises nothing or answers that it reports none, and says **No usage yet** when the agent reports but has nothing yet. The app asks to be told of changes when it initializes the connection, reads the report when a session starts and when a turn ends, and keeps the newest by revision.
+
+- The control shows the bucket with the highest fraction used, an exhausted one first: its name, then `62%`, `120k / 400k tokens` or `$1.20 / $5.00`, then `resets in 1 h 20 m` for a fixed window or `40k tokens/min` for a token bucket. A window whose end has passed says **reset, not yet reported**, since its figures are of the window before.
+- It shows in the accent of the scheme from `[usage] warn_permille` used (800 by default) or when the agent itself says `warning`, and in the colour of an error once the bucket is exhausted.
+- Its menu lists every bucket, the most pressing first, with the figure and refill, **inferred** where the agent gave only the words of an error, which models it covers, how long ago it was observed, the account, and the last refusal with its retry-after.
+- A session's spend (tokens, and cost when the agent reported one; an absent cost stays absent) joins the context figure in the conversation's header.
+- The account is the host's: `canoa` tells the agent the entry's name and sets it on every report it relays.
+
 ## What goes with a message
 
 `+` adds files or images, a folder reference, or what the clipboard holds; Ctrl+V (⌘V on a Mac) pastes the same way, and

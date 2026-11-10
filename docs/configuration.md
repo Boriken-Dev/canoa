@@ -25,6 +25,7 @@ Configuration tables:
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
 - [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
 - [attachments] paste_as_file (characters, default 8000): a longer paste goes with the message as an attachment of its own; embed_limit (bytes, default 1048576): a larger file goes as a link to it rather than as the agent's embedded context.
+- [usage] warn_permille (thousandths, default 800): from this much of a usage bucket used, the usage control beside the mode shows a status; an exhausted bucket always shows as an error. See [usage](acp-client.md#usage).
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
 - [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store).
 
