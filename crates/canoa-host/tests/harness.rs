@@ -14,8 +14,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use canoa_host::profile::PROFILE_META;
+use canoa_host::{Config, Home, ServeOptions, Serving};
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, quoted, with_link};
+use support::{
+    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
+};
 
 const SECRET: &str = "a-secret-the-client-never-sees";
 
@@ -661,5 +664,106 @@ fn a_version_2_client_keeps_the_text_of_a_message_once_it_ends() {
                 "an empty content clears what was streamed: {update}"
             );
         }
+    }
+}
+
+/// The error `Serving::bind` gives for `config`, which must not bind.
+fn bind_refused(config: &str) -> String {
+    let scratch = Scratch::new();
+    let home = Home::at(scratch.0.join("home"));
+    let config = Config::from_str_in(config, &scratch.0).expect("parses");
+    let identity = home.identity(Some(support::method())).expect("an identity");
+    Serving::bind(
+        &config,
+        identity,
+        home.store().expect("a store"),
+        &ServeOptions::new(host_binary()),
+    )
+    .expect_err("it does not bind")
+    .to_string()
+}
+
+#[test]
+fn settings_the_provider_refuses_stop_the_host_from_starting_and_name_the_entry() {
+    for settings in ["bogus = 1", "max_sessions = \"many\""] {
+        let refused = bind_refused(&format!(
+            "[host.agents.Agent]\nharness = \"claude\"\nsettings = {{ {settings} }}\n"
+        ));
+        assert!(
+            refused.contains("host entry Agent") && refused.contains("settings"),
+            "{refused}"
+        );
+    }
+}
+
+#[test]
+fn a_setting_that_turns_bypass_on_is_logged_as_configuration() {
+    let (_host, log) = Host::start_logged(
+        Scratch::new(),
+        "[host.agents.Agent]\nharness = \"claude\"\nsettings = { allow_bypass = true }\n",
+        1,
+        &[],
+    );
+    let written = log_holding(&log, &["allow_bypass"]);
+    let line = line_saying(&written, "allow_bypass");
+    assert!(
+        line.contains("non-default") && line.contains("INFO"),
+        "{line}"
+    );
+}
+
+/// A Codex entry whose roots are `scratch/work`, with or without the `main` profile, resuming a thread that was recorded in
+/// `recorded`: whether the resume was refused.
+fn resume_is_refused(recorded: &str, profile: bool) -> bool {
+    let scratch = Scratch::new();
+    let codex = standin(&scratch, "codex");
+    let work = cwd(&scratch);
+    let elsewhere = scratch.0.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("a directory");
+    let recorded = match recorded {
+        "inside" => work.clone(),
+        _ => elsewhere.to_string_lossy().into_owned(),
+    };
+    let (_, mut env) = env_of(&scratch);
+    env.push(("STANDIN_THREAD_CWD", OsString::from(&recorded)));
+    let roots = format!("working_roots = [{}]\n", quoted(&work));
+    let config = if profile {
+        profiled("codex", &codex, &scratch).replace(
+            "profiles = [\"main\"]\n",
+            &format!("profiles = [\"main\"]\n{roots}"),
+        )
+    } else {
+        format!(
+            "[host.agents.Agent]\nharness = \"codex\"\nexecutable = {}\n{roots}",
+            quoted(&codex.to_string_lossy())
+        )
+    };
+    let host = Host::start_in(scratch, &config, 1, &env);
+    let client = support::key();
+    host.pair(&client);
+    with_link(host.url("Agent"), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        rpc.request(
+            "session/resume",
+            json!({"sessionId": "5b6f7a52-3f0e-4c1f-9a41-0d3a2c7f9e10", "cwd": work, "mcpServers": []}),
+        )
+        .is_err()
+    })
+    .expect("a paired key is served")
+}
+
+/// A thread recorded outside the entry's roots is never resumed: with a profile too, whose skills are written beside the
+/// roots, not instead of them.
+#[test]
+fn a_thread_recorded_outside_the_roots_is_not_resumed_with_or_without_a_profile() {
+    for profile in [false, true] {
+        assert!(
+            resume_is_refused("outside", profile),
+            "profile {profile}: a thread recorded elsewhere was resumed"
+        );
+        assert!(
+            !resume_is_refused("inside", profile),
+            "profile {profile}: a thread recorded in the roots was refused"
+        );
     }
 }

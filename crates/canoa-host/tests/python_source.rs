@@ -340,6 +340,58 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         assert_eq!(initialized["agentInfo"]["name"], "coqui-acp-claude");
     }
 
+    /// A canoa.cfg harness entry `name` for `id` from the manifests in `dirs`: `harness_entry` under another name.
+    fn named_entry(python: &Python, name: &str, id: &str, dirs: &[PathBuf]) -> String {
+        harness_entry(python, id, dirs)
+            .replace("host.agents.python", &format!("host.agents.{name}"))
+    }
+
+    /// What `canoa serve` says on its standard error for `config`, which it must refuse to start.
+    fn bind_refused(python: &Python, config: &str) -> String {
+        let scratch = Scratch::new();
+        let file = scratch.0.join("canoa.cfg");
+        std::fs::write(&file, config).expect("written");
+        let output = Command::new(crate::support::host_binary())
+            .args(["serve", "--config"])
+            .arg(&file)
+            .envs(environment(python))
+            .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("it runs");
+        assert!(!output.status.success(), "it started: {output:?}");
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    }
+
+    /// An id is resolved from the entry's own file: an unknown one, one of another kind, and one that only another entry's
+    /// file offers are refused when the host starts, naming the entry.
+    #[test]
+    fn a_harness_id_is_resolved_from_its_own_entrys_file_only() {
+        let python = python();
+        let coqui_acp = checkout("coqui-acp-api");
+        let harness = coqui_acp.join("examples/provider-python/harness");
+        let echo = coqui_acp.join("examples/provider-python/echo");
+        let id = "acp_echo_harness_echo_harness";
+        let refused = bind_refused(
+            &python,
+            &named_entry(&python, "unknown", "no_such_harness", &[harness.clone()]),
+        );
+        assert!(refused.contains("host entry unknown"), "{refused}");
+        let refused = bind_refused(
+            &python,
+            &named_entry(&python, "wrong", "acp_echo_echo", &[echo.clone()]),
+        );
+        assert!(refused.contains("host entry wrong"), "{refused}");
+        // Two entries, the second loading a file that does not offer the first's id.
+        let config = format!(
+            "{}{}",
+            named_entry(&python, "first", id, &[harness]),
+            named_entry(&python, "second", id, &[echo])
+        );
+        let refused = bind_refused(&python, &config);
+        assert!(refused.contains("host entry second"), "{refused}");
+    }
+
     #[test]
     fn an_isolated_python_that_import_dirs_names_answers() {
         let python = python();
