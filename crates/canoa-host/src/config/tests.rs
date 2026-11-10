@@ -18,8 +18,8 @@ fn parse(text: &str) -> Result<Config, ConfigError> {
 
 #[test]
 fn a_file_with_no_host_table_serves_nothing() {
-    let config = parse("[desktop]\nstart_hidden = true\n[appearance]\nlook = \"canoa\"\n")
-        .expect("parses");
+    let config =
+        parse("[desktop]\nstart_hidden = true\n[appearance]\nlook = \"canoa\"\n").expect("parses");
     assert!(config.entries.is_empty());
 }
 
