@@ -25,12 +25,13 @@ use coqui_web_channel::websocket::{self, Frames};
 use coqui_web_channel::{Channel, Failure, Limits};
 
 use crate::child::{self, Running};
-use crate::config::{Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin};
+use crate::config::{Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin, UsageSource};
 use crate::harness::AgentOptions;
 use crate::inproc::{self, InProcess};
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
+use crate::usage_splice::Antigravity;
 use crate::worktree::Worktrees;
 
 /// Worktree requests one connection may make before its first ACP message.
@@ -68,6 +69,9 @@ pub struct ServeOptions {
     pub rekey: bool,
     /// Whether a configuration with no entry binds, serving nothing, rather than being refused.
     pub nothing_to_serve: bool,
+    /// The host's directory for what it keeps, where an agent started only to read its usage gets an empty working
+    /// directory; without one, no such agent is started.
+    pub state_dir: Option<PathBuf>,
 }
 
 impl ServeOptions {
@@ -80,7 +84,15 @@ impl ServeOptions {
             key_limit: None,
             rekey: true,
             nothing_to_serve: false,
+            state_dir: None,
         }
+    }
+
+    /// The directory the host keeps its own working files in, which a private read of an agent's usage needs.
+    #[must_use]
+    pub fn with_state_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.state_dir = Some(dir.into());
+        self
     }
 
     /// What one key may carry in each direction, in bytes. No floor; above the default the host logs it as a non-default setting.
@@ -483,6 +495,7 @@ impl Serving {
                     program,
                     args,
                     profiles,
+                    usage,
                 } => (
                     "agent",
                     Run::Agent {
@@ -490,9 +503,20 @@ impl Serving {
                             program: program.clone(),
                             args: args.clone(),
                         },
-                        scope: Scope::new(entry.working_roots.clone())
-                            .account(entry.name.clone())
-                            .limit_phrases(config.limit_phrases.clone()),
+                        scope: {
+                            let scope = Scope::new(entry.working_roots.clone())
+                                .account(entry.name.clone())
+                                .limit_phrases(config.limit_phrases.clone());
+                            match usage {
+                                Some(UsageSource::Antigravity) => scope.antigravity(Antigravity {
+                                    program: program.clone(),
+                                    args: args.clone(),
+                                    state_dir: options.state_dir.clone(),
+                                    private: profiles.is_empty(),
+                                }),
+                                None => scope,
+                            }
+                        },
                         offer: hosted::offer(
                             profiles,
                             &config.profiles,
@@ -884,7 +908,7 @@ fn give_agent<C: Channel>(
                 return tracing::warn!(entry = served.name, "the agent could not start: {error}");
             }
         };
-        let end = relay(&Scoped::new(channel, scope), &agent);
+        let end = relay(&Scoped::new(channel, scope).agent(agent.pid()), &agent);
         tracing::info!(entry = served.name, %peer, "left: {end:?}");
         shared.forget(key);
         let _ = agent.stop();
@@ -905,7 +929,7 @@ fn give_agent<C: Channel>(
             return tracing::warn!(entry = served.name, "the agent could not start: {error}");
         }
     };
-    let hosted = Hosted::new(channel, scope, &connection);
+    let hosted = Hosted::new(channel, scope, &connection).agent(agent.pid());
     let end = relay(&hosted, &agent);
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);

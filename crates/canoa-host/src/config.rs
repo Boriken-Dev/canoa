@@ -184,6 +184,24 @@ pub const APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request"
 /// Codex's sandboxes.
 pub const SANDBOXES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
 
+/// Where the host reads a stdio agent's usage figures from, beyond its failed turns (`usage = "..."` on the entry).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UsageSource {
+    /// Antigravity (`agy acp`): its quota, read from the loopback port its own language server opens once a session is open.
+    Antigravity,
+}
+
+impl UsageSource {
+    /// The source named `name` in canoa.cfg.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "antigravity" => Some(Self::Antigravity),
+            _ => None,
+        }
+    }
+}
 /// What an entry runs for each connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -196,6 +214,8 @@ pub enum EntryKind {
         args: Vec<OsString>,
         /// The `[host.profiles]` a client may choose among, the first when it names none; empty launches it bare.
         profiles: Vec<String>,
+        /// How the host reads this agent's usage when the agent reports none itself; `None` reads only its failed turns.
+        usage: Option<UsageSource>,
     },
     /// A coding agent's own command line that the host serves as an ACP agent itself, in its own process, with no adapter.
     Harness {
@@ -455,6 +475,7 @@ struct RawAgent {
     bypass: Option<bool>,
     modes: Option<Vec<String>>,
     profiles: Option<Vec<String>>,
+    usage: Option<String>,
     listen: Option<String>,
     #[serde(default)]
     working_roots: Vec<String>,
@@ -607,6 +628,13 @@ impl Config {
                             ));
                         }
                     }
+                    let usage = match agent.usage.as_deref() {
+                        None => None,
+                        Some(text) => Some(
+                            UsageSource::named(text)
+                                .ok_or_else(|| invalid(&name, "usage is antigravity"))?,
+                        ),
+                    };
                     EntryKind::Agent {
                         program: OsString::from(program),
                         args: agent
@@ -616,9 +644,13 @@ impl Config {
                             .map(OsString::from)
                             .collect(),
                         profiles: offered,
+                        usage,
                     }
                 }
                 (None, Some(harness)) => {
+                    if agent.usage.is_some() {
+                        return Err(invalid(&name, "usage goes with program, not harness"));
+                    }
                     let Some(harness) = crate::Harness::named(&harness) else {
                         return Err(invalid(&name, "harness is claude or codex"));
                     };

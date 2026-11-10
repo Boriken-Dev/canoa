@@ -26,7 +26,7 @@ use super::{
 };
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
-use crate::usage_splice::Splice;
+use crate::usage_splice::{Client, Splice};
 
 /// The `_meta` key a client names a profile under in `initialize`, and the host's report under in its answers.
 pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
@@ -1333,6 +1333,13 @@ impl<C: Channel + ?Sized> core::fmt::Debug for Hosted<'_, C> {
 }
 
 impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
+    /// This channel serves the agent running as process `pid`.
+    #[must_use]
+    pub(crate) fn agent(mut self, pid: u32) -> Self {
+        self.splice = self.splice.agent(pid);
+        self
+    }
+
     pub(crate) fn new(inner: &'a C, scope: &'a Scope, connection: &'a Connection) -> Self {
         Self {
             inner,
@@ -1493,6 +1500,7 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             }
             core::mem::replace(&mut hold.first, false)
         };
+        self.splice.tick(|sent| self.send_profiled(sent));
         let Some(message) = self.inner.receive(timeout)? else {
             return Ok(None);
         };
@@ -1519,11 +1527,12 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
         };
         match forwarded {
             Ok(bytes) => match self.splice.read_client(&bytes) {
-                Some(answer) => {
+                Client::Answer(answer) => {
                     self.reply(&answer)?;
                     Err(Failure::Timeout)
                 }
-                None => Ok(Some(bytes)),
+                Client::Held => Err(Failure::Timeout),
+                Client::Forward => Ok(Some(bytes)),
             },
             Err(answer) => {
                 if !answer.is_empty() {

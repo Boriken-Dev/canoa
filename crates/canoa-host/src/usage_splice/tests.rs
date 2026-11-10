@@ -4,8 +4,11 @@
     reason = "tests name what they use from std"
 )]
 
+use core::time::Duration;
 use std::cell::RefCell;
 use std::sync::Arc;
+
+use coqui_acp_api::usage::Bucket;
 
 use super::*;
 
@@ -41,9 +44,11 @@ fn from_agent(splice: &Splice, message: &Value) -> Vec<Value> {
 }
 
 fn read_client(splice: &Splice, message: &Value) -> Option<Value> {
-    splice
-        .read_client(&bytes(message))
-        .map(|answer| serde_json::from_slice(&answer).expect("JSON"))
+    match splice.read_client(&bytes(message)) {
+        Client::Answer(answer) => Some(serde_json::from_slice(&answer).expect("JSON")),
+        Client::Forward => None,
+        Client::Held => panic!("an answer that waits for a reading"),
+    }
 }
 
 fn initialize(splice: &Splice, notify: bool, answer: Value) -> Value {
@@ -537,4 +542,169 @@ fn words_said_in_a_session_with_no_open_turn_are_not_kept() {
         &json!({"id": 2, "result": {"stopReason": "refusal"}}),
     );
     assert_eq!(report_of(&splice)["buckets"], json!([]));
+}
+
+fn quota_entry(state_dir: Option<std::path::PathBuf>, private: bool) -> Quota {
+    Quota::new(Antigravity {
+        program: "canoa-test-no-such-agy".into(),
+        args: Vec::new(),
+        state_dir,
+        private,
+    })
+}
+
+#[test]
+fn an_entry_that_reads_a_quota_advertises_reported_and_inferred_and_needs_a_session() {
+    let inference = Arc::new(Inference::new(None).with_quota(quota_entry(None, false)));
+    let splice = Splice::new(inference, Some("work".to_owned()));
+    let answered = initialize(&splice, false, plain_answer());
+    let capability = &answered["result"]["agentCapabilities"]["_meta"][USAGE_CAPABILITY];
+    assert_eq!(
+        capability["sources"],
+        json!(["reported", "inferred"]),
+        "{answered}"
+    );
+    assert_eq!(capability["needs_session"], true, "{answered}");
+}
+
+#[test]
+fn read_buckets_and_an_inferred_hit_are_one_report_with_a_revision_that_only_grows() {
+    let quota = quota_entry(None, false);
+    let inference = Inference::new(None).with_quota(quota);
+    let before = inference.report(1_000, Some("work"));
+    assert_eq!(before.buckets.len(), 0);
+    assert_eq!(before.sources, [Source::Reported, Source::Inferred]);
+    let quota = inference.quota.as_ref().expect("a quota");
+    quota.apply(vec![Bucket::new("agy:model-a")]);
+    let read = inference.report(1_000, Some("work"));
+    assert_eq!(read.buckets.len(), 1);
+    assert!(read.revision > before.revision);
+    assert!(inference.observe(AGY, 1_000));
+    let both = inference.report(1_000, Some("work"));
+    let ids: Vec<&str> = both
+        .buckets
+        .iter()
+        .map(|bucket| bucket.id.as_str())
+        .collect();
+    assert_eq!(ids, ["agy:model-a", "inferred"]);
+    assert!(both.limit.is_some());
+    assert!(both.revision > read.revision);
+    assert_eq!(both.account.as_deref(), Some("work"));
+    // A new reading replaces the buckets it read and leaves the inferred one.
+    quota.apply(vec![Bucket::new("agy:model-b")]);
+    let replaced = inference.report(1_000, Some("work"));
+    let ids: Vec<&str> = replaced
+        .buckets
+        .iter()
+        .map(|bucket| bucket.id.as_str())
+        .collect();
+    assert_eq!(ids, ["agy:model-b", "inferred"]);
+    assert_eq!(inference.revision(1_000), replaced.revision);
+}
+
+#[test]
+fn a_private_agent_is_started_only_where_allowed_one_at_a_time_and_not_often() {
+    let state = std::env::temp_dir().join(format!("canoa-private-test-{}", std::process::id()));
+    let done = || {};
+    assert!(!Arc::new(quota_entry(None, true)).read_privately(done));
+    assert!(!Arc::new(quota_entry(Some(state.clone()), false)).read_privately(done));
+    let quota = Arc::new(quota_entry(Some(state.clone()), true));
+    let (ended, wait) = std::sync::mpsc::channel();
+    assert!(quota.read_privately(move || {
+        let _ = ended.send(());
+    }));
+    // The program does not exist, so the attempt ends at once; and a second is refused for being too soon either way.
+    wait.recv_timeout(Duration::from_secs(10))
+        .expect("the attempt ends and says so");
+    assert!(!quota.read_privately(done));
+    let _ = std::fs::remove_dir_all(&state);
+}
+
+/// Serves the recorded `GetUserStatus` answer on a loopback port of this test process, so a reading finds it among the
+/// listeners of the process it is told is the agent.
+fn serve_status() {
+    use std::io::{Read as _, Write as _};
+    let body = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/agy/getuserstatus.json"
+    ))
+    .expect("the fixture");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let body = body.clone();
+            std::thread::spawn(move || {
+                // The answer goes once the request's head is in; what follows it is drained, or closing the socket would
+                // reset it under the reader.
+                let mut request = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !request.ends_with(b"\r\n\r\n")
+                    && stream.read(&mut byte).is_ok_and(|read| read == 1)
+                {
+                    request.push(byte[0]);
+                }
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                let mut rest = [0_u8; 256];
+                while stream.read(&mut rest).is_ok_and(|read| read > 0) {}
+            });
+        }
+    });
+}
+
+#[test]
+fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
+    serve_status();
+    let inference = Arc::new(Inference::new(None).with_quota(quota_entry(None, false)));
+    let splice =
+        Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(std::process::id());
+    initialize(&splice, true, plain_answer());
+    assert_eq!(report_of(&splice)["buckets"], json!([]));
+    assert!(
+        read_client(
+            &splice,
+            &json!({"id": 5, "method": "session/new", "params": {"cwd": "/work"}})
+        )
+        .is_none()
+    );
+    from_agent(
+        &splice,
+        &json!({"id": 5, "result": {"sessionId": "s", "models": {"availableModels": [
+            {"modelId": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)"}]}}}),
+    );
+    let told = RefCell::new(Vec::<Value>::new());
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while !told.borrow().iter().any(|message| {
+        message["params"]["report"]["buckets"]
+            .as_array()
+            .is_some_and(|buckets| !buckets.is_empty())
+    }) && std::time::Instant::now() < until
+    {
+        splice.tick(|message| {
+            told.borrow_mut()
+                .push(serde_json::from_slice(message).expect("JSON"));
+            Ok(())
+        });
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let told = told.into_inner();
+    let notice = told
+        .iter()
+        .find(|message| message["method"] == USAGE_NOTIFICATION)
+        .expect("a notice");
+    let report = &notice["params"]["report"];
+    assert_eq!(report["account"], "work", "{report}");
+    assert!(
+        report["buckets"].as_array().is_some_and(|b| b.len() >= 2),
+        "{report}"
+    );
+    assert!(!report.to_string().contains("<EMAIL>"));
+    // The reading is current, so a request is answered at once from it.
+    let asked = report_of(&splice);
+    assert_eq!(asked["buckets"], report["buckets"]);
 }

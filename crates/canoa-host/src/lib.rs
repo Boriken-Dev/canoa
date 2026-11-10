@@ -20,7 +20,7 @@ pub mod web;
 mod worktree;
 
 pub use config::{
-    Config, ConfigError, Entry, EntryKind, HarnessOptions, Origin, Settings, WebConfig,
+    Config, ConfigError, Entry, EntryKind, HarnessOptions, Origin, Settings, UsageSource, WebConfig,
 };
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use coqui_agentic_peer::auth::Identity;
 use serde_json::{Value, json};
 use support::{
-    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
+    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, running, with_link,
 };
 
 fn agent_entry(name: &str, extra: &str) -> String {
@@ -1067,4 +1067,292 @@ fn an_agent_that_reports_usage_is_passed_through_untouched_by_a_failed_turn() {
         assert_eq!(asked["account"], "work", "{asked}");
     })
     .expect("a paired key is served");
+}
+
+/// The recorded `GetUserStatus` answer the agy stand-in serves, sanitized: the account's name and email are placeholders.
+fn agy_fixture() -> String {
+    format!(
+        "{}/tests/fixtures/agy/getuserstatus.json",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
+/// A stdio agent entry running the agy stand-in, with its quota read by the host; `extra` is more of the entry's keys.
+fn agy_entry(name: &str, extra: &str) -> String {
+    agent_entry(
+        name,
+        &format!(
+            "args = [\"--agy\", {}]\nusage = \"antigravity\"\n{extra}",
+            quoted(&agy_fixture())
+        ),
+    )
+}
+
+/// What the fixture holds in place of the account's details: nothing the host sends may carry them.
+const ACCOUNT_PLACEHOLDERS: [&str; 2] = ["<EMAIL>", "<NAME>"];
+
+/// The answer to `_coqui_acp/usage` once it holds buckets, or as it is after a while: a reading follows a session's opening
+/// on a thread of the host's own.
+fn usage_with_buckets(rpc: &Rpc<'_>) -> Value {
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        let report = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        if report["buckets"]
+            .as_array()
+            .is_some_and(|buckets| !buckets.is_empty())
+            || Instant::now() >= until
+        {
+            return report;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn an_agys_buckets_appear_after_a_session_and_go_only_to_the_client_that_asked() {
+    let fixture = std::fs::read_to_string(agy_fixture()).expect("the fixture");
+    for placeholder in ACCOUNT_PLACEHOLDERS {
+        assert!(fixture.contains(placeholder), "{placeholder}");
+    }
+    // A profile gives the agent an environment of its own, so the host starts none to read with: before a session there is
+    // nothing to read, and the agent below the launcher is found through the process tree.
+    let config = format!(
+        "{}[host.profiles.plain]\n",
+        agy_entry("agy", "profiles = [\"plain\"]")
+    );
+    let (host, log) = Host::start_logged(Scratch::new(), &config, 1, &[]);
+    let (watcher, quiet) = (support::key(), support::key());
+    host.pair(&watcher);
+    host.pair(&quiet);
+    let dir = cwd(&host.scratch);
+    let mut seen: Vec<Value> = Vec::new();
+    with_link(host.url("agy"), &watcher, host.peer, |rpc| {
+        let started = rpc.request("initialize", asking(true)).expect("answered");
+        let capability = &started["agentCapabilities"]["_meta"][USAGE_KEY];
+        assert_eq!(
+            capability["sources"],
+            json!(["reported", "inferred"]),
+            "{started}"
+        );
+        assert_eq!(capability["needs_session"], true, "{started}");
+        let before = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(before["supported"], true, "{before}");
+        assert_eq!(before["buckets"], json!([]), "{before}");
+        assert_eq!(before["account"], "agy", "{before}");
+        seen.extend([started, before]);
+
+        with_link(host.url("agy"), &quiet, host.peer, |other| {
+            other
+                .request("initialize", asking(false))
+                .expect("answered");
+            let session = new_session(other, &dir).expect("a session opens");
+            let report = usage_with_buckets(other);
+            let buckets = report["buckets"].as_array().expect("buckets");
+            assert!(buckets.len() >= 2, "{report}");
+            for bucket in buckets {
+                assert!(
+                    bucket["id"]
+                        .as_str()
+                        .is_some_and(|id| id.starts_with("agy:")),
+                    "{bucket}"
+                );
+                assert_eq!(bucket["source"], "reported", "{bucket}");
+                assert_eq!(bucket["unit"], "permille", "{bucket}");
+                assert!(bucket["remaining"].is_u64(), "{bucket}");
+            }
+            assert_eq!(report["account"], "agy", "{report}");
+            assert_eq!(
+                report["sources"],
+                json!(["reported", "inferred"]),
+                "{report}"
+            );
+            let session = session["sessionId"].as_str().expect("an id");
+            other.prompt(session, "hello").expect("the turn ends");
+            assert!(
+                usage_updates(other).is_empty(),
+                "{:?}",
+                other.updates.borrow()
+            );
+            seen.push(report);
+            seen.extend(other.updates.borrow().iter().cloned());
+        })
+        .expect("a paired key is served");
+
+        let notices = usage_notices(rpc, 1);
+        assert!(!notices.is_empty(), "the client that asked is told");
+        let report = &notices[0]["params"]["report"];
+        assert_eq!(report["account"], "agy", "{report}");
+        assert!(
+            report["buckets"]
+                .as_array()
+                .is_some_and(|buckets| buckets.len() >= 2),
+            "{report}"
+        );
+        seen.extend(rpc.updates.borrow().iter().cloned());
+    })
+    .expect("a paired key is served");
+
+    let seen = serde_json::to_string(&seen).expect("JSON");
+    let logged = log_holding(&log, &[]);
+    for placeholder in ACCOUNT_PLACEHOLDERS {
+        assert!(
+            !seen.contains(placeholder),
+            "{placeholder} reached a client"
+        );
+        assert!(
+            !logged.contains(placeholder),
+            "{placeholder} reached the log: {logged}"
+        );
+    }
+}
+
+#[test]
+fn an_agys_figures_are_read_after_a_session_and_each_turn_and_not_again_while_current() {
+    let host = Host::start(&agy_entry("agy", ""), 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("agy"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(false)).expect("answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id");
+        let report = usage_with_buckets(rpc);
+        assert!(
+            report["buckets"]
+                .as_array()
+                .is_some_and(|buckets| !buckets.is_empty()),
+            "{report}"
+        );
+        let reads = |rpc: &Rpc<'_>| {
+            rpc.request("_fixture/reads", json!({})).expect("answered")["reads"]
+                .as_u64()
+                .expect("a count")
+        };
+        let after_session = reads(rpc);
+        assert!(after_session >= 1);
+        // A request while the last reading is younger than the cache is answered from it.
+        for _ in 0..3 {
+            let again = rpc
+                .request("_coqui_acp/usage", json!({}))
+                .expect("answered");
+            assert_eq!(again["buckets"], report["buckets"]);
+        }
+        assert_eq!(reads(rpc), after_session);
+        // A turn's end reads again.
+        rpc.prompt(session, "hello").expect("the turn ends");
+        let until = Instant::now() + Duration::from_secs(30);
+        while reads(rpc) <= after_session && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        assert!(reads(rpc) > after_session, "no reading followed the turn");
+    })
+    .expect("a paired key is served");
+}
+
+#[test]
+fn with_no_session_open_an_agys_usage_is_read_by_an_agent_started_for_it_and_ended() {
+    let scratch = Scratch::new();
+    let agy_log = scratch.0.join("agy.log");
+    let (host, _) = Host::start_logged(
+        scratch,
+        &agy_entry("agy", ""),
+        1,
+        &[("CANOA_TEST_AGY_LOG", agy_log.clone().into())],
+    );
+    let client = support::key();
+    host.pair(&client);
+    let report = with_link(host.url("agy"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(false)).expect("answered");
+        let report = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered once the agent started for it has been read");
+        // Asked again at once, the answer is the one just read.
+        let again = rpc
+            .request("_coqui_acp/usage", json!({}))
+            .expect("answered");
+        assert_eq!(again["buckets"], report["buckets"]);
+        report
+    })
+    .expect("a paired key is served");
+    let buckets = report["buckets"].as_array().expect("buckets");
+    assert!(buckets.len() >= 2, "{report}");
+    assert!(
+        buckets.iter().all(|bucket| bucket["source"] == "reported"),
+        "{report}"
+    );
+
+    let logged = std::fs::read_to_string(&agy_log).expect("the stand-ins' log");
+    let lines: Vec<(&str, &str)> = logged
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .collect();
+    let says = |what: &str| {
+        lines
+            .iter()
+            .filter(|(_, line)| line.starts_with(what))
+            .count()
+    };
+    assert_eq!(says("new"), 1, "one agent opened a session: {logged}");
+    assert_eq!(says("prompt"), 0, "no prompt was sent: {logged}");
+    let (private, _) = lines
+        .iter()
+        .find(|(_, line)| *line == "new")
+        .expect("opened");
+    let (_, cwd) = lines
+        .iter()
+        .find(|(pid, line)| pid == private && line.starts_with("cwd "))
+        .expect("it was given a directory");
+    let directory = std::path::Path::new(cwd.trim_start_matches("cwd "));
+    assert!(
+        directory.starts_with(host.home()),
+        "{directory:?} is under the host's state"
+    );
+    assert!(directory.ends_with("usage-read"), "{directory:?}");
+    assert!(
+        std::fs::read_dir(directory).is_ok_and(|mut entries| entries.next().is_none()),
+        "the directory it worked in is empty"
+    );
+    let pid: u32 = private.parse().expect("a pid");
+    let until = Instant::now() + Duration::from_secs(15);
+    while running(pid) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(!running(pid), "the agent started for the reading was ended");
+}
+
+/// Reads a real Antigravity's quota through the host with no session open. Opt in with `CANOA_LIVE_AGY=1`, `agy` on PATH
+/// and a signed-in account; it sends no prompt, and the empty session agy keeps is the only trace.
+#[test]
+#[ignore = "needs a signed-in agy; set CANOA_LIVE_AGY=1"]
+fn live_a_real_agys_quota_is_read_with_no_session_open() {
+    if std::env::var_os("CANOA_LIVE_AGY").is_none() {
+        return;
+    }
+    let config =
+        "[host.agents.agy]\nprogram = \"agy\"\nargs = [\"acp\"]\nusage = \"antigravity\"\n";
+    let host = Host::start(config, 1);
+    let client = support::key();
+    host.pair(&client);
+    let report = with_link(host.url("agy"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(false)).expect("answered");
+        rpc.request("_coqui_acp/usage", json!({}))
+            .expect("answered")
+    })
+    .expect("a paired key is served");
+    let text = report.to_string();
+    eprintln!(
+        "{} buckets",
+        report["buckets"].as_array().map_or(0, Vec::len)
+    );
+    assert!(
+        report["buckets"]
+            .as_array()
+            .is_some_and(|buckets| !buckets.is_empty()),
+        "{text}"
+    );
+    assert!(!text.contains('@'), "no account detail in the report");
 }

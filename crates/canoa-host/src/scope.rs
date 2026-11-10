@@ -20,7 +20,7 @@ use coqui_web_channel::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;
-use crate::usage_splice::{Inference, Splice};
+use crate::usage_splice::{Antigravity, Client, Inference, Quota, Splice};
 use crate::worktree::Worktrees;
 
 /// JSON-RPC's code for a message that is not JSON.
@@ -66,6 +66,13 @@ impl Scope {
     #[must_use]
     pub(crate) fn limit_phrases(mut self, phrases: Option<Vec<String>>) -> Self {
         self.usage = Arc::new(Inference::new(phrases));
+        self
+    }
+
+    /// This scope reading an Antigravity agent's quota too, as `command` runs it.
+    #[must_use]
+    pub(crate) fn antigravity(mut self, command: Antigravity) -> Self {
+        self.usage = Arc::new(Inference::new(self.usage.phrases()).with_quota(Quota::new(command)));
         self
     }
 
@@ -299,6 +306,13 @@ pub(crate) struct Scoped<'a, C: Channel + ?Sized> {
 }
 
 impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
+    /// This channel serves the agent running as process `pid`.
+    #[must_use]
+    pub(crate) fn agent(mut self, pid: u32) -> Self {
+        self.splice = self.splice.agent(pid);
+        self
+    }
+
     pub(crate) fn new(inner: &'a C, scope: &'a Scope) -> Self {
         Self {
             inner,
@@ -327,16 +341,19 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     /// A refused message reads as a timeout, after which the channel is still usable, so a caller polling for its own
     /// reasons is never held by a peer that only sends what is refused.
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        self.splice
+            .tick(|sent| self.inner.send(&self.scope.stamp(sent)));
         let Some(message) = self.inner.receive(timeout)? else {
             return Ok(None);
         };
         match self.scope.check(&message) {
             Verdict::Forward(bytes) => match self.splice.read_client(&bytes) {
-                Some(answer) => {
+                Client::Answer(answer) => {
                     self.reply(&answer)?;
                     Err(Failure::Timeout)
                 }
-                None => Ok(Some(bytes)),
+                Client::Held => Err(Failure::Timeout),
+                Client::Forward => Ok(Some(bytes)),
             },
             Verdict::Refuse(answer) => {
                 if let Some(answer) = answer {

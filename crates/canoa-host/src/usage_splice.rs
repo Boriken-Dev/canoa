@@ -4,9 +4,12 @@
 //! `inferred`, answers `_coqui_acp/usage` itself and tells the clients that asked when the report changes. An agent that
 //! advertises the capability is never touched: its messages pass as they came.
 //!
+//! An entry that names `usage = "antigravity"` also has its agy's quota read ([`agy`]): the buckets join the report beside
+//! any inferred hit, and the capability says `reported` as well as `inferred`.
+//!
 //! One [`Inference`] belongs to an entry and is shared by its connections, since a limit is the account's; one [`Splice`]
-//! belongs to a connection and keeps what that client asked and which turns are open. A reader of the agent that reports real
-//! figures would feed the same [`Inference`] report, which is why the report and the reading of a turn are apart.
+//! belongs to a connection and keeps what that client asked and which turns are open. The reader of an agent that reports real
+//! figures feeds the same [`Inference`] report, which is why the report and the reading of a turn are apart.
 //!
 //! What the host reads is the agent's own words, which may echo what a client sent: a client whose prompt makes the agent
 //! fail with its own text can set the entry's shared limit.
@@ -27,8 +30,15 @@ use coqui_acp_api::{
     DEFAULT_LIMIT_PHRASES, LimitHit, Source, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION,
     USAGE_VERSION, UsageReport, infer_limit,
 };
+use coqui_acp_harness::antigravity::AcpModel;
 use coqui_web_channel::Failure;
 use serde_json::{Value, json};
+
+mod agy;
+mod members;
+
+pub(crate) use agy::{Antigravity, Quota};
+use agy::{Link, Reading};
 
 /// JSON-RPC's code for a message the receiver cannot place.
 const INTERNAL_ERROR: i64 = -32603;
@@ -91,6 +101,8 @@ pub(crate) struct Inference {
     /// `None` is [`DEFAULT_LIMIT_PHRASES`]; a list replaces them, and an empty one reads nothing.
     phrases: Option<Vec<String>>,
     held: Mutex<Held>,
+    /// Set for an entry whose agy's quota is read.
+    quota: Option<Arc<Quota>>,
 }
 
 impl Inference {
@@ -98,14 +110,29 @@ impl Inference {
         Self {
             phrases,
             held: Mutex::new(Held::default()),
+            quota: None,
         }
     }
 
-    /// Whether anything can be read at all: with no phrases the host stays out of the agent's way entirely.
+    /// The phrases this entry reads failed turns for.
+    pub(crate) fn phrases(&self) -> Option<Vec<String>> {
+        self.phrases.clone()
+    }
+
+    /// This entry's agy reads its quota too.
+    #[must_use]
+    pub(crate) fn with_quota(mut self, quota: Quota) -> Self {
+        self.quota = Some(Arc::new(quota));
+        self
+    }
+
+    /// Whether anything can be read at all: with no phrases and no quota the host stays out of the agent's way entirely.
     fn active(&self) -> bool {
-        self.phrases
-            .as_ref()
-            .is_none_or(|phrases| !phrases.is_empty())
+        self.quota.is_some()
+            || self
+                .phrases
+                .as_ref()
+                .is_none_or(|phrases| !phrases.is_empty())
     }
 
     /// Reads `text` from a failed turn; `true` when the report changed.
@@ -162,13 +189,24 @@ impl Inference {
     pub(crate) fn report(&self, now: i64, account: Option<&str>) -> UsageReport {
         let mut held = lock(&self.held);
         held.expire(now);
-        let mut report = held
-            .hit
-            .clone()
-            .map_or_else(UsageReport::new, UsageReport::inferred);
-        report.sources = vec![Source::Inferred];
+        let mut report = self
+            .quota
+            .as_ref()
+            .map_or_else(UsageReport::new, |quota| quota.report(now));
+        if let Some(hit) = held.hit.clone() {
+            let inferred = UsageReport::inferred(hit);
+            report.observed_at = report.observed_at.max(inferred.observed_at);
+            report.buckets.extend(inferred.buckets);
+            report.limit = inferred.limit;
+        }
+        report.sources = if self.quota.is_some() {
+            vec![Source::Reported, Source::Inferred]
+        } else {
+            vec![Source::Inferred]
+        };
         report.account = account.map(ToOwned::to_owned);
-        report.revision = held.revision;
+        // Each part's count only grows, so the sum does.
+        report.revision = held.revision + self.quota.as_ref().map_or(0, |quota| quota.revision());
         report
     }
 
@@ -176,7 +214,7 @@ impl Inference {
     fn revision(&self, now: i64) -> u64 {
         let mut held = lock(&self.held);
         held.expire(now);
-        held.revision
+        held.revision + self.quota.as_ref().map_or(0, |quota| quota.revision())
     }
 }
 
@@ -206,6 +244,12 @@ pub(crate) enum Event {
     Said { session: String, text: String },
     /// The answer to the `session/prompt` `id`.
     Ended { id: String, outcome: Outcome },
+    /// The answer to the `session/new` or `session/load` `id`: whether it opened a session, and the models it listed.
+    Opened {
+        id: String,
+        ok: bool,
+        models: Vec<AcpModel>,
+    },
 }
 
 /// A message of the agent's as it goes on, and what to remember of it once it did.
@@ -240,6 +284,10 @@ struct Conn {
     answered: BTreeSet<String>,
     /// Ids of `session/prompt` requests waiting for theirs, with the session each is for.
     prompts: BTreeMap<String, String>,
+    /// Ids of `session/new` and `session/load` requests waiting for theirs, kept for an entry that reads a quota.
+    opens: BTreeSet<String>,
+    /// A session has been opened on this connection, which is when its agy serves its quota.
+    opened: bool,
     /// What the agent said in a session during its open turn.
     said: BTreeMap<String, String>,
     /// The revision the client was last told.
@@ -252,6 +300,27 @@ pub(crate) struct Splice {
     inference: Arc<Inference>,
     account: Option<String>,
     conn: Mutex<Conn>,
+    /// What the threads reading for this connection leave for it.
+    link: Arc<Link>,
+    /// The connection's own agy, once its process is known.
+    reading: Option<Arc<Reading>>,
+}
+
+impl Drop for Splice {
+    fn drop(&mut self) {
+        self.link.close();
+    }
+}
+
+/// What becomes of a message from the client that reached the splice.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Client {
+    /// It goes to the agent.
+    Forward,
+    /// It stops here, and this is the answer.
+    Answer(Vec<u8>),
+    /// It stops here, and the answer comes later through [`Splice::tick`].
+    Held,
 }
 
 /// A notice for the client and the revision it carries.
@@ -266,14 +335,38 @@ impl Splice {
             inference,
             account,
             conn: Mutex::new(Conn::default()),
+            link: Arc::new(Link::default()),
+            reading: None,
         }
     }
 
-    /// Reads a message from the client. `Some` is this host's own answer to it, and the message goes no further.
-    pub(crate) fn read_client(&self, message: &[u8]) -> Option<Vec<u8>> {
+    /// This connection's agent is the process `pid`, which is where its quota is read from, if the entry reads one.
+    #[must_use]
+    pub(crate) fn agent(mut self, pid: u32) -> Self {
+        if let Some(quota) = &self.inference.quota {
+            self.reading = Some(Arc::new(Reading::new(
+                Arc::clone(&self.inference),
+                Arc::clone(quota),
+                Arc::clone(&self.link),
+                self.account.clone(),
+                pid,
+            )));
+        }
+        self
+    }
+
+    /// Reads a message from the client: it goes on to the agent, stops here with this host's own answer, or stops here with
+    /// its answer to come once a reading ends.
+    pub(crate) fn read_client(&self, message: &[u8]) -> Client {
+        self.client(message).unwrap_or(Client::Forward)
+    }
+
+    fn client(&self, message: &[u8]) -> Option<Client> {
         if !self.inference.active()
             || !(contains(message, b"initialize")
                 || contains(message, b"session/prompt")
+                || contains(message, b"session/new")
+                || contains(message, b"session/load")
                 || contains(message, USAGE_METHOD.as_bytes())
                 || !lock(&self.conn).answered.is_empty())
         {
@@ -303,19 +396,41 @@ impl Splice {
                 }
                 None
             }
+            "session/new" | "session/load"
+                if conn.stand == Stand::Host && self.inference.quota.is_some() =>
+            {
+                if conn.opens.len() < MAX_OPEN {
+                    conn.opens.insert(key);
+                }
+                None
+            }
             // Until the agent's own answer shows it does not report usage, the request is the agent's to answer.
             method if method == USAGE_METHOD && conn.stand == Stand::Host => {
                 if conn.answered.len() < MAX_OPEN {
                     conn.answered.insert(key);
                 }
+                let opened = conn.opened;
                 drop(conn);
+                if let Some(quota) = &self.inference.quota {
+                    // The figures are the agent's, which serves them while a session is open; a request after a reading
+                    // younger than the cache is answered from it, and one that needs a reading waits for it.
+                    if !quota.fresh() {
+                        if opened && let Some(reading) = &self.reading {
+                            reading.ask(id.clone());
+                            return Some(Client::Held);
+                        }
+                        let link = Arc::clone(&self.link);
+                        let inference = Arc::clone(&self.inference);
+                        let (waiting, account) = (id.clone(), self.account.clone());
+                        if quota.read_privately(move || {
+                            link.answer(&inference, &waiting, account.as_deref());
+                        }) {
+                            return Some(Client::Held);
+                        }
+                    }
+                }
                 let report = self.inference.report(unix_now(), self.account.as_deref());
-                let answer = match serde_json::to_value(&report) {
-                    Ok(report) => json!({"jsonrpc": "2.0", "id": id, "result": report}),
-                    Err(_) => json!({"jsonrpc": "2.0", "id": id,
-                        "error": {"code": INTERNAL_ERROR, "message": "the report could not be written"}}),
-                };
-                serde_json::to_vec(&answer).ok()
+                answer_of(&report, id).map(Client::Answer)
             }
             _ => None,
         }
@@ -338,6 +453,7 @@ impl Splice {
                 !conn.prompts.is_empty(),
                 !conn.initializes.is_empty()
                     || !conn.prompts.is_empty()
+                    || !conn.opens.is_empty()
                     || !conn.answered.is_empty(),
             )
         };
@@ -387,7 +503,21 @@ impl Splice {
         }
         if conn.initializes.contains(&key) {
             drop(conn);
-            return Self::initialized(&mut value, key);
+            return Self::initialized(&mut value, key, self.inference.quota.is_some());
+        }
+        if conn.opens.contains(&key) {
+            drop(conn);
+            let ok = value.get("error").is_none();
+            let models = value.get("result").map(agy::models_of).unwrap_or_default();
+            return Seen {
+                rewritten: None,
+                event: Some(Event::Opened {
+                    id: key,
+                    ok,
+                    models,
+                }),
+                hush: false,
+            };
         }
         if conn.prompts.contains_key(&key) {
             drop(conn);
@@ -404,7 +534,7 @@ impl Splice {
     }
 
     /// The answer to `initialize`: left alone when it advertises usage, else with the capability added.
-    fn initialized(value: &mut Value, id: String) -> Seen {
+    fn initialized(value: &mut Value, id: String, reported: bool) -> Seen {
         let Some(result) = value.get_mut("result").and_then(Value::as_object_mut) else {
             return Seen {
                 rewritten: None,
@@ -441,7 +571,12 @@ impl Splice {
             let meta = capabilities.entry("_meta").or_insert_with(|| json!({}));
             meta.as_object_mut()?.insert(
                 USAGE_CAPABILITY.to_owned(),
-                json!({"version": USAGE_VERSION, "sources": ["inferred"], "spend": false}),
+                if reported {
+                    json!({"version": USAGE_VERSION, "sources": ["reported", "inferred"], "spend": false,
+                        "needs_session": true})
+                } else {
+                    json!({"version": USAGE_VERSION, "sources": ["inferred"], "spend": false})
+                },
             );
             Some(())
         });
@@ -485,10 +620,24 @@ impl Splice {
                     }
                 }
             }
+            Event::Opened { id, ok, models } => {
+                conn.opens.remove(&id);
+                if ok {
+                    conn.opened = true;
+                    drop(conn);
+                    if let Some(reading) = &self.reading {
+                        reading.opened(models);
+                    }
+                }
+            }
             Event::Ended { id, outcome } => {
                 let session = conn.prompts.remove(&id);
                 let said = session.and_then(|session| conn.said.remove(&session));
+                let opened = conn.opened;
                 drop(conn);
+                if opened && let Some(reading) = &self.reading {
+                    reading.prompted();
+                }
                 match outcome {
                     Outcome::Failed(text) => self.inference.observe(&text, now),
                     Outcome::Refused => said.is_some_and(|said| self.inference.observe(&said, now)),
@@ -539,14 +688,52 @@ impl Splice {
         if let Some(event) = seen.event {
             self.commit(event);
         }
-        // A notice that does not go now is owed still, since the client's last-told revision did not move.
+        self.notify_if_owed(&send);
+        Ok(())
+    }
+
+    /// Delivers what a reading left for the client: the answers to its usage requests, then a notice if one is owed. Called
+    /// when the connection has a moment, since a reading ends on a thread that cannot write to the client. What does not go
+    /// now stays for the next call.
+    pub(crate) fn tick(&self, send: impl Fn(&[u8]) -> Result<(), Failure>) {
+        if !self.inference.active() {
+            return;
+        }
+        let mut answers = self.link.take().into_iter();
+        let mut unsent = Vec::new();
+        for answer in answers.by_ref() {
+            if send(&answer).is_err() {
+                unsent.push(answer);
+                break;
+            }
+        }
+        unsent.extend(answers);
+        if !unsent.is_empty() {
+            self.link.restore(unsent);
+            return;
+        }
+        self.notify_if_owed(&send);
+    }
+
+    /// Sends the notice the client is owed, if any. One that does not go is owed still, since the client's last-told
+    /// revision did not move.
+    fn notify_if_owed(&self, send: &impl Fn(&[u8]) -> Result<(), Failure>) {
         if let Some(notice) = self.notice(unix_now())
             && send(&notice.bytes).is_ok()
         {
             lock(&self.conn).told = notice.revision;
         }
-        Ok(())
     }
+}
+
+/// The answer to the usage request `id`: `report` as the result, or an error when it cannot be written.
+fn answer_of(report: &UsageReport, id: &Value) -> Option<Vec<u8>> {
+    let answer = match serde_json::to_value(report) {
+        Ok(report) => json!({"jsonrpc": "2.0", "id": id, "result": report}),
+        Err(_) => json!({"jsonrpc": "2.0", "id": id,
+            "error": {"code": INTERNAL_ERROR, "message": "the report could not be written"}}),
+    };
+    serde_json::to_vec(&answer).ok()
 }
 
 /// How an agent's answer to a prompt ended.

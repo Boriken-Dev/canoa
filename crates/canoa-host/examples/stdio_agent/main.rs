@@ -1,7 +1,7 @@
 //! A small ACP agent on its standard streams, the stdio entry the host's tests serve. It echoes prompts; a prompt starting
 //! `ask` first asks the client's permission and answers with the option chosen. It answers `session/new` with the
 //! parameters it received, and `_fixture/received` with every method it has seen, so a test can tell what reached it.
-//! `_fixture/pid` answers its process id. With `--scripted` it is the app's scripted coding agent instead (scripted.rs). With `CANOA_TEST_AGENT_STAYS` set it stays a minute after its input closes, as an
+//! `_fixture/pid` answers its process id. With `--agy FIXTURE` it plays Antigravity's usage surface (agy.rs). With `--scripted` it is the app's scripted coding agent instead (scripted.rs). With `CANOA_TEST_AGENT_STAYS` set it stays a minute after its input closes, as an
 //! agent that ignores its input would, so a test sees whether something else ends it.
 #![allow(
     clippy::std_instead_of_core,
@@ -9,6 +9,7 @@
     reason = "an example names what it uses from std"
 )]
 
+mod agy;
 mod scripted;
 
 use std::collections::BTreeMap;
@@ -18,6 +19,10 @@ use serde_json::{Value, json};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--agy") {
+        agy::run(&args);
+        return;
+    }
     if args.iter().any(|arg| arg == "--scripted") {
         scripted::run(&args);
         return;

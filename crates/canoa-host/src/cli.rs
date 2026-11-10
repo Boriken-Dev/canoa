@@ -625,7 +625,8 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     let mut options = ServeOptions::new(program.path)
         .with_program_args(program.args)
         .with_rekey(!args.no_rekey)
-        .with_nothing_to_serve(args.allow_empty);
+        .with_nothing_to_serve(args.allow_empty)
+        .with_state_dir(home.dir());
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);
     }
