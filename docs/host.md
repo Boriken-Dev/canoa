@@ -26,6 +26,11 @@ listen = "127.0.0.1:7801"
 working_roots = ["/home/me/src"]
 worktrees = true                  # a git worktree per session, inside working_roots; see Worktrees
 
+[host.agents.agy]
+program = "agy"
+args = ["acp"]
+usage = "antigravity"             # read agy's quota for the usage control; see Usage in the app's guide
+
 [host.providers.echo]
 library = "echo_provider.dll"
 provider = "echo_provider"
