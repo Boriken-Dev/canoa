@@ -238,3 +238,52 @@ fn a_name_that_is_taken_stops_the_host_before_it_serves() {
     let said = String::from_utf8_lossy(&second.stderr);
     assert!(said.contains("fixture"), "the entry is named: {said}");
 }
+
+/// The cache variables Claude Code's stand-in was started with for a session over a pipe whose client asked for `lifetime`.
+fn cache_ttl_over_a_pipe(lifetime: &str) -> serde_json::Value {
+    const TTL: &str = "CLAUDE_CODE_PROMPT_CACHE_TTL";
+    let scratch = Scratch::new();
+    let claude = scratch
+        .0
+        .join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example("harness_standin", false), &claude).expect("the stand-in is copied");
+    let record = scratch.0.join("record.jsonl");
+    let listen = listen_in(&scratch);
+    let config = format!(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\nlisten = {}\n",
+        quoted(&claude.to_string_lossy()),
+        quoted(&listen)
+    );
+    let env = vec![
+        ("STANDIN_RECORD", record.clone().into_os_string()),
+        ("STANDIN_ENV", std::ffi::OsString::from(TTL)),
+    ];
+    let host = Host::start_in(scratch, &config, 1, &env);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_pipe_link(&listen, &client, host.peer, |rpc| {
+        let meta = json!({canoa_host::CACHE_META: {"lifetime": lifetime}});
+        rpc.request(
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": meta}),
+        )?;
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))?;
+        Ok::<(), Value>(())
+    })
+    .expect("a paired key is served")
+    .expect("the session opens");
+    let first = std::fs::read_to_string(&record)
+        .unwrap_or_default()
+        .lines()
+        .next()
+        .map(|line| serde_json::from_str::<Value>(line).expect("one JSON line"))
+        .expect("the stand-in started");
+    first["env"][TTL].clone()
+}
+
+#[test]
+fn a_session_over_a_pipe_carries_the_cache_lifetime_its_client_chose() {
+    assert_eq!(cache_ttl_over_a_pipe("short"), json!("5m"));
+    assert_eq!(cache_ttl_over_a_pipe("long"), json!("1h"));
+}

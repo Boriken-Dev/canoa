@@ -15,6 +15,7 @@ import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/acp/pipe_channel.dart';
 import 'package:canoa/auth/peer_proof.dart';
+import 'package:canoa/chat/cache_lifetime.dart';
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:coqui_web/coqui_web.dart';
@@ -30,7 +31,7 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
 
 /// `canoa serve` with a scripted agent on a pipe, and another with a working root, in a directory of its own.
 final class PipedHost {
-  PipedHost._(this.process, this.dir, this.listen, this.peer, this.method, this.url, this.treesUrl);
+  PipedHost._(this.process, this.dir, this.listen, this.peer, this.method, this.url, this.treesUrl, this.claudeUrl);
 
   final Process process;
   final Directory dir;
@@ -46,11 +47,17 @@ final class PipedHost {
   /// The url of the entry that has a working root.
   final String treesUrl;
 
+  /// The url of a Claude Code entry served by a stand-in that records what it was started with.
+  final String claudeUrl;
+
   static Future<PipedHost> start() async {
     final dir = await Directory.systemTemp.createTemp('canoa-pipe-test');
     // A pipe's name is global on Windows; a socket's path is under the test's directory on Unix.
     final unique = '$pid-${Random().nextInt(1 << 30)}';
     final listen = Platform.isWindows ? 'pipe:canoa-dart-test-$unique' : 'unix:${dir.path}/host.sock';
+    final claudeListen = Platform.isWindows ? 'pipe:canoa-dart-claude-$unique' : 'unix:${dir.path}/claude.sock';
+    final standin = File('${dir.path}/claude${Platform.isWindows ? '.exe' : ''}');
+    await File(exampleBinary('harness_standin')!).copy(standin.path);
     final treesListen = Platform.isWindows ? 'pipe:canoa-dart-trees-$unique' : 'unix:${dir.path}/trees.sock';
     final config = File('${dir.path}/canoa.cfg');
     await config.writeAsString('''
@@ -63,16 +70,25 @@ listen = ${jsonEncode(listen)}
 program = ${jsonEncode(exampleBinary('stdio_agent'))}
 listen = ${jsonEncode(treesListen)}
 working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
+
+[host.agents.Claude]
+harness = "claude"
+executable = ${jsonEncode(standin.path)}
+listen = ${jsonEncode(claudeListen)}
 ''');
     final process = await Process.start(
       _hostBinary!,
       ['serve', '--config', config.path],
-      environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
+      environment: {
+        'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home',
+        'STANDIN_RECORD': '${dir.path}/record.jsonl',
+        'STANDIN_ENV': 'CLAUDE_CODE_PROMPT_CACHE_TTL',
+      },
     );
     process.stderr.transform(utf8.decoder).listen(stderr.write);
     final lines = process.stdout.transform(utf8.decoder).transform(const LineSplitter());
     final urls = <String, Map<String, dynamic>>{};
-    await for (final line in lines.take(2).timeout(const Duration(seconds: 30))) {
+    await for (final line in lines.take(3).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry;
     }
@@ -85,6 +101,7 @@ working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
       PeerMethod.parse(scripted['method'] as String),
       scripted['url'] as String,
       urls['trees']!['url'] as String,
+      urls['Claude']!['url'] as String,
     );
   }
 
@@ -185,6 +202,25 @@ void main() {
         reason: 'the host directory is outside the root');
     expect((await worktrees.remove(made)).branchKept, isFalse);
   }, skip: skip ?? (Process.runSync('git', ['--version']).exitCode == 0 ? null : 'no git on PATH'));
+  test('a session over the pipe carries the cache lifetime the app asked for', () async {
+    for (final (lifetime, ttl) in [(CacheLifetime.short, '5m'), (CacheLifetime.long, '1h')]) {
+      final record = File('${host.dir.path}/record.jsonl');
+      if (record.existsSync()) record.deleteSync();
+      final client = await connectVerifiedAcpOverPipe(
+        host.claudeUrl,
+        expectedPeerId: host.peer,
+        verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: host.method),
+        initializeMeta: {cacheLifetimeMeta: cacheLifetimeRequest(lifetime, chosen: true)},
+      );
+      try {
+        await client.openSession(cwd: host.dir.path);
+      } finally {
+        await client.close();
+      }
+      final started = jsonDecode(record.readAsLinesSync().first) as Map<String, dynamic>;
+      expect((started['env'] as Map)['CLAUDE_CODE_PROMPT_CACHE_TTL'], ttl, reason: '$lifetime');
+    }
+  }, skip: skip ?? exampleMissing('harness_standin'));
   test('a host that does not hold the pinned key is refused before any message', () async {
     final other = 'sha256:${'ab' * 32}';
     await expectLater(connect(expected: other), throwsA(anything));
