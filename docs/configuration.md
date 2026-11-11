@@ -283,6 +283,43 @@ SVG), shows only after its size (512 KiB) and the dimensions its header gives (1
 decoded; otherwise a placeholder shows. Those limits are the `[store]` settings below. An icon is shown as the still
 pixels of its first frame.
 
+#### Skills from elsewhere
+
+An overlay's `skills` may name a skill it does not bundle (the specification's
+[skills](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/skills.md)): by a table with a `source`
+(and an optional `ref` and `pin`), or by a bare name that your catalogs' `[skills]` tables resolve. The desktop app
+installs them with the overlay:
+
+- **The review names them first.** An overlay's page in the store, and **Install…** and **Check for changes…** in
+  Settings → Profiles, list each skill with its source (no user information, no query), its pin or that it has none,
+  the catalog that gave the source, and what installing does: fetched, fetched again because the source or pin changed
+  from the one you accepted, or kept. A name no catalog offers is **missing** and one two catalogs offer is
+  **ambiguous**: both are reported with the overlay naming them, Canoa never picks one, and the overlay applies
+  without them. Nothing of a skill is fetched until you apply, and the one yes covers the overlay and its skills.
+- **A skill is fetched like an overlay**, from git objects at its ref (its `HEAD` with none), never checked out, with a
+  Git that gets none of your credential helpers, SSH agent, askpass programs or settings and follows no redirect to
+  another host. Its files are digested before any is read and must match the pin; its `SKILL.md` must begin with YAML
+  front matter whose `name` is the entry's. A skill with no pin is fetched and reported `unpinned`. A skill whose
+  front matter holds a key other than `name`, `description`, `license`, `compatibility` and `metadata` is reported with
+  that key, since a harness may take it as a grant. A pin that does not match refuses that skill only: nothing of it
+  is kept, and the overlay still installs. A link or submodule in it refuses it. It holds at most 1024 files and 16 MiB.
+  Nothing in it runs, and nothing it names (a manifest inside it, a dependency file) is fetched or installed.
+- **Where it is kept.** `overlays/.skills/NAME/` holds the files its digest covers and `overlays/.skills/NAME.json`
+  records the source, the ref, the pin, the digest fetched, the catalog, the overlays naming it and whether you chose
+  it, under the skill's name in lower case. A later check that resolves to another source or pin is an update, shown
+  as one, never applied because a catalog changed; a skill another overlay already has from another source is refused,
+  the first to install it keeping the name.
+- **It is delivered like a bundled skill**, to the agents that take one, after the same checks: the record must list
+  the overlay and the files must still have the recorded digest. A skill that fails them, or was never fetched, is
+  listed in **Settings → Profiles** as not applied (`skills.NAME: from SOURCE, not fetched: install or sync the overlay in
+  Canoa`, or `a named skill; no catalog resolved it here: install or sync the overlay in Canoa`), never silently missing.
+- **The store's Skills section** lists each skill here with the overlays that name it (or that you chose it) and its
+  source and pin, and the skills your catalogs offer, each installable by your own choice after the same review.
+- **Removal.** Removing an overlay offers to remove the skills that only it named; a skill another overlay names stays,
+  and one you chose is never offered. Declining leaves it listed as named by no overlay, to remove there.
+
+`canoa` itself fetches nothing: it delivers a skill the app fetched, after the same checks, and reports the others.
+
 ### The overlay store
 
 **Store…** in Settings → Profiles lists the overlays of the catalogs `[catalogs]` names, to search, read about and
