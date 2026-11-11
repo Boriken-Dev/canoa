@@ -490,7 +490,9 @@ That decides who can reach the entry, not who is let in: only a paired key is. A
 Windows, so a client that connects before any host listens would reach whoever listens first, and only the key proof tells
 it from your host; pin the host's id as for an address. The web app never lists a pipe entry in `/canoa.json` or lets the
 page connect to one, since a browser cannot reach it. `canoa check` prints the entry and refuses a name the system cannot
-use, and a `unix:` path is refused on Windows. A native client in Rust dials with `canoa_host::pipe::PipeChannel::connect`.
+use, and a `unix:` path is refused on Windows.
+
+The app dials such an entry when the host it runs lists one (`app/lib/acp/pipe_channel.dart`: on Windows a pipe opened for overlapped I/O through `dart:ffi`, on Unix a socket from `dart:io`), proving the same pinned key, and so can a Rust client with `canoa_host::pipe::PipeChannel::connect`.
 ## What the host allows
 
 - **Loopback by default.** An entry listens on loopback unless its `listen` names another address, which `serve` logs as

@@ -241,7 +241,7 @@ pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it;
 ## A pipe or Unix socket (`canoa_host::pipe`)
 
 ```rust
-pub use coqui_transport_pipe::{Error, Listener, PipeName};
+pub use coqui_transport_pipe::{Error, Listener, PipeName, Stream};
 #[derive(Debug)] pub struct PipeChannel;   // Send, Sync; coqui_web_channel::Channel
 impl PipeChannel {
     pub fn new(stream: coqui_transport_pipe::Stream, max_message: usize) -> PipeChannel   // a connected stream
