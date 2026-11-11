@@ -1,7 +1,7 @@
 // A real turn with a real agent, which spends its subscription, so it runs only when asked. It writes one file in a temporary
 // directory, with the permission answered through the app's own store, and prints the shape of what the agent sent, never its text.
-// CANOA_TEST_REAL_TURN names the preset; Claude and Codex run through CANOA_HOST, a built canoa, in a test, and take
-// CANOA_TEST_REAL_MODEL and CANOA_TEST_REAL_EFFORT as their first model and effort.
+// CANOA_TEST_REAL_TURN names the host's own source (Claude, Codex, ...), reached over a link into the host library
+// (CANOA_TEST_LIBRARY, with CANOA_TEST_HOST a built canoa), as the app reaches it.
 @TestOn('vm')
 library;
 
@@ -9,10 +9,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:canoa/acp/agent_commands.dart';
-import 'package:canoa/acp/local_agent.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/embedded_host.dart';
 
 String _shape(Object? value, [int depth = 0]) => switch (value) {
   final Map<dynamic, dynamic> map when depth < 4 =>
@@ -50,32 +50,17 @@ List<String> _workingIn(Directory dir) {
 String _said(ChatSession session) =>
     session.messages.where((message) => message.role == MessageRole.agent).map((message) => message.text).join(' ').toLowerCase();
 
-/// The preset [label], with the model and effort the environment names for a host's own command.
-AgentCommand _preset(String? label) {
-  final preset = agentPresets.firstWhere((preset) => preset.label == label);
-  if (!preset.hosts) return preset;
-  final model = Platform.environment['CANOA_TEST_REAL_MODEL'];
-  final effort = Platform.environment['CANOA_TEST_REAL_EFFORT'];
-  return AgentCommand(
-    label: preset.label,
-    program: preset.program,
-    args: [...preset.args, if (model != null) ...['--model', model], if (effort != null) ...['--effort', effort]],
-    requires: preset.requires,
-    programPaths: preset.programPaths,
-    hosts: true,
-  );
-}
-
 void main() {
   final real = Platform.environment['CANOA_TEST_REAL_TURN'];
   // Two short turns, and a third program that opens the conversation again. Prints whether each thing held, never what was said.
   test('a real agent reads what is attached, and a later program can open that conversation again', () async {
-    final command = _preset(real);
+    final host = await EmbeddedHost.start();
+    addTearDown(host.stop);
     final dir = Directory.systemTemp.createTempSync('canoa-earlier-');
     final store = SessionStore(includePreview: false);
-    final first = await startLocalAgent(command, decider: store.askPermission, workingDirectory: dir.path);
+    final first = await host.agent(real!, decider: store.askPermission);
     final remote = await first.createSession(cwd: dir.path);
-    final session = store.addProviderSession(title: 'T', agent: command.label, peerId: first.peerId, remoteSessionId: remote, cwd: dir.path);
+    final session = store.addProviderSession(title: 'T', agent: real, peerId: first.peerId, remoteSessionId: remote, cwd: dir.path);
     store.attachVerifiedClient(session.id, first);
     store.select(session.id);
     expect(store.canAttach(session), isTrue);
@@ -94,9 +79,9 @@ void main() {
     await first.close();
 
     final later = SessionStore(includePreview: false);
-    final second = await startLocalAgent(command, decider: later.askPermission, workingDirectory: dir.path);
+    final second = await host.agent(real, decider: later.askPermission);
     final other = await second.createSession(cwd: dir.path);
-    final here = later.addProviderSession(title: 'New', agent: command.label, peerId: second.peerId, remoteSessionId: other, cwd: dir.path);
+    final here = later.addProviderSession(title: 'New', agent: real, peerId: second.peerId, remoteSessionId: other, cwd: dir.path);
     later.attachVerifiedClient(here.id, second);
     later.select(here.id);
     final page = await later.earlierSessions(here);
@@ -128,16 +113,17 @@ void main() {
   }, skip: real == null ? 'set CANOA_TEST_REAL_TURN' : false, timeout: const Timeout(Duration(minutes: 12)));
 
   test('a real agent asks, is answered, and does it', () async {
-    final command = _preset(real);
+    final host = await EmbeddedHost.start();
+    addTearDown(host.stop);
     final dir = Directory.systemTemp.createTempSync('canoa-turn-');
     final settings = File('${dir.path}${Platform.pathSeparator}.claude${Platform.pathSeparator}settings.json');
     settings.parent.createSync();
     settings.writeAsStringSync('{"permissions": {"ask": ["Write", "Edit", "Bash", "PowerShell"]}}');
     final allow = Platform.environment['CANOA_TEST_REAL_TURN_ANSWER'] != 'refuse';
     final store = SessionStore(includePreview: false);
-    final client = await startLocalAgent(command, decider: store.askPermission, workingDirectory: dir.path);
+    final client = await host.agent(real!, decider: store.askPermission);
     final remote = await client.createSession(cwd: dir.path);
-    final session = store.addProviderSession(title: 'T', agent: command.label, peerId: client.peerId, remoteSessionId: remote);
+    final session = store.addProviderSession(title: 'T', agent: real, peerId: client.peerId, remoteSessionId: remote);
     store.attachVerifiedClient(session.id, client);
     store.select(session.id);
     final seen = <String, Set<String>>{};

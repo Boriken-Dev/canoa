@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
+import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/chat/agent_events.dart' show ConfigOption, parseConfigOptions;
 
 final class OptionsAgent {
@@ -23,7 +24,7 @@ final class OptionsAgent {
   final requests = <Map<String, dynamic>>[];
 
   /// The commands it was started as.
-  final starts = <AgentCommand>[];
+  final starts = <Object>[];
   final clients = <VerifiedAgent>[];
 
   String model = 'default', effort = 'low', mode;
@@ -143,10 +144,29 @@ final class OptionsAgent {
     if (_held.isNotEmpty) _held.removeAt(0)();
   }
 
+  /// Started as a process would be, for the sources the app still starts itself.
   Future<VerifiedAgent> start(AgentCommand command, {AgentDecider? decider, AgentElicitor? elicitor, String? workingDirectory,
       Map<String, String> environment = const {}}) async {
     starts.add(command);
     if (failStart != null) throw AcpFailure(failStart!);
+    final wire = _wire();
+    final client = VerifiedAgent.fromChild(
+      label: command.label, messages: wire.messages, decider: decider, elicitor: elicitor, close: wire.close, send: wire.send,
+    );
+    clients.add(client);
+    await client.initialize();
+    return client;
+  }
+
+  /// Reached as a source of the host is, over a link: what the app is given in place of the library's.
+  HostLink openLink(String name) {
+    starts.add(name);
+    if (failStart != null) throw StateError(failStart!);
+    final wire = _wire();
+    return _WireLink(wire.messages, wire.send, wire.close);
+  }
+
+  ({Stream<String> messages, Future<void> Function(String) send, Future<void> Function() close}) _wire() {
     final incoming = StreamController<String>();
     void reply(Object? id, Object? result) => incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': result}));
     void update(String session, Map<String, Object?> body) => incoming.add(jsonEncode({
@@ -154,12 +174,8 @@ final class OptionsAgent {
     }));
     _asks.add((message) => incoming.add(jsonEncode(message)));
     _ends.add(() => incoming.close());
-    late final VerifiedAgent client;
-    client = VerifiedAgent.fromChild(
-      label: command.label,
+    return (
       messages: incoming.stream,
-      decider: decider,
-      elicitor: elicitor,
       close: () async => incoming.close(),
       send: (line) async {
         final message = jsonDecode(line) as Map<String, dynamic>;
@@ -241,10 +257,22 @@ final class OptionsAgent {
         }
       },
     );
-    clients.add(client);
-    await client.initialize();
-    return client;
   }
+}
+
+final class _WireLink implements HostLink {
+  _WireLink(this.messages, this._send, this._close);
+
+  @override
+  final Stream<String> messages;
+  final Future<void> Function(String) _send;
+  final Future<void> Function() _close;
+
+  @override
+  Future<void> send(String message) => _send(message);
+
+  @override
+  Future<void> close() => _close();
 }
 
 /// What [OptionsAgent] offers at the start, as the app reads it.

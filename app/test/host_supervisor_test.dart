@@ -121,7 +121,7 @@ void main() {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
     await supervisor.apply(configPath: '/c/canoa.cfg');
-    expect(tool.started.single, ['serve', '--config', '/c/canoa.cfg', '--allow-empty', '--until-stdin-closes']);
+    expect(tool.started.single, ['serve', '--config', '/c/canoa.cfg', '--allow-empty', '--local-sources', '--until-stdin-closes']);
     expect(supervisor.phase, HostPhase.starting);
     tool.children.single.out.add(_line);
     expect(supervisor.phase, HostPhase.running);

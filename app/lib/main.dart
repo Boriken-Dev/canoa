@@ -263,8 +263,8 @@ class _CanoaAppState extends State<CanoaApp> {
               ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
               : null,
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
-          presets: canRunLocalAgents ? agentPresets : const [],
-          hosted: [for (final source in _hostedSources) source.hostEntry!],
+          presets: [for (final source in _hostedSources) if (source.local) source],
+          hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
           checkSource: _check,
           openSources: sources,
         ),
@@ -306,8 +306,11 @@ class _CanoaAppState extends State<CanoaApp> {
       context: above,
       builder: (_) => ProfilesDialog(
         config: config,
-        agents: {for (final agent in [...agentPresets, ...config.agents]) agent.label, ...config.agentProfiles.keys}
-            .toList(),
+        agents: {
+          for (final source in _hostedSources) if (source.local) source.label,
+          for (final agent in config.agents) agent.label,
+          ...config.agentProfiles.keys,
+        }.toList(),
         home: platformProfileHome(configPath: _configPath),
         onPin: (name, digest) async {
           final changed = config.withOverlayPin(name, digest);
@@ -542,28 +545,29 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The agent entries the canoa this app runs is serving now, as it lists them.
   List<AgentSource> get _hostedSources => hostedSources(widget.host?.listening ?? const []);
 
-  /// The sources Settings has: the presets it does not hide, canoa.cfg's `[agents.NAME]` commands, and the agent entries of
-  /// the canoa this app runs.
+  /// The sources Settings has: the host's own that it does not hide, canoa.cfg's `[agents.NAME]` commands, and the other agent
+  /// entries of the canoa this app runs.
   List<AgentSource> get _sources => [
-    for (final preset in agentPresets)
-      if (!config.hiddenSources.contains(preset.label)) AgentSource.preset(preset),
+    for (final source in _hostedSources)
+      if (source.local && !config.hiddenSources.contains(source.label)) source,
     for (final command in config.agents) AgentSource.command(command),
-    ..._hostedSources,
+    for (final source in _hostedSources)
+      if (!source.local) source,
   ];
 
   /// What each source needs and whether it is here, as last checked.
   Map<AgentSource, SourceCheck> _checks = const {};
 
   Future<SourceCheck> _check(AgentSource source) async {
-    if (widget.checkSource case final check?) return check(source);
+    if (source.command != null && widget.checkSource != null) return widget.checkSource!(source);
     if (source.command case final command?) {
       return checkCommand(command, (program) => findProgram(program, searchDirs: program == command.program ? command.searchDirs : const []));
     }
-    final host = widget.host;
-    final serving = host?.listening.any((listening) => listening.name == source.hostEntry) ?? false;
-    return serving
-        ? const SourceCheck()
-        : SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
+    final listening = widget.host?.listening.where((listening) => listening.name == source.hostEntry).firstOrNull;
+    if (listening == null) {
+      return SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
+    }
+    return SourceCheck(missing: listening.missing);
   }
 
   /// What `canoa options` says of [source]: the models and efforts its provider lists with no session. A preset the host runs
@@ -572,10 +576,12 @@ class _CanoaAppState extends State<CanoaApp> {
     if (widget.askChoices case final ask?) return ask(source);
     final tool = widget.host?.tool;
     if (tool == null) return null;
-    final command = source.command;
     final List<String> args;
-    if (command != null && source.kind == SourceKind.preset && command.hosts && command.args.length > 1) {
-      args = ['options', command.args[1], '--format', 'json'];
+    if (source.local) {
+      // Only a harness lists its models before it starts.
+      final harness = source.harness;
+      if (harness == null) return null;
+      args = ['options', harness, '--format', 'json'];
     } else if (source.hostEntry != null && _configPath != null) {
       args = ['options', source.hostEntry!, '--entry', '--config', _configPath!, '--format', 'json'];
     } else {
@@ -756,7 +762,7 @@ class _CanoaAppState extends State<CanoaApp> {
       final Set<String> on;
       (prepared, on, notes) = await _prepareProfile(command.label, where, home, overlays: _overlaysFor(draft));
       started = await startProfiled(
-        command.withCacheLifetime(store.cacheLifetimeOf(draft).lifetime),
+        command,
         cwd: where, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
         decider: store.askPermission, elicitor: store.askQuestion, start: widget.startAgent ?? startLocalAgent,
       );
@@ -783,6 +789,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
+    if (listening.local) return _startViaLink(draft, name, folder, worktree, starting);
     final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
     if (method == null) throw StateError('canoa did not say which method it proves by');
     final endpoint = Uri.parse(listening.url);
@@ -827,6 +834,57 @@ class _CanoaAppState extends State<CanoaApp> {
     if (_hasProfiles) store.noteNoProfile(draft);
   }
 
+  /// The agent behind the host's own source [name], reached through the in-process link and ready to open a session.
+  Future<VerifiedAgent> _linkAgent(String name, Map<String, Object?> initializeMeta) async {
+    final host = widget.host;
+    if (host == null) throw StateError('This build has no host of its own to start $name');
+    final HostLink link;
+    try {
+      link = host.openLink(name);
+    } on HostCommandFailed catch (error) {
+      throw StateError('$error');
+    }
+    final client = VerifiedAgent.fromChild(
+      label: name, messages: link.messages, send: link.send, close: link.close,
+      decider: store.askPermission, elicitor: store.askQuestion, initializeMeta: initializeMeta,
+    );
+    try {
+      await client.initialize();
+      return client;
+    } on Object {
+      await client.close();
+      rethrow;
+    }
+  }
+
+  /// Starts a session on one of the host's own sources, over the in-process link: no address and no proof, since the host
+  /// is in this process.
+  Future<void> _startViaLink(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
+    final worktrees = worktree ? (widget.worktrees ?? localWorktrees)() : null;
+    if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
+    final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(name));
+    starting
+      ..worktrees = worktrees
+      ..made = made;
+    if (_quitting) throw StateError('Canoa is quitting');
+    final where = made?.path ?? folder;
+    VerifiedAgent? client;
+    try {
+      client = await _linkAgent(name, _cacheMeta(store.cacheLifetimeOf(draft)));
+      starting.client = client;
+      if (_quitting) throw StateError('Canoa is quitting');
+      final opened = await client.openSession(cwd: where);
+      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      store.bindDraft(draft, client, opened, cwd: where, worktree: made);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client?.close();
+      if (made != null) await _unmake(worktrees!, made);
+      rethrow;
+    }
+    if (_hasProfiles) store.noteNoProfile(draft);
+  }
+
   /// Opens a session from the list again: its agent is started or reached again, then asked to open it.
   Future<void> _reopen(LedgerEntry entry) async {
     for (final session in store.sessions) {
@@ -843,8 +901,13 @@ class _CanoaAppState extends State<CanoaApp> {
     PreparedProfile? prepared;
     var notes = const <LayerNote>[];
     switch (entry.place) {
+      case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entry.entry):
+        client = await _linkAgent(entry.entry, _cacheMeta((
+          lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
+          chosen: entry.cacheLifetime != null,
+        )));
       case SessionPlace.local:
-        final command = [...agentPresets, ...config.agents].where((agent) => agent.label == entry.entry).firstOrNull;
+        final command = config.agents.where((agent) => agent.label == entry.entry).firstOrNull;
         if (command == null) throw StateError('No agent named ${entry.entry} is set up here now');
         if (!canRunLocalAgents) throw StateError('This build cannot run agents on this computer');
         final cwd = entry.cwd;
@@ -853,7 +916,7 @@ class _CanoaAppState extends State<CanoaApp> {
         final Set<String> on;
         (prepared, on, notes) = await _prepareProfile(command.label, cwd, home);
         started = await startProfiled(
-          command.withCacheLifetime(CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat),
+          command,
           cwd: cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
           decider: store.askPermission, elicitor: store.askQuestion,
         );

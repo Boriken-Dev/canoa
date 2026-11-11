@@ -1,7 +1,6 @@
 // A preset's program is found on PATH, else in the directory its installer uses.
 import 'dart:io';
 
-import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/local_agent_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,14 +23,5 @@ void main() {
     final file = File('${dir.path}/$name${Platform.isWindows ? '.exe' : ''}')..writeAsBytesSync(const [0]);
     expect(await findProgram(name, searchDirs: ['~/canoa-install-probe']), file.path);
     expect(await findProgram(name, searchDirs: ['%CANOA_NOT_SET_VARIABLE%/x']), isNull);
-  });
-
-  test('the Antigravity and Grok presets name where their installers put them', () {
-    final byLabel = {for (final preset in agentPresets) preset.label: preset};
-    expect(byLabel.containsKey('Gemini'), isFalse);
-    expect([byLabel['Antigravity']!.program, ...byLabel['Antigravity']!.args], ['agy', 'acp']);
-    expect(byLabel['Antigravity']!.searchDirs, ['%LOCALAPPDATA%/agy/bin']);
-    expect([byLabel['Grok']!.program, ...byLabel['Grok']!.args], ['grok', 'agent', 'stdio']);
-    expect(byLabel['Grok']!.searchDirs, ['~/.grok/bin']);
   });
 }

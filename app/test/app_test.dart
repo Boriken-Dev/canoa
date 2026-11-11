@@ -111,7 +111,6 @@ void main() {
       expect(usageFor(parseCommand(r'"C:\Users\me\AppData\Local\agy\bin\agy.exe" acp')!), 'antigravity');
       expect(usageFor(parseCommand('agy chat')!), isNull);
       expect(usageFor(parseCommand('my-agent --acp')!), isNull);
-      expect(usageFor(agentPresets.firstWhere((preset) => preset.label == 'Antigravity')), 'antigravity');
     });
 
     test('is refused when it is not one', () {
@@ -207,7 +206,9 @@ void main() {
     final config = CanoaConfig.parse('[profile]\neffort = "high"\n[agents.Mine.profile]\nmodel = "m"\n');
     await tester.pumpWidget(CanoaApp(
       store: SessionStore(includePreview: false), config: config, configPath: '${dir.path}/canoa.cfg',
+      host: linkedHost((name) => throw StateError(name)),
     ));
+    await tester.pump();
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('settings-profiles')));

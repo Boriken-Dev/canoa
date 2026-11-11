@@ -1,7 +1,7 @@
-// Claude and Codex with no Node anywhere on PATH: the app offers both presets, and a session of each runs through the host
-// this app carries (`CanoaUI --canoa-child agent claude|codex`), its permission asked in the conversation and answered there,
-// with a profile's context and skill applied. The tools are crates/canoa-host's harness stand-in, copied as `claude` and
-// `codex` into a directory first on PATH, so no model is reached and nothing is spent.
+// Claude and Codex with no Node anywhere on PATH: the host this app carries serves both as its own sources, and a session of
+// each runs over the in-process link, its permission asked in the conversation and answered there. The tools are
+// crates/canoa-host's harness stand-in, copied as `claude` and `codex` into a directory first on PATH, so no model is reached
+// and nothing is spent.
 //
 //   CANOA_TEST_STANDIN_BIN=<dir holding claude(.exe) and codex(.exe)> STANDIN_RECORD=<file> PATH=<that dir>:$PATH \
 //     flutter test integration_test/native_agents_test.dart -d windows   (or -d linux)
@@ -13,6 +13,9 @@ import 'dart:io';
 import 'package:canoa/acp/local_agent.dart';
 import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/desktop/host_supervisor.dart';
+import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa_native/canoa_native.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
@@ -22,8 +25,6 @@ import 'package:integration_test/integration_test.dart';
 
 final String? _bin = Platform.environment['CANOA_TEST_STANDIN_BIN'];
 final String? _record = Platform.environment['STANDIN_RECORD'];
-
-String _slash(String path) => path.replaceAll(r'\', '/');
 
 List<Map<String, dynamic>> _records() {
   final file = File(_record!);
@@ -49,14 +50,12 @@ void main() {
     File('${dir.path}/skill/SKILL.md')
       ..parent.createSync()
       ..writeAsStringSync('---\nname: canoa-marker\ndescription: A stand-in skill.\n---\nNothing to do.\n');
-    final config = CanoaConfig.parse('''
-[profile]
-context = { text = "Context from the person's profile." }
-[profile.skills.canoa-marker]
-path = "${_slash(dir.path)}/skill"
-''');
     final store = SessionStore(includePreview: false, ledger: SessionLedger(MemoryLedgerBackend()));
-    await tester.pumpWidget(CanoaApp(store: store, config: config, pickFolder: () async => work.path));
+    final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg')..writeAsStringSync('');
+    final host = HostSupervisor(LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home'));
+    await host.apply(configPath: cfg.path);
+    addTearDown(host.stop);
+    await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig(), host: host, pickFolder: () async => work.path));
     await tester.pumpAndSettle();
 
     bool showing(Finder finder) => finder.evaluate().isNotEmpty;
@@ -88,13 +87,6 @@ path = "${_slash(dir.path)}/skill"
       await tester.enterText(composer, text);
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
-      // A profile with context and a skill is shown before its session starts.
-      await until(() => showing(find.byKey(const Key('profile-start'))) || showing(find.byType(PermissionCard)),
-          'the profile or the question', within: const Duration(minutes: 1));
-      if (showing(find.byKey(const Key('profile-start')))) {
-        await tester.tap(find.byKey(const Key('profile-start')));
-        await tester.pump();
-      }
       final allow = find.descendant(
           of: find.byType(PermissionCard),
           matching: find.byWidgetPredicate((widget) => widget is PermissionChoice && widget.option.kind == 'allow_once'));
@@ -110,22 +102,10 @@ path = "${_slash(dir.path)}/skill"
     await turn('Claude', 'write it');
     await turn('Codex', 'run it');
 
-    final records = _records();
-    final claude = records.firstWhere((entry) => entry['harness'] == 'claude');
-    final args = (claude['args'] as List).cast<String>();
-    final codexThread = records.firstWhere((entry) => entry['method'] == 'thread/start');
-    final codexRoots = records.where((entry) => entry['method'] == 'skills/extraRoots/set').toList();
     debugPrint('OFFERED $offered');
-    debugPrint('CLAUDE context ${args.contains("--append-system-prompt=Context from the person's profile.")} '
-        'skills ${claude['plugin_skills']} prompts ${args.contains('--permission-prompt-tool=stdio')}');
-    debugPrint('CODEX context ${jsonEncode(codexThread['params']['developerInstructions']).contains('person')} '
-        'skill roots ${codexRoots.length}');
     expect(offered, {'Claude': true, 'Codex': true}, reason: 'both ready with no Node');
     expect(File('${work.path}/standin.txt').existsSync(), isTrue, reason: 'what was allowed was done');
-    expect(args, contains("--append-system-prompt=Context from the person's profile."));
-    expect(claude['plugin_skills'], ['canoa-marker'], reason: 'the skill reached Claude Code as the canoa-profile plugin');
-    expect(jsonEncode(codexThread['params']['developerInstructions']), contains("Context from the person's profile."));
-    expect(codexRoots, isNotEmpty, reason: 'the skill reached Codex as a skill root');
+    expect(_records().where((entry) => entry['harness'] == 'claude'), isNotEmpty, reason: 'the stand-in claude ran');
 
     final closedAt = DateTime.now();
     while (true) {

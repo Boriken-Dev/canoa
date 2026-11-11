@@ -138,19 +138,10 @@ Future<VerifiedAgent> startLocalAgent(
   String? workingDirectory,
   Map<String, String> environment = const {},
 }) async {
-  environment = {...environment};
-  for (final entry in command.programPaths.entries) {
-    final path = await _find(entry.value);
-    if (path == null) throw AcpFailure('${entry.value} is not installed');
-    environment[entry.key] = path;
-  }
-  var (program, args) = invocation(
-    command,
-    executable: Platform.resolvedExecutable,
-    hostProgram: environmentVariable('CANOA_HOST'),
-  );
+  var program = command.program;
+  final args = command.args;
   // A program its installer left off PATH starts from where it was found.
-  if (!command.hosts && command.searchDirs.isNotEmpty) program = await _find(program, command.searchDirs) ?? program;
+  if (command.searchDirs.isNotEmpty) program = await _find(program, command.searchDirs) ?? program;
   final Process process;
   try {
     process = await Process.start(
@@ -158,8 +149,7 @@ Future<VerifiedAgent> startLocalAgent(
       args,
       workingDirectory: workingDirectory,
       environment: environment,
-      // The host's own command is an executable, which a shell would only have to quote.
-      runInShell: _useShell && !command.hosts,
+      runInShell: _useShell,
     );
   } on ProcessException catch (error) {
     throw AcpFailure('${command.label} could not start: ${error.message}');

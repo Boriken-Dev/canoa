@@ -13,16 +13,9 @@ IconData providerIcon(String? harness) => switch (harness) {
   _ => Icons.dns_outlined,
 };
 
-/// The icon of [source]: its provider's for a hosted entry and for a preset, so a source looks the same hosted or started
-/// here, and the terminal for a command a person wrote.
+/// The icon of [source]: its provider's for a hosted entry, and the terminal for a command a person wrote. A source of the
+/// host's own that runs no harness has the provider its name says (Grok, Pi, Antigravity).
 IconData sourceIcon(AgentSource? source) => switch (source?.kind) {
-  SourceKind.hosted => providerIcon(source?.harness),
-  SourceKind.preset => providerIcon(_presetProvider(source!)),
+  SourceKind.hosted => providerIcon(source?.harness ?? (source!.local ? source.label.toLowerCase() : null)),
   _ => Icons.terminal,
 };
-
-/// The provider id a preset stands for: the harness `canoa agent` serves, else the preset's name in lower case.
-String _presetProvider(AgentSource source) {
-  final command = source.command!;
-  return command.hosts && command.args.length > 1 ? command.args[1] : source.label.toLowerCase();
-}

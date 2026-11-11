@@ -146,8 +146,11 @@ class HostSupervisor extends ChangeNotifier {
   HostPhase _phase = HostPhase.stopped;
   HostPhase get phase => tool == null ? HostPhase.absent : (off ? HostPhase.off : _phase);
 
-  /// What the entries are listening on, while running.
+  /// What the entries are listening on, while running, and the host's own sources, which listen on nothing.
   List<HostListening> get listening => List.unmodifiable(_listening);
+
+  /// The entries a client on the network can reach.
+  List<HostListening> get served => List.unmodifiable(_listening.where((entry) => !entry.local));
   final List<HostListening> _listening = [];
 
   /// The host's peer id, once it has said it.
@@ -243,7 +246,7 @@ class HostSupervisor extends ChangeNotifier {
     notifyListeners();
     final HostChild child;
     try {
-      child = await tool!.start(['serve', '--config', _configPath!, '--allow-empty', '--until-stdin-closes']);
+      child = await tool!.start(['serve', '--config', _configPath!, '--allow-empty', '--local-sources', '--until-stdin-closes']);
     } on Object catch (error) {
       _problem = 'canoa could not start: $error';
       return _ended(generation, null);
@@ -270,7 +273,8 @@ class HostSupervisor extends ChangeNotifier {
       _listening.add(entry);
       _peerId = entry.peer;
       _peerMethod = entry.method;
-      _phase = HostPhase.running;
+      // The host's own sources are served to this process only, so they do not make it a host to anyone.
+      if (!entry.local) _phase = HostPhase.running;
       notifyListeners();
     });
     // Its status can come before its last line on standard error, which says why: wait for that to close, within a bound.
@@ -294,7 +298,7 @@ class HostSupervisor extends ChangeNotifier {
     _gaveUpOnOne = false;
     if (value['peer'] case final String peer) _peerId = peer;
     if (value['method'] case final String method) _peerMethod = method;
-    _phase = _listening.isEmpty ? HostPhase.idle : HostPhase.running;
+    _phase = _listening.any((entry) => !entry.local) ? HostPhase.running : HostPhase.idle;
     notifyListeners();
   }
 

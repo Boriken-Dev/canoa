@@ -18,7 +18,7 @@ const _allow = [
 ];
 
 Future<void> _started(WidgetTester tester, OptionsAgent agent, SessionStore store) async {
-  await pumpApp(tester, store, startAgent: agent.start);
+  await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await openFolder(tester);
@@ -248,7 +248,7 @@ void main() {
         ..rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true);
       final agent = OptionsAgent();
       final store = _store(ledger);
-      await pumpApp(tester, store, startAgent: agent.start);
+      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
       await newSession(tester);
       await chooseSource(tester, 'Scripted');
       await openFolder(tester);

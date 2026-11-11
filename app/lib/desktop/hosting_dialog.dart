@@ -268,7 +268,7 @@ class _HostingDialogState extends State<HostingDialog> {
 
   Widget _entryTile(HostEntry entry) {
     String? url;
-    for (final listening in widget.supervisor.listening) {
+    for (final listening in widget.supervisor.served) {
       if (listening.name == entry.name) url = listening.url;
     }
     return ListTile(

@@ -52,7 +52,7 @@ Future<(SessionStore, OptionsAgent, FakeClipboard, _Disk)> _started(WidgetTester
   final notes = disk.file('notes.txt', 'hello notes'.codeUnits);
   final big = disk.file('big.log', List.filled(2 * 1024 * 1024, 97));
   final shot = disk.file('shot.png', _png);
-  await pumpApp(tester, store, startAgent: agent.start, clipboard: clipboard, files: disk.sizes, size: size,
+  await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, clipboard: clipboard, files: disk.sizes, size: size,
       pickFiles: () async => [XFile(notes), XFile(big), XFile(shot)]);
   await newSession(tester);
   await chooseSource(tester, 'Scripted');

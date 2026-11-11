@@ -28,7 +28,7 @@ void main() {
 
   testWidgets('before an unknown source has run, model and effort say they come after it starts', (tester) async {
     final agent = OptionsAgent();
-    await pumpApp(tester, _store(), startAgent: agent.start);
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     expect(find.text('Model: after start'), findsOneWidget);
     expect(find.text('Effort: after start'), findsOneWidget);
@@ -40,7 +40,7 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final agent = OptionsAgent();
     final store = _store(ledger);
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     await send(tester, 'Say hello');
     expect(ledger.source('Scripted')?.options.map((option) => option.id), ['mode', 'model', 'effort']);
@@ -61,7 +61,7 @@ void main() {
     ledger.rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true);
     final agent = OptionsAgent();
     final store = _store(ledger);
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     await pick(tester, 'option-model', 'Opus');
     await pick(tester, 'option-effort', 'High');
@@ -80,7 +80,7 @@ void main() {
     final agent = OptionsAgent();
     final ledger = SessionLedger(MemoryLedgerBackend());
     final store = _store(ledger);
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     await send(tester, 'Say hello');
     await pick(tester, 'option-effort', 'High');
@@ -97,7 +97,7 @@ void main() {
 
   testWidgets('a value the agent refuses goes back, with its reason', (tester) async {
     final agent = OptionsAgent();
-    await pumpApp(tester, _store(), startAgent: agent.start);
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     await send(tester, 'Say hello');
     await pick(tester, 'option-model', 'Opus');
@@ -111,7 +111,7 @@ void main() {
   testWidgets('a change during a turn waits for the next one', (tester) async {
     final agent = OptionsAgent()..holdTurns = true;
     final store = _store();
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     await send(tester, 'Take your time');
     expect(store.selected?.status, SessionStatus.working);
@@ -138,7 +138,7 @@ void main() {
     final store = _store(ledger);
     final config = CanoaConfig.parse('[agents.Scripted]\nprogram = "scripted-agent"\nargs = ["--acp"]\n\n'
         '[agents.Scripted.profile]\nmodel = "opus"\n');
-    await pumpApp(tester, store, config: config, startAgent: agent.start);
+    await pumpApp(tester, store, config: config, startAgent: agent.start, linked: agent.openLink);
     await _draft(tester);
     await settle(tester);
     final chosen = {for (final choice in store.selected!.pending.values) choice.role: choice.value};
@@ -149,7 +149,7 @@ void main() {
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
     testWidgets('the controls under a running conversation draw at $label width', (tester) async {
       final agent = OptionsAgent();
-      await pumpApp(tester, _store(), startAgent: agent.start, size: size);
+      await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink, size: size);
       await _draft(tester);
       await send(tester, 'Fix the failing test in calc.js');
       await pick(tester, 'option-model', 'Opus');

@@ -27,7 +27,7 @@ Future<void> _chord(WidgetTester tester, LogicalKeyboardKey key) async {
 Future<SessionStore> _conversation(WidgetTester tester) async {
   final store = SessionStore(includePreview: false);
   final agent = OptionsAgent();
-  await pumpApp(tester, store, startAgent: agent.start, size: const Size(1280, 1000));
+  await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, size: const Size(1280, 1000));
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await send(tester, 'First question');

@@ -1,53 +1,53 @@
-// Claude and Codex run through the host this app carries, with no Node: what the presets say, how they are started, what
-// a source check looks for, and the harness their agent names itself as.
-import 'package:canoa/acp/agent_commands.dart';
+// The host's own sources (Claude, Codex, ...): how the host's lines say what they are, how they become sources of the app,
+// what the picker shows for them, and the harness their agent names itself as.
+import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/profile/apply.dart';
+import 'package:canoa/sources/source_icons.dart';
+import 'package:canoa/sources/source_options.dart';
 import 'package:canoa/sources/sources.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-AgentCommand _preset(String label) => agentPresets.firstWhere((preset) => preset.label == label);
+const _peer = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+
+HostListening _line(String json) => HostListening.parse(json)!;
 
 void main() {
-  test('Claude and Codex are the host\'s own agent command, and need only their own tool', () {
-    for (final (label, harness) in [('Claude', 'claude'), ('Codex', 'codex')]) {
-      final preset = _preset(label);
-      expect(preset.hosts, isTrue, reason: label);
-      expect(preset.args.take(2), ['agent', harness], reason: label);
-      expect([preset.program, ...preset.args], isNot(contains('npx')), reason: label);
-      expect(preset.requires, [harness], reason: label);
-      expect(commandNeeds(preset), [harness], reason: '$label needs no program of its own on PATH');
-      expect(preset.programPaths.values, [harness], reason: label);
-    }
-    expect(_preset('Claude').programPaths.keys, ['COQUI_ACP_CLAUDE_EXECUTABLE']);
-    expect(_preset('Codex').programPaths.keys, ['COQUI_ACP_CODEX_EXECUTABLE']);
-    expect(_preset('Claude').args, contains('--allow-client-plugins'), reason: 'a profile\'s skills are a plugin');
-    expect(_preset('Codex').args, isNot(contains('--allow-client-plugins')));
-    for (final label in ['Claude', 'Codex']) {
-      expect(_preset(label).args, contains('--allow-bypass'), reason: '$label: the person running it for themselves chooses the mode');
-    }
+  test('a local source has no address, and says what it is missing', () {
+    final claude = _line('{"name":"Claude","kind":"agent","local":true,"missing":["claude"],"harness":"claude","title":"Claude","peer":"$_peer"}');
+    expect(claude.local, isTrue);
+    expect(claude.url, isEmpty);
+    expect(claude.missing, ['claude']);
+    expect(claude.harness, 'claude');
+    final network = _line('{"name":"x","kind":"agent","url":"ws://127.0.0.1:1","peer":"$_peer"}');
+    expect(network.local, isFalse);
+    expect(network.missing, isEmpty);
+    expect(HostListening.parse('{"name":"x","kind":"agent","peer":"$_peer"}'), isNull, reason: 'a network entry needs its address');
   });
 
-  test('a host\'s own command runs as this app with its flag, or as the canoa the environment names', () {
-    final claude = _preset('Claude');
-    List<String> line((String, List<String>) run) => [run.$1, ...run.$2];
-    expect(line(invocation(claude, executable: r'C:\Canoa\CanoaUI.exe')),
-        [r'C:\Canoa\CanoaUI.exe', '--canoa-child', ...claude.args]);
-    expect(line(invocation(claude, executable: r'C:\Canoa\CanoaUI.exe', hostProgram: '/build/canoa')),
-        ['/build/canoa', ...claude.args]);
-    expect(line(invocation(claude, executable: '/app', hostProgram: '')), ['/app', '--canoa-child', ...claude.args]);
-    const other = AgentCommand(label: 'Mine', program: 'my-agent', args: ['--acp']);
-    expect(line(invocation(other, executable: '/app', hostProgram: '/build/canoa')), ['my-agent', '--acp']);
+  test('the host\'s lines become hosted sources, the local ones marked', () {
+    final sources = hostedSources([
+      _line('{"name":"Claude","kind":"agent","local":true,"missing":[],"harness":"claude","peer":"$_peer"}'),
+      _line('{"name":"Grok","kind":"agent","local":true,"missing":[],"peer":"$_peer"}'),
+      _line('{"name":"mine","kind":"agent","url":"ws://127.0.0.1:1","peer":"$_peer"}'),
+    ]);
+    expect([for (final source in sources) (source.label, source.local)], [('Claude', true), ('Grok', true), ('mine', false)]);
+    expect(sourceKey(sources.first), 'canoa/Claude');
   });
 
-  test('a source check looks only for the tool a host\'s own command drives', () async {
-    final asked = <String>[];
-    final check = await checkCommand(_preset('Claude'), (program) async {
-      asked.add(program);
-      return program == 'claude' ? '/usr/bin/claude' : null;
-    });
-    expect(asked, ['claude']);
-    expect(check.ready, isTrue);
+  test('a local source looks like its provider, and Claude and Codex offer their modes before they start', () {
+    const claude = AgentSource.hosted('Claude', harness: 'claude', local: true);
+    const grok = AgentSource.hosted('Grok', local: true);
+    const other = AgentSource.hosted('mine');
+    expect(sourceIcon(claude), providerIcon('claude'));
+    expect(sourceIcon(grok), providerIcon('grok'));
+    expect(sourceIcon(other), providerIcon(null));
+    expect(sourceIcon(grok), isNot(providerIcon(null)));
+    expect(knownModes(claude), isNotEmpty);
+    expect(knownModes(grok), isEmpty);
+    expect(knownModes(other), isEmpty);
+    expect(Icons.dns_outlined, providerIcon(null));
   });
 
   test('the translators the host runs are Claude Code and Codex, for the ledger and for profiles', () {

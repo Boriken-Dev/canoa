@@ -74,7 +74,7 @@ void main() {
   testWidgets('a second Send while the first message is still being delivered sends nothing', (tester) async {
     final agent = OptionsAgent()..holdChoices = true;
     final store = _remembering();
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await pick(tester, 'option-model', 'Opus');
@@ -118,7 +118,7 @@ void main() {
   testWidgets('a message the agent cannot be given stays in the composer, with what goes with it', (tester) async {
     final agent = OptionsAgent();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await send(tester, 'Say hello');
@@ -136,7 +136,7 @@ void main() {
   testWidgets('a first message the started agent cannot be given says so, not that nothing started, and stays', (tester) async {
     final agent = OptionsAgent();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     final session = store.selected!;
@@ -180,7 +180,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final folders = ['/work/repo', '/work/plain'];
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start, worktrees: worktrees, pickFolder: () async => folders.removeAt(0));
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, worktrees: worktrees, pickFolder: () async => folders.removeAt(0));
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -245,7 +245,7 @@ void main() {
     final store = SessionStore(includePreview: false);
     final config = CanoaConfig.parse('[agents.Scripted]\nprogram = "scripted-agent"\nargs = ["--acp"]\n\n'
         '[profile]\ncontext = { text = "Be brief." }\n');
-    await pumpApp(tester, store, config: config, startAgent: agent.start);
+    await pumpApp(tester, store, config: config, startAgent: agent.start, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await send(tester, 'Hello');

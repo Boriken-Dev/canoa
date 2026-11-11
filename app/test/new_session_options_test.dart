@@ -1,7 +1,6 @@
 // What a new session's composer offers for mode, model and effort before its agent has started, per source: the choices the app
 // knows the Claude and Codex presets have, a plain statement for an agent it knows nothing of, labels in a person's words, and the
 // choices reaching the agent that starts on the first message.
-import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/chat/modes.dart';
 import 'package:canoa/chat/session_options.dart';
@@ -35,7 +34,7 @@ void main() {
 
   testWidgets('Claude offers every mode, and the models its provider lists with their versions and Fable, in sentence case', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start);
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester, 'Claude');
     expect(await menuOf(tester, 'option-mode'), modes);
     expect(await menuOf(tester, 'option-model'), ['Default (Opus 5.5)', 'Opus 5.5', 'Fable 5.1', 'Sonnet 5.5', 'Haiku 5.5']);
@@ -47,7 +46,7 @@ void main() {
 
   testWidgets('Codex offers its models and their efforts before it starts, and the efforts follow the model', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start);
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester, 'Codex');
     expect(await menuOf(tester, 'option-mode'), modes);
     expect(await menuOf(tester, 'option-model'), ['Default', 'GPT-6 Luna', 'GPT-6 Sol']);
@@ -59,7 +58,7 @@ void main() {
 
   testWidgets('an effort the newly chosen model does not take is taken back', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start);
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester, 'Codex');
     await pick(tester, 'option-model', 'GPT-6 Sol');
     await pick(tester, 'option-effort', 'Extra high');
@@ -137,7 +136,7 @@ void main() {
   testWidgets('the mode, model and effort chosen before the first message reach the agent that starts', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
     final ledger = SessionLedger(MemoryLedgerBackend());
-    await pumpApp(tester, _store(ledger), startAgent: agent.start);
+    await pumpApp(tester, _store(ledger), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester, 'Claude');
     await pick(tester, 'option-mode', 'Accept edits');
     await pick(tester, 'option-model', 'Opus 5.5');
@@ -153,7 +152,7 @@ void main() {
 
   testWidgets("Bypass chosen before the start is the agent's own mode, asked for when it starts", (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start);
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
     await _draft(tester, 'Claude');
     await pick(tester, 'option-mode', 'Bypass');
     await send(tester, 'Go');
@@ -161,13 +160,13 @@ void main() {
     await finish(tester);
   });
 
-  test("a preset has its provider's icon, as a hosted entry of the same provider does", () {
-    AgentSource preset(String label) => AgentSource.preset(agentPresets.firstWhere((each) => each.label == label));
-    expect(sourceIcon(preset('Claude')), providerIcon('claude'));
-    expect(sourceIcon(preset('Codex')), providerIcon('codex'));
+  test("a source of the host's own has its provider's icon, as a hosted entry of the same provider does", () {
+    AgentSource preset(String label, [String? harness]) => AgentSource.hosted(label, harness: harness, local: true);
+    expect(sourceIcon(preset('Claude', 'claude')), providerIcon('claude'));
+    expect(sourceIcon(preset('Codex', 'codex')), providerIcon('codex'));
     expect(sourceIcon(preset('Grok')), providerIcon('grok'));
     expect(sourceIcon(preset('Antigravity')), providerIcon('antigravity'));
-    expect(sourceIcon(AgentSource.hosted('review', harness: 'claude')), sourceIcon(preset('Claude')));
+    expect(sourceIcon(AgentSource.hosted('review', harness: 'claude')), sourceIcon(preset('Claude', 'claude')));
     expect(sourceIcon(AgentSource.command(scripted)), Icons.terminal, reason: 'a command a person wrote');
   });
 

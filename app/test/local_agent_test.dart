@@ -46,17 +46,6 @@ Future<void> _until2(Future<bool> Function() test, String what) async {
 }
 
 void main() {
-  // Starts a real adapter and opens a session, which sends no prompt and costs nothing. Needs it installed and signed in.
-  final real = Platform.environment['CANOA_TEST_REAL_AGENT'];
-  test('a real adapter starts and opens a session', () async {
-    final command = agentPresets.firstWhere((preset) => preset.label == real);
-    expect(await isInstalled(command), isTrue, reason: 'it would not have been offered');
-    final client = await startLocalAgent(command);
-    final session = await client.createSession(cwd: Directory.current.path);
-    expect(session, isNotEmpty);
-    await client.close();
-  }, skip: real == null ? 'set CANOA_TEST_REAL_AGENT' : false, timeout: const Timeout(Duration(minutes: 5)));
-
   test('a turn runs, the agent has to ask, and what the person says reaches it', () async {
     final store = SessionStore();
     final (client, session) = await _running(store);
@@ -136,9 +125,4 @@ void main() {
     expect(await isInstalled(_echo), isTrue);
     await expectLater(startLocalAgent(missing), throwsA(isA<Exception>()));
   }, timeout: const Timeout(Duration(minutes: 1)));
-
-  test('an adapter is not offered without the tool it drives', () async {
-    const adapter = AgentCommand(label: 'Adapter', program: 'dart', requires: ['canoa-no-such-tool']);
-    expect(await isInstalled(adapter), isFalse);
-  });
 }

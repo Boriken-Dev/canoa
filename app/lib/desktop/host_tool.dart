@@ -7,7 +7,10 @@ const int statusHeld = 3;
 
 /// What `canoa serve` printed for one entry it serves.
 final class HostListening {
-  const HostListening({required this.name, required this.kind, required this.url, required this.peer, this.method, this.harness, this.title});
+  const HostListening({
+    required this.name, required this.kind, required this.url, required this.peer, this.method, this.harness, this.title,
+    this.local = false, this.missing = const [],
+  });
 
   final String name;
 
@@ -27,18 +30,27 @@ final class HostListening {
   /// The entry's `title` in canoa.cfg; null shows its name.
   final String? title;
 
+  /// One of the host's own sources: it has no address ([url] is empty), and is reached only through the host's links.
+  final bool local;
+
+  /// The programs a local source needs that the host did not find; empty when it can start.
+  final List<String> missing;
+
   /// One line of `serve`'s output, or null for anything else.
   static HostListening? parse(String line) {
     try {
       final value = jsonDecode(line);
       if (value is! Map) return null;
-      final [name, kind, url, peer] = [value['name'], value['kind'], value['url'], value['peer']];
+      final local = value['local'] == true;
+      final [name, kind, url, peer] = [value['name'], value['kind'], local ? '' : value['url'], value['peer']];
       if (name is! String || kind is! String || url is! String || peer is! String) return null;
       final method = value['method'];
       final [harness, title] = [value['harness'], value['title']];
       return HostListening(
         name: name, kind: kind, url: url, peer: peer, method: method is String ? method : null,
         harness: harness is String ? harness : null, title: title is String ? title : null,
+        local: local,
+        missing: [if (value['missing'] is List) for (final each in value['missing'] as List) if (each is String) each],
       );
     } on FormatException {
       return null;

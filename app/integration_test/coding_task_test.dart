@@ -7,7 +7,7 @@
 //
 //   flutter test integration_test/coding_task_test.dart -d windows   (or -d linux)
 //
-// CANOA_TEST_TASK_AGENT=Claude runs the Claude preset on the
+// CANOA_TEST_TASK_AGENT=Claude runs the host's own Claude source on the
 // person's own sign-in with `--setting-sources=project,local`, so that their user-level settings and CLAUDE.md stay out, and
 // spends the subscription, and needs `node` on PATH for the project's tests; without it a scripted stand-in (canoa-host's
 // stdio_agent example, `--scripted`) plays the agent and nothing is spent, with no Node. Reaching outside the temporary directory fails the
@@ -19,6 +19,9 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:canoa/acp/agent_commands.dart';
+import 'package:canoa/desktop/host_supervisor.dart';
+import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa_native/canoa_native.dart';
 import 'package:canoa/chat/agent_events.dart' show ToolStatus;
 import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/chat/transcript.dart';
@@ -143,30 +146,27 @@ void main() {
     final recorder = UpdateRecorder(write: (line) => updatesFile?.writeAsStringSync('$line\n', mode: FileMode.append));
     // The ledger holds what the agent offered and took, for the next session to start with.
     final store = SessionStore(includePreview: false, recorder: recorder, ledger: SessionLedger(MemoryLedgerBackend()));
-    final preset = _real == null ? null : agentPresets.firstWhere((preset) => preset.label == _real);
-    final agent = switch (preset) {
-      null => AgentCommand(
-        label: 'Scripted',
-        program: exampleBinary('stdio_agent') ?? fail(exampleMissing('stdio_agent')!),
-        args: scriptedArgs('${dir.path}/scripted.json'),
-      ),
-      // Claude through its preset, but without the person's user-level settings.
-      final AgentCommand claude when claude.label == 'Claude' => AgentCommand(
-        label: 'Claude without user settings',
-        program: claude.program,
-        args: [...claude.args, '--setting-sources=project,local'],
-        requires: claude.requires,
-        programPaths: claude.programPaths,
-        hosts: claude.hosts,
-      ),
-      final AgentCommand other => other,
-    };
-    final label = agent.label;
+    // A real agent is the host's own source of that name, reached over the link as the app reaches it; Claude without the
+    // person's user-level settings, which canoa.cfg's entry of the same name says.
+    final scripted = AgentCommand(
+      label: 'Scripted',
+      program: exampleBinary('stdio_agent') ?? fail(exampleMissing('stdio_agent')!),
+      args: scriptedArgs('${dir.path}/scripted.json'),
+    );
+    HostSupervisor? host;
+    if (_real != null) {
+      final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg')
+        ..writeAsStringSync(_real == 'Claude' ? '[host.agents.Claude]\nharness = "claude"\nbypass = true\nsetting_sources = ["project", "local"]\n' : '');
+      host = HostSupervisor(LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home'));
+      await host.apply(configPath: cfg.path);
+      addTearDown(host.stop);
+    }
+    final label = _real ?? scripted.label;
     final screen = GlobalKey();
     await tester.pumpWidget(RepaintBoundary(
       key: screen,
       // The folder dialog is the operating system's: the test answers it with the repository, as a person would pick it.
-      child: CanoaApp(store: store, config: CanoaConfig(agents: agent == preset ? const [] : [agent]), pickFolder: () async => repo.path),
+      child: CanoaApp(store: store, config: CanoaConfig(agents: _real == null ? [scripted] : const []), host: host, pickFolder: () async => repo.path),
     ));
     await tester.pumpAndSettle();
 

@@ -156,11 +156,11 @@ void main() {
     });
 
     test('names the handler and source of the session\'s source', () {
-      const claude = AgentSource.preset(AgentCommand(label: 'Claude', program: 'claude-agent-acp'));
+      const claude = AgentSource.hosted('Claude', harness: 'claude', local: true);
       const hosted = AgentSource.hosted('lab', harness: 'codex', title: 'The lab');
       const other = AgentSource.hosted('plain');
-      const antigravity = AgentSource.preset(AgentCommand(label: 'Antigravity', program: 'agy'));
-      const pi = AgentSource.preset(AgentCommand(label: 'Pi', program: 'pi-acp'));
+      const antigravity = AgentSource.hosted('Antigravity', local: true);
+      const pi = AgentSource.hosted('Pi', local: true);
       const mine = AgentSource.command(AgentCommand(label: 'My Agent', program: 'mine'));
       const template = r'${documents}/${handler}/${source}/${session}';
       expect(scratchFolder(template, _session, source: claude, documents: '/d', separator: '/'), '/d/claude/Claude/$_session');

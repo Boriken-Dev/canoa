@@ -26,7 +26,7 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend())
       ..rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true);
     final store = SessionStore(includePreview: false, ledger: ledger);
-    await pumpApp(tester, store, startAgent: agent.start, worktrees: worktrees);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -64,7 +64,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final ledger = SessionLedger(MemoryLedgerBackend());
     final store = SessionStore(includePreview: false, ledger: ledger);
-    await pumpApp(tester, store, startAgent: agent.start, worktrees: worktrees);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -87,7 +87,7 @@ void main() {
   testWidgets('what goes with the first message, added before the agent starts, goes with it', (tester) async {
     final agent = OptionsAgent();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start);
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     final session = store.selected!;

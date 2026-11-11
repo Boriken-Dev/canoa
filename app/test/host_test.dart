@@ -292,8 +292,8 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
     test('serves canoa.cfg, and a key the person pairs in the app reaches its agent', () async {
       await supervisor.apply(configPath: config.path);
       await until(() => supervisor.phase == HostPhase.running, 'the host to run');
-      final url = supervisor.listening.single.url;
-      final method = PeerMethod.parse(supervisor.listening.single.method!);
+      final url = supervisor.served.single.url;
+      final method = PeerMethod.parse(supervisor.served.single.method!);
       // A fresh home's method, which the host chose: the app's own proof runs it, and the turn below shows the two agree.
       expect(await browser.unreachable(method), isNull, reason: 'the app proves by the method a fresh home serves by');
       final client = connectVerifiedAcp(
@@ -325,7 +325,7 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
     test('a harness entry added to canoa.cfg is a source the app lists, with nothing in the app naming it', () async {
       await supervisor.apply(configPath: config.path);
       await until(() => supervisor.phase == HostPhase.running, 'the host to run');
-      expect(hostedSources(supervisor.listening), [const AgentSource.hosted('fixture')]);
+      expect(hostedSources(supervisor.served), [const AgentSource.hosted('fixture')]);
 
       final standin = '${dir.path}/claude${Platform.isWindows ? '.exe' : ''}';
       await File(HostUnderTest._example('harness_standin', library: false)).copy(standin);
@@ -340,8 +340,8 @@ executable = ${jsonEncode(standin)}
 ''');
       expect(await supervisor.check(config.path), isNull);
       await supervisor.apply(configPath: config.path);
-      await until(() => supervisor.listening.length == 2, 'the host to serve both entries');
-      final sources = hostedSources(supervisor.listening);
+      await until(() => supervisor.served.length == 2, 'the host to serve both entries');
+      final sources = hostedSources(supervisor.served);
       expect(sources, [const AgentSource.hosted('fixture'), const AgentSource.hosted('reviewer')]);
       final reviewer = sources.last;
       expect((reviewer.harness, reviewer.title, reviewer.displayName), ('claude', 'Claude for review', 'Claude for review'));

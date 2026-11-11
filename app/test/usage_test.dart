@@ -65,7 +65,7 @@ Map<String, Object?> _window(int seconds) => {
 SessionStore _store() => SessionStore(includePreview: false, ledger: SessionLedger(MemoryLedgerBackend()));
 
 Future<void> _started(WidgetTester tester, OptionsAgent agent, SessionStore store, {CanoaConfig? config}) async {
-  await pumpApp(tester, store, startAgent: agent.start, config: config ?? const CanoaConfig(agents: [scripted]));
+  await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, config: config ?? const CanoaConfig(agents: [scripted]));
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await openFolder(tester);

@@ -1,15 +1,16 @@
 import '../acp/agent_commands.dart';
 import '../desktop/host_tool.dart';
 
-/// Where a source's agent comes from: a preset this app starts, a command from canoa.cfg's `[agents.NAME]`, or an agent
-/// entry of the `canoa` this app runs.
-enum SourceKind { preset, command, hosted }
+/// Where a source's agent comes from: a command from canoa.cfg's `[agents.NAME]` that this app starts, or an agent entry of
+/// the `canoa` this app runs, which is either one of the host's own sources or one canoa.cfg names.
+enum SourceKind { command, hosted }
 
 /// One way to run an agent, as Settings lists it and the new-session picker offers it.
 final class AgentSource {
-  const AgentSource.preset(AgentCommand this.command) : kind = SourceKind.preset, hostEntry = null, harness = null, title = null;
-  const AgentSource.command(AgentCommand this.command) : kind = SourceKind.command, hostEntry = null, harness = null, title = null;
-  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title}) : kind = SourceKind.hosted, command = null;
+  const AgentSource.command(AgentCommand this.command)
+      : kind = SourceKind.command, hostEntry = null, harness = null, title = null, local = false;
+  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title, this.local = false})
+      : kind = SourceKind.hosted, command = null;
 
   final SourceKind kind;
 
@@ -26,6 +27,9 @@ final class AgentSource {
 
   /// A hosted entry's `title` in canoa.cfg.
   final String? title;
+
+  /// Whether it is one of the host's own sources (Claude, Codex, ...), reached through the in-process link and not an address.
+  final bool local;
 
   /// What a person is shown: a hosted entry's title, else its name. [label] stays the identity, which sessions remember.
   String get displayName => title ?? label;
@@ -44,7 +48,7 @@ final class AgentSource {
 /// naming any provider included, is a source here as soon as the host serves it, with nothing for the app to know of it.
 List<AgentSource> hostedSources(Iterable<HostListening> serving) => [
   for (final entry in serving)
-    if (entry.kind == 'agent') AgentSource.hosted(entry.name, harness: entry.harness, title: entry.title),
+    if (entry.kind == 'agent') AgentSource.hosted(entry.name, harness: entry.harness, title: entry.title, local: entry.local),
 ];
 
 /// What a source needs and whether it is here: each program it runs or requires, found or not.
@@ -79,7 +83,7 @@ final class SourceCheck {
 /// Finds a program the way a command is found, answering its absolute path or null.
 typedef ProgramLookup = Future<String?> Function(String program);
 
-/// Whether [command]'s program and everything it requires can be found: a host's own command's program is this app.
+/// Whether [command]'s program can be found.
 Future<SourceCheck> checkCommand(AgentCommand command, ProgramLookup find) async {
   final found = <String, String>{};
   final missing = <String>[];
@@ -94,8 +98,8 @@ Future<SourceCheck> checkCommand(AgentCommand command, ProgramLookup find) async
   return SourceCheck(found: found, missing: missing);
 }
 
-/// The programs a command runs and requires, in order, once each.
-List<String> commandNeeds(AgentCommand command) => {if (!command.hosts) command.program, ...command.requires}.toList();
+/// The programs a command runs.
+List<String> commandNeeds(AgentCommand command) => [command.program];
 
 /// What the session list keeps a source's memory under: its label, and for a hosted entry the host's name before it, since a
 /// preset and a hosted entry can share a label.

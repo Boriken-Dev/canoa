@@ -175,9 +175,10 @@ final class VerifiedAgent {
     required Future<void> Function() close,
     AgentDecider? decider,
     AgentElicitor? elicitor,
+    Map<String, Object?> initializeMeta = const {},
   }) {
     final identity = AgentIdentity();
-    final usage = UsageWire(send);
+    final usage = UsageWire(send, initializeMeta: initializeMeta);
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
         incoming: messages.map(identity._inspect).map(usage.incoming),

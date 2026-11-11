@@ -3,7 +3,6 @@
 // choice (so "ignored" is visible), and the choice is kept with the draft and the session and reaches the agent that starts.
 import 'dart:convert';
 
-import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/chat/cache_lifetime.dart';
 import 'package:canoa/drafts/draft_store.dart';
 import 'package:canoa/ledger/session_ledger.dart';
@@ -47,6 +46,12 @@ String? _note(WidgetTester tester) {
 
 SessionStore _store() => SessionStore(includePreview: false, ledger: SessionLedger(MemoryLedgerBackend()));
 
+/// The cache lifetime the agent was asked for on `initialize`, as the host reads it.
+Object? _asked(OptionsAgent agent) {
+  final initialize = agent.requests.firstWhere((request) => request['method'] == 'initialize');
+  return ((initialize['params'] as Map)['_meta'] as Map)[cacheLifetimeMeta];
+}
+
 void main() {
   testWidgets('a chat session asks long, and the view shows the provider\'s sentence', (tester) async {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
@@ -74,7 +79,7 @@ void main() {
   testWidgets('the person overrides it for one session, and the agent that starts is asked for that', (tester) async {
     final agent = OptionsAgent();
     final store = _store();
-    await pumpApp(tester, store, startAgent: agent.start, askChoices: (source) async => _answer(source.label));
+    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
     final menu = await menuOf(tester, 'option-cache');
     expect(menu, ['Not chosen (Long)', 'Default, the harness\'s own', 'Short, about 5 minutes', 'Long, about an hour']);
@@ -84,24 +89,22 @@ void main() {
     expect(store.selected!.cacheLifetime, CacheLifetime.short);
     expect(agent.starts, isEmpty, reason: 'choosing starts nothing');
     await send(tester, 'Fix the failing test');
-    final args = agent.starts.single.args;
-    expect(args.sublist(args.length - 2), ['--cache-lifetime', 'short']);
+    expect(_asked(agent), {'lifetime': 'short', 'chosen': true});
     expect(store.ledger!.entries.single.cacheLifetime, 'short', reason: 'kept with the session, asked again when it is reopened');
     await finish(tester);
   });
 
   testWidgets('a session nobody chose for is asked long', (tester) async {
     final agent = OptionsAgent();
-    await pumpApp(tester, _store(), startAgent: agent.start, askChoices: (source) async => _answer(source.label));
+    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
     await send(tester, 'Fix the failing test');
-    final args = agent.starts.single.args;
-    expect(args.sublist(args.length - 2), ['--cache-lifetime', 'long']);
+    expect(_asked(agent), {'lifetime': 'long', 'chosen': false});
     await finish(tester);
   });
 
   test('an entry sets the default until the person chooses', () async {
-    final source = AgentSource.command(agentPresets.firstWhere((preset) => preset.label == 'Claude'));
+    const source = AgentSource.hosted('Claude', harness: 'claude', local: true);
     final bare = SessionStore(includePreview: false);
     expect(bare.cacheLifetimeOf(bare.createDraft(source: source)), (lifetime: CacheLifetime.long, chosen: false),
         reason: 'no entry says: the chat default');
@@ -135,9 +138,5 @@ void main() {
     expect(cacheLifetimeRequest(CacheLifetime.long, chosen: false), {'lifetime': 'long', 'chosen': false});
     expect(cacheLifetimeRequest(CacheLifetime.short, chosen: true), {'lifetime': 'short', 'chosen': true});
     expect(CacheLifetime.named('forever'), isNull);
-    final plain = agentPresets.firstWhere((preset) => preset.label == 'Antigravity');
-    expect(plain.withCacheLifetime(CacheLifetime.long).args, plain.args, reason: 'a command with no such control is left as it is');
-    final claude = agentPresets.firstWhere((preset) => preset.label == 'Claude');
-    expect(claude.withCacheLifetime(CacheLifetime.harness).args, claude.args, reason: "the harness's own asks nothing");
   });
 }

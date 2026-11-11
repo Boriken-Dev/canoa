@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/desktop/host_tool.dart' show HostLink;
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/sources.dart';
@@ -31,13 +32,18 @@ Directory _documents() {
 /// An agent that notes the folder it was started in.
 final class _Agent {
   final agent = OptionsAgent();
-  final folders = <String?>[];
+
+  /// The folder each session was opened in, as the agent was asked.
+  List<String?> get folders => [
+    for (final request in agent.requests)
+      if (request['method'] == 'session/new') (request['params'] as Map)['cwd'] as String?,
+  ];
 
   Future<VerifiedAgent> start(AgentCommand command, {AgentDecider? decider, AgentElicitor? elicitor, String? workingDirectory,
-      Map<String, String> environment = const {}}) {
-    folders.add(workingDirectory);
-    return agent.start(command, decider: decider, elicitor: elicitor, workingDirectory: workingDirectory, environment: environment);
-  }
+      Map<String, String> environment = const {}}) =>
+      agent.start(command, decider: decider, elicitor: elicitor, workingDirectory: workingDirectory, environment: environment);
+
+  HostLink openLink(String name) => agent.openLink(name);
 }
 
 void main() {
@@ -46,7 +52,7 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final store = SessionStore(includePreview: false, ledger: ledger);
     final started = _Agent();
-    await pumpApp(tester, store, documents: documents.path, startAgent: started.start);
+    await pumpApp(tester, store, documents: documents.path, startAgent: started.start, linked: started.openLink);
     await newSession(tester);
     final draft = store.selected!;
     expect(draft.cwd, isNull, reason: 'no folder was chosen');
@@ -90,7 +96,7 @@ void main() {
     final started = _Agent();
     final work = Directory.systemTemp.createTempSync('canoa-work');
     addTearDown(() => work.deleteSync(recursive: true));
-    await pumpApp(tester, store, documents: documents.path, startAgent: started.start, pickFolder: () async => work.path);
+    await pumpApp(tester, store, documents: documents.path, startAgent: started.start, linked: started.openLink, pickFolder: () async => work.path);
     await newSession(tester);
     final draft = store.selected!;
     await openFolder(tester);
@@ -148,7 +154,7 @@ void main() {
     final store = SessionStore(includePreview: false);
     final started = _Agent();
     const config = CanoaConfig(agents: [scripted], sessions: LedgerSettings(workspace: r'${documents}/${datetime}/${session}'));
-    await pumpApp(tester, store, documents: documents.path, config: config, startAgent: started.start);
+    await pumpApp(tester, store, documents: documents.path, config: config, startAgent: started.start, linked: started.openLink);
     await newSession(tester);
     final draft = store.selected!;
     final shown = tester.widget<Text>(find.byKey(const Key('new-session-scratch-path'))).textSpan!.toPlainText();

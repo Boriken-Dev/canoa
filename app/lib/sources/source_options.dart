@@ -10,7 +10,7 @@ import 'sources.dart';
 ///
 /// What the agent then offers wins: a choice made here that it does not offer is reported when it starts, not applied.
 List<ConfigOption> knownModes(AgentSource source) {
-  if (source.kind != SourceKind.preset) return const [];
+  if (!source.local) return const [];
   return switch (source.label) {
     'Claude' || 'Codex' => [
       ConfigOption(

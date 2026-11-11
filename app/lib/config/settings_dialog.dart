@@ -14,7 +14,7 @@ class SettingsDialog extends StatefulWidget {
   final CanoaConfig config;
 
   /// The built-in sources, which can be hidden from a new session but not changed.
-  final List<AgentCommand> presets;
+  final List<AgentSource> presets;
 
   /// The agent entries of the canoa this app runs, which Hosting changes.
   final List<String> hosted;
@@ -166,7 +166,7 @@ class SettingsDialogState extends State<SettingsDialog> {
         SwitchListTile(
           key: Key('source-offered ${preset.label}'),
           title: Text(preset.label),
-          subtitle: _state(AgentSource.preset(preset)),
+          subtitle: _state(preset),
           value: !config.hiddenSources.contains(preset.label),
           onChanged: (on) => setState(() {
             final hidden = {...config.hiddenSources};

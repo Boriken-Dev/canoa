@@ -1,32 +1,16 @@
-import '../chat/cache_lifetime.dart';
-import '../desktop/child_flag.dart';
-
-/// An agent this computer can run: a program speaking ACP on its standard streams, or an adapter that makes one.
+/// An agent this computer can run: a program speaking ACP on its standard streams, which canoa.cfg's `[agents.NAME]` names.
 final class AgentCommand {
   const AgentCommand({
     required this.label,
     required this.program,
     this.args = const [],
-    this.requires = const [],
-    this.programPaths = const {},
     this.searchDirs = const [],
-    this.hosts = false,
     this.usage,
   });
 
   final String label;
   final String program;
   final List<String> args;
-
-  /// Whether [args] are a command of the host's own, `canoa agent claude` for one, run by the host this app carries rather
-  /// than by a program found on PATH: [program] then only names it.
-  final bool hosts;
-
-  /// Other programs it needs, such as the tool an adapter drives. It is offered only when these are found.
-  final List<String> requires;
-
-  /// Environment variables naming a program by its full path, resolved when it starts.
-  final Map<String, String> programPaths;
 
   /// What the host reads of this agent's usage when it serves it, canoa.cfg's `usage` key on a `[host.agents]` entry:
   /// `antigravity` for an agent that serves its quota from its own process and reports nothing over ACP. Null reads only
@@ -38,43 +22,14 @@ final class AgentCommand {
   final List<String> searchDirs;
 }
 
-extension CacheLifetimeArgs on AgentCommand {
-  /// This command asking the host's `canoa agent` for a prompt cache that lives [lifetime]. Any other command has no such
-  /// control and is returned as it is, and so is the harness's own, which asks nothing.
-  AgentCommand withCacheLifetime(CacheLifetime lifetime) {
-    if (!hosts || args.isEmpty || args.first != 'agent' || lifetime == CacheLifetime.harness) return this;
-    return AgentCommand(
-      label: label,
-      program: program,
-      args: [...args, '--cache-lifetime', lifetime.id],
-      requires: requires,
-      programPaths: programPaths,
-      searchDirs: searchDirs,
-      hosts: hosts,
-      usage: usage,
-    );
-  }
-}
-
-/// The program and arguments that run [command]. A host's own command runs as [hostProgram], a `canoa` the environment
-/// names for tests, when there is one, and otherwise as this app's own [executable] with the flag that makes it the host's
-/// command; any other runs as it is.
-(String, List<String>) invocation(AgentCommand command, {required String executable, String? hostProgram}) {
-  if (!command.hosts) return (command.program, command.args);
-  if (hostProgram != null && hostProgram.isNotEmpty) return (hostProgram, command.args);
-  return (executable, [canoaChildFlag, ...command.args]);
-}
-
-/// The `usage` canoa.cfg's host entry for [command] gets: the command's own, else the one of the preset it is, found by
-/// program name (without a directory or extension) and arguments, so `agy acp` typed by a person is the Antigravity preset.
+/// The `usage` canoa.cfg's host entry for [command] gets: the command's own, else the one of the program the host knows the
+/// quota of, found by program name (without a directory or extension) and arguments, so `agy acp` typed by a person is
+/// Antigravity's.
 String? usageFor(AgentCommand command) {
   if (command.usage != null) return command.usage;
   String name(String program) =>
       program.split(RegExp(r'[\\/]')).last.toLowerCase().replaceFirst(RegExp(r'\.(exe|cmd|bat)$'), '');
-  for (final preset in agentPresets) {
-    if (preset.usage == null || preset.hosts) continue;
-    if (name(preset.program) == name(command.program) && _sameArgs(preset.args, command.args)) return preset.usage;
-  }
+  if (name(command.program) == 'agy' && _sameArgs(const ['acp'], command.args)) return 'antigravity';
   return null;
 }
 
@@ -113,32 +68,3 @@ AgentCommand? parseCommand(String text) {
   if (words.isEmpty || words.first.isEmpty) return null;
   return AgentCommand(label: words.first, program: words.first, args: words.sublist(1));
 }
-
-/// What runs with no setup, for whoever has the tool signed in already, so its subscription applies and no API key is
-/// involved. Claude Code and Codex are served by the host this app carries (`canoa agent`), which drives the installed tool
-/// over its own protocol, with no Node; the app gives Claude Code a profile's skills as a plugin, so it allows a client's
-/// plugins. Pi's adapter is code fetched when it starts, so its version is pinned.
-const List<AgentCommand> agentPresets = [
-  AgentCommand(
-    label: 'Claude',
-    program: 'canoa',
-    args: ['agent', 'claude', '--allow-client-plugins', '--allow-bypass'],
-    requires: ['claude'],
-    programPaths: {'COQUI_ACP_CLAUDE_EXECUTABLE': 'claude'},
-    hosts: true,
-  ),
-  AgentCommand(
-    label: 'Codex',
-    program: 'canoa',
-    args: ['agent', 'codex', '--allow-bypass'],
-    requires: ['codex'],
-    programPaths: {'COQUI_ACP_CODEX_EXECUTABLE': 'codex'},
-    hosts: true,
-  ),
-  // Antigravity's CLI, which replaced Gemini CLI: `agy acp` is its ACP server. Its Windows installer puts it in
-  // %LOCALAPPDATA%gyin; where the Linux and macOS installers do is not confirmed, so there it is found on PATH only.
-  AgentCommand(label: 'Antigravity', program: 'agy', args: ['acp'], searchDirs: ['%LOCALAPPDATA%/agy/bin'], usage: 'antigravity'),
-  // xAI's Grok CLI in its ACP mode; its installers put it in ~/.grok/bin.
-  AgentCommand(label: 'Grok', program: 'grok', args: ['agent', 'stdio'], searchDirs: ['~/.grok/bin']),
-  AgentCommand(label: 'Pi', program: 'npx', args: ['-y', 'pi-acp@0.0.34'], requires: ['pi']),
-];

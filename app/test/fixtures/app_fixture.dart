@@ -9,6 +9,7 @@ import 'package:canoa/chat/composer.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
+import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/profile/launch.dart' show StartAgent;
 import 'package:canoa/session_store.dart';
@@ -19,6 +20,7 @@ import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fake_host.dart' show linkedHost;
 import 'source_choices.dart';
 
 /// Worktrees that are only counted.
@@ -69,6 +71,9 @@ final class FakeClipboard implements ClipboardReader {
 
 const scripted = AgentCommand(label: 'Scripted', program: 'scripted-agent', args: ['--acp']);
 
+/// The programs each of the host's own sources needs, by name.
+const _needs = {'Claude': ['claude'], 'Codex': ['codex'], 'Antigravity': ['agy'], 'Grok': ['grok'], 'Pi': ['npx', 'pi']};
+
 /// Every program is found, except those in [missing].
 Future<SourceCheck> Function(AgentSource) checkFinding({Set<String> missing = const {}}) => (source) async {
   final command = source.command;
@@ -91,6 +96,7 @@ Future<List<CanoaConfig>> pumpApp(
   Map<String, int> files = const {},
   ClipboardReader? clipboard,
   StartAgent? startAgent,
+  HostLink Function(String name)? linked,
   Worktrees? worktrees,
   DesktopShell? shell,
   HostSupervisor? host,
@@ -120,7 +126,12 @@ Future<List<CanoaConfig>> pumpApp(
     startAgent: startAgent ?? Starts().call,
     worktrees: () => worktrees ?? CountedWorktrees(),
     shell: shell,
-    host: host,
+    // The host's own sources are listed, and a session on one runs over a link that is the test's.
+    host: host ??
+        linkedHost(linked ?? (name) => throw StateError('nothing starts in this test: $name'), missing: {
+          for (final MapEntry(:key, :value) in _needs.entries)
+            if (value.any(missing.contains)) key: [for (final program in value) if (missing.contains(program)) program],
+        }),
     askChoices: askChoices ?? FakeHost().call,
   ));
   await tester.pumpAndSettle();
