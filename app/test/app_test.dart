@@ -225,7 +225,18 @@ void main() {
 void _staleDialogs() {
   testWidgets('a dialog left open never saves back what another one changed meanwhile', (tester) async {
     final dir = Directory.systemTemp.createTempSync('canoa-stale');
-    addTearDown(() => dir.deleteSync(recursive: true));
+    addTearDown(() async {
+      // Something of the dialogs' background work may still hold a file in it (errno 32 on Windows): the delete is repeated.
+      final closed = DateTime.now();
+      while (true) {
+        try {
+          return dir.deleteSync(recursive: true);
+        } on FileSystemException {
+          if (DateTime.now().difference(closed) > const Duration(seconds: 60)) rethrow;
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+      }
+    });
     final tool = FakeTool();
     final host = HostSupervisor(tool);
     final settings = ValueNotifier<int>(0);

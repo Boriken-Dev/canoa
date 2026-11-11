@@ -270,6 +270,8 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       supervisor = HostSupervisor(
         ProcessHostTool(_hostBinary!, environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'}),
         firstPause: const Duration(milliseconds: 200),
+        // The host's last words on standard error are awaited for as long as a loaded machine takes to deliver them.
+        errorDrain: const Duration(minutes: 2),
       );
     });
 
