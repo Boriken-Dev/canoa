@@ -30,8 +30,9 @@ String boundedTail(String text, int limit) => text.length > limit ? text.substri
 
 String boundedHead(String text, int limit) => text.length > limit ? '${text.substring(0, limit)}\n…' : text;
 
-/// [cancelled] is ACP v2's: a tool a stopped turn never ran.
-enum ToolStatus { pending, running, done, failed, cancelled }
+/// [cancelled] is ACP v2's: a tool a stopped turn never ran. [stopped] is Canoa's: a tool that was waiting for an answer or
+/// running when the connection to its agent ended, so nothing can answer it now.
+enum ToolStatus { pending, running, done, failed, cancelled, stopped }
 
 ToolStatus? _toolStatus(Object? value) => switch (value) {
   'pending' => ToolStatus.pending,

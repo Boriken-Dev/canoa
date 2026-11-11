@@ -277,6 +277,7 @@ class ToolCard extends StatelessWidget {
       ToolStatus.done => (Icons.check_circle_outline, look.accent, 'done'),
       ToolStatus.failed => (Icons.error_outline, Theme.of(context).colorScheme.error, 'failed'),
       ToolStatus.cancelled => (Icons.block, look.muted, 'cancelled'),
+      ToolStatus.stopped => (Icons.stop_circle_outlined, look.muted, 'stopped'),
     };
     final hasDetail = tool.blocks.isNotEmpty || tool.locations.isNotEmpty;
     final header = Row(children: [
@@ -284,6 +285,10 @@ class ToolCard extends StatelessWidget {
       const SizedBox(width: 8),
       Expanded(child: Text(tool.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: look.bodySize - 1))),
       const SizedBox(width: 8),
+      if (tool.status == ToolStatus.stopped) ...[
+        Text('stopped', style: TextStyle(fontSize: look.bodySize - 2, color: look.muted)),
+        const SizedBox(width: 4),
+      ],
       Tooltip(message: statusLabel, child: Icon(statusIcon, size: 16, color: statusColor, semanticLabel: statusLabel)),
     ]);
     return Container(

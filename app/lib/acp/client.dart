@@ -32,8 +32,12 @@ final class AgentIdentity {
   /// The usage extension, when the agent advertised it.
   UsageSupport? usage;
 
-  /// The method that opens an earlier session again, as the client would pick it, or null when the agent offers none.
+  /// The method that opens an earlier session again, or null when the agent offers none. `session/resume` wins where both are
+  /// offered: it asks the agent to continue, not to replay a conversation Canoa keeps its own list of.
   String? reopenBy;
+
+  int? _resumeId;
+  Map<String, dynamic>? _resumeReply;
 
   bool _seen = false;
 
@@ -44,7 +48,37 @@ final class AgentIdentity {
   static String? _text(Object? value) =>
       value is String && value.trim().isNotEmpty ? (value.length > 200 ? value.substring(0, 200) : value.trim()) : null;
 
+  /// Notes the id of a `session/resume` request on its way out, since the shared client drops the answer to it.
+  String _outgoing(String message) {
+    if (!message.contains('session/resume')) return message;
+    try {
+      final decoded = jsonDecode(message);
+      if (decoded is Map && decoded['method'] == 'session/resume' && decoded['id'] is int) _resumeId = decoded['id'] as int;
+    } on FormatException {
+      // The client sends only JSON, so this is not its request.
+    }
+    return message;
+  }
+
+  /// The answer to the `session/resume` last sent, once it has passed; taken once.
+  Map<String, dynamic>? _takeResumeReply() {
+    final reply = _resumeReply;
+    _resumeReply = null;
+    return reply;
+  }
+
   String _inspect(String message) {
+    if (_resumeId != null && message.contains('"result"')) {
+      try {
+        final decoded = jsonDecode(message);
+        if (decoded is Map && decoded['id'] == _resumeId) {
+          _resumeId = null;
+          _resumeReply = decoded['result'] is Map ? Map<String, dynamic>.from(decoded['result'] as Map) : <String, dynamic>{};
+        }
+      } on FormatException {
+        // Passed on untouched for the client to refuse.
+      }
+    }
     // Only the first answer naming a protocol version is read; every other message passes untouched.
     if (_seen || !message.contains('protocolVersion')) return message;
     final Object? decoded;
@@ -79,12 +113,10 @@ final class AgentIdentity {
       return at == true || at is Map;
     }
     usage = UsageSupport.parse(capabilities is Map ? capabilities['_meta'] : null);
-    reopenBy = version == 2
+    reopenBy = version == 2 || says(const ['sessionCapabilities', 'resume'])
         ? 'session/resume'
         : says(const ['loadSession'])
         ? 'session/load'
-        : says(const ['sessionCapabilities', 'resume'])
-        ? 'session/resume'
         : null;
     return message;
   }
@@ -148,7 +180,7 @@ final class VerifiedAgent {
       return VerifiedAgent._(
         (decider, elicitor) => AcpClient(
           incoming: proven.messages.map(identity._inspect).map(usage.incoming),
-          send: (message) => proven.send(usage.outgoing(message)),
+          send: (message) => proven.send(usage.outgoing(identity._outgoing(message))),
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,
@@ -181,7 +213,7 @@ final class VerifiedAgent {
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
         incoming: messages.map(identity._inspect).map(usage.incoming),
-        send: (message) => send(usage.outgoing(message)),
+        send: (message) => send(usage.outgoing(identity._outgoing(message))),
         closeSource: close,
         decider: decider,
         elicitor: elicitor,
@@ -212,7 +244,7 @@ final class VerifiedAgent {
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
         incoming: connection.messages.map(identity._inspect).map(usage.incoming),
-        send: (message) => connection.send(usage.outgoing(message)),
+        send: (message) => connection.send(usage.outgoing(identity._outgoing(message))),
         closeSource: connection.close,
         decider: decider,
         elicitor: elicitor,
@@ -249,8 +281,14 @@ final class VerifiedAgent {
   bool get takesFiles => _client.takesFiles;
   bool get canReopenSessions => _client.canReopenSessions;
   Future<AcpSessionPage> listSessions({String? cwd, String? cursor}) => _client.listSessions(cwd: cwd, cursor: cursor);
-  Future<AcpOpenedSession> reopenSession(String id, {required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
-      _client.reopenSession(id, cwd: cwd, setup: setup);
+  /// Opens an earlier session by `session/resume` where the agent offers it, else by `session/load`. The shared client prefers
+  /// load in v1, and v2 resumes with a replay already, so only a v1 agent offering both is resumed here.
+  Future<AcpOpenedSession> reopenSession(String id, {required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) async {
+    if (identity.reopenBy != 'session/resume' || protocolVersion == 2) return _client.reopenSession(id, cwd: cwd, setup: setup);
+    identity._resumeReply = null;
+    await _client.resumeSession(id, cwd: cwd, setup: setup);
+    return AcpOpenedSession(id, identity._takeResumeReply() ?? <String, dynamic>{});
+  }
   Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) =>
       _client.prompt(sessionId, text, attachments: attachments);
   Future<void> cancel(String sessionId) => _client.cancel(sessionId);

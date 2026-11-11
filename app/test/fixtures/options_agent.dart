@@ -35,6 +35,16 @@ final class OptionsAgent {
   static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
   static const codexModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan')];
 
+  /// Whether it also offers `session/resume`, which a reopening then prefers to `session/load`.
+  bool offersResume = false;
+
+  /// What `session/load` replays before it answers: updates for the session `o1`, as an agent sends a conversation again.
+  final replay = <Map<String, Object?>>[];
+
+  /// Ends the last started copy's connection, as an agent that went away does.
+  void disconnect() => _ends.last();
+  final _ends = <void Function()>[];
+
   /// Whether `session/load` is answered only when [releaseLoad] is called, so a test can act while a session opens again.
   bool holdLoad = false;
   final _heldLoad = <void Function()>[];
@@ -143,6 +153,7 @@ final class OptionsAgent {
       'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session, 'update': body},
     }));
     _asks.add((message) => incoming.add(jsonEncode(message)));
+    _ends.add(() => incoming.close());
     late final VerifiedAgent client;
     client = VerifiedAgent.fromChild(
       label: command.label,
@@ -165,6 +176,7 @@ final class OptionsAgent {
             usageOptIn = ((params['clientCapabilities'] ?? params['capabilities']) as Map?)?['_meta'];
             reply(id, {'protocolVersion': 1, 'agentCapabilities': {
               'loadSession': true,
+              if (offersResume) 'sessionCapabilities': {'resume': <String, Object?>{}},
               'promptCapabilities': {'image': images, 'embeddedContext': files},
               if (usage != null) '_meta': {'dev.boriken.coqui.acp/usage': {'version': 1, 'sources': ['reported'], 'spend': true}},
             }, 'agentInfo': {'name': 'options-agent', 'version': '1.0.0'}});
@@ -209,6 +221,11 @@ final class OptionsAgent {
               end();
             }
           case 'session/load' || 'session/resume':
+            if (method == 'session/load') {
+              for (final body in replay) {
+                update('o1', body);
+              }
+            }
             void answer() {
               // A reopened agent starts in its own default mode again, whatever the session was left in.
               mode = modes.isEmpty ? '' : modes.first.$1;

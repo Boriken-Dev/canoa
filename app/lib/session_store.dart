@@ -54,9 +54,12 @@ class ChatMessage {
 /// offers an allow before it would wait here.
 final class PermissionQuestion {
   PermissionQuestion(this.title, this.kind,
-      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false});
+      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId});
   final String title;
   final String? kind;
+
+  /// The tool call this asks about, whose line in the conversation is marked stopped when the request can no longer be answered.
+  final String? toolCallId;
 
   /// What it would run or touch, when the agent said.
   final String? detail;
@@ -868,6 +871,7 @@ class SessionStore extends ChangeNotifier {
       options: request.options,
       bypassPassed: target.bypass,
       forPerson: forPerson,
+      toolCallId: request.toolCall?['toolCallId'] as String?,
     );
     target.pendingPermissions.add(question);
     _needs(target, AttentionKind.permission);
@@ -937,6 +941,29 @@ class SessionStore extends ChangeNotifier {
     if (session.pendingPermissions.isEmpty) return;
     session.pendingPermissions.removeAt(0)._answer.complete(const AcpCancel());
     notifyListeners();
+  }
+
+  /// Takes away what [session] was still asking of the person when its connection ended or was replaced: the permission cards
+  /// and questions go, and the tool line each card was about is marked stopped. Nothing is answered, since the agent that asked
+  /// is gone or is no longer the one this conversation is with.
+  void _strand(ChatSession session) {
+    for (final question in session.pendingPermissions) {
+      if (question.toolCallId case final id?) _stop(session.toolEntries[id]?.tool);
+    }
+    session.pendingPermissions.clear();
+    session.pendingQuestions.clear();
+  }
+
+  /// Marks every tool line still waiting or running as stopped, for a session opened again, whose earlier run ended with the
+  /// process that held it.
+  void _stopLeftovers(ChatSession session) {
+    for (final entry in session.toolEntries.values) {
+      _stop(entry.tool);
+    }
+  }
+
+  static void _stop(ToolCall? tool) {
+    if (tool != null && (tool.status == ToolStatus.pending || tool.status == ToolStatus.running)) tool.status = ToolStatus.stopped;
   }
 
   /// Answers everything still waiting in [session]: its permission requests with [answer], and its questions cancelled.
@@ -1042,6 +1069,8 @@ class SessionStore extends ChangeNotifier {
     }
     final session = target;
     unawaited(_subscriptions.remove(localId)?.cancel());
+    // What the earlier connection asked can no longer be answered, whichever client is asked.
+    if (_verifiedClients[localId] != null && !identical(_verifiedClients[localId], client)) _strand(session);
     _verifiedClients[localId] = client;
     session.status = SessionStatus.connected;
     _subscriptions[localId] = client.updates.listen(
@@ -1053,7 +1082,7 @@ class SessionStore extends ChangeNotifier {
       onDone: () {
         _verifiedClients.remove(localId);
         session.status = SessionStatus.disconnected;
-        _endWaiting(session, const AcpDeny('the agent went away'));
+        _strand(session);
         notifyListeners();
       },
     );
@@ -1818,6 +1847,7 @@ class SessionStore extends ChangeNotifier {
     try {
       final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: launch?.setup ?? AcpSessionSetup.none);
       applyOpened(session, opened);
+      _stopLeftovers(session);
       if (launch != null && prepared != null) {
         await applyProfile(session, launch, prepared,
             harness: harness ?? entry.harness, notes: notes, keptMode: entry.mode);
