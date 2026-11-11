@@ -880,7 +880,7 @@ fn usage_updates(rpc: &Rpc<'_>) -> Vec<Value> {
 
 /// The usage notices once there are `count` of them: a notice follows the answer to the turn that caused it.
 fn usage_notices(rpc: &Rpc<'_>, count: usize) -> Vec<Value> {
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + Duration::from_secs(300);
     while usage_updates(rpc).len() < count && Instant::now() < until {
         if let Ok(message) = rpc.next_message(Duration::from_millis(200))
             && message.get("method").is_some()

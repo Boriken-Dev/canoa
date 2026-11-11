@@ -636,9 +636,32 @@ impl Splice {
         }
     }
 
+    /// Records what a turn's end says of the entry's limit. It runs before the answer reaches the client, which may ask for
+    /// the report at once and must find the limit in it.
+    fn learn(&self, event: &Event) {
+        let Event::Ended { id, outcome } = event else {
+            return;
+        };
+        let now = unix_now();
+        match outcome {
+            Outcome::Failed(text) => self.inference.observe(text, now),
+            Outcome::Refused => {
+                let said = {
+                    let conn = lock(&self.conn);
+                    conn.prompts
+                        .get(id)
+                        .and_then(|session| conn.said.get(session))
+                        .cloned()
+                };
+                said.is_some_and(|said| self.inference.observe(&said, now))
+            }
+            Outcome::Succeeded => self.inference.succeeded(now),
+            Outcome::Other => false,
+        };
+    }
+
     /// Applies what [`Splice::inspect`] saw, once the message was sent on.
     pub(crate) fn commit(&self, event: Event) {
-        let now = unix_now();
         let mut conn = lock(&self.conn);
         match event {
             Event::Initialized { id, advertised } => {
@@ -675,20 +698,15 @@ impl Splice {
                     }
                 }
             }
-            Event::Ended { id, outcome } => {
-                let session = conn.prompts.remove(&id);
-                let said = session.and_then(|session| conn.said.remove(&session));
+            Event::Ended { id, .. } => {
+                if let Some(session) = conn.prompts.remove(&id) {
+                    conn.said.remove(&session);
+                }
                 let opened = conn.opened;
                 drop(conn);
                 if opened && let Some(reading) = &self.reading {
                     reading.prompted();
                 }
-                match outcome {
-                    Outcome::Failed(text) => self.inference.observe(&text, now),
-                    Outcome::Refused => said.is_some_and(|said| self.inference.observe(&said, now)),
-                    Outcome::Succeeded => self.inference.succeeded(now),
-                    Outcome::Other => false,
-                };
             }
         }
     }
@@ -730,6 +748,9 @@ impl Splice {
         let seen = self.inspect(message);
         if seen.hush {
             return Ok(());
+        }
+        if let Some(event) = &seen.event {
+            self.learn(event);
         }
         send(seen.rewritten.as_deref().unwrap_or(message))?;
         if let Some(event) = seen.event {
