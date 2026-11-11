@@ -23,6 +23,13 @@ serde_json = "1"
 httparse = { version = "1.10", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Downloads of the programs a store installs: a blocking client, TLS by rustls with ring and, by default, the operating system's certificate
+# verifier (so a TLS-intercepting proxy the system trusts works); webpki's roots stay a choice.
+ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier"] }
+# Archives a store unpacks: tar and gzip for Codex and Node, zip for Node on Windows; deflate by flate2's pure Rust backend.
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 # Diagnostics; the subscriber is the binary's.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "ansi"] }

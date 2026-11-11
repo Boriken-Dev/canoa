@@ -25,7 +25,7 @@ default = []
 web = []
 
 [dependencies]
-canoa = { path = "../canoa" }
+canoa = { path = "../canoa", features = ["store"] }
 clap.workspace = true
 coqui-acp.workspace = true
 coqui-acp-api.workspace = true
@@ -64,6 +64,10 @@ rpassword = "7"
 sha2 = { version = "0.10", default-features = false }
 toml.workspace = true
 tracing.workspace = true
+ureq.workspace = true
+tar.workspace = true
+flate2.workspace = true
+zip.workspace = true
 tracing-subscriber.workspace = true
 
 # Ends a provider's process group, through a safe call.
@@ -83,6 +87,10 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 win32job = "2.0.3"
 # Windows' Credential Manager, whose credentials are made local to the machine and not roamed with the profile.
 windows-native-keyring-store = "1"
+# The user's registry keys an install may write, read to check a plan declared them.
+windows-registry = "0.6"
+# Whether this process runs elevated, through a safe call: the host forbids unsafe code. Small and old (winapi); one function.
+is_elevated = "0.1"
 
 [dev-dependencies]
 # The address a test client dials; already in the graph through coqui-web-channel.
@@ -113,6 +121,9 @@ name = "mcp_server"
 
 [[example]]
 name = "harness_standin"
+
+[[example]]
+name = "version_standin"
 
 [[example]]
 name = "web_peer"
