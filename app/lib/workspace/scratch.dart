@@ -1,14 +1,16 @@
-import '../profile/apply.dart' show harnessIdOf;
 import '../sources/sources.dart';
 import 'documents.dart';
 import 'workspace_template.dart';
 
-/// The harness a [source] stands for, for `${handler}`: a hosted entry's provider id, else its own name; a source this app
-/// starts, its AOS harness id (`claude-code`, `codex`, `grok`) where it has one, else its label.
-String handlerOf(AgentSource source) => switch (source.kind) {
-  SourceKind.hosted => source.harness ?? source.hostEntry!,
-  _ => harnessIdOf(entry: source.label) ?? source.label,
-};
+/// The `acp_harness` provider ids Canoa knows, which a source of the same name stands for.
+const _providerIds = {'claude', 'codex', 'grok', 'antigravity', 'pi'};
+
+/// The harness a [source] stands for, for `${handler}`: its provider id (`claude`, `codex`, `grok`, `antigravity`, `pi`, or a
+/// hosted entry's own `harness`), else its label.
+String handlerOf(AgentSource source) {
+  final id = source.harness ?? source.label.toLowerCase();
+  return source.harness != null || _providerIds.contains(id) ? id : source.label;
+}
 
 /// The folder [template] makes for the session [sessionId] started from [source], or null where this build has no folders
 /// or no Documents folder to put it in. The arguments stand in for the system's, for a test.
@@ -29,7 +31,7 @@ String? scratchFolder(String template, String sessionId, {
       documents: root ?? '',
       home: home ?? homeFolder() ?? '',
       session: sessionId,
-      now: now ?? DateTime.now(),
+      now: (now ?? DateTime.now()).toLocal(),
       handler: source == null ? '' : handlerOf(source),
       source: source?.label ?? '',
       host: host ?? localHostName() ?? '',

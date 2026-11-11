@@ -114,8 +114,10 @@ class ChatSession {
     this.method,
     this.worktree,
     this.source,
+    DateTime? created,
     List<ChatMessage>? messages,
-  }) : messages = messages ?? <ChatMessage>[];
+  }) : created = created ?? DateTime.now(),
+       messages = messages ?? <ChatMessage>[];
 
   /// Where the agent works, on its machine, when this side knows. A draft's folder until it starts.
   String? cwd;
@@ -138,8 +140,8 @@ class ChatSession {
   /// What is written in a draft's composer, kept with it.
   String draftText = '';
 
-  /// When this app made it.
-  final DateTime created = DateTime.now();
+  /// When this app made it. A draft's scratch folder takes its `${date}`, `${time}` and `${datetime}` from it.
+  final DateTime created;
 
   /// Which of canoa.cfg's overlays a draft starts with, by name; null for all of them.
   Set<String>? overlays;
@@ -550,7 +552,7 @@ class SessionStore extends ChangeNotifier {
   /// is made then if [worktree]. It is kept between runs until it starts or is closed, and never noted in the ledger before.
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
-      ({String kind, String label})? keptSource, bool bypass = false, String? workspaceId}) {
+      ({String kind, String label})? keptSource, bool bypass = false, String? workspaceId, DateTime? created}) {
     final session = ChatSession(
       id: 'local-${++_nextId}',
       title: title ?? draftTitle,
@@ -558,6 +560,7 @@ class SessionStore extends ChangeNotifier {
       status: SessionStatus.draft,
       cwd: cwd,
       source: source,
+      created: created,
     )
       ..wantsWorktree = worktree
       ..overlays = overlays
@@ -618,6 +621,7 @@ class SessionStore extends ChangeNotifier {
         title: record['title'] is String ? record['title'] as String : null,
         bypass: record['bypass'] == true,
         workspaceId: record['workspaceId'] is String ? record['workspaceId'] as String : null,
+        created: DateTime.tryParse('${record['created']}'),
         pending: {
           for (final choice in [
             for (final json in record['pending'] is List ? record['pending'] as List : const []) ?PendingChoice.fromJson(json),

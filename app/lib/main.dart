@@ -573,7 +573,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final source = sources.contains(_lastSource)
         ? _lastSource
         : sources.where((source) => _checks[source]?.ready ?? false).firstOrNull ?? sources.firstOrNull;
-    final draft = store.createDraft(source: source, cwd: _lastFolder ?? _recentFolders.firstOrNull);
+    final draft = store.createDraft(source: source);
     _hint(draft);
   }
 
@@ -946,7 +946,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The folder [session] works in when none is chosen, from canoa.cfg's `[sessions] workspace`; null for a session not made here.
   String? _scratchOf(ChatSession session) {
     final id = session.workspaceId;
-    return id == null ? null : scratchFolder(config.sessions.workspace, id, source: session.source, documents: widget.documents);
+    return id == null ? null : scratchFolder(config.sessions.workspace, id, source: session.source, now: session.created, documents: widget.documents);
   }
 
   /// What the composer offers, from this app's sources, folders, files and clipboard.

@@ -18,7 +18,7 @@ WorkspaceValues _values({
   String documents = '/home/ana/Documents',
   String home = '/home/ana',
   String session = _session,
-  String handler = 'claude-code',
+  String handler = 'claude',
   String source = 'Claude',
   String host = 'box1',
   String fqdn = '',
@@ -41,7 +41,7 @@ void main() {
     test('a set template expands each variable', () {
       expect(_expand(r'${home}/work/${date}/${session}'), '/home/ana/work/2026-11-11/$_session');
       expect(_expand(r'${documents}/${handler}/${source}/${host}/${session}'),
-          '/home/ana/Documents/claude-code/Claude/box1/$_session');
+          '/home/ana/Documents/claude/Claude/box1/$_session');
       expect(_expand(r'/s/${time}/${datetime}/${session}'), '/s/153005/2026-11-11T153005/$_session');
       expect(_expand(r'${home}\w\${session}'), '/home/ana/w/$_session', reason: 'a backslash in a template separates too');
     });
@@ -159,10 +159,16 @@ void main() {
       const claude = AgentSource.preset(AgentCommand(label: 'Claude', program: 'claude-agent-acp'));
       const hosted = AgentSource.hosted('lab', harness: 'codex', title: 'The lab');
       const other = AgentSource.hosted('plain');
+      const antigravity = AgentSource.preset(AgentCommand(label: 'Antigravity', program: 'agy'));
+      const pi = AgentSource.preset(AgentCommand(label: 'Pi', program: 'pi-acp'));
+      const mine = AgentSource.command(AgentCommand(label: 'My Agent', program: 'mine'));
       const template = r'${documents}/${handler}/${source}/${session}';
-      expect(scratchFolder(template, _session, source: claude, documents: '/d', separator: '/'), '/d/claude-code/Claude/$_session');
+      expect(scratchFolder(template, _session, source: claude, documents: '/d', separator: '/'), '/d/claude/Claude/$_session');
       expect(scratchFolder(template, _session, source: hosted, documents: '/d', separator: '/'), '/d/codex/lab/$_session');
       expect(handlerOf(other), 'plain');
+      expect([for (final source in [claude, hosted, antigravity, pi, mine]) handlerOf(source)],
+          ['claude', 'codex', 'antigravity', 'pi', 'My Agent'], reason: 'the provider id, else the label');
+      expect(handlerOf(const AgentSource.hosted('grok-lab', harness: 'grok')), 'grok');
     });
 
     test('makes and removes a folder, saying whether it was new', () async {

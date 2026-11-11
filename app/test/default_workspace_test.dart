@@ -50,6 +50,7 @@ void main() {
     await newSession(tester);
     final draft = store.selected!;
     expect(draft.cwd, isNull, reason: 'no folder was chosen');
+    final shown = tester.widget<Text>(find.byKey(const Key('new-session-scratch-path'))).textSpan!.toPlainText();
     expect(draft.workspaceId, matches(RegExp(r'^[0-9a-f-]{36}$')), reason: 'Canoa names the session before any agent runs');
     final folder = _scratch(documents, draft);
     expect(find.byKey(const Key('new-session-scratch-path')), findsOneWidget);
@@ -60,6 +61,7 @@ void main() {
 
     await chooseSource(tester, 'Scripted');
     expect(Directory(folder).existsSync(), isFalse, reason: 'choosing the source makes nothing');
+    expect(shown, 'Scratch  $folder', reason: 'the pill shows exactly the folder');
     await send(tester, 'hello');
     await until(tester, () => draft.remoteSessionId != null, 'the session to start');
     expect(Directory(folder).existsSync(), isTrue, reason: 'made by the first message');
@@ -100,6 +102,14 @@ void main() {
     expect(started.folders, [work.path]);
     expect(Directory('${documents.path}${_sep}Canoa').existsSync(), isFalse);
 
+    // The next new session starts in Scratch again, with the folder just used one click away in the menu.
+    await newSession(tester);
+    final next = store.selected!;
+    expect(next, isNot(draft));
+    expect(next.cwd, isNull);
+    expect(find.byKey(const Key('new-session-scratch-path')), findsOneWidget);
+    expect(await menuOf(tester, 'new-session-folder'), contains(work.path));
+
     // The menu takes it back to the scratch folder before the session starts.
     final other = store.createDraft(source: _source, cwd: work.path);
     store.select(other.id);
@@ -131,6 +141,27 @@ void main() {
       tester.widget<Text>(find.byKey(const Key('new-session-scratch-path'))).textSpan!.toPlainText(),
       contains([documents.path, 'work', 'Scripted', draft.workspaceId!].join(_sep)),
     );
+  });
+
+  testWidgets('the time in the folder is fixed when the draft is made, and the pill shows the folder the message makes', (tester) async {
+    final documents = _documents();
+    final store = SessionStore(includePreview: false);
+    final started = _Agent();
+    const config = CanoaConfig(agents: [scripted], sessions: LedgerSettings(workspace: r'${documents}/${datetime}/${session}'));
+    await pumpApp(tester, store, documents: documents.path, config: config, startAgent: started.start);
+    await newSession(tester);
+    final draft = store.selected!;
+    final shown = tester.widget<Text>(find.byKey(const Key('new-session-scratch-path'))).textSpan!.toPlainText();
+    final t = draft.created.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    expect(shown, contains('${t.year}-${two(t.month)}-${two(t.day)}T${two(t.hour)}${two(t.minute)}${two(t.second)}'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2100)));
+    await frames(tester);
+    await send(tester, 'hello');
+    await until(tester, () => draft.remoteSessionId != null, 'the session to start');
+    expect(shown, 'Scratch  ${started.folders.single}');
+    expect(Directory(started.folders.single!).existsSync(), isTrue);
+    await finish(tester);
   });
 
   testWidgets('Settings shows the template with a preview, refuses a bad one and saves a good one', (tester) async {
