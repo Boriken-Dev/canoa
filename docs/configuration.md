@@ -36,17 +36,17 @@ The session list is `sessions.json` beside canoa.cfg on a desktop, and this orig
 
 ### A new session
 
-**New session**, Ctrl+N (⌘N on a Mac) or the palette opens a new session in the middle of the window: its folder (recent folders, or **Open folder…**) above the message box, and in the row under the box `+`, the **source**, **Local** or **Worktree**, the agent's **mode**, **model** and **effort**, the **overlays** it starts with, and Send. It is in the side list at once, as New, with nothing started: no agent, no connection and no worktree. One left untouched is shown again rather than another made, and a new one starts from the source and folder chosen last.
+**New session**, Ctrl+N (⌘N on a Mac) or the palette opens a new session in the middle of the window: its folder (recent folders, or **Open folder…**) above the message box, and in the row under the box `+`, the **source**, **Local** or **Worktree**, the agent's **mode**, **model** and **effort**, the **overlays** it starts with, and Send. It is in the side list at once, as New, with nothing started: no agent, no connection and no worktree. One left untouched is shown again rather than another made, and a new one starts from the source chosen last, in Scratch; the recent folders are in the folder menu, and choosing one is for that session only.
 
-With no folder chosen (the first session on a computer, or after choosing **Scratch** in the folder menu) the folder shows as **Scratch** with the path it will have, and the session works there: the folder is made on the first message, never before, and taken away again if the agent does not start. Choosing a folder wins. The place comes from `[sessions] workspace`, a path template whose `${name}` variables are put in when the folder is made (Settings shows it with what it makes now); the default is `${documents}/Canoa/scratch/${session}`.
+A new session starts with no folder chosen: the folder shows as **Scratch** with the path it will have, and the session works there: the folder is made on the first message, never before, and taken away again if the agent does not start. Choosing a folder wins. The place comes from `[sessions] workspace`, a path template whose `${name}` variables are put in when the folder is made (Settings shows it with what it makes now); the default is `${documents}/Canoa/scratch/${session}`.
 
 | Variable | Is |
 | --- | --- |
 | `${documents}` | the person's Documents folder: on Windows the Documents known folder (which follows a redirected or OneDrive Documents), on Linux `$XDG_DOCUMENTS_DIR`, else `user-dirs.dirs`, else `~/Documents`, on macOS `~/Documents` |
 | `${home}` | the home folder |
 | `${session}` | Canoa's own id for the session, a UUID made with the draft before any agent runs and kept in the session list beside the id the agent reports |
-| `${date}`, `${time}`, `${datetime}` | local time when the folder is made: `2026-11-11`, `153005`, `2026-11-11T153005` |
-| `${handler}` | the harness: a hosted `harness` entry's provider id (else the entry's name), and for a source the app starts its harness id such as `claude-code`, `codex` or `grok` (else its label) |
+| `${date}`, `${time}`, `${datetime}` | local time when the session's draft was made, so the folder shown is the folder made: `2026-11-11`, `153005`, `2026-11-11T153005` |
+| `${handler}` | the harness's `acp_harness` provider id, the same for a hosted and a preset source: `claude`, `codex`, `grok`, `antigravity`, `pi` or a hosted entry's own `harness`; else the source's label |
 | `${source}` | the source's label |
 | `${host}` | this computer's name |
 | `${fqdn}` | a webpage's host name; empty on the desktop |
