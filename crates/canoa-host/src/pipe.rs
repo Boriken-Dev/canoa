@@ -9,11 +9,11 @@ use std::io::{self, Read, Write};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
-use coqui_transport_pipe::{OsIdentity, ReadTimeout, Stream};
+use coqui_transport_pipe::{OsIdentity, ReadTimeout};
 use coqui_web_channel::frame;
 use coqui_web_channel::{Channel, Failure};
 
-pub use coqui_transport_pipe::{Error, Listener, PipeName};
+pub use coqui_transport_pipe::{Error, Listener, PipeName, Stream};
 
 /// The size of a frame's length prefix.
 const PREFIX: usize = 4;
