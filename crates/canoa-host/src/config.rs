@@ -47,6 +47,9 @@ pub struct Config {
     pub accounts: IndexMap<String, AccountConfig>,
     /// Where the accounts' credentials are kept: `[host] account_store`.
     pub account_store: AccountStore,
+    /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
+    /// [`Entry::local`] set), in the file's order. They are served when the host serves its own sources.
+    pub local_agents: Vec<Entry>,
 }
 
 /// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
@@ -552,6 +555,9 @@ struct RawFile {
     host: Option<RawHost>,
     #[serde(default)]
     usage: Option<RawUsage>,
+    /// `[agents.NAME]`: the app's table, of which the host reads `program` and `args` and lets the rest go by.
+    #[serde(default)]
+    agents: IndexMap<String, toml::Value>,
 }
 
 /// `[usage]`: the app reads `warn_permille`, so only the key the host acts on is named and the others are let go by.
@@ -715,6 +721,7 @@ impl Config {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let raw: RawFile = toml::from_str(text).map_err(|error| parse_error(text, &error))?;
         let limit_phrases = raw.usage.and_then(|usage| usage.limit_phrases);
+        let local_agents = local_agents_of(&raw.agents)?;
         if limit_phrases
             .iter()
             .flatten()
@@ -728,6 +735,7 @@ impl Config {
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
+                local_agents,
                 ..Self::default()
             });
         };
@@ -1046,6 +1054,7 @@ impl Config {
             limit_phrases,
             accounts,
             account_store,
+            local_agents,
         })
     }
 
@@ -1562,6 +1571,83 @@ pub(crate) fn check_name(name: &str) -> Result<(), ConfigError> {
         });
     }
     Ok(())
+}
+
+/// `[agents.NAME]` tables that name a `program`, as entries reached over [`crate::Local`] only. A table with no `program`
+/// (the app keeps an agent's profile there) names no command and is let go by.
+fn local_agents_of(agents: &IndexMap<String, toml::Value>) -> Result<Vec<Entry>, ConfigError> {
+    let mut out = Vec::new();
+    for (name, table) in agents {
+        let Some(table) = table.as_table() else {
+            continue;
+        };
+        let Some(program) = table.get("program") else {
+            continue;
+        };
+        // A name the app shows, so any text a person can read: it is never part of an address.
+        if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(char::is_control)
+        {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: format!(
+                    "an agent's name has 1 to {MAX_NAME} characters, none of them control characters"
+                ),
+            });
+        }
+        let bad = |what: &str| ConfigError::Invalid {
+            entry: Some(name.clone()),
+            what: format!("agents.{name}: {what}"),
+        };
+        let program = program
+            .as_str()
+            .filter(|program| !program.is_empty())
+            .ok_or_else(|| bad("program is not text"))?;
+        let args: Vec<String> = match table.get("args") {
+            None => Vec::new(),
+            Some(toml::Value::Array(args)) => args
+                .iter()
+                .map(|arg| arg.as_str().map(str::to_owned))
+                .collect::<Option<_>>()
+                .ok_or_else(|| bad("args is not a list of text"))?,
+            Some(_) => return Err(bad("args is not a list of text")),
+        };
+        let usage = (is_agy(program) && args == ["acp"]).then_some(UsageSource::Antigravity);
+        let mut entry = entry(
+            name.clone(),
+            EntryKind::Agent {
+                program: OsString::from(program),
+                args: args.into_iter().map(OsString::from).collect(),
+                profiles: Vec::new(),
+                usage,
+            },
+            RawCommon {
+                listen: None,
+                working_roots: Vec::new(),
+                worktrees: None,
+                peers: None,
+                max_peers: None,
+            },
+        )?;
+        entry.local = true;
+        out.push(entry);
+    }
+    Ok(out)
+}
+
+/// Whether `program` is Antigravity's `agy`, whatever its directory or extension: its quota is read beside its turns.
+fn is_agy(program: &str) -> bool {
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let stem = name.rsplit_once('.').map_or(name, |(stem, extension)| {
+        if matches!(
+            extension.to_ascii_lowercase().as_str(),
+            "exe" | "cmd" | "bat"
+        ) {
+            stem
+        } else {
+            name
+        }
+    });
+    stem.eq_ignore_ascii_case("agy")
 }
 
 fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, ConfigError> {

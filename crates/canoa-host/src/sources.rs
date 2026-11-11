@@ -92,7 +92,38 @@ pub(crate) fn entries(config: &Config) -> Vec<Source> {
 }
 
 fn sources_in(config: &Config, find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>) -> Vec<Source> {
-    PRESETS
+    // The person's own commands come after the built-in ones, and take a built-in's name from it.
+    let mut own: Vec<Source> = config
+        .local_agents
+        .iter()
+        .filter(|entry| {
+            let taken = config.entries.iter().any(|each| each.name == entry.name);
+            if taken {
+                tracing::info!(
+                    "agents.{} is also host.agents.{}, which is served; the command is not",
+                    entry.name,
+                    entry.name
+                );
+            }
+            !taken
+        })
+        .map(|entry| {
+            let program = match &entry.kind {
+                crate::EntryKind::Agent { program, .. } => program.to_string_lossy().into_owned(),
+                _ => String::new(),
+            };
+            let missing = if find(&program, &[]).is_some() {
+                Vec::new()
+            } else {
+                vec![program]
+            };
+            Source {
+                entry: entry.clone(),
+                missing,
+            }
+        })
+        .collect();
+    let mut sources: Vec<Source> = PRESETS
         .iter()
         .filter(|preset| {
             let taken = config.entries.iter().any(|entry| entry.name == preset.name);
@@ -118,7 +149,10 @@ fn sources_in(config: &Config, find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>) 
             let entry = entry_of(preset, found.as_deref())?;
             Some(Source { entry, missing })
         })
-        .collect()
+        .filter(|source| own.iter().all(|mine| mine.entry.name != source.entry.name))
+        .collect();
+    sources.append(&mut own);
+    sources
 }
 
 /// `preset` as the entry canoa.cfg would have said, run through the same reading so that it is checked the same.
@@ -280,6 +314,88 @@ mod tests {
         let sources = sources_in(&config, &|_, _| None);
         assert!(sources.iter().all(|source| source.entry.name != "Claude"));
         assert_eq!(sources.len(), names().len() - 1);
+    }
+
+    fn with_agents(text: &str) -> Config {
+        Config::from_str_in(text, Path::new(".")).expect("parses")
+    }
+
+    #[test]
+    fn the_persons_own_commands_follow_the_built_in_sources_and_say_what_they_miss() {
+        let config = with_agents(
+            "[agents.\"My Agent\"]\nprogram = \"my-agent\"\nargs = [\"--acp\", \"x y\"]\n\
+             [agents.Claude.profile]\nmodel = \"opus\"\n\
+             [agents.Seen]\nprogram = \"seen\"\n",
+        );
+        assert_eq!(
+            config.local_agents.len(),
+            2,
+            "a table with no program is no command"
+        );
+        let sources = sources_in(&config, &|program, _| {
+            (program == "seen").then(|| PathBuf::from("/bin/seen"))
+        });
+        let named: Vec<&str> = sources.iter().map(|s| s.entry.name.as_str()).collect();
+        let mut expected = names();
+        expected.extend(["My Agent", "Seen"]);
+        assert_eq!(named, expected);
+        let mine = &sources[names().len()];
+        assert!(mine.entry.local);
+        assert_eq!(mine.missing, ["my-agent"]);
+        match &mine.entry.kind {
+            crate::EntryKind::Agent { program, args, .. } => {
+                assert_eq!(program.to_string_lossy(), "my-agent");
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(sources.last().is_some_and(|s| s.missing.is_empty()));
+    }
+
+    #[test]
+    fn a_command_takes_the_name_of_a_built_in_source_from_it() {
+        let config = with_agents("[agents.Pi]\nprogram = \"my-pi\"\n");
+        let sources = sources_in(&config, &|_, _| None);
+        let pis: Vec<_> = sources.iter().filter(|s| s.entry.name == "Pi").collect();
+        assert_eq!(pis.len(), 1);
+        assert!(matches!(
+            &pis[0].entry.kind,
+            crate::EntryKind::Agent { program, .. } if program == "my-pi"
+        ));
+    }
+
+    #[test]
+    fn antigravitys_command_has_its_quota_read_whatever_directory_it_is_in() {
+        for program in ["agy", "C:\\\\agy\\\\bin\\\\agy.exe", "/home/me/bin/agy"] {
+            let config = with_agents(&format!(
+                "[agents.A]\nprogram = {}\nargs = [\"acp\"]\n",
+                serde_json::to_string(program).expect("quoted")
+            ));
+            assert!(
+                matches!(
+                    &config.local_agents[0].kind,
+                    crate::EntryKind::Agent { usage: Some(_), .. }
+                ),
+                "{program}"
+            );
+        }
+        let other = with_agents("[agents.A]\nprogram = \"agy\"\nargs = [\"chat\"]\n");
+        assert!(matches!(
+            &other.local_agents[0].kind,
+            crate::EntryKind::Agent { usage: None, .. }
+        ));
+    }
+
+    #[test]
+    fn a_command_that_is_not_text_is_refused_naming_it() {
+        for text in [
+            "[agents.A]\nprogram = 1\n",
+            "[agents.A]\nprogram = \"x\"\nargs = \"y\"\n",
+            "[agents.A]\nprogram = \"x\"\nargs = [1]\n",
+        ] {
+            let error = Config::from_str_in(text, Path::new(".")).expect_err("refused");
+            assert!(error.to_string().contains("agents.A"), "{error}");
+        }
     }
 
     #[test]
