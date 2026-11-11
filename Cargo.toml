@@ -40,6 +40,8 @@ coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "7
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.
 coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "2966a25c956678e44e23faf3757d2b34c6a769f3" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5" }
+# Windows named pipes and Unix sockets, which a host entry may listen on; built on this tree's coqui-peer and coqui-builder.
+coqui-transport-pipe = { git = "https://github.com/Boriken-Dev/coqui-transport-pipe", rev = "1bf161f4d9349e9821d384859d3acdfb58aeae94" }
 coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681" }
 # The Noise method, for the example that plays the page's peer; the revision coqui-acp-bridge builds on.
 coqui-peer-noise = { git = "https://github.com/Boriken-Dev/coqui-peer-noise", rev = "3a5b30689780a6e6291af565ff6abbaae515973c", features = ["pin"] }

@@ -38,6 +38,7 @@ coqui-aos.workspace = true
 coqui-agentic-peer.workspace = true
 coqui-peer.workspace = true
 coqui-peer-webcrypto.workspace = true
+coqui-transport-pipe.workspace = true
 coqui-web-channel.workspace = true
 # The one-time token a provider's process proves its socket with.
 getrandom = "0.4"

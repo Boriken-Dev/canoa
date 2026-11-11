@@ -514,6 +514,7 @@ dependencies = [
  "coqui-peer",
  "coqui-peer-noise",
  "coqui-peer-webcrypto",
+ "coqui-transport-pipe",
  "coqui-web-channel",
  "data-encoding",
  "getrandom 0.4.3",
@@ -894,6 +895,28 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "zeroize",
+]
+
+[[package]]
+name = "coqui-transport"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-transport?rev=1283116a22de6a8918faa3d0ebd78b8b6777ff0a#1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+dependencies = [
+ "coqui-builder",
+]
+
+[[package]]
+name = "coqui-transport-pipe"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-transport-pipe?rev=1bf161f4d9349e9821d384859d3acdfb58aeae94#1bf161f4d9349e9821d384859d3acdfb58aeae94"
+dependencies = [
+ "coqui-builder",
+ "coqui-peer",
+ "coqui-transport",
+ "libc",
+ "socket2",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
