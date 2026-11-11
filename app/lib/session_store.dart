@@ -289,7 +289,7 @@ String titleFrom(String text) {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder, this.ledger, this.defaultMode,
+  SessionStore({bool includePreview = true, this.recorder, this.ledger, this.defaultMode, this.bypassOnceOnly = false,
       this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
       : readFile = readFile ?? readLocalFile {
     if (includePreview) {
@@ -367,6 +367,9 @@ class SessionStore extends ChangeNotifier {
   /// The mode a new session starts in, as an agent names it (one of [modeOrder] for the translators Canoa runs); null leaves
   /// each agent's own. It wins over the person's last choice for the source, and a profile's mode wins over it.
   String? defaultMode;
+
+  /// Whether Bypass answers only with an answer that allows once (`[permissions] allow_once_only`).
+  bool bypassOnceOnly;
 
   final _attention = StreamController<(ChatSession, AttentionKind)>.broadcast();
 
@@ -508,7 +511,7 @@ class SessionStore extends ChangeNotifier {
   /// Answers the requests waiting in [session] that offer an allow and are not a question or a plan.
   void _answerWaiting(ChatSession session) {
     for (final question in [...session.pendingPermissions]) {
-      final allow = question.forPerson ? null : bypassAnswer(question.options);
+      final allow = question.forPerson ? null : bypassAnswer(question.options, onceOnly: bypassOnceOnly);
       if (allow == null) continue;
       session.pendingPermissions.remove(question);
       question._answer.complete(AcpSelect(allow.optionId));
@@ -936,7 +939,7 @@ class SessionStore extends ChangeNotifier {
     final title = shortText(request.title) ?? shortText(request.kind) ?? 'A tool';
     final forPerson = _isForPerson(request);
     if (target.bypass && !forPerson) {
-      final allow = bypassAnswer(request.options);
+      final allow = bypassAnswer(request.options, onceOnly: bypassOnceOnly);
       if (allow != null) {
         _note(target, 'Bypass allowed: $title (${shortText(allow.name) ?? allow.kind}).');
         notifyListeners();

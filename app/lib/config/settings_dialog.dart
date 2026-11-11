@@ -320,6 +320,13 @@ class SettingsDialogState extends State<SettingsDialog> {
             ],
           ),
         ),
+        SwitchListTile(
+          key: const Key('settings-allow-once-only'),
+          title: const Text('Bypass answers with allow once only'),
+          subtitle: const Text('A request that offers only an "always" answer is then asked, not answered. Off, Bypass takes the "always" the agent offers.'),
+          value: config.allowOnceOnly,
+          onChanged: (v) => setState(() => config = config.copyWith(allowOnceOnly: v)),
+        ),
         ListTile(
           title: const Text('Sessions remembered'),
           subtitle: const Text('The least recently used go first'),

@@ -77,6 +77,7 @@ final class CanoaConfig {
     this.agentProfiles = const {},
     this.tables = const {},
     this.defaultMode,
+    this.allowOnceOnly = false,
     this.notifications = const NotificationSettings(),
     this.hiddenSources = const {},
     this.pasteAsFile = defaultPasteAsFile,
@@ -133,6 +134,10 @@ final class CanoaConfig {
   /// null leaves each agent's own. An older `full_access` list is read and dropped.
   final String? defaultMode;
 
+  /// `[permissions] allow_once_only`: Bypass answers a request only with an answer that allows once, so a request that offers
+  /// only an "always" is left to the person. Off, it takes the agent's "always" when that is all there is.
+  final bool allowOnceOnly;
+
   final NotificationSettings notifications;
 
   /// `[sources] hidden`: the presets, by label, that Settings keeps out of the new-session picker.
@@ -149,7 +154,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false,
+      LookId? look, String? brightness, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
@@ -169,6 +174,7 @@ final class CanoaConfig {
         agentProfiles: agentProfiles,
         tables: tables,
         defaultMode: clearDefaultMode ? null : defaultMode ?? this.defaultMode,
+        allowOnceOnly: allowOnceOnly ?? this.allowOnceOnly,
         notifications: notifications ?? this.notifications,
         hiddenSources: hiddenSources ?? this.hiddenSources,
         pasteAsFile: pasteAsFile,
@@ -196,6 +202,7 @@ final class CanoaConfig {
     agentProfiles: agentProfiles,
     tables: tables,
     defaultMode: defaultMode,
+    allowOnceOnly: allowOnceOnly,
     notifications: notifications,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
@@ -417,6 +424,7 @@ final class CanoaConfig {
     agentProfiles: agentProfiles ?? this.agentProfiles,
     tables: tables,
     defaultMode: defaultMode,
+    allowOnceOnly: allowOnceOnly,
     notifications: notifications,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
@@ -460,7 +468,7 @@ final class CanoaConfig {
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace'});
-    final permissions = table('permissions', {'default_mode', 'full_access'});
+    final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
@@ -613,6 +621,7 @@ final class CanoaConfig {
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout, cdn: cdn,
       defaultMode: defaultMode as String?,
+      allowOnceOnly: flag(permissions, 'allow_once_only', false),
       hiddenSources: {for (final name in hidden) name as String},
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
       embedLimit: limit('embed_limit', defaultEmbedLimit),
@@ -665,7 +674,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null ? '' : '\n[permissions]\ndefault_mode = ${jsonEncode(defaultMode)}\n'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

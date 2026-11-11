@@ -199,6 +199,25 @@ void main() {
       expect(agent.answerTo(3)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject'}});
     });
 
+    testWidgets('with allow once only, a request that offers only an always allow is asked, and one that offers allow once is answered',
+        (tester) async {
+      final (agent, session, store) = await _shown(tester);
+      store.bypassOnceOnly = true;
+      agent.ask(20, 'Edit a.txt', _alwaysOnly);
+      await _settle(tester);
+      await store.chooseMode(session, bypass);
+      await _settle(tester);
+      expect(agent.answerTo(20), isNull, reason: 'it was waiting when Bypass was chosen, and offers no allow once');
+      expect(session.pendingPermissions, hasLength(1));
+      agent.ask(21, 'Edit b.txt', _alwaysOnly);
+      await _settle(tester);
+      expect(agent.answerTo(21), isNull);
+      expect(find.byType(PermissionCard), findsOneWidget);
+      agent.ask(22, 'Edit c.txt', _all);
+      await _settle(tester);
+      expect(agent.answerTo(22)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
+    });
+
     testWidgets('answers the requests already waiting when it is chosen, except one with no allow', (tester) async {
       final (agent, session, store) = await _shown(tester);
       agent.ask(5, 'Edit a.txt', _all);

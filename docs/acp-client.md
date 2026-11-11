@@ -56,7 +56,7 @@ like any other mode, and does nothing while the session connects or is being ope
 
 **Bypass** asks for nothing. Where the agent has a mode that asks for nothing (`bypass`, `bypassPermissions`), that is the one
 chosen. Where it has none, Canoa provides it by answering the agent's requests itself: every request that offers an allow is
-answered, with `allow_once` when offered, else `allow_always`, and each answer is said in the conversation. Canoa's Bypass sits on the agent's own mode, which stays as it was: leaving Bypass returns to it, and the session list keeps both,
+answered, with `allow_once` when offered, else `allow_always` (Settings' **Bypass answers with allow once only**, `[permissions] allow_once_only`, leaves a request that offers only an "always" to the person), and each answer is said in the conversation. Canoa's Bypass sits on the agent's own mode, which stays as it was: leaving Bypass returns to it, and the session list keeps both,
 so a reopened session is put back in that mode and in Bypass. When the agent is itself in a mode that asks for nothing, or says
 so by itself, Canoa answers nothing: what the agent still asks is the person's. A request that offers no allow, a question
 and a plan are still the person's, and are shown with that said. A request already waiting when Bypass is chosen is

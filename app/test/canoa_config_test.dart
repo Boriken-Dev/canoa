@@ -35,6 +35,19 @@ cdn = "local"
     }
   });
 
+  test('allow_once_only is read, written and kept by every copy, and off by default', () {
+    expect(const CanoaConfig().allowOnceOnly, isFalse);
+    expect(CanoaConfig.parse(const CanoaConfig().encode()).allowOnceOnly, isFalse);
+    final config = CanoaConfig.parse('[permissions]\nallow_once_only = true\n');
+    expect(config.allowOnceOnly, isTrue);
+    expect(config.defaultMode, isNull);
+    for (final saved in [config, config.withProfilesOf(config), config.withHost(null), config.copyWith(brightness: 'light')]) {
+      expect(CanoaConfig.parse(saved.encode()).allowOnceOnly, isTrue);
+    }
+    expect(config.copyWith(allowOnceOnly: false).allowOnceOnly, isFalse);
+    expect(() => CanoaConfig.parse('[permissions]\nallow_once_only = "yes"\n'), throwsFormatException);
+  });
+
   test('keeps the host table canoa reads when settings are saved', () {
     final parsed = CanoaConfig.parse('''
 [desktop]

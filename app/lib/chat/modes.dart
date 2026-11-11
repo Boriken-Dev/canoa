@@ -114,11 +114,11 @@ ModeEntry? nextMode(List<ModeEntry> entries, String? current, {Set<String> skip 
   return null;
 }
 
-/// The option a request in bypass is answered with: the first that allows once, else the first that allows always. Null when
-/// it offers neither: that one is the person's.
-AcpPermissionOption? bypassAnswer(List<AcpPermissionOption> options) =>
+/// The option a request in bypass is answered with: the first that allows once, else the first that allows always unless
+/// [onceOnly]. Null when it offers neither: that one is the person's.
+AcpPermissionOption? bypassAnswer(List<AcpPermissionOption> options, {bool onceOnly = false}) =>
     options.where((option) => option.kind == 'allow_once').firstOrNull ??
-    options.where((option) => option.kind == 'allow_always').firstOrNull;
+    (onceOnly ? null : options.where((option) => option.kind == 'allow_always').firstOrNull);
 
 /// The mode option among [options].
 ConfigOption? modeOptionIn(List<ConfigOption> options) => optionIn(options, OptionRole.mode);

@@ -256,6 +256,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (_checked) unawaited(_checkSources());
     store.ledger?.configure(changed.sessions);
     store.defaultMode = changed.defaultMode;
+    store.bypassOnceOnly = changed.allowOnceOnly;
     await widget.shell?.update(changed);
     try {
       await _write(changed);
@@ -959,7 +960,7 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
     store = widget.store ??
-        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, defaultMode: config.defaultMode,
+        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, defaultMode: config.defaultMode, bypassOnceOnly: config.allowOnceOnly,
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.starter = _startDraft;
     store.choicesLoader = _askChoices;
