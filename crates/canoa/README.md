@@ -18,7 +18,7 @@ entries and their grants in one: not a security boundary by itself. See the [doc
 
 ## Installation
 
-Not published. `publish = false` until `canoa-host` is. There are no Cargo features.
+Not published. `publish = false` until `canoa-host` is. One Cargo feature: `store`, the `program_store` kind (a store for one agent program), which needs `coqui-acp-api`.
 
 ## Quick start
 

@@ -1,0 +1,474 @@
+{
+  "kinds": [
+    {
+      "doc": "Knows one program: where its copies are, what is newest, and how to install it into a folder the host owns.\n\nEvery method is synchronous and required, and answers for the store as configured. Every object a method is handed is\nthe store's from then on, and it destroys each, even when it refuses. `GUATIAO_ERR_UNSUPPORTED` always comes with the\nreason.",
+      "floor_hash": 3478619964,
+      "name": "program_store",
+      "object": false,
+      "slots": [
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "Who the program is and where it is fetched from, with nothing run and no connection opened. The same on every call.",
+          "fallible": true,
+          "name": "describe",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "query",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "kind": "process_spawner",
+              "name": "spawner",
+              "pass": "taken",
+              "type": "object"
+            },
+            {
+              "kind": "install_tools",
+              "name": "tools",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "The copies of the program it can find. With `probe` false it spawns nothing and answers from the managed copy and\n`tools.find` alone; with it true it may run each copy's version flag through `spawner`, within\n[`PROBE_TIMEOUT_MS`]. It opens no network connection.",
+          "fallible": true,
+          "name": "program",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "query",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "kind": "install_tools",
+              "name": "tools",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "The newest version on a channel, through `tools.fetch_text` only. A failure is `known: false` with the reason.",
+          "fallible": true,
+          "name": "latest",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "kind": "install_tools",
+              "name": "tools",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "What `apply` would do, before anything is written, with every change outside the host's folder. An update to the\nversion already current is a plan with nothing in it, never a refusal. A version the publisher no longer serves is\n`GUATIAO_ERR_UNSUPPORTED` with the reason.",
+          "fallible": true,
+          "name": "plan",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "kind": "process_spawner",
+              "name": "spawner",
+              "pass": "taken",
+              "type": "object"
+            },
+            {
+              "kind": "install_tools",
+              "name": "tools",
+              "pass": "taken",
+              "type": "object"
+            },
+            {
+              "kind": "install_prompter",
+              "name": "prompter",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "Carries out the plan the person confirmed in `request.staging` and nowhere else. `spawner`'s private directory is\n`request.staging`. It reads the version back by running the staged program, never from an installer's exit status. A\nfact the plan rests on that has moved is `GUATIAO_ERR_BAD_VALUE` with `plan changed`.\n\nWhen the person cancels (`prompter.cancelled()`, or a call answering `GUATIAO_ERR_GONE`) or `timeout_ms` passes, it\nkills its whole process tree and answers `GUATIAO_ERR_GONE` within two seconds. It never switches versions: the host\ndoes.",
+          "fallible": true,
+          "name": "apply",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "How an install tells the person what it is doing. The host implements it and hands one to\n[`apply`](ProgramStore::apply); the store destroys it when the apply ends.\n\nWhen the person cancels, every call answers `GUATIAO_ERR_GONE` and `cancelled` is true.",
+      "floor_hash": 1751029952,
+      "name": "install_prompter",
+      "object": true,
+      "slots": [
+        {
+          "args": [
+            {
+              "name": "line",
+              "type": "str"
+            }
+          ],
+          "doc": "One line of output, as the program printed it.",
+          "fallible": true,
+          "name": "say",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "progress",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "How far a download or a step has got.",
+          "fallible": true,
+          "name": "progress",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "form",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "The rare question, as a login asks one.",
+          "fallible": true,
+          "name": "ask",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "bool"
+          },
+          "args": [],
+          "doc": "Whether the person cancelled.",
+          "fallible": true,
+          "name": "cancelled",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "What the host does for a store on the machine its spawner runs on: the checked fetch, the safe unpack and the look for\nfiles. A store never opens a connection or writes a file by itself.",
+      "floor_hash": 821327524,
+      "name": "install_tools",
+      "object": true,
+      "slots": [
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "The files named in the request that exist, in the order the `PATH` and then `dirs` list them. Only absolute `PATH`\nentries are read: never `.` and never a relative entry.",
+          "fallible": true,
+          "name": "find",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "text"
+          },
+          "args": [
+            {
+              "name": "url",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "doc": "A small text document: a version file, a manifest. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes`.",
+          "fallible": true,
+          "name": "fetch_text",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "A file into the granted folder, checked as it is written. A mismatch deletes it and answers\n`GUATIAO_ERR_BAD_VALUE` with `checksum mismatch`. The executable bit is set only after the check passes.",
+          "fallible": true,
+          "name": "fetch",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "An archive inside the granted folder, unpacked. It refuses absolute paths, `..`, links, device names and anything\nover its limits.",
+          "fallible": true,
+          "name": "unpack",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "Starts programs where the host chooses: on this machine, on another over SSH, in a container or\na virtual machine. The host implements it and hands one to every\n[`AcpHarness::start`](crate::AcpHarness::start); the provider owns it from then on, starts its\nprograms through it, or never calls it, and destroys it by the time it calls the sink's\n`closed`.\n\nEvery slot takes `&self`, so a provider may call it from several threads at once.",
+      "floor_hash": 4134697914,
+      "name": "process_spawner",
+      "object": true,
+      "slots": [
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "Where its programs run and what it can give them; the same on every call.",
+          "fallible": true,
+          "name": "describe",
+          "required": true
+        },
+        {
+          "answer": {
+            "kind": "spawned_process",
+            "type": "object"
+          },
+          "args": [
+            {
+              "name": "spec",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "Starts `spec` and hands over the process. Refuses `GUATIAO_ERR_UNSUPPORTED` a spec asking\nwhat [`describe`](Self::describe) says it cannot give, `GUATIAO_ERR_NOT_FOUND` a program\nthat is not there, `GUATIAO_ERR_BAD_VALUE` a spec it cannot read.",
+          "fallible": true,
+          "name": "spawn",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            },
+            {
+              "name": "bytes",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "name": "private",
+              "type": "bool"
+            }
+          ],
+          "doc": "Writes `bytes` to the file `path` in the private directory the host granted this spawner (an\naccount's `state_dir`, or a login's), making directories on the way and replacing a file\nthere; `private` makes it readable by its owner alone where the system has such a notion.\n\n**The host resolves every path** against that directory and never trusts the provider's:\n`path` is relative, and an absolute path, a `..` part, or a link leading out of the directory\nis `GUATIAO_ERR_NOT_FOUND`, as is any call on a spawner with no such directory. A file\nwith another name for the same data (a hard link) is `GUATIAO_ERR_NOT_FOUND` too, where the\nsystem lets the host see it. `private` is honoured where the file is made: on Unix the file\nis created owner-only (mode 0600) before it holds a byte; on Windows the granted\ndirectory's ACL is the guard. A spawner that cannot give files says `files` false in [`describe`](Self::describe) and refuses all four\nfile methods `GUATIAO_ERR_UNSUPPORTED`.",
+          "fallible": true,
+          "name": "write_file",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "doc": "The content of the file `path`, whole. `GUATIAO_ERR_NOT_FOUND` for a file that is not there\nor a path [`write_file`](Self::write_file) refuses; `GUATIAO_ERR_BAD_VALUE` for one longer\nthan `max_bytes`, or a file that is not a regular file `GUATIAO_ERR_NOT_FOUND`.",
+          "fallible": true,
+          "name": "read_file",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "doc": "How long the file `path` is and when it last changed; `None` when it is not there.\n`GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses.",
+          "fallible": true,
+          "name": "file_info",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "doc": "Removes the file `path`; removing a file that is not there is no error.\n`GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses.",
+          "fallible": true,
+          "name": "remove_file",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "One program a spawner started, and everything it starts in turn.\n\nEvery slot takes `&self`, so one thread may write or kill while another waits in `read`.\nDestroying it kills the whole tree, as [`kill`](Self::kill) does.",
+      "floor_hash": 3306532587,
+      "name": "spawned_process",
+      "object": true,
+      "slots": [
+        {
+          "args": [
+            {
+              "name": "bytes",
+              "type": "bytes"
+            }
+          ],
+          "doc": "Writes all of `bytes` to its standard input (its terminal's, with a terminal).\n`GUATIAO_ERR_GONE` once the input is closed or the process has ended.",
+          "fallible": true,
+          "name": "write",
+          "required": true
+        },
+        {
+          "args": [],
+          "doc": "Closes its standard input: the program reads the end. Closing it twice is no error.",
+          "fallible": true,
+          "name": "close_input",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "i64"
+          },
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            },
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "doc": "Copies standard output (a terminal's whole output, with one) into `dst`: the byte count;\n`0` once no more can ever come; [`READ_TIMED_OUT`] after `timeout_ms` with nothing (`0`\npolls); [`READ_LINK_DOWN`] while the link is down. Never skips or repeats a byte, a link\nthat dropped and came back included.",
+          "fallible": true,
+          "name": "read",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "i64"
+          },
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            },
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "doc": "The same for standard error, when the spec kept it [`ErrorOutput::Separate`]; `0` at once\notherwise.",
+          "fallible": true,
+          "name": "read_error",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "size",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "Resizes its terminal. `GUATIAO_ERR_UNSUPPORTED` for a process started without one.",
+          "fallible": true,
+          "name": "resize",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "doc": "Waits up to `timeout_ms` (`0` polls) for it to end, and answers how it stands.",
+          "fallible": true,
+          "name": "wait",
+          "required": true
+        },
+        {
+          "args": [],
+          "doc": "Ends it and every process it started: its process group or job, and those that left it\nwhen [`SpawnerInfo::kills_escaped`] says so. Killing an ended process is no error.",
+          "fallible": true,
+          "name": "kill",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "Whether the link to where it runs is up, and how often it has dropped.",
+          "fallible": true,
+          "name": "link",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

@@ -2,9 +2,9 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-No Cargo features, MSRV Rust 1.89, a default build has no dependencies. Not published yet.
+One Cargo feature, `store` (the `program_store` kind, which needs `coqui-acp-api`); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
-Everything is imported from the crate root; there are no public modules.
+Everything but the `store` feature is imported from the crate root.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
@@ -107,3 +107,50 @@ Returns the text.
 - Registering a service again under the same id replaces it, including its verified state.
 - `verified()` is only for a trusted host integration after it has proven identity.
 - The registry is in memory.
+
+## `program_store` (`canoa::store`, feature `store`)
+
+A Guatiao kind, not ACP: a provider that knows one program (where its copies are, what is newest, how it installs). Needs
+`coqui-acp-api`'s `ProcessSpawner`, `Environment`, `Secret`, `LoginForm` and `LoginAnswer`. The files an outside library is built
+against: `include/canoa.store.kinds.json` (the three kinds and the two spawner kinds they name) and `include/canoa.store.schemas.json`
+(every model), both checked current by `tests/store_kinds.rs`, and `python/canoa_store_kinds.py` (typed `Protocol` classes, from `python/write_kinds.py` with Guatiao's Python binding on `PYTHONPATH`).
+
+```rust
+#[guatiao::kind(name = "program_store")]
+pub trait ProgramStore: Send + Sync {
+    fn describe(&self) -> Result<StoreInfo, ProviderError>;
+    fn program(&self, query: ProgramQuery, spawner: Object<dyn ProcessSpawner>, tools: Object<dyn InstallTools>) -> Result<ProgramReport, ProviderError>;
+    fn latest(&self, query: LatestQuery, tools: Object<dyn InstallTools>) -> Result<LatestReport, ProviderError>;
+    fn plan(&self, request: PlanRequest, tools: Object<dyn InstallTools>) -> Result<InstallPlan, ProviderError>;
+    fn apply(&self, request: ApplyRequest, spawner: Object<dyn ProcessSpawner>, tools: Object<dyn InstallTools>, prompter: Object<dyn InstallPrompter>) -> Result<ApplyOutcome, ProviderError>;
+}
+```
+
+Every method is required and synchronous. Every object a method is handed is the store's, and it destroys each, even when it refuses.
+`UNSUPPORTED` always carries its reason.
+
+- `describe`: cheap, the same on every call. `StoreInfo.program` is the folder name (`[a-z0-9-]{1,64}`, `is_program_name`); `endpoints`
+  are the `https` origins the host lets a download or a redirect reach; `serves` names the `acp_harness` provider ids and the
+  settings (`when`) that select the program.
+- `program`: every copy it can find, the host's own (`query.managed`) first. With `probe` false it spawns nothing and opens no
+  connection; with it true it may run each absolute copy's version flag through `spawner`, within `PROBE_TIMEOUT_MS`. Never a
+  network call.
+- `latest`: through `tools.fetch_text` only. A failure is `known: false` with `unknown_because`, never "current".
+- `plan`: what `apply` would do, before anything is written: every `Download` with its `Check`, every program it runs (`steps`), every
+  change outside the host's folder (`changes`, kinds `USER_PATH`, `PROFILE_FILE`, `REGISTRY`, `PATH`, `STATE_DIR`, ...), and an
+  opaque `token`. An update to the version already current is a plan with `version == from_version` and nothing in it, never a
+  refusal. Install and update carry a version.
+- `apply`: carries the plan out in `request.staging` (empty, the host's, and `spawner`'s private directory) and nowhere else. It reads the
+  version back by running the staged program, never from an installer's exit status. `BAD_VALUE "plan changed"` when a fact the plan
+  rests on has moved. On cancel (`prompter.cancelled()` or a call answering `GONE`) or at `timeout_ms` it kills its whole process
+  tree and answers `GONE` within two seconds. It never switches versions: the host does.
+- Never: a `.cmd`, `.bat` or `.ps1` started directly; a relative program; a working directory outside `staging`; a credential variable
+  passed on; a second fetch of a URL as `Unverified` after a mismatch; a write outside `staging`.
+
+`InstallTools` (the host implements it): `find` (names on the absolute `PATH` entries and `dirs`; never `.`), `fetch_text`, `fetch`
+(checked as written; a mismatch deletes the file and answers `BAD_VALUE checksum mismatch`; executable only after the check),
+`unpack` (`zip`, `tar`, `tar.gz`; refuses absolute paths, `..`, drive and device names, links unless `skip_links`, and over `max_files`
+or `max_bytes`). `InstallPrompter`: `say`, `progress`, `ask`, `cancelled`.
+
+What a host sends refuses a key it does not declare; an answer is read leniently. `StoreSettings { channel, version }` is the
+instance's configuration. Constructors: every `#[non_exhaustive]` model has `new`, and fields are set after.

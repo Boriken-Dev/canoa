@@ -1,8 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 #![warn(missing_docs, missing_debug_implementations)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 extern crate alloc;
+
+#[cfg(feature = "store")]
+#[cfg_attr(docsrs, doc(cfg(feature = "store")))]
+pub mod store;
 use alloc::collections::{BTreeMap, BTreeSet};
 use core::fmt;
 

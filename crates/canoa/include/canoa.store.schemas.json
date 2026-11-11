@@ -1,0 +1,1739 @@
+{
+  "Action": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "enum": [
+      "install",
+      "update",
+      "uninstall"
+    ],
+    "properties": {},
+    "type": "string",
+    "x-enum-labels": {
+      "install": "Puts a first copy in the host's folder.",
+      "uninstall": "Undoes what an install declared outside the host's folder.",
+      "update": "Puts a newer, or another, version beside the current one."
+    }
+  },
+  "ApplyOutcome": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "launch": {
+        "additionalProperties": false,
+        "description": "How to start it, with a path inside the staging folder.",
+        "properties": {
+          "environment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+            "type": "object"
+          },
+          "path": {
+            "description": "The absolute path of the file to start.",
+            "type": "string"
+          },
+          "settings": {
+            "default": {},
+            "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "notes": {
+        "default": [],
+        "description": "Things to tell the person.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "version": {
+        "description": "The version read back by running the staged program; absent for an uninstall.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "ApplyRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "environment": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "default": {},
+        "description": "The environment the programs it runs get, over a cleared one.",
+        "type": "object",
+        "writeOnly": true,
+        "x-sensitive": true
+      },
+      "managed": {
+        "additionalProperties": false,
+        "description": "The host's own copy.",
+        "properties": {
+          "dir": {
+            "description": "The absolute path of the version's folder.",
+            "type": "string"
+          },
+          "launch": {
+            "additionalProperties": false,
+            "description": "How to start it.",
+            "properties": {
+              "environment": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "default": {},
+                "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+                "type": "object"
+              },
+              "path": {
+                "description": "The absolute path of the file to start.",
+                "type": "string"
+              },
+              "settings": {
+                "default": {},
+                "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "version": {
+            "description": "The version it was installed as.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dir",
+          "version",
+          "launch"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "plan": {
+        "additionalProperties": false,
+        "description": "The plan the person confirmed, as it was.",
+        "properties": {
+          "action": {
+            "description": "The action.",
+            "enum": [
+              "install",
+              "update",
+              "uninstall"
+            ],
+            "type": "string",
+            "x-enum-labels": {
+              "install": "Puts a first copy in the host's folder.",
+              "uninstall": "Undoes what an install declared outside the host's folder.",
+              "update": "Puts a newer, or another, version beside the current one."
+            }
+          },
+          "bytes": {
+            "description": "The bytes it fetches, when known.",
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "changes": {
+            "default": [],
+            "description": "Everything it changes outside the host's folder; empty for the default.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "detail": {
+                  "description": "What it does there, for people.",
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "One of the change kinds: [`USER_PATH`], [`PROFILE_FILE`], [`STATE_DIR`] and the rest.",
+                  "type": "string"
+                },
+                "target": {
+                  "description": "What it changes: a path, a key.",
+                  "type": "string"
+                },
+                "undone_by_uninstall": {
+                  "default": false,
+                  "description": "Whether an `Uninstall` plan and apply undoes it.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "target",
+                "detail"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "downloads": {
+            "default": [],
+            "description": "Every file it fetches.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "bytes": {
+                  "description": "How big, when known.",
+                  "maximum": 18446744073709551615,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "check": {
+                  "description": "How it is checked.",
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "description": "Its SHA-256, in lower-case hexadecimal.",
+                      "properties": {
+                        "kind": {
+                          "const": "sha256"
+                        },
+                        "value": {
+                          "description": "The digest.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "value"
+                      ]
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Its SHA-512, in lower-case hexadecimal.",
+                      "properties": {
+                        "kind": {
+                          "const": "sha512"
+                        },
+                        "value": {
+                          "description": "The digest.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "value"
+                      ]
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "The publisher gives nothing to check it against; the plan says so.",
+                      "properties": {
+                        "kind": {
+                          "const": "unverified"
+                        },
+                        "why": {
+                          "description": "Why.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "why"
+                      ]
+                    }
+                  ],
+                  "type": "object",
+                  "x-variant-tag": "kind"
+                },
+                "url": {
+                  "description": "Where from; an `https` URL in one of the store's endpoints.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url",
+                "check"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "from_version": {
+            "description": "The version the copy was at.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notices": {
+            "default": [],
+            "description": "Anything the person should read before confirming.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "steps": {
+            "default": [],
+            "description": "Each program it runs, in words.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "token": {
+            "description": "Opaque, the store's: the host returns it with the plan and the store refuses it once a fact it rests on has moved.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version it ends at; required for an install and an update.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "token"
+        ],
+        "type": "object"
+      },
+      "staging": {
+        "description": "The absolute path of the empty folder the host made for this version: the only place it writes, and the spawner's private directory.",
+        "type": "string"
+      },
+      "timeout_ms": {
+        "default": 1800000,
+        "description": "How long it may run, in milliseconds.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "plan",
+      "staging"
+    ],
+    "type": "object"
+  },
+  "Change": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "detail": {
+        "description": "What it does there, for people.",
+        "type": "string"
+      },
+      "kind": {
+        "description": "One of the change kinds: [`USER_PATH`], [`PROFILE_FILE`], [`STATE_DIR`] and the rest.",
+        "type": "string"
+      },
+      "target": {
+        "description": "What it changes: a path, a key.",
+        "type": "string"
+      },
+      "undone_by_uninstall": {
+        "default": false,
+        "description": "Whether an `Uninstall` plan and apply undoes it.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "kind",
+      "target",
+      "detail"
+    ],
+    "type": "object"
+  },
+  "Check": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "description": "Its SHA-256, in lower-case hexadecimal.",
+        "properties": {
+          "kind": {
+            "const": "sha256"
+          },
+          "value": {
+            "description": "The digest.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "value"
+        ]
+      },
+      {
+        "additionalProperties": false,
+        "description": "Its SHA-512, in lower-case hexadecimal.",
+        "properties": {
+          "kind": {
+            "const": "sha512"
+          },
+          "value": {
+            "description": "The digest.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "value"
+        ]
+      },
+      {
+        "additionalProperties": false,
+        "description": "The publisher gives nothing to check it against; the plan says so.",
+        "properties": {
+          "kind": {
+            "const": "unverified"
+          },
+          "why": {
+            "description": "Why.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "why"
+        ]
+      }
+    ],
+    "properties": {},
+    "type": "object",
+    "x-variant-tag": "kind"
+  },
+  "Download": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "bytes": {
+        "description": "How big, when known.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "check": {
+        "description": "How it is checked.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Its SHA-256, in lower-case hexadecimal.",
+            "properties": {
+              "kind": {
+                "const": "sha256"
+              },
+              "value": {
+                "description": "The digest.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "description": "Its SHA-512, in lower-case hexadecimal.",
+            "properties": {
+              "kind": {
+                "const": "sha512"
+              },
+              "value": {
+                "description": "The digest.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "description": "The publisher gives nothing to check it against; the plan says so.",
+            "properties": {
+              "kind": {
+                "const": "unverified"
+              },
+              "why": {
+                "description": "Why.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "why"
+            ]
+          }
+        ],
+        "type": "object",
+        "x-variant-tag": "kind"
+      },
+      "url": {
+        "description": "Where from; an `https` URL in one of the store's endpoints.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "url",
+      "check"
+    ],
+    "type": "object"
+  },
+  "FetchRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "check": {
+        "description": "What it must match.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "Its SHA-256, in lower-case hexadecimal.",
+            "properties": {
+              "kind": {
+                "const": "sha256"
+              },
+              "value": {
+                "description": "The digest.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "description": "Its SHA-512, in lower-case hexadecimal.",
+            "properties": {
+              "kind": {
+                "const": "sha512"
+              },
+              "value": {
+                "description": "The digest.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "description": "The publisher gives nothing to check it against; the plan says so.",
+            "properties": {
+              "kind": {
+                "const": "unverified"
+              },
+              "why": {
+                "description": "Why.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "why"
+            ]
+          }
+        ],
+        "type": "object",
+        "x-variant-tag": "kind"
+      },
+      "executable": {
+        "default": false,
+        "description": "Whether to make it executable once it is checked.",
+        "type": "boolean"
+      },
+      "max_bytes": {
+        "description": "The most it may be, in bytes.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "path": {
+        "description": "Where it goes, relative to the granted folder.",
+        "type": "string"
+      },
+      "url": {
+        "description": "An `https` URL in one of the store's endpoints.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "url",
+      "path",
+      "check",
+      "max_bytes"
+    ],
+    "type": "object"
+  },
+  "Fetched": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "bytes": {
+        "description": "How many bytes.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sha256": {
+        "description": "Their SHA-256, in lower-case hexadecimal.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "bytes",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "FindRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "dirs": {
+        "default": [],
+        "description": "Directories to look in besides the `PATH`; each may open with `~` or an environment variable.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "names": {
+        "description": "File names to look for, with no directory part; on Windows each is tried with the executable extensions.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "names"
+    ],
+    "type": "object"
+  },
+  "Found": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "len": {
+        "description": "Its length.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "modified_ms": {
+        "description": "When it last changed, in Unix milliseconds.",
+        "maximum": 9223372036854775807,
+        "minimum": -9223372036854775808,
+        "type": "integer"
+      },
+      "path": {
+        "description": "Its absolute path.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "len",
+      "modified_ms"
+    ],
+    "type": "object"
+  },
+  "InstallPlan": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "description": "The action.",
+        "enum": [
+          "install",
+          "update",
+          "uninstall"
+        ],
+        "type": "string",
+        "x-enum-labels": {
+          "install": "Puts a first copy in the host's folder.",
+          "uninstall": "Undoes what an install declared outside the host's folder.",
+          "update": "Puts a newer, or another, version beside the current one."
+        }
+      },
+      "bytes": {
+        "description": "The bytes it fetches, when known.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "changes": {
+        "default": [],
+        "description": "Everything it changes outside the host's folder; empty for the default.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "description": "What it does there, for people.",
+              "type": "string"
+            },
+            "kind": {
+              "description": "One of the change kinds: [`USER_PATH`], [`PROFILE_FILE`], [`STATE_DIR`] and the rest.",
+              "type": "string"
+            },
+            "target": {
+              "description": "What it changes: a path, a key.",
+              "type": "string"
+            },
+            "undone_by_uninstall": {
+              "default": false,
+              "description": "Whether an `Uninstall` plan and apply undoes it.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "target",
+            "detail"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "downloads": {
+        "default": [],
+        "description": "Every file it fetches.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "description": "How big, when known.",
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "check": {
+              "description": "How it is checked.",
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "description": "Its SHA-256, in lower-case hexadecimal.",
+                  "properties": {
+                    "kind": {
+                      "const": "sha256"
+                    },
+                    "value": {
+                      "description": "The digest.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Its SHA-512, in lower-case hexadecimal.",
+                  "properties": {
+                    "kind": {
+                      "const": "sha512"
+                    },
+                    "value": {
+                      "description": "The digest.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "The publisher gives nothing to check it against; the plan says so.",
+                  "properties": {
+                    "kind": {
+                      "const": "unverified"
+                    },
+                    "why": {
+                      "description": "Why.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "why"
+                  ]
+                }
+              ],
+              "type": "object",
+              "x-variant-tag": "kind"
+            },
+            "url": {
+              "description": "Where from; an `https` URL in one of the store's endpoints.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "check"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "from_version": {
+        "description": "The version the copy was at.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "notices": {
+        "default": [],
+        "description": "Anything the person should read before confirming.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "steps": {
+        "default": [],
+        "description": "Each program it runs, in words.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "token": {
+        "description": "Opaque, the store's: the host returns it with the plan and the store refuses it once a fact it rests on has moved.",
+        "type": "string"
+      },
+      "version": {
+        "description": "The version it ends at; required for an install and an update.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "action",
+      "token"
+    ],
+    "type": "object"
+  },
+  "LatestQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "channel": {
+        "description": "The channel, when the program has them; absent is the default.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "LatestReport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "channel": {
+        "description": "The channel it is on.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "known": {
+        "default": false,
+        "description": "Whether the newest version is known. A failure to ask is `false`, never \"current\".",
+        "type": "boolean"
+      },
+      "notes_url": {
+        "description": "A page about it.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unknown_because": {
+        "description": "Why not, when it is not.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "version": {
+        "description": "The version.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "Launch": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "environment": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "default": {},
+        "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+        "type": "object"
+      },
+      "path": {
+        "description": "The absolute path of the file to start.",
+        "type": "string"
+      },
+      "settings": {
+        "default": {},
+        "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "ManagedCopy": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "dir": {
+        "description": "The absolute path of the version's folder.",
+        "type": "string"
+      },
+      "launch": {
+        "additionalProperties": false,
+        "description": "How to start it.",
+        "properties": {
+          "environment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+            "type": "object"
+          },
+          "path": {
+            "description": "The absolute path of the file to start.",
+            "type": "string"
+          },
+          "settings": {
+            "default": {},
+            "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "version": {
+        "description": "The version it was installed as.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dir",
+      "version",
+      "launch"
+    ],
+    "type": "object"
+  },
+  "PlanRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "description": "The action.",
+        "enum": [
+          "install",
+          "update",
+          "uninstall"
+        ],
+        "type": "string",
+        "x-enum-labels": {
+          "install": "Puts a first copy in the host's folder.",
+          "uninstall": "Undoes what an install declared outside the host's folder.",
+          "update": "Puts a newer, or another, version beside the current one."
+        }
+      },
+      "channel": {
+        "description": "The channel, when the program has them.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "copy": {
+        "description": "An outside copy, by path, the plan concerns; absent is the host's own.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "managed": {
+        "additionalProperties": false,
+        "description": "The host's own copy.",
+        "properties": {
+          "dir": {
+            "description": "The absolute path of the version's folder.",
+            "type": "string"
+          },
+          "launch": {
+            "additionalProperties": false,
+            "description": "How to start it.",
+            "properties": {
+              "environment": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "default": {},
+                "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+                "type": "object"
+              },
+              "path": {
+                "description": "The absolute path of the file to start.",
+                "type": "string"
+              },
+              "settings": {
+                "default": {},
+                "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "version": {
+            "description": "The version it was installed as.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dir",
+          "version",
+          "launch"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "platform": {
+        "additionalProperties": false,
+        "description": "Where the program will run.",
+        "properties": {
+          "arch": {
+            "description": "`x86_64` or `aarch64`.",
+            "type": "string"
+          },
+          "os": {
+            "description": "`windows`, `linux` or `macos`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "os",
+          "arch"
+        ],
+        "type": "object"
+      },
+      "version": {
+        "description": "A version to pin; absent is the newest.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "action",
+      "platform"
+    ],
+    "type": "object"
+  },
+  "Platform": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "arch": {
+        "description": "`x86_64` or `aarch64`.",
+        "type": "string"
+      },
+      "os": {
+        "description": "`windows`, `linux` or `macos`.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "os",
+      "arch"
+    ],
+    "type": "object"
+  },
+  "ProgramCopy": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "launch": {
+        "additionalProperties": false,
+        "description": "How to start it.",
+        "properties": {
+          "environment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+            "type": "object"
+          },
+          "path": {
+            "description": "The absolute path of the file to start.",
+            "type": "string"
+          },
+          "settings": {
+            "default": {},
+            "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "managed": {
+        "default": false,
+        "description": "Whether it is the host's own copy.",
+        "type": "boolean"
+      },
+      "manager": {
+        "description": "Who put it there: one of the `MANAGER_*` names.",
+        "type": "string"
+      },
+      "path": {
+        "description": "The absolute path of the file.",
+        "type": "string"
+      },
+      "self_updates": {
+        "default": false,
+        "description": "Whether it replaces itself and the launch cannot stop that.",
+        "type": "boolean"
+      },
+      "update": {
+        "description": "Who can update it.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "By this store, into the host's folder.",
+            "properties": {
+              "kind": {
+                "const": "by_store"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "description": "By the program or its package manager; `how` is the command, as text, for the person to run.",
+            "properties": {
+              "how": {
+                "description": "The publisher's own command.",
+                "type": "string"
+              },
+              "kind": {
+                "const": "elsewhere"
+              }
+            },
+            "required": [
+              "kind",
+              "how"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "description": "Not at all.",
+            "properties": {
+              "kind": {
+                "const": "no"
+              },
+              "why": {
+                "description": "Why.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "why"
+            ]
+          }
+        ],
+        "type": "object",
+        "x-variant-tag": "kind"
+      },
+      "version": {
+        "description": "The version, when it could be read.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "version_line": {
+        "description": "The line the version was read from, when it was run.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "path",
+      "manager",
+      "launch",
+      "update"
+    ],
+    "type": "object"
+  },
+  "ProgramQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "environment": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "default": {},
+        "description": "The environment its programs run in: `PATH` and the home directories decide what is found.",
+        "type": "object",
+        "writeOnly": true,
+        "x-sensitive": true
+      },
+      "managed": {
+        "additionalProperties": false,
+        "description": "The host's own copy, when it has one.",
+        "properties": {
+          "dir": {
+            "description": "The absolute path of the version's folder.",
+            "type": "string"
+          },
+          "launch": {
+            "additionalProperties": false,
+            "description": "How to start it.",
+            "properties": {
+              "environment": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "default": {},
+                "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+                "type": "object"
+              },
+              "path": {
+                "description": "The absolute path of the file to start.",
+                "type": "string"
+              },
+              "settings": {
+                "default": {},
+                "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "version": {
+            "description": "The version it was installed as.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dir",
+          "version",
+          "launch"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "probe": {
+        "default": false,
+        "description": "Whether the store may run each copy's version flag. False asks from what is on disk alone.",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "ProgramReport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "copies": {
+        "default": [],
+        "description": "Every copy, the host's own first.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "launch": {
+              "additionalProperties": false,
+              "description": "How to start it.",
+              "properties": {
+                "environment": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "default": {},
+                  "description": "Variables to start it with, none of them a credential: `DISABLE_AUTOUPDATER=1` and the like.",
+                  "type": "object"
+                },
+                "path": {
+                  "description": "The absolute path of the file to start.",
+                  "type": "string"
+                },
+                "settings": {
+                  "default": {},
+                  "description": "`acp_harness` settings that point a provider at it, such as `{\"executable\": path}`."
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "managed": {
+              "default": false,
+              "description": "Whether it is the host's own copy.",
+              "type": "boolean"
+            },
+            "manager": {
+              "description": "Who put it there: one of the `MANAGER_*` names.",
+              "type": "string"
+            },
+            "path": {
+              "description": "The absolute path of the file.",
+              "type": "string"
+            },
+            "self_updates": {
+              "default": false,
+              "description": "Whether it replaces itself and the launch cannot stop that.",
+              "type": "boolean"
+            },
+            "update": {
+              "description": "Who can update it.",
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "description": "By this store, into the host's folder.",
+                  "properties": {
+                    "kind": {
+                      "const": "by_store"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "By the program or its package manager; `how` is the command, as text, for the person to run.",
+                  "properties": {
+                    "how": {
+                      "description": "The publisher's own command.",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "elsewhere"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "how"
+                  ]
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Not at all.",
+                  "properties": {
+                    "kind": {
+                      "const": "no"
+                    },
+                    "why": {
+                      "description": "Why.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "why"
+                  ]
+                }
+              ],
+              "type": "object",
+              "x-variant-tag": "kind"
+            },
+            "version": {
+              "description": "The version, when it could be read.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "version_line": {
+              "description": "The line the version was read from, when it was run.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "manager",
+            "launch",
+            "update"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "Progress": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "done": {
+        "description": "How much is done.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "label": {
+        "description": "What is going on.",
+        "type": "string"
+      },
+      "total": {
+        "description": "Out of how much, when known.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "label",
+      "done"
+    ],
+    "type": "object"
+  },
+  "Serves": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "provider": {
+        "description": "The `acp_harness` provider id.",
+        "type": "string"
+      },
+      "when": {
+        "default": {},
+        "description": "The provider settings that select the program, such as `{\"harness\": \"grok\"}`; empty selects any."
+      }
+    },
+    "required": [
+      "provider"
+    ],
+    "type": "object"
+  },
+  "StoreInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "channels": {
+        "default": [],
+        "description": "Its release channels; the first is the default, and none means it has none.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "endpoints": {
+        "default": [],
+        "description": "The `https` origins it fetches from, and the only ones the host lets a download or a redirect reach.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "homepage": {
+        "description": "Its home page.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "platforms": {
+        "default": [],
+        "description": "What it can be installed for.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "arch": {
+              "description": "`x86_64` or `aarch64`.",
+              "type": "string"
+            },
+            "os": {
+              "description": "`windows`, `linux` or `macos`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "os",
+            "arch"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "program": {
+        "description": "The folder name the host keeps the program under: lower-case letters, digits and hyphens, 1 to 64.",
+        "type": "string"
+      },
+      "publisher": {
+        "description": "Who publishes it.",
+        "type": "string"
+      },
+      "serves": {
+        "default": [],
+        "description": "The harness providers that start it.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "description": "The `acp_harness` provider id.",
+              "type": "string"
+            },
+            "when": {
+              "default": {},
+              "description": "The provider settings that select the program, such as `{\"harness\": \"grok\"}`; empty selects any."
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "title": {
+        "description": "Its name for people.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "program",
+      "title",
+      "publisher"
+    ],
+    "type": "object"
+  },
+  "StoreSettings": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "channel": {
+        "description": "The channel to install from when a request names none; absent is the store's default.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "version": {
+        "description": "A version to pin every install and update to; absent is the newest.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "UnpackRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "archive": {
+        "description": "Its path, relative to the granted folder.",
+        "type": "string"
+      },
+      "format": {
+        "description": "`zip`, `tar` or `tar.gz`.",
+        "type": "string"
+      },
+      "into": {
+        "description": "The folder to unpack into, relative to the granted folder.",
+        "type": "string"
+      },
+      "max_bytes": {
+        "description": "The most it may unpack to, in bytes.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "max_files": {
+        "description": "The most files it may unpack.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "remove_archive": {
+        "default": false,
+        "description": "Whether to delete the archive after.",
+        "type": "boolean"
+      },
+      "skip_links": {
+        "default": false,
+        "description": "Whether to leave out the links an archive holds, rather than refuse the archive for them.",
+        "type": "boolean"
+      },
+      "strip": {
+        "default": 0,
+        "description": "How many leading path parts to drop from each entry.",
+        "maximum": 4294967295,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "archive",
+      "into",
+      "format",
+      "max_bytes",
+      "max_files"
+    ],
+    "type": "object"
+  },
+  "Unpacked": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "bytes": {
+        "description": "How many bytes.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "files": {
+        "description": "How many files.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "files",
+      "bytes"
+    ],
+    "type": "object"
+  },
+  "Updatable": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "description": "By this store, into the host's folder.",
+        "properties": {
+          "kind": {
+            "const": "by_store"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      {
+        "additionalProperties": false,
+        "description": "By the program or its package manager; `how` is the command, as text, for the person to run.",
+        "properties": {
+          "how": {
+            "description": "The publisher's own command.",
+            "type": "string"
+          },
+          "kind": {
+            "const": "elsewhere"
+          }
+        },
+        "required": [
+          "kind",
+          "how"
+        ]
+      },
+      {
+        "additionalProperties": false,
+        "description": "Not at all.",
+        "properties": {
+          "kind": {
+            "const": "no"
+          },
+          "why": {
+            "description": "Why.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "why"
+        ]
+      }
+    ],
+    "properties": {},
+    "type": "object",
+    "x-variant-tag": "kind"
+  }
+}

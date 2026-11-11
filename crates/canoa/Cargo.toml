@@ -20,4 +20,17 @@ std_instead_of_core = "warn"
 std_instead_of_alloc = "warn"
 alloc_instead_of_core = "warn"
 
+[features]
+# The `program_store` kind: how a program is found, checked for updates and installed into a folder the host owns.
+store = ["dep:coqui-acp-api"]
+
 [dependencies]
+coqui-acp-api = { workspace = true, optional = true }
+
+[dev-dependencies]
+guatiao-serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[test]]
+name = "store_kinds"
+required-features = ["store"]
