@@ -109,18 +109,19 @@ String? localHostName() {
 
 String get pathSeparator => Platform.pathSeparator;
 
-/// Makes [path] and what is above it; true when it was not there.
+/// Makes [path] and what is above it; true when it was not there. One small synchronous call, so a session starting waits on
+/// no other disk work first.
 Future<bool> makeFolder(String path) async {
   final folder = Directory(path);
-  if (await folder.exists()) return false;
-  await folder.create(recursive: true);
+  if (folder.existsSync()) return false;
+  folder.createSync(recursive: true);
   return true;
 }
 
 /// Removes [path] when it is empty, and says nothing when it is not or cannot be.
 Future<void> removeEmptyFolder(String path) async {
   try {
-    await Directory(path).delete();
+    Directory(path).deleteSync();
   } on FileSystemException {
     // Not empty, or already gone: leave it.
   }
