@@ -18,7 +18,7 @@ Configuration tables:
 - [network] prefer_webtransport, connect_timeout (seconds, between 1 and 120)
 - [assets] cdn = "none" or "local" (deployment option; font hosting remains a separate build concern)
 - [host] what `canoa` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md). The app keeps this table as it is when it saves its settings.
-- [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200)
+- [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200), workspace (the folder of a session started with none chosen, a path template; see [a new session](#a-new-session))
 - [notifications] permission, question, finished: which of these, in a conversation the person is not looking at, reach them as a notification outside the window; each on by default. See [below](#when-a-conversation-needs-you).
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
@@ -37,6 +37,21 @@ The session list is `sessions.json` beside canoa.cfg on a desktop, and this orig
 ### A new session
 
 **New session**, Ctrl+N (⌘N on a Mac) or the palette opens a new session in the middle of the window: its folder (recent folders, or **Open folder…**) above the message box, and in the row under the box `+`, the **source**, **Local** or **Worktree**, the agent's **mode**, **model** and **effort**, the **overlays** it starts with, and Send. It is in the side list at once, as New, with nothing started: no agent, no connection and no worktree. One left untouched is shown again rather than another made, and a new one starts from the source and folder chosen last.
+
+With no folder chosen (the first session on a computer, or after choosing **Scratch** in the folder menu) the folder shows as **Scratch** with the path it will have, and the session works there: the folder is made on the first message, never before, and taken away again if the agent does not start. Choosing a folder wins. The place comes from `[sessions] workspace`, a path template whose `${name}` variables are put in when the folder is made (Settings shows it with what it makes now); the default is `${documents}/Canoa/scratch/${session}`.
+
+| Variable | Is |
+| --- | --- |
+| `${documents}` | the person's Documents folder: on Windows the Documents known folder (which follows a redirected or OneDrive Documents), on Linux `$XDG_DOCUMENTS_DIR`, else `user-dirs.dirs`, else `~/Documents`, on macOS `~/Documents` |
+| `${home}` | the home folder |
+| `${session}` | Canoa's own id for the session, a UUID made with the draft before any agent runs and kept in the session list beside the id the agent reports |
+| `${date}`, `${time}`, `${datetime}` | local time when the folder is made: `2026-11-11`, `153005`, `2026-11-11T153005` |
+| `${handler}` | the harness: a hosted `harness` entry's provider id (else the entry's name), and for a source the app starts its harness id such as `claude-code`, `codex` or `grok` (else its label) |
+| `${source}` | the source's label |
+| `${host}` | this computer's name |
+| `${fqdn}` | a webpage's host name; empty on the desktop |
+
+Only the template places separators (`/` or `\`, either spelling): every value except `${documents}` and `${home}` is made one path segment, its separators, `..`, control and reserved characters replaced by `_`, and a part of the template that a variable leaves empty (`${fqdn}` on the desktop) is dropped. canoa.cfg is refused, naming `sessions.workspace`, when the template names a variable not in the table, leaves a `${` open, or has no `${session}`, so two sessions never share a folder by accident.
 
 A source is a program with its arguments and what else it needs: the presets (Claude Code and Codex through their ACP adapters, Antigravity as `agy acp`, Grok as `grok agent stdio`, Pi), the commands under `[agents.NAME]`, and the agent entries the `canoa` this app runs is serving, as `canoa serve` lists them: an entry added to `[host.agents]`, a `harness` entry naming any provider included, is a source once the host serves it, with no change to the app (the app does not read the entry, and a draft kept on a hosted source gets it back when the host serves it). Settings → Sources lists them with where each program was found (on PATH, else where its installer puts it: `%LOCALAPPDATA%\agy\bin` for `agy` on Windows, `~/.grok/bin` for `grok`), hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
 
