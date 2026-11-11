@@ -214,8 +214,11 @@ team = "sha256:..."          # an overlay's or a project's server, allowed at th
 
 An overlay is an [Agent Overlay Specification](https://github.com/Boriken-Dev/agent-overlay-spec) (AOS) v0 overlay: a
 directory whose files take effect by convention (`skills/<name>/SKILL.md`, `CONTEXT.md`, `rules/<name>.md`, the file
-`env`), with an optional `overlay.cfg` manifest, TOML, or JSON or YAML after a `#!json` or `#!yaml` line (a YAML tag,
-anchor, alias or merge key is refused). Canoa reads the
+`env`), with an optional manifest in one of two forms, never both (an overlay with both is left out). `OVERLAY.md` holds
+the manifest as front matter between `---` lines, YAML unless its first line is a format line such as `#!toml`, and its
+body, when it holds more than white space, is the overlay's context in place of `CONTEXT.md`, which Canoa then ignores
+and lists among what it does not apply. `overlay.cfg` is TOML, or JSON or YAML after a `#!json` or `#!yaml` line. YAML is
+read as a restricted subset: a tag, anchor, alias or merge key leaves the overlay out. Canoa reads the
 manifest statically and validates it; one it cannot read or that is not valid leaves the overlay out, except that a
 problem in `[about]`, store metadata, never does. Canoa applies:
 
@@ -241,7 +244,7 @@ harnesses' hints, and the
 From git, the desktop app installs an overlay into `overlays/NAME/` beside canoa.cfg, with `overlays/NAME.json`
 recording the source, the commit, each file's git blob id and **the tree digest** of what it wrote, and its history in
 `overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in Settings → Profiles fetch the source and show
-the commit, the tree digest, every file it adds, changes or removes, and its `overlay.cfg`; nothing changes until you
+the commit, the tree digest, every file it adds, changes or removes, and its `OVERLAY.md` or `overlay.cfg`; nothing changes until you
 apply, and what is applied is that commit's files, checked against the digest as they are written. Applying **pins**
 the overlay in canoa.cfg by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
 have another digest installs nothing until you change the pin. Each time profiles are built the installed copy is
