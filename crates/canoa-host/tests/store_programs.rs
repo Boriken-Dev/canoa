@@ -169,7 +169,7 @@ fn an_install_writes_current_json_and_a_launch_that_runs() {
         .programs
         .store("echo_store", &StoreSettings::default())
         .expect("store");
-    let report = s.programs.report(&*store, true).expect("report");
+    let report = s.programs.report(&*store, true, None).expect("report");
     assert_eq!(report.copies[0].version.as_deref(), Some("2.0.0"));
     assert!(report.copies[0].managed);
     assert_eq!(
@@ -358,13 +358,40 @@ fn an_undeclared_change_is_refused_named_and_the_version_folder_removed() {
     );
 }
 
-/// A store beside which something else keeps rewriting the profile for a while, as a running agent rewrites its own state.
-struct Noisy {
-    engine: Engine<EchoRecipe>,
-    rc: PathBuf,
+/// What a rigged store does around the echo engine's apply.
+#[derive(Clone)]
+enum Rig {
+    /// Appends a PATH line to the profile and then fails, as an installer that gets half way does.
+    WriteRcThenFail,
+    /// Appends a PATH line to the profile and goes on.
+    WritesRc,
+    /// Something else keeps rewriting the profile, during the install and after it.
+    MovingProfile,
+    /// Something else keeps rewriting a file outside everything the host watches.
+    MovingElsewhere(PathBuf),
+    /// Declares a change covering the whole home, and does nothing else.
+    DeclaresTheHome(PathBuf),
+    /// Declares a change of the user's `PATH`, and writes a line that is not one.
+    DeclaresPathWritesAlias,
+    /// Changes a file in another program's folder under the programs root, as an install must not.
+    TouchesAnotherProgram(PathBuf),
+    /// Answers with a launch that sets a variable which changes what a program loads.
+    LaunchesWithNodeOptions,
+    /// Answers with a launch whose script is a file outside the version's folder.
+    LaunchesAScriptElsewhere(PathBuf),
+    /// Declares the whole of HKCU.
+    DeclaresAllOfHkcu,
+    /// Plans a download that nothing checks.
+    PlansAnUnverifiedDownload,
 }
 
-impl ProgramStore for Noisy {
+struct Rigged {
+    engine: Engine<EchoRecipe>,
+    rc: PathBuf,
+    rig: Rig,
+}
+
+impl ProgramStore for Rigged {
     fn describe(&self) -> Result<StoreInfo, ProviderError> {
         self.engine.describe()
     }
@@ -388,7 +415,36 @@ impl ProgramStore for Noisy {
         r: PlanRequest,
         t: Object<dyn InstallTools>,
     ) -> Result<InstallPlan, ProviderError> {
-        self.engine.plan(&r, &t)
+        let mut plan = self.engine.plan(&r, &t)?;
+        match &self.rig {
+            Rig::DeclaresTheHome(home) => plan.changes.push(canoa::store::Change::new(
+                canoa::store::PATH,
+                home.to_string_lossy(),
+                "everything",
+                false,
+            )),
+            Rig::DeclaresPathWritesAlias => plan.changes.push(canoa::store::Change::new(
+                canoa::store::USER_PATH,
+                "PATH",
+                "adds a directory",
+                true,
+            )),
+            Rig::DeclaresAllOfHkcu => plan.changes.push(canoa::store::Change::new(
+                canoa::store::REGISTRY,
+                "HKCU",
+                "everything",
+                false,
+            )),
+            Rig::PlansAnUnverifiedDownload => {
+                for download in &mut plan.downloads {
+                    download.check = canoa::store::Check::Unverified {
+                        why: "the test says so".to_owned(),
+                    };
+                }
+            }
+            _ => {}
+        }
+        Ok(plan)
     }
     fn apply(
         &self,
@@ -397,39 +453,182 @@ impl ProgramStore for Noisy {
         t: Object<dyn InstallTools>,
         p: Object<dyn InstallPrompter>,
     ) -> Result<ApplyOutcome, ProviderError> {
-        let rc = self.rc.clone();
-        std::thread::spawn(move || {
-            for n in 0..40 {
-                let _ = fs::write(&rc, format!("# rewritten {n}\n"));
-                std::thread::sleep(std::time::Duration::from_millis(60));
+        let rewrite = |path: PathBuf| {
+            std::thread::spawn(move || {
+                for n in 0..40 {
+                    let _ = fs::write(&path, format!("# rewritten {n}\n"));
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                }
+            });
+        };
+        match &self.rig {
+            Rig::WriteRcThenFail => {
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.rc)
+                    .expect("rc");
+                writeln!(file, "export PATH=$HOME/.echo/bin:$PATH").expect("write");
+                return Err(ProviderError::new(
+                    coqui_acp_api::guatiao::Status::GUATIAO_ERR_INTERNAL,
+                    "boom",
+                ));
             }
-        });
+            Rig::WritesRc => {
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.rc)
+                    .expect("rc");
+                writeln!(file, "export PATH=$HOME/.echo/bin:$PATH").expect("write");
+            }
+            Rig::MovingProfile => rewrite(self.rc.clone()),
+            Rig::MovingElsewhere(path) => rewrite(path.clone()),
+            Rig::DeclaresPathWritesAlias => {
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.rc)
+                    .expect("rc");
+                writeln!(file, "alias ll='ls -l'").expect("write");
+            }
+            Rig::TouchesAnotherProgram(path) => {
+                fs::write(path, b"changed by this install").expect("another program's file");
+            }
+            Rig::DeclaresTheHome(_) | Rig::DeclaresAllOfHkcu | Rig::PlansAnUnverifiedDownload => {}
+            Rig::LaunchesWithNodeOptions | Rig::LaunchesAScriptElsewhere(_) => {
+                let mut outcome = self.engine.apply(&r, &s, &t, &p)?;
+                if let Some(launch) = outcome.launch.as_mut() {
+                    match &self.rig {
+                        Rig::LaunchesWithNodeOptions => {
+                            launch
+                                .environment
+                                .insert("NODE_OPTIONS".to_owned(), "--require x".to_owned());
+                        }
+                        Rig::LaunchesAScriptElsewhere(path) => {
+                            let mut settings = coqui_acp_api::guatiao::Map::new();
+                            settings.set(
+                                "script",
+                                coqui_acp_api::guatiao::Value::from(
+                                    path.to_string_lossy().as_ref(),
+                                ),
+                            );
+                            launch.settings = coqui_acp_api::guatiao::Value::from(settings);
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(outcome);
+            }
+        }
         self.engine.apply(&r, &s, &t, &p)
     }
 }
 
-#[test]
-fn a_change_still_going_on_after_the_install_ends_is_not_blamed_on_it() {
-    let s = setup("noisy", Variant::Normal);
-    let store: Arc<dyn ProgramStore> = Arc::new(Noisy {
+/// The profile the rigged stores write to: one the person already has, at the path the footprint names it by.
+fn profile(s: &Setup) -> PathBuf {
+    s.dir.0.join("home").join(".bashrc")
+}
+
+fn rigged(s: &Setup, rig: Rig) -> Arc<dyn ProgramStore> {
+    fs::write(
+        profile(s),
+        "# mine
+",
+    )
+    .expect("a profile");
+    Arc::new(Rigged {
         engine: Engine::new(EchoRecipe, StoreSettings::default()),
-        rc: s.dir.0.join("home/.bashrc"),
-    });
-    let plan = s
+        rc: profile(s),
+        rig,
+    })
+}
+
+fn apply_rigged(
+    s: &Setup,
+    store: Arc<dyn ProgramStore>,
+    edit: impl FnOnce(&mut InstallPlan),
+) -> Result<Option<canoa_host::store::programs::Applied>, StoreError> {
+    let mut plan = s
         .programs
         .plan(&*store, Action::Install, None, None)
         .expect("plan");
-    let applied = s
-        .programs
-        .apply_store(
-            store,
-            "echo_store",
-            &plan,
-            Arc::new(Recorder::default()),
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("something else's ongoing writes do not stop the install");
+    edit(&mut plan);
+    s.programs.apply_store(
+        store,
+        "echo_store",
+        &plan,
+        Arc::new(Recorder::default()),
+        Arc::new(AtomicBool::new(false)),
+    )
+}
+
+#[test]
+fn a_store_that_changes_the_profile_and_then_fails_is_reported_for_what_it_changed() {
+    let s = setup("failing", Variant::Normal);
+    let error = apply_rigged(&s, rigged(&s, Rig::WriteRcThenFail), |_| {}).expect_err("refused");
+    let StoreError::Undeclared { items, .. } = &error else {
+        panic!("a failed apply that changed the profile was reported as: {error}")
+    };
+    assert!(
+        items.iter().any(|i| i.what.ends_with(".bashrc")),
+        "{items:?}"
+    );
+    assert!(current(&s).is_none());
+}
+
+#[test]
+fn a_profile_line_that_keeps_changing_is_caught_and_not_exempted() {
+    let s = setup("moving", Variant::Normal);
+    let error = apply_rigged(&s, rigged(&s, Rig::MovingProfile), |_| {}).expect_err("refused");
+    assert!(matches!(error, StoreError::Undeclared { .. }), "{error}");
+    assert!(
+        format!("{error}").contains("try again"),
+        "the person is told to retry: {error}"
+    );
+}
+
+#[test]
+fn a_path_outside_everything_watched_is_ignored_however_it_changes() {
+    let s = setup("elsewhere", Variant::Normal);
+    let noise = s.dir.0.join("unwatched");
+    fs::create_dir_all(&noise).expect("dir");
+    let rig = Rig::MovingElsewhere(noise.join("noise.txt"));
+    let applied = apply_rigged(&s, rigged(&s, rig), |_| {}).expect("installed");
     assert!(applied.is_some());
+}
+
+#[test]
+fn a_clients_copy_of_the_plan_cannot_declare_what_the_store_did_not() {
+    let s = setup("clientplan", Variant::Normal);
+    let rc = profile(&s);
+    let error = apply_rigged(&s, rigged(&s, Rig::WritesRc), |plan| {
+        plan.changes.push(canoa::store::Change::new(
+            canoa::store::PROFILE_FILE,
+            rc.to_string_lossy(),
+            "adds a line",
+            true,
+        ));
+    })
+    .expect_err("refused");
+    assert!(matches!(error, StoreError::Undeclared { .. }), "{error}");
+}
+
+#[test]
+fn a_declared_change_that_covers_the_whole_home_is_refused() {
+    let s = setup("declareshome", Variant::Normal);
+    let home = s.dir.0.join("home");
+    let error =
+        apply_rigged(&s, rigged(&s, Rig::DeclaresTheHome(home)), |_| {}).expect_err("refused");
+    assert!(format!("{error}").contains("declares"), "{error}");
+}
+
+#[test]
+fn a_user_path_change_covers_a_path_line_and_not_an_alias() {
+    let s = setup("pathalias", Variant::Normal);
+    let error =
+        apply_rigged(&s, rigged(&s, Rig::DeclaresPathWritesAlias), |_| {}).expect_err("refused");
+    assert!(matches!(error, StoreError::Undeclared { .. }), "{error}");
 }
 
 #[test]
@@ -475,4 +674,233 @@ fn an_elevated_host_installs_only_when_told_it_may() {
         elevated,
         "{result:?}"
     );
+}
+
+#[test]
+fn another_programs_folder_changing_during_an_install_is_caught() {
+    let s = setup("otherprogram", Variant::Normal);
+    let other = s.dir.0.join("programs").join("grok");
+    fs::create_dir_all(&other).expect("another program's folder");
+    let file = other.join("current.json");
+    fs::write(&file, b"{}").expect("file");
+    let error = apply_rigged(&s, rigged(&s, Rig::TouchesAnotherProgram(file)), |_| {})
+        .expect_err("refused");
+    let StoreError::Undeclared { items, .. } = &error else {
+        panic!("{error}")
+    };
+    assert!(
+        items.iter().any(|i| i.what.ends_with("current.json")),
+        "{items:?}"
+    );
+}
+
+#[test]
+fn a_launch_that_sets_what_programs_load_or_names_a_script_elsewhere_is_refused() {
+    let s = setup("launchshape", Variant::Normal);
+    let error =
+        apply_rigged(&s, rigged(&s, Rig::LaunchesWithNodeOptions), |_| {}).expect_err("refused");
+    assert!(format!("{error}").contains("NODE_OPTIONS"), "{error}");
+    let elsewhere = s.dir.0.join("elsewhere.js");
+    let error = apply_rigged(
+        &s,
+        rigged(&s, Rig::LaunchesAScriptElsewhere(elsewhere)),
+        |_| {},
+    )
+    .expect_err("refused");
+    assert!(
+        format!("{error}").contains("outside the version"),
+        "{error}"
+    );
+    assert!(current(&s).is_none());
+}
+
+#[test]
+fn a_declared_change_of_all_of_hkcu_is_refused() {
+    let s = setup("hkcu", Variant::Normal);
+    let error = apply_rigged(&s, rigged(&s, Rig::DeclaresAllOfHkcu), |_| {}).expect_err("refused");
+    assert!(format!("{error}").contains("declares"), "{error}");
+}
+
+#[test]
+fn a_declared_change_of_a_filesystem_root_is_refused() {
+    let s = setup("rootchange", Variant::Normal);
+    let root = std::env::temp_dir()
+        .ancestors()
+        .last()
+        .expect("a root")
+        .to_path_buf();
+    let error =
+        apply_rigged(&s, rigged(&s, Rig::DeclaresTheHome(root)), |_| {}).expect_err("refused");
+    assert!(format!("{error}").contains("declares"), "{error}");
+}
+
+#[test]
+fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_recorded() {
+    let s = setup("unverified", Variant::Normal);
+    let error =
+        apply_rigged(&s, rigged(&s, Rig::PlansAnUnverifiedDownload), |_| {}).expect_err("refused");
+    assert!(matches!(error, StoreError::Unverified(_)), "{error}");
+    // Told it may, the same plan goes ahead and the copy records that the file was not verified.
+    let dir = Dir::new("unverified-ok");
+    let home = dir.0.join("home");
+    fs::create_dir_all(&home).expect("home");
+    let mut options = Options::default();
+    options.home = Some(home);
+    options.watch_registry = false;
+    options.allow_elevated = true;
+    options.allow_unverified = true;
+    let programs = Programs::new(Shelf::new(dir.0.join("programs")), registry())
+        .transport(s.transport.clone())
+        .options(options);
+    let store: Arc<dyn ProgramStore> = Arc::new(Rigged {
+        engine: Engine::new(EchoRecipe, StoreSettings::default()),
+        rc: dir.0.join("home").join(".bashrc"),
+        rig: Rig::PlansAnUnverifiedDownload,
+    });
+    let plan = programs
+        .plan(&*store, Action::Install, None, None)
+        .expect("plan");
+    let applied = programs
+        .apply_store(
+            store,
+            "echo_store",
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("allowed")
+        .expect("applied");
+    assert!(
+        applied.current.files.iter().all(|f| !f.verified),
+        "{:?}",
+        applied.current.files
+    );
+}
+
+#[test]
+fn a_plan_the_host_did_not_make_is_not_applied() {
+    let s = setup("foreignplan", Variant::Normal);
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let mut plan = s
+        .programs
+        .plan(&*store, Action::Install, None, None)
+        .expect("plan");
+    plan.token = "0".repeat(64);
+    let error = s
+        .programs
+        .apply(
+            "echo_store",
+            &StoreSettings::default(),
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("refused");
+    assert!(format!("{error}").contains("no such plan"), "{error}");
+}
+
+#[test]
+fn a_downgrade_is_planned_and_shown_as_one() {
+    let s = setup("downgrade", Variant::Normal);
+    install(&s, None, Action::Install)
+        .expect("2.0.0")
+        .expect("applied");
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let plan = s
+        .programs
+        .plan(&*store, Action::Update, None, Some("1.0.0".to_owned()))
+        .expect("plan");
+    assert_eq!(plan.from_version.as_deref(), Some("2.0.0"));
+    assert_eq!(plan.version.as_deref(), Some("1.0.0"));
+    assert!(
+        plan.notices.iter().any(|n| n.contains("downgrade")),
+        "{:?}",
+        plan.notices
+    );
+}
+
+#[test]
+fn a_recorded_file_that_was_changed_stops_the_launch_the_host_hands_out() {
+    let s = setup("launchverify", Variant::Normal);
+    install(&s, None, Action::Install)
+        .expect("installed")
+        .expect("applied");
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let launch = s.programs.launch(&*store).expect("untouched");
+    let path = launch.path.clone();
+    let mut bytes = fs::read(&path).expect("the program");
+    bytes.push(0);
+    fs::write(&path, bytes).expect("tamper");
+    assert!(s.programs.launch(&*store).is_err());
+}
+
+#[test]
+fn only_the_copy_the_person_picked_is_run_among_those_outside_the_host() {
+    let s = setup("pick", Variant::Normal);
+    // A program named as the store looks for it, on a PATH directory, that would print a version if it were run.
+    let bin = s.dir.0.join("bin");
+    fs::create_dir_all(&bin).expect("bin");
+    let name = if cfg!(windows) {
+        "echo-program.exe"
+    } else {
+        "echo-program"
+    };
+    let tool = bin.join(name);
+    fs::write(
+        &tool,
+        canoa_host::store::contract::standin_bytes(&standin(), "echo 9.9.9", 0, None),
+    )
+    .expect("tool");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    let mut options = Options::default();
+    options.home = Some(s.dir.0.join("home"));
+    options.watch_registry = false;
+    options.allow_elevated = true;
+    options.environment = {
+        let mut env = coqui_acp_api::Environment::new();
+        env.insert("PATH", bin.to_string_lossy().into_owned());
+        if let Ok(root) = std::env::var("SystemRoot") {
+            env.insert("SystemRoot", root);
+        }
+        env
+    };
+    let programs = Programs::new(Shelf::new(s.dir.0.join("other-programs")), registry())
+        .transport(s.transport.clone())
+        .options(options);
+    let store = programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let not_picked = programs.report(&*store, true, None).expect("report");
+    assert_eq!(not_picked.copies.len(), 1);
+    assert!(
+        not_picked.copies[0].version.is_none(),
+        "an outside copy was run: {:?}",
+        not_picked.copies[0]
+    );
+    let path = not_picked.copies[0].path.clone();
+    // A copy just written is scanned by the system on its first start, which can take longer than a probe is given: ask again.
+    let version = (0..4)
+        .find_map(|_| {
+            programs
+                .report(&*store, true, Some(&path))
+                .expect("report")
+                .copies[0]
+                .version
+                .clone()
+        })
+        .expect("the picked copy is run");
+    assert_eq!(version, "9.9.9");
 }

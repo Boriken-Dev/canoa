@@ -81,8 +81,11 @@ pub(crate) fn dotted(line: &str) -> Option<String> {
         let numeric = |p: Option<&str>| {
             p.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
         };
-        (numeric(parts.next()) && numeric(parts.next()) && parts.next().is_some())
-            .then(|| word.to_string())
+        (numeric(parts.next())
+            && numeric(parts.next())
+            && parts.next().is_some()
+            && valid_version(word))
+        .then(|| word.to_string())
     })
 }
 

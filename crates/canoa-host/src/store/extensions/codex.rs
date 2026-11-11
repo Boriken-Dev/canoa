@@ -45,7 +45,7 @@ impl Recipe for CodexRecipe {
         info.homepage = Some("https://github.com/openai/codex".to_owned());
         info.serves = vec![Serves::any("codex")];
         info.platforms = measured_platforms();
-        info.endpoints = vec![ORIGIN.to_owned()];
+        info.endpoints = vec![format!("{ORIGIN}/codex/")];
         info
     }
 

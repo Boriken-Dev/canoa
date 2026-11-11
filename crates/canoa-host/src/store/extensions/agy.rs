@@ -43,8 +43,8 @@ impl Recipe for AgyRecipe {
         info.serves = vec![serves_when("stdio", "harness", "antigravity")];
         info.platforms = measured_platforms();
         info.endpoints = vec![
-            "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app".to_owned(),
-            "https://storage.googleapis.com".to_owned(),
+            format!("{MANIFESTS}/"),
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/".to_owned(),
         ];
         info
     }

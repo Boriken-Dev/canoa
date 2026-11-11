@@ -17,7 +17,6 @@ use super::{
 use crate::store::engine::{Part, Recipe, Release};
 
 const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
-const ORIGIN: &str = "https://downloads.claude.ai";
 
 /// Claude Code.
 #[derive(Debug, Default, Clone, Copy)]
@@ -45,7 +44,7 @@ impl Recipe for ClaudeRecipe {
         info.serves = vec![Serves::any("claude")];
         info.platforms = measured_platforms();
         info.channels = vec!["latest".to_owned(), "stable".to_owned()];
-        info.endpoints = vec![ORIGIN.to_owned()];
+        info.endpoints = vec![format!("{BASE}/")];
         info
     }
 

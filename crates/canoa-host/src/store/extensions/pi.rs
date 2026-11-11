@@ -47,7 +47,7 @@ impl Recipe for PiRecipe {
         let mut info = StoreInfo::new("pi", "Pi", "Earendil Works");
         info.serves = vec![serves_when("stdio", "harness", "pi")];
         info.platforms = measured_platforms();
-        info.endpoints = vec![NODE_ORIGIN.to_owned(), REGISTRY.to_owned()];
+        info.endpoints = vec![format!("{NODE_ORIGIN}/dist/"), format!("{REGISTRY}/")];
         info
     }
 
@@ -233,6 +233,8 @@ impl Recipe for PiRecipe {
                 "--ignore-scripts",
                 "--no-audit",
                 "--no-fund",
+                "--registry",
+                "https://registry.npmjs.org/",
                 "--prefix",
                 &prefix,
                 &pi,

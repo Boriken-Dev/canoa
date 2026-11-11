@@ -47,8 +47,8 @@ impl Recipe for GrokRecipe {
             "enterprise".to_owned(),
         ];
         info.endpoints = vec![
-            "https://x.ai".to_owned(),
-            "https://storage.googleapis.com".to_owned(),
+            "https://x.ai/cli/".to_owned(),
+            "https://storage.googleapis.com/grok-build-public-artifacts/".to_owned(),
         ];
         info
     }

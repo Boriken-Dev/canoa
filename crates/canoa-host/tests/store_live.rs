@@ -61,6 +61,8 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
     let mut options = Options::default();
     // A host that runs as root installs only when told it may: a probe machine without another user says so here.
     options.allow_elevated = std::env::var_os("CANOA_STORE_LIVE_ELEVATED").is_some();
+    // Grok's publisher gives nothing to check its binary against: the plan says so, and this run takes it.
+    options.allow_unverified = true;
     let path_dirs: Vec<PathBuf> = canoa_host::store::footprint::user_path_dirs(
         &std::ffi::OsString::from(options.environment.get("PATH").unwrap_or("")),
     );
@@ -132,7 +134,7 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
                     "  installed {} at {}",
                     applied.current.version, applied.current.launch.path
                 );
-                let report = programs.report(&*store, true).expect("report");
+                let report = programs.report(&*store, true, None).expect("report");
                 let first = &report.copies[0];
                 println!(
                     "  program(): managed={} version={:?} line={:?}",

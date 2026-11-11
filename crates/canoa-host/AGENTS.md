@@ -549,7 +549,7 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
   default 2), `abandon`, `rollback`, `remove`. `commit` refuses a launch path that is not a regular file inside the staged folder.
 - `footprint::{Watch, Footprint, uncovered}`: before and after snapshots of profile files, `PATH` directories, the home's top level
   (and, in the suite, the whole sandbox) and, on Windows, `HKCU\Environment`, `Run`, `RunOnce` and the `Uninstall` names. `uncovered` is
-  what no declared `Change` covers; `restore_environment` puts back `HKCU\Environment` values (Windows).
+  what no declared `Change` covers; `restore_registry` puts back the values of `HKCU` `Environment`, `Run`, `RunOnce`, the policy `Run` and the command processor's key (Windows).
 - `tools::LocalTools` (`InstallTools`): HTTPS only (loopback `http` under `loopback_http`, a test's setting); every redirect hop's origin must be
   one of the store's `endpoints`; `ToolsLimits` (5 redirects, 60 s to a response, 30 min a body, 100 000 files, 4 GiB unpack) each a
   setting; the digest is computed as the bytes are written. `Transport` is the network seam (`HttpTransport` is `ureq` with rustls, trusting the operating
@@ -580,6 +580,30 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
   good example; `tests/store_suite.rs` has stores that break one rule each. The registry keys are the real ones and are restored.
 - A store reaches a harness only through the host: `Launch.settings` (`{"executable": path}`) merged under an entry's own, and `Launch.environment`
   added to its requests; wiring that into `[host.agents]` is not here yet.
+
+**What the host holds a store to, and what it does not (a security review, 2026-11)**
+
+- A store is code running as the user. The host's checks catch a store's mistakes and an install's side effects; they are not a sandbox.
+- The host applies the plan it made, found by its token (`Programs::plan` keeps it); a client's copy only names it. The token covers the
+  version, platform, launch, every download and its check, and every declared change. A change that declares a place of its own is the only
+  kind accepted: a root, the home itself or an ancestor of it, all of HKCU, is refused (`the plan declares ...`). `USER_PATH` covers the
+  `PATH` value and a profile whose every changed line mentions `PATH`, nothing else.
+- An install is measured on every outcome, a failure, a cancel and a timeout included: the machine is snapshotted before and after, the
+  registry values put back, and the folder removed. Nothing is exempted for moving: a profile line, a `PATH` directory or a `Run` key that
+  changes is undeclared, and the error asks the person to try again. During an install the other programs' folders under the programs root are watched too.
+- The programs root is `Shelf::default_root()` or below (`Shelf::configured` refuses another) until an access-list check exists.
+- Downloads nothing checks (Grok's) are refused unless `Options::allow_unverified`; `current.json` records each file's `verified`. Endpoints may be a prefix
+  (`https://storage.googleapis.com/antigravity-public/antigravity-cli/`), which a URL and every redirect has to start with.
+- `Programs::launch` checks the files recorded for the managed copy against their digests before it hands out the launch. Files unpacked
+  from an archive (Codex's package, agy's Linux archive, Pi's Node and packages) are not recorded one by one and are not checked.
+- A launch is recorded only when its variables are not `PATH`, `NODE_*`, `LD_*`, `DYLD_*` or credentials, and its `executable`, `node` and `script` settings lie in the version's folder.
+- An install is given an environment without the person's `npm_config_*`, `NODE_*` and `SSH_AUTH_SOCK`; Pi's npm is told its registry. Pi's packages
+  are not pinned by a shrinkwrap yet (`npm ci` from a per-version lockfile is a later step).
+- `Programs::report(probe)` runs the host's own copy only, and of the outside ones the one the person picked (`pick`).
+- A downgrade (an update to an older version) is planned with a notice that says so.
+- Install, update and remove are for the person who owns the host: nothing here serves them to a paired peer, and a later phase that does has to ask the person.
+- Not checked yet, by decision: Claude's `manifest.json.sig` and Node's `SHASUMS256.txt.sig`. A pure-Rust OpenPGP verifier (`pgp`, rpgp) is the way; it adds
+  its RustCrypto tree to this crate and the pinned keys (Anthropic's signing key, and the Node release key of the pinned Node) to the source.
 
 Tests: `cargo build -p canoa-host --examples` first, then `cargo test -p canoa-host --all-features --test store_tools --test store_shelf
 --test store_programs --test store_suite --test store_extensions`. `tests/store_live.rs` (ignored) installs the real programs:

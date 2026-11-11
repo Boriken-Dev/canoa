@@ -18,8 +18,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use canoa::store::{
-    Action, ApplyOutcome, ApplyRequest, Check, Download, FetchRequest, FindRequest, InstallPlan,
-    InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, MANAGER_CANOA,
+    Action, ApplyOutcome, ApplyRequest, Change, Check, Download, FetchRequest, FindRequest,
+    InstallPlan, InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, MANAGER_CANOA,
     PROBE_TIMEOUT_MS, PlanRequest, Platform, ProgramCopy, ProgramQuery, ProgramReport, Progress,
     StoreInfo, StoreSettings, UnpackRequest, Updatable,
 };
@@ -102,6 +102,8 @@ pub struct Release {
     pub notices: Vec<String>,
     /// What the recipe itself needs again at apply time, such as the relative path of a runtime it unpacks.
     pub facts: BTreeMap<String, String>,
+    /// Everything it changes outside the version's folder; none, for a store that downloads and places.
+    pub changes: Vec<Change>,
 }
 
 impl Release {
@@ -115,6 +117,7 @@ impl Release {
             steps: Vec::new(),
             notices: Vec::new(),
             facts: BTreeMap::new(),
+            changes: Vec::new(),
         }
     }
 }
@@ -348,7 +351,9 @@ impl<R: Recipe> Engine<R> {
                 update,
             );
             copy.self_updates = self.recipe.self_updates();
+            // Only the copy the person picked is run: an outside copy is whatever happens to be on the `PATH`.
             if query.probe
+                && query.probe_copy.as_deref() == Some(file.path.as_str())
                 && let Some((version, line)) = self.probe(spawner, &file.path, environment)
             {
                 copy.version = Some(version);
@@ -423,6 +428,18 @@ impl<R: Recipe> Engine<R> {
         plan.from_version = from.clone();
         if request.action == Action::Update && from.as_deref() == Some(release.version.as_str()) {
             return Ok(plan);
+        }
+        plan.changes.clone_from(&release.changes);
+        if let Some(from) = from.as_deref()
+            && !numeric(from).is_empty()
+            && numeric(&release.version) < numeric(from)
+        {
+            let words = format!(
+                "This installs {}, which is older than {from}: a downgrade.",
+                release.version
+            );
+            plan.notices.push(words.clone());
+            plan.steps.push(words);
         }
         plan.bytes = release
             .parts
@@ -589,7 +606,7 @@ impl<R: Recipe> Engine<R> {
                 "the downloaded program will not run: it printed no version",
             ));
         };
-        if read != release.version {
+        if !super::extensions::valid_version(&read) || read != release.version {
             return Err(refuse(
                 Status::GUATIAO_ERR_INTERNAL,
                 &format!("the program reports {read}, not {}", release.version),
@@ -602,12 +619,28 @@ impl<R: Recipe> Engine<R> {
     }
 }
 
+/// The numbers a version starts with, `1.5.2-beta` being `[1, 5, 2]`.
+fn numeric(version: &str) -> Vec<u64> {
+    version
+        .split(['.', '-', '+'])
+        .map_while(|part| part.parse().ok())
+        .collect()
+}
+
 /// The opaque token of a release: what the plan rests on.
 fn token_of(release: &Release, platform: &Platform) -> String {
     let mut text = format!(
         "{}|{}|{}|{}",
         release.version, platform.os, platform.arch, release.launch
     );
+    let _ = write!(text, "|{:?}", release.changes.len());
+    for change in &release.changes {
+        let _ = write!(
+            text,
+            "|change:{}:{}:{}:{}",
+            change.kind, change.target, change.detail, change.undone_by_uninstall
+        );
+    }
     for part in &release.parts {
         let check = match &part.download.check {
             Check::Sha256 { value } => format!("sha256:{value}"),

@@ -425,7 +425,7 @@ impl Runner<'_> {
     }
 
     fn tools(&self, transport: Arc<WorldTransport>) -> LocalTools {
-        LocalTools::new(transport, self.info.endpoints.clone())
+        LocalTools::new(transport, self.info.endpoints.clone()).allow_unverified(true)
     }
 
     fn describe(&mut self) {
@@ -465,6 +465,7 @@ impl Runner<'_> {
         let transport = WorldTransport::new(World::new());
         let tools = || {
             LocalTools::new(transport.clone(), self.info.endpoints.clone())
+                .allow_unverified(true)
                 .lookup(sandbox.lookup(&env))
         };
         let spawner =
@@ -628,6 +629,7 @@ impl Runner<'_> {
         request.timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
         let deadline = Instant::now() + timeout;
         let tools = LocalTools::new(transport.clone(), self.info.endpoints.clone())
+            .allow_unverified(true)
             .granted(&staging)
             .lookup(sandbox.lookup(&env))
             .cancelled_by(cancel)
@@ -659,7 +661,7 @@ impl Runner<'_> {
         let elapsed = started.elapsed();
         let after = Footprint::take(&watch);
         let differences = uncovered(&before.diff(&after), &plan.changes);
-        let _ = before.restore_environment(&after);
+        let _ = before.restore_registry(&after);
         drop(machine);
         let lines = prompter.lines.lock().map(|l| l.clone()).unwrap_or_default();
         let mut leaked = lines.iter().any(|l| l.contains(CANARY_VALUE));
@@ -762,8 +764,9 @@ impl Runner<'_> {
         ));
         query.environment = Secret::new(env.clone());
         query.probe = true;
-        let tools =
-            LocalTools::new(transport, self.info.endpoints.clone()).lookup(sandbox.lookup(&env));
+        let tools = LocalTools::new(transport, self.info.endpoints.clone())
+            .allow_unverified(true)
+            .lookup(sandbox.lookup(&env));
         match self.store.program(
             query,
             LocalSpawner::new().into_object(),
@@ -942,6 +945,7 @@ impl Runner<'_> {
             let env = sandbox.environment(&staging);
             let transport = WorldTransport::new(moved);
             let tools = LocalTools::new(transport, self.info.endpoints.clone())
+                .allow_unverified(true)
                 .granted(&staging)
                 .lookup(sandbox.lookup(&env));
             let spawner = GuardedSpawner::new(
