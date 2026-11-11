@@ -130,14 +130,14 @@ context = { text = "A profile, so that this entry starts through the host's own 
       await host.apply(configPath: cfg.path);
       await until(() async => host.phase == HostPhase.running, 'the host to run');
       expect(host.pid, pid, reason: 'the host runs in this process');
-      expect(host.listening.map((entry) => entry.name), ['scripted', 'profiled']);
+      expect(host.served.map((entry) => entry.name), ['scripted', 'profiled']);
       debugPrint('platform ${Platform.operatingSystem}: tray shown ${shell.hasTray}, host in process $pid');
 
       // Connections a turn leaves open, so that their agents stay running.
       final held = <VerifiedAgent>[];
 
       Future<String> turn(String name, {bool hold = false}) async {
-        final entry = host.listening.singleWhere((listening) => listening.name == name);
+        final entry = host.served.singleWhere((listening) => listening.name == name);
         final method = PeerMethod.parse(entry.method!);
         final client = await connectVerifiedAcp(
           chatEndpoints(webSocket: entry.url),
@@ -165,7 +165,7 @@ context = { text = "A profile, so that this entry starts through the host's own 
 
       // Turned away until the person pairs it, through the library.
       await expectLater(turn('scripted'), throwsA(anything));
-      final method = PeerMethod.parse(host.listening.first.method!);
+      final method = PeerMethod.parse(host.served.first.method!);
       await host.accept(await browser.localId(method));
       expect(await turn('scripted'), 'hello from scripted');
 
@@ -201,7 +201,7 @@ context = { text = "A profile, so that this entry starts through the host's own 
       final log = host.log;
       await shell.beforeQuit!();
       expect(host.phase, HostPhase.stopped);
-      expect(host.listening, isEmpty);
+      expect(host.served, isEmpty);
       for (final client in held) {
         await client.close();
       }

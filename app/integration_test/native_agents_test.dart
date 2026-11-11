@@ -107,6 +107,7 @@ void main() {
     expect(File('${work.path}/standin.txt').existsSync(), isTrue, reason: 'what was allowed was done');
     expect(_records().where((entry) => entry['harness'] == 'claude'), isNotEmpty, reason: 'the stand-in claude ran');
 
+    await host.stop();
     final closedAt = DateTime.now();
     while (true) {
       try {

@@ -28,7 +28,7 @@ void main() {
     expect(supervisor.phase, HostPhase.idle);
     expect(supervisor.peerId, 'sha256:aa');
     expect(supervisor.peerMethod, 'noise');
-    expect(supervisor.listening, isEmpty);
+    expect(supervisor.served, isEmpty);
     await supervisor.stop();
     expect(tool.children.single.inputClosed, isTrue, reason: 'idle, it is still running');
   });

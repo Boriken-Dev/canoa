@@ -158,8 +158,8 @@ void main() {
       expect(host.pid, hostPid, reason: 'closing the window does not touch the host');
 
       // A browser's key, with the window closed: turned away, paired by the person, then served.
-      final url = host.listening.single.url;
-      final method = PeerMethod.parse(host.listening.single.method!);
+      final url = host.served.single.url;
+      final method = PeerMethod.parse(host.served.single.method!);
       Future<String> browserTurn() async {
         final client = await connectVerifiedAcp(
           chatEndpoints(webSocket: url),
@@ -208,7 +208,7 @@ void main() {
 
       await host.stop();
       expect(Process.killPid(hostPid!), isFalse, reason: 'stopping ended the host');
-      expect(host.listening, isEmpty);
+      expect(host.served, isEmpty);
     },
     skip: _hostBinary == null,
   );
