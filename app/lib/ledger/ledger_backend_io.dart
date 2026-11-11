@@ -2,11 +2,12 @@ import 'dart:io';
 
 import 'session_ledger.dart';
 
-/// `sessions.json` beside canoa.cfg at [configPath], in the app's config directory; in memory when there is no such place.
-LedgerBackend platformLedgerBackend({String? configPath}) =>
+/// `<name>.json` (`sessions.json` for the session list) beside canoa.cfg at [configPath], in the app's config directory; in
+/// memory when there is no such place.
+LedgerBackend platformLedgerBackend({String? configPath, String name = 'sessions'}) =>
     configPath == null
         ? MemoryLedgerBackend()
-        : FileLedgerBackend('${File(configPath).parent.path}${Platform.pathSeparator}sessions.json');
+        : FileLedgerBackend('${File(configPath).parent.path}${Platform.pathSeparator}$name.json');
 
 /// The ledger in one file, replaced whole through a file beside it so that a write cut short leaves the last one.
 final class FileLedgerBackend implements LedgerBackend {

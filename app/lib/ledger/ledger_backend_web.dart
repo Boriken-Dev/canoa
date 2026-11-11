@@ -3,8 +3,10 @@ import 'dart:js_interop';
 
 import 'session_ledger.dart';
 
-/// This origin's IndexedDB: a web page, a PWA and the extension each keep their own.
-LedgerBackend platformLedgerBackend({String? configPath}) => IndexedDbLedgerBackend();
+/// This origin's IndexedDB: a web page, a PWA and the extension each keep their own. The session list is `canoa-sessions`;
+/// another [name] is `canoa-<name>`.
+LedgerBackend platformLedgerBackend({String? configPath, String name = 'sessions'}) =>
+    IndexedDbLedgerBackend(database: 'canoa-$name');
 
 @JS('indexedDB')
 external _Factory? get _indexedDB;
