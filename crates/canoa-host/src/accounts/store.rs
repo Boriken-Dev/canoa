@@ -14,13 +14,12 @@
     reason = "files are std's"
 )]
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use aes_gcm::aead::{Aead, Generate, Key, KeyInit, Payload};
 use aes_gcm::aes::cipher::consts::U12;
@@ -86,12 +85,27 @@ pub(crate) fn service_for(home: &Path) -> String {
     format!("dev.boriken.canoa.{}", &tag(&home.to_string_lossy())[..16])
 }
 
-/// The one writer of an account's entries in this process, whichever store object it reaches them through.
-fn writer(service: &str, id: &str) -> Arc<Mutex<()>> {
-    static WRITERS: LazyLock<Mutex<BTreeMap<String, Arc<Mutex<()>>>>> =
-        LazyLock::new(Mutex::default);
-    let mut writers = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
-    Arc::clone(writers.entry(format!("{service}/{id}")).or_default())
+/// One operation on the operating system's store at a time in this process, whichever store object it comes through. That
+/// makes one writer of an account's entries, and it keeps Windows' Credential Manager from answering "no such credential"
+/// for a chunk just written while another thread deletes or writes elsewhere, which it was seen to do.
+pub(crate) fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    TURN.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs one call on the operating system's store, again after a moment when the platform failed it: Windows answers
+/// "not enough memory" to a write when the machine is short of it, and the call is good a moment later.
+fn patiently<T>(mut call: impl FnMut() -> Result<T, KeyError>) -> Result<T, KeyError> {
+    let mut tries = 0;
+    loop {
+        match call() {
+            Err(KeyError::PlatformFailure(_)) if tries < 4 => {
+                tries += 1;
+                std::thread::sleep(core::time::Duration::from_millis(150));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Makes the platform's credential store the default of `keyring_core`, once.
@@ -198,7 +212,7 @@ impl KeyringStore {
         let entry = self
             .entry(&Self::index_user(id))
             .map_err(IndexError::Unreadable)?;
-        match entry.get_secret() {
+        match patiently(|| entry.get_secret()) {
             Ok(mut bytes) => {
                 let index = serde_json::from_slice(&bytes);
                 bytes.zeroize();
@@ -218,7 +232,7 @@ impl KeyringStore {
             let Ok(entry) = self.entry(&Self::chunk_user(id, generation, number)) else {
                 return;
             };
-            if entry.delete_credential().is_err() {
+            if patiently(|| entry.delete_credential()).is_err() {
                 return;
             }
         }
@@ -242,6 +256,7 @@ impl SecretStore for KeyringStore {
     }
 
     fn get(&self, id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let _turn = one_at_a_time();
         let Some(index) = self.index(id).map_err(IndexError::into_error)? else {
             return Ok(None);
         };
@@ -255,8 +270,7 @@ impl SecretStore for KeyringStore {
             let read = self
                 .entry(&Self::chunk_user(id, index.generation, number))
                 .and_then(|entry| {
-                    entry
-                        .get_secret()
+                    patiently(|| entry.get_secret())
                         .map_err(|error| failed("a chunk of the stored record is missing", error))
                 });
             match read {
@@ -278,8 +292,7 @@ impl SecretStore for KeyringStore {
     }
 
     fn put(&self, id: &str, bytes: &[u8]) -> Result<(), StoreError> {
-        let writer = writer(&self.service, id);
-        let _writing = writer.lock().unwrap_or_else(PoisonError::into_inner);
+        let _turn = one_at_a_time();
         // An index that cannot be read is not a reason to start again at generation 1 over what it names.
         let before = self.index(id).map_err(IndexError::into_error)?;
         let generation = before.as_ref().map_or(1, |index| index.generation + 1);
@@ -292,9 +305,8 @@ impl SecretStore for KeyringStore {
             bytes.chunks(CHUNK).collect()
         };
         for (number, part) in parts.into_iter().enumerate() {
-            let written = self
-                .entry(&Self::chunk_user(id, generation, number))?
-                .set_secret(part)
+            let entry = self.entry(&Self::chunk_user(id, generation, number))?;
+            let written = patiently(|| entry.set_secret(part))
                 .map_err(|error| failed("the credential store refused a credential", error));
             if let Err(error) = written {
                 self.forget_generation(id, generation);
@@ -307,9 +319,8 @@ impl SecretStore for KeyringStore {
             len: bytes.len(),
         })
         .map_err(|error| failed("index", error))?;
-        let pointed = self
-            .entry(&Self::index_user(id))?
-            .set_secret(&index)
+        let index_entry = self.entry(&Self::index_user(id))?;
+        let pointed = patiently(|| index_entry.set_secret(&index))
             .map_err(|error| failed("the credential store refused a credential", error));
         index.zeroize();
         if let Err(error) = pointed {
@@ -323,8 +334,7 @@ impl SecretStore for KeyringStore {
     }
 
     fn remove(&self, id: &str) -> Result<(), StoreError> {
-        let writer = writer(&self.service, id);
-        let _writing = writer.lock().unwrap_or_else(PoisonError::into_inner);
+        let _turn = one_at_a_time();
         let newest = match self.index(id) {
             Ok(Some(index)) => index.generation,
             Ok(None) => 0,
@@ -335,7 +345,8 @@ impl SecretStore for KeyringStore {
         for generation in 1..=newest + 1 {
             self.forget_generation(id, generation);
         }
-        match self.entry(&Self::index_user(id))?.delete_credential() {
+        let index_entry = self.entry(&Self::index_user(id))?;
+        match patiently(|| index_entry.delete_credential()) {
             Ok(()) | Err(KeyError::NoEntry) => Ok(()),
             Err(error) => Err(failed("the credential store could not forget it", error)),
         }
