@@ -75,6 +75,18 @@ void main() {
     await client.close();
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  test('two messages sent back to back both reach the agent', () async {
+    final client = await startLocalAgent(_echo);
+    final session = await client.createSession(cwd: Directory.current.path);
+    final seen = client.updates.listen((_) {});
+    // The prompt is written and flushed while the cancel is written: the second write must wait for the first.
+    final turn = client.prompt(session, 'first');
+    unawaited(turn.then((_) {}, onError: (Object _) {}));
+    await client.cancel(session);
+    await seen.cancel();
+    await client.close();
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
   test('refusing reaches the agent as a refusal', () async {
     final store = SessionStore();
     final (client, session) = await _running(store);

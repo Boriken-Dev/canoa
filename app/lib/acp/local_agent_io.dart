@@ -181,12 +181,18 @@ Future<VerifiedAgent> startLocalAgent(
     }
   });
   var closing = false;
+  var writing = Future<void>.value();
   final client = VerifiedAgent.fromChild(
     label: command.label,
     messages: process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
-    send: (message) async {
-      process.stdin.writeln(message);
-      await process.stdin.flush();
+    // A sink that is flushing takes no write: each message waits for the one before it to be written and flushed.
+    send: (message) {
+      final written = writing.then((_) async {
+        process.stdin.writeln(message);
+        await process.stdin.flush();
+      });
+      writing = written.then((_) {}, onError: (Object _) {});
+      return written;
     },
     close: () async {
       if (closing) return;
