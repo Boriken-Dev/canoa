@@ -77,7 +77,7 @@ final class OverlayStore implements OverlayManager {
     }
     final before = installed(name);
     final old = before?.files ?? const {};
-    final manifest = files['overlay.cfg'];
+    final manifest = files['OVERLAY.md'] ?? files['overlay.cfg'];
     return OverlayUpdate(
       name: name,
       source: source,

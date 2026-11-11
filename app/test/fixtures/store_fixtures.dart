@@ -209,7 +209,7 @@ final class MemoryOverlays implements OverlayManager {
       added: [for (final path in blobs.keys) if (!old.containsKey(path)) path],
       changed: [for (final MapEntry(:key, :value) in blobs.entries) if (old[key] case final blob? when blob != value) key],
       removed: [for (final path in old.keys) if (!blobs.containsKey(path)) path],
-      manifest: files['overlay.cfg'] == null ? null : utf8.decode(files['overlay.cfg']!),
+      manifest: switch (files['OVERLAY.md'] ?? files['overlay.cfg']) { final bytes? => utf8.decode(bytes), _ => null },
     );
   }
 

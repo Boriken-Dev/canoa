@@ -402,12 +402,10 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
     pinRefusal = 'The catalog pins $catalogPin, and what was fetched is ${update.digest}: refused';
   }
   aos.Document manifest = const {};
-  if (files['overlay.cfg'] case final bytes?) {
-    try {
-      manifest = aos.readDocument(Uint8List.fromList(bytes), aos.defaultSettings);
-    } on aos.AosError {
-      manifest = const {};
-    }
+  try {
+    manifest = aos.readOverlay(read.tree, aos.defaultSettings).manifest;
+  } on aos.AosError {
+    manifest = const {};
   }
   final ignored = <String>[];
   final about = manifest.containsKey('about') ? _storeAbout(manifest['about'], '/about', ignored) ?? const {} : const <String, Object>{};

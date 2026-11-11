@@ -304,10 +304,10 @@ class OverlayUpdateDialog extends StatelessWidget {
           files('Removed', update.removed),
           files('Left out: no part of an overlay (.git, node_modules, ...), never installed', update.skipped),
           if (update.manifest case final manifest?) ...[
-            const Text('Its overlay.cfg, which reaches agents once applied:'),
+            const Text('Its OVERLAY.md or overlay.cfg, which reaches agents once applied:'),
             SelectableText(visible(manifest), style: const TextStyle(fontFamily: 'monospace')),
           ] else
-            const Text('It has no overlay.cfg: its conventional files (skills, CONTEXT.md, env, rules) apply.'),
+            const Text('It has no OVERLAY.md or overlay.cfg: its conventional files (skills, CONTEXT.md, env, rules) apply.'),
           const Text('Nothing from it runs now, and Canoa runs no setup or env script of it. What it sets reaches agents '
               'started after this; Settings, Profiles shows what Canoa does not apply.'),
         ],

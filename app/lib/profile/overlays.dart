@@ -70,7 +70,7 @@ final class OverlayUpdate {
   final OverlayFiles files;
   final List<String> skipped, added, changed, removed;
 
-  /// The overlay's overlay.cfg at [commit], or null when it has none.
+  /// The overlay's OVERLAY.md, else its overlay.cfg, at [commit], or null when it has none.
   final String? manifest;
 
   bool get changesNothing =>

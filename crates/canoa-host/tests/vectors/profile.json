@@ -2239,6 +2239,457 @@
         "META_OVERLAY_ROOT": "/ov/meta",
         "MODE": "on"
       }
+    },
+    {
+      "name": "OVERLAY.md: its YAML front matter is the manifest and its body is the context",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  TEAM_MODE: strict\n---\n# Team\n\nBe brief.\n",
+            "skills/review/SKILL.md": "---\nname: review\n---\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "TEAM_MODE",
+            "value": {
+              "text": "strict"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [
+          {
+            "name": "review",
+            "value": {
+              "path": "skills/review"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "text": "# Team\n\nBe brief.\n"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:746123207674b94dc7e5ab6136484a7b88c2c5cf562e6ae82fa0c4d16b79d7b8",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "non_defaults": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team",
+        "TEAM_MODE": "strict"
+      }
+    },
+    {
+      "name": "OVERLAY.md: a format line names TOML, and a body of white space leaves CONTEXT.md the context",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\n#!toml\n[env]\nTEAM_MODE = \"strict\"\n---\n\n \n",
+            "CONTEXT.md": "# Team\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "TEAM_MODE",
+            "value": {
+              "text": "strict"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "file": "CONTEXT.md"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:0f75d868a3f3cd85cd5141736d624be42cbf42917bd02ae107571c40abc429da",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "non_defaults": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team",
+        "TEAM_MODE": "strict"
+      }
+    },
+    {
+      "name": "OVERLAY.md: a body is the context, and CONTEXT.md beside it is ignored and reported",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  TEAM_MODE: strict\n---\nFrom the body.\n",
+            "CONTEXT.md": "# From the file\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "TEAM_MODE",
+            "value": {
+              "text": "strict"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "text": "From the body.\n"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:809bdb98f1900ff13c5ade1c8ce14930e69376e7ad4a03ac438ec69bb7c3bd7d",
+            "not_applied": [
+              "context: CONTEXT.md, ignored while the body of OVERLAY.md is the context"
+            ],
+            "ungranted": [],
+            "unresolved": [],
+            "non_defaults": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team",
+        "TEAM_MODE": "strict"
+      }
+    },
+    {
+      "name": "OVERLAY.md: with no front matter all of it is the body",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "# Team\n\nNo front matter here.\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "text": "# Team\n\nNo front matter here.\n"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:1def38f165ffc90bfc0694f4f455c50a3af3c9f0921518fe93b5fd9f8cdaf813",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "non_defaults": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team"
+      }
+    },
+    {
+      "name": "OVERLAY.md: its restricted YAML reads comments, flow and block collections, and quoted and block scalars",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\n# a comment\npriority: 300  # trailing\nrouting: [\"Read kb/x.md\", 'and kb/y.md']\nenv:\n  TEAM_NOTE: |\n    two\n    lines\n  TEAM_MODE: \"strict\"\n  TEAM_FLAG: 'on'\n---\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "TEAM_FLAG",
+            "value": {
+              "text": "on"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "TEAM_MODE",
+            "value": {
+              "text": "strict"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "TEAM_NOTE",
+            "value": {
+              "text": "two\nlines\n"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "text": "Read kb/x.md\nand kb/y.md"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:8e58f58bb9e4d02ad63fc88007c117cab46de5a2ca5240611d177daceeb0750c",
+            "not_applied": [],
+            "ungranted": [],
+            "unresolved": [],
+            "non_defaults": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team",
+        "TEAM_FLAG": "on",
+        "TEAM_MODE": "strict",
+        "TEAM_NOTE": "two\nlines\n"
+      }
+    },
+    {
+      "name": "OVERLAY.md and overlay.cfg in one overlay are refused, never merged",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  TEAM_MODE: strict\n---\nBody.\n",
+            "overlay.cfg": "[env]\nTEAM_MODE = \"strict\"\n"
+          }
+        }
+      ],
+      "refused": [
+        {
+          "identity": "team",
+          "code": "manifest",
+          "subject": "two-manifests"
+        }
+      ],
+      "view": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": []
+      },
+      "environment": {}
+    },
+    {
+      "name": "OVERLAY.md: an anchor, a tag and a merge key are refused",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "anchor",
+          "root": "/ov/anchor",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  A: &x one\n---\n"
+          }
+        },
+        {
+          "identity": "tag",
+          "root": "/ov/tag",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  A: !!str one\n---\n"
+          }
+        },
+        {
+          "identity": "merge",
+          "root": "/ov/merge",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  <<: {A: one}\n---\n"
+          }
+        }
+      ],
+      "refused": [
+        {
+          "identity": "anchor",
+          "code": "manifest",
+          "subject": "yaml-anchor at line 3"
+        },
+        {
+          "identity": "tag",
+          "code": "manifest",
+          "subject": "yaml-tag at line 3"
+        },
+        {
+          "identity": "merge",
+          "code": "manifest",
+          "subject": "yaml-merge-key at line 3"
+        }
+      ],
+      "view": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": []
+      },
+      "environment": {}
+    },
+    {
+      "name": "OVERLAY.md: front matter never closed, or a mapping that is not one, is refused",
+      "os": "linux",
+      "overlays": [
+        {
+          "identity": "open",
+          "root": "/ov/open",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\nenv:\n  A: one\n# Body\n"
+          }
+        },
+        {
+          "identity": "list",
+          "root": "/ov/list",
+          "pinned": true,
+          "files": {
+            "OVERLAY.md": "---\n- env\n- priority\n---\n"
+          }
+        }
+      ],
+      "refused": [
+        {
+          "identity": "open",
+          "code": "manifest",
+          "subject": "unterminated-front-matter at line 1"
+        },
+        {
+          "identity": "list",
+          "code": "manifest",
+          "subject": "not-a-mapping at line 2"
+        }
+      ],
+      "view": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": []
+      },
+      "environment": {}
     }
   ],
   "reserved_env": {

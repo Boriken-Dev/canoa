@@ -204,3 +204,95 @@ fn the_reserved_variables_are_the_vectors_list() {
     assert_eq!(list("prefixes"), RESERVED_ENV_PREFIXES);
     assert_eq!(list("suffixes"), RESERVED_ENV_SUFFIXES);
 }
+
+/// An overlay's layer from the text of its files.
+fn layer_of(files: &[(&str, &str)]) -> Result<Layer, canoa_host::profile::OverlayRefusal> {
+    use canoa_host::profile::{OverlayInput, overlay_layer};
+    let tree = coqui_aos::OverlayTree::from_texts(
+        files.iter().map(|(path, text)| ((*path).to_owned(), *text)),
+    );
+    overlay_layer(&OverlayInput::new("team", "/ov/team", "linux", &tree))
+}
+
+#[test]
+fn an_overlay_md_applies_as_the_overlay_cfg_and_context_md_form_does() {
+    use canoa_host::profile::Context;
+    let body = "# Team\n\nBe brief.\n";
+    let skill = ("skills/review/SKILL.md", "---\nname: review\n---\n");
+    let front = "---\nname: team\nenv:\n  TEAM_MODE: strict\n  TEAM_NOTE: two words\n---\n";
+    let md = layer_of(&[("OVERLAY.md", &format!("{front}{body}")), skill]).expect("OVERLAY.md");
+    let cfg = layer_of(&[
+        (
+            "overlay.cfg",
+            "name = \"team\"\n[env]\nTEAM_MODE = \"strict\"\nTEAM_NOTE = \"two words\"\n",
+        ),
+        ("CONTEXT.md", body),
+        skill,
+    ])
+    .expect("overlay.cfg");
+    assert_eq!(md.profile.contexts, [Context::Text(body.to_owned())]);
+    assert_eq!(
+        cfg.profile.contexts,
+        [Context::File("CONTEXT.md".to_owned())]
+    );
+    let (mut md_profile, mut cfg_profile) = (md.profile.clone(), cfg.profile.clone());
+    md_profile.contexts.clear();
+    cfg_profile.contexts.clear();
+    assert_eq!(
+        md_profile, cfg_profile,
+        "the same profile but for the context's form"
+    );
+    let (md_aos, cfg_aos) = (md.aos.expect("aos"), cfg.aos.expect("aos"));
+    assert_eq!(md_aos.manifest, cfg_aos.manifest, "the same manifest");
+    assert_eq!(md_aos.not_applied, cfg_aos.not_applied);
+}
+
+#[test]
+fn a_body_that_is_context_ignores_and_reports_context_md() {
+    use canoa_host::profile::Context;
+    let layer = layer_of(&[
+        ("OVERLAY.md", "---\nname: team\n---\nFrom the body.\n"),
+        ("CONTEXT.md", "From the file.\n"),
+    ])
+    .expect("applies");
+    assert_eq!(
+        layer.profile.contexts,
+        [Context::Text("From the body.\n".to_owned())]
+    );
+    assert_eq!(
+        layer.aos.expect("aos").not_applied,
+        ["context: CONTEXT.md, ignored while the body of OVERLAY.md is the context"]
+    );
+}
+
+#[test]
+fn naming_overlay_md_as_context_puts_its_body_there_and_a_blank_body_nothing() {
+    use canoa_host::profile::Context;
+    let named = layer_of(&[(
+        "OVERLAY.md",
+        "---\ndefaults:\n  context: false\ncontext: [OVERLAY.md]\n---\nThe body.\n",
+    )])
+    .expect("applies");
+    assert_eq!(
+        named.profile.contexts,
+        [Context::Text("The body.\n".to_owned())]
+    );
+    let blank =
+        layer_of(&[("OVERLAY.md", "---\ncontext: [OVERLAY.md]\n---\n \n")]).expect("applies");
+    assert!(blank.profile.contexts.is_empty());
+}
+
+#[test]
+fn a_body_that_is_not_text_refuses_the_overlay() {
+    let mut bytes = b"---\nname: team\n---\n".to_vec();
+    bytes.extend_from_slice(&[0xff, 0xfe]);
+    let tree = coqui_aos::OverlayTree::default().with_bytes("OVERLAY.md", bytes);
+    let input = canoa_host::profile::OverlayInput::new("team", "/ov/team", "linux", &tree);
+    let refusal = canoa_host::profile::overlay_layer(&input).expect_err("refused");
+    assert_eq!(refusal.code, "manifest");
+    assert!(
+        refusal.subject.starts_with("invalid-utf8"),
+        "{}",
+        refusal.subject
+    );
+}

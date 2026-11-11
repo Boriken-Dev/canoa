@@ -66,8 +66,8 @@ final class OverlayRefusal implements Exception {
   String toString() => '${switch (code) {
     'name' => 'Its name is not a valid overlay identity',
     'digest' => 'Its files cannot be digested',
-    'manifest' => 'Its overlay.cfg cannot be read',
-    'invalid' => 'Its overlay.cfg is not valid',
+    'manifest' => 'Its manifest cannot be read',
+    'invalid' => 'Its manifest is not valid',
     'env-file' => 'An env file of it cannot be read',
     _ => 'It sets a variable a layer from elsewhere may not set',
   }} ($subject)';
@@ -140,11 +140,13 @@ Layer overlayLayer({
   final paths = aos.OverlayTree.fromPaths(files);
   Uint8List? member(String path) => files.contains(path) ? tree.bytes(path) : null;
   final aos.Document manifest;
+  final List<String> ignored;
   try {
-    final bytes = member('overlay.cfg');
-    manifest = bytes == null ? <String, Object>{} : aos.readDocument(bytes, aos.defaultSettings);
+    final read = aos.readOverlay(tree, aos.defaultSettings);
+    manifest = read.manifest;
+    ignored = read.contextIgnored;
   } on aos.AosError catch (error) {
-    throw OverlayRefusal('manifest', error.message);
+    throw OverlayRefusal('manifest', _reading(error));
   }
   final issues = aos.validate(manifest, paths);
   // `about` is store metadata: a problem in it never stops an overlay, and Canoa applies nothing of it.
@@ -152,7 +154,9 @@ Layer overlayLayer({
     if (!aos.applies([issue])) throw OverlayRefusal('invalid', '${issue.at} ${issue.code}');
   }
   final windows = os == 'windows';
-  final notApplied = <String>[];
+  final notApplied = <String>[
+    for (final file in ignored) 'context: $file, ignored while the body of OVERLAY.md is the context',
+  ];
   final texts = <String, List<int>>{};
   final references = <(String, String, bool)>[];
   final env = <String, EnvValue>{aos.rootVariable(identity): EnvLiteral(root)};
@@ -267,7 +271,7 @@ Layer overlayLayer({
       if (line is String && line.trim().isNotEmpty) line,
   ];
   if (routing.isNotEmpty) contexts.add(ProfileContext.text(routing.join('\n')));
-  contexts.addAll([for (final path in aos.contextOf(manifest, paths)) ProfileContext.file(path)]);
+  contexts.addAll([for (final path in aos.contextOf(manifest, tree)) ?_context(tree, path)]);
   String? model, effort;
   for (final MapEntry(key: id, value: hints) in sortedEntries(manifest['harness'])) {
     if (harness != id) {
@@ -283,7 +287,7 @@ Layer overlayLayer({
         case ('effort', final String text):
           effort = text;
         case ('context', final List<dynamic> paths):
-          contexts.addAll([for (final path in paths) if (path is String) ProfileContext.file(path)]);
+          contexts.addAll([for (final path in paths) if (path is String) ?_context(tree, path)]);
         case ('skills', true):
           break;
         case ('skills', _):
@@ -367,6 +371,19 @@ Layer overlayLayer({
       },
     ),
   );
+}
+
+/// A reader's refusal as its class and line: the parsers disagree on columns, and the text of a document is never quoted.
+String _reading(aos.AosError error) => error.line == null ? error.errorClass : '${error.errorClass} at line ${error.line}';
+
+/// A context entry as the profile holds it: a file, or for `OVERLAY.md` its body as text, since the front matter is the
+/// manifest and no context. An empty body is no context.
+ProfileContext? _context(aos.OverlayTree tree, String path) {
+  if (path != 'OVERLAY.md') return ProfileContext.file(path);
+  final bytes = tree.bytes(path);
+  if (bytes == null) return null;
+  final text = utf8.decode(aos.contextFileText(bytes, aos.defaultSettings), allowMalformed: true);
+  return text.trim().isEmpty ? null : ProfileContext.text(text);
 }
 
 /// Not empty, with no control character: what Canoa's own layers take for a model or an effort.

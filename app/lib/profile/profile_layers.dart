@@ -11,9 +11,6 @@ import 'project_trust.dart';
 /// Canoa's own layer, lowest of all. It sets nothing: every value comes from a layer the person can see and change.
 const builtInProfile = Profile();
 
-/// The file an overlay's directory holds its AOS manifest in.
-const overlayManifestFile = 'overlay.cfg';
-
 /// The AOS harness id of each of Canoa's agent presets, whose `[harness.<id>]` hints apply to it.
 const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Grok': 'grok', 'Pi': 'pi'};
 

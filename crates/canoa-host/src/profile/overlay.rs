@@ -94,8 +94,8 @@ impl fmt::Display for OverlayRefusal {
         let what = match self.code {
             "name" => "its name is not a valid overlay identity",
             "digest" => "its files cannot be digested",
-            "manifest" => "its overlay.cfg cannot be read",
-            "invalid" => "its overlay.cfg is not valid",
+            "manifest" => "its manifest cannot be read",
+            "invalid" => "its manifest is not valid",
             "env-file" => "an env file of it cannot be read",
             _ => "it sets a variable a layer from elsewhere may not set",
         };
@@ -212,9 +212,9 @@ const DEFAULT_SCRIPTS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash
 ///
 /// # Errors
 ///
-/// [`OverlayRefusal`] for a name that is not a valid identity, a tree that cannot be digested, an `overlay.cfg` that
-/// cannot be read or is not valid, an env file that is missing or cannot be read, and a variable Canoa does not let a
-/// layer from elsewhere set ([`is_reserved_env`]).
+/// [`OverlayRefusal`] for a name that is not a valid identity, a tree that cannot be digested, a manifest (`OVERLAY.md`
+/// or `overlay.cfg`, never both) that cannot be read or is not valid, an env file that is missing or cannot be read,
+/// and a variable Canoa does not let a layer from elsewhere set ([`is_reserved_env`]).
 #[allow(
     clippy::too_many_lines,
     reason = "one pass over the manifest, field by field"
@@ -238,11 +238,10 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
     };
     let paths = OverlayTree::from_paths(files.iter().cloned());
     let settings = Settings::default();
-    let manifest = match member("overlay.cfg") {
-        Some(bytes) => aos::read_document(bytes, &settings)
-            .map_err(|error| refused("manifest", error.to_string()))?,
-        None => Map::new(),
-    };
+    let read = aos::read_overlay(input.tree, &settings)
+        .map_err(|error| refused("manifest", reading(&error)))?;
+    let manifest = read.manifest;
+    let ignored = read.context_ignored;
     // `about` is store metadata: a problem in it never stops an overlay, and Canoa applies nothing of it.
     if let Some(issue) = aos::validate(&manifest, Some(&paths))
         .iter()
@@ -252,7 +251,10 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
     }
     let windows = input.os == "windows";
     let mut profile = Profile::default();
-    let mut not_applied = Vec::new();
+    let mut not_applied: Vec<String> = ignored
+        .iter()
+        .map(|file| format!("context: {file}, ignored while the body of OVERLAY.md is the context"))
+        .collect();
     let mut texts = BTreeMap::new();
     let mut references = Vec::new();
     let mut env: IndexMap<String, EnvValue> = IndexMap::new();
@@ -502,9 +504,9 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         profile.contexts.push(Context::Text(routing.join("\n")));
     }
     profile.contexts.extend(
-        aos::context_of(&manifest, &paths)
-            .into_iter()
-            .map(Context::File),
+        aos::context_of(&manifest, input.tree)
+            .iter()
+            .filter_map(|path| context_entry(input.tree, path, &settings)),
     );
     for (id, hints) in entries(manifest.get("harness")) {
         if input.harness != Some(id.as_str()) {
@@ -522,7 +524,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                     paths
                         .iter()
                         .filter_map(Value::as_str)
-                        .map(|path| Context::File(path.to_owned())),
+                        .filter_map(|path| context_entry(input.tree, path, &settings)),
                 ),
                 ("skills", Value::Bool(true)) => {}
                 ("skills", _) => {
@@ -600,6 +602,26 @@ pub(crate) fn granted(shared: &IndexMap<String, LayerId>, name: &str, windows: b
     shared
         .keys()
         .any(|shared| shared == name || windows && shared.eq_ignore_ascii_case(name))
+}
+
+/// A reader's refusal as its class and line: the parsers disagree on columns, and the text of a document is never quoted.
+fn reading(error: &aos::Error) -> String {
+    let class = error.class.as_str();
+    error.line.map_or_else(
+        || class.to_owned(),
+        |line| format!("{class} at line {line}"),
+    )
+}
+
+/// A context entry as the profile holds it: a file, or for `OVERLAY.md` its body as text, since the front matter is the
+/// manifest and no context. An empty body is no context.
+fn context_entry(tree: &OverlayTree, path: &str, settings: &Settings) -> Option<Context> {
+    if path != "OVERLAY.md" {
+        return Some(Context::File(path.to_owned()));
+    }
+    let body = aos::context_file_text(tree.bytes(path)?, settings).ok()?;
+    let text = core::str::from_utf8(body).ok()?;
+    (!text.trim().is_empty()).then(|| Context::Text(text.to_owned()))
 }
 
 /// A text field of a mapping, empty when it is absent or not text.
