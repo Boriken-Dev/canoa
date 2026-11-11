@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -208,6 +208,14 @@ pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the ident
 pub fn Serving::peer(&self) -> PeerId          // the identity's id, which a client pins
 pub fn Serving::listening(&self) -> &[Listening]
 pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another thread
+pub fn Serving::local(&self) -> Local          // Clone, Send: the way into every entry from inside this process; outlives run(self)
+pub fn Local::entries(&self) -> Vec<&str>      // the entries it reaches, in the configuration's order
+pub fn Local::open(&self, entry: &str) -> Result<Link, LocalError>   // a connection inside this process: no proof, no trust store; the entry's agent starts on the first message
+#[non_exhaustive] pub enum LocalError { NoEntry, Stopped, Thread }
+pub fn Link::send(&self, message: &[u8]) -> Result<(), LinkError>    // waits up to 30 s while 256 are unread
+pub fn Link::receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, LinkError>   // None: the other end closed and all was read
+pub fn Link::close(&self)                      // ends both ends and the agent; dropping a Link does it
+#[non_exhaustive] pub enum LinkError { TooLong, Timeout, Ended }
 pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed and every agent ended
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
 pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
@@ -523,6 +531,7 @@ pub trait Front: Send + Sync {
     fn home(&self) -> Option<PathBuf>;                 // None: this user's
     fn holder(&self) -> &str;                          // what serve calls itself to another host
     fn ask(&self, prompt: &str, secret: bool) -> io::Result<Option<String>>;   // one typed line, a secret without echo; Ok(None): this front cannot take one (an application asks in its own forms)
+    fn local(&self, local: Local) {}                   // default: ignored. serve hands over its way in, bound and before "ready"
 }
 #[non_exhaustive] pub struct Program { pub path: PathBuf, pub args: Vec<OsString> }   // args go before the subcommand
 pub const fn Program::new(path: PathBuf, args: Vec<OsString>) -> Program
@@ -668,6 +677,7 @@ canoa accounts remove NAME [--config FILE]
 - `pair` takes its PIN back however it ends, so a connection still pairing on its own thread when it is given up pairs nobody: in an application's process such a thread outlives the command.
 - `serve --allow-empty`: a canoa.cfg with no entry, or none at all at that path, runs with nothing to serve, printing only the `ready` line, where without it that is status 2. It writes no file. A canoa.cfg that exists and cannot be read or parsed is still status 2.
 - `serve --web [DIR]` serves the web app too (see "The web app"): from `DIR` (made absolute from the working directory), else `[host.web]`'s `dir`, else the site built in; on `[host.web]`'s settings, or the defaults without the table. `--web-listen` replaces `listen`, and needs `--web` or `[host.web]` (status 2). After the entries' lines it prints `{"web": URL}`, a line with no `name`. A site that cannot be served, no site, plain HTTP beyond loopback, a zero limit or an unusable certificate is status 2; an address that cannot be bound, status 1.
+- **A link from inside** (`Local::open`) is served as a paired key's connection is: the entry's agent, scope, worktrees (`_canoa/worktree/*` before the first ACP message) and `max_peers`. It skips the proof, the trust store and the entry's `peers` list, since whoever holds a `Local` is this process; no network peer can obtain one. `Stopper::stop` closes every link. The peer it is logged as is the host's own id.
 - `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every listener and agent is ended (`Stopper::stop`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
 - `pair` (`--listen` default `127.0.0.1:0`, another address logged at `info` as `non-default: pair --listen is ADDRESS, default loopback`; `--timeout-seconds` default 300) prints `{"pin", "peer", "method", "url"}`, a six-digit PIN, this host's id, its method and the address to dial, and pairs by that method; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.
 - On `serve --until-stdin-closes` and `pair --until-stdin-closes`, nothing is logged between the input closing and the exit, and the process exits within 5 s whatever is left: a parent that died can leave standard error a pipe a write to which never returns (seen on Windows under a Dart parent).

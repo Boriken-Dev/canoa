@@ -33,6 +33,7 @@ use crate::config::{
 use crate::inproc::{self, InProcess};
 use crate::kind;
 use crate::pipe;
+use crate::local::{self, Link};
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
@@ -459,6 +460,86 @@ fn end_all(agents: &Mutex<Agents>) {
     }
 }
 
+/// Why [`Local::open`] gave no link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LocalError {
+    /// The host serves no entry of that name.
+    NoEntry,
+    /// The host is stopping.
+    Stopped,
+    /// A thread for the connection could not be started.
+    Thread,
+}
+
+impl fmt::Display for LocalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoEntry => "this host serves no entry of that name",
+            Self::Stopped => "this host is stopping",
+            Self::Thread => "a thread for the connection could not be started",
+        })
+    }
+}
+
+impl core::error::Error for LocalError {}
+
+/// A way into every entry of a [`Serving`] from inside its own process. A link opened here is served as a paired key's
+/// connection is, with the entry's agent, scope, worktrees and `max_peers`, but without a proof or the trust store: whoever
+/// holds a `Local` is this process, and no peer on a network can obtain one. It ignores an entry's `peers` list for that
+/// reason, and ends with [`Stopper::stop`] like any connection.
+#[derive(Clone)]
+pub struct Local {
+    shared: Arc<Shared>,
+    served: Vec<Arc<Served>>,
+}
+
+impl fmt::Debug for Local {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Local").finish_non_exhaustive()
+    }
+}
+
+impl Local {
+    /// The names of the entries it reaches, in the configuration's order.
+    #[must_use]
+    pub fn entries(&self) -> Vec<&str> {
+        self.served
+            .iter()
+            .map(|served| served.name.as_str())
+            .collect()
+    }
+
+    /// Opens a connection to `entry`: the client's end of it, whose first message starts the entry's agent as a peer's would.
+    /// Dropping or closing the end ends the connection and its agent.
+    ///
+    /// # Errors
+    ///
+    /// [`LocalError`]: no such entry, the host is stopping, or no thread could be started.
+    pub fn open(&self, entry: &str) -> Result<Link, LocalError> {
+        let served = self
+            .served
+            .iter()
+            .find(|served| served.name == entry)
+            .ok_or(LocalError::NoEntry)?;
+        if self.shared.stopped.load(Ordering::SeqCst) {
+            return Err(LocalError::Stopped);
+        }
+        let (client, host) = local::pair(MAX_LINE, Arc::clone(&self.shared.stopped));
+        let shared = Arc::clone(&self.shared);
+        let served = Arc::clone(served);
+        thread::Builder::new()
+            .name("canoa-local".to_owned())
+            .spawn(move || {
+                let peer = shared.method.peer_id();
+                serve_proven(&shared, &served, &host, &peer);
+                host.close();
+            })
+            .map_err(|_| LocalError::Thread)?;
+        Ok(client)
+    }
+}
+
 /// Every entry bound to its address, not yet taking connections.
 pub struct Serving {
     shared: Arc<Shared>,
@@ -851,6 +932,19 @@ impl Serving {
         &self.listening
     }
 
+    /// A way into every entry from inside this process, which outlives [`Serving::run`] taking `self`.
+    #[must_use]
+    pub fn local(&self) -> Local {
+        Local {
+            shared: Arc::clone(&self.shared),
+            served: self
+                .listeners
+                .iter()
+                .map(|(served, _)| Arc::clone(served))
+                .collect(),
+        }
+    }
+
     /// What stops this and ends its agents, for a thread other than the one in [`Serving::run`].
     #[must_use]
     pub fn stopper(&self) -> Stopper {
@@ -1017,11 +1111,18 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
     }
     let store = Arc::clone(&shared.store);
     let stopped = Arc::clone(&shared.stopped);
+    let checked = peer;
     let sealed = Sealed::new(channel, established.session)
-        .with_check(move || !stopped.load(Ordering::SeqCst) && store.is_accepted(&peer));
+        .with_check(move || !stopped.load(Ordering::SeqCst) && store.is_accepted(&checked));
+    serve_proven(shared, served, &sealed, &peer);
+    sealed.close();
+}
+
+/// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after.
+fn serve_proven<C: Channel>(shared: &Shared, served: &Served, sealed: &C, peer: &PeerId) {
     let Some(_running) = served.running.enter() else {
         tracing::info!(entry = served.name, %peer, "turned away: max_peers are running");
-        return sealed.close();
+        return;
     };
     let mut first = sealed.receive(Some(FIRST_MESSAGE));
     // Answered before any agent starts, so a worktree can be removed with no agent of this connection working in it.
@@ -1032,13 +1133,13 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         {
             if answered == MAX_WORKTREE_REQUESTS {
                 tracing::info!(entry = served.name, %peer, "turned away: too many worktree requests");
-                return sealed.close();
+                return;
             }
             answered += 1;
             if let Some(reply) = worktrees.answer(message)
                 && sealed.send(&reply).is_err()
             {
-                return sealed.close();
+                return;
             }
             first = sealed.receive(Some(FIRST_MESSAGE));
         }
@@ -1050,17 +1151,10 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
         Ok(Some(first)) => {
             tracing::info!(entry = served.name, %peer, "proven");
             let copy = first.clone();
-            give_agent(
-                shared,
-                served,
-                &Prefilled::new(&sealed, first),
-                &copy,
-                &peer,
-            );
+            give_agent(shared, served, &Prefilled::new(sealed, first), &copy, peer);
         }
         Ok(None) | Err(_) => {}
     }
-    sealed.close();
 }
 
 fn give_agent<C: Channel>(

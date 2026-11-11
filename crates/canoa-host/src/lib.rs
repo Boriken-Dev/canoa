@@ -11,6 +11,7 @@ pub mod harness;
 pub mod home;
 mod inproc;
 mod kind;
+mod local;
 pub mod options;
 pub mod peers;
 pub mod pipe;
@@ -33,8 +34,9 @@ pub use config::{
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use kind::CACHE_META;
+pub use local::{Link, LinkError};
 pub use peers::{Peer, PeerState, PeersError};
 pub use provider::{HostLine, ProviderError, ProviderOptions, serve_stdio};
-pub use serve::{Listening, ServeError, ServeOptions, Serving, Stopper};
+pub use serve::{Listening, Local, LocalError, ServeError, ServeOptions, Serving, Stopper};
 pub use tool::ToolSpec;
 pub use web::{WebError, WebServer, WebStopper};

@@ -72,6 +72,10 @@ pub trait Front: Send + Sync {
     ///
     /// The answer could not be read.
     fn ask(&self, prompt: &str, secret: bool) -> std::io::Result<Option<String>>;
+
+    /// Hands over the way into the entries from inside this process, once `serve` is bound and before it says it is ready.
+    /// It works until `serve` has ended. A front that has no use for it ignores it.
+    fn local(&self, _local: crate::Local) {}
 }
 
 /// How a host starts its own `provider`, `tool` and `launch` commands.
@@ -733,6 +737,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
             crate::ServeError::NothingToServe => Failed::usage(error),
             _ => Failed::run(error),
         })?;
+    front.local(serving.local());
     let web = web
         .map(|web| WebServer::bind(&web, &serving))
         .transpose()
