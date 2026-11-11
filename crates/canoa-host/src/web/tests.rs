@@ -228,6 +228,8 @@ fn a_source_the_settings_add_is_allowed_besides_the_entries() {
         url: "ws://127.0.0.1:7801".to_owned(),
         harness: None,
         title: None,
+        local: false,
+        missing: Vec::new(),
     }];
     let mut config = loopback(&site());
     config.connect = vec!["https://fonts.gstatic.com".to_owned()];
@@ -247,6 +249,8 @@ fn an_entry_on_a_pipe_is_neither_listed_for_the_page_nor_allowed_to_it() {
         url: url.to_owned(),
         harness: None,
         title: None,
+        local: false,
+        missing: Vec::new(),
     };
     let entries = [
         entry("socket", "ws://127.0.0.1:7801"),
@@ -375,6 +379,8 @@ fn files_are_served_from_the_directory_with_their_types_and_headers() {
             url: "ws://127.0.0.1:7801".to_owned(),
             harness: None,
             title: None,
+            local: false,
+            missing: Vec::new(),
         }],
     );
     let index = get(address, "/");
@@ -492,6 +498,8 @@ fn the_host_index_lists_the_entries_it_was_given() {
             url: "ws://127.0.0.1:7801".to_owned(),
             harness: Some("claude".to_owned()),
             title: Some("Claude for review".to_owned()),
+            local: false,
+            missing: Vec::new(),
         },
         Listening {
             name: "py".to_owned(),
@@ -499,6 +507,8 @@ fn the_host_index_lists_the_entries_it_was_given() {
             url: "ws://127.0.0.1:7802".to_owned(),
             harness: None,
             title: None,
+            local: false,
+            missing: Vec::new(),
         },
     ];
     let address = running(&loopback(&site()), &entries);

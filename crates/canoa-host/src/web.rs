@@ -329,7 +329,14 @@ impl WebServer {
     /// [`WebError::Listen`] for an address that cannot be bound.
     pub fn bind(web: &WebConfig, serving: &Serving) -> Result<Self, WebError> {
         let peer = serving.peer().to_string();
-        Self::bind_listing(web, &peer, serving.method().name(), serving.listening())
+        // Entries reached only from inside this process are not the page's to dial.
+        let listed: Vec<Listening> = serving
+            .listening()
+            .iter()
+            .filter(|listening| !listening.local)
+            .cloned()
+            .collect();
+        Self::bind_listing(web, &peer, serving.method().name(), &listed)
     }
 
     /// As [`WebServer::bind`], listing `entries` under the host id `peer`, which proves by `method`.

@@ -524,6 +524,10 @@ struct ServeArgs {
     /// status 2.
     #[arg(long)]
     allow_empty: bool,
+    /// Serve the host's own sources too (Claude, Codex, Antigravity, Grok, Pi), to this process only: they have no address,
+    /// and each line says what a source is missing.
+    #[arg(long)]
+    local_sources: bool,
     /// Serve the web app too, on [host.web]'s address (default 127.0.0.1:7800): from DIR, else [host.web]'s dir, else the
     /// site built in (feature `web`).
     #[arg(long, value_name = "DIR", num_args = 0..=1)]
@@ -728,6 +732,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         .with_program_args(program.args)
         .with_rekey(!args.no_rekey)
         .with_nothing_to_serve(args.allow_empty)
+        .with_local_sources(args.local_sources)
         .with_state_dir(home.dir());
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);

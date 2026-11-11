@@ -19,6 +19,7 @@ pub mod profile;
 pub mod provider;
 mod scope;
 pub mod serve;
+mod sources;
 pub mod store;
 pub mod tool;
 mod usage_splice;

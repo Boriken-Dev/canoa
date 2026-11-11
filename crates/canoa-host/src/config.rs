@@ -246,6 +246,9 @@ pub struct Entry {
     pub max_peers: usize,
     /// What a client shows for an agent entry instead of its name; `None` shows the name. Always `None` for a provider or tool.
     pub title: Option<String>,
+    /// Whether it is served only over [`crate::Local`]: it listens on no address, and no paired key reaches it. The host's
+    /// own sources are these; canoa.cfg cannot make one.
+    pub local: bool,
 }
 
 /// What a `claude` or `codex` harness entry's keys ask before the command line acts. Each one unset is the host's own value,
@@ -1600,6 +1603,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         peers,
         max_peers,
         title: None,
+        local: false,
     })
 }
 

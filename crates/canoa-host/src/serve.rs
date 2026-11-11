@@ -32,11 +32,12 @@ use crate::config::{
 };
 use crate::inproc::{self, InProcess};
 use crate::kind;
-use crate::pipe;
 use crate::local::{self, Link};
+use crate::pipe;
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
+use crate::sources;
 use crate::usage_splice::{Antigravity, Starter};
 use crate::worktree::Worktrees;
 
@@ -80,6 +81,8 @@ pub struct ServeOptions {
     /// The host's directory for what it keeps, where an agent started only to read its usage gets an empty working
     /// directory; without one, no such agent is started.
     pub state_dir: Option<PathBuf>,
+    /// Whether the host's own sources (Claude, Codex, Antigravity, Grok and Pi) are served too, over [`Local`] only.
+    pub local_sources: bool,
 }
 
 impl ServeOptions {
@@ -93,7 +96,15 @@ impl ServeOptions {
             rekey: true,
             nothing_to_serve: false,
             state_dir: None,
+            local_sources: false,
         }
+    }
+
+    /// Serves the host's own sources over [`Local`] alongside canoa.cfg's entries. A name canoa.cfg already uses is left to it.
+    #[must_use]
+    pub const fn with_local_sources(mut self, on: bool) -> Self {
+        self.local_sources = on;
+        self
     }
 
     /// The directory the host keeps its own working files in, which a private read of an agent's usage needs.
@@ -203,12 +214,16 @@ pub struct Listening {
     /// `agent`, `provider` or `tool`.
     pub kind: &'static str,
     /// What a client dials: `ws://ADDRESS`, or `pipe:NAME` or `unix:PATH` for an entry on a pipe, which the served web page
-    /// never lists.
+    /// never lists; empty for a local entry.
     pub url: String,
     /// The provider id of a `harness` entry; `None` for any other entry.
     pub harness: Option<String>,
     /// The entry's `title`, if it has one.
     pub title: Option<String>,
+    /// Whether it is reached over [`Local`] only: one of the host's own sources, with no address.
+    pub local: bool,
+    /// The programs a local entry needs that were not found; empty for any other, and for a source that can start.
+    pub missing: Vec<String>,
 }
 
 impl Listening {
@@ -223,7 +238,12 @@ impl Listening {
         let mut map = serde_json::Map::new();
         map.insert("name".into(), self.name.clone().into());
         map.insert("kind".into(), self.kind.into());
-        map.insert("url".into(), self.url.clone().into());
+        if self.local {
+            map.insert("local".into(), true.into());
+            map.insert("missing".into(), self.missing.clone().into());
+        } else {
+            map.insert("url".into(), self.url.clone().into());
+        }
         if let Some(harness) = &self.harness {
             map.insert("harness".into(), harness.clone().into());
         }
@@ -544,6 +564,8 @@ impl Local {
 pub struct Serving {
     shared: Arc<Shared>,
     listeners: Vec<(Arc<Served>, Bound)>,
+    /// The entries reached over [`Local`] only.
+    local_only: Vec<Arc<Served>>,
     listening: Vec<Listening>,
 }
 
@@ -627,7 +649,12 @@ impl Serving {
         store: TrustStore,
         options: &ServeOptions,
     ) -> Result<Self, ServeError> {
-        if config.entries.is_empty() && !options.nothing_to_serve {
+        let sources = if options.local_sources {
+            sources::entries(config)
+        } else {
+            Vec::new()
+        };
+        if config.entries.is_empty() && sources.is_empty() && !options.nothing_to_serve {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
@@ -671,48 +698,62 @@ impl Serving {
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
-        for entry in &config.entries {
+        let mut local_only = Vec::new();
+        let missing_of: BTreeMap<&str, &Vec<String>> = sources
+            .iter()
+            .map(|source| (source.entry.name.as_str(), &source.missing))
+            .collect();
+        for entry in config
+            .entries
+            .iter()
+            .chain(sources.iter().map(|source| &source.entry))
+        {
             // Every message after the proof is sealed in its session, so where the socket sits is the person's to choose.
-            let (listener, url) = match &entry.listen {
-                Listen::Address(address) => {
-                    let (bound, listener) = websocket::Listener::bind_plain(*address)
-                        .and_then(|listener| Ok((listener.local_addr()?, listener)))
-                        .map_err(|failure| ServeError::Listen {
-                            entry: entry.name.clone(),
-                            failure,
-                        })?;
-                    if listener.plain_beyond_loopback() {
-                        tracing::info!(
-                            "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
-                            table_of(&entry.kind),
-                            entry.name
-                        );
+            let (listener, url) = if entry.local {
+                (None, format!("local://{}", entry.name))
+            } else {
+                let (bound, url) = match &entry.listen {
+                    Listen::Address(address) => {
+                        let (bound, listener) = websocket::Listener::bind_plain(*address)
+                            .and_then(|listener| Ok((listener.local_addr()?, listener)))
+                            .map_err(|failure| ServeError::Listen {
+                                entry: entry.name.clone(),
+                                failure,
+                            })?;
+                        if listener.plain_beyond_loopback() {
+                            tracing::info!(
+                                "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
+                                table_of(&entry.kind),
+                                entry.name
+                            );
+                        }
+                        let listener = listener
+                            .with_limits(unproven_limits())
+                            .with_frames(Frames::Binary)
+                            .with_origins(config.origins.clone());
+                        (Bound::Socket(listener), url_of(bound))
                     }
-                    let listener = listener
-                        .with_limits(unproven_limits())
-                        .with_frames(Frames::Binary)
-                        .with_origins(config.origins.clone());
-                    (Bound::Socket(listener), url_of(bound))
-                }
-                Listen::Pipe(name) => {
-                    // Every setting is the crate's default, the access control included; a receive sets its own read timeout.
-                    let listener =
-                        pipe::Listener::bind(name).map_err(|error| ServeError::Pipe {
-                            entry: entry.name.clone(),
-                            error,
-                        })?;
-                    for setting in listener.non_defaults() {
-                        tracing::info!(
-                            "non-default: host.{}.{}.listen has {} at {}, default {}",
-                            table_of(&entry.kind),
-                            entry.name,
-                            setting.setting,
-                            setting.value,
-                            setting.default
-                        );
+                    Listen::Pipe(name) => {
+                        // Every setting is the crate's default, the access control included; a receive sets its own read timeout.
+                        let listener =
+                            pipe::Listener::bind(name).map_err(|error| ServeError::Pipe {
+                                entry: entry.name.clone(),
+                                error,
+                            })?;
+                        for setting in listener.non_defaults() {
+                            tracing::info!(
+                                "non-default: host.{}.{}.listen has {} at {}, default {}",
+                                table_of(&entry.kind),
+                                entry.name,
+                                setting.setting,
+                                setting.value,
+                                setting.default
+                            );
+                        }
+                        (Bound::Pipe(listener), name.to_string())
                     }
-                    (Bound::Pipe(listener), name.to_string())
-                }
+                };
+                (Some(bound), url)
             };
             let (kind, run) = match &entry.kind {
                 EntryKind::Agent {
@@ -880,6 +921,14 @@ impl Serving {
                     Capability::new(ACP_CAPABILITY),
                 );
             }
+            let missing = if entry.local {
+                missing_of
+                    .get(entry.name.as_str())
+                    .map(|missing| (*missing).clone())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             listening.push(Listening {
                 name: entry.name.clone(),
                 kind,
@@ -889,14 +938,19 @@ impl Serving {
                     _ => None,
                 },
                 title: entry.title.clone(),
+                local: entry.local,
+                missing,
             });
-            let served = Served {
+            let served = Arc::new(Served {
                 name: entry.name.clone(),
                 restricted: entry.peers.is_some(),
                 run,
                 running: Gate::new(entry.max_peers),
-            };
-            listeners.push((Arc::new(served), listener));
+            });
+            match listener {
+                Some(listener) => listeners.push((served, listener)),
+                None => local_only.push(served),
+            }
         }
         Ok(Self {
             shared: Arc::new(Shared {
@@ -910,6 +964,7 @@ impl Serving {
                 program_args: options.program_args.clone(),
             }),
             listeners,
+            local_only,
             listening,
         })
     }
@@ -941,6 +996,7 @@ impl Serving {
                 .listeners
                 .iter()
                 .map(|(served, _)| Arc::clone(served))
+                .chain(self.local_only.iter().map(Arc::clone))
                 .collect(),
         }
     }

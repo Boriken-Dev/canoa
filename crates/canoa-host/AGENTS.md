@@ -142,7 +142,7 @@ pub fn Config::entry(&self, name: &str) -> Option<&Entry>
 pub fn Listen::parse(text: &str) -> Result<Listen, String>   // "ADDRESS:PORT", "pipe:NAME" or "unix:PATH"; the error is a clause naming `listen` and quoting nothing
 pub const fn Listen::address(&self) -> Option<SocketAddr>    // None for a pipe
 #[non_exhaustive] pub struct HostProfile { pub profile: Profile, pub overlays: Vec<String>, pub allow_mcp: BTreeMap<String, String>, pub directory: PathBuf }
-#[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: Listen, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize, pub title: Option<String> }
+#[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: Listen, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize, pub title: Option<String>, pub local: bool }   // local: served over Local only, no address; only the host's own sources are
 #[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String>, usage: Option<UsageSource> }, Harness { harness: String, origin: Option<Origin>, executable: Option<OsString>, options: HarnessOptions, settings: Option<Settings>, profiles: Vec<String>, accounts: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
 #[non_exhaustive] pub struct AccountConfig { pub harness: String, pub kind: String, pub id: String, pub settings: Option<Settings> }   // Clone, Eq: one [host.accounts.NAME]
 #[non_exhaustive] pub enum AccountStore { Os, File }   // Copy, Default (Os), Eq: `[host] account_store`
@@ -201,6 +201,7 @@ pub const fn ServeOptions::with_key_limit(self, bytes: u64) -> ServeOptions     
 pub const fn ServeOptions::with_rekey(self, rekey: bool) -> ServeOptions
 pub fn ServeOptions::with_program_args(self, args: Vec<OsString>) -> ServeOptions   // before the subcommand on provider_program's command line
 pub const fn ServeOptions::with_nothing_to_serve(self, allowed: bool) -> ServeOptions   // a configuration with no entry binds, and serves nothing until stopped
+pub const fn ServeOptions::with_local_sources(self, on: bool) -> ServeOptions   // also serve the host's own sources over Local; see "The host's own sources"
 pub fn ServeOptions::with_state_dir(self, dir: impl Into<PathBuf>) -> ServeOptions   // where a private agy read gets its empty working directory, `<dir>/usage-read`; `canoa serve` gives the home; none, and no private agent is started
 
 pub fn Serving::bind(config: &Config, identity: coqui_agentic_peer::auth::Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
@@ -219,7 +220,7 @@ pub fn Link::close(&self)                      // ends both ends and the agent; 
 pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed and every agent ended
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
 pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
-#[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String, pub harness: Option<String>, pub title: Option<String> }   // url: ws://ADDRESS, or pipe:NAME / unix:PATH for an entry on a pipe
+#[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String, pub harness: Option<String>, pub title: Option<String>, pub local: bool, pub missing: Vec<String> }   // local: no address (url is empty); missing: programs a local entry needs that were not found; url: ws://ADDRESS, or pipe:NAME / unix:PATH for an entry on a pipe
 pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it; false for a pipe entry   // kind: "agent", "provider" or "tool"; harness: a harness entry's provider id; title: an agent entry's title
 ```
 
@@ -641,7 +642,7 @@ Tests: `cargo build -p canoa-host --examples` first, then `cargo test -p canoa-h
 ## Command line
 
 ```text
-canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
+canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--local-sources] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
                  [--web [DIR]] [--web-listen ADDRESS]
 canoa check [--config FILE] [--format text|json]
 canoa id [--method noise|webcrypto [--force]]
@@ -675,6 +676,7 @@ canoa accounts remove NAME [--config FILE]
 - `serve` prints one JSON object per entry on standard output, `{"name", "kind", "url", "harness"?, "title"?, "peer", "method"}`, `harness` being a harness entry's provider id (absent for any other entry) and `title` the entry's title (absent when it has none), `peer` this host's id and `method` its proof's, once every entry is bound, and then `{"ready": true, "peer", "method"}`, a line with no `name`; then it serves until stopped. It logs on standard error.
 - **One host on a home.** `serve` takes the home's lock (see "One host on a home") before anything else of the home, or any address: a second one, the app's or another `canoa serve`, says `canoa: NAME (process PID) already hosts this home, DIR: ...`, binds nothing and ends with status 3. A holder that died holds nothing. `check`, `peers`, `accept`, `revoke`, `id` and `pair` take no lock, and `coqui-acp-bridge serve --paired` does not know of it.
 - `pair` takes its PIN back however it ends, so a connection still pairing on its own thread when it is given up pairs nobody: in an application's process such a thread outlives the command.
+- **The host's own sources** (`serve --local-sources`, `ServeOptions::with_local_sources`): `Claude` and `Codex` (built-in harness entries with Bypass offered), `Antigravity` (`agy acp`, usage read, also found in `%LOCALAPPDATA%/agy/bin`), `Grok` (`grok agent stdio`, also in `~/.grok/bin`) and `Pi` (`npx -y pi-acp@0.0.34`, needing `pi`). Each is an entry with `Entry::local` set: no listener, no `/canoa.json` line, reachable through `Local::open` only. `serve` prints a line for each, `{"name", "kind": "agent", "local": true, "missing": [...], "harness"?, "title", "peer", "method"}` with no `url`; `missing` names the programs not found (on Windows only `.exe`, `.cmd`, `.bat` and `.com` count, so `npx` is `npx.cmd`), and the entry is served either way so a client can say what to install. A name canoa.cfg already uses is left to canoa.cfg.
 - `serve --allow-empty`: a canoa.cfg with no entry, or none at all at that path, runs with nothing to serve, printing only the `ready` line, where without it that is status 2. It writes no file. A canoa.cfg that exists and cannot be read or parsed is still status 2.
 - `serve --web [DIR]` serves the web app too (see "The web app"): from `DIR` (made absolute from the working directory), else `[host.web]`'s `dir`, else the site built in; on `[host.web]`'s settings, or the defaults without the table. `--web-listen` replaces `listen`, and needs `--web` or `[host.web]` (status 2). After the entries' lines it prints `{"web": URL}`, a line with no `name`. A site that cannot be served, no site, plain HTTP beyond loopback, a zero limit or an unusable certificate is status 2; an address that cannot be bound, status 1.
 - **A link from inside** (`Local::open`) is served as a paired key's connection is: the entry's agent, scope, worktrees (`_canoa/worktree/*` before the first ACP message) and `max_peers`. It skips the proof, the trust store and the entry's `peers` list, since whoever holds a `Local` is this process; no network peer can obtain one. `Stopper::stop` closes every link. The peer it is logged as is the host's own id.
