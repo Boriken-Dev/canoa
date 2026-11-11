@@ -41,11 +41,39 @@ pub struct Spawned {
 pub fn is_credential_name(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
     upper.ends_with("_API_KEY")
-        || upper.ends_with("_TOKEN")
+        || upper.ends_with("TOKEN")
         || upper.ends_with("_SECRET")
         || upper.ends_with("PASSWORD")
         || upper.ends_with("_KEY")
-        || upper == "ANTHROPIC_AUTH_TOKEN"
+        || upper.ends_with("_PAT")
+        || upper == "SSH_AUTH_SOCK"
+        || upper.starts_with("DOTAGENTS_")
+}
+
+/// Whether `name` is a variable that changes what a program loads or where its package manager reads from, so that the host
+/// never passes the person's own on to an install: npm's configuration, Node's options and path, the ssh agent.
+fn steers_the_install(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper.starts_with("NPM_CONFIG_") || upper.starts_with("NODE_") || upper == "SSH_AUTH_SOCK"
+}
+
+/// `path` with `.` and `..` resolved by name, as the file system would find it; `None` when it climbs above its root.
+#[must_use]
+pub fn normalize(path: &Path) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Some(out)
 }
 
 /// What a guarded spawner kept.
@@ -72,7 +100,10 @@ impl SpawnLog {
     }
 }
 
-/// A [`ProcessSpawner`] that starts only what a store may: an absolute program that is not a `.cmd`, `.bat` or `.ps1`,
+/// A [`ProcessSpawner`] that starts only what a store may. It protects against a store's own mistakes (a path built wrongly, a
+/// shell script started by habit), not against a store that means harm: a store is code running as the user.
+///
+/// It starts only an absolute program that is not a `.cmd`, `.bat` or `.ps1`,
 /// in a working directory inside the folder the store was given, with no credential variable, on a search path that never
 /// reads the current directory. It refuses the rest and records why.
 #[derive(Debug)]
@@ -131,7 +162,10 @@ impl<S: ProcessSpawner> GuardedSpawner<S> {
         }
         match &spec.cwd {
             _ if self.lenient_cwd => {}
-            Some(cwd) if Path::new(cwd).starts_with(&self.staging) => {}
+            Some(cwd)
+                if normalize(Path::new(cwd))
+                    .zip(normalize(Path::new(&self.staging)))
+                    .is_some_and(|(cwd, staging)| cwd.starts_with(staging)) => {}
             Some(cwd) => {
                 return Err(format!(
                     "a working directory outside the staging folder: {cwd}"
@@ -231,7 +265,7 @@ impl<'a> Run<'a> {
     ) -> Self {
         let environment: Environment = environment
             .iter()
-            .filter(|(name, _)| !is_credential_name(name))
+            .filter(|(name, _)| !is_credential_name(name) && !steers_the_install(name))
             .collect();
         Self {
             spawner,
@@ -344,10 +378,20 @@ pub fn clean(line: &str) -> String {
     let mut out: String = line
         .trim_end_matches(['\r', '\n'])
         .chars()
+        .filter(|c| !c.is_control() || *c == '\t')
         .filter(|c| {
-            !c.is_control() || *c == '\t'
+            !matches!(
+                *c,
+                '\u{202a}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{2060}'
+                    | '\u{061c}'
+                    | '\u{feff}'
+            )
         })
-        .filter(|c| !matches!(*c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}'))
         .collect();
     if out.len() > 4096 {
         let mut end = 4096;

@@ -188,6 +188,7 @@ pub struct LocalTools {
     lookup: Lookup,
     limits: ToolsLimits,
     loopback_http: bool,
+    allow_unverified: bool,
     cancel: Arc<AtomicBool>,
     deadline: Option<std::time::Instant>,
 }
@@ -213,6 +214,7 @@ impl LocalTools {
             lookup: Lookup::process(),
             limits: ToolsLimits::default(),
             loopback_http: false,
+            allow_unverified: false,
             cancel: Arc::new(AtomicBool::new(false)),
             deadline: None,
         }
@@ -257,6 +259,13 @@ impl LocalTools {
     /// Lets `http` reach a loopback address. A test's setting: a download over it is never safe.
     pub const fn loopback_http(mut self, allowed: bool) -> Self {
         self.loopback_http = allowed;
+        self
+    }
+
+    /// Lets `fetch` take a download nothing checks (`Check::Unverified`). Off by default: the person allows it, knowing the plan
+    /// said which downloads those are.
+    pub const fn allow_unverified(mut self, allowed: bool) -> Self {
+        self.allow_unverified = allowed;
         self
     }
 
@@ -335,11 +344,16 @@ impl LocalTools {
                 "only https is fetched",
             ));
         }
-        if !self
-            .endpoints
-            .iter()
-            .any(|e| e.eq_ignore_ascii_case(&origin))
-        {
+        let reaches = |endpoint: &String| {
+            let after_scheme = endpoint.split_once("://").map_or("", |(_, rest)| rest);
+            if after_scheme.contains('/') {
+                // An endpoint with a path is a prefix: the bucket, not the whole host.
+                url.starts_with(endpoint.as_str()) && !url[endpoint.len()..].contains("..")
+            } else {
+                endpoint.eq_ignore_ascii_case(&origin)
+            }
+        };
+        if !self.endpoints.iter().any(reaches) {
             return Err(refused(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 &format!("{origin} is not one of the store's endpoints"),
@@ -419,13 +433,21 @@ fn safe_part(part: &str) -> bool {
     if part == ".." || part.contains(['/', '\\', ':', '\0']) {
         return false;
     }
-    let stem = part.split('.').next().unwrap_or(part).to_ascii_uppercase();
+    let stem = part.split('.').next().unwrap_or(part).to_uppercase();
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix).is_some_and(|rest| {
+            let mut chars = rest.chars();
+            matches!(
+                chars.next(),
+                Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}')
+            ) && chars.next().is_none()
+        })
+    };
     let device = matches!(
         stem.as_str(),
         "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-    ) || (stem.len() == 4
-        && (stem.starts_with("COM") || stem.starts_with("LPT"))
-        && stem.as_bytes()[3].is_ascii_digit());
+    ) || numbered("COM")
+        || numbered("LPT");
     !device && !part.ends_with(' ') && !part.ends_with('.')
 }
 
@@ -555,6 +577,12 @@ impl InstallTools for LocalTools {
 
     fn fetch(&self, request: FetchRequest) -> Result<Fetched, ProviderError> {
         let target = self.within_granted(&request.path)?;
+        if matches!(request.check, Check::Unverified { .. }) && !self.allow_unverified {
+            return Err(refused(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "a download nothing checks is not allowed here",
+            ));
+        }
         let mut reply = self.open(&request.url)?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| io_error(&e))?;
@@ -686,6 +714,9 @@ struct Limits {
 }
 
 /// Where the entry `name` goes under `into`, or `None` when stripping leaves nothing.
+/// How deep an archive's entry may be nested.
+const MAX_DEPTH: usize = 64;
+
 fn entry_target(name: &str, into: &Path, strip: usize) -> Result<Option<PathBuf>, ProviderError> {
     let bad = || {
         refused(
@@ -700,7 +731,7 @@ fn entry_target(name: &str, into: &Path, strip: usize) -> Result<Option<PathBuf>
         .split('/')
         .filter(|p| !p.is_empty() && *p != ".")
         .collect();
-    if parts.iter().any(|part| !safe_part(part)) {
+    if parts.iter().any(|part| !safe_part(part)) || parts.len() > MAX_DEPTH {
         return Err(bad());
     }
     if parts.len() <= strip {
@@ -782,6 +813,7 @@ fn unpack_tar<R: Read>(
             continue;
         };
         if kind == T::Directory {
+            count_file(limits)?;
             fs::create_dir_all(&target).map_err(|e| io_error(&e))?;
             continue;
         }
@@ -841,6 +873,7 @@ fn unpack_zip(
             continue;
         };
         if entry.is_dir() {
+            count_file(limits)?;
             fs::create_dir_all(&target).map_err(|e| io_error(&e))?;
             continue;
         }

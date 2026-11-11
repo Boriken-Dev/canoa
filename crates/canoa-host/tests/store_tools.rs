@@ -86,6 +86,7 @@ fn tools(origin: &str, granted: &Path) -> LocalTools {
     LocalTools::new(Arc::new(HttpTransport::default()), vec![origin.to_owned()])
         .granted(granted)
         .loopback_http(true)
+        .allow_unverified(true)
 }
 
 fn fetch(
@@ -203,8 +204,9 @@ fn a_redirect_inside_the_declared_origin_is_followed() {
 fn plain_http_is_refused_unless_loopback_is_allowed() {
     let origin = serve(vec![("/f", 200, None, b"x".to_vec())]);
     let dir = Dir::new("http");
-    let strict =
-        LocalTools::new(Arc::new(HttpTransport::default()), vec![origin.clone()]).granted(&dir.0);
+    let strict = LocalTools::new(Arc::new(HttpTransport::default()), vec![origin.clone()])
+        .granted(&dir.0)
+        .allow_unverified(true);
     let error = fetch(
         &strict,
         &origin,
@@ -438,4 +440,54 @@ fn find_reads_only_absolute_path_entries() {
     // A copy in the current directory is never found through `.`.
     let cwd_tool = std::env::current_dir().expect("cwd").join(name);
     let _ = fs::remove_file(&cwd_tool);
+}
+
+#[test]
+fn a_download_nothing_checks_is_refused_unless_it_was_allowed() {
+    let origin = serve(vec![("/f", 200, None, b"x".to_vec())]);
+    let dir = Dir::new("unverified");
+    let strict = LocalTools::new(Arc::new(HttpTransport::default()), vec![origin.clone()])
+        .granted(&dir.0)
+        .loopback_http(true);
+    let error = fetch(
+        &strict,
+        &origin,
+        "/f",
+        Check::Unverified { why: "test".into() },
+        10,
+        false,
+    )
+    .expect_err("refused");
+    assert!(
+        error.message().contains("nothing checks"),
+        "{}",
+        error.message()
+    );
+    assert!(!dir.0.join("out.bin").exists());
+}
+
+#[test]
+fn an_endpoint_with_a_path_reaches_that_path_and_no_other_part_of_the_host() {
+    let origin = serve(vec![
+        ("/bucket/a", 200, None, b"in".to_vec()),
+        ("/other/a", 200, None, b"out".to_vec()),
+        ("/bucket/x", 302, Some("/other/a".to_owned()), Vec::new()),
+    ]);
+    let dir = Dir::new("prefix");
+    let prefix = format!("{origin}/bucket/");
+    let tools = LocalTools::new(Arc::new(HttpTransport::default()), vec![prefix])
+        .granted(&dir.0)
+        .loopback_http(true)
+        .allow_unverified(true);
+    let unchecked = || Check::Unverified { why: "test".into() };
+    fetch(&tools, &origin, "/bucket/a", unchecked(), 10, false).expect("inside the prefix");
+    fs::remove_file(dir.0.join("out.bin")).expect("clear");
+    for path in ["/other/a", "/bucket/x"] {
+        let error = fetch(&tools, &origin, path, unchecked(), 10, false).expect_err(path);
+        assert!(
+            error.message().contains("not one of the store's endpoints"),
+            "{path}: {}",
+            error.message()
+        );
+    }
 }

@@ -118,6 +118,14 @@ pub struct FileRecord {
     pub url: String,
     /// Its SHA-256.
     pub sha256: String,
+    /// Whether the publisher gave something to check it against. A copy with a file where this is false was installed only
+    /// because the person allowed a download nothing checks.
+    #[serde(default = "yes")]
+    pub verified: bool,
+}
+
+const fn yes() -> bool {
+    true
 }
 
 /// The store that made a copy.
@@ -209,6 +217,25 @@ impl Shelf {
             .map(|d| d.join("Canoa").join("programs"))
     }
 
+    /// A shelf at `root`, which has to be the default folder or below it: no check yet reads who may write another place, so the
+    /// host takes no other.
+    ///
+    /// # Errors
+    ///
+    /// [`ShelfError::NotPrivate`] for a root outside [`default_root`](Self::default_root), or when there is no default.
+    pub fn configured(root: impl Into<PathBuf>) -> Result<Self, ShelfError> {
+        let root = root.into();
+        let default = Self::default_root()
+            .ok_or_else(|| ShelfError::NotPrivate("this user has no data folder".into()))?;
+        if !super::footprint::path_under(&root.to_string_lossy(), &default.to_string_lossy()) {
+            return Err(ShelfError::NotPrivate(
+                "a programs folder outside the user's data folder is not accepted until the access list of the place can be read"
+                    .into(),
+            ));
+        }
+        Ok(Self::new(root))
+    }
+
     /// The root.
     #[must_use]
     pub fn root(&self) -> &Path {
@@ -259,6 +286,40 @@ impl ProgramDir {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         }
+    }
+
+    /// Checks the files recorded for `current` against their digests, before a launch. A recorded file that is not there any more
+    /// was an archive the install unpacked and removed, whose files are not recorded one by one, and is not checked.
+    ///
+    /// # Errors
+    ///
+    /// [`ShelfError::Refused`] naming the first file that no longer matches.
+    pub fn verify(&self, current: &Current) -> Result<(), ShelfError> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        for record in &current.files {
+            let path = Path::new(&current.dir).join(&record.path);
+            let Ok(mut file) = File::open(&path) else {
+                continue;
+            };
+            let mut hash = Sha256::new();
+            let mut buffer = vec![0u8; 64 * 1024];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                hash.update(&buffer[..count]);
+            }
+            let digest = format!("{:x}", hash.finalize());
+            if !digest.eq_ignore_ascii_case(&record.sha256) {
+                return Err(ShelfError::Refused(format!(
+                    "{} no longer matches the digest recorded when it was installed",
+                    record.path
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Takes the program's lock, making its folder (private to the user) as needed, and removes the folders left by a

@@ -224,6 +224,10 @@ fn a_folder_others_can_write_is_refused() {
     assert!(matches!(program.lock(), Err(ShelfError::NotPrivate(_))));
 }
 
+/// The tests that plant values in the real registry take turns: each puts back what it finds changed, which would undo the other's.
+#[cfg(windows)]
+static REGISTRY_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn watch(home: &Path, bin: &Path) -> Watch {
     Watch::new(home).path_dirs([bin.to_path_buf()])
 }
@@ -270,7 +274,7 @@ fn a_declared_change_covers_its_kind_and_nothing_else() {
     fs::create_dir_all(&home).expect("home");
     fs::create_dir_all(&bin).expect("bin");
     let before = Footprint::take(&watch(&home, &bin));
-    fs::write(home.join(".zshrc"), "x").expect("rc");
+    fs::write(home.join(".zshrc"), "export PATH=$HOME/x:$PATH\n").expect("rc");
     fs::write(bin.join("tool"), b"x").expect("tool");
     let diff = before.diff(&Footprint::take(&watch(&home, &bin)));
     assert_eq!(
@@ -309,6 +313,9 @@ fn a_declared_change_covers_its_kind_and_nothing_else() {
 fn a_registry_value_a_suite_owns_is_detected_restored_and_a_path_rewrite_is_a_user_path_difference()
 {
     use windows_registry::CURRENT_USER;
+    let _turn = REGISTRY_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = Dir::new("registry");
     let (home, bin) = (dir.0.join("home"), dir.0.join("bin"));
     fs::create_dir_all(&home).expect("home");
@@ -324,6 +331,134 @@ fn a_registry_value_a_suite_owns_is_detected_restored_and_a_path_rewrite_is_a_us
             .any(|d| d.kind == REGISTRY && d.what.ends_with(&name)),
         "{diff:?}"
     );
-    assert_eq!(before.restore_environment(&after), 1);
+    assert_eq!(before.restore_registry(&after), 1);
     assert!(key.get_string(&name).is_err(), "the value was removed");
+}
+
+#[test]
+fn the_places_a_login_or_a_session_start_reads_are_watched() {
+    let dir = Dir::new("wide");
+    let (home, bin) = (dir.0.join("home"), dir.0.join("bin"));
+    fs::create_dir_all(home.join(".ssh")).expect("ssh");
+    fs::create_dir_all(home.join(".config/autostart")).expect("autostart");
+    fs::create_dir_all(&bin).expect("bin");
+    let before = Footprint::take(&watch(&home, &bin));
+    fs::write(home.join(".zshenv"), "x").expect("zshenv");
+    fs::write(home.join(".gitconfig"), "[core]\n").expect("gitconfig");
+    fs::write(home.join(".ssh/authorized_keys"), "ssh-ed25519 AAAA\n").expect("keys");
+    fs::write(
+        home.join(".config/autostart/x.desktop"),
+        "[Desktop Entry]\n",
+    )
+    .expect("autostart");
+    let names: Vec<String> = before
+        .diff(&Footprint::take(&watch(&home, &bin)))
+        .into_iter()
+        .map(|d| d.what.replace('\\', "/"))
+        .collect();
+    for wanted in [
+        ".zshenv",
+        ".gitconfig",
+        ".ssh/authorized_keys",
+        ".config/autostart/x.desktop",
+    ] {
+        assert!(
+            names.iter().any(|n| n.ends_with(wanted)),
+            "{wanted} not seen in {names:?}"
+        );
+    }
+}
+
+#[test]
+fn a_user_path_change_covers_a_profile_only_when_every_changed_line_is_about_path() {
+    let dir = Dir::new("lines");
+    let (home, bin) = (dir.0.join("home"), dir.0.join("bin"));
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&bin).expect("bin");
+    fs::write(home.join(".bashrc"), "# mine\n").expect("rc");
+    let before = Footprint::take(&watch(&home, &bin));
+    fs::write(home.join(".bashrc"), "# mine\nexport PATH=$HOME/x:$PATH\n").expect("rc");
+    let declared = [Change::new(USER_PATH, "PATH", "adds a directory", true)];
+    let diff = before.diff(&Footprint::take(&watch(&home, &bin)));
+    assert!(
+        uncovered(&diff, &declared).is_empty(),
+        "a PATH line is covered"
+    );
+    let before = Footprint::take(&watch(&home, &bin));
+    fs::write(
+        home.join(".bashrc"),
+        "# mine\nexport PATH=$HOME/x:$PATH\nalias ll='ls -l'\n",
+    )
+    .expect("rc");
+    let diff = before.diff(&Footprint::take(&watch(&home, &bin)));
+    assert_eq!(uncovered(&diff, &declared).len(), 1, "an alias line is not");
+}
+
+#[test]
+fn a_programs_root_outside_the_default_is_not_accepted() {
+    let outside = std::env::temp_dir().join("canoa-programs-elsewhere");
+    assert!(matches!(
+        Shelf::configured(&outside),
+        Err(ShelfError::NotPrivate(_))
+    ));
+    if let Some(default) = Shelf::default_root() {
+        assert!(Shelf::configured(default.join("sub")).is_ok());
+        assert!(Shelf::configured(&default).is_ok());
+    }
+}
+
+#[test]
+fn a_recorded_file_that_changed_is_found_before_a_launch() {
+    let dir = Dir::new("verify");
+    let shelf = Shelf::new(dir.0.join("programs"));
+    let program = shelf.program("echo").expect("p");
+    let lock = program.lock().expect("lock");
+    let staging = lock.stage("1.0.0").expect("stage");
+    let exe = staging.join("echo.bin");
+    fs::write(&exe, b"the bytes that were checked").expect("file");
+    let digest = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(b"the bytes that were checked"))
+    };
+    let record = canoa_host::store::shelf::FileRecord {
+        path: "echo.bin".to_owned(),
+        url: "https://example.test/echo".to_owned(),
+        sha256: digest,
+        verified: true,
+    };
+    let launch = Launch::new(exe.to_string_lossy());
+    let current = lock
+        .commit(&staging, "1.0.0", &launch, vec![record], by())
+        .expect("commit");
+    program.verify(&current).expect("untouched");
+    fs::write(&exe, b"swapped").expect("tamper");
+    assert!(matches!(
+        program.verify(&current),
+        Err(ShelfError::Refused(_))
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn a_run_key_value_is_detected_and_put_back() {
+    use windows_registry::CURRENT_USER;
+    let _turn = REGISTRY_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = Dir::new("runkey");
+    let (home, bin) = (dir.0.join("home"), dir.0.join("bin"));
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&bin).expect("bin");
+    let name = format!("COQUI_STORE_CHECK_RUN_{}", std::process::id());
+    let path = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    let before = Footprint::take(&watch(&home, &bin).registry(true));
+    let key = CURRENT_USER.create(path).expect("key");
+    key.set_string(&name, "calc.exe").expect("set");
+    let after = Footprint::take(&watch(&home, &bin).registry(true));
+    assert!(before.diff(&after).iter().any(|d| d.what.ends_with(&name)));
+    assert!(before.restore_registry(&after) >= 1);
+    assert!(
+        key.get_string(&name).is_err(),
+        "the value was taken out again"
+    );
 }
