@@ -8,13 +8,23 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'aos_support.dart';
 import 'overlays.dart';
 import 'profile.dart';
+import 'skill_copies.dart';
 
 /// Named overlays from git, under [root]: each one's files in `<root>/<name>/`, its record in `<root>/<name>.json`, and
 /// the fetched history in `<root>/.cache/<name>.git`. Nothing from a source is ever run: files are read out of git's
 /// object store, never checked out, so no hook, filter or attribute of the source applies.
 final class OverlayStore implements OverlayManager {
   OverlayStore(this.root, {this.git = 'git', this.maxFiles = defaultMaxFiles, this.maxBytes = defaultMaxBytes,
-      this.maxEntries = defaultMaxEntries, this.maxFetchBytes = defaultMaxFetchBytes, this.timeout = defaultTimeout});
+      this.maxEntries = defaultMaxEntries, this.maxFetchBytes = defaultMaxFetchBytes, this.timeout = defaultTimeout,
+      this.skillGitConfig = const [], this.skillProtocols = defaultSkillProtocols})
+      : _isolated = false;
+
+  OverlayStore._isolated(this.root, this.git, this.maxFiles, this.maxBytes, this.maxEntries, this.maxFetchBytes,
+      this.timeout, this.skillGitConfig, this.skillProtocols)
+      : _isolated = true;
+
+  /// The transports a skill may be fetched over.
+  static const defaultSkillProtocols = ['https', 'http', 'ssh', 'git'];
 
   /// The most files one overlay may hold.
   static const defaultMaxFiles = 4096;
@@ -37,6 +47,19 @@ final class OverlayStore implements OverlayManager {
   final String git;
   final int maxFiles, maxBytes, maxEntries, maxFetchBytes;
   final Duration timeout;
+
+  /// Git settings (`key=value`) added to every command that fetches a skill, and the transports allowed for it. Tests map
+  /// a made-up host to a local repository with `url.<path>.insteadOf` and allow `file`; nothing else has a use for them.
+  final List<String> skillGitConfig;
+  final List<String> skillProtocols;
+
+  /// Whether this instance fetches skills: git then runs with an environment of its own, none of the person's
+  /// configuration, credentials, agent or prompts, and follows no redirect.
+  final bool _isolated;
+
+  /// The instance that fetches skills, held to the limits of one skill's directory.
+  late final OverlayStore _skillGit = OverlayStore._isolated(root, git, maxSkillFileCount, maxSkillByteCount,
+      maxEntries, maxFetchBytes, timeout, skillGitConfig, skillProtocols);
 
   /// [git] as a full path, found once; a name is never looked for in the current directory, which Windows would
   /// otherwise search first.
@@ -203,21 +226,132 @@ final class OverlayStore implements OverlayManager {
     if (cache.existsSync()) await cache.delete(recursive: true);
   }
 
+  String get _skillsDirectory => _path(skillsDirectory);
+
+  @override
+  Future<Map<String, SkillCopy>> skillCopies() async {
+    final directory = Directory(_skillsDirectory);
+    if (!directory.existsSync()) return {};
+    final out = <String, SkillCopy>{};
+    for (final entity in directory.listSync(followLinks: false)) {
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      final name = entity.uri.pathSegments.last.replaceFirst(RegExp(r'\.json$'), '');
+      try {
+        final json = jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
+        if (skillKey(json['name'] as String) != name) continue;
+        out[name] = SkillCopy.fromJson(json, _skillFiles(Directory('$_skillsDirectory${Platform.pathSeparator}$name')));
+      } on Object {
+        continue;
+      }
+    }
+    return out;
+  }
+
+  /// A fetched skill's files, by relative path; none when it is not a plain directory within [skillLimits], which the
+  /// digest check then refuses.
+  Map<String, List<int>> _skillFiles(Directory directory) {
+    final files = <String, List<int>>{};
+    if (!directory.existsSync()) return files;
+    var bytes = 0;
+    for (final entity in directory.listSync(recursive: true, followLinks: false)) {
+      if (entity is Link) return {};
+      if (entity is! File) continue;
+      final relative = entity.path.substring(directory.path.length + 1).replaceAll(Platform.pathSeparator, '/');
+      final data = entity.readAsBytesSync();
+      bytes += data.length;
+      if (files.length >= maxSkillFileCount || bytes > maxSkillByteCount) return {};
+      files[relative] = data;
+    }
+    return files;
+  }
+
+  @override
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async {
+    if (source.kind != 'git') throw const OverlayException('Canoa fetches skills from git only, and this source is not git');
+    if (holdsPassword(source.location)) throw const OverlayException('A skill source holds a password, which none may');
+    final fetch = _skillGit;
+    final cache = '$_skillsDirectory${Platform.pathSeparator}.fetch-${DateTime.now().microsecondsSinceEpoch}.git';
+    await Directory(cache).create(recursive: true);
+    try {
+      await fetch._git(['init', '--quiet', '--bare', '--template=', cache]);
+      final commit = await fetch._fetchRef(cache, source.location, source.reference);
+      final (files, _, _) = await fetch._list(cache, commit, source.path ?? '');
+      final blobs = await fetch._blobs(cache, files.values.toSet().toList());
+      return [for (final MapEntry(key: path, value: blob) in files.entries) (path, Uint8List.fromList(blobs[blob]!))];
+    } finally {
+      await _delete(Directory(cache));
+    }
+  }
+
+  @override
+  Future<void> saveSkill(SkillCopy copy) async {
+    if (!validSkillName(copy.name)) throw const OverlayException('That is not a skill name');
+    final key = skillKey(copy.name);
+    final separator = Platform.pathSeparator;
+    final staging = Directory('$_skillsDirectory$separator.staging-$key');
+    await _delete(staging);
+    await staging.create(recursive: true);
+    try {
+      for (final MapEntry(key: path, value: bytes) in copy.files.entries) {
+        if (!aos.validRelativePath(path)) throw const OverlayException('A skill file has no valid relative path');
+        final file = File('${staging.path}$separator${path.replaceAll('/', separator)}');
+        await file.parent.create(recursive: true);
+        // Exclusive: a name the file system takes for one already written fails the install rather than replacing it.
+        await file.create(exclusive: true);
+        await file.writeAsBytes(bytes, flush: true);
+      }
+    } on Object {
+      await _delete(staging);
+      rethrow;
+    }
+    final target = Directory('$_skillsDirectory$separator$key');
+    final old = Directory('$_skillsDirectory$separator.old-$key');
+    await _delete(old);
+    if (target.existsSync()) await target.rename(old.path);
+    await staging.rename(target.path);
+    await _delete(old);
+    final record = File('${target.path}.json');
+    final next = File('${record.path}.new');
+    await next.writeAsString(copy.toText(), flush: true);
+    await next.rename(record.path);
+  }
+
+  @override
+  Future<void> removeSkill(String name) async {
+    if (!validSkillName(name)) throw const OverlayException('That is not a skill name');
+    final base = '$_skillsDirectory${Platform.pathSeparator}${skillKey(name)}';
+    final record = File('$base.json');
+    if (record.existsSync()) await record.delete();
+    await _delete(Directory(base));
+  }
+
+  static Future<void> _delete(Directory directory) async {
+    if (directory.existsSync()) await directory.delete(recursive: true);
+  }
+
   void _checkName(String name) {
     if (!isEntryName(name)) throw const OverlayException('An overlay name has 1 to 64 letters, digits, - or _');
   }
 
   /// Fetches only what [source] names, one commit deep, and returns its commit. A whole commit id is that object and
   /// nothing else: a branch or tag carrying the same name never stands in for it.
-  Future<String> _fetch(String cache, GitOverlay source) async {
-    final reference = source.reference;
+  Future<String> _fetch(String cache, GitOverlay source) => _fetchRef(cache, source.repo, source.reference);
+
+  /// [_fetch] for a repository and a ref; no ref is the repository's HEAD.
+  Future<String> _fetchRef(String cache, String repo, String? reference) async {
+    if (reference == null) {
+      await _git(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1',
+          '--', repo, 'HEAD']);
+      final head = await _git(['--git-dir=$cache', 'rev-parse', '--verify', '--end-of-options', 'FETCH_HEAD^{commit}']);
+      return (head as String).trim();
+    }
     if (isFullCommitId(reference)) {
       final direct = await _run(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules',
-          '--depth=1', '--', source.repo, reference]);
+          '--depth=1', '--', repo, reference]);
       if (direct.exitCode != 0) {
         // A server that refuses a want by id still serves its branches and tags, one of which may hold the commit.
         await _git(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1',
-            '--', source.repo,
+            '--', repo,
             '+refs/heads/*:refs/canoa/heads/*', '+refs/tags/*:refs/canoa/tags/*']);
       }
       final found = await _run(['--git-dir=$cache', 'rev-parse', '--verify', '--quiet', '--end-of-options',
@@ -227,14 +361,14 @@ final class OverlayStore implements OverlayManager {
       }
       return reference;
     }
-    final listed = await _git(['ls-remote', '--heads', '--tags', '--', source.repo, 'refs/heads/$reference',
+    final listed = await _git(['ls-remote', '--heads', '--tags', '--', repo, 'refs/heads/$reference',
         'refs/tags/$reference']) as String;
     final names = {for (final line in const LineSplitter().convert(listed)) line.split('\t').last};
     final remote = ['refs/heads/$reference', 'refs/tags/$reference'].where(names.contains).firstOrNull;
     if (remote == null) throw const OverlayException('The source has no branch or tag of that name');
     final local = 'refs/canoa/${remote.substring('refs/'.length)}';
     await _git(guard: cache, ['--git-dir=$cache', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1', '--',
-        source.repo, '+$remote:$local']);
+        repo, '+$remote:$local']);
     final found = await _git(['--git-dir=$cache', 'rev-parse', '--verify', '--end-of-options', '$local^{commit}']);
     return (found as String).trim();
   }
@@ -391,19 +525,55 @@ final class OverlayStore implements OverlayManager {
     gitPath,
     [
       '-c', 'protocol.allow=never',
-      for (final scheme in const ['https', 'http', 'ssh', 'git', 'file']) ...['-c', 'protocol.$scheme.allow=always'],
+      for (final scheme in _isolated ? skillProtocols : const ['https', 'http', 'ssh', 'git', 'file'])
+        ...['-c', 'protocol.$scheme.allow=always'],
       '-c', 'core.hooksPath=${_path('.no-hooks')}',
       '-c', 'core.fsmonitor=false',
       '-c', 'credential.interactive=never',
+      if (_isolated) ...[
+        '-c', 'credential.helper=',
+        '-c', 'http.followRedirects=false',
+        for (final setting in skillGitConfig) ...['-c', setting],
+      ],
       ...args,
     ],
-    environment: const {
+    environment: _isolated
+        ? isolatedEnvironment()
+        : const {
+            'GIT_TERMINAL_PROMPT': '0',
+            'GCM_INTERACTIVE': 'never',
+            'SSH_ASKPASS_REQUIRE': 'never',
+            'GIT_LITERAL_PATHSPECS': '1',
+          },
+    includeParentEnvironment: !_isolated,
+  );
+
+  /// What a skill's fetch runs git with: not the person's settings, credential helpers, askpass programs or SSH agent,
+  /// only what git needs to find its programs and the proxy the network is reached through. Public so a test reads it.
+  Map<String, String> isolatedEnvironment() {
+    final home = '${_path(skillsDirectory)}${Platform.pathSeparator}.home';
+    Directory(home).createSync(recursive: true);
+    // An empty file: Git for Windows cannot open the null device as a configuration file.
+    final nothing = '$home${Platform.pathSeparator}empty.config';
+    File(nothing).writeAsStringSync('');
+    final here = Platform.environment;
+    return {
+      for (final name in const ['PATH', 'SystemRoot', 'windir', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'HTTP_PROXY',
+        'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy'])
+        name: ?here[name],
+      'HOME': home,
+      'USERPROFILE': home,
+      'XDG_CONFIG_HOME': home,
+      'GIT_CONFIG_GLOBAL': nothing,
+      'GIT_CONFIG_NOSYSTEM': '1',
       'GIT_TERMINAL_PROMPT': '0',
       'GCM_INTERACTIVE': 'never',
       'SSH_ASKPASS_REQUIRE': 'never',
+      'GIT_ALLOW_PROTOCOL': skillProtocols.join(':'),
+      'GIT_SSH_COMMAND': 'ssh -F "$nothing" -o BatchMode=yes -o IdentityAgent=none -o PasswordAuthentication=no',
       'GIT_LITERAL_PATHSPECS': '1',
-    },
-  );
+    };
+  }
 
   /// [args] run to their end, or ended after [timeout]; with [guard], also ended once that directory holds more than
   /// [maxFetchBytes], which then throws.

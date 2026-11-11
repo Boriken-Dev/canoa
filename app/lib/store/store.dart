@@ -15,6 +15,8 @@ import '../profile/aos_support.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/overlays.dart';
 import '../profile/profile.dart';
+import '../profile/skill_copies.dart';
+import 'skills.dart';
 import 'store_settings.dart';
 
 /// Why the store will not do something, said to the person. Never quotes a file's content.
@@ -44,10 +46,13 @@ final class CatalogEntry {
 /// A catalog as the store keeps it: its entries by name, in byte order of their names.
 final class StoreCatalog {
   const StoreCatalog({required this.entries, required this.refused, required this.ignored, this.name, this.description,
-      this.homepage});
+      this.homepage, this.skills = const {}});
 
   final String? name, description, homepage;
   final Map<String, CatalogEntry> entries;
+
+  /// The skills it offers by name, in byte order of their names, as it lists them: a source and an optional pin each.
+  final Map<String, aos.CatalogEntry> skills;
 
   /// `(name, class)` of each entry refused.
   final List<(String, String)> refused;
@@ -114,7 +119,13 @@ Future<LoadedCatalog> loadCatalog(OverlayManager overlays, String label, GitOver
   };
   final kept = all.keys.take(settings.catalogMaxEntries).toList();
   final catalog = StoreCatalog(name: read.name, description: read.description, homepage: read.homepage,
-      entries: {for (final name in kept) name: all[name]!}, refused: read.overlays.refused, ignored: read.ignored);
+      entries: {for (final name in kept) name: all[name]!}, refused: read.overlays.refused, ignored: read.ignored,
+      skills: {
+        for (final name in ([...?read.skills?.entries.keys]
+              ..sort((a, b) => compareBytes(utf8.encode(a), utf8.encode(b))))
+            .take(settings.catalogMaxEntries))
+          name: read.skills!.entries[name]!,
+      });
   // Each icon file is read once, however many entries name it, and no more files than the limit, all in one batch.
   final wanted = <String>{};
   final pathOf = <String, String?>{};
@@ -154,6 +165,25 @@ CatalogIcon _icon(TreeFile? found, String path, StoreSettings settings) {
     return (bytes: null, refused: error.errorClass);
   }
 }
+
+/// The catalogs read, as coqui_aos resolves a skill's name through them: each with the overlays and the skills it lists,
+/// in the order of [catalogs]. One that could not be read is left out.
+List<(String, aos.Catalog)> skillCatalogs(List<LoadedCatalog> catalogs) => [
+  for (final loaded in catalogs)
+    if (loaded.catalog case final catalog?)
+      (
+        loaded.label,
+        aos.Catalog(
+          form: 'minimal',
+          name: null,
+          description: null,
+          homepage: null,
+          overlays: aos.CatalogSection(),
+          skills: aos.CatalogSection()..entries.addAll(catalog.skills),
+          ignored: const [],
+        ),
+      ),
+];
 
 /// [source] as a store shows it: without user information or query, which can hold a credential.
 String displaySource(aos.Source source) => source.shown();
@@ -322,7 +352,7 @@ EntryState entryState(CanoaConfig config, String name, GitOverlay source, {Overl
 /// An overlay fetched, not installed, and what it would do, all from its own manifest and files.
 final class OverlayPreview {
   const OverlayPreview({required this.update, required this.manifest, required this.about, required this.ignored,
-      this.icon, this.iconRefused, this.layer, this.report, this.refusal, this.pinRefusal});
+      this.icon, this.iconRefused, this.layer, this.report, this.refusal, this.pinRefusal, this.skills});
 
   /// What installing it would change; the same object the install applies.
   final OverlayUpdate update;
@@ -349,6 +379,9 @@ final class OverlayPreview {
 
   /// Why it may not be installed from this entry: a pin that does not match the tree fetched.
   final String? pinRefusal;
+
+  /// What installing it would do with the skills it names from elsewhere: none of them fetched yet.
+  final SkillReview? skills;
 
   bool get installable => refusal == null && pinRefusal == null;
 
@@ -385,6 +418,7 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   String? catalogPin,
   String? harness,
   aos.Settings? iconLimits,
+  List<(String, aos.Catalog)> catalogs = const [],
 }) async {
   final update = await overlays.check(name, source.pinnedTo(null));
   final files = await overlays.read(update);
@@ -423,15 +457,16 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   Layer? layer;
   OverlayReport? report;
   String? refusal;
+  final skills = await reviewSkills(overlays, identity: name, manifest: manifest, tree: read.tree, catalogs: catalogs);
   try {
     layer = overlayLayer(identity: name, root: overlays.directoryOf(name), os: os, tree: read.tree, harness: harness,
-        pinned: true, iconLimits: iconLimits);
+        pinned: true, iconLimits: iconLimits, fetched: await overlays.skillCopies());
     report = overlayReport(layer.id, layer.aos!, shared);
   } on OverlayRefusal catch (error) {
     refusal = '$error';
   }
   return OverlayPreview(update: update, manifest: manifest, about: about, ignored: ignored, icon: icon,
-      iconRefused: iconRefused, layer: layer, report: report, refusal: refusal, pinRefusal: pinRefusal);
+      iconRefused: iconRefused, layer: layer, report: report, refusal: refusal, pinRefusal: pinRefusal, skills: skills);
 }
 
 /// The pin canoa.cfg gives the overlay [name], when it names one, and the tree [preview] fetched has another digest:
@@ -448,9 +483,11 @@ String? pinMoved(CanoaConfig config, OverlayPreview preview) {
 /// Installs or updates what [preview] showed, through the same path an overlay named by hand takes: the files at its
 /// commit, checked against its tree digest as written, then the overlay named in canoa.cfg pinned to that digest. A
 /// pin canoa.cfg already gives it holds as it does for a sync from Settings, Profiles: a tree of another digest is
-/// installed only with [movePin], the person's choice to move it.
+/// installed only with [movePin], the person's choice to move it. The person's yes covers the overlay and the skills the
+/// preview named: they are fetched here, each at its pin, and what became of each goes to [report]; a skill that is
+/// refused leaves the overlay installed and is not delivered.
 Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, OverlayPreview preview,
-    {required String catalog, bool movePin = false}) async {
+    {required String catalog, bool movePin = false, SkillInstallReport? report}) async {
   if (preview.pinRefusal case final why?) throw StoreRefusal(why);
   if (preview.refusal case final why?) throw StoreRefusal('Canoa would leave it out: $why');
   final name = preview.name;
@@ -469,18 +506,31 @@ Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, 
     throw StoreRefusal('canoa.cfg pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
   }
   final record = await overlays.apply(preview.update, catalog: catalog);
+  if (preview.skills case final review? when !review.isEmpty) {
+    final done = await installSkills(overlays, review);
+    report?.outcomes.addAll(done.outcomes);
+    report?.orphans.addAll(done.orphans);
+  }
   return config.withOverlay(named ?? name, preview.update.source.pinnedTo(null), record.digest!);
 }
 
 /// Removes the overlay [name] the store installed from [source]: its files and fetched history, and its entry in
-/// `[overlays]`. One named from another source, or by hand, is refused, never removed.
-Future<CanoaConfig> removeInstalled(OverlayManager overlays, CanoaConfig config, String name, GitOverlay source) async {
+/// `[overlays]`. One named from another source, or by hand, is refused, never removed. A fetched skill that only this
+/// overlay named and the person did not choose is then offered for removal through [offer], which is given those skills
+/// and answers whether to remove them: with no [offer] they stay, listed as named by no overlay. A skill another overlay
+/// names, or one the person chose, is never offered.
+Future<CanoaConfig> removeInstalled(OverlayManager overlays, CanoaConfig config, String name, GitOverlay source,
+    {Future<bool> Function(List<SkillCopy> orphans)? offer}) async {
   final named = namedAs(config, name);
   if (named == null) return config;
   if (entryState(config, name, source, overlays: overlays) != EntryState.installed) {
     throw StoreRefusal('canoa.cfg names $named from another source or by hand: the store does not remove it');
   }
   await overlays.remove(named);
+  final orphans = await detachOverlay(overlays, named);
+  if (orphans.isNotEmpty && offer != null && await offer(orphans)) {
+    await removeOrphans(overlays, [for (final copy in orphans) copy.name]);
+  }
   return config.withoutOverlay(named);
 }
 

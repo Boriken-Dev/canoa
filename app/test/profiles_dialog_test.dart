@@ -2,6 +2,7 @@
 // it changes and then pinned by its digest, what Canoa does not apply of it, and a project profile used only once
 // trusted, revocably.
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/profile/aos_support.dart';
@@ -10,6 +11,8 @@ import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home.dart';
 import 'package:canoa/profile/profiles_dialog.dart';
 import 'package:canoa/profile/project_trust.dart';
+import 'package:canoa/profile/skill_copies.dart';
+import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -76,6 +79,18 @@ final class FakeOverlays implements OverlayManager {
 
   @override
   Future<void> discard(String name) async {}
+
+  @override
+  Future<Map<String, SkillCopy>> skillCopies() async => const {};
+
+  @override
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) => throw UnimplementedError();
+
+  @override
+  Future<void> saveSkill(SkillCopy copy) => throw UnimplementedError();
+
+  @override
+  Future<void> removeSkill(String name) => throw UnimplementedError();
 }
 
 final class FakeHome implements ProfileHome {

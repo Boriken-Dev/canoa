@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
 import '../store/programs.dart';
+import '../store/skills.dart';
 import '../store/store_icon.dart';
 import '../store/store_page.dart';
+import 'aos_support.dart';
 import 'overlay_layer.dart';
 import 'overlays.dart';
 import 'profile.dart';
@@ -97,13 +99,28 @@ class ProfilesDialogState extends State<ProfilesDialog> {
   Future<void> _sync(String name, GitOverlay source) => _run('Checking $name', () async {
     final home = widget.home!;
     final update = await home.overlays.check(name, source);
+    final skills = await _reviewSkills(home, name, update);
     if (!mounted) return;
-    final apply = await showSelectableDialog<bool>(context: context, builder: (_) => OverlayUpdateDialog(update: update));
+    final apply = await showSelectableDialog<bool>(
+        context: context, builder: (_) => OverlayUpdateDialog(update: update, skills: skills));
     if (apply != true) return;
     final record = await home.overlays.apply(update);
+    if (skills != null && !skills.isEmpty) await installSkills(home.overlays, skills);
     final pinned = await widget.onPin?.call(name, record.digest!);
     if (pinned != null && mounted) setState(() => config = pinned);
   });
+
+  /// What syncing [name] would do with the skills it names from elsewhere, from the manifest just fetched. No catalog is
+  /// read here, so a name resolved through one before stays as it was resolved and a new one is reported unresolved.
+  Future<SkillReview?> _reviewSkills(ProfileHome home, String name, OverlayUpdate update) async {
+    try {
+      final read = treeOfFiles(await home.overlays.read(update));
+      final manifest = aos.readOverlay(read.tree, aos.defaultSettings).manifest;
+      return await reviewSkills(home.overlays, identity: name, manifest: manifest, tree: read.tree);
+    } on aos.AosError {
+      return null;
+    }
+  }
 
   Future<void> _trust(ProjectLayer project) async {
     final bytes = project.profile;
@@ -286,8 +303,11 @@ String visible(String text) => text.replaceAllMapped(
 
 /// What installing or syncing an overlay changes, shown before anything is: the commits and every file.
 class OverlayUpdateDialog extends StatelessWidget {
-  const OverlayUpdateDialog({super.key, required this.update});
+  const OverlayUpdateDialog({super.key, required this.update, this.skills});
   final OverlayUpdate update;
+
+  /// What applying does with the skills the overlay names from elsewhere; the one yes covers them.
+  final SkillReview? skills;
 
   @override
   Widget build(BuildContext context) {
@@ -307,6 +327,15 @@ class OverlayUpdateDialog extends StatelessWidget {
           files('Changed', update.changed),
           files('Removed', update.removed),
           files('Left out: no part of an overlay (.git, node_modules, ...), never installed', update.skipped),
+          if (skills case final review? when !review.isEmpty) ...[
+            const SizedBox(height: 8),
+            Text('Skills from elsewhere', key: const Key('overlay-skills')),
+            Text(review.fetches
+                ? 'Applying fetches these, each from its source and checked against its pin, with the overlay as one yes. '
+                    'Fetching runs nothing.'
+                : 'Applying fetches none of these.'),
+            SkillRows(items: review.items),
+          ],
           if (update.manifest case final manifest?) ...[
             const Text('Its OVERLAY.md or overlay.cfg, which reaches agents once applied:'),
             SelectableText(visible(manifest), style: const TextStyle(fontFamily: 'monospace')),

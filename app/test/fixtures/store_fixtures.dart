@@ -8,6 +8,7 @@ import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home.dart';
+import 'package:canoa/profile/skill_copies.dart';
 import 'package:canoa/profile/project_trust.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter_test/flutter_test.dart';
@@ -249,6 +250,33 @@ final class MemoryOverlays implements OverlayManager {
 
   @override
   Future<void> discard(String name) async => discarded.add(name);
+
+  /// What a skill's source holds, by the source as shown, and every source [fetchSkillFiles] was asked for.
+  final skillSources = <String, List<(String, Uint8List)>>{};
+  final skillFetches = <String>[];
+
+  /// The skills fetched and accepted, by lower-case name.
+  final skills = <String, SkillCopy>{};
+
+  /// Puts the skill a source serves: [files] by path.
+  void putSkill(String shown, Map<String, String> files) => skillSources[shown] = [
+    for (final MapEntry(:key, :value) in files.entries) (key, Uint8List.fromList(utf8.encode(value))),
+  ];
+
+  @override
+  Future<Map<String, SkillCopy>> skillCopies() async => Map.of(skills);
+
+  @override
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async {
+    skillFetches.add(source.shown());
+    return skillSources[source.shown()] ?? (throw const OverlayException('The source has no such skill'));
+  }
+
+  @override
+  Future<void> saveSkill(SkillCopy copy) async => skills[skillKey(copy.name)] = copy;
+
+  @override
+  Future<void> removeSkill(String name) async => skills.remove(skillKey(name));
 }
 
 /// A profile home over [MemoryOverlays], reading installed overlays from it.

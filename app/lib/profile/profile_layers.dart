@@ -7,6 +7,7 @@ import 'overlay_layer.dart';
 import 'profile.dart';
 import 'profile_home.dart';
 import 'project_trust.dart';
+import 'skill_copies.dart';
 
 /// Canoa's own layer, lowest of all. It sets nothing: every value comes from a layer the person can see and change.
 const builtInProfile = Profile();
@@ -65,6 +66,7 @@ Future<ProfileLayers> profileLayers({
   final found = <String, Layer>{};
   final manifests = <String, aos.Document>{};
   final names = <String, String>{};
+  final fetched = home == null ? const <String, SkillCopy>{} : await home.overlays.skillCopies();
   for (final MapEntry(key: name, value: source) in overlays.entries) {
     final id = LayerId(LayerKind.overlay, name);
     if (home == null) {
@@ -130,7 +132,7 @@ Future<ProfileLayers> profileLayers({
     final Layer layer;
     try {
       layer = overlayLayer(identity: name, root: directory, os: home.os, tree: read.tree, harness: harness,
-          iconLimits: iconLimits, pinned: switch (source) {
+          iconLimits: iconLimits, fetched: fetched, pinned: switch (source) {
             GitOverlay(:final pin) => pin != null,
             DirOverlay(:final pin) => pin != null,
           });

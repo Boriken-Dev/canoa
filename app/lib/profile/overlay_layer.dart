@@ -10,6 +10,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 
 import 'aos_support.dart';
 import 'profile.dart';
+import 'skill_copies.dart';
 
 /// An AOS overlay as Canoa applies it: what building its environment needs, and what Canoa does not apply.
 final class AosLayer {
@@ -119,7 +120,8 @@ const _defaultScripts = ['.py', '.js', '.mjs', '.cjs', '.ps1', '.bash', '.sh'];
 /// Makes the layer of an AOS overlay from its [tree]: its root variable, environment, skills, MCP servers, context, and
 /// the hints for [harness]. The `bin` and `lib` defaults, which change `PATH`, `PYTHONPATH` and `NODE_PATH`, are not
 /// applied and are reported; so is everything Canoa does not run. Its `[about]` icon is kept only within [iconLimits].
-/// Throws [OverlayRefusal].
+/// A skill from elsewhere is delivered from its entry in [fetched] (by lower-case name) once [skillCopyRefusal] finds
+/// nothing against it, and otherwise reported with the reason it is not. Throws [OverlayRefusal].
 Layer overlayLayer({
   required String identity,
   required String root,
@@ -128,6 +130,7 @@ Layer overlayLayer({
   String? harness,
   bool pinned = false,
   aos.Settings? iconLimits,
+  Map<String, SkillCopy> fetched = const {},
 }) {
   if (!aos.validOverlayName(identity)) throw OverlayRefusal('name', identity);
   final aos.TreeDigest digest;
@@ -221,7 +224,23 @@ Layer overlayLayer({
     if (isReservedEnv(name)) throw OverlayRefusal('reserved', name);
   }
 
-  final skills = <String, Skill?>{for (final name in aos.skillsOf(manifest, paths)) name: Skill('skills/$name')};
+  final skills = <String, Skill?>{};
+  final fetchedBlobs = <String, List<int>>{};
+  for (final entry in aos.skillEntries(manifest, paths)) {
+    if (entry.origin == 'bundled') {
+      skills[entry.name] = Skill('skills/${entry.name}');
+      continue;
+    }
+    final copy = fetched[skillKey(entry.name)];
+    if (skillCopyRefusal(entry, identity, copy) case final why?) {
+      notApplied.add('skills.${entry.name}: $why');
+      continue;
+    }
+    skills[entry.name] = Skill('skills/${entry.name}');
+    for (final MapEntry(:key, :value) in copy!.files.entries) {
+      fetchedBlobs['skills/${entry.name}/$key'] = value;
+    }
+  }
 
   final insecure = _insecureServers(applied, files, texts, identity: identity, root: root, os: os, pinned: pinned);
   final mcp = <String, McpServer?>{};
@@ -364,6 +383,7 @@ Layer overlayLayer({
       about: about,
       icon: icon,
       blobs: {
+        ...fetchedBlobs,
         for (final path in files)
           if (skills.values.any((skill) => path.startsWith('${skill!.path}/')) ||
               contexts.any((context) => context.file == path))

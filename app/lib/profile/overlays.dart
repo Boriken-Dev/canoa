@@ -1,4 +1,9 @@
+import 'dart:typed_data';
+
+import 'package:coqui_aos/coqui_aos.dart' as aos;
+
 import 'profile.dart';
+import 'skill_copies.dart';
 
 /// What an overlay holds at one commit: each file, relative to the overlay's directory, with its git blob id.
 typedef OverlayFiles = Map<String, String>;
@@ -119,6 +124,21 @@ abstract interface class OverlayManager {
   /// Removes what [check] fetched for [name] when nothing is installed under that name: a preview that was not
   /// installed leaves nothing behind.
   Future<void> discard(String name);
+
+  /// Every skill fetched from elsewhere and accepted, by lower-case name, with its files. Reads nothing of a skill's
+  /// files that its record does not name.
+  Future<Map<String, SkillCopy>> skillCopies();
+
+  /// The files of the skill at [source], as its directory holds them in git: fetched with none of the person's
+  /// credentials, agent or prompts, no redirect to another host followed, nothing checked out and nothing run. Throws
+  /// [OverlayException] for a transport that fails, a link, a submodule or more than [skillLimits] allows.
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source);
+
+  /// Writes [copy] (its files, then its record) as the skill's copy, replacing any other of that name.
+  Future<void> saveSkill(SkillCopy copy);
+
+  /// Removes the skill [name]'s files and record.
+  Future<void> removeSkill(String name);
 }
 
 /// One file of a fetched tree: its size, and its bytes unless it was larger than asked.

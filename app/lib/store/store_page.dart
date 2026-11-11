@@ -7,10 +7,12 @@ import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
+import '../profile/skill_copies.dart';
 import '../profile/profiles_dialog.dart' show EffectiveTable, OverlayReportView, visible;
 import 'links.dart';
 import 'programs.dart';
 import 'programs_view.dart';
+import 'skills.dart';
 import 'store.dart';
 import 'store_icon.dart';
 import '../selectable.dart';
@@ -54,6 +56,9 @@ class StorePageState extends State<StorePage> {
   StoreListing? listing;
   String? busy, problem;
 
+  /// The skills fetched and accepted, by lower-case name.
+  Map<String, SkillCopy> skills = const {};
+
   @override
   void initState() {
     super.initState();
@@ -76,13 +81,60 @@ class StorePageState extends State<StorePage> {
     for (final MapEntry(key: name, value: from) in config.catalogs.entries) {
       found.add(await loadCatalog(home.overlays, name, from, config.store));
     }
+    final copies = await home.overlays.skillCopies();
     if (!mounted) return;
     setState(() {
       loaded = found;
       listing = StoreListing(found);
+      skills = copies;
       tags.retainAll(listing!.tags);
       busy = null;
     });
+  }
+
+  Future<void> _refreshSkills() async {
+    final copies = await widget.home?.overlays.skillCopies();
+    if (copies != null && mounted) setState(() => skills = copies);
+  }
+
+  /// Installs the skill [name] [catalog] offers, by the person's own choice, after showing where it comes from.
+  Future<void> _installSkill(String label, String name, aos.CatalogEntry offer) async {
+    final home = widget.home!;
+    final item = reviewChosenSkill(home.overlays, skills, label, name, offer);
+    final yes = await showSelectableDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Install the skill ${oneLine(name)}?'),
+        content: SingleChildScrollView(child: SkillRows(items: [item], key: const Key('store-skill-review'))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('store-skill-install-confirm'),
+            onPressed: item.fetch == null ? null : () => Navigator.pop(context, true),
+            child: Text(item.pin == null ? 'Fetch it unpinned and install' : 'Fetch it at its pin and install'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    setState(() {
+      busy = 'Installing $name';
+      problem = null;
+    });
+    final outcome = await installChosenSkill(home.overlays, item);
+    if (mounted) setState(() => problem = outcome.result == SkillResult.installed || outcome.result == SkillResult.kept ? null : '$name: ${outcome.message}');
+    await _refreshSkills();
+    if (mounted) setState(() => busy = null);
+  }
+
+  Future<void> _removeSkill(SkillCopy copy) async {
+    final home = widget.home!;
+    if (copy.chosen) {
+      await releaseChosenSkill(home.overlays, copy.name);
+    } else {
+      await removeOrphans(home.overlays, [copy.name]);
+    }
+    await _refreshSkills();
   }
 
   Future<void> _save(CanoaConfig changed) async {
@@ -118,9 +170,10 @@ class StorePageState extends State<StorePage> {
   Future<void> _open(ListedEntry listed) async {
     final saved = await Navigator.of(context).push<CanoaConfig>(selectablePage(
       builder: (_) => OverlayPage(listed: listed, catalog: listing!.catalogOf(listed), config: config, home: widget.home,
-          onSave: widget.onSave),
+          onSave: widget.onSave, catalogs: skillCatalogs(loaded)),
     ));
     if (saved != null && mounted) setState(() => config = saved);
+    await _refreshSkills();
   }
 
   @override
@@ -181,6 +234,7 @@ class StorePageState extends State<StorePage> {
               else if (busy == null && shown.isEmpty)
                 const Text('Nothing listed matches.'),
               for (final listed in shown) _entryTile(listed),
+              ..._skillsSection(text),
               const SizedBox(height: 16),
               Text('Catalogs', style: text.titleMedium),
               const Text('A catalog lists overlays by name and source. What it says of an overlay is its author\'s claim; '
@@ -228,6 +282,70 @@ class StorePageState extends State<StorePage> {
         onTap: () => _open(listed),
       ),
     );
+  }
+
+  /// The Skills section: the skills here with the overlays that name each, and the skills the catalogs offer. Absent when
+  /// there is neither.
+  List<Widget> _skillsSection(TextTheme text) {
+    final offered = <(String, String, aos.CatalogEntry)>[
+      for (final catalog in loaded)
+        if (catalog.catalog case final read?)
+          for (final MapEntry(key: name, value: offer) in read.skills.entries)
+            if (!skills.containsKey(skillKey(name))) (catalog.label, name, offer),
+    ];
+    if (skills.isEmpty && offered.isEmpty) return const [];
+    return [
+      const SizedBox(height: 16),
+      Text('Skills', key: const Key('store-skills'), style: text.titleMedium),
+      const Text('A skill is fetched from its source when an overlay that names it is installed, or when you install it '
+          'here, and only then. Fetching runs nothing.'),
+      for (final copy in skills.values) _skillTile(copy),
+      for (final (label, name, offer) in offered)
+        ListTile(
+          key: Key('store-offered-skill-$label-$name'),
+          contentPadding: EdgeInsets.zero,
+          title: Text(oneLine(name)),
+          subtitle: Text(oneLine('$label · ${offer.source.shown()} · ${offer.pin ?? 'unpinned'}')),
+          trailing: TextButton(
+            key: Key('store-skill-install-$label-$name'),
+            onPressed: busy != null ? null : () => _installSkill(label, name, offer),
+            child: const Text('Install…'),
+          ),
+        ),
+    ];
+  }
+
+  Widget _skillTile(SkillCopy copy) {
+    final who = [
+      if (copy.chosen) 'chosen by you',
+      if (copy.overlays.isNotEmpty) 'named by ${copy.overlays.join(', ')}',
+      if (copy.overlays.isEmpty && !copy.chosen) 'named by no overlay now',
+    ].join('; ');
+    final shown = _sourceShown(copy.source);
+    final removable = copy.chosen || copy.overlays.isEmpty;
+    return ListTile(
+      key: Key('store-skill-${skillKey(copy.name)}'),
+      contentPadding: EdgeInsets.zero,
+      title: Text(oneLine(copy.name)),
+      subtitle: Text(oneLine('$who\n$shown · ${copy.pin == null ? 'unpinned, fetched as ${copy.digest}' : 'pinned ${copy.pin}'}'
+          '${copy.catalog == null ? '' : ' · from the catalog ${copy.catalog}'}')),
+      isThreeLine: true,
+      trailing: removable
+          ? TextButton(
+              key: Key('store-skill-remove-${skillKey(copy.name)}'),
+              onPressed: busy != null ? null : () => _removeSkill(copy),
+              child: Text(copy.chosen ? (copy.overlays.isEmpty ? 'Remove' : 'Stop choosing') : 'Remove'),
+            )
+          : null,
+    );
+  }
+
+  static String _sourceShown(String key) {
+    try {
+      return aos.Source.parse(key).shown();
+    } on aos.AosError {
+      return 'a source Canoa cannot show';
+    }
   }
 
   EntryState? _state(CatalogEntry entry) {
@@ -288,13 +406,16 @@ class StorePageState extends State<StorePage> {
 /// overlay itself says and would do, from its own manifest and files; then install, update or remove.
 class OverlayPage extends StatefulWidget {
   const OverlayPage({super.key, required this.listed, required this.catalog, required this.config,
-      required this.home, required this.onSave});
+      required this.home, required this.onSave, this.catalogs = const []});
 
   final ListedEntry listed;
   final LoadedCatalog catalog;
   final CanoaConfig config;
   final ProfileHome? home;
   final SaveConfig onSave;
+
+  /// The catalogs read, through which a skill named without a source is resolved.
+  final List<(String, aos.Catalog)> catalogs;
 
   @override
   State<OverlayPage> createState() => OverlayPageState();
@@ -304,6 +425,9 @@ class OverlayPageState extends State<OverlayPage> {
   late CanoaConfig config = widget.config;
   OverlayPreview? preview;
   String? busy, problem;
+
+  /// What became of the skills the last install fetched.
+  SkillInstallReport? skillReport;
 
   CatalogEntry get entry => widget.listed.entry;
 
@@ -356,7 +480,7 @@ class OverlayPageState extends State<OverlayPage> {
     final (name, source) = _target!;
     final found = await previewOverlay(home.overlays, namedAs(config, name) ?? name, source,
         os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), config.profile)]).shareEnv,
-        catalogPin: entry.pin, iconLimits: config.store.iconLimits);
+        catalogPin: entry.pin, iconLimits: config.store.iconLimits, catalogs: widget.catalogs);
     if (mounted) setState(() => preview = found);
   });
 
@@ -383,8 +507,10 @@ class OverlayPageState extends State<OverlayPage> {
   }
 
   Future<void> _installing({required bool movePin}) => _run('Installing', () async {
+    final report = SkillInstallReport();
     final changed = await installPreview(widget.home!.overlays, config, preview!,
-        catalog: widget.listed.label, movePin: movePin);
+        catalog: widget.listed.label, movePin: movePin, report: report);
+    if (mounted) setState(() => skillReport = report);
     final saved = await widget.onSave(changed);
     if (saved != null && mounted) {
       setState(() {
@@ -411,7 +537,7 @@ class OverlayPageState extends State<OverlayPage> {
     );
     if (yes != true) return;
     await _run('Removing', () async {
-      final changed = await removeInstalled(widget.home!.overlays, config, name, source);
+      final changed = await removeInstalled(widget.home!.overlays, config, name, source, offer: _offerOrphans);
       final saved = await widget.onSave(changed);
       if (saved != null && mounted) {
         setState(() {
@@ -420,6 +546,26 @@ class OverlayPageState extends State<OverlayPage> {
         });
       }
     });
+  }
+
+  /// Offers to remove the skills that only this overlay named and that nothing names now.
+  Future<bool> _offerOrphans(List<SkillCopy> orphans) async {
+    final yes = await showSelectableDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove its skills too?'),
+        content: Text('${orphans.map((copy) => oneLine(copy.name)).join(', ')} '
+            '${orphans.length == 1 ? 'was' : 'were'} fetched for this overlay, and no other overlay names '
+            '${orphans.length == 1 ? 'it' : 'them'}. Skills you chose yourself are never offered.'),
+        actions: [
+          TextButton(key: const Key('store-orphans-keep'), onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep them')),
+          FilledButton(key: const Key('store-orphans-remove'), onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remove them')),
+        ],
+      ),
+    );
+    return yes == true;
   }
 
   @override
@@ -472,6 +618,12 @@ class OverlayPageState extends State<OverlayPage> {
                 child: TextButton(key: const Key('store-remove'), onPressed: busy != null ? null : _remove,
                     child: const Text('Remove…')),
               ),
+            ],
+            if (skillReport case final report? when report.outcomes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Its skills', style: text.titleMedium),
+              for (final outcome in report.outcomes)
+                Text(oneLine('${outcome.name}: ${outcome.message}'), key: Key('store-skill-outcome-${skillKey(outcome.name)}')),
             ],
             if (busy != null) ...[const LinearProgressIndicator(), Text('$busy…')],
             if (problem != null)
@@ -606,6 +758,18 @@ class OverlayPageState extends State<OverlayPage> {
           files('Removed', update.removed),
         ],
         files('Left out: no part of an overlay, never installed', update.skipped),
+        if (found.skills case final review? when !review.isEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Skills from elsewhere', key: const Key('store-skills-review'), style: text.titleMedium),
+          Text(review.fetches
+              ? 'Installing fetches these, each from its source and checked against its pin, as one yes with the overlay. '
+                  'Nothing has been fetched yet, and fetching runs nothing.'
+              : 'Installing fetches none of these.'),
+          SkillRows(items: review.items),
+          if (review.orphans.isNotEmpty)
+            Text(oneLine('No longer named by this overlay: ${review.orphans.map((copy) => copy.name).join(', ')}; '
+                'you are offered their removal'), style: text.bodySmall),
+        ],
         const SizedBox(height: 8),
         Text('What it would do', style: text.titleMedium),
         const Text('From its own overlay.cfg and files, as Settings, Profiles would apply it. Nothing of it has run, '
@@ -660,6 +824,45 @@ class OverlayPageState extends State<OverlayPage> {
   }
 
   static String _short(String digest) => digest.length > 19 ? '${digest.substring(0, 19)}…' : digest;
+}
+
+/// The skills an overlay names from elsewhere, one row each: its source as shown, its pin or that it has none, the
+/// catalog that gave the source, and what installing does with it.
+class SkillRows extends StatelessWidget {
+  const SkillRows({super.key, required this.items});
+  final List<SkillItem> items;
+
+  static String _what(SkillItem item) => switch (item.status) {
+    SkillStatus.fetch => 'fetched',
+    SkillStatus.update => 'fetched again: the source or pin changed from the one accepted',
+    SkillStatus.unchanged => 'kept as accepted',
+    SkillStatus.missing => 'not delivered: named, and no catalog offers it',
+    SkillStatus.ambiguous => 'not delivered: ${item.catalogs?.join(' and ')} both offer it, and Canoa never picks one',
+    SkillStatus.shadowed => 'not delivered: ${item.why}',
+    SkillStatus.refused => 'not delivered: ${item.why}',
+  };
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (final item in items)
+        Padding(
+          key: Key('store-skill-row-${skillKey(item.name)}'),
+          padding: const EdgeInsets.only(top: 6),
+          child: SelectableText.rich(TextSpan(children: [
+            TextSpan(text: '${oneLine(item.name)}: ', style: const TextStyle(fontWeight: FontWeight.w600)),
+            TextSpan(text: oneLine([
+              _what(item),
+              if (item.source != null) item.source!,
+              if (item.fetch != null || item.status == SkillStatus.unchanged)
+                item.pin == null ? 'unpinned: nothing says what it should hold' : 'pinned ${item.pin}',
+              if (item.catalog != null) 'from the catalog ${item.catalog}',
+            ].join(' · '))),
+          ])),
+        ),
+    ],
+  );
 }
 
 /// Opens the store over [context], and gives the configuration as the store left it.
