@@ -10,7 +10,7 @@ const _inPage = bool.fromEnvironment('dart.library.js_interop');
 
 /// One entry the host that served this page lists.
 final class ServedEntry {
-  const ServedEntry({required this.name, required this.kind, required this.url});
+  const ServedEntry({required this.name, required this.kind, required this.url, this.harness, this.title});
 
   final String name;
 
@@ -19,6 +19,12 @@ final class ServedEntry {
 
   /// Its WebSocket address.
   final String url;
+
+  /// The provider id of a `harness` entry; null for any other.
+  final String? harness;
+
+  /// The entry's `title`; null shows its name.
+  final String? title;
 }
 
 /// What the `canoa` that served this page says it serves, from `canoa.json` beside the page. It only fills the
@@ -51,7 +57,14 @@ final class ServedHost {
         if (name is! String || kind is! String || url is! String) return null;
         final address = Uri.tryParse(url);
         if (address == null || !{'ws', 'wss'}.contains(address.scheme) || !address.hasAuthority) return null;
-        served.add(ServedEntry(name: name, kind: kind, url: url));
+        final [harness, title] = [entry['harness'], entry['title']];
+        served.add(ServedEntry(
+          name: name,
+          kind: kind,
+          url: url,
+          harness: harness is String ? harness : null,
+          title: title is String ? title : null,
+        ));
       }
       return ServedHost(peer: peer, method: PeerMethod.parse(method), entries: served);
     } on FormatException {

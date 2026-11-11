@@ -1395,3 +1395,45 @@ fn a_private_agent_that_ends_early_is_not_waited_for() {
         "the agent started for the reading ended itself"
     );
 }
+
+#[test]
+fn a_served_entry_line_names_its_provider_and_title() {
+    let host = Host::start(
+        &format!(
+            "{}[host.agents.Review]\nharness = \"claude\"\ntitle = \"Claude for review\"\n[host.agents.Plain]\nharness = \"codex\"\n",
+            agent_entry("fixture", "title = \"The fixture\"")
+        ),
+        3,
+    );
+    let review = &host.served["Review"];
+    assert_eq!(review["kind"], "agent");
+    assert_eq!(review["harness"], "claude");
+    assert_eq!(review["title"], "Claude for review");
+    let plain = &host.served["Plain"];
+    assert_eq!(plain["harness"], "codex");
+    assert!(plain.get("title").is_none(), "{plain}");
+    let program = &host.served["fixture"];
+    assert!(program.get("harness").is_none(), "{program}");
+    assert_eq!(program["title"], "The fixture");
+}
+
+#[test]
+fn check_accepts_a_title_on_an_agent_and_refuses_it_elsewhere_or_blank() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("canoa.cfg");
+    let run = || {
+        std::process::Command::new(host_binary())
+            .args(["check", "--config", &path.to_string_lossy()])
+            .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+            .output()
+            .expect("runs")
+    };
+    std::fs::write(&path, agent_entry("fixture", "title = \"Fixture\"")).expect("written");
+    assert!(run().status.success());
+    for extra in ["title = \"\"", "title = \"  \"", "title = 3"] {
+        std::fs::write(&path, agent_entry("fixture", extra)).expect("written");
+        assert_eq!(run().status.code(), Some(2), "{extra}");
+    }
+    std::fs::write(&path, provider_entry("echo", "title = \"Echo\"")).expect("written");
+    assert_eq!(run().status.code(), Some(2), "a provider takes no title");
+}

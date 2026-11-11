@@ -13,6 +13,7 @@ import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/drafts/draft_store.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -268,6 +269,34 @@ void main() {
     await settle(tester, 200);
     expect(store.selected!.source?.kind, SourceKind.hosted);
     expect(store.selected!.pending, isEmpty);
+    await finish(tester);
+  });
+
+  testWidgets('a hosted entry is shown by its title and its provider icon, and its name stays its identity', (tester) async {
+    final store = SessionStore(includePreview: false);
+    final tool = FakeTool();
+    final host = HostSupervisor(tool);
+    await host.apply(configPath: '/c/canoa.cfg');
+    await pumpApp(tester, store, host: host);
+    await newSession(tester);
+    tool.children.single.out
+      ..add('{"name":"review","kind":"agent","harness":"claude","title":"Claude for review","url":"ws://127.0.0.1:7801","peer":"sha256:aa","method":"noise"}')
+      ..add('{"name":"other","kind":"agent","harness":"outside_provider","url":"ws://127.0.0.1:7802","peer":"sha256:aa","method":"noise"}')
+      ..add(_serving('plain'));
+    await frames(tester);
+    await tester.tap(find.byKey(const Key('new-session-source')));
+    await frames(tester);
+    IconData iconOf(String name) => tester.widget<Icon>(find.descendant(of: find.byKey(Key('source $name')), matching: find.byType(Icon))).icon!;
+    expect(find.descendant(of: find.byKey(const Key('source review')), matching: find.text('Claude for review')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('source other')), matching: find.text('other')), findsOneWidget, reason: 'no title shows the name');
+    expect(iconOf('review'), providerIcon('claude'));
+    expect(iconOf('review'), isNot(providerIcon(null)));
+    expect(iconOf('other'), providerIcon(null), reason: 'an unknown provider has the generic icon');
+    expect(iconOf('plain'), providerIcon(null));
+    await tester.tap(find.byKey(const Key('source review')));
+    await frames(tester);
+    expect(store.selected!.source, const AgentSource.hosted('review'), reason: 'the name is still what is remembered');
+    expect(find.descendant(of: find.byKey(const Key('new-session-source')), matching: find.text('Claude for review')), findsOneWidget);
     await finish(tester);
   });
 

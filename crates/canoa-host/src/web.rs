@@ -22,7 +22,7 @@ use crate::serve::{Gate, Listening, Serving};
 
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7800);
-/// The path of the list of this host's entries: `{"peer", "method", "entries": [{"name", "kind", "url"}]}`.
+/// The path of the list of this host's entries: `{"peer", "method", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`.
 pub const HOST_INDEX: &str = "/canoa.json";
 /// Whether this build holds a site of its own (feature `web`), served when no directory is given.
 pub const BUILT_IN: bool = cfg!(feature = "web");
@@ -635,11 +635,11 @@ fn readable_by_others(file: &Path) -> bool {
     std::fs::metadata(file).is_ok_and(|metadata| metadata.permissions().mode() & 0o077 != 0)
 }
 
-/// The list at [`HOST_INDEX`]: this host's id and method, and each entry's name, kind and address, as `serve` prints them.
+/// The list at [`HOST_INDEX`]: this host's id and method, and each entry as `serve` prints it (name, kind, address, and provider id and title when it has them).
 fn host_index(peer: &str, method: &str, entries: &[Listening]) -> Vec<u8> {
     let entries: Vec<_> = entries
         .iter()
-        .map(|entry| serde_json::json!({"name": entry.name, "kind": entry.kind, "url": entry.url}))
+        .map(|entry| serde_json::Value::Object(entry.to_json()))
         .collect();
     serde_json::to_vec(&serde_json::json!({"peer": peer, "method": method, "entries": entries}))
         .unwrap_or_default()

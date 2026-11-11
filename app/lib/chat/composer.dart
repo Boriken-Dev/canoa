@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../session_store.dart';
+import '../sources/source_icons.dart';
 import '../sources/sources.dart';
 import '../theme/look.dart';
 import 'agent_events.dart' show AgentCommandInfo, Choice, ConfigOption;
@@ -250,7 +251,7 @@ class ComposerState extends State<Composer> {
         hintText: !widget.enabled
             ? (store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect an ACP peer to chat')
             : session.isDraft
-            ? 'Message ${session.source?.label ?? 'an agent'}: it starts when you send'
+            ? 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send'
             : 'Message agent',
         border: InputBorder.none,
         isDense: true,
@@ -495,7 +496,7 @@ class _SourceChooser extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = session.source;
-    final problem = source == null ? null : kit.checks[source]?.describe(source.label, needs: _needs(source));
+    final problem = source == null ? null : kit.checks[source]?.describe(source.displayName, needs: _needs(source));
     return PopupMenuButton<Object>(
       key: const Key('new-session-source'),
       tooltip: 'Where its agent comes from',
@@ -509,10 +510,10 @@ class _SourceChooser extends StatelessWidget {
               dense: true,
               contentPadding: EdgeInsets.zero,
               leading: Icon(switch (each.kind) {
-                SourceKind.hosted => Icons.dns_outlined,
+                SourceKind.hosted => providerIcon(each.harness),
                 _ => Icons.terminal,
               }, size: 18),
-              title: Text(each.label),
+              title: Text(each.displayName),
               subtitle: switch (kit.checks[each]) {
                 final check? when !check.ready => Text('Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}',
                     style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -528,8 +529,8 @@ class _SourceChooser extends StatelessWidget {
       child: Tooltip(
         message: problem ?? 'Where its agent comes from',
         child: _Pill(
-          label: source?.label ?? 'Choose a source',
-          icon: source?.kind == SourceKind.hosted ? Icons.dns_outlined : Icons.terminal,
+          label: source?.displayName ?? 'Choose a source',
+          icon: source?.kind == SourceKind.hosted ? providerIcon(source?.harness) : Icons.terminal,
           danger: problem != null || source == null,
         ),
       ),

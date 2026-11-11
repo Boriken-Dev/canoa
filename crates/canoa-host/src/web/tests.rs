@@ -226,6 +226,8 @@ fn a_source_the_settings_add_is_allowed_besides_the_entries() {
         name: "echo".to_owned(),
         kind: "agent",
         url: "ws://127.0.0.1:7801".to_owned(),
+        harness: None,
+        title: None,
     }];
     let mut config = loopback(&site());
     config.connect = vec!["https://fonts.gstatic.com".to_owned()];
@@ -340,6 +342,8 @@ fn files_are_served_from_the_directory_with_their_types_and_headers() {
             name: "echo".to_owned(),
             kind: "agent",
             url: "ws://127.0.0.1:7801".to_owned(),
+            harness: None,
+            title: None,
         }],
     );
     let index = get(address, "/");
@@ -455,11 +459,15 @@ fn the_host_index_lists_the_entries_it_was_given() {
             name: "echo".to_owned(),
             kind: "agent",
             url: "ws://127.0.0.1:7801".to_owned(),
+            harness: Some("claude".to_owned()),
+            title: Some("Claude for review".to_owned()),
         },
         Listening {
             name: "py".to_owned(),
             kind: "provider",
             url: "ws://127.0.0.1:7802".to_owned(),
+            harness: None,
+            title: None,
         },
     ];
     let address = running(&loopback(&site()), &entries);
@@ -474,7 +482,7 @@ fn the_host_index_lists_the_entries_it_was_given() {
             "peer": PEER,
             "method": "noise",
             "entries": [
-                {"name": "echo", "kind": "agent", "url": "ws://127.0.0.1:7801"},
+                {"name": "echo", "kind": "agent", "url": "ws://127.0.0.1:7801", "harness": "claude", "title": "Claude for review"},
                 {"name": "py", "kind": "provider", "url": "ws://127.0.0.1:7802"},
             ],
         })

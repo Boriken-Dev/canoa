@@ -1056,3 +1056,28 @@ fn the_settings_of_a_built_in_harness_are_held_to_what_its_keys_are() {
         assert!(error.contains(what), "{text}: {error}");
     }
 }
+
+#[test]
+fn an_agent_entry_may_carry_a_title() {
+    let config = parse("[host.agents.a]\nprogram = \"x\"\ntitle = \"Review\"\n").expect("parses");
+    assert_eq!(config.entries[0].title.as_deref(), Some("Review"));
+    let config = parse("[host.agents.a]\nharness = \"claude\"\n").expect("parses");
+    assert_eq!(config.entries[0].title, None);
+    let long = "x".repeat(65);
+    for text in [
+        "[host.agents.a]\nprogram = \"x\"\ntitle = \"\"\n".to_owned(),
+        "[host.agents.a]\nprogram = \"x\"\ntitle = \" \"\n".to_owned(),
+        "[host.agents.a]\nprogram = \"x\"\ntitle = \"a\nb\"\n".to_owned(),
+        format!("[host.agents.a]\nprogram = \"x\"\ntitle = \"{long}\"\n"),
+        "[host.agents.a]\nprogram = \"x\"\ntitle = 1\n".to_owned(),
+        "[host.providers.p]\nlibrary = \"l.dll\"\nprovider = \"p\"\ntitle = \"T\"\n".to_owned(),
+    ] {
+        assert!(
+            matches!(
+                parse(&text),
+                Err(ConfigError::Invalid { .. } | ConfigError::Parse { .. })
+            ),
+            "{text}"
+        );
+    }
+}

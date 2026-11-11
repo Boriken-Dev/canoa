@@ -102,6 +102,8 @@ pub struct Host {
     child: Child,
     stdin: Option<ChildStdin>,
     pub urls: BTreeMap<String, String>,
+    /// Each entry's whole line, by name.
+    pub served: BTreeMap<String, Value>,
     pub peer: PeerId,
     pub scratch: Scratch,
     lines: mpsc::Receiver<String>,
@@ -206,6 +208,7 @@ impl Host {
             }
         });
         let mut urls = BTreeMap::new();
+        let mut served = BTreeMap::new();
         let mut peer = None;
         for _ in 0..entries {
             let line = received
@@ -213,6 +216,10 @@ impl Host {
                 .expect("the host says where each entry listens");
             let value: Value = serde_json::from_str(&line).expect("one JSON object per line");
             assert_eq!(value["method"], method().name(), "the method it proves by");
+            served.insert(
+                value["name"].as_str().expect("a name").to_owned(),
+                value.clone(),
+            );
             urls.insert(
                 value["name"].as_str().expect("a name").to_owned(),
                 value["url"].as_str().expect("a url").to_owned(),
@@ -229,6 +236,7 @@ impl Host {
             child,
             stdin,
             urls,
+            served,
             peer: peer.expect("at least one entry"),
             scratch,
             lines: received,

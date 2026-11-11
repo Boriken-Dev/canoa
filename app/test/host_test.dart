@@ -18,6 +18,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/chat/usage.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
@@ -332,12 +333,19 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
 
 [host.agents.reviewer]
 harness = "claude"
+title = "Claude for review"
 executable = ${jsonEncode(standin)}
 ''');
       expect(await supervisor.check(config.path), isNull);
       await supervisor.apply(configPath: config.path);
       await until(() => supervisor.listening.length == 2, 'the host to serve both entries');
-      expect(hostedSources(supervisor.listening), [const AgentSource.hosted('fixture'), const AgentSource.hosted('reviewer')]);
+      final sources = hostedSources(supervisor.listening);
+      expect(sources, [const AgentSource.hosted('fixture'), const AgentSource.hosted('reviewer')]);
+      final reviewer = sources.last;
+      expect((reviewer.harness, reviewer.title, reviewer.displayName), ('claude', 'Claude for review', 'Claude for review'));
+      expect(providerIcon(reviewer.harness), providerIcon('claude'));
+      expect(providerIcon(reviewer.harness), isNot(providerIcon(sources.first.harness)), reason: 'a program entry has the generic icon');
+      expect((sources.first.harness, sources.first.title, sources.first.displayName), (null, null, 'fixture'));
     }, skip: skip);
 
     test('a host that dies is started again, and stopping ends it for good', () async {

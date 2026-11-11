@@ -185,6 +185,27 @@ pub struct Listening {
     pub kind: &'static str,
     /// The address a client dials.
     pub url: String,
+    /// The provider id of a `harness` entry; `None` for any other entry.
+    pub harness: Option<String>,
+    /// The entry's `title`, if it has one.
+    pub title: Option<String>,
+}
+
+impl Listening {
+    /// The entry as `serve` prints it and `/canoa.json` lists it: `name`, `kind`, `url`, and `harness` and `title` when set.
+    pub(crate) fn to_json(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut map = serde_json::Map::new();
+        map.insert("name".into(), self.name.clone().into());
+        map.insert("kind".into(), self.kind.into());
+        map.insert("url".into(), self.url.clone().into());
+        if let Some(harness) = &self.harness {
+            map.insert("harness".into(), harness.clone().into());
+        }
+        if let Some(title) = &self.title {
+            map.insert("title".into(), title.clone().into());
+        }
+        map
+    }
 }
 
 /// A count of what is running, with a ceiling.
@@ -705,6 +726,11 @@ impl Serving {
                 name: entry.name.clone(),
                 kind,
                 url,
+                harness: match &entry.kind {
+                    EntryKind::Harness { harness, .. } => Some(harness.clone()),
+                    _ => None,
+                },
+                title: entry.title.clone(),
             });
             let served = Served {
                 name: entry.name.clone(),

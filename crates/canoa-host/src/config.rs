@@ -22,6 +22,8 @@ pub const DEFAULT_MAX_PEERS: usize = 4;
 pub const DEFAULT_MAX_SESSIONS: usize = 8;
 /// The longest entry name, which appears in logs and in what `serve` prints.
 pub const MAX_NAME: usize = 64;
+/// The longest `title` of an agent entry, in characters.
+pub const MAX_TITLE: usize = 64;
 
 /// What the host serves: every entry of `[host.agents]`, `[host.providers]` and `[host.tools]`, in the file's order, agents
 /// first, then providers.
@@ -141,6 +143,8 @@ pub struct Entry {
     pub peers: Option<Vec<PeerId>>,
     /// Connections served at once; another is turned away while they run.
     pub max_peers: usize,
+    /// What a client shows for an agent entry instead of its name; `None` shows the name. Always `None` for a provider or tool.
+    pub title: Option<String>,
 }
 
 /// What a `claude` or `codex` harness entry's keys ask before the command line acts. Each one unset is the host's own value,
@@ -489,6 +493,7 @@ struct RawAgent {
     modes: Option<Vec<String>>,
     profiles: Option<Vec<String>>,
     usage: Option<String>,
+    title: Option<String>,
     listen: Option<String>,
     #[serde(default)]
     working_roots: Vec<String>,
@@ -592,6 +597,10 @@ impl Config {
         for (name, agent) in host.agents {
             check_name(&name)?;
             let offered = agent.profiles.unwrap_or_default();
+            if let Some(title) = &agent.title {
+                check_title(&name, title)?;
+            }
+            let title = agent.title;
             for (index, profile) in offered.iter().enumerate() {
                 if !profiles.contains_key(profile) {
                     return Err(invalid(
@@ -765,7 +774,9 @@ impl Config {
                     ));
                 }
             };
-            entries.push(entry(name, kind, common)?);
+            let mut served = entry(name, kind, common)?;
+            served.title = title;
+            entries.push(served);
         }
         for (name, provider) in host.providers {
             check_name(&name)?;
@@ -1274,6 +1285,23 @@ fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), 
     Ok((common, spec))
 }
 
+/// A title is shown to a person in place of the name: not blank, no control characters, at most [`MAX_TITLE`] characters.
+fn check_title(name: &str, title: &str) -> Result<(), ConfigError> {
+    if title.trim().is_empty() {
+        return Err(invalid(name, "title is blank"));
+    }
+    if title.chars().any(char::is_control) {
+        return Err(invalid(name, "title holds a control character"));
+    }
+    if title.chars().count() > MAX_TITLE {
+        return Err(invalid(
+            name,
+            &format!("title is longer than {MAX_TITLE} characters"),
+        ));
+    }
+    Ok(())
+}
+
 /// Checked before anything quotes the name, since a key in the file may hold any character.
 fn check_name(name: &str) -> Result<(), ConfigError> {
     if name.is_empty()
@@ -1332,6 +1360,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         worktrees: common.worktrees.unwrap_or(true),
         peers,
         max_peers,
+        title: None,
     })
 }
 

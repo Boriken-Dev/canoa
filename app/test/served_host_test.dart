@@ -15,7 +15,7 @@ String _listed({String peer = _peer, String method = 'noise', String url = 'ws:/
   'peer': peer,
   'method': method,
   'entries': [
-    {'name': 'claude', 'kind': 'agent', 'url': url},
+    {'name': 'claude', 'kind': 'agent', 'url': url, 'harness': 'claude', 'title': 'Claude for review'},
     {'name': 'echo', 'kind': 'provider', 'url': 'ws://127.0.0.1:7802'},
   ],
 });
@@ -29,6 +29,7 @@ void main() {
       ('claude', 'agent', 'ws://127.0.0.1:7801'),
       ('echo', 'provider', 'ws://127.0.0.1:7802'),
     ]);
+    expect([for (final entry in host.entries) (entry.harness, entry.title)], [('claude', 'Claude for review'), (null, null)]);
   });
 
   test('anything else is no list', () {

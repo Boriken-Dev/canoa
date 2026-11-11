@@ -7,7 +7,7 @@ const int statusHeld = 3;
 
 /// What `canoa serve` printed for one entry it serves.
 final class HostListening {
-  const HostListening({required this.name, required this.kind, required this.url, required this.peer, this.method});
+  const HostListening({required this.name, required this.kind, required this.url, required this.peer, this.method, this.harness, this.title});
 
   final String name;
 
@@ -21,6 +21,12 @@ final class HostListening {
   /// The proof the host runs, `noise` or `webcrypto`; null from a host that does not say.
   final String? method;
 
+  /// The provider id of a `harness` entry (`claude`, `codex`, an outside provider's); null for any other entry.
+  final String? harness;
+
+  /// The entry's `title` in canoa.cfg; null shows its name.
+  final String? title;
+
   /// One line of `serve`'s output, or null for anything else.
   static HostListening? parse(String line) {
     try {
@@ -29,7 +35,11 @@ final class HostListening {
       final [name, kind, url, peer] = [value['name'], value['kind'], value['url'], value['peer']];
       if (name is! String || kind is! String || url is! String || peer is! String) return null;
       final method = value['method'];
-      return HostListening(name: name, kind: kind, url: url, peer: peer, method: method is String ? method : null);
+      final [harness, title] = [value['harness'], value['title']];
+      return HostListening(
+        name: name, kind: kind, url: url, peer: peer, method: method is String ? method : null,
+        harness: harness is String ? harness : null, title: title is String ? title : null,
+      );
     } on FormatException {
       return null;
     }

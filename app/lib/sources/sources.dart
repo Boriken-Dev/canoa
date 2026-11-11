@@ -7,9 +7,9 @@ enum SourceKind { preset, command, hosted }
 
 /// One way to run an agent, as Settings lists it and the new-session picker offers it.
 final class AgentSource {
-  const AgentSource.preset(AgentCommand this.command) : kind = SourceKind.preset, hostEntry = null;
-  const AgentSource.command(AgentCommand this.command) : kind = SourceKind.command, hostEntry = null;
-  const AgentSource.hosted(String this.hostEntry) : kind = SourceKind.hosted, command = null;
+  const AgentSource.preset(AgentCommand this.command) : kind = SourceKind.preset, hostEntry = null, harness = null, title = null;
+  const AgentSource.command(AgentCommand this.command) : kind = SourceKind.command, hostEntry = null, harness = null, title = null;
+  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title}) : kind = SourceKind.hosted, command = null;
 
   final SourceKind kind;
 
@@ -20,6 +20,15 @@ final class AgentSource {
   final String? hostEntry;
 
   String get label => command?.label ?? hostEntry!;
+
+  /// The provider id of a hosted `harness` entry; null for any other entry.
+  final String? harness;
+
+  /// A hosted entry's `title` in canoa.cfg.
+  final String? title;
+
+  /// What a person is shown: a hosted entry's title, else its name. [label] stays the identity, which sessions remember.
+  String get displayName => title ?? label;
 
   /// Whether this app starts the program itself, on this computer.
   bool get runsHere => command != null;
@@ -35,7 +44,7 @@ final class AgentSource {
 /// naming any provider included, is a source here as soon as the host serves it, with nothing for the app to know of it.
 List<AgentSource> hostedSources(Iterable<HostListening> serving) => [
   for (final entry in serving)
-    if (entry.kind == 'agent') AgentSource.hosted(entry.name),
+    if (entry.kind == 'agent') AgentSource.hosted(entry.name, harness: entry.harness, title: entry.title),
 ];
 
 /// What a source needs and whether it is here: each program it runs or requires, found or not.

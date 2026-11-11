@@ -643,13 +643,10 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
             _ => Failed::usage(error),
         })?;
     for listening in serving.listening() {
-        let line = serde_json::json!({
-            "name": listening.name,
-            "kind": listening.kind,
-            "url": listening.url,
-            "peer": peer,
-            "method": serving.method().name(),
-        });
+        let mut line = listening.to_json();
+        line.insert("peer".into(), peer.clone().into());
+        line.insert("method".into(), serving.method().name().into());
+        let line = serde_json::Value::Object(line);
         print(front, &line.to_string())?;
     }
     if let Some(web) = &web {
