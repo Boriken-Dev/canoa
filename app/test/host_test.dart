@@ -18,6 +18,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/chat/usage.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa/sources/sources.dart';
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -316,6 +317,27 @@ program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
       }
       await supervisor.revoke(browserId);
       expect((await supervisor.keys()).map((key) => key.id), isNot(contains(browserId)));
+    }, skip: skip);
+
+    test('a harness entry added to canoa.cfg is a source the app lists, with nothing in the app naming it', () async {
+      await supervisor.apply(configPath: config.path);
+      await until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      expect(hostedSources(supervisor.listening), [const AgentSource.hosted('fixture')]);
+
+      final standin = '${dir.path}/claude${Platform.isWindows ? '.exe' : ''}';
+      await File(HostUnderTest._example('harness_standin', library: false)).copy(standin);
+      await config.writeAsString('''
+[host.agents.fixture]
+program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
+
+[host.agents.reviewer]
+harness = "claude"
+executable = ${jsonEncode(standin)}
+''');
+      expect(await supervisor.check(config.path), isNull);
+      await supervisor.apply(configPath: config.path);
+      await until(() => supervisor.listening.length == 2, 'the host to serve both entries');
+      expect(hostedSources(supervisor.listening), [const AgentSource.hosted('fixture'), const AgentSource.hosted('reviewer')]);
     }, skip: skip);
 
     test('a host that dies is started again, and stopping ends it for good', () async {

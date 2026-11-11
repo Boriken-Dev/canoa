@@ -1,4 +1,5 @@
 import '../acp/agent_commands.dart';
+import '../desktop/host_tool.dart';
 
 /// Where a source's agent comes from: a preset this app starts, a command from canoa.cfg's `[agents.NAME]`, or an agent
 /// entry of the `canoa` this app runs.
@@ -29,6 +30,13 @@ final class AgentSource {
   @override
   int get hashCode => Object.hash(kind, label);
 }
+
+/// The sources the host lists: each agent entry it is serving, in its order. An entry added to canoa.cfg, a harness entry
+/// naming any provider included, is a source here as soon as the host serves it, with nothing for the app to know of it.
+List<AgentSource> hostedSources(Iterable<HostListening> serving) => [
+  for (final entry in serving)
+    if (entry.kind == 'agent') AgentSource.hosted(entry.name),
+];
 
 /// What a source needs and whether it is here: each program it runs or requires, found or not.
 final class SourceCheck {

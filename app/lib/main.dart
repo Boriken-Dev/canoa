@@ -220,11 +220,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onPreview: (preview) => setState(() => _preview = preview),
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
           presets: canRunLocalAgents ? agentPresets : const [],
-          hosted: [
-            if (widget.host != null)
-              for (final entry in config.hostEntries)
-                if (entry.kind == 'agent') entry.name,
-          ],
+          hosted: [for (final source in _hostedSources) source.hostEntry!],
           checkSource: _check,
           openSources: sources,
         ),
@@ -488,15 +484,16 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// The agent entries the canoa this app runs is serving now, as it lists them.
+  List<AgentSource> get _hostedSources => hostedSources(widget.host?.listening ?? const []);
+
   /// The sources Settings has: the presets it does not hide, canoa.cfg's `[agents.NAME]` commands, and the agent entries of
   /// the canoa this app runs.
   List<AgentSource> get _sources => [
     for (final preset in agentPresets)
       if (!config.hiddenSources.contains(preset.label)) AgentSource.preset(preset),
     for (final command in config.agents) AgentSource.command(command),
-    if (widget.host != null)
-      for (final entry in config.hostEntries)
-        if (entry.kind == 'agent') AgentSource.hosted(entry.name),
+    ..._hostedSources,
   ];
 
   /// What each source needs and whether it is here, as last checked.
@@ -788,12 +785,18 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// The host's entries come and go as it starts and ends, and a hosted source can run only while it serves one.
-  int _serving = -1;
+  List<AgentSource>? _serving;
   void _hostChanged() {
-    final serving = widget.host?.listening.length ?? 0;
-    if (serving == _serving) return;
+    final serving = _hostedSources;
+    if (_serving != null && _serving!.length == serving.length && _serving!.every(serving.contains)) return;
     _serving = serving;
-    if (_checked) unawaited(_checkSources());
+    store.resolveKeptSources((kind, label) =>
+        _sources.where((source) => source.kind.name == kind && source.label == label).firstOrNull);
+    if (_checked) {
+      unawaited(_checkSources());
+    } else if (mounted) {
+      setState(() {});
+    }
   }
 
   /// Ends every agent this app started, and the host with the agents it started.

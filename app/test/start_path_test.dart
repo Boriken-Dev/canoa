@@ -15,6 +15,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
@@ -22,6 +23,10 @@ import 'fixtures/fake_host.dart';
 import 'fixtures/options_agent.dart';
 
 const _source = AgentSource.command(scripted);
+
+/// The line `canoa serve` prints for an agent entry it serves.
+String _serving(String name) =>
+    '{"name":"$name","kind":"agent","url":"ws://127.0.0.1:7801","peer":"sha256:aa","method":"noise"}';
 
 int _prompts(OptionsAgent agent) => agent.methods.where((method) => method == 'session/prompt').length;
 
@@ -253,15 +258,56 @@ void main() {
 
   testWidgets('a hosted source is given none of the profile, model included', (tester) async {
     final store = SessionStore(includePreview: false);
-    final config = CanoaConfig.parse('[profile]\nmodel = "opus"\n')
-        .withHostAgent(name: 'hosted', program: 'agent', listen: '127.0.0.1:7801');
-    await pumpApp(tester, store, config: config, host: HostSupervisor(FakeTool()));
+    final tool = FakeTool();
+    final host = HostSupervisor(tool);
+    await host.apply(configPath: '/c/canoa.cfg');
+    tool.children.single.out.add(_serving('hosted'));
+    await pumpApp(tester, store, config: CanoaConfig.parse('[profile]\nmodel = "opus"\n'), host: host);
     await newSession(tester);
     await chooseSource(tester, 'hosted');
     await settle(tester, 200);
     expect(store.selected!.source?.kind, SourceKind.hosted);
     expect(store.selected!.pending, isEmpty);
     await finish(tester);
+  });
+
+  testWidgets('an entry the host starts serving is in the source picker, and one it stops serving is not', (tester) async {
+    final store = SessionStore(includePreview: false);
+    final tool = FakeTool();
+    final host = HostSupervisor(tool);
+    await host.apply(configPath: '/c/canoa.cfg');
+    await pumpApp(tester, store, host: host);
+    await newSession(tester);
+
+    // canoa.cfg is not read by the app: the host's line for a new entry is all it takes.
+    tool.children.single.out.add(_serving('outside'));
+    await frames(tester);
+    await tester.tap(find.byKey(const Key('new-session-source')));
+    await frames(tester);
+    expect(find.byKey(const Key('source outside')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('source outside')));
+    await frames(tester);
+    expect(store.selected!.source, const AgentSource.hosted('outside'));
+
+    await tester.runAsync(host.stop);
+    await settle(tester, 100);
+    await tester.tap(find.byKey(const Key('new-session-source')));
+    await frames(tester);
+    expect(find.byKey(const Key('source outside')), findsNothing, reason: 'the host serves nothing now');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await frames(tester);
+    await finish(tester);
+  });
+
+  test('a draft restored before the host served its source gets the source when the host does', () {
+    final store = SessionStore(includePreview: false);
+    final draft = store.createDraft(keptSource: (kind: 'hosted', label: 'late'));
+    store.resolveKeptSources((kind, label) => null);
+    expect(draft.source, isNull);
+    store.resolveKeptSources((kind, label) => AgentSource.hosted(label));
+    expect(draft.source, const AgentSource.hosted('late'));
+    expect(draft.keptSource, isNull);
+    expect(draft.agent, 'late');
   });
 
   test('what a source offered is its own, not another\'s of the same name', () {

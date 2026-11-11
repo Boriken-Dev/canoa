@@ -618,6 +618,24 @@ class SessionStore extends ChangeNotifier {
     }
   }
 
+  /// Gives each draft restored without its source that source, now that [source] finds it: a hosted source exists only once
+  /// the host serves it.
+  void resolveKeptSources(AgentSource? Function(String kind, String label) source) {
+    var changed = false;
+    for (final session in sessions) {
+      final kept = session.keptSource;
+      if (!session.isDraft || session.source != null || kept == null) continue;
+      final found = source(kept.kind, kept.label);
+      if (found == null) continue;
+      session
+        ..source = found
+        ..keptSource = null
+        ..agent = found.label;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
   void _keepDraft(ChatSession session) {
     final id = session.draftId;
     if (drafts == null || id == null || !session.isDraft) return;
