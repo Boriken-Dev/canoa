@@ -831,3 +831,96 @@ fn an_entrys_setting_sources_reach_claude_code_and_a_bad_one_is_refused() {
     );
     assert!(refused.contains("host entry Agent"), "{refused}");
 }
+
+/// What `canoa options` prints for a built-in harness: the provider's models with each one's efforts, asked of the
+/// command line with no session and no turn.
+fn options_of(args: &[&str], scratch: &Scratch) -> Value {
+    let (record, env) = env_of(scratch);
+    let output = std::process::Command::new(host_binary())
+        .arg("options")
+        .args(args)
+        .args(["--format", "json"])
+        .envs(env)
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .output()
+        .expect("canoa runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let started = records(&record);
+    assert!(
+        started
+            .iter()
+            .all(|line| line.get("prompt").is_none()
+                && line.get("method") != Some(&json!("turn/start"))),
+        "no prompt and no turn: {started:?}"
+    );
+    serde_json::from_slice(&output.stdout).expect("one JSON object")
+}
+
+#[test]
+fn options_lists_claudes_models_with_versions_and_efforts_and_no_turn() {
+    let scratch = Scratch::new();
+    let program = standin(&scratch, "claude");
+    let answer = options_of(
+        &["claude", "--executable", &program.to_string_lossy()],
+        &scratch,
+    );
+    assert_eq!(answer["known"], true, "{answer}");
+    assert_eq!(
+        answer["program_version"], "2.1.318 (Claude Code)",
+        "{answer}"
+    );
+    let model = &answer["models"][0];
+    assert_eq!(model["id"], "standin-small");
+    assert_eq!(model["resolved"], "claude-standin-1-2");
+    assert_eq!(model["version"], "Standin 1.2");
+    assert_eq!(model["efforts"], json!(["low", "high"]));
+}
+
+#[test]
+fn options_lists_codexs_models_with_their_own_efforts_and_no_turn() {
+    let scratch = Scratch::new();
+    let program = standin(&scratch, "codex");
+    let answer = options_of(
+        &["codex", "--executable", &program.to_string_lossy()],
+        &scratch,
+    );
+    assert_eq!(answer["known"], true, "{answer}");
+    let model = &answer["models"][0];
+    assert_eq!(model["id"], "standin-small");
+    assert_eq!(model["efforts"], json!(["low", "high"]));
+    assert_eq!(model["default_effort"], "low");
+    assert_eq!(model["is_default"], true);
+}
+
+#[test]
+fn options_of_a_configured_entry_reads_canoa_cfg_and_a_program_entry_lists_none() {
+    let scratch = Scratch::new();
+    let program = standin(&scratch, "claude");
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(
+        &config,
+        format!(
+            "[host.agents.Mine]
+harness = \"claude\"
+executable = {}
+[host.agents.Plain]
+program = \"agy\"
+args = [\"acp\"]
+",
+            quoted(&program.to_string_lossy())
+        ),
+    )
+    .expect("written");
+    let config = config.to_string_lossy().into_owned();
+    let mine = options_of(&["Mine", "--entry", "--config", &config], &scratch);
+    assert_eq!(mine["known"], true, "{mine}");
+    assert_eq!(mine["models"][0]["id"], "standin-small");
+    let plain = options_of(&["Plain", "--entry", "--config", &config], &scratch);
+    assert_eq!(plain["known"], false, "{plain}");
+    assert_eq!(plain["models"], json!([]));
+    assert!(plain["unknown_because"].is_string());
+}

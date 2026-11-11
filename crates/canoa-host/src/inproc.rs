@@ -169,7 +169,7 @@ impl ChannelSink for ToClientSink {
 }
 
 /// The host holds no account for a connection, so there is nothing to renew or lose.
-struct NoAccounts;
+pub(crate) struct NoAccounts;
 
 impl AccountKeeper for NoAccounts {
     fn renewed(&self, _renewal: AccountRenewal) -> Result<(), ProviderError> {

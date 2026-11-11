@@ -197,6 +197,10 @@ enum Command {
         #[command(subcommand)]
         harness: AgentHarness,
     },
+    /// Print what a source offers before a session starts, asked of its provider with no session and no model turn: its
+    /// models with their versions and each model's efforts. SOURCE is claude or codex, run as `canoa agent` runs them, or
+    /// with --entry the name of a [host.agents] entry. A source that lists its models only in its session says so.
+    Options(OptionsArgs),
     /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
     /// with profiles. The rest of standard input goes to the agent.
     Launch {
@@ -206,6 +210,21 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<std::ffi::OsString>,
     },
+}
+
+/// What `canoa options` takes.
+#[derive(Debug, Args)]
+struct OptionsArgs {
+    /// claude or codex; with --entry, an entry's name.
+    source: String,
+    /// SOURCE names an entry of canoa.cfg, not a built-in harness.
+    #[arg(long)]
+    entry: bool,
+    /// For claude or codex, the program; the variable `canoa agent` reads, or the harness's name, without it.
+    #[arg(long)]
+    executable: Option<OsString>,
+    #[command(flatten)]
+    config: ConfigArgs,
 }
 
 /// The command line `canoa agent` serves.
@@ -437,7 +456,7 @@ struct ConfigArgs {
     /// $XDG_CONFIG_HOME/Canoa/canoa.cfg (~/.config without it).
     #[arg(long, env = "CANOA_CONFIG")]
     config: Option<PathBuf>,
-    /// How `check` prints entries.
+    /// How `check` prints entries and `options` its choices.
     #[arg(long, value_enum, default_value_t = Format::Text)]
     format: Format,
 }
@@ -829,6 +848,39 @@ fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     Ok(())
 }
 
+fn options(args: &OptionsArgs, front: &dyn Front) -> Result<(), Failed> {
+    let choices = if args.entry {
+        let config = load(&args.config, front)?;
+        crate::options::entry(&config, &args.source)
+            .ok_or_else(|| Failed::usage("canoa.cfg has no entry of that name"))?
+    } else {
+        let harness = crate::Harness::named(&args.source).ok_or_else(|| {
+            Failed::usage("SOURCE is claude or codex, or an entry's name with --entry")
+        })?;
+        crate::options::preset(harness, args.executable.as_deref())
+    };
+    match args.config.format {
+        Format::Json => print(front, &choices.to_json().to_string()),
+        Format::Text => {
+            if let Some(why) = &choices.unknown_because {
+                print(front, &format!("unknown: {why}"))?;
+            }
+            for model in &choices.models {
+                print(
+                    front,
+                    &format!(
+                        "{}	{}	{}",
+                        model.id,
+                        model.name.as_deref().unwrap_or(&model.id),
+                        model.efforts.join(",")
+                    ),
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn list_peers(format: Format, front: &dyn Front) -> Result<(), Failed> {
     for peer in peers::list(&store(&home_of(front)?)?).map_err(Failed::run)? {
         let (state, source) = match peer.state {
@@ -868,6 +920,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
     match cli.command {
         Command::Serve(args) => serve(&args, front),
         Command::Check(args) => check(&args, front),
+        Command::Options(args) => options(&args, front),
         Command::Id { method, force } => print(
             front,
             &method

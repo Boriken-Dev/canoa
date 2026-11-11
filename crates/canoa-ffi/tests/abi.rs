@@ -199,6 +199,32 @@ fn a_job_freed_is_gone_for_good() {
     assert_eq!(canoa_ffi_job_stop(job), STATUS_UNKNOWN_JOB);
 }
 
+/// The job that asks a source's choices needs no session and no program: an entry that runs a program on standard streams
+/// says it lists its models only once it has started.
+#[test]
+fn a_job_asks_a_sources_choices_with_no_session() {
+    let scratch = Scratch::new();
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(
+        &config,
+        "[host.agents.Plain]
+program = \"agy\"
+args = [\"acp\"]
+",
+    )
+    .expect("written");
+    let job = start(&json!({
+        "args": ["options", "Plain", "--entry", "--config", config, "--format", "json"],
+        "home": scratch.0,
+    }));
+    let said = to_end(job);
+    assert_eq!(said.exit, Some(0), "{said:?}");
+    let choices: Value = serde_json::from_str(&said.out[0]).expect("one JSON object");
+    assert_eq!(choices["known"], false);
+    assert_eq!(choices["models"], json!([]));
+    assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+}
+
 #[test]
 fn a_wrong_command_line_ends_with_status_2_and_says_why() {
     let job = start(&json!({"args": ["no-such-command"]}));

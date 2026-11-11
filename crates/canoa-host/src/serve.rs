@@ -1121,7 +1121,7 @@ fn say_origin(entry: &Entry, origin: &Origin) {
 /// same names, and for the built-in `claude` and `codex` the host's own values where nothing is set, never the person's
 /// configuration on this machine, because a paired key reaches it. What a client may choose stays within the entry's mode.
 /// A setting that acts with nothing asked is logged as configuration.
-fn harness_settings(
+pub(crate) fn harness_settings(
     entry: &Entry,
     harness: &str,
     executable: Option<&OsString>,

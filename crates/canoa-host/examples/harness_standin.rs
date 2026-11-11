@@ -111,8 +111,9 @@ fn claude(args: &[String]) {
                 record(&json!({"control": subtype, "request": message["request"]}));
                 let response = if subtype == "initialize" {
                     json!({"commands": [{"name": "standin", "description": "A stand-in's command", "argumentHint": ""}],
-                        "models": [{"value": "standin-small", "displayName": "Small", "description": "A stand-in model",
-                            "supportsEffort": true, "supportedEffortLevels": ["low", "high"]}]})
+                        "models": [{"value": "standin-small", "resolvedModel": "claude-standin-1-2", "displayName": "Small",
+                            "description": "A stand-in model", "supportsEffort": true,
+                            "supportedEffortLevels": ["low", "high"]}]})
                 } else {
                     json!({})
                 };
