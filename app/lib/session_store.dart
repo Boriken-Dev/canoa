@@ -939,7 +939,7 @@ class SessionStore extends ChangeNotifier {
 
   /// Puts a permission request to the person, in the conversation it belongs to: the one [from] serves under the request's
   /// session id. A request about no session here is refused, and one past [maxPendingPermissions] is cancelled.
-  Future<AcpDecision> askPermission(AcpPermissionRequest request, VerifiedAgent from) {
+  Future<AcpDecision> askPermission(AcpPermissionRequest request, VerifiedAgent from) async {
     ChatSession? target;
     for (final session in _sessions) {
       if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
@@ -963,11 +963,13 @@ class SessionStore extends ChangeNotifier {
         return Future.value(AcpSelect(allow.optionId));
       }
     }
-    final subject = forPerson ? null : subjectOf(kind: request.kind, rawInput: request.rawInput, toolCall: request.toolCall);
+    final subject = forPerson ? null : _ruleSubject(target, request);
     final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
     final folder = target.cwd;
     final keepable = rules != null && subject != null && once != null && folder != null && folder.isNotEmpty;
     if (keepable) {
+      // What another instance revoked since the file was read stops applying before this request is matched.
+      await rules!.refresh();
       final rule = rules!.match(source: ruleSource(target), peer: target.peerId ?? '', folder: folder, kind: request.kind, subject: subject);
       if (rule != null) {
         rules!.recordUse(rule, switch (subject) {
@@ -1055,6 +1057,28 @@ class SessionStore extends ChangeNotifier {
     if (option.kind == 'allow_always') session.alwaysAnsweredAt = DateTime.now();
     question._answer.complete(AcpSelect(option.optionId));
     notifyListeners();
+  }
+
+  /// Whether [session] is in a mode Canoa can see asks about commands: the agent's own Manual or Plan. In Accept edits, in
+  /// Bypass, in the mode an agent's own "always" switches to, in a mode it names otherwise, or in none yet, a remembered command
+  /// would answer what the mode leaves to the person, or add to what the agent already allows.
+  bool _modeAsks(ChatSession session) {
+    if (session.bypass) return false;
+    final value = underlyingMode(session)?.toLowerCase();
+    return value != null && const {'manual', 'default', 'plan'}.contains(value);
+  }
+
+  /// What a rule could state of [request] in [session]: commands only while the mode asks about them; changes to files only for a
+  /// session on this computer, in a folder where links can be followed and that is neither home nor Canoa's settings; an MCP tool
+  /// always. Null when no rule can cover it.
+  RuleSubject? _ruleSubject(ChatSession session, AcpPermissionRequest request) {
+    final subject = subjectOf(kind: request.kind, rawInput: request.rawInput, toolCall: request.toolCall);
+    final folder = session.cwd;
+    return switch (subject) {
+      PathSubject() when kIsWeb || session.place != SessionPlace.local || folder == null || !(rules?.pathsAllowedIn(folder) ?? false) => null,
+      CommandSubject() when !_modeAsks(session) => null,
+      _ => subject,
+    };
   }
 
   /// What a rule calls [session]'s source: its identity (the key the session list remembers it under), not the name it is shown

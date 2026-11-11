@@ -44,6 +44,7 @@ import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
 import 'permissions/real_path.dart';
+import 'permissions/rule_log.dart';
 import 'profile/apply.dart';
 import 'profile/launch.dart';
 import 'profile/profile.dart' show OverlaySource;
@@ -88,7 +89,7 @@ Future<void> main(List<String> args) async {
   final configFile = desktopConfigPath();
   final rules = PermissionRules(
     platformLedgerBackend(configPath: configFile, name: 'permissions'),
-    log: platformLedgerBackend(configPath: configFile, name: 'permissions-log'),
+    log: platformRuleLog(configPath: configFile),
     guards: PermissionGuards(
       home: homeFolder(),
       config: _parentFolder(configFile),

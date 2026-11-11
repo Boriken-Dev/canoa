@@ -25,7 +25,7 @@ class RememberDialog extends StatefulWidget {
 
 class _RememberDialogState extends State<RememberDialog> {
   late final RuleSubject subject = widget.question.subject!;
-  late RuleType type = switch (subject) {
+  late final RuleType type = switch (subject) {
     CommandSubject() => RuleType.command,
     PathSubject() => RuleType.path,
     McpSubject() => RuleType.mcp,
@@ -69,37 +69,11 @@ class _RememberDialogState extends State<RememberDialog> {
     final mono = const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12);
     final fields = <Widget>[
       switch (subject) {
-        CommandSubject(:final command) => RadioGroup<RuleType>(
-          groupValue: type,
-          onChanged: (chosen) => setState(() {
-            type = chosen ?? type;
-            problem = null;
-          }),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            RadioListTile<RuleType>(
-              key: const Key('rule-exact'),
-              value: RuleType.command,
-              title: const Text('Only this command'),
-              subtitle: SelectableText(command, style: mono),
-            ),
-            RadioListTile<RuleType>(
-              key: const Key('rule-prefix'),
-              value: RuleType.prefix,
-              title: const Text('Any command that starts with'),
-              subtitle: TextField(
-                key: const Key('rule-value'),
-                controller: text,
-                style: mono,
-                enabled: type == RuleType.prefix,
-                onChanged: (_) => setState(() => problem = null),
-                decoration: const InputDecoration(
-                  isDense: true,
-                  helperText: 'Cut words off the end. At least two words; never a shell, interpreter or launcher.',
-                ),
-              ),
-            ),
-          ]),
-        ),
+        CommandSubject(:final command) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Only this command, exactly:', style: label),
+          const SizedBox(height: 4),
+          SelectableText(command, key: const Key('rule-exact'), style: mono),
+        ]),
         PathSubject() => TextField(
           key: const Key('rule-value'),
           controller: text,
@@ -107,7 +81,7 @@ class _RememberDialogState extends State<RememberDialog> {
           onChanged: (_) => setState(() => problem = null),
           decoration: InputDecoration(
             labelText: 'This file, or this folder and what is under it',
-            helperText: 'An absolute path inside $folder. Never version control, settings, hooks, build scripts or Canoa\'s own files.',
+            helperText: 'An absolute path inside $folder. Never a hidden file or folder, build scripts, agent instructions or Canoa\'s own files.',
           ),
         ),
         McpSubject(:final server, :final tool) => Text('Any use of the tool $tool of $server, with any input.'),
@@ -133,7 +107,8 @@ class _RememberDialogState extends State<RememberDialog> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   'A command runs whatever the files in this folder make it do: a test or build command runs the scripts and tests '
-                  'there, as they are when it runs. Only one of commands or file changes can be allowed here at a time.',
+                  'there, as they are when it runs. Only one of commands or file changes and tools can be allowed for this source in '
+                  'this folder, or one next to it, at a time.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
 import '../ledger/session_ledger.dart' show LedgerBackend;
@@ -105,122 +106,116 @@ String? cleanPath(String path) {
 /// Whether [inner] is [outer] or lies under it, both already made by [cleanPath].
 bool _under(String outer, String inner) => inner == outer || inner.startsWith(outer.endsWith('/') ? outer : '$outer/');
 
-/// Where a change can alter what Canoa or the tools run next, so no path rule ever covers it, at any depth: the folders of
-/// version control and of the agents' and editors' own settings and hooks, and these files, which hold instructions, tool servers
-/// or the scripts a build or a test starts. Compared without case.
-const Set<String> protectedNames = {
-  '.git', '.claude', '.codex', '.gemini', '.cursor', '.vscode', '.idea', '.husky',
-  '.mcp.json', '.envrc', 'agents.md', 'claude.md', 'gemini.md',
-  'package.json', 'makefile', 'justfile', 'pyproject.toml', 'setup.py', 'build.rs', 'rakefile',
+/// Files that run code when a build, a test, an editor or an agent starts, and the files agents read their instructions from. A
+/// path rule never covers one, at any depth, with or without its case or a trailing dot or space. Every segment that starts with a
+/// dot is protected as well (see [protectedSegment]).
+const Set<String> protectedFiles = {
+  'package.json', 'makefile', 'justfile', 'pyproject.toml', 'setup.py', 'build.rs', 'rakefile', 'cargo.toml', 'conftest.py',
+  'agents.md', 'agents.override.md', 'claude.md', 'claude.local.md', 'gemini.md',
+  'directory.build.props', 'directory.build.targets', 'mise.toml', 'node_modules',
 };
 
-/// Whether a segment of [cleaned] is one of [protectedNames].
-bool touchesProtected(String cleaned) => cleaned.split('/').any((part) => protectedNames.contains(part.toLowerCase()));
+final RegExp _shortName = RegExp(r'~[0-9]');
+final RegExp _configFile = RegExp(r'\.config\.(js|mjs|cjs|ts)$');
 
-/// Folders no path rule may reach: the person's home folder (a scope may not contain it) and Canoa's own configuration folder
-/// (a scope may not contain it or lie in it).
+/// Whether one path segment below the session's folder is out of reach of a path rule. The segment is first read the way a file
+/// system reads it: Windows drops trailing dots and spaces, so `.claude.` and `package.json.` are the files they look like, and
+/// an 8.3 short name (`GIT~1`) is another spelling of a long one. Anything but printable ASCII is refused rather than normalised,
+/// since Unicode normalisation and ignorable characters give one name many spellings. Then it is protected when it starts with a
+/// dot, is one of [protectedFiles], or is a `*.config.js`, `.mjs`, `.cjs` or `.ts`.
+bool protectedSegment(String raw) {
+  if (raw.codeUnits.any((unit) => unit < 0x20 || unit > 0x7e)) return true;
+  var read = raw;
+  while (read.endsWith('.') || read.endsWith(' ')) {
+    read = read.substring(0, read.length - 1);
+  }
+  if (read.isEmpty || raw.startsWith('.') || read.startsWith('.')) return true;
+  final lower = read.toLowerCase();
+  return _shortName.hasMatch(lower) || protectedFiles.contains(lower) || _configFile.hasMatch(lower);
+}
+
+/// Whether [inner] (under [outer], both made by [cleanPath]) goes through a protected segment below [outer].
+bool _touchesProtected(String outer, String inner) {
+  final below = inner.length <= outer.length ? '' : inner.substring(outer.endsWith('/') ? outer.length : outer.length + 1);
+  return below.split('/').where((part) => part.isNotEmpty).any(protectedSegment);
+}
+
+/// Folders no path rule may reach: the person's home folder and Canoa's own configuration folder.
 final class PermissionGuards {
   const PermissionGuards({this.home, this.config});
   final String? home, config;
 }
 
-/// Resolves the links in a path, for what exists of it; null when it cannot. A desktop build resolves them, a browser has no files.
+/// Resolves the links in a path, for what exists of it; null when it cannot. A desktop build resolves them; a browser, and a
+/// session on another machine, cannot, and no path rule is made there.
 typedef RealPath = String? Function(String path);
-
-/// Why [file] cannot be covered by a rule for [scope] in [folder], or null when it can. All three have to be absolute; the file
-/// lies under the scope, the scope under the folder; neither touches [protectedNames] nor reaches the guarded folders; and
-/// where [real] is given, the same holds after the links in them are resolved.
-String? pathProblem({required String scope, required String file, required String folder, PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
-  final s = cleanPath(scope), f = cleanPath(file), d = cleanPath(folder);
-  if (s == null || f == null || d == null) return 'A path has to be absolute, with no ~, no : but a drive letter\'s, and not a network path.';
-  if (!_under(d, s)) return 'That is not inside $folder.';
-  if (!_under(s, f)) return 'That does not cover the file asked.';
-  if (touchesProtected(s) || touchesProtected(f)) return 'Version control, settings, hooks and build scripts are never covered.';
-  final home = guards.home == null ? null : cleanPath(guards.home!), config = guards.config == null ? null : cleanPath(guards.config!);
-  if (home != null && _under(s, home)) return 'That holds your home folder.';
-  if (config != null && (_under(s, config) || _under(config, s))) return 'Canoa\'s own settings are never covered.';
-  if (real != null) {
-    final rs = _resolved(real, s), rf = _resolved(real, f), rd = _resolved(real, d);
-    if (rs == null || rf == null || rd == null) return 'A link in that path could not be followed.';
-    if (!_under(rd, rs) || !_under(rs, rf) || touchesProtected(rf)) return 'A link in that path leads outside it.';
-    if (config != null && _under(config, rf)) return 'Canoa\'s own settings are never covered.';
-  }
-  return null;
-}
 
 String? _resolved(RealPath real, String cleaned) {
   final resolved = real(cleaned);
   return resolved == null ? null : cleanPath(resolved);
 }
 
-/// What ends a command or reaches beyond it: control and line characters (hidden ones too), the shell's separators, redirections,
-/// substitutions and groupings, and the quotes, `=` and `~` that give an argument a meaning of its own.
-final RegExp _beyondPrefix = RegExp(r'''[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069;&|<>`$(){}\\'"=~]''');
-
-/// Characters an exact rule never holds: controls, line breaks, and what hides or reorders text.
-final RegExp _hiddenInExact = RegExp(r'[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]');
-
-/// Programs a prefix rule is never made for: they run what they are given (shells, interpreters, launchers and wrappers), or
-/// fetch, copy or rewrite things whatever the arguments (`git` runs hooks and aliases). A person who wants one allows it by an
-/// exact rule, or in the agent's own settings. Matched without case or `.exe`.
-const Set<String> launcherPrograms = {
-  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh', 'nu', 'pwsh', 'powershell', 'cmd', 'wsl',
-  'env', 'sudo', 'su', 'doas', 'xargs', 'find', 'timeout', 'nice', 'nohup', 'time', 'watch', 'eval', 'exec', 'source', 'start',
-  'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'lua', 'npx', 'uv', 'uvx', 'make', 'cmake', 'ninja',
-  'git', 'tar', 'rsync', 'ssh', 'scp', 'docker', 'podman', 'curl', 'wget',
-};
-
-/// With these a package manager runs a script or a program.
-const Set<String> packageRunners = {'npm', 'pnpm', 'yarn'};
-const Set<String> packageRunWords = {'run', 'run-script', 'exec', 'x', 'dlx'};
-
-final RegExp _programName = RegExp(r'^[A-Za-z][A-Za-z0-9._+-]*$');
-final RegExp _pythonName = RegExp(r'^python[0-9.]*$');
-
-/// Why [prefix] cannot stand for the start of a command, or null when it can. It is whole words the person read: at least two,
-/// a plain program name first (no assignment, no path) that is not one of [launcherPrograms], and none of the characters that
-/// start another command or give an argument a meaning of its own.
-String? prefixProblem(String prefix) {
-  if (prefix.trim().isEmpty) return 'Name the start of the command.';
-  if (prefix != prefix.trim()) return 'It starts and ends with a word, not a space.';
-  if (_beyondPrefix.hasMatch(prefix)) return 'It holds a character that starts another command, hides one, or is a quote, = or ~.';
-  final words = prefix.split(' ');
-  if (words.length < 2 || words.any((word) => word.isEmpty)) return 'Name at least two words, one space apart: a program and what it does.';
-  if (!_programName.hasMatch(words.first)) return 'The first word has to be a plain program name.';
-  final program = words.first.toLowerCase().replaceFirst(RegExp(r'\.(exe|cmd|bat|ps1)$'), '');
-  if (launcherPrograms.contains(program) || _pythonName.hasMatch(program)) return '${words.first} runs whatever it is given, so no prefix covers it.';
-  if (packageRunners.contains(program) && packageRunWords.contains(words[1].toLowerCase())) {
-    return '${words.first} ${words[1]} runs a script or a program, so no prefix covers it.';
+/// Why no path rule can be made in [folder], or null when one can: the folder holds the person's home folder (or is it), or
+/// overlaps Canoa's configuration folder, whether read as written or after its links are resolved; or links cannot be followed.
+String? folderProblem(String folder, {PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
+  if (real == null) return 'Changes to files are only remembered for sessions on this computer, where links can be followed.';
+  final d = cleanPath(folder);
+  if (d == null) return 'The folder has to be an absolute path.';
+  final rd = _resolved(real, d);
+  if (rd == null) return 'A link in the folder could not be followed.';
+  for (final guard in [guards.home, guards.config]) {
+    final g = guard == null ? null : cleanPath(guard);
+    if (g == null) continue;
+    final rg = _resolved(real, g);
+    final isHome = guard == guards.home;
+    for (final candidate in [g, ?rg]) {
+      if (_under(d, candidate) || _under(rd, candidate)) return isHome ? 'The folder holds your home folder.' : 'The folder holds Canoa\'s own settings.';
+      if (!isHome && (_under(candidate, d) || _under(candidate, rd))) return 'The folder is inside Canoa\'s own settings.';
+    }
   }
   return null;
 }
 
-/// Whether [command] is [prefix] followed only by arguments: a space, then nothing that starts another command. `npm test`
-/// covers `npm test -- a.js`, and neither `npm testing` nor `npm test; rm -rf ~`.
-bool prefixCovers(String prefix, String command) {
-  if (prefixProblem(prefix) != null || !command.startsWith(prefix)) return false;
-  final rest = command.substring(prefix.length);
-  return rest.isEmpty || (rest.startsWith(' ') && !_beyondPrefix.hasMatch(rest));
+/// Why [file] cannot be covered by a rule for [scope] in [folder], or null when it can. All three have to be absolute, and links
+/// must be followable ([real]); the folder is not home and not Canoa's settings; the file lies under the scope and the scope under
+/// the folder; and nothing below the folder is a protected segment; all of it after the links are resolved too.
+String? pathProblem({required String scope, required String file, required String folder, PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
+  final bad = folderProblem(folder, guards: guards, real: real);
+  if (bad != null) return bad;
+  final s = cleanPath(scope), f = cleanPath(file), d = cleanPath(folder);
+  if (s == null || f == null || d == null) return 'A path has to be absolute, with no ~, no : but a drive letter\'s, and not a network path.';
+  if (!_under(d, s)) return 'That is not inside $folder.';
+  if (!_under(s, f)) return 'That does not cover the file asked.';
+  if (_touchesProtected(d, s) || _touchesProtected(d, f)) return 'Hidden files and folders, version control, settings, build scripts and agent instructions are never covered.';
+  final rs = _resolved(real!, s), rf = _resolved(real, f), rd = _resolved(real, d);
+  if (rs == null || rf == null || rd == null) return 'A link in that path could not be followed.';
+  if (!_under(rd, rs) || !_under(rs, rf) || _touchesProtected(rd, rf) || _touchesProtected(rd, rs)) return 'A link in that path leads outside it, or to something never covered.';
+  return null;
 }
+
+/// Characters an exact rule never holds: controls, line breaks, and what hides or reorders text.
+final RegExp _hiddenInExact = RegExp(r'[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]');
 
 /// How a rule says what it allows.
 enum RuleType {
   /// This command, exactly.
   command,
 
-  /// A command that starts with these words and carries only arguments.
-  prefix,
-
   /// A change to this file, or any under this folder.
   path,
 
   /// This MCP tool, with any input.
-  mcp;
+  mcp,
+
+  /// A rule an earlier version wrote, or another program: kept so it can be seen and revoked, and never applied.
+  unsupported;
 
   static RuleType? named(Object? name) => values.where((type) => type.name == name).firstOrNull;
 
-  /// Whether it is about commands, which run whatever the folder's files make them do.
-  bool get isCommand => this == command || this == prefix;
+  /// Which kind of power it grants. A command can write any file, and a file change or an MCP tool (a file system tool among
+  /// them) can write what a command then runs, so one source and folder keep commands or the rest, never both.
+  bool get isCommand => this == command;
+  bool get isFilesystem => this == path || this == mcp;
 }
 
 /// One thing the person said to allow, for a source in a folder. Canoa answers a request it matches with the agent's allow-once
@@ -234,12 +229,13 @@ final class PermissionRule {
     required this.tool,
     this.toolName = '',
     required this.type,
+    String? typeName,
     required this.value,
     required this.made,
     this.fired = 0,
     this.lastUsed,
     this.external = false,
-  });
+  }) : typeName = typeName ?? type.name;
 
   final String id;
 
@@ -259,7 +255,10 @@ final class PermissionRule {
   final String toolName;
   final RuleType type;
 
-  /// The command, the start of a command, the path, or the MCP tool's name, by [type].
+  /// The type as stored, which for an [RuleType.unsupported] rule is what an earlier version wrote.
+  final String typeName;
+
+  /// The command, the path, or the MCP tool's name, by [type].
   final String value;
   final DateTime made;
   int fired;
@@ -271,12 +270,12 @@ final class PermissionRule {
   /// What it allows, in words a person reads.
   String get describe => switch (type) {
     RuleType.command => 'Run: $value',
-    RuleType.prefix => 'Run a command starting with: $value',
     RuleType.path => 'Change $value, or a file under it',
     RuleType.mcp => switch (_mcpName.firstMatch(value)) {
       final match? => 'Use the tool ${match.group(2)} of ${match.group(1)}, with any input',
       null => 'Use the tool $value, with any input',
     },
+    RuleType.unsupported => 'No longer supported ($typeName): $value',
   };
 
   /// Whether a request from [source] on [peer] in [folder] of [kind] doing [subject] is what this rule allows.
@@ -295,8 +294,6 @@ final class PermissionRule {
     switch ((type, subject)) {
       case (RuleType.command, CommandSubject(:final command)):
         return command == value;
-      case (RuleType.prefix, CommandSubject(:final command)):
-        return prefixCovers(value, command);
       case (RuleType.path, PathSubject(:final path)):
         return pathProblem(scope: value, file: path, folder: this.folder, guards: guards, real: real) == null;
       case (RuleType.mcp, McpSubject(:final name)):
@@ -313,7 +310,7 @@ final class PermissionRule {
     'folder': folder,
     'tool': tool,
     if (toolName.isNotEmpty) 'tool_name': toolName,
-    'type': type.name,
+    'type': typeName,
     'value': value,
     'made': made.toUtc().toIso8601String(),
     'fired': fired,
@@ -322,9 +319,9 @@ final class PermissionRule {
   };
 
   static PermissionRule? fromJson(Object? json) {
-    if (json is! Map) return null;
-    final type = RuleType.named(json['type']);
-    if (type == null) return null;
+    if (json is! Map || json['type'] is! String) return null;
+    final named = RuleType.named(json['type']);
+    final type = named == null || named == RuleType.unsupported ? RuleType.unsupported : named;
     for (final key in ['id', 'source', 'folder', 'tool', 'value']) {
       if (json[key] is! String || (json[key] as String).isEmpty) return null;
     }
@@ -339,6 +336,7 @@ final class PermissionRule {
       tool: json['tool'] as String,
       toolName: json['tool_name'] is String ? json['tool_name'] as String : '',
       type: type,
+      typeName: json['type'] as String,
       value: json['value'] as String,
       made: made,
       fired: fired is int && fired >= 0 ? fired : 0,
@@ -355,8 +353,6 @@ String? scopeProblem(RuleType type, String value, RuleSubject subject, String fo
     case (RuleType.command, CommandSubject(:final command)):
       if (_hiddenInExact.hasMatch(command)) return 'The command holds a control, line-break or hidden character, so only you can allow it, each time.';
       return command == value ? null : 'That is not the command asked.';
-    case (RuleType.prefix, CommandSubject(:final command)):
-      return prefixProblem(value) ?? (prefixCovers(value, command) ? null : 'That does not cover the command asked.');
     case (RuleType.path, PathSubject(:final path)):
       return pathProblem(scope: value, file: path, folder: folder, guards: guards, real: real);
     case (RuleType.mcp, McpSubject(:final name)):
@@ -366,9 +362,39 @@ String? scopeProblem(RuleType type, String value, RuleSubject subject, String fo
   }
 }
 
+/// An append-only record, one line a time.
+abstract interface class RuleLog {
+  Future<void> append(String line);
+
+  /// Where it is, for a person to find.
+  String get location;
+}
+
+/// A log kept in memory, for tests.
+final class MemoryRuleLog implements RuleLog {
+  final lines = <String>[];
+
+  @override
+  Future<void> append(String line) async => lines.add(line);
+
+  @override
+  String get location => 'memory only';
+}
+
+/// What a log line says of [detail] instead of the text: a command is its program and how many arguments follow, which cannot
+/// hold a secret; a path or a tool is itself. [sha256Of] stands for the rest, so a line can be matched to a command and not read.
+String redacted(RuleType type, String detail) {
+  if (type != RuleType.command) return detail;
+  final words = detail.trim().split(RegExp(r'\s+'));
+  final program = words.first.length > 64 ? '${words.first.substring(0, 64)}…' : words.first;
+  return words.length == 1 ? program : '$program … (${words.length - 1} arguments)';
+}
+
+String sha256Of(String text) => sha256.convert(utf8.encode(text)).toString();
+
 /// The rules the person made, kept in a file beside canoa.cfg (IndexedDB in a browser), and a log of each rule made, used and
-/// revoked with the full command or path. A change is written at once; before each write the stored file is read again, so a
-/// rule someone else added is kept (and flagged) rather than overwritten.
+/// revoked. A change is written at once. The stored file is read again before each write and before a request is matched, so a
+/// rule another program added is kept (and flagged) and a rule another instance revoked stops applying.
 class PermissionRules extends ChangeNotifier {
   PermissionRules(this.backend, {this.log, this.guards = const PermissionGuards(), this.real, DateTime Function()? clock, Random? random})
       : _clock = clock ?? DateTime.now,
@@ -376,22 +402,24 @@ class PermissionRules extends ChangeNotifier {
 
   final LedgerBackend backend;
 
-  /// Where the log is kept, one JSON line per event; null keeps none.
-  final LedgerBackend? log;
+  /// Where the log is kept; null keeps none.
+  final RuleLog? log;
   final PermissionGuards guards;
+
+  /// How links are followed; null where they cannot be, and no path rule is then made.
   final RealPath? real;
   final DateTime Function() _clock;
   final Random _random;
   final List<PermissionRule> _rules = [];
   final Set<String> _revoked = {};
+
+  /// The ids the stored file held when it was last read or written: one of them that the file no longer holds was revoked
+  /// elsewhere.
+  Set<String> _persisted = {};
   Future<void> _writing = Future.value();
-  Future<void> _logging = Future.value();
 
   /// The most rules kept; a person who has made this many revokes some before making another.
   static const maxRules = 500;
-
-  /// The most lines the log keeps; the oldest go past it.
-  static const maxLogLines = 50000;
 
   /// Why the stored rules could not be read, if they could not.
   String? problem;
@@ -424,20 +452,31 @@ class PermissionRules extends ChangeNotifier {
       _rules
         ..clear()
         ..addAll(_parse(document));
+      _persisted = {for (final rule in _rules) rule.id};
     } on FormatException catch (error) {
       problem = '${backend.location} is not a list of rules (${error.message}), so none apply';
     }
     notifyListeners();
   }
 
-  /// Why a rule of [type] cannot be made for this source and folder beside the rules there: a rule for commands and a rule for
-  /// changes to files together let a command write any file or a change write what a command then runs, so only one kind is kept.
+  /// Whether a path rule can be made in [folder], by [folderProblem].
+  bool pathsAllowedIn(String folder) => folderProblem(folder, guards: guards, real: real) == null;
+
+  /// Why a rule of [type] cannot be made for this source and folder beside the rules there, or null. Commands and the rest are
+  /// not kept together for one source, in this folder or one that holds it or lies in it.
   String? conflict(String source, String peer, String folder, RuleType type) {
+    if (type == RuleType.unsupported) return null;
     final here = cleanPath(folder);
     for (final rule in _rules) {
-      if (rule.source != source || rule.peer != peer || cleanPath(rule.folder) != here) continue;
-      if (type.isCommand && rule.type == RuleType.path) return 'A rule for changes to files already stands here: revoke it before allowing commands.';
-      if (type == RuleType.path && rule.type.isCommand) return 'A rule for commands already stands here: revoke it before allowing changes to files.';
+      if (rule.source != source || rule.peer != peer || rule.type == RuleType.unsupported) continue;
+      if ((type.isCommand && rule.type.isFilesystem) || (type.isFilesystem && rule.type.isCommand)) {
+        final there = cleanPath(rule.folder);
+        if (here == null || there == null || _under(here, there) || _under(there, here)) {
+          return type.isCommand
+              ? 'A rule for file changes or a tool already stands here or in a folder next to it: revoke it before allowing commands.'
+              : 'A rule for commands already stands here or in a folder next to it: revoke it before allowing this.';
+        }
+      }
     }
     return null;
   }
@@ -446,12 +485,12 @@ class PermissionRules extends ChangeNotifier {
   String? checkScope(RuleType type, String value, RuleSubject subject, String folder) =>
       scopeProblem(type, value, subject, folder, guards: guards, real: real);
 
-  /// The first rule that allows a request, or null. Where a hand-edited file holds both a command rule and a path rule for the
-  /// same source and folder, neither applies.
+  /// The first rule that allows a request, or null. Where the list holds commands and the rest for one source in nested folders
+  /// (a hand-edited file), neither applies.
   PermissionRule? match({required String source, String peer = '', required String folder, required String? kind, required RuleSubject subject}) {
     for (final rule in _rules) {
       if (!rule.matches(source: source, peer: peer, folder: folder, kind: kind, subject: subject, guards: guards, real: real)) continue;
-      if (rule.type != RuleType.mcp && conflict(rule.source, rule.peer, rule.folder, rule.type) != null) continue;
+      if (conflict(rule.source, rule.peer, rule.folder, rule.type) != null) continue;
       return rule;
     }
     return null;
@@ -516,27 +555,45 @@ class PermissionRules extends ChangeNotifier {
     unawaited(flush());
   }
 
-  /// Adds the rules the stored file holds that this list does not know and did not revoke, as flagged where this app did not
-  /// write them.
+  /// Takes up what the stored file says: a rule it no longer holds that it held before was revoked elsewhere and goes; a rule it
+  /// holds that this list does not know and did not revoke is added, flagged where this app did not write it.
   Future<void> _mergeStored() async {
     final document = await backend.read();
-    if (document == null) return;
-    final known = {for (final rule in _rules) rule.id};
+    final List<PermissionRule> stored;
     try {
-      for (final rule in _parse(document)) {
-        if (known.contains(rule.id) || _revoked.contains(rule.id) || _rules.length >= maxRules) continue;
-        _rules.add(rule);
-      }
+      stored = document == null ? const [] : _parse(document);
     } on FormatException {
-      // A file that is not a list is replaced by this one: the person is told by `problem` when it was loaded.
+      return;
     }
+    final ids = {for (final rule in stored) rule.id};
+    final before = _rules.length;
+    _rules.removeWhere((rule) => _persisted.contains(rule.id) && !ids.contains(rule.id));
+    final known = {for (final rule in _rules) rule.id};
+    var changed = _rules.length != before;
+    for (final rule in stored) {
+      if (known.contains(rule.id) || _revoked.contains(rule.id) || _rules.length >= maxRules) continue;
+      _rules.add(rule);
+      changed = true;
+    }
+    _persisted = ids;
+    if (changed) notifyListeners();
   }
+
+  /// Reads the stored file again and takes up what it says, in order with the writes: call it before matching a request.
+  Future<void> refresh() => _writing = _writing.then((_) async {
+    try {
+      await _mergeStored();
+    } on Object catch (error) {
+      debugPrint('Canoa permissions: could not read ${backend.location}: $error');
+    }
+  });
 
   Future<void> flush() {
     return _writing = _writing.then((_) async {
       try {
         await _mergeStored();
         await backend.write(encode());
+        _persisted = {for (final rule in _rules) rule.id};
         if (writeProblem?.startsWith('could not write the log') != true) writeProblem = null;
       } on Object catch (error) {
         writeProblem = 'could not write ${backend.location}: $error';
@@ -545,6 +602,8 @@ class PermissionRules extends ChangeNotifier {
       notifyListeners();
     });
   }
+
+  Future<void> _logging = Future.value();
 
   void _logEvent(String event, PermissionRule rule, String detail) {
     final target = log;
@@ -556,18 +615,13 @@ class PermissionRules extends ChangeNotifier {
       'source': rule.source,
       'folder': rule.folder,
       'type': rule.type.name,
-      'detail': detail,
+      'what': redacted(rule.type, detail),
+      'sha256': sha256Of(detail),
     });
-    _logging = _logging.then((_) async {
-      try {
-        final lines = ((await target.read()) ?? '').split('\n').where((text) => text.isNotEmpty).toList()..add(line);
-        if (lines.length > maxLogLines) lines.removeRange(0, lines.length - maxLogLines);
-        await target.write('${lines.join('\n')}\n');
-      } on Object catch (error) {
-        writeProblem = 'could not write the log ${target.location}: $error';
-        debugPrint('Canoa permissions: $writeProblem');
-        notifyListeners();
-      }
+    _logging = _logging.then((_) => target.append(line)).catchError((Object error) {
+      writeProblem = 'could not write the log ${target.location}: $error';
+      debugPrint('Canoa permissions: $writeProblem');
+      notifyListeners();
     });
   }
 

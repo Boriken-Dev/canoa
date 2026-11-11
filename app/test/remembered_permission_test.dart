@@ -96,8 +96,10 @@ const _noAllow = [
 ];
 
 Future<void> _settle(WidgetTester tester) async {
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-  await tester.pump();
+  for (var round = 0; round < 3; round++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+  }
 }
 
 final class _Shown {
@@ -109,16 +111,21 @@ final class _Shown {
   final MemoryLedgerBackend backend;
 }
 
-Future<_Shown> _shown(WidgetTester tester, {PermissionRules? rules, MemoryLedgerBackend? backend}) async {
+/// Links that lead nowhere else.
+String? _plain(String path) => path;
+
+Future<_Shown> _shown(WidgetTester tester, {PermissionRules? rules, MemoryLedgerBackend? backend, String mode = 'manual'}) async {
   await tester.binding.setSurfaceSize(const Size(1100, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final kept = backend ?? MemoryLedgerBackend();
-  final list = rules ?? PermissionRules(kept);
+  final list = rules ?? PermissionRules(kept, real: _plain);
   final store = SessionStore(includePreview: false, rules: list);
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));
   await tester.pump();
+  agent.setMode(mode);
+  await _settle(tester);
   return _Shown(agent, session, store, list, kept);
 }
 
@@ -257,6 +264,9 @@ void main() {
       final other = _Agent(), elsewhere = _Agent();
       final inOther = await tester.runAsync(() => other.start(s.store, label: 'Scripted', folder: '/work/other')) as ChatSession;
       final fromOther = await tester.runAsync(() => elsewhere.start(s.store, label: 'Other', folder: '/work/calc')) as ChatSession;
+      other.setMode('manual');
+      elsewhere.setMode('manual');
+      await _settle(tester);
       other.run(20, 'npm test');
       elsewhere.run(21, 'npm test');
       await _settle(tester);
@@ -275,63 +285,82 @@ void main() {
       await tester.pumpAndSettle();
       await _confirm(tester);
       await tester.runAsync(s.rules.settled);
-      final again = PermissionRules(s.backend);
+      final again = PermissionRules(s.backend, real: _plain);
       await tester.runAsync(again.load);
       expect(again.rules.single.value, 'npm test');
       final next = SessionStore(includePreview: false, rules: again);
       final agent = _Agent();
       await tester.runAsync(() => agent.start(next));
+      agent.setMode('manual');
+      await _settle(tester);
       agent.run(5, 'npm test');
       await _settle(tester);
       expect(agent.chose(5), 'allow-once');
     });
   });
 
-  group('a rule for a prefix', () {
-    Future<_Shown> openDialog(WidgetTester tester, String command) async {
+  group('there is no rule for a prefix', () {
+    testWidgets('the dialog offers the exact command and nothing else', (tester) async {
       final s = await _shown(tester);
-      s.agent.run(1, command);
+      s.agent.run(1, 'npm test -- a.js');
       await _settle(tester);
       await tester.tap(_offer);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('rule-prefix')));
-      await tester.pumpAndSettle();
-      return s;
-    }
-
-    testWidgets('is prefilled with the whole command, never a guessed prefix', (tester) async {
-      await openDialog(tester, 'npm test -- a.js');
-      expect(tester.widget<TextField>(find.byKey(const Key('rule-value'))).controller!.text, 'npm test -- a.js');
-    });
-
-    testWidgets('covers arguments after the edited prefix and nothing past it', (tester) async {
-      final s = await openDialog(tester, 'npm test -- a.js');
-      await tester.enterText(find.byKey(const Key('rule-value')), 'npm test');
+      expect(find.byKey(const Key('rule-prefix')), findsNothing);
+      expect(find.byKey(const Key('rule-value')), findsNothing);
+      expect(tester.widget<SelectableText>(find.byKey(const Key('rule-exact'))).data, 'npm test -- a.js');
       await _confirm(tester);
-      expect(s.agent.chose(1), 'allow-once');
-      expect(s.rules.rules.single.type, RuleType.prefix);
-      s.agent.run(2, 'npm test --silent');
+      expect(s.rules.rules.single.type, RuleType.command);
+      s.agent.run(2, 'npm test -- a.js --bail');
+      s.agent.run(3, 'npm test');
       await _settle(tester);
-      expect(s.agent.chose(2), 'allow-once');
-      for (final (i, command) in ['npm testing', 'npm test; rm -rf ~', 'npm test && x', 'npm', 'npm test\nrm', r'npm test $(id)'].indexed) {
-        s.agent.run(30 + i, command);
-        await _settle(tester);
-        expect(s.agent.answerTo(30 + i), isNull, reason: command);
-        s.store.cancelPermission(s.session);
-      }
+      expect(s.agent.answerTo(2), isNull);
+      expect(s.agent.answerTo(3), isNull);
+    });
+  });
+
+  group('the mode', () {
+    testWidgets('applies no command rule while it accepts edits, and offers none', (tester) async {
+      final s = await _shown(tester, mode: 'accept_edits');
+      _add(s, type: RuleType.command, value: 'npm test');
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull);
+      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(_offer, findsNothing);
+      s.agent.setMode('manual');
+      await _settle(tester);
+      s.agent.run(2, 'npm test');
+      await _settle(tester);
+      expect(s.agent.chose(2), 'allow-once', reason: 'back in Manual the rule applies');
     });
 
-    testWidgets('refuses a prefix that is not the start of the command, or holds a second command, and keeps nothing', (tester) async {
-      final s = await openDialog(tester, 'npm test -- a.js');
-      for (final bad in ['yarn', 'npm', 'npm test -- a.js; rm', 'npm test ', '', 'npm test && curl x', 'npm run test', 'sh -c']) {
-        await tester.enterText(find.byKey(const Key('rule-value')), bad);
-        await tester.tap(find.byKey(const Key('rule-confirm')));
-        await tester.pump();
-        expect(find.byKey(const Key('rule-problem')), findsOneWidget, reason: '"$bad"');
-        expect(s.rules.rules, isEmpty);
-        expect(s.session.pendingPermissions, hasLength(1));
-      }
+    testWidgets('applies none in Canoa\'s own Bypass, in a mode it does not know, or before the agent has said', (tester) async {
+      final s = await _shown(tester);
+      _add(s, type: RuleType.command, value: 'npm test');
+      s.session.bypass = true;
+      s.agent.run(1, 'npm test', options: _noAllow);
+      await _settle(tester);
       expect(s.agent.answerTo(1), isNull);
+      s.store.cancelPermission(s.session);
+      s.session.bypass = false;
+      s.agent.setMode('accept_edits');
+      await _settle(tester);
+      s.agent.run(2, 'npm test');
+      await _settle(tester);
+      expect(s.agent.answerTo(2), isNull);
+      final unsaid = await _shown(tester, mode: 'unknown-mode');
+      _add(unsaid, type: RuleType.command, value: 'npm test');
+      unsaid.agent.run(3, 'npm test');
+      await _settle(tester);
+      expect(unsaid.agent.answerTo(3), isNull);
+    });
+
+    testWidgets('does not hold back a tool or a file change', (tester) async {
+      final s = await _shown(tester, mode: 'accept_edits');
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(_offer, findsOneWidget);
     });
   });
 
@@ -368,6 +397,63 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('rule-problem')), findsOneWidget);
       expect(s.rules.rules, isEmpty);
+    });
+  });
+
+  group('where a file change is remembered', () {
+    for (final place in [SessionPlace.host, SessionPlace.peer, SessionPlace.browser]) {
+      testWidgets('not for a session on a ${place.name} place', (tester) async {
+        final s = await _shown(tester);
+        s.session.place = place;
+        s.agent.editFile(1, '/work/calc/src/a.js');
+        s.agent.run(2, 'npm test');
+        await _settle(tester);
+        final asked = s.session.pendingPermissions;
+        expect(asked, hasLength(2));
+        expect(asked.first.subject, isNull, reason: 'a file change has no rule here');
+        expect(asked.last.subject, isA<CommandSubject>(), reason: 'a command still does');
+      });
+    }
+
+    testWidgets('on this computer it has one', (tester) async {
+      final s = await _shown(tester);
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(s.session.pendingPermissions.single.subject, isA<PathSubject>());
+    });
+
+    testWidgets('and a rule made for a local session does not answer for a hosted one', (tester) async {
+      final s = await _shown(tester);
+      _add(s, kind: 'edit', type: RuleType.path, value: '/work/calc/src');
+      s.session.place = SessionPlace.host;
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull);
+    });
+
+    testWidgets('not where links cannot be followed, as in a browser', (tester) async {
+      final backend = MemoryLedgerBackend();
+      final s = await _shown(tester, rules: PermissionRules(backend), backend: backend);
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(_offer, findsNothing);
+    });
+
+    testWidgets('not where the session folder is home, holds it, or is Canoa\'s settings', (tester) async {
+      final backend = MemoryLedgerBackend();
+      final guarded = PermissionRules(backend, real: _plain, guards: const PermissionGuards(home: '/work/calc', config: '/cfg'));
+      final s = await _shown(tester, rules: guarded, backend: backend);
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(_offer, findsNothing);
+      s.store.cancelPermission(s.session);
+      final above = PermissionRules(MemoryLedgerBackend(), real: _plain, guards: const PermissionGuards(home: '/work/calc/home'));
+      final t = await _shown(tester, rules: above);
+      t.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(_offer, findsNothing, reason: 'the folder holds home');
     });
   });
 
@@ -427,6 +513,32 @@ void main() {
       expect(find.byKey(const Key('rules-write-problem')), findsOneWidget);
     });
 
+    testWidgets('shows a rule an earlier version wrote as no longer supported, and revokes it', (tester) async {
+      final backend = MemoryLedgerBackend()
+        ..document = '{"version":1,"rules":[{"id":"old","source":"s","folder":"/f","tool":"execute","type":"prefix","value":"npm test","made":"2026-11-01T00:00:00Z","by":"canoa"}]}';
+      final rules = PermissionRules(backend);
+      await tester.runAsync(rules.load);
+      await open(tester, rules);
+      expect(find.textContaining('No longer supported (prefix): npm test'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('revoke-old')));
+      await tester.pumpAndSettle();
+      expect(rules.rules, isEmpty);
+    });
+
+    testWidgets('a rule revoked by another instance stops answering before the next request is matched', (tester) async {
+      final s = await _shown(tester);
+      final rule = _add(s, type: RuleType.command, value: 'npm test');
+      await tester.runAsync(s.rules.settled);
+      final other = PermissionRules(s.backend, real: _plain);
+      await tester.runAsync(other.load);
+      other.revoke(rule.id);
+      await tester.runAsync(other.settled);
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull);
+      expect(s.rules.rules, isEmpty);
+    });
+
     testWidgets('a revoked rule asks again', (tester) async {
       final s = await _shown(tester);
       final rule = _add(s, type: RuleType.command, value: 'npm test');
@@ -457,7 +569,7 @@ void main() {
       await _settle(tester);
       await tester.tap(_offer);
       await tester.pumpAndSettle();
-      expect(find.textContaining('Never version control, settings, hooks, build scripts'), findsOneWidget);
+      expect(find.textContaining('Never a hidden file or folder, build scripts'), findsOneWidget);
     });
 
     testWidgets('refuses a path rule for version control, however it is asked for', (tester) async {
