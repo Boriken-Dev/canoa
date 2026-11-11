@@ -318,10 +318,10 @@ impl<'a> Run<'a> {
     }
 
     fn say(&self, line: &str) {
-        if let Some(prompter) = self.prompter {
-            if !line.is_empty() {
-                let _ = prompter.say(line);
-            }
+        if let Some(prompter) = self.prompter
+            && !line.is_empty()
+        {
+            let _ = prompter.say(line);
         }
     }
 
@@ -329,10 +329,10 @@ impl<'a> Run<'a> {
         if Instant::now() >= self.deadline {
             return Some("install timed out");
         }
-        if let Some(prompter) = self.prompter {
-            if prompter.cancelled().unwrap_or(false) {
-                return Some("install cancelled");
-            }
+        if let Some(prompter) = self.prompter
+            && prompter.cancelled().unwrap_or(false)
+        {
+            return Some("install cancelled");
         }
         None
     }

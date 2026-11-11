@@ -107,6 +107,10 @@ name = "echo_provider"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "echo_store"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "echo_source"
 crate-type = ["cdylib"]
 
