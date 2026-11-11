@@ -65,6 +65,22 @@ Bypass is on, the mode control shows in the accent colour and a banner and a mar
 **Leave Bypass** ends it in one action. It is the chat's answer to the agent's requests and nothing else: it never reaches the
 browser extension's grants for pages, tabs or tools, which stay [their own](acp-permissions.md#independent-browser-grants).
 
+**Always allow here.** A card for a command, a change to one file or an MCP tool also offers a button that names its scope,
+`Always allow here: <folder>`, beside the agent's own answers (and only when the agent offers an answer that allows once). It
+opens the rule to read and edit before anything is kept: a command as exactly that command, or as the words it starts with
+(whole words, then arguments only: a prefix never covers a second command, a substitution, a redirection or a line break); a
+change to a file as that file or a folder under the session's own; an MCP tool as that tool of that server with any input. A rule
+has to cover the very request it was made from, and is kept for one source (the agent entry's label) and one folder (exactly the
+session's, not what is under it). A later request that matches is answered with the agent's `allow_once` answer, never an
+`allow_always`, and never when the agent offers no `allow_once`; anything else, including input that says more than a command or
+a path (a background run, a second path), asks as before. Paths are read lexically (`.` and `..` resolved, separators and the
+case of a Windows drive ignored); a link inside the folder is read as written. Each rule made and each use is said in the
+conversation. Rules are kept in `permissions.json` beside canoa.cfg (in the browser, the origin's IndexedDB), listed in
+Settings under **Permissions** with when each was made and how often it answered, and **Revoke** takes one back at once. Canoa
+adds no rule when the person picks the agent's own "always": that stays the agent's, and when the agent then changes the
+session's mode, the conversation says it did. A hosted session's requests come to this app like any other, so the rules are the
+user's own wherever the agent runs.
+
 ## The changes pane
 
 **Changes** in a conversation's header, once a tool has changed a file, lists every file the session's completed tools

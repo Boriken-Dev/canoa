@@ -4,6 +4,7 @@ import '../acp/client.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
 import 'agent_events.dart' show shortText;
+import 'remember_dialog.dart';
 
 /// Where an option goes among the answers: refusals first, then what Canoa does not know, then what allows; once before always.
 int _rank(AcpPermissionOption option) => switch (option.kind) {
@@ -62,6 +63,8 @@ class PermissionCard extends StatelessWidget {
     final ordered = [...question.options]..sort((a, b) => _rank(a) - _rank(b));
     final remembers = ordered.any((option) => option.kind.endsWith('_always'));
     final agent = shortText(session.agent) ?? 'The agent';
+    final folder = session.cwd ?? '';
+    final canRemember = question.subject != null && folder.isNotEmpty;
     final asked = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -73,6 +76,15 @@ class PermissionCard extends StatelessWidget {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               'An "always" answer is remembered by $agent, not by Canoa: Canoa cannot see or undo what it keeps.',
+              style: small,
+            ),
+          ),
+        if (canRemember)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Always allow here: Canoa itself answers allow once to what you confirm, for $agent in $folder, until you revoke '
+              'it in Settings, Permissions.',
               style: small,
             ),
           ),
@@ -102,6 +114,15 @@ class PermissionCard extends StatelessWidget {
       children: [
         for (final option in ordered)
           PermissionChoice(option: option, onPressed: () => store.choosePermission(session, option)),
+        if (canRemember)
+          FilledButton.tonal(
+            key: const Key('always-allow-here'),
+            onPressed: () => showDialog<bool>(
+              context: context,
+              builder: (_) => RememberDialog(store: store, session: session, question: question),
+            ),
+            child: Text('Always allow here: ${folderName(folder)}', maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
         if (ordered.isEmpty)
           TextButton(onPressed: () => store.cancelPermission(session), child: const Text('Cancel the request')),
       ],
@@ -112,7 +133,7 @@ class PermissionCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: LayoutBuilder(builder: (context, constraints) {
-            final beside = constraints.maxWidth >= besideFrom && ordered.length <= 2;
+            final beside = constraints.maxWidth >= besideFrom && ordered.length + (canRemember ? 1 : 0) <= 2;
             final top = Row(
               crossAxisAlignment: beside ? CrossAxisAlignment.center : CrossAxisAlignment.start,
               children: [

@@ -109,7 +109,7 @@ bool pathInside(String folder, String path) {
 
 /// What ends a command or reaches beyond it: control and line characters (hidden ones too), and the shell's separators,
 /// redirections, substitutions and groupings.
-final RegExp _beyondPrefix = RegExp(r'[\u0000-\u001f\u007f-\u009f‎‏ -‮⁦-⁩;&|<>`$(){}\\]');
+final RegExp _beyondPrefix = RegExp(r'[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069;&|<>`$(){}\\]');
 
 /// Why [prefix] cannot stand for the start of a command, or null when it can. It is a prefix the person read: whole words, and
 /// none of the characters that start another command.

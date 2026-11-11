@@ -15,6 +15,7 @@ import 'chat/update_record.dart';
 import 'chat/usage.dart';
 import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
+import 'permissions/permission_rules.dart';
 import 'profile/apply.dart';
 import 'profile/profile_layers.dart' show LayerNote;
 import 'sources/source_choices.dart';
@@ -57,7 +58,7 @@ class ChatMessage {
 /// offers an allow before it would wait here.
 final class PermissionQuestion {
   PermissionQuestion(this.title, this.kind,
-      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId});
+      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId, this.subject});
   final String title;
   final String? kind;
 
@@ -75,6 +76,9 @@ final class PermissionQuestion {
 
   /// Whether it is a question or a plan for the person, which Bypass never answers.
   final bool forPerson;
+
+  /// What it would do, in the terms a remembered rule states; null when no rule could cover it, or the card offers none.
+  final RuleSubject? subject;
   final Completer<AcpDecision> _answer = Completer();
 }
 
@@ -213,6 +217,9 @@ class ChatSession {
   /// Whether Bypass was chosen before the agent was known, so it is the agent's own where the agent turns out to have one.
   bool bypassBeforeAgent = false;
 
+  /// When the person last answered with the agent's own "always", for saying that a change of mode soon after is what it did.
+  DateTime? alwaysAnsweredAt;
+
   /// The mode the person, a profile or the agent last set, as the agent names it: what the ledger keeps. Never the agent's
   /// starting default, which nobody chose.
   String? chosenMode;
@@ -289,7 +296,7 @@ String titleFrom(String text) {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder, this.ledger, this.defaultMode, this.bypassOnceOnly = false,
+  SessionStore({bool includePreview = true, this.recorder, this.ledger, this.rules, this.defaultMode, this.bypassOnceOnly = false,
       this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
       : readFile = readFile ?? readLocalFile {
     if (includePreview) {
@@ -316,6 +323,9 @@ class SessionStore extends ChangeNotifier {
 
   /// Where every session opened or resumed here is noted, to be listed and opened again after the app ends.
   final SessionLedger? ledger;
+
+  /// What the person told Canoa to allow without asking, per source and folder; null where nothing is kept.
+  final PermissionRules? rules;
 
   /// Where drafts are kept between runs, with what is written in them and what goes with them.
   final DraftKeeper? drafts;
@@ -534,6 +544,13 @@ class SessionStore extends ChangeNotifier {
     if (before == null || now == null || now == before || now == 'custom') return;
     session.chosenMode = now;
     _keepMode(session);
+    final answered = session.alwaysAnsweredAt;
+    if (answered != null && DateTime.now().difference(answered) < const Duration(seconds: 30)) {
+      session.alwaysAnsweredAt = null;
+      final label = modeEntries(modeOptionIn(session.options)).where((entry) => entry.value == now).firstOrNull?.label ?? now;
+      _note(session, 'After your "always" answer, ${shortText(session.agent) ?? 'the agent'} switched this session to $label. '
+          'The mode control changes it back.');
+    }
   }
 
   /// Puts a draft in the mode [value] names, which is Canoa's own Bypass where the agent has none that asks for nothing.
@@ -946,6 +963,21 @@ class SessionStore extends ChangeNotifier {
         return Future.value(AcpSelect(allow.optionId));
       }
     }
+    final subject = forPerson
+        ? null
+        : subjectOf(kind: request.kind, title: request.title, rawInput: request.rawInput, toolCall: request.toolCall);
+    final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
+    final folder = target.cwd;
+    final keepable = rules != null && subject != null && once != null && folder != null && folder.isNotEmpty;
+    if (keepable) {
+      final rule = rules!.match(source: target.agent, folder: folder, kind: request.kind, subject: subject);
+      if (rule != null) {
+        rules!.recordUse(rule);
+        _note(target, 'A remembered rule allowed: $title (${rule.describe}). Settings, Permissions shows it and revokes it.');
+        notifyListeners();
+        return Future.value(AcpSelect(once.optionId));
+      }
+    }
     final question = PermissionQuestion(
       title,
       request.kind,
@@ -957,6 +989,7 @@ class SessionStore extends ChangeNotifier {
       bypassPassed: target.bypass,
       forPerson: forPerson,
       toolCallId: request.toolCall?['toolCallId'] as String?,
+      subject: keepable ? subject : null,
     );
     target.pendingPermissions.add(question);
     _needs(target, AttentionKind.permission);
@@ -1017,8 +1050,31 @@ class SessionStore extends ChangeNotifier {
     final question = session.pendingPermissions.first;
     if (!question.options.contains(option)) return;
     session.pendingPermissions.removeAt(0);
+    if (option.kind == 'allow_always') session.alwaysAnsweredAt = DateTime.now();
     question._answer.complete(AcpSelect(option.optionId));
     notifyListeners();
+  }
+
+  /// The scope the person set for the oldest request in [session], as [type] and [value]: remembered as a rule for this source
+  /// in this folder, and the request answered with the agent's allow-once answer. Returns why it cannot be made, or null once
+  /// it is.
+  String? rememberHere(ChatSession session, RuleType type, String value) {
+    final store = rules, folder = session.cwd;
+    if (session.pendingPermissions.isEmpty || store == null || folder == null || folder.isEmpty) return 'There is nowhere to keep a rule.';
+    final question = session.pendingPermissions.first;
+    final subject = question.subject, kind = question.kind;
+    final once = question.options.where((option) => option.kind == 'allow_once').firstOrNull;
+    if (subject == null || kind == null || once == null) return 'No rule can cover this request.';
+    final problem = scopeProblem(type, value, subject, folder);
+    if (problem != null) return problem;
+    final rule = store.add(source: session.agent, folder: folder, kind: kind, type: type, value: value);
+    if (rule == null) return 'Canoa keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
+    session.pendingPermissions.removeAt(0);
+    _note(session, 'Always allow here: ${rule.describe}, for ${shortText(session.agent) ?? 'this source'} in $folder. Canoa now '
+        'answers a matching request with allow once, without asking you. Settings, Permissions revokes it.');
+    question._answer.complete(AcpSelect(once.optionId));
+    notifyListeners();
+    return null;
   }
 
   /// The person's answer to a question offering nothing they could choose: it is answered cancelled.

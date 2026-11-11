@@ -3,12 +3,13 @@ import 'canoa_config.dart';
 import '../chat/modes.dart';
 import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
+import '../permissions/permission_rules.dart';
 import '../sources/sources.dart';
 import '../theme/look.dart';
 import '../workspace/workspace_template.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles,
+  const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.rules, this.onProfiles,
       this.onAllowNotifications, this.onPreview, this.workspacePreview, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
   final CanoaConfig config;
 
@@ -36,6 +37,9 @@ class SettingsDialog extends StatefulWidget {
 
   /// The session list, whose kept text Settings can clear.
   final SessionLedger? ledger;
+
+  /// What the person told Canoa to allow without asking, which Settings lists and revokes at once, apart from Save.
+  final PermissionRules? rules;
 
   /// Opens the effective profile of each agent.
   final VoidCallback? onProfiles;
@@ -102,6 +106,39 @@ class SettingsDialogState extends State<SettingsDialog> {
       _sourceCommand.clear();
     });
   }
+
+  /// The rules made by "Always allow here", each with when it was made and how often it answered, and a way to take it back.
+  Widget _permissions(BuildContext context) => ListenableBuilder(
+    listenable: widget.rules!,
+    builder: (context, _) {
+      final rules = widget.rules!.rules;
+      String day(DateTime at) => at.toLocal().toIso8601String().substring(0, 10);
+      return ExpansionTile(
+        key: const Key('settings-permissions'),
+        title: const Text('Permissions'),
+        subtitle: Text(rules.isEmpty ? 'Nothing is allowed without asking' : '${rules.length} remembered, each answered with allow once'),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.rules!.problem case final problem?)
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+          if (rules.isEmpty)
+            const ListTile(title: Text('"Always allow here" on a permission card remembers a rule for a source and a folder; it is listed here.')),
+          for (final rule in rules)
+            ListTile(
+              key: Key('rule-${rule.id}'),
+              title: Text(rule.describe),
+              subtitle: Text(
+                '${rule.source} in ${rule.folder}\n'
+                'Made ${day(rule.made)}; used ${rule.fired == 1 ? 'once' : '${rule.fired} times'}'
+                '${rule.lastUsed == null ? '' : ', last ${day(rule.lastUsed!)}'}',
+              ),
+              isThreeLine: true,
+              trailing: TextButton(key: Key('revoke-${rule.id}'), onPressed: () => widget.rules!.revoke(rule.id), child: const Text('Revoke')),
+            ),
+        ],
+      );
+    },
+  );
 
   Widget _sources(BuildContext context) => ExpansionTile(
     key: const Key('settings-sources'),
@@ -307,6 +344,7 @@ class SettingsDialogState extends State<SettingsDialog> {
           ],
         ),
         if (widget.presets.isNotEmpty || config.agents.isNotEmpty || widget.hosted.isNotEmpty) _sources(context),
+        if (widget.rules != null) _permissions(context),
         ListTile(
           key: const Key('settings-default-mode'),
           title: const Text('Mode of a new session'),

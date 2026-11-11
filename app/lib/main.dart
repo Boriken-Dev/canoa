@@ -42,6 +42,7 @@ import 'auth/peer_proof.dart' show PeerMethod;
 import 'ledger/ledger_backend.dart';
 import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
+import 'permissions/permission_rules.dart';
 import 'profile/apply.dart';
 import 'profile/launch.dart';
 import 'profile/profile.dart' show OverlaySource;
@@ -75,6 +76,8 @@ Future<void> main(List<String> args) async {
   // Beside canoa.cfg on a desktop, in this origin's IndexedDB on the web.
   final ledger = SessionLedger(platformLedgerBackend(configPath: desktopConfigPath()), settings: config.sessions);
   await ledger.load();
+  final rules = PermissionRules(platformLedgerBackend(configPath: desktopConfigPath(), name: 'permissions'));
+  await rules.load();
   final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
   final shell = createDesktopShell();
   final settingsSignal = ValueNotifier<int>(0);
@@ -89,7 +92,7 @@ Future<void> main(List<String> args) async {
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
-    host: host, hostingSignal: hostingSignal, ledger: ledger, notifier: platformNotifier(), drafts: drafts,
+    host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts,
   ));
   await host?.apply(configPath: desktopConfigPath());
 }
@@ -100,7 +103,7 @@ class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
-    this.configPath, this.writeConfig, this.ledger, this.notifier, this.drafts,
+    this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.checkSource, this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard, this.startAgent,
     this.worktrees, this.documents, this.askChoices,
   });
@@ -147,6 +150,9 @@ class CanoaApp extends StatefulWidget {
 
   /// The list of sessions kept across runs, for a store this app makes; a given [store] brings its own.
   final SessionLedger? ledger;
+
+  /// What the person told Canoa to allow without asking, kept across runs, for a store this app makes.
+  final PermissionRules? rules;
   final CanoaConfig config;
   final DesktopShell? shell;
   final ValueNotifier<int>? settingsSignal;
@@ -229,7 +235,7 @@ class _CanoaAppState extends State<CanoaApp> {
       fromDialog = await showSelectableDialog<CanoaConfig>(
         context: above,
         builder: (_) => SettingsDialog(
-          config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
+          config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger, rules: store.rules,
           onProfiles: _showProfiles,
           onPreview: (preview) => setState(() => _preview = preview),
           workspacePreview: hasWorkspaceFolders && canRunLocalAgents
@@ -960,7 +966,7 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
     store = widget.store ??
-        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, defaultMode: config.defaultMode, bypassOnceOnly: config.allowOnceOnly,
+        SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, rules: widget.rules, defaultMode: config.defaultMode, bypassOnceOnly: config.allowOnceOnly,
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.starter = _startDraft;
     store.choicesLoader = _askChoices;
