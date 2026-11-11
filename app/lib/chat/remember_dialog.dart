@@ -113,6 +113,14 @@ class _RememberDialogState extends State<RememberDialog> {
                 ),
               ),
             Text(
+              'Limits: a hard link is not detected; the list of files never covered cannot be complete; and what the agent has '
+              'itself been set to allow (its own permissions, or rules it remembered) is outside what Canoa can see, and can make '
+              'Manual silent.',
+              key: const Key('rule-limits'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
               'Canoa then answers a matching request with allow once, itself, without asking you, until you revoke the rule in '
               'Settings, Permissions. It never answers an "always", a request from another source or folder, or one the agent '
               'offers no allow once for.',

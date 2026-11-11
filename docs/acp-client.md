@@ -69,47 +69,66 @@ browser extension's grants for pages, tabs or tools, which stay [their own](acp-
 `Always allow here: <folder>`, beside the agent's own answers (and only when the agent offers an answer that allows once). It
 opens the rule to read before anything is kept:
 
-- A command is allowed exactly, that command and no other: there are no prefix rules. A command holding a control, line-break or
-  hidden character is never remembered. A command rule applies only while the session is in a mode Canoa can see asks about
-  commands (the agent's Manual or Plan); in Accept edits, in Bypass, in the mode an agent's own "always" switches to, in any
-  other mode or before the agent has said, it asks as it would. A command runs whatever the files in the folder make it do, which
-  the dialog says.
-- A change to a file is allowed for that file or a folder under the session's own, by an absolute path, and only for a session
-  on this computer (`SessionPlace.local`) in a desktop build, which can follow links. Nothing is offered for a hosted, peer or
-  browser-provided session, in a browser, or where the session folder is the person's home folder, holds it, or touches Canoa's
-  configuration folder (read as written and after links are resolved). A path that is relative, starts with `~`, holds a `:`
-  other than a drive letter's (a stream, `C:x`) or is a network path is never offered a rule. Below the session folder, no
-  segment is ever covered that starts with a dot (`.git`, `.claude`, `.envrc`, ...), is one of `package.json`, `Makefile`,
-  `justfile`, `pyproject.toml`, `setup.py`, `build.rs`, `Rakefile`, `Cargo.toml`, `conftest.py`, `AGENTS.md`,
-  `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`, `Directory.Build.props`, `Directory.Build.targets`,
-  `mise.toml`, `node_modules`, or ends in `.config.js`, `.mjs`, `.cjs` or `.ts` (`protectedFiles`, `protectedSegment`). Each
-  segment is read the way Windows reads it first (trailing dots and spaces dropped, so `.claude.` and `package.json.` are
-  protected; an 8.3 name with `~1` is refused), and one with anything but printable ASCII is refused rather than normalised.
-  Links are resolved and the result has to satisfy the same rules inside the resolved folder and scope. An `edits` list is read
-  only as entries of `old_string`, `new_string` and `replace_all`; a request carrying a patch, a diff or any other key is not
-  covered.
+- A command is allowed exactly, that command and no other: there are no prefix rules. Only a command of printable ASCII is
+  remembered, so nothing that looks like another character (a curly quote, a typographic dash, a Unicode space, a hidden or tag
+  character) and no control or line break gets a rule. A command runs whatever the files in the folder make it do, which the
+  dialog says.
 - An MCP tool is allowed as that tool of that server with any input, by the structured tool name the agent sends
-  (`_meta.claudeCode.toolName`, `mcp__<server>__<tool>`); a title is never read as one.
+  (`_meta.claudeCode.toolName`, `mcp__<server>__<tool>`); a title is never read as one. A tool counts as a command: it may run
+  one. None is offered for a tool of the `execute` kind or whose server or tool name says it runs things (run, exec, process,
+  shell, terminal, eval, bash, command, cmd, spawn, script, invoke, powershell).
+- Commands and tools apply only while the session is in a mode Canoa can see asks about commands (the agent's Manual or Plan);
+  in Accept edits, in Bypass, in the mode an agent's own "always" switches to, in any other mode or before the agent has said, a
+  request asks as it would.
+- A change to a file is allowed for that file or a folder under the session's own, by an absolute path with no `.` or `..` in it
+  (the system resolves `..` after links), and only for a session on this computer (`SessionPlace.local`) in a desktop build,
+  which can follow links. Nothing is offered for a hosted, peer or browser-provided session, in a browser, or where the session
+  folder is the person's home folder, holds it, or touches Canoa's configuration folder (read as written and after links are
+  resolved). A path that is relative, starts with `~`, holds a `:` other than a drive letter's (a stream, `C:x`) or is a network
+  path is never offered a rule. Below the session folder no segment is ever covered that starts with a dot (`.git`, `.claude`,
+  `.envrc`, ...), is a Windows device name (`CON`, `NUL`, `COM1`, with or without an extension), or is one of the names in
+  `protectedFiles` and `protectedSegment` in `permission_rules.dart`: build and test scripts and manifests (`package.json`,
+  `Makefile`, `pyproject.toml`, `setup.py`, `setup.cfg`, `tox.ini`, `pytest.ini`, `noxfile.py`, `conftest.py`, `build.rs`,
+  `Cargo.toml`, `go.mod`, `go.work`, `pom.xml`, `build.gradle*`, `gradlew`, `mvnw`, `gradle-wrapper.properties`, `*.csproj`,
+  `Directory.Build.*`, `Directory.Packages.props`, `nuget.config`, `CMakeLists.txt`, `meson.build`, `Gemfile`, `Rakefile`,
+  `Dockerfile`, `requirements*.txt`, `rust-toolchain*`, `shell.nix`, `flake.nix`, `mise.toml`, `*.code-workspace`), tool
+  configuration (`vite.config.*`, `webpack.config.*`, `gulpfile.*`, `Gruntfile.*`, `*.config.js|mjs|cjs|ts`), agent instruction
+  files (`AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`) and code a build runs (`node_modules`,
+  `vendor`, `venv`, `env`, `__pycache__`, `*.pth`). Each segment is read the way Windows reads it first (trailing dots and
+  spaces dropped, so `.claude.` and `package.json.` are protected; an 8.3 name with `~1` is refused), and one with anything but
+  printable ASCII is refused rather than normalised. Links are resolved and the result has to satisfy the same rules inside the
+  resolved folder and scope. An `edits` list is read only as entries of `old_string`, `new_string` and `replace_all`; a request
+  carrying a patch, a diff or any other key is not covered.
 
-A source keeps command rules or file-change and tool rules, not both: not in one folder and not in two where one holds the
-other, because a command can write any file and a file change or a file system tool can write what a command runs. A rule has to
-cover the very request it was made from (the one the dialog was opened for), and is kept for one source (the key the session
-list remembers it under: a preset's or command's label, and `canoa/<name>` for an entry the host serves), the peer it ran on,
-one folder (exactly the session's, not what is under it) and the tool the agent named (`Bash` is not `PowerShell`). A later
-request that matches is answered with the agent's `allow_once` answer, never an `allow_always`, and never when the agent offers
-no `allow_once`; anything else, including input that says more than a command or a path (a background run, a second path),
-asks as before. Each rule made and each use is said in the conversation. Rules are kept in `permissions.json` beside canoa.cfg
-(in the browser, the origin's IndexedDB). On a desktop `permissions-log.jsonl` beside it gets one JSON line appended for each
-rule made, used and revoked: the time, the rule, its source and folder, a redacted form of what it covered (a command is its
-program and how many arguments follow, never the arguments) and the SHA-256 of the full text; it only grows, and a browser keeps
-none. The rules file is read again before each write and before a request is matched, so a rule another program added is kept
-and shown as not made in this app, and a rule another instance revoked stops applying. A write that fails is shown in Settings.
-A rule an earlier version wrote that this one does not understand (the prefix rules it once had) is kept, shown as no longer
-supported and never applied, until it is revoked. Settings lists the rules under **Permissions** with when each was made and how
-often it answered, and **Revoke** takes one back at once. Canoa adds no rule when the person picks the agent's own "always":
-that stays the agent's, and when the agent then changes the session's mode, the conversation says it did. Rules are kept by this
-app, per client, for every session it shows, wherever the agent runs; they move to the host with the session state when that
-moves.
+Commands and tools are not kept together with file changes, for any source or peer: not in one folder, not in two where one holds
+the other once links are resolved, and not in two folders of one repository (the nearest `.git`), because a command can write any
+file and a file change can write what a command runs. A rule has to cover the very request it was made from (the one the dialog
+was opened for), and is kept for one source (the key the session list remembers it under: a preset's or command's label, and
+`canoa/<name>` for an entry the host serves), the peer it ran on, one folder (exactly the session's, not what is under it) and the
+tool the agent named (`Bash` is not `PowerShell`). A later request that matches is answered with the agent's `allow_once` answer,
+never an `allow_always`, and never when the agent offers no `allow_once`; anything else, including input that says more than a
+command or a path (a background run, a second path), asks as before.
+
+A request that needs the rules is matched after the rules file is read again, in order with the requests before it, and only if
+nothing changed meanwhile: a request that was waiting when the person pressed Stop, closed the conversation, or the connection
+ended is answered cancelled, and one that finds the mode, Bypass or the cards different is decided on what they are now. Each rule
+made and each use is said in the conversation. Rules are kept in `permissions.json` beside canoa.cfg (in the browser, the origin's
+IndexedDB). On a desktop the file is replaced through a temp file named for that write, under a lock that the read-merge-write holds,
+so another instance cannot write between; a rule another program added is kept and shown as not made in this app, and a rule
+another instance revoked is dropped. A file that cannot be read or does not parse applies no rule at all and is not written over;
+Settings says so. A write that fails is shown in Settings. On a desktop `permissions-log.jsonl` beside it gets one JSON line
+appended for each rule made, used and revoked: the time, the rule's id, source and folder, and for a command only its program
+(never an argument, an assignment or a URL), for a path or tool the thing itself. It holds no hash of the text, only grows, and a
+browser keeps none. A rule an earlier version wrote that this one does not understand (the prefix rules it once had) is kept,
+shown as no longer supported and never applied, until it is revoked. Settings lists the rules under **Permissions** with when each
+was made and how often it answered, and **Revoke** takes one back at once. Canoa adds no rule when the person picks the agent's own
+"always": that stays the agent's, and when the agent then changes the session's mode, the conversation says it did. Rules are kept
+by this app, per client, for every session it shows, wherever the agent runs; they move to the host with the session state when
+that moves.
+
+Known limits, said in the dialog too: a hard link to a file outside the folder is not detected; the list of names that are never
+covered cannot be complete; and what the agent has itself been set to allow (its own permission rules, rules it remembered) is
+outside what Canoa can see, and can make its Manual mode silent.
 
 ## The changes pane
 

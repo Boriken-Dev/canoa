@@ -95,6 +95,7 @@ Future<void> main(List<String> args) async {
       config: _parentFolder(configFile),
     ),
     real: platformRealPath,
+    repoRoot: platformRepoRoot,
   );
   await rules.load();
   final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));

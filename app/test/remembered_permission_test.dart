@@ -146,7 +146,136 @@ Future<void> _confirm(WidgetTester tester) async {
   await _settle(tester);
 }
 
+/// A rules file whose reads wait while [hold] is set, as a slow disk does.
+final class _GatedBackend implements LedgerBackend {
+  String? document;
+  bool hold = false;
+  final _waiting = <Completer<void>>[];
+
+  void release() {
+    hold = false;
+    for (final waiting in _waiting) {
+      waiting.complete();
+    }
+    _waiting.clear();
+  }
+
+  @override
+  String get location => 'a slow file';
+
+  @override
+  Future<String?> read() async {
+    if (hold) {
+      final waiting = Completer<void>();
+      _waiting.add(waiting);
+      await waiting.future;
+    }
+    return document;
+  }
+
+  @override
+  Future<void> write(String document) async => this.document = document;
+}
+
+void raceTests() {
+  group('a request waiting for the rules to be read again', () {
+    Future<(_Shown, _GatedBackend)> gated(WidgetTester tester, {String mode = 'manual'}) async {
+      final backend = _GatedBackend();
+      final s = await _shown(tester, rules: PermissionRules(backend, real: _plain), mode: mode);
+      _add(s, type: RuleType.command, value: 'npm test');
+      await tester.runAsync(s.rules.settled);
+      backend.hold = true;
+      return (s, backend);
+    }
+
+    Future<void> done(WidgetTester tester, _Shown s, _GatedBackend backend) async {
+      await tester.runAsync(() async => backend.release());
+      await _settle(tester);
+    }
+
+    testWidgets('is dropped when the person presses Stop meanwhile, and not answered allow once after it', (tester) async {
+      final (s, backend) = await gated(tester);
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.session.pendingPermissions, isEmpty, reason: 'it waits on the read');
+      await tester.runAsync(s.store.cancelActiveSession);
+      await done(tester, s, backend);
+      expect(s.agent.chose(1), isNull, reason: 'a turn that was stopped is not allowed to go on');
+      expect(s.agent.answerTo(1)?['result'], {'outcome': {'outcome': 'cancelled'}});
+      expect(s.rules.rules.single.fired, 0);
+      expect(s.session.messages.where((m) => m.text.contains('A remembered rule allowed')), isEmpty);
+    });
+
+    testWidgets('is dropped when the conversation is closed meanwhile', (tester) async {
+      final (s, backend) = await gated(tester);
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      await tester.runAsync(() => s.store.close(s.session));
+      await done(tester, s, backend);
+      expect(s.agent.chose(1), isNull);
+      expect(s.rules.rules.single.fired, 0);
+    });
+
+    testWidgets('is not answered by a rule once the mode accepts edits, which it learns of meanwhile', (tester) async {
+      final (s, backend) = await gated(tester);
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      s.agent.setMode('accept_edits');
+      await _settle(tester);
+      await done(tester, s, backend);
+      expect(s.agent.answerTo(1), isNull);
+      expect(s.session.pendingPermissions, hasLength(1), reason: 'it asks, as the mode now says');
+      expect(s.rules.rules.single.fired, 0);
+    });
+
+    testWidgets('is answered by Bypass, not by the rule, when Bypass was chosen meanwhile', (tester) async {
+      final (s, backend) = await gated(tester);
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      s.session.bypass = true;
+      await done(tester, s, backend);
+      expect(s.agent.chose(1), 'allow-once');
+      expect(s.rules.rules.single.fired, 0, reason: 'Bypass answered it');
+      expect(s.session.messages.where((m) => m.text.contains('Bypass allowed')), isNotEmpty);
+    });
+
+    testWidgets('keeps the cards in the order the requests came, whether or not they needed the read', (tester) async {
+      final (s, backend) = await gated(tester);
+      s.agent.run(1, 'cargo test');
+      s.agent.ask(2, 'Read a file', kind: 'read', rawInput: {'file_path': '/work/calc/a'});
+      s.agent.run(3, 'cargo build');
+      await _settle(tester);
+      expect(s.session.pendingPermissions, isEmpty, reason: 'the later ones do not pass the first');
+      await done(tester, s, backend);
+      expect([for (final asked in s.session.pendingPermissions) asked.toolCallId], ['t1', 't2', 't3']);
+    });
+  });
+}
+
+void toolRuleTests() {
+  group('a rule for an MCP tool is held to the mode like a command', () {
+    testWidgets('it does not apply while the mode accepts edits, and it is not offered', (tester) async {
+      final s = await _shown(tester, mode: 'accept_edits');
+      _add(s, kind: 'other', type: RuleType.mcp, value: 'mcp__marker__mark', toolName: 'mcp__marker__mark');
+      s.agent.ask(1, 'mark', kind: 'other', rawInput: {'x': 1}, toolName: 'mcp__marker__mark');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull);
+      expect(_offer, findsNothing);
+    });
+
+    testWidgets('it is never offered for a tool that executes', (tester) async {
+      final s = await _shown(tester);
+      s.agent.ask(1, 'run', kind: 'other', rawInput: {'x': 1}, toolName: 'mcp__sh__run_command');
+      s.agent.ask(2, 'list', kind: 'execute', rawInput: {'x': 1}, toolName: 'mcp__marker__list');
+      await _settle(tester);
+      expect(s.session.pendingPermissions.map((asked) => asked.subject), [isNull, isNull]);
+    });
+  });
+}
+
 void main() {
+  raceTests();
+  toolRuleTests();
   group('the card', () {
     testWidgets('offers Always allow here with the folder on the button and says what it does', (tester) async {
       final s = await _shown(tester);
@@ -608,7 +737,7 @@ void main() {
       await tester.pumpAndSettle();
       await _confirmKeeping(tester);
       expect(find.byKey(const Key('rule-problem')), findsOneWidget);
-      expect(find.textContaining('A rule for commands already stands here'), findsOneWidget);
+      expect(find.textContaining('A rule for commands or tools already stands'), findsOneWidget);
       expect(s.rules.rules, hasLength(1));
       expect(s.agent.answerTo(1), isNull);
     });

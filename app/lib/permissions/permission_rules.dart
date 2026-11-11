@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
 import '../ledger/session_ledger.dart' show LedgerBackend;
@@ -44,6 +43,13 @@ const Set<String> _editKeys = {'old_string', 'new_string', 'replace_all'};
 
 const List<String> _pathKeys = ['file_path', 'path', 'notebook_path'];
 
+/// Names that say a tool executes what it is given.
+final RegExp _executes = RegExp(r'run|exec|process|shell|terminal|eval|bash|command|cmd|spawn|script|invoke|powershell|pwsh', caseSensitive: false);
+
+/// Whether the path as written has a `.` or `..` segment, which the kernel resolves after links: `src/j/../evil` is not under `src`
+/// when `j` is a link.
+bool hasDotSegment(String path) => path.split(RegExp(r'[\\/]')).any((part) => part == '.' || part == '..');
+
 final RegExp _mcpName = RegExp(r'^mcp__([^_](?:[^_]|_(?!_))*)__(.+)$');
 
 /// What [rawInput] of a request of [kind] would do, when a rule can say so and nothing in it could mean more than that: an MCP
@@ -55,7 +61,11 @@ RuleSubject? subjectOf({String? kind, Object? rawInput, Map<String, dynamic>? to
   final structured = claude is Map && claude['toolName'] is String ? claude['toolName'] as String : '';
   if (structured.isNotEmpty) {
     final match = _mcpName.firstMatch(structured);
-    if (match != null) return McpSubject(structured, match.group(1)!, match.group(2)!);
+    if (match != null) {
+      // A tool that executes anything is a command with input no rule here can read: it is never remembered.
+      if (kind == 'execute' || _executes.hasMatch('${match.group(1)} ${match.group(2)}')) return null;
+      return McpSubject(structured, match.group(1)!, match.group(2)!);
+    }
   }
   if (rawInput is! Map) return null;
   switch (kind) {
@@ -65,7 +75,7 @@ RuleSubject? subjectOf({String? kind, Object? rawInput, Map<String, dynamic>? to
       return CommandSubject(structured, command);
     case 'edit':
       final paths = [for (final key in _pathKeys) if (rawInput.containsKey(key)) rawInput[key]];
-      if (paths.length != 1 || paths.single is! String || cleanPath(paths.single as String) == null) return null;
+      if (paths.length != 1 || paths.single is! String || cleanPath(paths.single as String) == null || hasDotSegment(paths.single as String)) return null;
       if (rawInput.keys.any((key) => !_pathKeys.contains(key) && !_contentKeys.contains(key))) return null;
       final edits = rawInput['edits'];
       if (edits != null && (edits is! List || edits.any((edit) => edit is! Map || edit.keys.any((key) => !_editKeys.contains(key))))) {
@@ -113,10 +123,17 @@ const Set<String> protectedFiles = {
   'package.json', 'makefile', 'justfile', 'pyproject.toml', 'setup.py', 'build.rs', 'rakefile', 'cargo.toml', 'conftest.py',
   'agents.md', 'agents.override.md', 'claude.md', 'claude.local.md', 'gemini.md',
   'directory.build.props', 'directory.build.targets', 'mise.toml', 'node_modules',
+  'venv', 'env', '__pycache__', 'pytest.ini', 'tox.ini', 'setup.cfg', 'noxfile.py', 'shell.nix', 'flake.nix', 'gradlew', 'mvnw',
+  'gradle-wrapper.properties', 'pom.xml', 'go.mod', 'go.work', 'directory.packages.props', 'nuget.config', 'cmakelists.txt',
+  'meson.build', 'gemfile', 'dockerfile', 'vendor',
 };
 
 final RegExp _shortName = RegExp(r'~[0-9]');
-final RegExp _configFile = RegExp(r'\.config\.(js|mjs|cjs|ts)$');
+final RegExp _configFile = RegExp(
+    r'\.config\.(js|mjs|cjs|ts)$|\.(pth|csproj|code-workspace)$|^requirements.*\.txt$|^build\.gradle|^rust-toolchain|^(vite|webpack)\.config\.|^(gulpfile|gruntfile)\.');
+
+/// Names Windows opens as a device whatever follows the dot: `CON`, `con.txt`, `COM1`.
+final RegExp _deviceName = RegExp(r'^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$');
 
 /// Whether one path segment below the session's folder is out of reach of a path rule. The segment is first read the way a file
 /// system reads it: Windows drops trailing dots and spaces, so `.claude.` and `package.json.` are the files they look like, and
@@ -131,7 +148,7 @@ bool protectedSegment(String raw) {
   }
   if (read.isEmpty || raw.startsWith('.') || read.startsWith('.')) return true;
   final lower = read.toLowerCase();
-  return _shortName.hasMatch(lower) || protectedFiles.contains(lower) || _configFile.hasMatch(lower);
+  return _shortName.hasMatch(lower) || _deviceName.hasMatch(lower) || protectedFiles.contains(lower) || _configFile.hasMatch(lower);
 }
 
 /// Whether [inner] (under [outer], both made by [cleanPath]) goes through a protected segment below [outer].
@@ -145,6 +162,14 @@ final class PermissionGuards {
   const PermissionGuards({this.home, this.config});
   final String? home, config;
 }
+
+/// A folder that can be locked while the rules file is read, changed and replaced, so two instances cannot write over each other.
+abstract interface class LockableBackend {
+  Future<T> exclusively<T>(Future<T> Function() body);
+}
+
+/// The nearest folder at or above [folder] that holds version control (`.git`), or null; a build only on a desktop has files to ask.
+typedef RepoRoot = String? Function(String folder);
 
 /// Resolves the links in a path, for what exists of it; null when it cannot. A desktop build resolves them; a browser, and a
 /// session on another machine, cannot, and no path rule is made there.
@@ -182,6 +207,7 @@ String? folderProblem(String folder, {PermissionGuards guards = const Permission
 String? pathProblem({required String scope, required String file, required String folder, PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
   final bad = folderProblem(folder, guards: guards, real: real);
   if (bad != null) return bad;
+  if (hasDotSegment(scope) || hasDotSegment(file)) return 'A path with . or .. in it is never covered: the system resolves .. after links.';
   final s = cleanPath(scope), f = cleanPath(file), d = cleanPath(folder);
   if (s == null || f == null || d == null) return 'A path has to be absolute, with no ~, no : but a drive letter\'s, and not a network path.';
   if (!_under(d, s)) return 'That is not inside $folder.';
@@ -192,9 +218,6 @@ String? pathProblem({required String scope, required String file, required Strin
   if (!_under(rd, rs) || !_under(rs, rf) || _touchesProtected(rd, rf) || _touchesProtected(rd, rs)) return 'A link in that path leads outside it, or to something never covered.';
   return null;
 }
-
-/// Characters an exact rule never holds: controls, line breaks, and what hides or reorders text.
-final RegExp _hiddenInExact = RegExp(r'[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]');
 
 /// How a rule says what it allows.
 enum RuleType {
@@ -212,10 +235,10 @@ enum RuleType {
 
   static RuleType? named(Object? name) => values.where((type) => type.name == name).firstOrNull;
 
-  /// Which kind of power it grants. A command can write any file, and a file change or an MCP tool (a file system tool among
-  /// them) can write what a command then runs, so one source and folder keep commands or the rest, never both.
-  bool get isCommand => this == command;
-  bool get isFilesystem => this == path || this == mcp;
+  /// Which kind of power it grants. A command can write any file, and an MCP tool may run one or write files, so it counts as one;
+  /// a file change can write what a command then runs. A folder keeps commands and tools, or file changes, never both.
+  bool get isCommand => this == command || this == mcp;
+  bool get isFilesystem => this == path;
 }
 
 /// One thing the person said to allow, for a source in a folder. Canoa answers a request it matches with the agent's allow-once
@@ -351,7 +374,9 @@ final class PermissionRule {
 String? scopeProblem(RuleType type, String value, RuleSubject subject, String folder, {PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
   switch ((type, subject)) {
     case (RuleType.command, CommandSubject(:final command)):
-      if (_hiddenInExact.hasMatch(command)) return 'The command holds a control, line-break or hidden character, so only you can allow it, each time.';
+      if (command.codeUnits.any((unit) => unit < 0x20 || unit > 0x7e)) {
+        return 'Only a command of printable ASCII is remembered: this one holds a control, line-break, space, quote, dash or other character that looks like another, so only you can allow it, each time.';
+      }
       return command == value ? null : 'That is not the command asked.';
     case (RuleType.path, PathSubject(:final path)):
       return pathProblem(scope: value, file: path, folder: folder, guards: guards, real: real);
@@ -381,22 +406,30 @@ final class MemoryRuleLog implements RuleLog {
   String get location => 'memory only';
 }
 
-/// What a log line says of [detail] instead of the text: a command is its program and how many arguments follow, which cannot
-/// hold a secret; a path or a tool is itself. [sha256Of] stands for the rest, so a line can be matched to a command and not read.
+final RegExp _assignment = RegExp(r'^(\$env:)?[A-Za-z_][A-Za-z0-9_]*=|^\$env:', caseSensitive: false);
+
+/// What a log line says of [detail] instead of the text: for a command only its program, with a mark that more followed; the
+/// arguments, assignments before it (`NAME=value`, `$env:NAME=...`) and anything that is a URL are left out, since any of them can
+/// hold a secret. A path or a tool is itself. A line can be matched to its rule by the rule's id.
 String redacted(RuleType type, String detail) {
   if (type != RuleType.command) return detail;
   final words = detail.trim().split(RegExp(r'\s+'));
-  final program = words.first.length > 64 ? '${words.first.substring(0, 64)}…' : words.first;
-  return words.length == 1 ? program : '$program … (${words.length - 1} arguments)';
+  var at = 0;
+  while (at < words.length && _assignment.hasMatch(words[at])) {
+    at++;
+  }
+  if (at >= words.length) return '(only assignments)';
+  var program = words[at];
+  if (program.contains('://') || program.contains('@')) program = '(a URL or an address)';
+  if (program.length > 64) program = '${program.substring(0, 64)}…';
+  return at + 1 < words.length ? '$program …' : program;
 }
-
-String sha256Of(String text) => sha256.convert(utf8.encode(text)).toString();
 
 /// The rules the person made, kept in a file beside canoa.cfg (IndexedDB in a browser), and a log of each rule made, used and
 /// revoked. A change is written at once. The stored file is read again before each write and before a request is matched, so a
 /// rule another program added is kept (and flagged) and a rule another instance revoked stops applying.
 class PermissionRules extends ChangeNotifier {
-  PermissionRules(this.backend, {this.log, this.guards = const PermissionGuards(), this.real, DateTime Function()? clock, Random? random})
+  PermissionRules(this.backend, {this.log, this.guards = const PermissionGuards(), this.real, this.repoRoot, DateTime Function()? clock, Random? random})
       : _clock = clock ?? DateTime.now,
         _random = random ?? Random.secure();
 
@@ -408,6 +441,9 @@ class PermissionRules extends ChangeNotifier {
 
   /// How links are followed; null where they cannot be, and no path rule is then made.
   final RealPath? real;
+
+  /// Where the repository of a folder starts, when that can be asked.
+  final RepoRoot? repoRoot;
   final DateTime Function() _clock;
   final Random _random;
   final List<PermissionRule> _rules = [];
@@ -453,29 +489,55 @@ class PermissionRules extends ChangeNotifier {
         ..clear()
         ..addAll(_parse(document));
       _persisted = {for (final rule in _rules) rule.id};
+      problem = null;
     } on FormatException catch (error) {
-      problem = '${backend.location} is not a list of rules (${error.message}), so none apply';
+      _failClosed('${backend.location} is not a list of rules (${error.message}), so none apply');
+      return;
     }
+    notifyListeners();
+  }
+
+  /// Applies no rule at all and says why: a file that cannot be read says nothing about what the person allowed. Nothing is
+  /// written over it, so what it holds can be looked at and put right.
+  void _failClosed(String why) {
+    _rules.clear();
+    _persisted = {};
+    problem = why;
     notifyListeners();
   }
 
   /// Whether a path rule can be made in [folder], by [folderProblem].
   bool pathsAllowedIn(String folder) => folderProblem(folder, guards: guards, real: real) == null;
 
-  /// Why a rule of [type] cannot be made for this source and folder beside the rules there, or null. Commands and the rest are
-  /// not kept together for one source, in this folder or one that holds it or lies in it.
-  String? conflict(String source, String peer, String folder, RuleType type) {
+  /// A folder as the rules compare it: with its links resolved, and where its repository starts.
+  ({String folder, String? root})? _tree(String folder) {
+    final plain = cleanPath(folder);
+    if (plain == null) return null;
+    final resolved = real == null ? plain : _resolved(real!, plain);
+    if (resolved == null) return null;
+    final root = repoRoot?.call(resolved);
+    return (folder: resolved, root: root == null ? null : cleanPath(root));
+  }
+
+  /// Why a rule of [type] cannot be made for [folder] beside the rules already made, or null. Commands and tools (which may run
+  /// one) are not kept together with file changes (which can write what a command runs) for any source or peer: not in this
+  /// folder, one that holds it or lies in it once links are resolved, or one in the same repository.
+  String? conflict(String folder, RuleType type) {
     if (type == RuleType.unsupported) return null;
-    final here = cleanPath(folder);
+    final mine = _tree(folder);
     for (final rule in _rules) {
-      if (rule.source != source || rule.peer != peer || rule.type == RuleType.unsupported) continue;
-      if ((type.isCommand && rule.type.isFilesystem) || (type.isFilesystem && rule.type.isCommand)) {
-        final there = cleanPath(rule.folder);
-        if (here == null || there == null || _under(here, there) || _under(there, here)) {
-          return type.isCommand
-              ? 'A rule for file changes or a tool already stands here or in a folder next to it: revoke it before allowing commands.'
-              : 'A rule for commands already stands here or in a folder next to it: revoke it before allowing this.';
-        }
+      if (rule.type == RuleType.unsupported) continue;
+      if (!((type.isCommand && rule.type.isFilesystem) || (type.isFilesystem && rule.type.isCommand))) continue;
+      final theirs = _tree(rule.folder);
+      final related = mine == null ||
+          theirs == null ||
+          _under(mine.folder, theirs.folder) ||
+          _under(theirs.folder, mine.folder) ||
+          (mine.root != null && mine.root == theirs.root);
+      if (related) {
+        return type.isCommand
+            ? 'A rule for file changes already stands in this folder, one next to it or in the same repository: revoke it before allowing commands or tools.'
+            : 'A rule for commands or tools already stands in this folder, one next to it or in the same repository: revoke it before allowing file changes.';
       }
     }
     return null;
@@ -488,9 +550,10 @@ class PermissionRules extends ChangeNotifier {
   /// The first rule that allows a request, or null. Where the list holds commands and the rest for one source in nested folders
   /// (a hand-edited file), neither applies.
   PermissionRule? match({required String source, String peer = '', required String folder, required String? kind, required RuleSubject subject}) {
+    if (problem != null) return null;
     for (final rule in _rules) {
       if (!rule.matches(source: source, peer: peer, folder: folder, kind: kind, subject: subject, guards: guards, real: real)) continue;
-      if (conflict(rule.source, rule.peer, rule.folder, rule.type) != null) continue;
+      if (conflict(rule.folder, rule.type) != null) continue;
       return rule;
     }
     return null;
@@ -511,7 +574,7 @@ class PermissionRules extends ChangeNotifier {
     final same = _rules.where((rule) =>
         rule.source == source && rule.peer == peer && rule.folder == folder && rule.tool == kind && rule.toolName == toolName && rule.type == type && rule.value == stored);
     if (same.isNotEmpty) return same.first;
-    if (_rules.length >= maxRules) return null;
+    if (_rules.length >= maxRules || problem != null) return null;
     final rule = PermissionRule(
       id: [for (var i = 0; i < 8; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join(),
       source: source,
@@ -562,9 +625,11 @@ class PermissionRules extends ChangeNotifier {
     final List<PermissionRule> stored;
     try {
       stored = document == null ? const [] : _parse(document);
-    } on FormatException {
+    } on FormatException catch (error) {
+      _failClosed('${backend.location} is not a list of rules (${error.message}), so none apply');
       return;
     }
+    problem = null;
     final ids = {for (final rule in stored) rule.id};
     final before = _rules.length;
     _rules.removeWhere((rule) => _persisted.contains(rule.id) && !ids.contains(rule.id));
@@ -584,17 +649,26 @@ class PermissionRules extends ChangeNotifier {
     try {
       await _mergeStored();
     } on Object catch (error) {
-      debugPrint('Canoa permissions: could not read ${backend.location}: $error');
+      _failClosed('could not read ${backend.location}: $error');
     }
   });
 
   Future<void> flush() {
     return _writing = _writing.then((_) async {
-      try {
+      Future<void> replace() async {
         await _mergeStored();
+        if (problem != null) {
+          writeProblem = 'nothing was written, so the file is left as it is: $problem';
+          return;
+        }
         await backend.write(encode());
         _persisted = {for (final rule in _rules) rule.id};
         if (writeProblem?.startsWith('could not write the log') != true) writeProblem = null;
+      }
+
+      try {
+        final locking = backend;
+        await (locking is LockableBackend ? (locking as LockableBackend).exclusively(replace) : replace());
       } on Object catch (error) {
         writeProblem = 'could not write ${backend.location}: $error';
         debugPrint('Canoa permissions: $writeProblem');
@@ -616,7 +690,6 @@ class PermissionRules extends ChangeNotifier {
       'folder': rule.folder,
       'type': rule.type.name,
       'what': redacted(rule.type, detail),
-      'sha256': sha256Of(detail),
     });
     _logging = _logging.then((_) => target.append(line)).catchError((Object error) {
       writeProblem = 'could not write the log ${target.location}: $error';

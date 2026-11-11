@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:canoa/ledger/ledger_backend_io.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/permissions/real_path_io.dart' show resolveExisting;
@@ -30,6 +31,7 @@ RuleSubject? _edit(String path, [Map<String, Object?> more = const {}]) =>
     subjectOf(kind: 'edit', rawInput: {'file_path': path, 'old_string': 'a', 'new_string': 'b', ...more});
 
 void main() {
+  fileBackendTests();
   group('a rule for an exact command', () {
     final rule = _rule(RuleType.command, 'npm test');
 
@@ -72,8 +74,12 @@ void main() {
       expect(_allows(rule, subjectOf(kind: 'execute', rawInput: {'command': 'npm test\n'})), isFalse);
     });
 
-    test('no rule is made for a command with a control, line-break, hidden or reordering character', () {
-      for (final command in ['npm test\n', 'npm\ttest', 'npm test\u202e', 'npm test\u200b', 'npm test\u2028x', 'npm test\u0007', 'npm test\ufeff']) {
+    test('a rule is made only for a command of printable ASCII: nothing that looks like another character', () {
+      for (final command in [
+        'npm test\n', 'npm\ttest', 'npm test\u202e', 'npm test\u200b', 'npm test\u2028x', 'npm test\u0007', 'npm test\ufeff',
+        'echo \u201chi\u201d', 'ls \u2013la', 'ls \u2014la', 'ls\u00a0-la', 'ls\u2003-la', 'ls\u3000-la', 'npm test\u{e0041}', 'npm\u034f test',
+        'npm\u3164test', 'npm\u180etest', 'caf\u00e9', 'ls \u2212la',
+      ]) {
         final subject = subjectOf(kind: 'execute', rawInput: {'command': command})!;
         expect(scopeProblem(RuleType.command, command, subject, _folder), isNotNull, reason: command.codeUnits.toString());
       }
@@ -93,6 +99,10 @@ void main() {
         expect(cleanPath(path), isNull, reason: path);
       }
       expect(cleanPath('/work//calc/./src/../a.js'), '/work/calc/a.js');
+      for (final path in ['/work/calc/src/j/../evil', '/work/calc/./src/a.js', '/work/calc/src/..', r'C:\work\calc\src\j\..\evil', '/work/calc/src/a/./b']) {
+        expect(_edit(path), isNull, reason: 'the system resolves .. after links: $path');
+      }
+      expect(scopeProblem(RuleType.path, '/work/calc/src/../src', _edit('/work/calc/src/a.js')!, _folder, real: _plain), contains('.. '));
       expect(cleanPath(r'C:\Work\Calc\a.js'), 'c:/work/calc/a.js');
       expect(cleanPath('c:/Work'), 'c:/work');
     });
@@ -105,7 +115,7 @@ void main() {
       expect(_allows(rule, _edit('/work/calc/src')), isTrue);
       expect(_allows(rule, _edit('/work/calc/src/a.js')), isTrue);
       expect(_allows(rule, _edit('/work/calc/src/deep/er/a.js')), isTrue);
-      expect(_allows(rule, _edit('/work/calc/./src/../src/a.js')), isTrue);
+      expect(_allows(rule, _edit('/work/calc/./src/../src/a.js')), isFalse, reason: 'a path with . or .. is not read at all');
     });
 
     test('never covers outside it, by a sibling name or by climbing out', () {
@@ -177,6 +187,27 @@ void main() {
         '/work/calc/sub/CLAUDE~1.MD', '/work/calc/ /x', '/work/calc/... /x',
       ]) {
         expect(_allows(wide, _edit(path)), isFalse, reason: path);
+      }
+    });
+
+    test('a Windows device name, with or without an extension', () {
+      for (final name in ['CON', 'con', 'PRN', 'AUX', 'NUL', 'COM1', 'com9', 'LPT1', 'lpt9', 'CON.txt', 'nul.json', 'aux.a.b', 'COM1 .', 'sub/CON/x']) {
+        expect(_allows(wide, _edit('/work/calc/$name')), isFalse, reason: name);
+      }
+      for (final name in ['CONSOLE', 'COM10', 'console.log', 'auxiliary.txt', 'nullable.dart', 'com']) {
+        expect(_allows(wide, _edit('/work/calc/$name')), isTrue, reason: name);
+      }
+    });
+
+    test('the longer list of files that run code, and its known gaps are not covered', () {
+      for (final path in [
+        'venv/lib/x.py', 'env/bin/activate', 'a/__pycache__/x.pyc', 'x.pth', 'pytest.ini', 'tox.ini', 'setup.cfg', 'noxfile.py', 'requirements.txt',
+        'requirements-dev.txt', 'my.code-workspace', 'shell.nix', 'flake.nix', 'gradlew', 'mvnw', 'gradle/wrapper/gradle-wrapper.properties',
+        'pom.xml', 'build.gradle', 'build.gradle.kts', 'rust-toolchain', 'rust-toolchain.toml', 'go.mod', 'go.work', 'App.csproj', 'Directory.Packages.props',
+        'nuget.config', 'NuGet.Config', 'CMakeLists.txt', 'meson.build', 'Gemfile', 'Dockerfile', 'vendor/x/y.go', 'vite.config.js', 'vite.config.mts',
+        'webpack.config.babel.js', 'gulpfile.js', 'Gruntfile.coffee',
+      ]) {
+        expect(_allows(wide, _edit('/work/calc/$path')), isFalse, reason: path);
       }
     });
 
@@ -304,6 +335,15 @@ void main() {
       expect(mcp('mark'), isNull);
     });
 
+    test('is never made for a tool that executes, by its kind or by its name', () {
+      expect(mcp('mcp__shell__list', kind: 'execute'), isNull);
+      for (final name in ['mcp__marker__run', 'mcp__marker__exec_cmd', 'mcp__terminal__open', 'mcp__marker__process_file', 'mcp__marker__eval', 'mcp__sh__Shell',
+        'mcp__marker__run_script', 'mcp__marker__powershell', 'mcp__marker__bash']) {
+        expect(mcp(name), isNull, reason: name);
+      }
+      expect(mcp('mcp__marker__mark'), isA<McpSubject>());
+    });
+
     test('is described by tool and server', () {
       expect(rule.describe, 'Use the tool mark of marker, with any input');
       expect(_rule(RuleType.mcp, 'mcp__my_server__do_it').describe, 'Use the tool do_it of my_server, with any input');
@@ -341,7 +381,7 @@ void main() {
       expect(old.describe, startsWith('No longer supported (prefix)'));
       expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNull);
       expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test -- a.js')), isNull);
-      expect(rules.conflict(_source, '', _folder, RuleType.path), isNull, reason: 'an inactive rule holds nothing back');
+      expect(rules.conflict(_folder, RuleType.path), isNull, reason: 'an inactive rule holds nothing back');
       rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'ls -la');
       await rules.settled();
       expect(jsonDecode(backend.document!)['rules'][0]['type'], 'prefix');
@@ -379,26 +419,40 @@ void main() {
       expect(again.rules, isEmpty, reason: 'the revoke was written');
     });
 
-    test('commands and the rest are not kept together for one source: file changes and tools count, in nested folders too', () {
+    test('commands and tools are not kept with file changes, for any source or peer, in nested folders too', () {
       final rules = make();
       rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test');
-      for (final type in [RuleType.path, RuleType.mcp]) {
-        expect(rules.conflict(_source, '', _folder, type), isNotNull, reason: type.name);
-        expect(rules.conflict(_source, '', '/work/calc/sub', type), isNotNull, reason: 'a folder inside it');
-        expect(rules.conflict(_source, '', '/work', type), isNotNull, reason: 'a folder that holds it');
-        expect(rules.conflict(_source, '', '/work/other', type), isNull);
-        expect(rules.conflict('Other', '', _folder, type), isNull);
-        expect(rules.conflict(_source, 'peer-b', _folder, type), isNull);
-      }
-      expect(rules.conflict(_source, '', '/work/calc/sub', RuleType.command), isNull);
+      expect(rules.conflict(_folder, RuleType.path), isNotNull);
+      expect(rules.conflict('/work/calc/sub', RuleType.path), isNotNull, reason: 'a folder inside it');
+      expect(rules.conflict('/work', RuleType.path), isNotNull, reason: 'a folder that holds it');
+      expect(rules.conflict('/work/other', RuleType.path), isNull);
+      expect(rules.conflict(_folder, RuleType.mcp), isNull, reason: 'a tool is a command');
+      expect(rules.conflict('/work/calc/sub', RuleType.command), isNull);
       final others = make();
-      others.add(source: _source, folder: _folder, kind: 'other', toolName: 'mcp__a__b', type: RuleType.mcp, value: 'mcp__a__b');
-      expect(others.conflict(_source, '', _folder, RuleType.command), isNotNull, reason: 'a file system tool can write what a command runs');
-      expect(others.conflict(_source, '', '/work/calc/sub', RuleType.command), isNotNull);
+      others.add(source: 'Elsewhere', peer: 'peer-b', folder: _folder, kind: 'other', toolName: 'mcp__a__b', type: RuleType.mcp, value: 'mcp__a__b');
+      expect(others.conflict(_folder, RuleType.path), isNotNull, reason: 'a tool can run a command: another source and peer count');
+      expect(others.conflict(_folder, RuleType.command), isNull);
       final paths = make();
       paths.add(source: _source, folder: _folder, kind: 'edit', type: RuleType.path, value: '/work/calc/src');
-      expect(paths.conflict(_source, '', '/work', RuleType.command), isNotNull);
-      expect(paths.conflict(_source, '', _folder, RuleType.mcp), isNull);
+      expect(paths.conflict('/work', RuleType.command), isNotNull);
+      expect(paths.conflict(_folder, RuleType.mcp), isNotNull, reason: 'a tool counts as a command');
+      expect(paths.conflict(_folder, RuleType.path), isNull);
+    });
+
+    test('folders are compared once links are resolved, and a repository counts as one tree', () {
+      String? junction(String path) => path.startsWith('/alias') ? '/work/calc${path.substring(6)}' : path;
+      final linked = PermissionRules(MemoryLedgerBackend(), real: junction);
+      linked.add(source: _source, folder: '/alias', kind: 'execute', type: RuleType.command, value: 'ls');
+      expect(linked.conflict('/work/calc/sub', RuleType.path), isNotNull, reason: 'a link into the same tree');
+      expect(linked.conflict('/work/elsewhere', RuleType.path), isNull);
+      String? root(String folder) => folder.startsWith('/repo') ? '/repo' : null;
+      final repo = PermissionRules(MemoryLedgerBackend(), real: _plain, repoRoot: root);
+      repo.add(source: _source, folder: '/repo/a', kind: 'execute', type: RuleType.command, value: 'ls');
+      expect(repo.conflict('/repo/b', RuleType.path), isNotNull, reason: 'the same repository, in another folder');
+      expect(repo.conflict('/other/b', RuleType.path), isNull);
+      final unresolvable = PermissionRules(MemoryLedgerBackend(), real: (_) => null);
+      unresolvable.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'ls');
+      expect(unresolvable.conflict('/anywhere', RuleType.path), isNotNull, reason: 'a folder that cannot be placed is treated as overlapping');
     });
 
     test('a file that holds both for one place applies neither', () async {
@@ -410,6 +464,38 @@ void main() {
       await rules.load();
       expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNull);
       expect(rules.match(source: _source, folder: '/work/calc/src', kind: 'edit', subject: _edit('/work/calc/src/a.js')!), isNull);
+    });
+
+    test('a file that stops parsing applies no rule at all, says so, is not written over, and applies again once it is right', () async {
+      final backend = MemoryLedgerBackend();
+      final rules = make(backend);
+      rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test');
+      await rules.settled();
+      final good = backend.document!;
+      backend.document = '{not json';
+      await rules.refresh();
+      expect(rules.rules, isEmpty);
+      expect(rules.problem, contains('none apply'));
+      expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNull);
+      expect(rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'pwd'), isNull, reason: 'no rule is made over a file that cannot be read');
+      await rules.settled();
+      expect(backend.document, '{not json', reason: 'what it holds is left to be put right');
+      backend.document = good;
+      await rules.refresh();
+      expect(rules.problem, isNull);
+      expect(rules.rules.single.value, 'npm test');
+      expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNotNull);
+    });
+
+    test('a file that cannot be read applies no rule either', () async {
+      final backend = _FailingBackend()..fail = false;
+      final rules = PermissionRules(backend);
+      rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test');
+      await rules.settled();
+      backend.failReads = true;
+      await rules.refresh();
+      expect(rules.rules, isEmpty);
+      expect(rules.problem, contains('could not read'));
     });
 
     test('a file that is not a list of rules leaves none and says so', () async {
@@ -494,20 +580,21 @@ void main() {
       expect(rules.writeProblem, isNull);
     });
 
-    test('the log is appended to, and holds a hash and a redacted form of a command, never the command', () async {
+    test('the log is appended to, and holds the program of a command and nothing after it, no hash and no assignment', () async {
       final log = MemoryRuleLog();
       final rules = make(MemoryLedgerBackend(), log);
-      const secret = 'curl -H "Authorization: Bearer sk-live-123456" https://api.example.test/x';
+      const secret = 'TOKEN=sk-live-123456 curl -H "Authorization: Bearer sk-live-123456" https://user:pw@api.example.test/x';
       final rule = rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: secret)!;
       rules.recordUse(rule, secret);
       rules.revoke(rule.id);
       await rules.settled();
       expect(log.lines, hasLength(3));
       for (final line in log.lines) {
-        expect(line, isNot(contains('sk-live')));
-        expect(line, isNot(contains('Authorization')));
-        expect(line, contains(sha256Of(secret)));
-        expect(line, contains('"what":"curl … (5 arguments)"'));
+        for (final leak in ['sk-live', 'Authorization', 'user:pw', 'TOKEN', 'api.example', 'sha256']) {
+          expect(line, isNot(contains(leak)), reason: leak);
+        }
+        expect(line, contains('"what":"curl …"'));
+        expect(RegExp('[0-9a-f]{64}').hasMatch(line), isFalse, reason: 'no hash of the text');
       }
       expect(log.lines[0], allOf(contains('"event":"made"'), contains('"rule":"${rule.id}"')));
       expect(log.lines[1], allOf(contains('"event":"used"'), contains('2026-11-12T08:00:00.000Z')));
@@ -516,6 +603,18 @@ void main() {
       rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'ls -la');
       await rules.settled();
       expect(log.lines.take(3).toList(), before, reason: 'a line once written is not touched');
+    });
+
+    test('what a log line says of a command: a program, never an assignment, a URL or an argument', () {
+      expect(redacted(RuleType.command, 'ls'), 'ls');
+      expect(redacted(RuleType.command, 'ls -la /secret'), 'ls …');
+      expect(redacted(RuleType.command, 'A=1 B=2 make test'), 'make …');
+      expect(redacted(RuleType.command, r'$env:TOKEN=abc; ls'), 'ls');
+      expect(redacted(RuleType.command, r'$env:TOKEN=abc'), '(only assignments)');
+      expect(redacted(RuleType.command, 'TOKEN=abc'), '(only assignments)');
+      expect(redacted(RuleType.command, 'https://u:p@h.example/x'), '(a URL or an address)');
+      expect(redacted(RuleType.command, 'curl'), 'curl');
+      expect(redacted(RuleType.command, 'x' * 100), '${'x' * 64}…');
     });
 
     test('a path or a tool is logged as it is', () async {
@@ -539,16 +638,68 @@ void main() {
 
 String? pathsProblem(RealPath? real) => folderProblem(_folder, real: real);
 
+void fileBackendTests() {
+  group('the rules file', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('canoa-rulesfile-'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('is replaced through a temp file named for that write alone, none left behind', () async {
+      final backend = FileLedgerBackend('${dir.path}/permissions.json');
+      for (var i = 0; i < 8; i++) {
+        await backend.write('{"version":1,"rules":[],"n":$i}');
+      }
+      expect(await backend.read(), contains('"n":7'));
+      final names = [for (final entity in dir.listSync()) entity.uri.pathSegments.where((part) => part.isNotEmpty).last];
+      expect(names, ['permissions.json'], reason: 'no .new or .tmp file stays');
+    });
+
+    test('is changed under a lock, one caller at a time', () async {
+      final backend = FileLedgerBackend('${dir.path}/permissions.json');
+      final order = <String>[];
+      final one = backend.exclusively(() async {
+        order.add('one in');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        order.add('one out');
+      });
+      final two = backend.exclusively(() async {
+        order.add('two in');
+        order.add('two out');
+      });
+      await Future.wait([one, two]);
+      expect(order, ['one in', 'one out', 'two in', 'two out']);
+      expect(File('${dir.path}/permissions.json.lock').existsSync(), isTrue);
+    });
+
+    test('a list over it keeps a rule made by another list over the same file', () async {
+      final path = '${dir.path}/permissions.json';
+      final a = PermissionRules(FileLedgerBackend(path));
+      a.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'ls');
+      await a.settled();
+      final b = PermissionRules(FileLedgerBackend(path));
+      await b.load();
+      b.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'pwd');
+      await b.settled();
+      await a.refresh();
+      expect(a.rules.map((rule) => rule.value), unorderedEquals(['ls', 'pwd']));
+    });
+  });
+}
+
 /// A backend whose writes fail while [fail] is set.
 final class _FailingBackend implements LedgerBackend {
   bool fail = true;
+  bool failReads = false;
   String? document;
 
   @override
   String get location => 'a file that cannot be written';
 
   @override
-  Future<String?> read() async => document;
+  Future<String?> read() async {
+    if (failReads) throw const FileSystemException('unreadable');
+    return document;
+  }
 
   @override
   Future<void> write(String document) async {

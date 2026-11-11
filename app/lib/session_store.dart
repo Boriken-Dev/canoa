@@ -214,6 +214,13 @@ class ChatSession {
   /// mode of its own that asks for nothing. Off unless the person chose it. It sits on the agent's own mode, which stays.
   bool bypass = false;
 
+  /// Counts the times everything waiting in this conversation was ended (Stop, close, a connection that ended), so a request that
+  /// was waiting on something else when it happened can tell, and is dropped.
+  int epoch = 0;
+
+  /// The permission request before this one, which this one waits on so that cards keep the order the requests came in.
+  Future<void> askTail = Future.value();
+
   /// Whether Bypass was chosen before the agent was known, so it is the agent's own where the agent turns out to have one.
   bool bypassBeforeAgent = false;
 
@@ -944,7 +951,26 @@ class SessionStore extends ChangeNotifier {
     for (final session in _sessions) {
       if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
     }
-    if (target == null) return Future.value(const AcpDeny('not a session here'));
+    if (target == null) return const AcpDeny('not a session here');
+    // Each request waits for the one before it, so a request that needs the rules read again cannot be passed by one that does not.
+    final epoch = target.epoch;
+    final prior = target.askTail;
+    final gate = Completer<void>();
+    target.askTail = gate.future;
+    try {
+      await prior;
+      // What another instance revoked since the file was read stops applying before this request is matched.
+      if (rules != null && rules!.rules.isNotEmpty) await rules!.refresh();
+      // Stop, closing the conversation or a connection that ended while this waited: nothing is answered but cancelled, and what
+      // the mode, Bypass and the waiting cards are now is read after this point, not before it.
+      if (target.epoch != epoch || !_sessions.contains(target) || !identical(_verifiedClients[target.id], from)) return const AcpCancel();
+      return _decide(target, request);
+    } finally {
+      gate.complete();
+    }
+  }
+
+  Future<AcpDecision> _decide(ChatSession target, AcpPermissionRequest request) {
     if (target.pendingPermissions.length >= maxPendingPermissions) {
       _note(target, 'The agent asked more questions than the $maxPendingPermissions a conversation holds waiting, so the rest '
           'were answered cancelled.');
@@ -968,8 +994,6 @@ class SessionStore extends ChangeNotifier {
     final folder = target.cwd;
     final keepable = rules != null && subject != null && once != null && folder != null && folder.isNotEmpty;
     if (keepable) {
-      // What another instance revoked since the file was read stops applying before this request is matched.
-      await rules!.refresh();
       final rule = rules!.match(source: ruleSource(target), peer: target.peerId ?? '', folder: folder, kind: request.kind, subject: subject);
       if (rule != null) {
         rules!.recordUse(rule, switch (subject) {
@@ -1076,7 +1100,7 @@ class SessionStore extends ChangeNotifier {
     final folder = session.cwd;
     return switch (subject) {
       PathSubject() when kIsWeb || session.place != SessionPlace.local || folder == null || !(rules?.pathsAllowedIn(folder) ?? false) => null,
-      CommandSubject() when !_modeAsks(session) => null,
+      CommandSubject() || McpSubject() when !_modeAsks(session) => null,
       _ => subject,
     };
   }
@@ -1095,8 +1119,8 @@ class SessionStore extends ChangeNotifier {
     final subject = question.subject, kind = question.kind;
     final once = question.options.where((option) => option.kind == 'allow_once').firstOrNull;
     if (subject == null || kind == null || once == null) return 'No rule can cover this request.';
-    final problem = store.checkScope(type, value, subject, folder) ??
-        store.conflict(ruleSource(session), session.peerId ?? '', folder, type);
+    if (store.problem != null) return 'The rules file cannot be read, so no rule is made: ${store.problem}';
+    final problem = store.checkScope(type, value, subject, folder) ?? store.conflict(folder, type);
     if (problem != null) return problem;
     final rule = store.add(
         source: ruleSource(session), peer: session.peerId ?? '', folder: folder, kind: kind, toolName: subject.toolName, type: type, value: value);
@@ -1120,6 +1144,7 @@ class SessionStore extends ChangeNotifier {
   /// and questions go, and the tool line each card was about is marked stopped. Nothing is answered, since the agent that asked
   /// is gone or is no longer the one this conversation is with.
   void _strand(ChatSession session) {
+    session.epoch++;
     for (final question in session.pendingPermissions) {
       if (question.toolCallId case final id?) _stop(session.toolEntries[id]?.tool);
     }
@@ -1141,6 +1166,7 @@ class SessionStore extends ChangeNotifier {
 
   /// Answers everything still waiting in [session]: its permission requests with [answer], and its questions cancelled.
   void _endWaiting(ChatSession session, AcpDecision answer) {
+    session.epoch++;
     for (final question in session.pendingPermissions) {
       question._answer.complete(answer);
     }
