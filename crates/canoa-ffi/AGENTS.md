@@ -13,12 +13,16 @@ The only consumer is the app's plugin, `app/native`, whose `lib/canoa_native.dar
 ## The C ABI (`canoa_ffi::exports`)
 
 ```c
-uint32_t canoa_ffi_abi(void);                                                      // ABI_VERSION, 1; refuse any other
+uint32_t canoa_ffi_abi(void);                                                      // ABI_VERSION, 2; refuse any other
 int32_t  canoa_ffi_job_start(const uint8_t *request, size_t len, uint64_t *out_job);
 int32_t  canoa_ffi_job_read(uint64_t job, uint8_t **out_text, size_t *out_len);
 void     canoa_ffi_text_free(uint8_t *text, size_t len);
 int32_t  canoa_ffi_job_stop(uint64_t job);
 int32_t  canoa_ffi_job_free(uint64_t job);
+int32_t  canoa_ffi_link_open(uint64_t job, const uint8_t *entry, size_t entry_len, uint64_t *out_link);
+int32_t  canoa_ffi_link_send(uint64_t link, const uint8_t *message, size_t len);
+int32_t  canoa_ffi_link_read(uint64_t link, uint8_t **out_text, size_t *out_len);
+int32_t  canoa_ffi_link_close(uint64_t link);
 int32_t  canoa_ffi_child_main(void);
 ```
 
@@ -29,6 +33,10 @@ int32_t  canoa_ffi_child_main(void);
 | 2 | `STATUS_UNKNOWN_JOB` | no job has that number, or it was freed |
 | 3 | `STATUS_FAILED` | a thread for the job could not be started |
 | 4 | `STATUS_PANIC` | the library panicked in this call |
+| 5 | `STATUS_UNKNOWN_LINK` | no link has that number, or it was closed |
+| 6 | `STATUS_NO_ENTRY` | the job is no `serve` yet, its host serves no entry of that name, or it is stopping |
+| 7 | `STATUS_BUSY` | a link holds 64 MiB of unsent messages: send again once the host has taken some |
+| 8 | `STATUS_ENDED` | the link has ended from either side: read what is left, then close it |
 
 - **No function blocks**, none calls back, and no panic crosses: each body runs under `catch_unwind`, and each out-parameter that is non-null and aligned is written first with its empty value (0, null, 0), whatever else the call refuses; an `out_job` inside the request is refused unwritten. Call them from any thread.
 - **A job is one `canoa` command**, on a thread of its own, numbered from 1; a number is never used twice, and a stale or invented one is `STATUS_UNKNOWN_JOB`.
@@ -45,6 +53,7 @@ int32_t  canoa_ffi_child_main(void);
 - `canoa_ffi_job_read`: what the job has said since the last read, `{"out": [line...], "err": [line...], "dropped": n, "exit": status or null}`, which `canoa_ffi_text_free` frees with the same length. `out` is what `canoa` prints on standard output, `err` what it says on standard error. `dropped` counts lines lost past 4096 unread of a kind, the oldest first. `exit` is set once the command has ended and has given up all it held, a home's lock and its addresses included; a command line `clap` refuses is status 2, a panicked command 101.
 - `canoa_ffi_job_stop`: closes the job's input. `serve --until-stdin-closes` then ends every listener, link and agent, and `pair --until-stdin-closes` gives up. It returns at once; `exit` says when the job has ended. A command with no such flag does not hear it.
 - `canoa_ffi_job_free`: forgets the job, closing its input first. A job still running goes on to its end with nobody reading it.
+- `canoa_ffi_link_open`: a connection to entry `entry` (UTF-8) of the `serve` job `job` runs, inside this process: no proof, no trust store, no sealing, and the entry's `peers` list is ignored, since only this process can call it. The entry serves it as a paired key's connection, its agent starting on the first message. Two threads of the link's own move messages, so no call blocks. `canoa_ffi_link_send` copies one ACP message and queues it in order (a worktree request goes first, as `_canoa/worktree/*`); `canoa_ffi_link_read` takes `{"messages": [text...], "closed": bool}`, the host's side holding 1024 unread before it waits; `canoa_ffi_link_close` ends the link and its agent. Stopping the job closes every link, which then read `closed`.
 - `canoa_ffi_child_main`: this process as the host's own `provider`, `tool`, `agent` or `launch`, from the process's command line, whose first argument is `--canoa-child` (`jobs::CHILD_FLAG`). Anything else is status 2. It returns the status to exit with, and is called before the application starts anything of its own.
 
 ## What a long command changes in this process

@@ -7,7 +7,7 @@ use core::panic::AssertUnwindSafe;
 use core::ptr;
 use std::panic::catch_unwind;
 
-use crate::jobs;
+use crate::{jobs, links};
 
 /// Done.
 pub const STATUS_OK: i32 = 0;
@@ -21,8 +21,17 @@ pub const STATUS_FAILED: i32 = 3;
 /// The library panicked in this call; the call did nothing more.
 pub const STATUS_PANIC: i32 = 4;
 
+/// No link has that number, or it was closed.
+pub const STATUS_UNKNOWN_LINK: i32 = 5;
+/// The job runs no `serve` yet, or its host serves no entry of that name, or is stopping.
+pub const STATUS_NO_ENTRY: i32 = 6;
+/// A link holds as much of the application's unsent as it takes: send again once the host has taken some.
+pub const STATUS_BUSY: i32 = 7;
+/// The link has ended, from either side: read what is left of it, then close it.
+pub const STATUS_ENDED: i32 = 8;
+
 /// The version of this ABI, raised by any change to a function here.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// Runs `body`, turning a panic into [`STATUS_PANIC`]. The payload is forgotten, since dropping it could panic again.
 fn guarded(body: impl FnOnce() -> i32) -> i32 {
@@ -166,6 +175,128 @@ pub extern "C" fn canoa_ffi_job_free(job: u64) -> i32 {
             STATUS_OK
         } else {
             STATUS_UNKNOWN_JOB
+        }
+    })
+}
+
+/// Opens a link to the entry `entry` (`entry_len` bytes of UTF-8) of the `serve` job `job` runs, and writes its number to
+/// `out_link`, 0 on failure. The link is a connection inside this process: it needs no proof, and the entry serves it as it
+/// serves a paired key's, its agent starting on the first message sent. [`STATUS_NO_ENTRY`] says the job is no `serve` yet,
+/// the host serves no such entry, or it is stopping.
+///
+/// # Safety
+///
+/// `entry` is null or valid for reading `entry_len` bytes; `out_link` is null or valid for writing a `u64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn canoa_ffi_link_open(
+    job: u64,
+    entry: *const u8,
+    entry_len: usize,
+    out_link: *mut u64,
+) -> i32 {
+    guarded(|| {
+        if out_link.is_null() || !out_link.is_aligned() {
+            return STATUS_BAD_ARGUMENT;
+        }
+        let (read_from, written_at) = (entry.addr(), out_link.addr());
+        if !entry.is_null()
+            && read_from < written_at.saturating_add(size_of::<u64>())
+            && written_at < read_from.saturating_add(entry_len)
+        {
+            return STATUS_BAD_ARGUMENT;
+        }
+        // SAFETY: non-null, aligned and apart from the entry just above, and the caller promises it can be written.
+        unsafe { out_link.write(0) };
+        if entry.is_null() || isize::try_from(entry_len).is_err() {
+            return STATUS_BAD_ARGUMENT;
+        }
+        // SAFETY: non-null and no longer than a slice may be, the caller promises `entry_len` readable bytes, and `u8` has
+        // no alignment to get wrong. The slice ends with this call.
+        let entry = unsafe { core::slice::from_raw_parts(entry, entry_len) };
+        let Ok(entry) = core::str::from_utf8(entry) else {
+            return STATUS_BAD_ARGUMENT;
+        };
+        match links::open(job, entry) {
+            Ok(link) => {
+                // SAFETY: as the first write.
+                unsafe { out_link.write(link) };
+                STATUS_OK
+            }
+            Err(status) => status,
+        }
+    })
+}
+
+/// Queues one message, `len` bytes of an ACP message, for the host; it is copied during this call and sent in order by a
+/// thread of the link's own, so this never waits. [`STATUS_BUSY`] says too much is queued already.
+///
+/// # Safety
+///
+/// `message` is null or valid for reading `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn canoa_ffi_link_send(link: u64, message: *const u8, len: usize) -> i32 {
+    guarded(|| {
+        if message.is_null() || isize::try_from(len).is_err() {
+            return STATUS_BAD_ARGUMENT;
+        }
+        // SAFETY: non-null and no longer than a slice may be, the caller promises `len` readable bytes, and `u8` has no
+        // alignment to get wrong. The slice ends with this call, and `links::send` copies what it keeps.
+        let message = unsafe { core::slice::from_raw_parts(message, len) };
+        links::send(link, message)
+    })
+}
+
+/// Takes what the host has sent on a link since the last read, as UTF-8 JSON: `{"messages": [text...], "closed": bool}`;
+/// `closed` is set once nothing more will come. Free the text with [`canoa_ffi_text_free`].
+///
+/// # Safety
+///
+/// `out_text` and `out_len` are null or valid for writing a pointer and a `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn canoa_ffi_link_read(
+    link: u64,
+    out_text: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    guarded(|| {
+        let text_ok = !out_text.is_null() && out_text.is_aligned();
+        let len_ok = !out_len.is_null() && out_len.is_aligned();
+        // SAFETY: each only when non-null and aligned, and the caller promises it can be written. The two are the same size,
+        // so two that alias name one word, which both write as zero.
+        unsafe {
+            if text_ok {
+                out_text.write(ptr::null_mut());
+            }
+            if len_ok {
+                out_len.write(0);
+            }
+        }
+        if !text_ok || !len_ok || out_text.cast::<u8>() == out_len.cast::<u8>() {
+            return STATUS_BAD_ARGUMENT;
+        }
+        let Some(text) = links::read(link) else {
+            return STATUS_UNKNOWN_LINK;
+        };
+        let text = text.into_bytes().into_boxed_slice();
+        let len = text.len();
+        let text = Box::into_raw(text).cast::<u8>();
+        // SAFETY: as the writes above. The allocation goes back through `canoa_ffi_text_free` with this length.
+        unsafe {
+            out_text.write(text);
+            out_len.write(len);
+        }
+        STATUS_OK
+    })
+}
+
+/// Ends a link and forgets it: the host's agent for it ends too. Its number never means anything again.
+#[unsafe(no_mangle)]
+pub extern "C" fn canoa_ffi_link_close(link: u64) -> i32 {
+    guarded(|| {
+        if links::close(link) {
+            STATUS_OK
+        } else {
+            STATUS_UNKNOWN_LINK
         }
     })
 }

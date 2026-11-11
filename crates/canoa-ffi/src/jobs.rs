@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
+use canoa_host::Local;
 use canoa_host::cli::{self, Cli, Front, Program};
 use clap::Parser as _;
 use serde::Deserialize;
@@ -66,6 +67,8 @@ struct Input {
 pub(crate) struct Job {
     queues: Mutex<Queues>,
     input: Mutex<Input>,
+    /// The way into a `serve`'s entries, once it has bound them.
+    local: Mutex<Option<Local>>,
 }
 
 impl Job {
@@ -202,6 +205,14 @@ impl Front for JobFront {
     fn ask(&self, _prompt: &str, _secret: bool) -> std::io::Result<Option<String>> {
         Ok(None)
     }
+
+    fn local(&self, local: Local) {
+        *self
+            .job
+            .local
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(local);
+    }
 }
 
 /// Whether a command runs long enough that the process's log belongs in what it says.
@@ -308,6 +319,16 @@ pub(crate) fn read(number: u64) -> Option<String> {
         "exit": queues.exit,
     });
     Some(text.to_string())
+}
+
+/// The way into the entries of the `serve` that job `number` runs, once it has bound them.
+pub(crate) fn local_of(number: u64) -> Result<Option<Local>, ()> {
+    let job = job(number).ok_or(())?;
+    Ok(job
+        .local
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone())
 }
 
 /// Closes a job's input; whether the number names one.

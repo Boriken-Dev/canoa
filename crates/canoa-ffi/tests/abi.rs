@@ -13,9 +13,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use canoa_ffi::exports::{
-    ABI_VERSION, STATUS_BAD_ARGUMENT, STATUS_OK, STATUS_UNKNOWN_JOB, canoa_ffi_abi,
-    canoa_ffi_job_free, canoa_ffi_job_read, canoa_ffi_job_start, canoa_ffi_job_stop,
-    canoa_ffi_text_free,
+    ABI_VERSION, STATUS_BAD_ARGUMENT, STATUS_ENDED, STATUS_NO_ENTRY, STATUS_OK, STATUS_UNKNOWN_JOB,
+    STATUS_UNKNOWN_LINK, canoa_ffi_abi, canoa_ffi_job_free, canoa_ffi_job_read,
+    canoa_ffi_job_start, canoa_ffi_job_stop, canoa_ffi_link_close, canoa_ffi_link_open,
+    canoa_ffi_link_read, canoa_ffi_link_send, canoa_ffi_text_free,
 };
 use serde_json::{Value, json};
 
@@ -449,4 +450,185 @@ fn accounts_are_listed_and_a_sign_in_that_needs_a_typed_secret_is_refused_as_a_j
                 .contains("second"),
         "no account was added"
     );
+}
+fn open_link(job: u64, entry: &str) -> Result<u64, i32> {
+    let mut link = u64::MAX;
+    // SAFETY: both point at what lives across the call.
+    let status = unsafe { canoa_ffi_link_open(job, entry.as_ptr(), entry.len(), &raw mut link) };
+    if status == STATUS_OK {
+        assert_ne!(link, 0);
+        Ok(link)
+    } else {
+        assert_eq!(link, 0, "written first");
+        Err(status)
+    }
+}
+
+fn send_on(link: u64, message: &Value) -> i32 {
+    let text = message.to_string();
+    // SAFETY: the text lives across the call.
+    unsafe { canoa_ffi_link_send(link, text.as_ptr(), text.len()) }
+}
+
+fn read_link(link: u64) -> Value {
+    let (mut text, mut len) = (core::ptr::null_mut(), 0_usize);
+    // SAFETY: both point at locals that live across the call.
+    let status = unsafe { canoa_ffi_link_read(link, &raw mut text, &raw mut len) };
+    assert_eq!(status, STATUS_OK);
+    // SAFETY: the library just gave this text of this length.
+    let value = serde_json::from_slice(unsafe { core::slice::from_raw_parts(text, len) })
+        .expect("the text is JSON");
+    // SAFETY: as it was given, once.
+    unsafe { canoa_ffi_text_free(text, len) };
+    value
+}
+
+/// The first message on `link` answering request `id`, parsed.
+fn answer_on(link: u64, id: u64) -> Value {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let read = read_link(link);
+        for message in read["messages"].as_array().expect("a list") {
+            let message: Value =
+                serde_json::from_str(message.as_str().expect("text")).expect("ACP");
+            if message["id"] == id && message.get("method").is_none() {
+                return message;
+            }
+        }
+        assert!(Instant::now() < deadline, "no answer to {id}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn stdio_agent() -> PathBuf {
+    let tests = std::env::current_exe().expect("the test knows where it is");
+    let profile = tests
+        .parent()
+        .and_then(Path::parent)
+        .expect("a test binary is in target/<profile>/deps");
+    profile
+        .join("examples")
+        .join(format!("stdio_agent{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// Whether process `pid` is running, asked of the system's own tools.
+fn process_runs(pid: u64) -> bool {
+    if cfg!(windows) {
+        let listed = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .expect("tasklist runs");
+        String::from_utf8_lossy(&listed.stdout).contains(&pid.to_string())
+    } else {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+}
+
+#[test]
+fn a_link_refuses_what_it_cannot_open_and_says_which() {
+    let mut link = 9_u64;
+    // SAFETY: a null entry is what is being refused; `link` lives across the call.
+    assert_eq!(
+        unsafe { canoa_ffi_link_open(1, core::ptr::null(), 0, &raw mut link) },
+        STATUS_BAD_ARGUMENT
+    );
+    assert_eq!(link, 0, "written first");
+    // SAFETY: a null out-parameter is what is being refused.
+    assert_eq!(
+        unsafe { canoa_ffi_link_open(1, b"x".as_ptr(), 1, core::ptr::null_mut()) },
+        STATUS_BAD_ARGUMENT
+    );
+    assert_eq!(open_link(u64::MAX, "x"), Err(STATUS_UNKNOWN_JOB));
+    let bad = [0xff_u8, 0xfe];
+    // SAFETY: both point at what lives across the call; text that is not UTF-8 is what is being refused.
+    assert_eq!(
+        unsafe { canoa_ffi_link_open(1, bad.as_ptr(), bad.len(), &raw mut link) },
+        STATUS_BAD_ARGUMENT
+    );
+    assert_eq!(canoa_ffi_link_close(u64::MAX), STATUS_UNKNOWN_LINK);
+    assert_eq!(send_on(u64::MAX, &json!({})), STATUS_UNKNOWN_LINK);
+    // SAFETY: a null message is what is being refused.
+    assert_eq!(
+        unsafe { canoa_ffi_link_send(1, core::ptr::null(), 0) },
+        STATUS_BAD_ARGUMENT
+    );
+    let (mut text, mut len) = (core::ptr::null_mut(), 9_usize);
+    // SAFETY: both point at locals that live across the call.
+    let status = unsafe { canoa_ffi_link_read(u64::MAX, &raw mut text, &raw mut len) };
+    assert_eq!(status, STATUS_UNKNOWN_LINK);
+    assert!(text.is_null());
+    assert_eq!(len, 0);
+
+    // A host that serves nothing has no entry to open.
+    let scratch = Scratch::new();
+    let job = serve(&scratch.config(), &scratch.0.join("home"), "a test");
+    until(job, "the host to be ready", |out, _, _| {
+        out.iter().any(|line| line.contains("ready"))
+    });
+    assert_eq!(open_link(job, "none"), Err(STATUS_NO_ENTRY));
+    assert_eq!(canoa_ffi_job_stop(job), STATUS_OK);
+    assert_eq!(to_end(job).exit, Some(0));
+    assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+}
+
+#[test]
+fn a_link_runs_a_session_on_an_entry_with_no_proof_and_closing_it_ends_the_agent() {
+    let agent = stdio_agent();
+    assert!(
+        agent.exists(),
+        "build the examples first: cargo build -p canoa-host --examples"
+    );
+    let scratch = Scratch::new();
+    let config = scratch.0.join("canoa.cfg");
+    let quoted = serde_json::to_string(&agent.to_string_lossy()).expect("quoted");
+    std::fs::write(
+        &config,
+        format!("[host.agents.fixture]\nprogram = {quoted}\nlisten = \"127.0.0.1:0\"\n"),
+    )
+    .expect("written");
+    let job = serve(&config, &scratch.0.join("home"), "a test");
+    until(job, "the host to be ready", |out, _, _| {
+        out.iter().any(|line| line.contains("ready"))
+    });
+    let link = open_link(job, "fixture").expect("a link");
+
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": 1, "clientCapabilities": {}}});
+    assert_eq!(send_on(link, &initialize), STATUS_OK);
+    assert!(answer_on(link, 1).get("result").is_some());
+    let dir = scratch.0.to_string_lossy().into_owned();
+    let new = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new",
+        "params": {"cwd": dir, "mcpServers": []}});
+    assert_eq!(send_on(link, &new), STATUS_OK);
+    let session = answer_on(link, 2);
+    assert!(session["result"]["sessionId"].is_string(), "{session}");
+    let ask = json!({"jsonrpc": "2.0", "id": 3, "method": "_fixture/pid", "params": {}});
+    assert_eq!(send_on(link, &ask), STATUS_OK);
+    let pid = answer_on(link, 3)["result"]["pid"].as_u64().expect("a pid");
+
+    assert_eq!(canoa_ffi_link_close(link), STATUS_OK);
+    assert_eq!(canoa_ffi_link_close(link), STATUS_UNKNOWN_LINK);
+    assert_eq!(send_on(link, &json!({})), STATUS_UNKNOWN_LINK);
+    let deadline = Instant::now() + WAIT;
+    while process_runs(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!process_runs(pid), "the agent outlived its link");
+
+    // Stopping the host ends a link still open: it reads closed, and a send is told it ended.
+    let second = open_link(job, "fixture").expect("another link");
+    assert_eq!(canoa_ffi_job_stop(job), STATUS_OK);
+    assert_eq!(to_end(job).exit, Some(0));
+    let deadline = Instant::now() + WAIT;
+    while !read_link(second)["closed"].as_bool().unwrap_or(false) {
+        assert!(Instant::now() < deadline, "the link never read closed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(send_on(second, &json!({})), STATUS_ENDED);
+    assert_eq!(canoa_ffi_link_close(second), STATUS_OK);
+    assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
 }
