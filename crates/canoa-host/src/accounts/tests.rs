@@ -106,6 +106,7 @@ fn the_file_store_keeps_its_key_and_files_to_the_owner() {
 fn the_operating_systems_store_round_trips_a_record_over_the_blob_limit() {
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
     let store = KeyringStore::new(service);
+    let _forget = Forget(&store, &["account-one"]);
     let bytes = large();
     match store.put("account-one", &bytes) {
         Ok(()) => {}
@@ -342,4 +343,16 @@ pub(crate) fn store_unavailable(why: &str) -> bool {
         );
     }
     unavailable
+}
+
+/// Takes an account's entries out of the operating system's store when the test ends, however it ends: a test that
+/// panics must not leave credentials behind, which fill the store until it refuses every write.
+struct Forget<'a>(&'a KeyringStore, &'static [&'static str]);
+
+impl Drop for Forget<'_> {
+    fn drop(&mut self) {
+        for id in self.1 {
+            let _ = self.0.remove(id);
+        }
+    }
 }

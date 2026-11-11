@@ -299,6 +299,7 @@ fn instances_making_the_sealing_key_at_once_end_with_one_key_all_can_use() {
 fn an_id_with_hash_signs_does_not_collide_with_another_accounts_chunks() {
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
     let store = KeyringStore::new(service);
+    let _forget = Forget(&store, &["x", "x#1#0"]);
     if store
         .put("x", b"first")
         .is_err_and(|e| super::store_unavailable(&e.to_string()))
@@ -322,6 +323,7 @@ fn an_id_with_hash_signs_does_not_collide_with_another_accounts_chunks() {
 fn the_windows_credential_is_local_to_this_machine() {
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
     let store = KeyringStore::new(service);
+    let _forget = Forget(&store, &["account-one"]);
     if store
         .put("account-one", b"x")
         .is_err_and(|e| super::store_unavailable(&e.to_string()))
@@ -346,6 +348,7 @@ fn two_homes_have_two_services_and_no_id_is_in_a_name() {
 fn a_chunk_a_failed_write_left_and_every_old_generation_are_removed_with_the_account() {
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
     let store = KeyringStore::new(service);
+    let _forget = Forget(&store, &["x"]);
     let big = vec![b'a'; 9_000];
     if store
         .put("x", &big)
@@ -381,6 +384,7 @@ fn a_chunk_a_failed_write_left_and_every_old_generation_are_removed_with_the_acc
 fn an_index_that_cannot_be_read_is_not_written_over() {
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
     let store = KeyringStore::new(service);
+    let _forget = Forget(&store, &["x"]);
     if store
         .put("x", b"first")
         .is_err_and(|e| super::store_unavailable(&e.to_string()))
