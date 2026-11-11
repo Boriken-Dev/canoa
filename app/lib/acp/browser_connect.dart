@@ -23,6 +23,25 @@ Future<VerifiedAgent> connectBrowserAcp(
   );
 }
 
+/// As [connectBrowserAcp] for an entry on a pipe or Unix socket, [pipe] being the `pipe:NAME` or `unix:PATH` the host printed.
+Future<VerifiedAgent> connectBrowserAcpOverPipe(
+  String pipe, {
+  required String pinnedPeerId,
+  required PeerMethod method,
+  Duration timeout = const Duration(seconds: 10),
+  AgentDecider? decider,
+  AgentElicitor? elicitor,
+  Map<String, Object?> initializeMeta = const {},
+}) async {
+  final why = await browserMethodUnavailable(method);
+  if (why != null) throw MethodUnavailable(method, why);
+  return connectVerifiedAcpOverPipe(
+    pipe, expectedPeerId: pinnedPeerId,
+    verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, method),
+    timeout: timeout, decider: decider, elicitor: elicitor, initializeMeta: initializeMeta,
+  );
+}
+
 /// Pairs this browser's Noise key with the machine waiting at [url] (`coqui-acp-bridge pair-accept --method noise`) by the
 /// [pin] it shows, and answers that machine's id, to pin under Noise.
 Future<String> pairBrowserAcp(Uri url, String pin, {Duration timeout = const Duration(seconds: 10)}) async {

@@ -1,5 +1,6 @@
 import 'package:coqui_web/coqui_web.dart';
 import 'client.dart';
+import 'pipe_channel.dart';
 
 /// The endpoints the chat dials for an agent it pins. Plain WebSocket is taken on loopback only, where `canoa` listens by
 /// default: the peer proof does not depend on the transport, and every message after it is sealed in the session it ends in.
@@ -29,12 +30,52 @@ Future<VerifiedAgent> connectVerifiedAcp(
   AgentElicitor? elicitor,
   Map<String, Object?> initializeMeta = const {},
 }) async {
-  final source = await connectWebChannel(
-    endpoints,
+  return _verifiedAcp(
+    await connectWebChannel(
+      endpoints,
+      timeout: timeout,
+      webTransportDialer: webTransportDialer,
+      webSocketDialer: webSocketDialer,
+    ),
+    expectedPeerId: expectedPeerId,
+    verifyPeer: verifyPeer,
     timeout: timeout,
-    webTransportDialer: webTransportDialer,
-    webSocketDialer: webSocketDialer,
+    decider: decider,
+    elicitor: elicitor,
+    initializeMeta: initializeMeta,
   );
+}
+
+/// As [connectVerifiedAcp] for an entry the host listens on with a pipe or a Unix socket: [pipe] is the `pipe:NAME` or
+/// `unix:PATH` that `canoa serve` printed as its url. The operating system keeps other users out, and the peer proof still
+/// has to show the host holds [expectedPeerId]'s key before any ACP message.
+Future<VerifiedAgent> connectVerifiedAcpOverPipe(
+  String pipe, {
+  required String expectedPeerId,
+  required VerifyAcpPeer verifyPeer,
+  Duration timeout = const Duration(seconds: 10),
+  AgentDecider? decider,
+  AgentElicitor? elicitor,
+  Map<String, Object?> initializeMeta = const {},
+}) async => _verifiedAcp(
+  await openPipeChannel(pipe, timeout: timeout),
+  expectedPeerId: expectedPeerId,
+  verifyPeer: verifyPeer,
+  timeout: timeout,
+  decider: decider,
+  elicitor: elicitor,
+  initializeMeta: initializeMeta,
+);
+
+Future<VerifiedAgent> _verifiedAcp(
+  WebChannel source, {
+  required String expectedPeerId,
+  required VerifyAcpPeer verifyPeer,
+  required Duration timeout,
+  AgentDecider? decider,
+  AgentElicitor? elicitor,
+  Map<String, Object?> initializeMeta = const {},
+}) async {
   final connection = StagedChannel(source);
   final client = await VerifiedAgent.open(
     connection,

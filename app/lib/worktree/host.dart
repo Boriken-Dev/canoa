@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
+import '../acp/pipe_channel.dart';
 import 'worktree.dart';
 
 /// One request to a host on a connection of its own, its `result` or a [WorktreeFailure] with the host's words.
@@ -69,8 +70,37 @@ Future<Map<String, Object?>> hostWorktreeRequest(
   required Map<String, Object?> params,
   Duration timeout = const Duration(seconds: 10),
   Duration answerTimeout = const Duration(minutes: 2),
+}) async => _worktreeRequest(
+  await connectWebChannel(endpoints, timeout: timeout),
+  expectedPeerId: expectedPeerId, verifyPeer: verifyPeer, method: method, params: params,
+  timeout: timeout, answerTimeout: answerTimeout,
+);
+
+/// As [hostWorktreeRequest] to an entry the host listens on with a pipe or a Unix socket: [pipe] is the `pipe:NAME` or
+/// `unix:PATH` that `canoa serve` printed.
+Future<Map<String, Object?>> hostWorktreeRequestOverPipe(
+  String pipe, {
+  required String expectedPeerId,
+  required VerifyAcpPeer verifyPeer,
+  required String method,
+  required Map<String, Object?> params,
+  Duration timeout = const Duration(seconds: 10),
+  Duration answerTimeout = const Duration(minutes: 2),
+}) async => _worktreeRequest(
+  await openPipeChannel(pipe, timeout: timeout),
+  expectedPeerId: expectedPeerId, verifyPeer: verifyPeer, method: method, params: params,
+  timeout: timeout, answerTimeout: answerTimeout,
+);
+
+Future<Map<String, Object?>> _worktreeRequest(
+  WebChannel source, {
+  required String expectedPeerId,
+  required VerifyAcpPeer verifyPeer,
+  required String method,
+  required Map<String, Object?> params,
+  required Duration timeout,
+  required Duration answerTimeout,
 }) async {
-  final source = await connectWebChannel(endpoints, timeout: timeout);
   final staged = StagedChannel(source);
   WebChannel closing = staged;
   try {

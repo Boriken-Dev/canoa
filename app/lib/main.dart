@@ -11,6 +11,7 @@ import 'sources/source_choices.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/connect.dart' show chatEndpoints;
+import 'acp/pipe_channel.dart' show isPipeUrl;
 import 'acp/provider_connect.dart';
 import 'acp/agent_commands.dart';
 import 'acp/client.dart';
@@ -421,6 +422,13 @@ class _CanoaAppState extends State<CanoaApp> {
     final uri = Uri.tryParse(endpoint ?? '');
     final proof = PeerMethod.values.where((each) => each.id == method).firstOrNull;
     if (uri == null || proof == null || peerId == null) return null;
+    if (isPipeUrl(uri.toString())) {
+      return HostWorktrees((name, params) => hostWorktreeRequestOverPipe(
+        uri.toString(), expectedPeerId: peerId, method: name, params: params,
+        verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, proof),
+        timeout: Duration(seconds: config.connectTimeout),
+      ));
+    }
     final overWebTransport = uri.scheme == 'https';
     final endpoints = chatEndpoints(
       webSocket: overWebTransport ? (fallback ?? '') : uri.toString(),
@@ -759,13 +767,20 @@ class _CanoaAppState extends State<CanoaApp> {
     final where = made?.path ?? folder;
     VerifiedAgent? client;
     try {
-      client = await connectBrowserAcp(
-        chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
-        pinnedPeerId: listening.peer, method: method,
-        timeout: Duration(seconds: config.connectTimeout),
-        decider: store.askPermission, elicitor: store.askQuestion,
-        initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
-      );
+      client = isPipeUrl(listening.url)
+          ? await connectBrowserAcpOverPipe(
+              listening.url, pinnedPeerId: listening.peer, method: method,
+              timeout: Duration(seconds: config.connectTimeout),
+              decider: store.askPermission, elicitor: store.askQuestion,
+              initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
+            )
+          : await connectBrowserAcp(
+              chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
+              pinnedPeerId: listening.peer, method: method,
+              timeout: Duration(seconds: config.connectTimeout),
+              decider: store.askPermission, elicitor: store.askQuestion,
+              initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
+            );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
       final opened = await client.openSession(cwd: where);
@@ -817,20 +832,28 @@ class _CanoaAppState extends State<CanoaApp> {
         final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
         if (endpoint == null || method == null) throw StateError('Canoa did not note how to reach that peer');
         final overWebTransport = endpoint.scheme == 'https';
-        client = await connectBrowserAcp(
-          chatEndpoints(
-            webSocket: overWebTransport ? (entry.fallback ?? '') : endpoint.toString(),
-            webTransport: overWebTransport ? endpoint.toString() : '',
-            preferWebTransport: config.preferWebTransport,
-          ),
-          pinnedPeerId: entry.peerId, method: method,
-          timeout: Duration(seconds: config.connectTimeout),
-          decider: store.askPermission, elicitor: store.askQuestion,
-          initializeMeta: _cacheMeta((
-            lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
-            chosen: entry.cacheLifetime != null,
-          )),
-        );
+        final cacheMeta = _cacheMeta((
+          lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
+          chosen: entry.cacheLifetime != null,
+        ));
+        client = isPipeUrl(endpoint.toString())
+            ? await connectBrowserAcpOverPipe(
+                endpoint.toString(), pinnedPeerId: entry.peerId, method: method,
+                timeout: Duration(seconds: config.connectTimeout),
+                decider: store.askPermission, elicitor: store.askQuestion,
+                initializeMeta: cacheMeta,
+              )
+            : await connectBrowserAcp(
+                chatEndpoints(
+                  webSocket: overWebTransport ? (entry.fallback ?? '') : endpoint.toString(),
+                  webTransport: overWebTransport ? endpoint.toString() : '',
+                  preferWebTransport: config.preferWebTransport,
+                ),
+                pinnedPeerId: entry.peerId, method: method,
+                timeout: Duration(seconds: config.connectTimeout),
+                decider: store.askPermission, elicitor: store.askQuestion,
+                initializeMeta: cacheMeta,
+              );
       case SessionPlace.browser:
         throw StateError(why ?? 'Reopen it from Earlier conversations');
     }
