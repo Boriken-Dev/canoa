@@ -24,6 +24,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show KeyDownEvent, KeyRepeatEvent, LogicalKeyboardKey;
 
+import 'chat/cache_lifetime.dart';
 import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/changes.dart';
 import 'chat/clipboard.dart';
@@ -716,7 +717,8 @@ class _CanoaAppState extends State<CanoaApp> {
       final Set<String> on;
       (prepared, on, notes) = await _prepareProfile(command.label, where, home, overlays: _overlaysFor(draft));
       started = await startProfiled(
-        command, cwd: where, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
+        command.withCacheLifetime(store.cacheLifetimeOf(draft).lifetime),
+        cwd: where, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
         decider: store.askPermission, elicitor: store.askQuestion, start: widget.startAgent ?? startLocalAgent,
       );
       client = started.client;
@@ -733,6 +735,10 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     await store.applyProfile(draft, started.launch, prepared, harness: started.harness, notes: notes);
   }
+
+  /// What `initialize` carries to a host to say how long this session's prompt cache should live.
+  Map<String, Object?> _cacheMeta(({CacheLifetime lifetime, bool chosen}) asked) =>
+      {cacheLifetimeMeta: cacheLifetimeRequest(asked.lifetime, chosen: asked.chosen)};
 
   Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
     final host = widget.host;
@@ -758,6 +764,7 @@ class _CanoaAppState extends State<CanoaApp> {
         pinnedPeerId: listening.peer, method: method,
         timeout: Duration(seconds: config.connectTimeout),
         decider: store.askPermission, elicitor: store.askQuestion,
+        initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
       );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
@@ -800,7 +807,8 @@ class _CanoaAppState extends State<CanoaApp> {
         final Set<String> on;
         (prepared, on, notes) = await _prepareProfile(command.label, cwd, home);
         started = await startProfiled(
-          command, cwd: cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
+          command.withCacheLifetime(CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat),
+          cwd: cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
           decider: store.askPermission, elicitor: store.askQuestion,
         );
         client = started.client;
@@ -818,6 +826,10 @@ class _CanoaAppState extends State<CanoaApp> {
           pinnedPeerId: entry.peerId, method: method,
           timeout: Duration(seconds: config.connectTimeout),
           decider: store.askPermission, elicitor: store.askQuestion,
+          initializeMeta: _cacheMeta((
+            lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
+            chosen: entry.cacheLifetime != null,
+          )),
         );
       case SessionPlace.browser:
         throw StateError(why ?? 'Reopen it from Earlier conversations');

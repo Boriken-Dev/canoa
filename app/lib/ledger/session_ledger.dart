@@ -86,6 +86,7 @@ final class LedgerEntry {
     this.worktree,
     this.mode,
     this.bypass = false,
+    this.cacheLifetime,
     this.canoaId,
     this.messages = const [],
   });
@@ -130,6 +131,9 @@ final class LedgerEntry {
   String? mode;
   bool bypass;
 
+  /// The prompt-cache lifetime the person chose for the session (`short`, `long` or `default`), asked again when it is opened.
+  String? cacheLifetime;
+
   String get key => keyOf(peerId, sessionId);
   static String keyOf(String peerId, String sessionId) => '$peerId\n$sessionId';
 
@@ -171,6 +175,7 @@ final class LedgerEntry {
     'worktree': ?worktree?.toJson(),
     'mode': ?mode,
     if (bypass) 'bypass': true,
+    'cacheLifetime': ?cacheLifetime,
     'canoaId': ?canoaId,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
   };
@@ -204,6 +209,7 @@ final class LedgerEntry {
       worktree: SessionWorktree.fromJson(json['worktree']),
       mode: text('mode'),
       bypass: json['bypass'] == true,
+      cacheLifetime: text('cacheLifetime'),
       canoaId: text('canoaId'),
       messages: [
         if (json['messages'] case final List<dynamic> kept)
@@ -424,6 +430,7 @@ class SessionLedger extends ChangeNotifier {
     String? method,
     SessionWorktree? worktree,
     String? canoaId,
+    String? cacheLifetime,
   }) {
     if (_settings.keep <= 0) return null;
     final now = _clock();
@@ -453,6 +460,7 @@ class SessionLedger extends ChangeNotifier {
       ..cwd = cwd ?? found.cwd
       ..title = title ?? found.title
       ..worktree = worktree ?? found.worktree
+      ..cacheLifetime = cacheLifetime ?? found.cacheLifetime
       ..canoaId = canoaId ?? found.canoaId;
     _apply();
     _changed();

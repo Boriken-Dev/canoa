@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../chat/agent_events.dart';
+import '../chat/cache_lifetime.dart';
 import 'sources.dart';
 
 /// One model a source's provider offers before a session starts, as `canoa options` prints it.
@@ -56,8 +57,15 @@ final class ModelChoice {
 /// What a source's provider lists before a session starts: its models and each one's efforts. A source whose provider cannot
 /// say before it starts is [known] false, and the composer says its choices come after it starts.
 final class SourceChoices {
-  const SourceChoices({required this.known, this.unknownBecause, this.models = const [], this.programVersion, DateTime? fetchedAt})
-      : _fetchedAt = fetchedAt;
+  const SourceChoices({
+    required this.known,
+    this.unknownBecause,
+    this.models = const [],
+    this.programVersion,
+    this.cacheLifetime,
+    this.cacheLifetimeSetting,
+    DateTime? fetchedAt,
+  }) : _fetchedAt = fetchedAt;
 
   final bool known;
   final String? unknownBecause;
@@ -65,13 +73,28 @@ final class SourceChoices {
 
   /// The first line of the program's `--version`, when it answered.
   final String? programVersion;
+
+  /// What the provider says it does with a session's cache lifetime, in its own sentence (`ignored: ...` where it has no
+  /// control for it); null when it did not say, and then the chat offers no choice.
+  final String? cacheLifetime;
+
+  /// The lifetime canoa.cfg's entry sets for its sessions, when it sets one.
+  final CacheLifetime? cacheLifetimeSetting;
   final DateTime? _fetchedAt;
 
   /// When this was asked; the epoch for choices that were not.
   DateTime get fetchedAt => _fetchedAt ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
   SourceChoices at(DateTime when) =>
-      SourceChoices(known: known, unknownBecause: unknownBecause, models: models, programVersion: programVersion, fetchedAt: when);
+      SourceChoices(
+        known: known,
+        unknownBecause: unknownBecause,
+        models: models,
+        programVersion: programVersion,
+        cacheLifetime: cacheLifetime,
+        cacheLifetimeSetting: cacheLifetimeSetting,
+        fetchedAt: when,
+      );
 
   /// The object `canoa options --format json` prints, in [text]; null when it holds none.
   static SourceChoices? parse(String text) {
@@ -84,6 +107,8 @@ final class SourceChoices {
           unknownBecause: value['unknown_because'] is String ? value['unknown_because'] as String : null,
           models: [if (value['models'] is List) for (final model in value['models'] as List) ?ModelChoice._parse(model)],
           programVersion: value['program_version'] is String ? value['program_version'] as String : null,
+          cacheLifetime: value['cache_lifetime'] is String ? value['cache_lifetime'] as String : null,
+          cacheLifetimeSetting: CacheLifetime.named(value['cache_lifetime_setting']),
         );
       } on FormatException {
         continue;

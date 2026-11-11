@@ -11,6 +11,7 @@ import '../sources/sources.dart';
 import '../theme/look.dart';
 import 'agent_events.dart' show AgentCommandInfo, Choice, ConfigOption;
 import 'attachments.dart';
+import 'cache_lifetime.dart';
 import 'modes.dart';
 import 'session_options.dart';
 import 'transcript.dart' show CommandSuggestions;
@@ -451,6 +452,7 @@ class _Controls extends StatelessWidget {
         _OptionChooser(store: store, session: session, role: role, options: options, seen: seen),
       if (options.any((option) => roleOf(option) == OptionRole.other))
         _MoreChooser(store: store, session: session, options: options),
+      if (draft) _CacheChooser(store: store, session: session),
       if (kit.overlays.isNotEmpty || session.profile != null) _OverlaysChooser(store: store, session: session, kit: kit),
     ];
     final send = widget.working
@@ -840,6 +842,43 @@ class _MoreChooser extends StatelessWidget {
 }
 
 /// Which overlays a draft starts with; once it has started, what its profile gave it.
+/// How long a new session's prompt cache lives, for one session: shown only where the source's provider said what it does with
+/// the choice, since a source that cannot say has no such control to set. Its sentence is under the composer.
+class _CacheChooser extends StatelessWidget {
+  const _CacheChooser({required this.store, required this.session});
+
+  final SessionStore store;
+  final ChatSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final source = session.source;
+    if (source == null || store.choicesOf(source)?.cacheLifetime == null) return const SizedBox.shrink();
+    final asked = store.cacheLifetimeOf(session);
+    return PopupMenuButton<CacheLifetime?>(
+      key: const Key('option-cache'),
+      tooltip: 'How long the prompt cache lives',
+      enabled: session.status == SessionStatus.draft,
+      onSelected: (value) => store.setCacheLifetime(session, value),
+      itemBuilder: (context) => [
+        PopupMenuItem<CacheLifetime?>(
+          key: const Key('cache-unchosen'),
+          value: null,
+          child: Text(asked.chosen ? 'Not chosen' : 'Not chosen (${asked.lifetime.label})'),
+        ),
+        for (final each in CacheLifetime.values)
+          CheckedPopupMenuItem<CacheLifetime?>(
+            key: Key('cache-${each.id}'),
+            value: each,
+            checked: asked.chosen && each == asked.lifetime,
+            child: Text('${each.label}, ${each.about}'),
+          ),
+      ],
+      child: _Pill(label: 'Cache: ${asked.lifetime.label}', icon: Icons.timer_outlined),
+    );
+  }
+}
+
 class _OverlaysChooser extends StatelessWidget {
   const _OverlaysChooser({required this.store, required this.session, required this.kit});
 

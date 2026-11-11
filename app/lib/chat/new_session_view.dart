@@ -86,6 +86,9 @@ class NewSessionView extends StatelessWidget {
         ]),
       ),
     );
+    final source = session.source;
+    final says = source == null ? null : store.choicesOf(source)?.cacheLifetime;
+    final cacheNote = says == null ? null : 'Prompt cache: ${store.cacheLifetimeOf(session).lifetime.label.toLowerCase()}. Provider: $says';
     return LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
@@ -103,6 +106,12 @@ class NewSessionView extends StatelessWidget {
               folder,
               const SizedBox(height: 20),
               composer,
+              if (cacheNote != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(cacheNote, key: const Key('new-session-cache-note'), textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(color: look.muted)),
+                ),
               for (final notice in notices)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),

@@ -1,3 +1,4 @@
+import '../chat/cache_lifetime.dart';
 import '../desktop/child_flag.dart';
 
 /// An agent this computer can run: a program speaking ACP on its standard streams, or an adapter that makes one.
@@ -35,6 +36,24 @@ final class AgentCommand {
   /// Where the tool's own installer puts [program], looked in when PATH does not have it: `~` is the home directory, and a
   /// `%NAME%` an environment variable (the directory is skipped where it is not set).
   final List<String> searchDirs;
+}
+
+extension CacheLifetimeArgs on AgentCommand {
+  /// This command asking the host's `canoa agent` for a prompt cache that lives [lifetime]. Any other command has no such
+  /// control and is returned as it is, and so is the harness's own, which asks nothing.
+  AgentCommand withCacheLifetime(CacheLifetime lifetime) {
+    if (!hosts || args.isEmpty || args.first != 'agent' || lifetime == CacheLifetime.harness) return this;
+    return AgentCommand(
+      label: label,
+      program: program,
+      args: [...args, '--cache-lifetime', lifetime.id],
+      requires: requires,
+      programPaths: programPaths,
+      searchDirs: searchDirs,
+      hosts: hosts,
+      usage: usage,
+    );
+  }
 }
 
 /// The program and arguments that run [command]. A host's own command runs as [hostProgram], a `canoa` the environment

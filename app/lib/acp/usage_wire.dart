@@ -10,9 +10,12 @@ typedef UsageNotice = ({String? sessionId, UsageReport report});
 /// client adds to `initialize`, the agent's `_coqui_acp/usage_update` notifications as they pass, and the app's own
 /// `_coqui_acp/usage` requests, whose ids are text so they never meet the client's numbered ones.
 final class UsageWire {
-  UsageWire(this._send);
+  UsageWire(this._send, {this.initializeMeta = const {}});
 
   final Future<void> Function(String) _send;
+
+  /// Entries added to the `_meta` of `initialize`, which a host reads before it starts anything (the cache lifetime).
+  final Map<String, Object?> initializeMeta;
   final _notices = StreamController<UsageNotice>.broadcast();
   final _waiting = <String, Completer<UsageReport?>>{};
   int _next = 0;
@@ -20,7 +23,7 @@ final class UsageWire {
   /// The reports the agent sends when one changes.
   Stream<UsageNotice> get notices => _notices.stream;
 
-  /// [message] on its way to the agent, with the opt-in added when it is `initialize`: this client takes notifications. The
+  /// [message] on its way to the agent, with the opt-in (and [initializeMeta]) added when it is `initialize`: this client takes notifications. The
   /// host adds the account itself.
   String outgoing(String message) {
     if (!message.contains('"initialize"')) return message;
@@ -36,6 +39,10 @@ final class UsageWire {
     final capabilities = params[key] is Map ? params[key] as Map : (params[key] = <String, Object?>{});
     final meta = capabilities['_meta'] is Map ? capabilities['_meta'] as Map : (capabilities['_meta'] = <String, Object?>{});
     meta[usageCapability] = {'notify': true};
+    if (initializeMeta.isNotEmpty) {
+      final own = params['_meta'] is Map ? params['_meta'] as Map : (params['_meta'] = <String, Object?>{});
+      own.addAll(initializeMeta);
+    }
     return jsonEncode(decoded);
   }
 

@@ -133,6 +133,7 @@ final class VerifiedAgent {
     Duration verificationTimeout = const Duration(seconds: 10),
     AgentDecider? decider,
     AgentElicitor? elicitor,
+    Map<String, Object?> initializeMeta = const {},
   }) async {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
@@ -143,7 +144,7 @@ final class VerifiedAgent {
       }
       final proven = actual.channel;
       final identity = AgentIdentity();
-      final usage = UsageWire(proven.send);
+      final usage = UsageWire(proven.send, initializeMeta: initializeMeta);
       return VerifiedAgent._(
         (decider, elicitor) => AcpClient(
           incoming: proven.messages.map(identity._inspect).map(usage.incoming),

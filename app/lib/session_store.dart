@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import 'chat/agent_events.dart';
 import 'chat/attachments.dart';
+import 'chat/cache_lifetime.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'chat/update_record.dart';
@@ -137,6 +138,10 @@ class ChatSession {
 
   /// Whether a draft starts in a new git worktree of its folder, which is made when it starts.
   bool wantsWorktree = false;
+
+  /// How long the person chose for this session's prompt cache to live; null when they chose none, and then the agent's entry
+  /// in canoa.cfg decides, else the chat's default. Kept with the draft and with the session in the ledger.
+  CacheLifetime? cacheLifetime;
 
   /// What is written in a draft's composer, kept with it.
   String draftText = '';
@@ -588,7 +593,8 @@ class SessionStore extends ChangeNotifier {
   /// is made then if [worktree]. It is kept between runs until it starts or is closed, and never noted in the ledger before.
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
-      ({String kind, String label})? keptSource, bool bypass = false, String? workspaceId, DateTime? created}) {
+      ({String kind, String label})? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
+      CacheLifetime? cacheLifetime}) {
     final session = ChatSession(
       id: 'local-${++_nextId}',
       title: title ?? draftTitle,
@@ -599,6 +605,7 @@ class SessionStore extends ChangeNotifier {
       created: created,
     )
       ..wantsWorktree = worktree
+      ..cacheLifetime = cacheLifetime
       ..overlays = overlays
       ..draftId = id ?? newDraftId()
       ..workspaceId = workspaceId ?? newSessionUuid()
@@ -613,6 +620,24 @@ class SessionStore extends ChangeNotifier {
     _keepDraft(session);
     _askChoices(source);
     return session;
+  }
+
+  /// What [session]'s agent is asked for its prompt cache: the person's choice, else the lifetime canoa.cfg's entry sets, else
+  /// the chat's default. [chosen] says the person chose it, so a host lets it win over its entry's setting.
+  ({CacheLifetime lifetime, bool chosen}) cacheLifetimeOf(ChatSession session) {
+    final chosen = session.cacheLifetime;
+    if (chosen != null) return (lifetime: chosen, chosen: true);
+    final source = session.source;
+    final setting = source == null ? null : choicesOf(source)?.cacheLifetimeSetting;
+    return (lifetime: setting ?? CacheLifetime.chat, chosen: false);
+  }
+
+  /// Sets how long [session]'s prompt cache should live; null takes the choice back. A session that has started keeps its own.
+  void setCacheLifetime(ChatSession session, CacheLifetime? lifetime) {
+    if (!session.isDraft) return;
+    session.cacheLifetime = lifetime;
+    _keepDraft(session);
+    notifyListeners();
   }
 
   /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
@@ -654,6 +679,7 @@ class SessionStore extends ChangeNotifier {
         keptSource: kept,
         cwd: record['cwd'] is String ? record['cwd'] as String : null,
         worktree: record['worktree'] == true,
+        cacheLifetime: CacheLifetime.named(record['cacheLifetime']),
         overlays: record['overlays'] is List ? {for (final name in record['overlays'] as List) if (name is String) name} : null,
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
@@ -702,6 +728,7 @@ class SessionStore extends ChangeNotifier {
       'cwd': ?session.cwd,
       'workspaceId': ?session.workspaceId,
       'worktree': session.wantsWorktree,
+      'cacheLifetime': ?session.cacheLifetime?.id,
       'overlays': ?session.overlays?.toList(),
       'text': session.draftText,
       if (!session.agentNames) 'title': session.title,
@@ -1235,6 +1262,7 @@ class SessionStore extends ChangeNotifier {
       method: session.method,
       worktree: session.worktree,
       canoaId: session.workspaceId,
+      cacheLifetime: session.cacheLifetime?.id,
     );
   }
 
@@ -1904,6 +1932,7 @@ class SessionStore extends ChangeNotifier {
       worktree: entry.worktree,
     ))
       ..bypass = entry.bypass
+      ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
       ..chosenMode = entry.mode
       ..opening = true;
     attachVerifiedClient(session.id, client, record: false);
