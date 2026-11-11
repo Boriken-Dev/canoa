@@ -49,6 +49,16 @@ percent-encoding.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# An account's credential in the operating system's store (Windows Credential Manager, macOS Keychain, Secret Service).
+keyring = "4"
+# The file store's sealing, at the version the dependency graph already holds.
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "getrandom"] }
+# A credential's memory wiped once it is used.
+zeroize = "1"
+# An account's renewal compared with the stored copy by when each stops working.
+time = { version = "0.3", default-features = false, features = ["parsing"] }
+# A secret typed at the terminal, with no echo.
+rpassword = "7"
 # The digest of a worktree's status listing, and of what the examples print; the version the dependency graph already holds.
 sha2 = { version = "0.10", default-features = false }
 toml.workspace = true

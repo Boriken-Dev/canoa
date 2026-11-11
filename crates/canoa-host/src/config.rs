@@ -41,6 +41,36 @@ pub struct Config {
     /// `[usage] limit_phrases`: the words that make a failed turn of an agent that reports no usage a limit. `None` is
     /// unset, which means coqui-acp-api's defaults; a list replaces them, and an empty one infers nothing.
     pub limit_phrases: Option<Vec<String>>,
+    /// `[host.accounts]`, by name, in the file's order: the accounts a harness entry may offer.
+    pub accounts: IndexMap<String, AccountConfig>,
+    /// Where the accounts' credentials are kept: `[host] account_store`.
+    pub account_store: AccountStore,
+}
+
+/// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AccountStore {
+    /// The operating system's credential store (Windows Credential Manager, macOS Keychain, Secret Service).
+    #[default]
+    Os,
+    /// A file per account in the host's home, sealed to a key beside it: for a host with no credential store, and a
+    /// weakening the host logs.
+    File,
+}
+
+/// One `[host.accounts.NAME]`: which login an entry may run a session on. It holds no credential.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AccountConfig {
+    /// The provider, as an entry's `harness`.
+    pub harness: String,
+    /// One of the kinds the provider's catalog lists.
+    pub kind: String,
+    /// The account's id, which Canoa writes when it makes the account: never reused, and the key of its stored credential.
+    pub id: String,
+    /// The kind's settings that are not secrets, checked against the provider's schema when the host starts.
+    pub settings: Option<Settings>,
 }
 
 /// `[host.web]`: the web app on a listener of its own, beside the entries.
@@ -240,6 +270,9 @@ pub enum EntryKind {
         settings: Option<Settings>,
         /// The `[host.profiles]` a client may choose among, as an agent's.
         profiles: Vec<String>,
+        /// The `[host.accounts]` a client may choose among, the first when it names none; empty runs the harness on
+        /// the login it has where it runs.
+        accounts: Vec<String>,
     },
     /// A Guatiao `agent_provider`, from a library or a source, served through the ACP facade in a process of its own.
     Provider {
@@ -439,7 +472,22 @@ struct RawHost {
     tools: IndexMap<String, toml::Table>,
     #[serde(default)]
     profiles: IndexMap<String, toml::Table>,
+    #[serde(default)]
+    accounts: IndexMap<String, RawAccount>,
+    account_store: Option<String>,
     web: Option<RawWeb>,
+}
+
+/// `[host.accounts.NAME]`. A key it does not list is collected, so that it is refused by name and a credential written
+/// there is never quoted.
+#[derive(Deserialize)]
+struct RawAccount {
+    harness: Option<String>,
+    kind: Option<String>,
+    id: Option<String>,
+    settings: Option<toml::Table>,
+    #[serde(flatten)]
+    rest: toml::Table,
 }
 
 #[derive(Deserialize)]
@@ -492,6 +540,7 @@ struct RawAgent {
     setting_sources: Option<Vec<String>>,
     modes: Option<Vec<String>>,
     profiles: Option<Vec<String>>,
+    accounts: Option<Vec<String>>,
     usage: Option<String>,
     title: Option<String>,
     listen: Option<String>,
@@ -593,6 +642,30 @@ impl Config {
             let profile = profile_of(&name, table, &directory)?;
             profiles.insert(name, profile);
         }
+        let account_store = match host.account_store.as_deref() {
+            None | Some("os") => AccountStore::Os,
+            Some("file") => AccountStore::File,
+            Some(_) => {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: "account_store is os or file".to_owned(),
+                });
+            }
+        };
+        let mut accounts = IndexMap::new();
+        for (name, raw) in host.accounts {
+            let account = account_of(&name, raw)?;
+            if accounts
+                .values()
+                .any(|other: &AccountConfig| other.id == account.id)
+            {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: format!("account {name}: its id is another account's"),
+                });
+            }
+            accounts.insert(name, account);
+        }
         let mut entries = Vec::new();
         for (name, agent) in host.agents {
             check_name(&name)?;
@@ -610,6 +683,18 @@ impl Config {
                 }
                 if offered[..index].contains(profile) {
                     return Err(invalid(&name, "profiles names a profile twice"));
+                }
+            }
+            let offered_accounts = agent.accounts.unwrap_or_default();
+            for (index, account) in offered_accounts.iter().enumerate() {
+                if !accounts.contains_key(account) {
+                    return Err(invalid(
+                        &name,
+                        "accounts names an account [host.accounts] does not hold",
+                    ));
+                }
+                if offered_accounts[..index].contains(account) {
+                    return Err(invalid(&name, "accounts names an account twice"));
                 }
             }
             let common = RawCommon {
@@ -647,6 +732,7 @@ impl Config {
                         (agent.source_settings.is_some(), "source_settings"),
                         (agent.import_search.is_some(), "import_search"),
                         (agent.settings.is_some(), "settings"),
+                        (!offered_accounts.is_empty(), "accounts"),
                     ] {
                         if set {
                             return Err(invalid(
@@ -765,6 +851,7 @@ impl Config {
                         options,
                         settings,
                         profiles: offered,
+                        accounts: offered_accounts,
                     }
                 }
                 _ => {
@@ -837,6 +924,8 @@ impl Config {
             profiles,
             web,
             limit_phrases,
+            accounts,
+            account_store,
         })
     }
 
@@ -1303,7 +1392,41 @@ fn check_title(name: &str, title: &str) -> Result<(), ConfigError> {
 }
 
 /// Checked before anything quotes the name, since a key in the file may hold any character.
-fn check_name(name: &str) -> Result<(), ConfigError> {
+/// One `[host.accounts.NAME]`. Errors name a key, never a value: a credential written here is refused, and not quoted.
+fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, ConfigError> {
+    check_name(name)?;
+    let refused = |what: String| ConfigError::Invalid {
+        entry: None,
+        what: format!("account {name}: {what}"),
+    };
+    if let Some(key) = raw.rest.keys().next() {
+        return Err(refused(format!(
+            "{key} is not a key of an account, and a credential never goes in canoa.cfg: `canoa accounts add` keeps it in the account store"
+        )));
+    }
+    let text = |value: Option<String>, key: &str| match value {
+        Some(value) if !value.is_empty() => Ok(value),
+        _ => Err(refused(format!("{key} is missing or empty"))),
+    };
+    let id = text(raw.id, "id")?;
+    if !coqui_acp_api::is_account_id(&id) {
+        return Err(refused(
+            "id is 1 to 128 bytes with no control character".to_owned(),
+        ));
+    }
+    let settings = raw
+        .settings
+        .map(|table| settings_of(name, table))
+        .transpose()?;
+    Ok(AccountConfig {
+        harness: text(raw.harness, "harness")?,
+        kind: text(raw.kind, "kind")?,
+        id,
+        settings,
+    })
+}
+
+pub(crate) fn check_name(name: &str) -> Result<(), ConfigError> {
     if name.is_empty()
         || name.len() > MAX_NAME
         || !name

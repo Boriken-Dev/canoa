@@ -22,7 +22,7 @@ use serde_json::{Map, Value, json};
 
 use crate::config::{Config, EntryKind, Settings};
 use crate::harness::Harness;
-use crate::inproc::NoAccounts;
+use crate::accounts::NoAccounts;
 use crate::kind;
 
 /// How long the program's `--version` is waited for.

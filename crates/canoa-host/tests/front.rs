@@ -57,6 +57,10 @@ impl Front for TestFront {
     fn holder(&self) -> &str {
         "a test"
     }
+
+    fn ask(&self, _prompt: &str, _secret: bool) -> std::io::Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 struct Running {
@@ -203,4 +207,59 @@ fn a_host_stopped_through_its_input_has_ended_every_agent_by_the_time_it_returns
     for link in links {
         let _ = link.join();
     }
+}
+
+#[test]
+fn an_application_that_cannot_take_a_typed_secret_is_shown_the_page_and_refuses_the_question() {
+    let scratch = Scratch::new();
+    let claude = scratch
+        .0
+        .join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example("harness_standin", false), &claude).expect("the stand-in is copied");
+    let config = scratch.0.join("canoa.cfg");
+    let before = format!(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n",
+        quoted(&claude.to_string_lossy())
+    );
+    std::fs::write(&config, &before).expect("canoa.cfg");
+    let config_arg = config.to_string_lossy().into_owned();
+    let running = Running::start(
+        scratch.0.join("home"),
+        &[
+            "accounts",
+            "add",
+            "work",
+            "--harness",
+            "claude",
+            "--method",
+            "subscription",
+            "--format",
+            "json",
+            "--config",
+            &config_arg,
+        ],
+    );
+    let shown = running.line();
+    assert!(
+        shown["open_url"]["url"]
+            .as_str()
+            .is_some_and(|url| url.starts_with("https://claude.com/")),
+        "{shown}"
+    );
+    let failed = running
+        .ended
+        .join()
+        .expect("it did not panic")
+        .expect_err("refused");
+    assert_eq!(failed.status, 1);
+    // Nothing was stored or written.
+    assert_eq!(std::fs::read_to_string(&config).expect("canoa.cfg"), before);
+    assert!(
+        !scratch
+            .0
+            .join("home")
+            .join("accounts")
+            .join("store.key")
+            .exists()
+    );
 }

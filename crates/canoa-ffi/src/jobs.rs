@@ -197,6 +197,11 @@ impl Front for JobFront {
     fn holder(&self) -> &str {
         &self.holder
     }
+
+    /// The application asks in forms of its own, and a secret reaches the host only sealed.
+    fn ask(&self, _prompt: &str, _secret: bool) -> std::io::Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 /// Whether a command runs long enough that the process's log belongs in what it says.
@@ -361,6 +366,10 @@ impl Front for ChildFront {
 
     fn holder(&self) -> &str {
         "canoa"
+    }
+
+    fn ask(&self, _prompt: &str, _secret: bool) -> std::io::Result<Option<String>> {
+        Ok(None)
     }
 }
 

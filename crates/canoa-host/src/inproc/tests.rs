@@ -312,7 +312,15 @@ fn served(
 ) -> thread::JoinHandle<End> {
     thread::spawn(move || {
         let request = StartRequest::builder().working_root("/root").build();
-        serve_kind(&*channel, &*harness, request, 1024 * 1024, &control)
+        let spawner = coqui_acp_harness::LocalSpawner::new().into_object();
+        let keeper = crate::accounts::NoAccounts.into_object();
+        serve_kind(
+            &*channel,
+            &*harness,
+            (request, spawner, keeper),
+            1024 * 1024,
+            &control,
+        )
     })
 }
 

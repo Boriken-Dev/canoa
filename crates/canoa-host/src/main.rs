@@ -57,6 +57,21 @@ impl Front for Standard {
     fn holder(&self) -> &str {
         "canoa"
     }
+
+    /// A secret is typed without echo at a terminal; with input piped, a line of it is read, as a script gives one.
+    fn ask(&self, prompt: &str, secret: bool) -> std::io::Result<Option<String>> {
+        let mut err = std::io::stderr().lock();
+        write!(err, "{prompt}")?;
+        err.flush()?;
+        drop(err);
+        let stdin = std::io::stdin();
+        if secret && stdin.is_terminal() {
+            return rpassword::read_password().map(Some);
+        }
+        let mut line = String::new();
+        stdin.read_line(&mut line)?;
+        Ok(Some(line.trim_end_matches(['\r', '\n']).to_owned()))
+    }
 }
 
 fn main() -> ExitCode {

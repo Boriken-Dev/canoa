@@ -639,6 +639,7 @@ executable = "codex"
             options: HarnessOptions::default(),
             settings: None,
             profiles: vec!["plain".to_owned()],
+            accounts: Vec::new(),
         }
     );
     assert_eq!(
@@ -650,6 +651,7 @@ executable = "codex"
             options: HarnessOptions::default(),
             settings: None,
             profiles: Vec::new(),
+            accounts: Vec::new(),
         }
     );
     for (text, what) in [

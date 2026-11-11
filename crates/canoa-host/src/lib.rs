@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+mod accounts;
 mod child;
 pub mod cli;
 pub mod config;
@@ -21,8 +22,10 @@ mod usage_splice;
 pub mod web;
 mod worktree;
 
+pub use accounts::ACCOUNT_META;
 pub use config::{
-    Config, ConfigError, Entry, EntryKind, HarnessOptions, Origin, Settings, UsageSource, WebConfig,
+    AccountConfig, AccountStore, Config, ConfigError, Entry, EntryKind, HarnessOptions, Origin,
+    Settings, UsageSource, WebConfig,
 };
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};

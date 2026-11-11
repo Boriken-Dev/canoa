@@ -15,14 +15,19 @@ use core::fmt;
 use std::path::Path;
 
 use coqui_acp_api::guatiao::Value;
+use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
-use coqui_acp_api::{AcpHarness, Environment, StartRequest};
+use coqui_acp_api::{
+    AccountCatalog, AccountKeeper, AccountKindInfo, AcpHarness, Environment, ProcessSpawner,
+    StartRequest,
+};
 use coqui_acp_claude::ClaudeProvider;
 use coqui_acp_codex::CodexProvider;
 
-use crate::config::{Origin, Settings};
+use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts};
+use crate::config::{AccountConfig, Origin, Settings};
 use crate::provider::{ProviderError, map_of, open};
 
 // What `Registry::register_local` takes: the two built-in providers, linked into this binary.
@@ -70,8 +75,31 @@ pub(crate) struct Harness {
     profiled: Option<Arc<dyn AcpHarness>>,
     roots: Vec<String>,
     departures: Vec<Departure>,
+    /// What the provider says of its accounts; `None` when it could not say.
+    catalog: Option<AccountCatalog>,
+    /// The accounts the entry offers, when it offers any.
+    accounts: Option<Offer>,
     /// Dropped after the instances, which point into what it loaded.
     _registry: Arc<Registry>,
+}
+
+/// An account an entry offers: its name, its configuration and its kind in the provider's catalog.
+pub(crate) type Offered = (String, AccountConfig, AccountKindInfo);
+
+/// The accounts an entry offers, in its order.
+struct Offer {
+    host: Arc<Accounts>,
+    offered: Vec<Offered>,
+    /// Number the plain and the profiled instance's sequences, so one's are not taken for the other's.
+    sources: (u64, u64),
+}
+
+/// What one connection runs on: the account it chose, and what the provider is handed for it.
+pub(crate) struct Connection {
+    pub(crate) harness: Arc<dyn AcpHarness>,
+    pub(crate) request: StartRequest,
+    pub(crate) spawner: Object<dyn ProcessSpawner>,
+    pub(crate) keeper: Object<dyn AccountKeeper>,
 }
 
 impl fmt::Debug for Harness {
@@ -104,6 +132,7 @@ impl Harness {
                 ProviderError::Schema(why) => ProviderError::Settings(why),
                 other => other,
             })?;
+        let catalog = plain.accounts().ok();
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));
@@ -121,8 +150,85 @@ impl Harness {
             profiled,
             roots,
             departures,
+            catalog,
+            accounts: None,
             _registry: Arc::clone(registry),
         })
+    }
+
+    /// What the provider says of its accounts and sign-ins.
+    pub(crate) const fn catalog(&self) -> Option<&AccountCatalog> {
+        self.catalog.as_ref()
+    }
+
+    /// The provider as configured, for the commands that sign in.
+    pub(crate) fn provider(&self) -> &Arc<dyn AcpHarness> {
+        &self.plain
+    }
+
+    /// This harness offering `offered`, each by name with its configuration and its kind in the catalog, kept in `host`.
+    pub(crate) fn offering(mut self, host: &Arc<Accounts>, offered: Vec<Offered>) -> Self {
+        self.accounts = Some(Offer {
+            host: Arc::clone(host),
+            offered,
+            sources: (host.source(), host.source()),
+        });
+        self
+    }
+
+    /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
+    /// entry's first; `None` for an entry that offers none. `holder` says who is holding it.
+    ///
+    /// # Errors
+    ///
+    /// Why the choice is refused, for the client.
+    pub(crate) fn choose(&self, first: &[u8], holder: &str) -> Result<Option<Held>, String> {
+        let Some(offer) = &self.accounts else {
+            return Ok(None);
+        };
+        let named = serde_json::from_slice::<serde_json::Value>(first)
+            .ok()
+            .and_then(|message| {
+                message
+                    .get("params")?
+                    .get("_meta")?
+                    .get(ACCOUNT_META)
+                    .cloned()
+            });
+        let (name, config, info) = match named {
+            None => offer.offered.first(),
+            Some(serde_json::Value::String(name)) => {
+                offer.offered.iter().find(|(offered, ..)| *offered == name)
+            }
+            Some(_) => return Err("the account is named by its name, as text".to_owned()),
+        }
+        .ok_or_else(|| "this entry does not offer that account".to_owned())?;
+        let held = offer
+            .host
+            .begin(name, config, info, holder)
+            .map_err(|refusal| refusal.to_string())?;
+        // What using the kind weakens is said at every start, and so is a credential the host's own environment sets that
+        // the account takes the place of.
+        for notice in &info.notices {
+            tracing::info!("account {name}: {notice}");
+        }
+        if config.kind != coqui_acp_api::HARNESS_LOGIN
+            && let Some(catalog) = &self.catalog
+        {
+            let set: Vec<&str> = catalog
+                .credential_variables
+                .iter()
+                .filter(|variable| std::env::var_os(variable).is_some())
+                .map(String::as_str)
+                .collect();
+            if !set.is_empty() {
+                tracing::info!(
+                    "non-default: the host's environment sets {}, which account {name} takes the place of for its sessions",
+                    set.join(", ")
+                );
+            }
+        }
+        Ok(Some(held))
     }
 
     /// The instance a connection runs on, and the request it starts with. `environment` and `skills` are a profile's: the
@@ -131,13 +237,18 @@ impl Harness {
     pub(crate) fn connection(
         &self,
         profile: Option<(Environment, &Path)>,
-    ) -> (Arc<dyn AcpHarness>, StartRequest) {
+        account: Option<&Held>,
+    ) -> Connection {
         let mut request = StartRequest::builder();
         for root in &self.roots {
             request = request.working_root(root.clone());
         }
+        let mut source = self.accounts.as_ref().map_or(0, |offer| offer.sources.0);
         let harness = match profile {
             Some((environment, skills)) => {
+                if self.profiled.is_some() {
+                    source = self.accounts.as_ref().map_or(0, |offer| offer.sources.1);
+                }
                 request = request.environment(environment);
                 if !self.roots.is_empty() {
                     request = request.working_root(skills.to_string_lossy().into_owned());
@@ -146,7 +257,22 @@ impl Harness {
             }
             None => Arc::clone(&self.plain),
         };
-        (harness, request.build())
+        let (spawner, keeper) = match (account, &self.accounts) {
+            (Some(held), Some(_)) => {
+                request = request.account(held.grant());
+                (held.spawner(), held.keeper(source))
+            }
+            _ => (
+                coqui_acp_harness::LocalSpawner::new().into_object(),
+                NoAccounts.into_object(),
+            ),
+        };
+        Connection {
+            harness,
+            request: request.build(),
+            spawner,
+            keeper,
+        }
     }
 
     /// How the configured instance departs from the provider's defaults: what its schema shows, then what the provider

@@ -24,6 +24,7 @@ use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_web_channel::websocket::{self, Frames};
 use coqui_web_channel::{Channel, Failure, Limits};
 
+use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
 use crate::config::{
     BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin, Settings,
@@ -151,6 +152,11 @@ pub enum ServeError {
         /// Why; names a setting, never a value.
         what: String,
     },
+    /// The accounts canoa.cfg names cannot be served.
+    Accounts {
+        /// Why; names a key, never a value.
+        what: String,
+    },
 }
 
 impl fmt::Display for ServeError {
@@ -169,6 +175,7 @@ impl fmt::Display for ServeError {
                     "host entry {entry}: its harness provider is unusable: {what}"
                 )
             }
+            Self::Accounts { what } => write!(f, "[host.accounts]: {what}"),
         }
     }
 }
@@ -541,6 +548,16 @@ impl Serving {
                 setting.default
             );
         }
+        let accounts = if config.accounts.is_empty() {
+            None
+        } else {
+            let Some(home) = &options.state_dir else {
+                return Err(ServeError::Accounts {
+                    what: "accounts need the host's directory to keep their state in".to_owned(),
+                });
+            };
+            Some(Accounts::open(config.account_store, home))
+        };
         let agents = Arc::new(Mutex::new(Agents::default()));
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
@@ -639,6 +656,7 @@ impl Serving {
                     options: asks,
                     settings,
                     profiles,
+                    accounts: offered,
                 } => {
                     if let Some(origin) = origin {
                         say_origin(entry, origin);
@@ -678,6 +696,14 @@ impl Serving {
                             entry.name
                         );
                     }
+                    let provider = match &accounts {
+                        Some(host) if !offered.is_empty() => {
+                            let listed = offered_accounts(config, harness, offered, &provider)
+                                .map_err(refused)?;
+                            provider.offering(host, listed)
+                        }
+                        _ => provider,
+                    };
                     (
                         "agent",
                         Run::Agent {
@@ -978,7 +1004,7 @@ fn give_agent<C: Channel>(
                 shared,
                 served,
                 channel,
-                peer,
+                (peer, first),
                 options,
                 scope,
                 connection.as_ref(),
@@ -1210,6 +1236,41 @@ pub(crate) fn harness_settings(
     Settings::new(map)
 }
 
+/// The accounts an entry of `harness` offers, each with its kind in the provider's catalog, once canoa.cfg's settings for
+/// it are checked against that kind's schema.
+fn offered_accounts(
+    config: &Config,
+    harness: &str,
+    names: &[String],
+    provider: &kind::Harness,
+) -> Result<Vec<kind::Offered>, String> {
+    let catalog = provider
+        .catalog()
+        .ok_or_else(|| "the provider did not list the accounts it takes".to_owned())?;
+    let mut listed = Vec::new();
+    for name in names {
+        let Some(account) = config.accounts.get(name) else {
+            return Err(format!("account {name} is not in [host.accounts]"));
+        };
+        if account.harness != harness {
+            return Err(format!(
+                "account {name} is of harness {}, not {harness}",
+                account.harness
+            ));
+        }
+        let Some(info) = catalog.kind(&account.kind) else {
+            return Err(format!(
+                "account {name}: the provider has no account kind {}",
+                account.kind
+            ));
+        };
+        crate::accounts::check_settings(info, account.settings.as_ref())
+            .map_err(|why| format!("account {name}: {why}"))?;
+        listed.push((name.clone(), account.clone(), info.clone()));
+    }
+    Ok(listed)
+}
+
 /// Serves one connection with an `acp_harness` provider in this process, which [`Stopper::stop_agents`] ends like any agent.
 /// With a profile, its environment goes to the provider's program, and the provider lets Claude Code take the plugin the
 /// host writes for its skills: the host removes every `_meta` a client sends, so that plugin is the only one that can reach
@@ -1218,40 +1279,76 @@ fn give_harness<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
-    peer: &PeerId,
+    (peer, first): (&PeerId, &[u8]),
     harness: &kind::Harness,
     scope: &Scope,
     connection: Option<&Connection>,
 ) {
+    // The account is chosen, and held for this connection, before anything starts.
+    let account = match harness.choose(first, &format!("a connection to {}", served.name)) {
+        Ok(account) => account,
+        Err(why) => {
+            let id = serde_json::from_slice::<serde_json::Value>(first)
+                .ok()
+                .and_then(|message| message.get("id").cloned());
+            if let Some(id) = id {
+                let answer = serde_json::json!({"jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32602, "message": why}});
+                let _ = channel.send(answer.to_string().as_bytes());
+            }
+            tracing::info!(entry = served.name, %peer, "turned away: {why}");
+            return;
+        }
+    };
     let control = InProcess::new();
     let key = match shared.record(|| Ok((Process::Translator(Arc::clone(&control)), ()))) {
         Ok(Some((key, ()))) => key,
         Ok(None) | Err(_) => return,
     };
-    let (provider, request) = harness.connection(connection.map(|connection| {
-        let environment = connection
-            .env()
-            .iter()
-            .map(|(name, value)| (name.clone(), value.expose().to_owned()))
-            .collect();
-        (environment, connection.skills())
-    }));
+    let started = harness.connection(
+        connection.map(|connection| {
+            let environment = connection
+                .env()
+                .iter()
+                .map(|(name, value)| (name.clone(), value.expose().to_owned()))
+                .collect();
+            (environment, connection.skills())
+        }),
+        account.as_ref(),
+    );
+    let gated = Gated::new(
+        channel,
+        account.as_ref().map(Held::report),
+        account.as_ref().is_some_and(Held::rotates),
+    );
+    // Usage is reported under the account that ran the connection, whichever entry offered it.
+    let accounted;
+    let scope = match &account {
+        Some(held) => {
+            accounted = scope.clone().account(held.id().to_owned());
+            &accounted
+        }
+        None => scope,
+    };
+    let to_provider = (started.request, started.spawner, started.keeper);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &Hosted::in_process(channel, scope, connection),
-            &*provider,
-            request,
+            &Hosted::in_process(&gated, scope, connection),
+            &*started.harness,
+            to_provider,
             MAX_LINE,
             &control,
         ),
         None => inproc::serve_kind(
-            &Scoped::new(channel, scope),
-            &*provider,
-            request,
+            &Scoped::new(&gated, scope),
+            &*started.harness,
+            to_provider,
             MAX_LINE,
             &control,
         ),
     };
+    // What the connection held goes back only after the provider has said it is done with the account.
+    drop(account);
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
 }

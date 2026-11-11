@@ -15,12 +15,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use coqui_acp_api::guatiao::Status;
-use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::{
-    AccountKeeper, AccountLoss, AccountRenewal, AcpHarness, ChannelSink, ProcessSpawner,
-    StartRequest,
-};
-use coqui_acp_harness::LocalSpawner;
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::{AccountKeeper, AcpHarness, ChannelSink, ProcessSpawner, StartRequest};
 use coqui_web_channel::{Channel, Failure};
 
 /// How often each direction looks up to see whether the other has ended.
@@ -168,27 +164,19 @@ impl ChannelSink for ToClientSink {
     }
 }
 
-/// The host holds no account for a connection, so there is nothing to renew or lose.
-pub(crate) struct NoAccounts;
-
-impl AccountKeeper for NoAccounts {
-    fn renewed(&self, _renewal: AccountRenewal) -> Result<(), ProviderError> {
-        Ok(())
-    }
-
-    fn lost(&self, _loss: AccountLoss) -> Result<(), ProviderError> {
-        Ok(())
-    }
-}
-
 /// Serves one connection with an `acp_harness` provider: each message the client sends goes to the provider's channel,
 /// each message the provider's sink gets goes to the client, until the client closes, the channel fails, the provider ends
 /// the connection or `control` is stopped. The provider starts its program through this machine's spawner, and kills what
-/// it started when the connection ends; this returns once it has said so, or after [`STOP_WAIT`].
+/// it started when the connection ends; this returns once it has said so, or after [`STOP_WAIT`]. `spawner` is the machine
+/// the provider's program runs on and `keeper` hears what happens to the connection's account.
 pub(crate) fn serve_kind<C: Channel + ?Sized>(
     channel: &C,
     harness: &dyn AcpHarness,
-    request: StartRequest,
+    (request, spawner, keeper): (
+        StartRequest,
+        Object<dyn ProcessSpawner>,
+        Object<dyn AccountKeeper>,
+    ),
     max_line: usize,
     control: &InProcess,
 ) -> End {
@@ -203,12 +191,7 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
         max_line,
     }
     .into_object();
-    let started = harness.start(
-        request,
-        LocalSpawner::new().into_object(),
-        sink,
-        NoAccounts.into_object(),
-    );
+    let started = harness.start(request, spawner, sink, keeper);
     let provider = match started {
         Ok(provider) => provider,
         Err(error) => {

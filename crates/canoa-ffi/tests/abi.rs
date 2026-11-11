@@ -411,3 +411,42 @@ fn unsafe_code_stays_in_the_files_named_here() {
         assert_eq!(holds, allowed.contains(&&*name), "{name}");
     }
 }
+
+#[test]
+fn accounts_are_listed_and_a_sign_in_that_needs_a_typed_secret_is_refused_as_a_job() {
+    let scratch = Scratch::new();
+    let (config, home) = (scratch.0.join("canoa.cfg"), scratch.0.join("home"));
+    std::fs::write(
+        &config,
+        "[host]\naccount_store = \"file\"\n[host.agents.c]\nharness = \"claude\"\nexecutable = \"no-such-claude-for-the-test\"\n[host.accounts.work]\nharness = \"claude\"\nkind = \"harness-login\"\nid = \"0b7d\"\n",
+    )
+    .expect("written");
+    let listed = to_end(start(&json!({
+        "args": ["accounts", "list", "--format", "json", "--config", config],
+        "home": home,
+    })));
+    assert_eq!(listed.exit, Some(0), "{listed:?}");
+    let account: Value = serde_json::from_str(&listed.out[0]).expect("a JSON line");
+    assert_eq!(
+        (account["name"].as_str(), account["id"].as_str()),
+        (Some("work"), Some("0b7d"))
+    );
+
+    // The application has no way to hand a secret in sealed yet, so a method that asks for one is refused, and no
+    // credential is taken from anywhere else.
+    let added = to_end(start(&json!({
+        "args": ["accounts", "add", "second", "--harness", "claude", "--method", "api-key", "--format", "json",
+            "--until-stdin-closes", "--config", config],
+        "home": home,
+    })));
+    assert_ne!(added.exit, Some(0), "{added:?}");
+    assert!(
+        std::fs::read_to_string(&config)
+            .expect("canoa.cfg")
+            .contains("[host.accounts.work]")
+            && !std::fs::read_to_string(&config)
+                .expect("canoa.cfg")
+                .contains("second"),
+        "no account was added"
+    );
+}

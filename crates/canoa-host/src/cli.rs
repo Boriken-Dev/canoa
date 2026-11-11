@@ -21,6 +21,7 @@ use coqui_agentic_peer::{auth, pairing};
 use coqui_web_channel::websocket::{self, Frames};
 use coqui_web_channel::{Channel as _, Failure, Limits};
 
+use crate::accounts::commands::Env as AccountsEnv;
 use crate::config::ImportSearch;
 use crate::home::{Home, LockError};
 use crate::{
@@ -63,6 +64,14 @@ pub trait Front: Send + Sync {
 
     /// What `serve` calls itself to another host that finds this home held.
     fn holder(&self) -> &str;
+
+    /// Asks the person for one line, `secret` ones typed without echo; `Ok(None)` when this front has no way to take a
+    /// typed answer, as an application that asks in forms of its own. A secret is never read from a command line.
+    ///
+    /// # Errors
+    ///
+    /// The answer could not be read.
+    fn ask(&self, prompt: &str, secret: bool) -> std::io::Result<Option<String>>;
 }
 
 /// How a host starts its own `provider`, `tool` and `launch` commands.
@@ -201,6 +210,12 @@ enum Command {
     /// models with their versions and each model's efforts. SOURCE is claude or codex, run as `canoa agent` runs them, or
     /// with --entry the name of a [host.agents] entry. A source that lists its models only in its session says so.
     Options(OptionsArgs),
+    /// Make, list, sign in again to and remove accounts: logins an agent entry may run its sessions on, which keep their
+    /// credentials in the account store and never in canoa.cfg.
+    Accounts {
+        #[command(subcommand)]
+        command: AccountsCommand,
+    },
     /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
     /// with profiles. The rest of standard input goes to the agent.
     Launch {
@@ -225,6 +240,60 @@ struct OptionsArgs {
     executable: Option<OsString>,
     #[command(flatten)]
     config: ConfigArgs,
+}
+
+/// What `canoa accounts` does.
+#[derive(Debug, Subcommand)]
+enum AccountsCommand {
+    /// List the accounts of canoa.cfg with their state; never a credential.
+    List {
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
+    /// Make an account by signing in. A secret it asks for is typed without echo, or read from standard input when that is
+    /// not a terminal, and never taken from the command line. Appends `[host.accounts.NAME]` to canoa.cfg.
+    Add {
+        /// The account's name, as an entry's `accounts` names it.
+        name: String,
+        /// The provider the account is for, as an entry's `harness`.
+        #[arg(long)]
+        harness: String,
+        /// How to sign in, one of the provider's login methods (naming none lists them).
+        #[arg(long)]
+        method: Option<String>,
+        /// An input the method asks before it runs (an email, an issuer), as KEY=VALUE.
+        #[arg(long = "input", value_name = "KEY=VALUE")]
+        inputs: Vec<String>,
+        /// Give up, with the sign-in, when standard input closes: for a program that runs this as its job.
+        #[arg(long)]
+        until_stdin_closes: bool,
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
+    /// Sign in again to an account that needs it.
+    Login {
+        /// The account's name.
+        name: String,
+        /// How to sign in, when the account's kind has more than one.
+        #[arg(long)]
+        method: Option<String>,
+        /// An input the method asks before it runs, as KEY=VALUE.
+        #[arg(long = "input", value_name = "KEY=VALUE")]
+        inputs: Vec<String>,
+        /// Give up, with the sign-in, when standard input closes.
+        #[arg(long)]
+        until_stdin_closes: bool,
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
+    /// Forget an account: its stored credential and its state, and its block in canoa.cfg. Nothing is signed out at the
+    /// provider.
+    Remove {
+        /// The account's name.
+        name: String,
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
 }
 
 /// The command line `canoa agent` serves.
@@ -462,7 +531,7 @@ struct ConfigArgs {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-enum Format {
+pub(crate) enum Format {
     Text,
     Json,
 }
@@ -537,14 +606,14 @@ impl fmt::Display for Failed {
 impl core::error::Error for Failed {}
 
 impl Failed {
-    fn usage(why: impl ToString) -> Self {
+    pub(crate) fn usage(why: impl ToString) -> Self {
         Self {
             status: 2,
             why: why.to_string(),
         }
     }
 
-    fn run(why: impl ToString) -> Self {
+    pub(crate) fn run(why: impl ToString) -> Self {
         Self {
             status: 1,
             why: why.to_string(),
@@ -826,6 +895,64 @@ fn pair(
     }
 }
 
+/// canoa.cfg for a command that may make it: a file that does not exist names nothing.
+fn account_env<'a>(args: &ConfigArgs, front: &'a dyn Front) -> Result<AccountsEnv<'a>, Failed> {
+    let config_path = config_path(args, front)?;
+    let config = match Config::load(&config_path) {
+        Err(crate::ConfigError::Read { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Config::from_str_in("", config_path.parent().unwrap_or_else(|| Path::new("")))
+                .map_err(Failed::usage)?
+        }
+        loaded => loaded.map_err(Failed::usage)?,
+    };
+    Ok(AccountsEnv {
+        front,
+        config_path,
+        config,
+        home: home_of(front)?,
+    })
+}
+
+fn accounts(command: AccountsCommand, front: &dyn Front) -> Result<(), Failed> {
+    use crate::accounts::commands as run;
+    match command {
+        AccountsCommand::List { config } => run::list(&account_env(&config, front)?, config.format),
+        AccountsCommand::Add {
+            name,
+            harness,
+            method,
+            inputs,
+            until_stdin_closes,
+            config,
+        } => run::add(
+            &account_env(&config, front)?,
+            &name,
+            &harness,
+            method.as_deref(),
+            &run::inputs_of(&inputs)?,
+            (config.format, until_stdin_closes),
+        ),
+        AccountsCommand::Login {
+            name,
+            method,
+            inputs,
+            until_stdin_closes,
+            config,
+        } => run::login(
+            &account_env(&config, front)?,
+            &name,
+            method.as_deref(),
+            &run::inputs_of(&inputs)?,
+            (config.format, until_stdin_closes),
+        ),
+        AccountsCommand::Remove { name, config } => {
+            run::remove(&account_env(&config, front)?, &name)
+        }
+    }
+}
+
 fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     let config = load(args, front)?;
     for entry in &config.entries {
@@ -1032,6 +1159,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             )
             .map_err(Failed::run)
         }
+        Command::Accounts { command } => accounts(command, front),
         Command::Launch { program, args } => {
             let error = crate::profile::launch(&program, &args, crate::serve::MAX_LINE);
             Err(match error.kind() {
