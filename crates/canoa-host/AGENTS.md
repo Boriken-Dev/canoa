@@ -534,6 +534,57 @@ pub struct Failed { pub status: u8, pub why: String }
 
 Everything `canoa` does is here; `src/main.rs` is a `Front` on its own standard streams, and `canoa-ffi` another. `run` neither exits nor writes anywhere but through the front. With a `Front` that returns from `when_input_closes`, `serve --until-stdin-closes` returns once it has stopped, its lock given up.
 
+
+## Program stores (`canoa_host::store`)
+
+The host's end of `canoa::store`'s `program_store` kind: it finds, checks, installs and switches the agent programs Canoa runs, through
+stores that know each program. Nothing runs at startup, and the host holds no program name, command or URL: those are the stores'.
+
+- `shelf::Shelf` (`<programs>/<program>/{lock, current.json, versions/<version>-<nonce>/}`): `Shelf::default_root()` is
+  `%LOCALAPPDATA%\Canoa\programs`, `~/Library/Application Support/Canoa/programs` or `$XDG_DATA_HOME/Canoa/programs`. `ProgramDir::lock`
+  takes the program's OS lock, refuses a folder another user owns or others can write (Unix; on Windows it inherits `%LOCALAPPDATA%`'s access
+  list, which is not read: no vetted crate checks an owner or an access list, and this crate holds no `unsafe`, so on Windows the folder is only
+  refused when it is a link) and removes the version folders `current.json` does not name. `Locked::stage`, `commit` (one rename of
+  `current.json` is the atomic switch; the old copy becomes `previous`; folders other than current and previous are pruned, `keep_versions`
+  default 2), `abandon`, `rollback`, `remove`. `commit` refuses a launch path that is not a regular file inside the staged folder.
+- `footprint::{Watch, Footprint, uncovered}`: before and after snapshots of profile files, `PATH` directories, the home's top level
+  (and, in the suite, the whole sandbox) and, on Windows, `HKCU\Environment`, `Run`, `RunOnce` and the `Uninstall` names. `uncovered` is
+  what no declared `Change` covers; `restore_environment` puts back `HKCU\Environment` values (Windows).
+- `tools::LocalTools` (`InstallTools`): HTTPS only (loopback `http` under `loopback_http`, a test's setting); every redirect hop's origin must be
+  one of the store's `endpoints`; `ToolsLimits` (5 redirects, 60 s to a response, 30 min a body, 100 000 files, 4 GiB unpack) each a
+  setting; the digest is computed as the bytes are written. `Transport` is the network seam (`HttpTransport` is `ureq` with rustls, trusting the operating
+  system's verifier and store by default (`Roots::Platform`, so a TLS-intercepting proxy the system trusts works; `Roots::Webpki` is the other choice).
+- `exec::GuardedSpawner` refuses what a store must never start (relative program, `.cmd`/`.bat`/`.ps1`, a working directory outside the
+  staged folder, a credential variable) and sets `NoDefaultCurrentDirectoryInExePath=1`. `exec::Run` runs a program to its end, relaying each cleaned
+  line (`clean`: control and bidirectional characters out, 4 KiB) and keeping cancel and deadline.
+- `programs::Programs`: `store`, `report` (the copies, no network), `latest`, `plan`, `apply`/`apply_store`, `rollback`, `remove`. An apply takes the
+  lock, stages, gives the store an environment with every home and temp directory inside the staged folder, snapshots before and after, and
+  only then switches. An undeclared change (`StoreError::Undeclared`) removes the folder, leaves `current.json`, names each item and puts back
+  the `HKCU\Environment` values. Before it blocks it compares once more 750 ms later and leaves out whatever is still changing between the two (an
+  agent rewriting its own state, not the install). It refuses an elevated host (root; on Windows `is_elevated`) and an `ELEVATION` plan unless
+  `Options::allow_elevated`.
+- `engine::{Engine, Recipe}` and `extensions::{anthropic, codex, grok, agy, pi}`: the five built-in stores, `registry::built_in()`. A recipe names the
+  publisher's documents and the version's shape; the engine downloads, unpacks, runs the recipe's extra step and reads the version back.
+  Claude: one binary, SHA-256 from the manifest (its signature is not checked). Codex: `codex-package` tar.gz, SHA-256 from the release's
+  checksums and the channel's digest; no switch stops its updater (`self_updates`). Grok: one binary, no checksum published, so `Unverified`.
+  agy: SHA-512 from the manifest, only the newest build (a pinned version is `UNSUPPORTED`). Pi: Node's standalone build (SHASUMS256.txt, its signature is not
+  checked) then that Node's npm with `--ignore-scripts`; npm fetches the packages itself, so the host does not see those bytes.
+- **Pi's launch** is a Node and a script, not one file: `Launch.path` is the absolute Node, `Launch.settings` holds `node` (the same path) and
+  `script` (the absolute path of Pi's `dist/bundle/cli.js`), and `Launch.environment` sets `PI_SKIP_VERSION_CHECK=1`. A provider that serves
+  Pi takes `node` and `script` as settings and starts the Node with the script, never a `.cmd` shim.
+- **Known gaps, stated in each plan's notices:** Claude's manifest signature (`manifest.json.sig`, key published at downloads.claude.ai/keys) and Node's
+  `SHASUMS256.txt` signature are not checked, only the digests over TLS; a digest fetched from the origin that serves the file does not
+  catch a compromised publisher. npm's own downloads for Pi are not seen by the host.
+- `contract::run(store, fixture)`: the suite (`describe.*`, `program.*`, `latest.*`, `plan.*`, `apply.*`, `uninstall.*`), strict and offline, on a `World` of
+  documents and a stand-in program built by `cargo test` (`examples/version_standin.rs`, with a trailer appended per version). `echo` is the
+  good example; `tests/store_suite.rs` has stores that break one rule each. The registry keys are the real ones and are restored.
+- A store reaches a harness only through the host: `Launch.settings` (`{"executable": path}`) merged under an entry's own, and `Launch.environment`
+  added to its requests; wiring that into `[host.agents]` is not here yet.
+
+Tests: `cargo build -p canoa-host --examples` first, then `cargo test -p canoa-host --all-features --test store_tools --test store_shelf
+--test store_programs --test store_suite --test store_extensions`. `tests/store_live.rs` (ignored) installs the real programs:
+`CANOA_STORE_LIVE=claude,codex,grok,agy,pi cargo test -p canoa-host --test store_live -- --ignored --nocapture`.
+
 ## Errors
 
 - `ConfigError` (`#[non_exhaustive]`): `Read { path, source }`; `Parse { line, column, what }`, 1-based, `what` in the schema's words; `Invalid { entry, what }`. No variant quotes a value from the file; an entry's name is quoted.
