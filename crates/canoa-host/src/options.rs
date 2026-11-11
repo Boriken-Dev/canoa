@@ -20,9 +20,9 @@ use coqui_acp_api::{
 use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
 
+use crate::accounts::NoAccounts;
 use crate::config::{Config, EntryKind, Settings};
 use crate::harness::Harness;
-use crate::accounts::NoAccounts;
 use crate::kind;
 
 /// How long the program's `--version` is waited for.
