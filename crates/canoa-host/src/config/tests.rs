@@ -46,7 +46,10 @@ listen = "127.0.0.1:7801"
         .collect();
     assert_eq!(names, ["beta", "alpha", "zeta"]);
     let beta = config.entry("beta").expect("there");
-    assert_eq!(beta.listen, "127.0.0.1:0".parse().expect("an address"));
+    assert_eq!(
+        beta.listen,
+        Listen::Address("127.0.0.1:0".parse().expect("an address"))
+    );
     assert_eq!(beta.max_peers, DEFAULT_MAX_PEERS);
     assert_eq!(beta.peers, None);
     assert_eq!(
@@ -258,7 +261,10 @@ fn listening_beyond_loopback_is_plain_configuration() {
     for listen in ["0.0.0.0:7801", "192.0.2.1:7801", "[::]:7801", "[::1]:7801"] {
         let text = format!("[host.agents.a]\nprogram = \"x\"\nlisten = \"{listen}\"\n");
         let config = parse(&text).expect("an address is accepted whatever it is");
-        assert_eq!(config.entries[0].listen, listen.parse().expect("address"));
+        assert_eq!(
+            config.entries[0].listen,
+            Listen::Address(listen.parse().expect("address"))
+        );
     }
 }
 
@@ -567,6 +573,58 @@ fn plain_http_beyond_loopback_is_refused() {
     );
 }
 
+/// A pipe's `listen` on this platform, and the same name on the other.
+#[cfg(windows)]
+const PIPE: &str = "pipe:canoa-test";
+#[cfg(unix)]
+const PIPE: &str = "unix:/tmp/canoa-test.sock";
+
+#[test]
+fn an_entry_may_listen_on_a_pipe_or_a_unix_socket() {
+    let text = format!("[host.agents.a]\nprogram = \"x\"\nlisten = \"{PIPE}\"\n");
+    let config = parse(&text).expect("a pipe is accepted");
+    let Listen::Pipe(name) = &config.entries[0].listen else {
+        panic!("a pipe: {:?}", config.entries[0].listen);
+    };
+    assert_eq!(name.to_string(), PIPE);
+    assert_eq!(config.entries[0].listen.to_string(), PIPE);
+    assert_eq!(config.entries[0].listen.address(), None);
+    assert_eq!(Listen::parse(PIPE), Ok(config.entries[0].listen.clone()));
+}
+
+#[test]
+fn two_entries_cannot_listen_on_one_pipe_and_a_pipe_is_not_an_address() {
+    let text = format!(
+        "[host.agents.a]\nprogram = \"x\"\nlisten = \"{PIPE}\"\n[host.agents.b]\nprogram = \"x\"\nlisten = \"{PIPE}\"\n"
+    );
+    let refused = parse(&text).expect_err("refused");
+    assert!(refused.to_string().contains("same address"), "{refused}");
+    // A pipe never counts against the web app's address.
+    let text = format!(
+        "[host.agents.a]\nprogram = \"x\"\nlisten = \"{PIPE}\"\n[host.web]\nlisten = \"127.0.0.1:7800\"\n"
+    );
+    assert!(parse(&text).is_ok());
+}
+
+#[test]
+fn a_pipe_that_cannot_be_used_is_refused_for_its_entry_without_the_name() {
+    let mut bad = vec!["pipe:", "pipe:a/b", "pipe:..", "unix:"];
+    if cfg!(unix) {
+        bad.push("unix:relative/path.sock");
+    } else {
+        // A Unix socket is no use on Windows.
+        bad.push("unix:/tmp/a.sock");
+    }
+    for listen in bad {
+        let text = format!("[host.agents.a]\nprogram = \"x\"\nlisten = \"{listen}\"\n");
+        let refused = parse(&text).expect_err(listen);
+        let said = refused.to_string();
+        assert!(said.contains("listen"), "{said}");
+        for part in ["a/b", "relative"] {
+            assert!(!said.contains(part), "{said}");
+        }
+    }
+}
 #[test]
 fn a_web_setting_that_cannot_serve_is_refused_by_name() {
     for (setting, value) in [

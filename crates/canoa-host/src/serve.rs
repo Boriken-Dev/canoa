@@ -27,11 +27,12 @@ use coqui_web_channel::{Channel, Failure, Limits};
 use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
 use crate::config::{
-    BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Origin, Settings,
-    UsageSource,
+    BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Listen, Origin,
+    Settings, UsageSource,
 };
 use crate::inproc::{self, InProcess};
 use crate::kind;
+use crate::pipe;
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
@@ -143,6 +144,13 @@ pub enum ServeError {
         /// Why.
         failure: Failure,
     },
+    /// An entry's pipe or Unix socket could not be bound.
+    Pipe {
+        /// The entry.
+        entry: String,
+        /// Why.
+        error: pipe::Error,
+    },
     /// The proof could not be built from the options.
     Proof(String),
     /// A harness entry's provider could not be loaded, found, or configured.
@@ -168,6 +176,9 @@ impl fmt::Display for ServeError {
             Self::Listen { entry, failure } => {
                 write!(f, "host entry {entry} could not listen: {failure}")
             }
+            Self::Pipe { entry, error } => {
+                write!(f, "host entry {entry} could not listen: {error}")
+            }
             Self::Proof(reason) => write!(f, "the proof could not be built: {reason}"),
             Self::Harness { entry, what } => {
                 write!(
@@ -190,7 +201,8 @@ pub struct Listening {
     pub name: String,
     /// `agent`, `provider` or `tool`.
     pub kind: &'static str,
-    /// The address a client dials.
+    /// What a client dials: `ws://ADDRESS`, or `pipe:NAME` or `unix:PATH` for an entry on a pipe, which the served web page
+    /// never lists.
     pub url: String,
     /// The provider id of a `harness` entry; `None` for any other entry.
     pub harness: Option<String>,
@@ -199,6 +211,12 @@ pub struct Listening {
 }
 
 impl Listening {
+    /// Whether a browser can dial it: it listens on an address, not on a pipe or a Unix socket.
+    #[must_use]
+    pub fn on_address(&self) -> bool {
+        !self.url.starts_with("pipe:") && !self.url.starts_with("unix:")
+    }
+
     /// The entry as `serve` prints it and `/canoa.json` lists it: `name`, `kind`, `url`, and `harness` and `title` when set.
     pub(crate) fn to_json(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut map = serde_json::Map::new();
@@ -444,8 +462,14 @@ fn end_all(agents: &Mutex<Agents>) {
 /// Every entry bound to its address, not yet taking connections.
 pub struct Serving {
     shared: Arc<Shared>,
-    listeners: Vec<(Arc<Served>, websocket::Listener)>,
+    listeners: Vec<(Arc<Served>, Bound)>,
     listening: Vec<Listening>,
+}
+
+/// What an entry listens on.
+enum Bound {
+    Socket(websocket::Listener),
+    Pipe(pipe::Listener),
 }
 
 impl fmt::Debug for Serving {
@@ -568,25 +592,47 @@ impl Serving {
         let mut listening = Vec::new();
         for entry in &config.entries {
             // Every message after the proof is sealed in its session, so where the socket sits is the person's to choose.
-            let listener = websocket::Listener::bind_plain(entry.listen)
-                .and_then(|listener| Ok((listener.local_addr()?, listener)))
-                .map_err(|failure| ServeError::Listen {
-                    entry: entry.name.clone(),
-                    failure,
-                })?;
-            let (bound, listener) = listener;
-            if listener.plain_beyond_loopback() {
-                tracing::info!(
-                    "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
-                    table_of(&entry.kind),
-                    entry.name
-                );
-            }
-            let listener = listener
-                .with_limits(unproven_limits())
-                .with_frames(Frames::Binary)
-                .with_origins(config.origins.clone());
-            let url = url_of(bound);
+            let (listener, url) = match &entry.listen {
+                Listen::Address(address) => {
+                    let (bound, listener) = websocket::Listener::bind_plain(*address)
+                        .and_then(|listener| Ok((listener.local_addr()?, listener)))
+                        .map_err(|failure| ServeError::Listen {
+                            entry: entry.name.clone(),
+                            failure,
+                        })?;
+                    if listener.plain_beyond_loopback() {
+                        tracing::info!(
+                            "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
+                            table_of(&entry.kind),
+                            entry.name
+                        );
+                    }
+                    let listener = listener
+                        .with_limits(unproven_limits())
+                        .with_frames(Frames::Binary)
+                        .with_origins(config.origins.clone());
+                    (Bound::Socket(listener), url_of(bound))
+                }
+                Listen::Pipe(name) => {
+                    // Every setting is the crate's default, the access control included; a receive sets its own read timeout.
+                    let listener =
+                        pipe::Listener::bind(name).map_err(|error| ServeError::Pipe {
+                            entry: entry.name.clone(),
+                            error,
+                        })?;
+                    for setting in listener.non_defaults() {
+                        tracing::info!(
+                            "non-default: host.{}.{}.listen has {} at {}, default {}",
+                            table_of(&entry.kind),
+                            entry.name,
+                            setting.setting,
+                            setting.value,
+                            setting.default
+                        );
+                    }
+                    (Bound::Pipe(listener), name.to_string())
+                }
+            };
             let (kind, run) = match &entry.kind {
                 EntryKind::Agent {
                     program,
@@ -823,7 +869,10 @@ impl Serving {
                 let shared = Arc::clone(&self.shared);
                 thread::Builder::new()
                     .name(format!("canoa-{}", served.name))
-                    .spawn(move || accept_loop(&shared, &served, &listener))
+                    .spawn(move || match &listener {
+                        Bound::Socket(listener) => accept_loop(&shared, &served, listener),
+                        Bound::Pipe(listener) => accept_pipe_loop(&shared, &served, listener),
+                    })
             })
             .collect();
         for thread in threads.into_iter().flatten() {
@@ -875,6 +924,45 @@ fn accept_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &websocket:
                     channel.close();
                 }
                 Err(failure) => tracing::debug!("a handshake failed: {failure}"),
+            });
+        if let Err(error) = spawned {
+            tracing::warn!("a connection was dropped: {error}");
+        }
+    }
+}
+
+/// [`accept_loop`] for a pipe or Unix socket: there is no handshake to run before the proof.
+fn accept_pipe_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &pipe::Listener) {
+    while !shared.stopped.load(Ordering::SeqCst) {
+        let stream = match listener.accept_timeout(Some(STOP_POLL)) {
+            Ok(stream) => stream,
+            Err(pipe::Error::TimedOut) => continue,
+            Err(error) => {
+                tracing::warn!(entry = served.name, "a connection failed: {error}");
+                thread::sleep(STOP_POLL);
+                continue;
+            }
+        };
+        let Some(entered) = shared.unproven.enter() else {
+            tracing::warn!(
+                entry = served.name,
+                "a connection was dropped: too many are unproven"
+            );
+            continue;
+        };
+        // Information for the log: the key proof is what admits a peer.
+        match stream.peer() {
+            Ok(peer) => tracing::debug!(entry = served.name, ?peer, "a connection on a pipe"),
+            Err(error) => tracing::debug!(entry = served.name, "no peer identity: {error}"),
+        }
+        let channel = pipe::PipeChannel::new(stream, auth::MAX_PROOF_MESSAGE);
+        let shared = Arc::clone(shared);
+        let served = Arc::clone(served);
+        let spawned = thread::Builder::new()
+            .name("canoa-peer".to_owned())
+            .spawn(move || {
+                connection(&shared, &served, &channel, entered);
+                channel.close();
             });
         if let Err(error) = spawned {
             tracing::warn!("a connection was dropped: {error}");

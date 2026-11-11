@@ -13,6 +13,7 @@ mod inproc;
 mod kind;
 pub mod options;
 pub mod peers;
+pub mod pipe;
 pub mod profile;
 pub mod provider;
 mod scope;
@@ -25,7 +26,7 @@ mod worktree;
 pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, Entry, EntryKind,
-    HarnessOptions, Origin, Settings, UsageSource, WebConfig, cache_lifetime_name,
+    HarnessOptions, Listen, Origin, Settings, UsageSource, WebConfig, cache_lifetime_name,
     cache_lifetime_named,
 };
 pub use harness::Harness;

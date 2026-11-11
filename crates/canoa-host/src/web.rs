@@ -339,6 +339,13 @@ impl WebServer {
         method: &str,
         entries: &[Listening],
     ) -> Result<Self, WebError> {
+        // A page cannot reach a pipe, so it is neither offered one nor allowed to connect to one.
+        let entries: Vec<Listening> = entries
+            .iter()
+            .filter(|entry| entry.on_address())
+            .cloned()
+            .collect();
+        let entries = entries.as_slice();
         if web.tls.is_none() && !web.listen.ip().is_loopback() {
             return Err(WebError::PlainBeyondLoopback(web.listen));
         }

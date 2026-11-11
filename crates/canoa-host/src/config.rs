@@ -11,6 +11,7 @@ use std::path::{Component, Path, PathBuf};
 
 use coqui_acp_api::CacheLifetime;
 use coqui_peer_webcrypto::PeerId;
+use coqui_transport_pipe::PipeName;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -154,6 +155,74 @@ pub struct HostProfile {
     pub directory: PathBuf,
 }
 
+/// Where an entry listens, as an entry's `listen` writes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Listen {
+    /// A WebSocket on this address, which a browser can reach.
+    Address(SocketAddr),
+    /// A Windows named pipe (`pipe:NAME`) or a Unix socket (`unix:PATH`), which only a native client on this machine can
+    /// reach, as the operating system's access control allows. The proof is the same as on an address.
+    Pipe(PipeName),
+}
+
+impl Listen {
+    /// The text of an address, `pipe:NAME` or `unix:PATH`.
+    ///
+    /// # Errors
+    ///
+    /// What the text is not, or why the pipe's name cannot be used here, in a clause that quotes nothing.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        if let Some(path) = text.strip_prefix("unix:")
+            && !Path::new(path).is_absolute()
+        {
+            // A relative path would be taken from wherever the host happens to run.
+            return Err("listen: a unix: path must be absolute".to_owned());
+        }
+        if text.starts_with("pipe:") || text.starts_with("unix:") {
+            return text
+                .parse::<PipeName>()
+                .map(Self::Pipe)
+                .map_err(|error| format!("listen is not usable here: {error}"));
+        }
+        text.parse::<SocketAddr>()
+            .map(Self::Address)
+            .map_err(|_| "listen is not an address and port, pipe:NAME or unix:PATH".to_owned())
+    }
+
+    /// The address, for a listener a browser can reach; `None` for a pipe.
+    #[must_use]
+    pub const fn address(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Address(address) => Some(*address),
+            Self::Pipe(_) => None,
+        }
+    }
+
+    /// Whether this names a place that is one entry's alone: a pipe, or an address with a port.
+    const fn is_fixed(&self) -> bool {
+        match self {
+            Self::Address(address) => address.port() != 0,
+            Self::Pipe(_) => true,
+        }
+    }
+}
+
+impl fmt::Display for Listen {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Address(address) => address.fmt(f),
+            Self::Pipe(name) => name.fmt(f),
+        }
+    }
+}
+
+impl From<SocketAddr> for Listen {
+    fn from(address: SocketAddr) -> Self {
+        Self::Address(address)
+    }
+}
+
 /// One agent the host offers on an address of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -162,9 +231,10 @@ pub struct Entry {
     pub name: String,
     /// What runs for each connection.
     pub kind: EntryKind,
-    /// Where it listens; port 0 takes any free port. Loopback unless the file says otherwise: the link is sealed by the
-    /// paired key's method, so another address is configuration (`serve` logs it), not an exception.
-    pub listen: SocketAddr,
+    /// Where it listens: an address, where port 0 takes any free port and loopback is the default unless the file says
+    /// otherwise (the link is sealed by the paired key's method, so another address is configuration, which `serve` logs, not
+    /// an exception), or a pipe or Unix socket.
+    pub listen: Listen,
     /// Directories a session's `cwd` must be under. Empty takes any absolute path.
     pub working_roots: Vec<PathBuf>,
     /// Whether a client may have the host make a git worktree for a session inside `working_roots`; an agent or tool entry
@@ -1493,10 +1563,8 @@ pub(crate) fn check_name(name: &str) -> Result<(), ConfigError> {
 
 fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, ConfigError> {
     let listen = match common.listen {
-        None => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-        Some(text) => text
-            .parse::<SocketAddr>()
-            .map_err(|_| invalid(&name, "listen is not an address and port"))?,
+        None => Listen::Address(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+        Some(text) => Listen::parse(&text).map_err(|what| invalid(&name, &what))?,
     };
     let mut working_roots = Vec::new();
     for root in common.working_roots {
@@ -1636,7 +1704,11 @@ fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig,
             raw.immutable_seconds
                 .map_or(limits.immutable_age, Duration::from_secs),
         );
-    if web.listen.port() != 0 && entries.iter().any(|entry| entry.listen == web.listen) {
+    if web.listen.port() != 0
+        && entries
+            .iter()
+            .any(|entry| entry.listen.address() == Some(web.listen))
+    {
         return Err(refused("listen is an entry's address too"));
     }
     Ok(web)
@@ -1648,7 +1720,7 @@ fn check_unique(entries: &[Entry]) -> Result<(), ConfigError> {
             if earlier.name == entry.name {
                 return Err(invalid(&entry.name, "two entries share this name"));
             }
-            if entry.listen.port() != 0 && earlier.listen == entry.listen {
+            if entry.listen.is_fixed() && earlier.listen == entry.listen {
                 return Err(invalid(
                     &entry.name,
                     "another entry listens on the same address",

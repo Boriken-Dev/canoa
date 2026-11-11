@@ -239,6 +239,37 @@ fn a_source_the_settings_add_is_allowed_besides_the_entries() {
     );
 }
 
+#[test]
+fn an_entry_on_a_pipe_is_neither_listed_for_the_page_nor_allowed_to_it() {
+    let entry = |name: &str, url: &str| Listening {
+        name: name.to_owned(),
+        kind: "agent",
+        url: url.to_owned(),
+        harness: None,
+        title: None,
+    };
+    let entries = [
+        entry("socket", "ws://127.0.0.1:7801"),
+        entry("piped", "pipe:canoa-test"),
+        entry("sock", "unix:/tmp/canoa-test.sock"),
+    ];
+    let address = running(&loopback(&site()), &entries);
+    let policy = get(address, "/").headers["content-security-policy"].clone();
+    assert!(policy.contains("ws://127.0.0.1:7801"), "{policy}");
+    assert!(
+        !policy.contains("pipe:") && !policy.contains("unix:"),
+        "{policy}"
+    );
+    let index = get(address, crate::web::HOST_INDEX);
+    let listed: serde_json::Value = serde_json::from_slice(&index.body).expect("JSON");
+    let names: Vec<&str> = listed["entries"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|entry| entry["name"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(names, ["socket"], "{listed}");
+}
 /// A server on `config`'s site, on a loopback port of its own, taking connections on a thread.
 fn running(config: &WebConfig, entries: &[Listening]) -> SocketAddr {
     let server = WebServer::bind_listing(config, PEER, "noise", entries).expect("it binds");

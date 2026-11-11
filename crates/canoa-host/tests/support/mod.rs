@@ -441,6 +441,35 @@ pub fn with_link<R>(
     Ok(result)
 }
 
+/// As [`with_link`] for an entry on a pipe or Unix socket, `listen` being the text `serve` printed (`pipe:NAME` or `unix:PATH`).
+pub fn with_pipe_link<R>(
+    listen: &str,
+    identity: &Identity,
+    host: PeerId,
+    body: impl FnOnce(&Rpc<'_, canoa_host::pipe::PipeChannel>) -> R,
+) -> Result<R, String> {
+    let name: canoa_host::pipe::PipeName = listen
+        .parse()
+        .map_err(|error: canoa_host::pipe::Error| error.to_string())?;
+    let channel = canoa_host::pipe::PipeChannel::connect(&name, method().record_length(MAX))
+        .map_err(|error| error.to_string())?;
+    let proof = Proof::builder(identity.clone())
+        .responders(Trust::pinned([host]))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let established = auth::prove_out(&proof, &channel, WAIT, method().record_length(MAX))
+        .map_err(|error| error.to_string())?;
+    let sealed = Sealed::new(&channel, established.session);
+    let rpc = Rpc {
+        channel: &sealed,
+        next: std::cell::Cell::new(0),
+        updates: std::cell::RefCell::new(Vec::new()),
+    };
+    let result = body(&rpc);
+    sealed.close();
+    channel.close();
+    Ok(result)
+}
 /// Whether a process `pid` is running, asked of the system's own tools.
 pub fn running(pid: u32) -> bool {
     if cfg!(windows) {
