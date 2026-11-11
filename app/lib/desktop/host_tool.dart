@@ -106,6 +106,23 @@ abstract interface class HostChild {
   void kill();
 }
 
+/// A connection to one of a running host's entries from inside this process: whole ACP messages each way, with no proof, since
+/// nothing outside the process can hold one. Closing it ends the entry's agent for it.
+abstract interface class HostLink {
+  /// What the entry's agent sends; ends once the link has.
+  Stream<String> get messages;
+
+  /// Sends one message, waiting while the host has taken too many. Throws [StateError] once the link has ended.
+  Future<void> send(String message);
+  Future<void> close();
+}
+
+/// A [HostChild] that is a `serve` in this process, which can be connected to without a socket.
+abstract interface class HostLinks {
+  /// Throws when the host does not serve [entry] (yet), or has stopped.
+  HostLink openLink(String entry);
+}
+
 /// How this app runs `canoa` commands.
 abstract interface class HostTool {
   /// What they run from: the library's file, or the program's.

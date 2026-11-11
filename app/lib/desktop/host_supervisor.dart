@@ -201,6 +201,18 @@ class HostSupervisor extends ChangeNotifier {
     await _start();
   }
 
+  /// A connection to the entry [name] of the running host from inside this process, with no socket and no proof. Throws
+  /// [HostCommandFailed] when no host is running here, or it does not serve [name] now.
+  HostLink openLink(String name) {
+    final child = _child;
+    if (child is! HostLinks) throw const HostCommandFailed('no host runs in this process');
+    try {
+      return (child as HostLinks).openLink(name);
+    } on Object catch (error) {
+      throw HostCommandFailed('canoa is not serving $name here now: $error');
+    }
+  }
+
   /// Starts again at once, as a person asks after fixing what was wrong.
   Future<void> restart() async {
     await _end();

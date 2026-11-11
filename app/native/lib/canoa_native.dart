@@ -6,7 +6,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 /// The ABI this code was written for; a library of another is refused.
-const int canoaAbiVersion = 1;
+const int canoaAbiVersion = 2;
 
 // One table with crates/canoa-ffi/src/exports.rs; app/test/host_library_test.dart compares them.
 const int statusOk = 0;
@@ -14,6 +14,10 @@ const int statusBadArgument = 1;
 const int statusUnknownJob = 2;
 const int statusFailed = 3;
 const int statusPanic = 4;
+const int statusUnknownLink = 5;
+const int statusNoEntry = 6;
+const int statusBusy = 7;
+const int statusEnded = 8;
 
 /// A call the library refused.
 final class CanoaNativeError implements Exception {
@@ -36,6 +40,17 @@ final class JobSaid {
   final int? exit;
 }
 
+/// What the host has sent on a link since it was last read.
+final class LinkSaid {
+  const LinkSaid(this.messages, this.closed);
+
+  /// Whole ACP messages, in order.
+  final List<String> messages;
+
+  /// Nothing more will come.
+  final bool closed;
+}
+
 /// The library, loaded.
 final class CanoaNative {
   CanoaNative._(DynamicLibrary library, this.path)
@@ -52,7 +67,20 @@ final class CanoaNative {
         'canoa_ffi_text_free',
       ),
       _stop = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_job_stop'),
-      _free = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_job_free');
+      _free = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_job_free'),
+      _linkOpen = library.lookupFunction<
+        Int32 Function(Uint64, Pointer<Uint8>, Size, Pointer<Uint64>),
+        int Function(int, Pointer<Uint8>, int, Pointer<Uint64>)
+      >('canoa_ffi_link_open'),
+      _linkSend = library.lookupFunction<
+        Int32 Function(Uint64, Pointer<Uint8>, Size),
+        int Function(int, Pointer<Uint8>, int)
+      >('canoa_ffi_link_send'),
+      _linkRead = library.lookupFunction<
+        Int32 Function(Uint64, Pointer<Pointer<Uint8>>, Pointer<Size>),
+        int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>)
+      >('canoa_ffi_link_read'),
+      _linkClose = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_link_close');
 
   /// Where it was loaded from.
   final String path;
@@ -62,6 +90,10 @@ final class CanoaNative {
   final void Function(Pointer<Uint8>, int) _textFree;
   final int Function(int) _stop;
   final int Function(int) _free;
+  final int Function(int, Pointer<Uint8>, int, Pointer<Uint64>) _linkOpen;
+  final int Function(int, Pointer<Uint8>, int) _linkSend;
+  final int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>) _linkRead;
+  final int Function(int) _linkClose;
 
   /// Where the built application carries it: beside the executable on Windows, in its `lib` directory on Linux, in its
   /// framework on macOS. Named in full, so that no other directory is searched.
@@ -137,5 +169,64 @@ final class CanoaNative {
   void free(int job) {
     final status = _free(job);
     if (status != statusOk) throw CanoaNativeError('free', status);
+  }
+
+  /// Opens a link to the entry [entry] of the `serve` job [job] runs: a connection inside this process, needing no proof.
+  /// Throws [CanoaNativeError] with [statusNoEntry] when the job serves no such entry (yet), or has stopped.
+  int openLink(int job, String entry) {
+    final bytes = utf8.encode(entry);
+    final text = malloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
+    final link = malloc<Uint64>();
+    try {
+      text.asTypedList(bytes.length).setAll(0, bytes);
+      final status = _linkOpen(job, text, bytes.length, link);
+      if (status != statusOk) throw CanoaNativeError('link_open', status);
+      return link.value;
+    } finally {
+      malloc.free(text);
+      malloc.free(link);
+    }
+  }
+
+  /// Queues one ACP message for the host. Returns [statusOk], [statusBusy] (send again later) or [statusEnded]; any other
+  /// refusal throws.
+  int sendOnLink(int link, String message) {
+    final bytes = utf8.encode(message);
+    final text = malloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
+    try {
+      text.asTypedList(bytes.length).setAll(0, bytes);
+      final status = _linkSend(link, text, bytes.length);
+      if (status != statusOk && status != statusBusy && status != statusEnded) throw CanoaNativeError('link_send', status);
+      return status;
+    } finally {
+      malloc.free(text);
+    }
+  }
+
+  /// What the host has sent on [link] since the last read.
+  LinkSaid readLink(int link) {
+    final text = malloc<Pointer<Uint8>>();
+    final length = malloc<Size>();
+    try {
+      final status = _linkRead(link, text, length);
+      if (status != statusOk) throw CanoaNativeError('link_read', status);
+      final Object? value;
+      try {
+        value = jsonDecode(utf8.decode(text.value.asTypedList(length.value)));
+      } finally {
+        _textFree(text.value, length.value);
+      }
+      final said = value! as Map<String, Object?>;
+      return LinkSaid((said['messages']! as List<Object?>).cast<String>(), said['closed']! as bool);
+    } finally {
+      malloc.free(text);
+      malloc.free(length);
+    }
+  }
+
+  /// Ends [link], and with it the entry's agent for it, and forgets it.
+  void closeLink(int link) {
+    final status = _linkClose(link);
+    if (status != statusOk) throw CanoaNativeError('link_close', status);
   }
 }

@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/child_flag.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
@@ -13,6 +14,8 @@ import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa_native/canoa_native.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/examples.dart';
 
 final String? _library = switch (Platform.environment['CANOA_TEST_LIBRARY']) {
   final String path when path.isNotEmpty => File(path).absolute.path,
@@ -40,6 +43,10 @@ void main() {
     expect(constant('STATUS_UNKNOWN_JOB'), statusUnknownJob);
     expect(constant('STATUS_FAILED'), statusFailed);
     expect(constant('STATUS_PANIC'), statusPanic);
+    expect(constant('STATUS_UNKNOWN_LINK'), statusUnknownLink);
+    expect(constant('STATUS_NO_ENTRY'), statusNoEntry);
+    expect(constant('STATUS_BUSY'), statusBusy);
+    expect(constant('STATUS_ENDED'), statusEnded);
     expect(constant('ABI_VERSION'), canoaAbiVersion);
     final jobs = File('../crates/canoa-ffi/src/jobs.rs').readAsStringSync();
     expect(jobs, contains('pub const CHILD_FLAG: &str = "$canoaChildFlag";'));
@@ -127,6 +134,35 @@ void main() {
       await _until(() => supervisor.phase == HostPhase.idle, 'this host to take the home over');
       await supervisor.stop();
     }, skip: _host == null ? 'CANOA_TEST_HOST names a built canoa' : null);
+
+    test('a session runs over a link into the host, with no socket and no pairing', () async {
+      final agent = exampleBinary('stdio_agent');
+      if (agent == null) fail(exampleMissing('stdio_agent')!);
+      await File(cfg).writeAsString('[host.agents.fixture]\nprogram = ${jsonEncode(agent)}\nlisten = "127.0.0.1:0"\n');
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      expect(() => supervisor.openLink('other'), throwsA(isA<HostCommandFailed>()));
+      final link = supervisor.openLink('fixture');
+      final client = VerifiedAgent.fromChild(
+        label: 'fixture', messages: link.messages, send: link.send, close: link.close,
+      );
+      await client.initialize();
+      final opened = await client.openSession(cwd: dir.path);
+      final written = StringBuffer();
+      final listening = client.updates.listen((update) => written.write(update.text ?? ''));
+      await client.prompt(opened.id, 'hello');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await listening.cancel();
+      expect(written.toString(), 'echo: hello');
+      await client.close();
+      // The host stopping ends a link still open.
+      final second = supervisor.openLink('fixture');
+      final ended = second.messages.drain<void>();
+      await supervisor.stop();
+      await ended.timeout(const Duration(seconds: 30));
+      await expectLater(second.send('{}'), throwsStateError);
+    });
 
     test('its other commands run too: keys, check, and pairing given up', () async {
       final supervisor = HostSupervisor(tool);

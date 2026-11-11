@@ -103,8 +103,78 @@ final class LibraryHostTool implements HostTool {
   }
 }
 
+/// How often a link is asked what the host sent.
+const Duration _linkPollEvery = Duration(milliseconds: 15);
+
+/// How long a send waits between tries while the library holds all it takes.
+const Duration _linkBusyPause = Duration(milliseconds: 10);
+
+/// A link the library holds, read on a timer like a command.
+final class _LibraryLink implements HostLink {
+  _LibraryLink(this._native, this._link) {
+    _timer = Timer.periodic(_linkPollEvery, (_) => _read());
+    scheduleMicrotask(_read);
+  }
+
+  final CanoaNative _native;
+  final int _link;
+  final _messages = StreamController<String>();
+  late final Timer _timer;
+  bool _closed = false;
+
+  void _read() {
+    if (_closed) return;
+    final LinkSaid said;
+    try {
+      said = _native.readLink(_link);
+    } on Object {
+      return _end();
+    }
+    said.messages.forEach(_messages.add);
+    if (said.closed) _end();
+  }
+
+  void _end() {
+    if (_closed) return;
+    _closed = true;
+    _timer.cancel();
+    try {
+      _native.closeLink(_link);
+    } on Object {
+      // Forgotten already.
+    }
+    unawaited(_messages.close());
+  }
+
+  @override
+  Stream<String> get messages => _messages.stream;
+
+  @override
+  Future<void> send(String message) async {
+    while (true) {
+      if (_closed) throw StateError('the link to the host has ended');
+      final int status;
+      try {
+        status = _native.sendOnLink(_link, message);
+      } on CanoaNativeError catch (error) {
+        throw StateError('$error');
+      }
+      if (status == statusOk) return;
+      if (status == statusEnded) {
+        _read();
+        _end();
+        throw StateError('the link to the host has ended');
+      }
+      await Future<void>.delayed(_linkBusyPause);
+    }
+  }
+
+  @override
+  Future<void> close() async => _end();
+}
+
 /// A command the library runs, read on a timer: nothing in the library calls back or blocks.
-final class _LibraryChild implements HostChild {
+final class _LibraryChild implements HostChild, HostLinks {
   _LibraryChild(this._native, this._job) {
     _timer = Timer.periodic(_pollEvery, (_) => _read());
     // A command that ends at once need not cost a whole period.
@@ -164,6 +234,12 @@ final class _LibraryChild implements HostChild {
       unawaited(_out.close());
       unawaited(_err.close());
     });
+  }
+
+  @override
+  HostLink openLink(String entry) {
+    if (_exit.isCompleted) throw StateError('the host has ended');
+    return _LibraryLink(_native, _native.openLink(_job, entry));
   }
 
   @override
