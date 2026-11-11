@@ -58,6 +58,14 @@ The first command in a process installs a `tracing` subscriber writing to the lo
 
 The console comes before the pipe: attaching to one replaces the standard handles of a process started with none, as Explorer starts an application. These stay for the life of the process; stopping a host does not undo them, and the library is never to be unloaded, since its threads run on in it.
 
+## Accounts as jobs
+
+`canoa accounts list|add|login|remove` (see `canoa-host`'s header) run as jobs like any command that changes nothing about the process, with `home` naming the host's directory, where the accounts keep their state and, with `[host] account_store = "file"`, their sealed files.
+
+- `args`: `["accounts", "add", NAME, "--harness", ID, "--method", METHOD, "--format", "json", "--until-stdin-closes", "--config", FILE]`. With `--format json` the job's `out` carries one JSON object per line: `{"say": TEXT}`, `{"open_url": {"url", "user_code", "expires_ms"}}` for a page to open and the code to confirm there, and at the end `{"account": {"name", "harness", "kind", "id", "label", "checked"}}`. `list --format json` prints `{"name", "harness", "kind", "id", "state", "revision", "expires_at"}` per account.
+- `canoa_ffi_job_stop` cancels a sign-in (`--until-stdin-closes`): the provider kills what it started and the job ends with status 1.
+- **A job cannot take a typed secret.** Its front answers `ask` with nothing, so a login method that asks for a code or a key (Claude's, an API key) fails the job with status 1 and the account is not made; no credential is read from anywhere else. A method that only shows a page and waits (Codex's `chatgpt`, `chatgpt-device`) works. The app will ask in a sealed form once the host takes one; the C ABI has no input for it today and gains none here.
+
 ## Environment variables
 
 | Variable | Effect | Default |

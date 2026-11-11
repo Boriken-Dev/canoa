@@ -301,6 +301,56 @@ The requests, each answered by the host, never the agent:
 A link swapped in, between the host's check and git's work, by someone who can already write inside a root, is not
 guarded against.
 
+## Accounts
+
+A harness entry (`harness = "claude"`, `"codex"`, or an outside provider's id) can offer several logins of the same
+harness, so that one session runs on a work subscription and another on a personal one, or on an API key with an
+endpoint of its own. The provider knows how its harness takes each kind of login (the variables, the files, the sign-in
+command); the host keeps who the accounts are, their credentials, who holds one, and what a renewal does.
+
+```toml
+[host]
+account_store = "os"            # the default; "file" for a host with no operating system credential store
+
+[host.agents.claude]
+harness = "claude"
+accounts = ["work", "personal"] # a session runs on the first unless its client names another
+
+[host.accounts.work]            # written by `canoa accounts add`; holds no credential
+harness = "claude"
+kind = "claude-login"
+id = "0b7d3c1e-5a52-4f0e-9d0f-6c1f5d5b8e21"
+```
+
+```sh
+canoa accounts add work --harness claude --method subscription   # signs in; asks for the code the page shows, with no echo
+canoa accounts list                                              # name, harness, kind, state; never a credential
+canoa accounts login work                                        # sign in again when a login was lost
+canoa accounts remove work                                       # forgets the stored credential and the account's directory
+```
+
+- **A credential is never in canoa.cfg.** A file that holds one under `[host.accounts]` is refused, naming the key and not
+  quoting the value. It rests in the operating system's credential store (Windows Credential Manager, macOS Keychain,
+  Secret Service), and a typed key is read from the terminal without echo, never from the command line. A host with no
+  such store, a headless Linux for one, says `account_store = "file"`: a file per account in the host's directory, sealed
+  to a key beside it. That keeps a copied file closed and nothing from anyone who can read the directory, and the host logs it
+  as a weakening.
+- **One copy of a login that rotates.** Claude's and Codex's logins replace their refresh token each time they renew, so a
+  second copy would be dead the moment the first renewed. A session on such an account holds it from its start until its
+  connection ends, a second connection that chooses it is turned away saying who holds it, and so is a second session on
+  the same connection. Sessions on an API key share it.
+- **What the harness renews is kept.** While a session runs the harness may refresh its login in its files. The host stores
+  the newer copy, ignores an older report, and when the harness lost the login (a refused refresh blanks or deletes its
+  file) marks the account as needing a sign-in without replacing the last copy it holds.
+- **The harness gets only the account.** Every credential variable the provider knows is removed from what it starts, the
+  account's is set, and a login kind's files are written into a directory of the account's own under the host's directory,
+  taken away when the last session on it ends. A credential variable in the host's own environment is logged as replaced.
+- A client chooses the account in `initialize`'s `_meta["dev.boriken.canoa/account"]`; the answer's `_meta` names the
+  account and its kind.
+- The desktop app runs these commands as jobs of its own host. A sign-in that asks for a typed secret (Claude's code, an
+  API key) needs a sealed form in the app, which is not built yet, so for now such an account is added with `canoa
+  accounts add` in a terminal.
+
 ## In the desktop app
 
 Canoa's desktop app carries the host as a library and runs it in its own process, on the host's own threads, so there is

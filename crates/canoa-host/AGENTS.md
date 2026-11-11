@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`) and `coqui-acp-provider` (coqui-acp `c15c0ff9`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`e513bb7`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web-channel` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`) and `coqui-acp-provider` (coqui-acp `2972b6ad`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`e513bb7`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web-channel` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring`, `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `ACCOUNT_META`, `AccountConfig`, `AccountStore`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -21,6 +21,7 @@ The host reads `[host]` and `[usage] limit_phrases` (`Config::limit_phrases`: `N
 ```toml
 [host]
 origins = ["https://canoa.example"]  # optional: browser origins that may connect; empty or absent lets any, and the proof decides
+account_store = "os"                  # optional: where accounts keep their credentials, "os" (the default) or "file"; see Accounts
 
 [host.agents.NAME]                    # a program speaking ACP on its standard streams
 program = "gemini"                    # this or harness, one of the two; found as the OS finds a command
@@ -38,6 +39,7 @@ approval_policy = "on-request"        # codex only: one of APPROVAL_POLICIES; de
 sandbox = "workspace-write"           # codex only: one of SANDBOXES; default "workspace-write"
 bypass = false                        # claude and codex: offer the Bypass mode, which asks for nothing, to a paired client; default false
 modes = ["plan", "accept_edits"]      # claude and codex: the modes a paired client may choose, widening the default (the entry's own mode and stricter ones); Bypass still needs `bypass`
+accounts = ["work", "personal"]       # optional, with harness: the [host.accounts] a client may run a session on, the first by default; absent runs the harness on the login it has where it runs
 
 [host.agents.OUTSIDE]                 # an outside acp_harness provider
 harness = "acp_echo_harness_echo_harness"  # its id; library or source is required for an id the host does not carry
@@ -52,6 +54,12 @@ dirs = ["harness"]
 overlays = ["team"]                   # optional: AOS overlays the app installed in overlays/ beside this file
 allow_mcp = { team = "sha256:…" }     # optional: an overlay's MCP server and the definition digest it may start at
 context = { text = "..." }            # and every key of the profile schema
+
+[host.accounts.work]                  # a login for an entry's `accounts`; written by `canoa accounts add`, and never holds a credential
+harness = "claude"                    # a provider, as an entry's harness
+kind = "claude-login"                 # one of the kinds the provider's catalog lists
+id = "0b7d3c1e-5a52-4f0e-9d0f-6c1f5d5b8e21"   # Canoa writes it when it makes the account; never reused, and the key of its stored credential
+settings = { base_url = "https://llm.example" }   # optional: the kind's settings that are not secrets, checked against its schema
 
 [host.providers.NAME]                 # a Guatiao agent_provider, from a library or a source
 library = "echo_provider.dll"         # a library file, relative to the file's directory; or:
@@ -119,7 +127,7 @@ pub const DEFAULT_MAX_SESSIONS: usize = 8;
 pub const MAX_NAME: usize = 64;
 pub const MAX_TITLE: usize = 64;
 
-#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile>, pub web: Option<WebConfig> }   // Default, Clone, Eq
+#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile>, pub web: Option<WebConfig>, pub limit_phrases: Option<Vec<String>>, pub accounts: IndexMap<String, AccountConfig>, pub account_store: AccountStore }   // Default, Clone, Eq
 #[non_exhaustive] pub struct WebConfig { pub dir: Option<PathBuf>, pub listen: SocketAddr, pub tls: Option<WebTls>, pub hosts: Vec<String>, pub connect: Vec<String>, pub limits: web::Limits, pub keep_out: Vec<PathBuf> }   // Default, Clone, Eq
 pub fn WebConfig::new() -> WebConfig            // the site built in, on web::DEFAULT_LISTEN, plain HTTP, nothing else allowed, default limits
 // keep_out is never read from the file: `serve` fills it with canoa.cfg's directory and the identity home
@@ -131,7 +139,10 @@ pub fn Config::entry(&self, name: &str) -> Option<&Entry>
 
 #[non_exhaustive] pub struct HostProfile { pub profile: Profile, pub overlays: Vec<String>, pub allow_mcp: BTreeMap<String, String>, pub directory: PathBuf }
 #[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: SocketAddr, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize, pub title: Option<String> }
-#[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String>, usage: Option<UsageSource> }, Harness { harness: String, origin: Option<Origin>, executable: Option<OsString>, options: HarnessOptions, settings: Option<Settings>, profiles: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
+#[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String>, usage: Option<UsageSource> }, Harness { harness: String, origin: Option<Origin>, executable: Option<OsString>, options: HarnessOptions, settings: Option<Settings>, profiles: Vec<String>, accounts: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
+#[non_exhaustive] pub struct AccountConfig { pub harness: String, pub kind: String, pub id: String, pub settings: Option<Settings> }   // Clone, Eq: one [host.accounts.NAME]
+#[non_exhaustive] pub enum AccountStore { Os, File }   // Copy, Default (Os), Eq: `[host] account_store`
+pub const ACCOUNT_META: &str = "dev.boriken.canoa/account";   // the `_meta` key of `initialize`, in the request (the account's name) and in the answer ({"name", "kind"})
 #[non_exhaustive] pub enum UsageSource { Antigravity }   // Copy; `usage = "antigravity"` on an agent entry
 pub fn UsageSource::named(name: &str) -> Option<UsageSource>
 #[non_exhaustive] pub enum Origin { Library(PathBuf), Source { file: PathBuf, settings: Settings, import_search: ImportSearch } }   // paths absolute
@@ -158,6 +169,7 @@ pub const SETTING_SOURCES: &[&str];    // user, project, local
 pub const APPROVAL_POLICIES: &[&str];  // untrusted, on-failure, on-request, never
 pub const SANDBOXES: &[&str];          // read-only, workspace-write, danger-full-access
 ```
+- `[host.accounts.NAME]`: a name as an entry's, with `harness`, `kind` and `id` (1 to 128 bytes, no control character, another account's refused) required and `settings` optional. Any other key is refused by name (`api_key is not a key of an account`), never quoting its value: **a credential never goes in canoa.cfg**. `[host] account_store` is `os` or `file`. An agent entry's `accounts` names accounts the file holds, none twice; with `program` it is refused. When `serve` starts, each account an entry offers is checked against the provider's catalog: its harness is the entry's, its kind is listed, its `settings` fit the kind's schema (a key the kind marks as a credential is refused as one, naming the key) and an endpoint setting is an `https` address or an `http` one to this machine.
 - `[host.profiles.NAME]`: a name as an entry's; `overlays` valid AOS overlay names; `allow_mcp` values `sha256:` and 64 lower-case hex digits; the rest `Profile::from_table` as `LayerKind::User`, its relative paths from the file's directory. An agent's `profiles` must name profiles the file holds, each once. Errors say `profile NAME:` and a setting, never a value.
 - A tool entry's `listen`, `working_roots`, `worktrees`, `peers` and `max_peers` are read as in the other tables; the rest is a `ToolSpec`, refused as a whole when `ToolSpec::check` refuses it. Its errors name a setting and a rule's index, never a value.
 - `library` and `source` are made absolute against `base` (the file's directory for `load`); `directory` is `base` made absolute, where the provider's process runs.
@@ -216,7 +228,7 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 - `max_peers` connections per entry at once; past it a proven peer is turned away. Past `MAX_UNPROVEN` handshakes at once across entries, a new connection is dropped.
 
 ```rust
-#[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure }, Proof(String) }
+#[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure }, Proof(String), Harness { entry: String, what: String }, Accounts { what: String } }
 ```
 
 ## The web app (`canoa_host::web`)
@@ -464,6 +476,16 @@ pub fn Home::holder(&self) -> Option<Holder>   // by what it wrote; proves nothi
 - What `Display` says of `Held` names the holder, its process and the home. `canoa serve` and the app show it.
 - A file system that has no such lock is `Io`: that host does not start.
 
+## Accounts
+
+An agent entry with `harness` can offer accounts: logins of the provider's, each its own `[host.accounts.NAME]`. The provider owns how its harness takes one (kinds, variables, files, login commands: its `accounts` catalog); the host owns which exist, where their credentials rest, who holds one and what a renewal does.
+
+- **Where a credential rests.** In the operating system's credential store (Windows Credential Manager, macOS Keychain, Secret Service) through the `keyring` crate, service `dev.boriken.canoa`, by default; never in canoa.cfg, the ledger or a log. Windows holds at most 2560 bytes in one credential and a Codex `auth.json` is several kilobytes, so a record (the credentials, `revision`, `expires_at`, `needs_sign_in`) is cut into chunks of 2048 bytes, one entry each, under a generation that an index entry names: a write that stops half way leaves the old record whole. `[host] account_store = "file"` keeps a file per account in `HOME/accounts/` instead, sealed with AES-256-GCM to a key (`store.key`, 32 bytes, mode 0600 on Unix) beside it, the account's id in what is authenticated, written beside its place and renamed over it; for a host with no credential store (a headless Linux), logged as `non-default: host.account_store is file` since it protects against a copied file and not against anyone who can read the directory. With the operating system's store missing, the first use says so and names the setting. The accounts' files live under `HOME/accounts/` (`HOME` being the host's home, `COQUI_AGENTIC_PEER_HOME`), one directory per account named by a digest of its id: `state/` is where the harness runs, `lease` the file lock below.
+- **A session on an account.** The client names the account in `initialize`'s `_meta["dev.boriken.canoa/account"]` (its name); absent, the entry's first; a name the entry does not offer, or an account held, is answered `-32602` before anything starts. The answer's `_meta` names `{"name", "kind"}` and never a value. The provider is given the `AccountGrant` (the stored credentials, `revision`, and `state_dir` for a kind that needs one) and a spawner whose file methods serve that directory; the files it places there are taken away once the last connection on the account ends, the harness's own state stays. Usage is reported under the account's id. Each start logs the kind's notices, and `non-default: the host's environment sets NAME…` for a credential variable of the host's own that the account takes the place of (the provider removes every one it knows).
+- **One holder.** A kind whose catalog says `rotates` is held by one connection from its start until it ends, across processes (an exclusive lock on `lease`), and a second session on that connection (`session/new`, `load` or `resume`) is answered `-32602` until the first is closed. `canoa accounts login|remove` take the same lock and are refused while a connection holds it; `list` shows `in use`. A kind that does not rotate is shared. `harness-login` is never leased or stored.
+- **Renewals.** What the provider reports through the account keeper is stored when it is newer than the stored copy: its `from_revision` is not older than the stored `revision`, its `expires_at` (RFC 3339) not earlier, and the credentials differ; the stored `revision` then grows by one. An older or repeated report is ignored and logged, and so is a sequence a provider instance has already told. A `lost` login sets `needs_sign_in` and keeps the last copy, which the next start uses; a sign-in (`canoa accounts login`) replaces it and clears the mark. A blank copy is never stored.
+- **Signing in.** A login method runs in a directory made for it under `HOME/accounts/login/`, removed however it ended, with the provider's prompts relayed through the `Front`: `say`, `open_url` (with a device code) and `ask`, which a front without typed input refuses (`Front::ask` answering `None`) and the provider then fails the sign-in. An application hosting the library gets that front today: it can list, and can add an account only by a method that never asks, until sealed prompts exist. An `ask` is never answered from anywhere but the front.
+
 ## The command line as a library (`canoa_host::cli`)
 
 ```rust
@@ -475,6 +497,7 @@ pub trait Front: Send + Sync {
     fn program(&self) -> io::Result<Program>;          // what runs provider, tool and launch for this host
     fn home(&self) -> Option<PathBuf>;                 // None: this user's
     fn holder(&self) -> &str;                          // what serve calls itself to another host
+    fn ask(&self, prompt: &str, secret: bool) -> io::Result<Option<String>>;   // one typed line, a secret without echo; Ok(None): this front cannot take one (an application asks in its own forms)
 }
 #[non_exhaustive] pub struct Program { pub path: PathBuf, pub args: Vec<OsString> }   // args go before the subcommand
 pub const fn Program::new(path: PathBuf, args: Vec<OsString>) -> Program
@@ -514,10 +537,15 @@ canoa agent codex [--executable FILE] [--approval-policy POLICY] [--sandbox SAND
               [--no-client-mcp-servers] [--allow-network-paths]
 canoa launch PROGRAM [ARGS]...
 canoa options (claude | codex [--executable FILE] | NAME --entry [--config FILE]) [--format text|json]
+canoa accounts list [--config FILE] [--format text|json]
+canoa accounts add NAME --harness ID --method METHOD [--input KEY=VALUE]... [--until-stdin-closes] [--config FILE] [--format text|json]
+canoa accounts login NAME [--method METHOD] [--input KEY=VALUE]... [--until-stdin-closes] [--config FILE] [--format text|json]
+canoa accounts remove NAME [--config FILE]
 ```
 
 - `agent claude|codex` serves the installed Claude Code or Codex as an ACP agent (version 1 or 2, whichever the client asks, up to `--max-acp-version`) on standard input and output, through coqui-acp's translators, with no Node; notices and exits go to standard error as `canoa agent NAME: ...`; a version 2 message's end is written without `content: []`, as for a harness entry. `--executable` defaults to `COQUI_ACP_CLAUDE_EXECUTABLE` or `COQUI_ACP_CODEX_EXECUTABLE`, else `claude` or `codex`. Plugins from a client are off unless `--allow-client-plugins`. A `--working-root` holds a session's `cwd`, more directories and plugins, and a resumed Codex thread's own directory. It takes the process's standard streams, so `canoa-ffi` runs it only through `--canoa-child`, as `provider`, `tool` and `launch`. The command line reads its own variables (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_HOME`, ...) from the environment it runs in. Exit 0 when the client closes, 1 when reading it failed, 2 for a wrong invocation.
 - `options` prints what a source offers before a session starts, asked of its `acp_harness` provider's `models` with no session and no model turn (`canoa_host::options`). `claude` and `codex` run as `canoa agent` runs them (`--executable`, else `COQUI_ACP_CLAUDE_EXECUTABLE` or `COQUI_ACP_CODEX_EXECUTABLE`, else the harness's name); with `--entry`, `NAME` is a `[host.agents]` entry of canoa.cfg (`--config`): a `harness` entry is asked through its own provider and settings, any other entry (a program on standard streams, a provider, a tool) answers `known: false` with the reason. `--format json` prints one object: `{"known", "unknown_because"?, "program"?, "program_version"?, "models": [{"id", "name"?, "description"?, "resolved"?, "version"?, "efforts": [..], "default_effort"?, "is_default"?}]}`, `program_version` being the first line of the program's `--version` when it answers within 10 s; `text` prints one `ID<TAB>NAME<TAB>EFFORTS` line per model. Claude Code lists `default`, `opus`, `fable`, `sonnet` and `haiku` with the model each resolves to and the efforts each takes; Codex lists its models with each one's own efforts. It uses the machine's own login and takes the process's usual streams, so `canoa-ffi` runs it as an in-process job; the app caches the answer, the host does not. Exit 2 for a source that is neither built in nor an entry.
+- `accounts` (see "Accounts"): `add` signs in by one of the provider's login methods (`--method` naming none or an unknown one lists them, status 2) and appends `[host.accounts.NAME]` to canoa.cfg, made if absent; `login` signs in again to an account (`--method` only when its kind has several); `remove` forgets the stored credential and the account's directory and takes the block `add` wrote out of canoa.cfg (an account written some other way is for its writer to remove; an entry that offers it keeps it, status 2); `list` prints `NAME HARNESS KIND STATE` or `{"name", "harness", "kind", "id", "state", "revision", "expires_at"}`, `state` being `signed in`, `needs sign-in`, `in use` or `signed in where it runs` (harness-login), never a credential. A page to open or a code to confirm is said on standard error (`Open this page: URL`, `Confirm this code there: CODE`), or with `--format json` printed as `{"say": TEXT}` and `{"open_url": {"url", "user_code", "expires_ms"}}`, then `{"account": {"name", "harness", "kind", "id", "label", "checked"}}` when `add` is done. A secret the method asks for is typed without echo at a terminal, or one line of standard input when that is not a terminal; it is never read from the command line. `--until-stdin-closes` cancels the sign-in when the front's input closes (the process-level `canoa` ends at once instead, so do not use it with a piped secret).
 - `launch` is what `serve` runs for an agent entry with profiles: the environment on the first line of standard input, the rest to `PROGRAM`, whose status it exits with; a first line of another form is status 2.
 
 - `--method` names the proof: this user's identity of that method, made when absent, and the home then records that method in `method`. Without it, the method the home records (the one named last, or its first identity's), or a new identity of the default method, Noise. An identity never changes method. A client of the other method is logged as `a client was refused: … the peer proves by X, and this endpoint only by Y`, with no word of `accept`: its key has to be paired again under this host's method. `--key-limit` and `--no-rekey` set the session, each method's default otherwise, and a non-default one is logged at `info`.
