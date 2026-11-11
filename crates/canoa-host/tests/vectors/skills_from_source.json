@@ -1,0 +1,251 @@
+{
+  "about": "The skills of AOS overlays that name skills from elsewhere, as the consumers that install them give them: dotagents (tests/test_skills_from_source.py, a byte-for-byte copy of this file) and canoa (tests/profile.rs, app/test/skills_from_source_test.dart). `overlays` maps an identity to its files; `catalogs` are the consumer's catalogs by label; `requested` are the active overlays. `expect` is the plan before anything is fetched: every skill with its origin, source, pin and the catalog that gave it, the names no catalog offers (`missing`), the ones more than one offers (`ambiguous`, with the labels), the ones with no pin, the ones a holder of the name keeps from another (`shadowing`), who delivers which name, and what would be fetched.",
+  "cases": [
+    {
+      "name": "a bundled skill, one by source, one unpinned, and a name a catalog offers",
+      "overlays": {
+        "team": {
+          "overlay.cfg": "name = \"team\"\nskills = [\n  \"pdf\",\n  { name = \"review\", source = \"https://skills.example.test/tools.git#skills/review\", pin = \"sha256:abababababababababababababababababababababababababababababababab\" },\n  { name = \"lint\", source = \"https://skills.example.test/tools.git#skills/lint\" },\n]\n",
+          "skills/notes/SKILL.md": "---\nname: notes\ndescription: The notes skill.\n---\nBody.\n"
+        }
+      },
+      "catalogs": [
+        {
+          "label": "main",
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = { source = \"https://skills.example.test/pdf.git\", pin = \"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\" }\n"
+        }
+      ],
+      "requested": [
+        "team"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "lint",
+            "overlay": "team",
+            "origin": "source",
+            "source": "https://skills.example.test/tools.git#skills/lint"
+          },
+          {
+            "name": "notes",
+            "overlay": "team",
+            "origin": "bundled"
+          },
+          {
+            "name": "pdf",
+            "overlay": "team",
+            "origin": "catalog",
+            "source": "https://skills.example.test/pdf.git",
+            "pin": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "catalog": "main"
+          },
+          {
+            "name": "review",
+            "overlay": "team",
+            "origin": "source",
+            "source": "https://skills.example.test/tools.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "lint",
+            "team"
+          ]
+        ],
+        "shadowing": [],
+        "delivered": {
+          "lint": "team",
+          "notes": "team",
+          "pdf": "team",
+          "review": "team"
+        },
+        "collisions": [],
+        "fetch": [
+          {
+            "name": "lint",
+            "overlay": "team",
+            "source": "https://skills.example.test/tools.git#skills/lint",
+            "pin": null
+          },
+          {
+            "name": "pdf",
+            "overlay": "team",
+            "source": "https://skills.example.test/pdf.git",
+            "pin": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          },
+          {
+            "name": "review",
+            "overlay": "team",
+            "source": "https://skills.example.test/tools.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a name no catalog offers is missing, and the overlay still has its bundled skill",
+      "overlays": {
+        "team": {
+          "overlay.cfg": "name = \"team\"\nskills = [\"nothing\"]\n",
+          "skills/notes/SKILL.md": "---\nname: notes\ndescription: The notes skill.\n---\nBody.\n"
+        }
+      },
+      "catalogs": [],
+      "requested": [
+        "team"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "notes",
+            "overlay": "team",
+            "origin": "bundled"
+          },
+          {
+            "name": "nothing",
+            "overlay": "team",
+            "origin": "missing"
+          }
+        ],
+        "missing": [
+          [
+            "nothing",
+            "team"
+          ]
+        ],
+        "ambiguous": [],
+        "unpinned": [],
+        "shadowing": [],
+        "delivered": {
+          "notes": "team"
+        },
+        "collisions": [],
+        "fetch": []
+      }
+    },
+    {
+      "name": "a name two catalogs offer is ambiguous, reported with both labels, and not guessed",
+      "overlays": {
+        "team": {
+          "overlay.cfg": "name = \"team\"\nskills = [\"pdf\"]\n"
+        }
+      },
+      "catalogs": [
+        {
+          "label": "main",
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"https://skills.example.test/pdf.git\"\n"
+        },
+        {
+          "label": "extra",
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"https://skills.example.test/other-pdf.git\"\n"
+        }
+      ],
+      "requested": [
+        "team"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "overlay": "team",
+            "origin": "ambiguous",
+            "catalogs": [
+              "extra",
+              "main"
+            ]
+          }
+        ],
+        "missing": [],
+        "ambiguous": [
+          [
+            "pdf",
+            "team",
+            [
+              "extra",
+              "main"
+            ]
+          ]
+        ],
+        "unpinned": [],
+        "shadowing": [],
+        "delivered": {},
+        "collisions": [],
+        "fetch": []
+      }
+    },
+    {
+      "name": "two overlays naming one skill alike are one fetch; a different pin is a collision",
+      "overlays": {
+        "a": {
+          "overlay.cfg": "name = \"a\"\nskills = [{ name = \"review\", source = \"https://skills.example.test/tools.git#skills/review\", pin = \"sha256:abababababababababababababababababababababababababababababababab\" }]\n"
+        },
+        "b": {
+          "overlay.cfg": "name = \"b\"\nskills = [{ name = \"Review\", source = \"https://skills.example.test/tools.git#skills/review\", pin = \"sha256:abababababababababababababababababababababababababababababababab\" }]\n"
+        },
+        "c": {
+          "overlay.cfg": "name = \"c\"\nskills = [{ name = \"review\", source = \"https://skills.example.test/tools.git#skills/review\", pin = \"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\" }]\n"
+        }
+      },
+      "catalogs": [],
+      "requested": [
+        "a",
+        "b",
+        "c"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "review",
+            "overlay": "a",
+            "origin": "source",
+            "source": "https://skills.example.test/tools.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          },
+          {
+            "name": "Review",
+            "overlay": "b",
+            "origin": "source",
+            "source": "https://skills.example.test/tools.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          },
+          {
+            "name": "review",
+            "overlay": "c",
+            "origin": "source",
+            "source": "https://skills.example.test/tools.git#skills/review",
+            "pin": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "shadowing": [
+          [
+            "review",
+            "c"
+          ]
+        ],
+        "delivered": {
+          "Review": "b"
+        },
+        "collisions": [
+          "review"
+        ],
+        "fetch": [
+          {
+            "name": "Review",
+            "overlay": "b",
+            "source": "https://skills.example.test/tools.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ]
+      }
+    }
+  ]
+}
