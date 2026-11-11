@@ -10,7 +10,7 @@ use std::time::SystemTime;
 
 use coqui_acp_api::{AccountKindInfo, AccountLoss, AccountRenewal, Credentials};
 
-use super::store::{self, FileStore, KeyringStore, SecretStore};
+use super::store::{FileStore, KeyringStore, SecretStore};
 use super::*;
 use crate::config::AccountConfig;
 
@@ -308,7 +308,7 @@ fn config(id: &str) -> AccountConfig {
 #[cfg(windows)]
 #[test]
 fn windows_refuses_one_credential_over_2560_bytes() {
-    let _turn = store::one_at_a_time();
+    let _turn = super::store::one_at_a_time();
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
     let entry = KeyringStore::new(service).entry("limit").expect("an entry");
     let at_limit = entry.set_secret(&vec![b'x'; 2560]);
