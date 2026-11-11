@@ -212,7 +212,19 @@ impl KeyringStore {
         let entry = self
             .entry(&Self::index_user(id))
             .map_err(IndexError::Unreadable)?;
-        match patiently(|| entry.get_secret()) {
+        // Windows' Credential Manager was seen to answer "no such credential" for one written a moment before, under load: an
+        // account is taken to have none only after it has said so a few times.
+        let mut asked = 0;
+        let read = loop {
+            match patiently(|| entry.get_secret()) {
+                Err(KeyError::NoEntry) if asked < 2 => {
+                    asked += 1;
+                    std::thread::sleep(core::time::Duration::from_millis(100));
+                }
+                other => break other,
+            }
+        };
+        match read {
             Ok(mut bytes) => {
                 let index = serde_json::from_slice(&bytes);
                 bytes.zeroize();
