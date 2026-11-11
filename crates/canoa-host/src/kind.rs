@@ -20,14 +20,14 @@ use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
-    AccountCatalog, AccountKeeper, AccountKindInfo, AcpHarness, Environment, ProcessSpawner,
-    StartRequest,
+    AccountCatalog, AccountKeeper, AccountKindInfo, AcpHarness, CacheLifetime, Environment,
+    ProcessSpawner, StartRequest,
 };
 use coqui_acp_claude::ClaudeProvider;
 use coqui_acp_codex::CodexProvider;
 
 use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts};
-use crate::config::{AccountConfig, Origin, Settings};
+use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
 
 // What `Registry::register_local` takes: the two built-in providers, linked into this binary.
@@ -36,6 +36,12 @@ coqui_acp_api::guatiao::local_providers!(
     version = env!("CARGO_PKG_VERSION"),
     providers = [ClaudeProvider, CodexProvider]
 );
+
+/// The `_meta` key of a client's `initialize` that says how long its session's prompt cache should live: an object
+/// `{"lifetime": "default" | "short" | "long", "chosen": bool}`. `chosen` (true when absent) says the person chose it for
+/// this session, which wins over the entry's `cache_lifetime`; false is the client's default for its kind of session, which
+/// the entry's setting replaces.
+pub const CACHE_META: &str = "dev.boriken.canoa/cache_lifetime";
 
 /// The setting through which a profiled connection lets a client's plugin reach the harness: Claude Code's provider has it.
 const CLIENT_PLUGINS: &str = "allow_client_plugins";
@@ -79,6 +85,8 @@ pub(crate) struct Harness {
     catalog: Option<AccountCatalog>,
     /// The accounts the entry offers, when it offers any.
     accounts: Option<Offer>,
+    /// The entry's `cache_lifetime`: what its sessions ask when the client does not choose.
+    lifetime: Option<CacheLifetime>,
     /// Dropped after the instances, which point into what it loaded.
     _registry: Arc<Registry>,
 }
@@ -152,7 +160,50 @@ impl Harness {
             departures,
             catalog,
             accounts: None,
+            lifetime: None,
             _registry: Arc::clone(registry),
+        })
+    }
+
+    /// This harness asking `lifetime` of its provider for the sessions whose client chooses none.
+    pub(crate) const fn with_lifetime(mut self, lifetime: Option<CacheLifetime>) -> Self {
+        self.lifetime = lifetime;
+        self
+    }
+
+    /// The prompt-cache lifetime a connection asks, from its client's first message and the entry's setting: the client's
+    /// choice for this session, else the entry's, else what the client asks of its kind of session, else the provider's own.
+    ///
+    /// # Errors
+    ///
+    /// Why the client's value is refused, for the client.
+    pub(crate) fn lifetime_of(&self, first: &[u8]) -> Result<CacheLifetime, String> {
+        let meta = serde_json::from_slice::<serde_json::Value>(first)
+            .ok()
+            .and_then(|message| {
+                message
+                    .get("params")?
+                    .get("_meta")?
+                    .get(CACHE_META)
+                    .cloned()
+            });
+        let Some(meta) = meta else {
+            return Ok(self.lifetime.unwrap_or_default());
+        };
+        let asked = meta
+            .get("lifetime")
+            .and_then(serde_json::Value::as_str)
+            .and_then(cache_lifetime_named)
+            .ok_or_else(|| "the cache lifetime is default, short or long".to_owned())?;
+        let chosen = match meta.get("chosen") {
+            None => true,
+            Some(serde_json::Value::Bool(chosen)) => *chosen,
+            Some(_) => return Err("chosen is true or false".to_owned()),
+        };
+        Ok(if chosen {
+            asked
+        } else {
+            self.lifetime.unwrap_or(asked)
         })
     }
 
@@ -238,8 +289,9 @@ impl Harness {
         &self,
         profile: Option<(Environment, &Path)>,
         account: Option<&Held>,
+        lifetime: CacheLifetime,
     ) -> Connection {
-        let mut request = StartRequest::builder();
+        let mut request = StartRequest::builder().cache_lifetime(lifetime);
         for root in &self.roots {
             request = request.working_root(root.clone());
         }

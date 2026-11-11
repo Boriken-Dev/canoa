@@ -10,6 +10,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use coqui_acp_api::CacheLifetime;
 use coqui_acp_claude::{ClaudeAgent, ClaudeLaunch};
 use coqui_acp_codex::{CodexAgent, CodexLaunch};
 use coqui_acp_harness::{Harness as Translator, Settings};
@@ -81,7 +82,20 @@ pub(crate) struct AgentOptions {
     pub(crate) max_sessions: usize,
     /// Added to the environment the command line inherits.
     pub(crate) env: Vec<(OsString, OsString)>,
+    /// How long the command line's prompt cache should live, where it has a control for it.
+    pub(crate) cache_lifetime: CacheLifetime,
 }
+
+/// Claude Code's variables for how long its prompt cache lives, for the conversation and for its sub-agents, with the
+/// values `short` (5 minutes) and `long` (1 hour) set them to.
+const CLAUDE_TTL_VARIABLES: [&str; 2] = [
+    "CLAUDE_CODE_PROMPT_CACHE_TTL",
+    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+];
+
+/// What Codex's app server does with a cache lifetime, as its provider words it.
+pub(crate) const CODEX_IGNORES_LIFETIME: &str =
+    "Codex's app server has no setting for how long its prompt cache lives";
 
 /// Names the environment's variables, never their values: a profile's may be secrets.
 impl core::fmt::Debug for AgentOptions {
@@ -133,6 +147,7 @@ impl AgentOptions {
             max_version: 2,
             max_sessions: crate::config::DEFAULT_MAX_SESSIONS,
             env: Vec::new(),
+            cache_lifetime: CacheLifetime::Default,
         }
     }
 
@@ -163,6 +178,18 @@ impl AgentOptions {
         launch.modes.clone_from(&self.modes);
         launch.permission_prompts = self.permission_prompts;
         launch.env.extend(self.env.iter().cloned());
+        let ttl = match self.cache_lifetime {
+            CacheLifetime::Short => Some("5m"),
+            CacheLifetime::Long => Some("1h"),
+            _ => None,
+        };
+        if let Some(ttl) = ttl {
+            launch.env.extend(
+                CLAUDE_TTL_VARIABLES
+                    .iter()
+                    .map(|name| (OsString::from(name), OsString::from(ttl))),
+            );
+        }
         launch
     }
 

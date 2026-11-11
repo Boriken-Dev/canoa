@@ -693,7 +693,8 @@ impl Serving {
                         !profiles.is_empty(),
                         roots,
                     )
-                    .map_err(|error| refused(error.to_string()))?;
+                    .map_err(|error| refused(error.to_string()))?
+                    .with_lifetime(asks.cache_lifetime);
                     for (setting, value, default) in provider.non_defaults() {
                         tracing::info!(
                             "non-default: host.agents.{}: {setting} is {value}, default {default}",
@@ -1288,21 +1289,25 @@ fn give_harness<C: Channel>(
     scope: &Scope,
     connection: Option<&Connection>,
 ) {
+    let turn_away = |why: String| {
+        let id = serde_json::from_slice::<serde_json::Value>(first)
+            .ok()
+            .and_then(|message| message.get("id").cloned());
+        if let Some(id) = id {
+            let answer = serde_json::json!({"jsonrpc": "2.0", "id": id,
+                "error": {"code": -32602, "message": why}});
+            let _ = channel.send(answer.to_string().as_bytes());
+        }
+        tracing::info!(entry = served.name, %peer, "turned away: {why}");
+    };
+    let lifetime = match harness.lifetime_of(first) {
+        Ok(lifetime) => lifetime,
+        Err(why) => return turn_away(why),
+    };
     // The account is chosen, and held for this connection, before anything starts.
     let account = match harness.choose(first, &format!("a connection to {}", served.name)) {
         Ok(account) => account,
-        Err(why) => {
-            let id = serde_json::from_slice::<serde_json::Value>(first)
-                .ok()
-                .and_then(|message| message.get("id").cloned());
-            if let Some(id) = id {
-                let answer = serde_json::json!({"jsonrpc": "2.0", "id": id,
-                    "error": {"code": -32602, "message": why}});
-                let _ = channel.send(answer.to_string().as_bytes());
-            }
-            tracing::info!(entry = served.name, %peer, "turned away: {why}");
-            return;
-        }
+        Err(why) => return turn_away(why),
     };
     let control = InProcess::new();
     let key = match shared.record(|| Ok((Process::Translator(Arc::clone(&control)), ()))) {
@@ -1319,6 +1324,7 @@ fn give_harness<C: Channel>(
             (environment, connection.skills())
         }),
         account.as_ref(),
+        lifetime,
     );
     let gated = Gated::new(
         channel,

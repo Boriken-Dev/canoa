@@ -924,3 +924,133 @@ args = [\"acp\"]
     assert_eq!(plain["models"], json!([]));
     assert!(plain["unknown_because"].is_string());
 }
+
+const TTL: &str = "CLAUDE_CODE_PROMPT_CACHE_TTL";
+const SUBAGENT_TTL: &str = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL";
+
+/// The two cache variables a Claude Code stand-in was started with, for an entry with `keys` and a client whose
+/// `initialize` carries `meta` under the cache key; `Err` is why the host turned the client away.
+fn cache_variables(keys: &str, meta: Option<Value>) -> Result<(Value, Value), Value> {
+    let scratch = Scratch::new();
+    let claude = standin(&scratch, "claude");
+    let record = scratch.0.join("record.jsonl");
+    let env = vec![
+        ("STANDIN_RECORD", record.clone().into_os_string()),
+        (
+            "STANDIN_ENV",
+            OsString::from(format!("{TTL},{SUBAGENT_TTL}")),
+        ),
+    ];
+    let config = format!(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n{keys}",
+        quoted(&claude.to_string_lossy())
+    );
+    let host = Host::start_in(scratch, &config, 1, &env);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        let mut params = json!({"protocolVersion": 1, "clientCapabilities": {}});
+        if let Some(meta) = meta {
+            params["_meta"] = json!({ canoa_host::CACHE_META: meta });
+        }
+        rpc.request("initialize", params)?;
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))?;
+        Ok::<(), Value>(())
+    })
+    .expect("a paired key is served")?;
+    let started = records(&record);
+    Ok((
+        started[0]["env"][TTL].clone(),
+        started[0]["env"][SUBAGENT_TTL].clone(),
+    ))
+}
+
+/// What the stand-in sees when the host sets neither variable: the test's own environment.
+fn inherited() -> (Value, Value) {
+    (
+        json!(std::env::var(TTL).ok()),
+        json!(std::env::var(SUBAGENT_TTL).ok()),
+    )
+}
+
+#[test]
+fn a_session_starts_claude_code_with_the_cache_lifetime_its_client_chose() {
+    for (lifetime, ttl) in [("short", json!("5m")), ("long", json!("1h"))] {
+        let seen = cache_variables("", Some(json!({"lifetime": lifetime}))).expect("served");
+        assert_eq!(seen, (ttl.clone(), ttl), "{lifetime}");
+    }
+    let unchosen = cache_variables("", None).expect("served");
+    assert_eq!(
+        unchosen,
+        inherited(),
+        "a client that says nothing leaves the harness's own"
+    );
+}
+
+#[test]
+fn an_entrys_cache_lifetime_is_the_default_and_a_chosen_one_for_the_session_wins() {
+    let short = json!("5m");
+    let long = json!("1h");
+    // No client opinion: the entry's.
+    let seen = cache_variables("cache_lifetime = \"short\"\n", None).expect("served");
+    assert_eq!(seen.0, short);
+    // The client's default for its kind of session gives way to the entry's, and stands where the entry says nothing.
+    let seen = cache_variables(
+        "cache_lifetime = \"short\"\n",
+        Some(json!({"lifetime": "long", "chosen": false})),
+    )
+    .expect("served");
+    assert_eq!(seen.0, short);
+    let seen =
+        cache_variables("", Some(json!({"lifetime": "long", "chosen": false}))).expect("served");
+    assert_eq!(seen.0, long);
+    // The person's choice for this session wins over the entry.
+    let seen = cache_variables(
+        "cache_lifetime = \"short\"\n",
+        Some(json!({"lifetime": "long"})),
+    )
+    .expect("served");
+    assert_eq!(seen, (long.clone(), long));
+    // An entry that says default leaves the harness's own, whatever the client's default for its kind.
+    let seen = cache_variables(
+        "cache_lifetime = \"default\"\n",
+        Some(json!({"lifetime": "long", "chosen": false})),
+    )
+    .expect("served");
+    assert_eq!(seen, inherited());
+}
+
+#[test]
+fn a_cache_lifetime_that_is_not_one_is_refused_before_anything_starts() {
+    for meta in [
+        json!({"lifetime": "forever"}),
+        json!("long"),
+        json!({"lifetime": "long", "chosen": "yes"}),
+    ] {
+        let refused = cache_variables("", Some(meta.clone())).expect_err("turned away");
+        assert_eq!(refused["code"], -32602, "{meta}: {refused}");
+    }
+}
+
+#[test]
+fn a_codex_entry_says_its_provider_ignores_the_cache_lifetime() {
+    let scratch = Scratch::new();
+    let codex = standin(&scratch, "codex");
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(
+        &config,
+        format!(
+            "[host.agents.Codex]\nharness = \"codex\"\nexecutable = {}\ncache_lifetime = \"short\"\n",
+            quoted(&codex.to_string_lossy())
+        ),
+    )
+    .expect("written");
+    let config = config.to_string_lossy().into_owned();
+    let said = options_of(&["Codex", "--entry", "--config", &config], &scratch);
+    let sentence = said["cache_lifetime"].as_str().expect("a sentence");
+    assert!(sentence.starts_with("ignored:"), "{said}");
+    assert_eq!(said["cache_lifetime_setting"], "short", "{said}");
+    let preset = options_of(&["codex"], &scratch);
+    assert!(preset["cache_lifetime"].is_string(), "{preset}");
+}

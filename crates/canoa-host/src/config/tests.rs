@@ -1083,3 +1083,45 @@ fn an_agent_entry_may_carry_a_title() {
         );
     }
 }
+
+#[test]
+fn a_harness_entry_sets_its_cache_lifetime_and_a_bad_one_is_refused_naming_the_key() {
+    use coqui_acp_api::CacheLifetime;
+    let config = parse(
+        r#"
+[host.agents.Unset]
+harness = "claude"
+[host.agents.Short]
+harness = "claude"
+cache_lifetime = "short"
+[host.agents.Long]
+harness = "codex"
+cache_lifetime = "long"
+[host.agents.Default]
+harness = "claude"
+cache_lifetime = "default"
+[host.agents.Outside]
+harness = "x"
+library = "l"
+cache_lifetime = "short"
+"#,
+    )
+    .expect("parses");
+    let lifetime = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
+        Some(EntryKind::Harness { options, .. }) => options.cache_lifetime,
+        _ => panic!("a harness"),
+    };
+    assert_eq!(lifetime("Unset"), None, "unset is the client's to default");
+    assert_eq!(lifetime("Short"), Some(CacheLifetime::Short));
+    assert_eq!(lifetime("Long"), Some(CacheLifetime::Long));
+    assert_eq!(lifetime("Default"), Some(CacheLifetime::Default));
+    assert_eq!(lifetime("Outside"), Some(CacheLifetime::Short));
+    for text in [
+        "[host.agents.a]\nharness = \"claude\"\ncache_lifetime = \"forever\"\n",
+        "[host.agents.a]\nharness = \"claude\"\ncache_lifetime = \"Short\"\n",
+        "[host.agents.a]\nprogram = \"x\"\ncache_lifetime = \"short\"\n",
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains("cache_lifetime"), "{text}: {error}");
+    }
+}

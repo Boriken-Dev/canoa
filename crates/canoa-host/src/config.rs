@@ -9,6 +9,7 @@ use core::time::Duration;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
+use coqui_acp_api::CacheLifetime;
 use coqui_peer_webcrypto::PeerId;
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -200,6 +201,34 @@ pub struct HarnessOptions {
     /// names them. Unset, a client may choose the mode the entry's own settings amount to and every stricter one, so it
     /// cannot loosen what canoa.cfg set; naming modes widens that, and Bypass still needs `bypass = true`.
     pub modes: Option<Vec<coqui_acp_harness::Mode>>,
+    /// How long the provider's prompt cache should live for this entry's sessions (`cache_lifetime = "default" | "short" |
+    /// "long"`), when the harness has such a control. A client's own choice for one session wins; unset leaves the client's
+    /// default for its kind of session (the chat asks `long`), and the harness's own where it names none.
+    pub cache_lifetime: Option<CacheLifetime>,
+}
+
+/// The values of `cache_lifetime`, in canoa.cfg and on `canoa agent`.
+pub const CACHE_LIFETIMES: &[&str] = &["default", "short", "long"];
+
+/// The lifetime `name` stands for, one of [`CACHE_LIFETIMES`].
+#[must_use]
+pub fn cache_lifetime_named(name: &str) -> Option<CacheLifetime> {
+    match name {
+        "default" => Some(CacheLifetime::Default),
+        "short" => Some(CacheLifetime::Short),
+        "long" => Some(CacheLifetime::Long),
+        _ => None,
+    }
+}
+
+/// The name of `lifetime` in [`CACHE_LIFETIMES`].
+#[must_use]
+pub const fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
+    match lifetime {
+        CacheLifetime::Short => "short",
+        CacheLifetime::Long => "long",
+        _ => "default",
+    }
 }
 
 /// Claude Code's setting sources.
@@ -539,6 +568,7 @@ struct RawAgent {
     bypass: Option<bool>,
     setting_sources: Option<Vec<String>>,
     modes: Option<Vec<String>>,
+    cache_lifetime: Option<String>,
     profiles: Option<Vec<String>>,
     accounts: Option<Vec<String>>,
     usage: Option<String>,
@@ -712,6 +742,18 @@ impl Config {
                 setting_sources: agent.setting_sources,
                 modes: agent.modes,
             };
+            let cache_lifetime = agent
+                .cache_lifetime
+                .as_deref()
+                .map(|text| {
+                    cache_lifetime_named(text).ok_or_else(|| {
+                        invalid(
+                            &name,
+                            &format!("cache_lifetime is one of {}", CACHE_LIFETIMES.join(", ")),
+                        )
+                    })
+                })
+                .transpose()?;
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
                     if program.is_empty() {
@@ -727,6 +769,7 @@ impl Config {
                         (asks.bypass.is_some(), "bypass"),
                         (asks.setting_sources.is_some(), "setting_sources"),
                         (asks.modes.is_some(), "modes"),
+                        (agent.cache_lifetime.is_some(), "cache_lifetime"),
                         (agent.library.is_some(), "library"),
                         (agent.source.is_some(), "source"),
                         (agent.source_settings.is_some(), "source_settings"),
@@ -834,6 +877,10 @@ impl Config {
                             }
                         }
                         HarnessOptions::default()
+                    };
+                    let options = HarnessOptions {
+                        cache_lifetime,
+                        ..options
                     };
                     // A path is canoa.cfg's, as a provider's library is: the command line runs in a session's directory,
                     // which a client chooses.
@@ -1152,6 +1199,7 @@ fn harness_options(
         approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
         sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
         bypass: agent.bypass.unwrap_or(false),
+        cache_lifetime: None,
     })
 }
 

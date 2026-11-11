@@ -15,13 +15,14 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
 use coqui_acp_api::{
-    AccountKeeper as _, AcpHarness, ModelInfo, ModelListing, ModelsRequest, ProcessSpawner as _,
+    AccountKeeper as _, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
+    ProcessSpawner as _,
 };
 use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
 
 use crate::accounts::NoAccounts;
-use crate::config::{Config, EntryKind, Settings};
+use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
 use crate::harness::Harness;
 use crate::kind;
 
@@ -44,6 +45,11 @@ pub struct Choices {
     pub program: Option<String>,
     /// The first line of the program's `--version`, when it answered: what a cache of these choices is keyed by.
     pub program_version: Option<String>,
+    /// What the provider does with a start request's cache lifetime, in its own sentence (`ignored: ...` when it has no
+    /// control for it); `None` when it did not say.
+    pub cache_lifetime: Option<String>,
+    /// The entry's own `cache_lifetime`, when canoa.cfg sets one: what its sessions ask unless the person chooses.
+    pub configured_cache_lifetime: Option<String>,
 }
 
 impl Choices {
@@ -54,10 +60,13 @@ impl Choices {
             models: Vec::new(),
             program: None,
             program_version: None,
+            cache_lifetime: None,
+            configured_cache_lifetime: None,
         }
     }
 
-    /// The choices as one JSON object: `known`, `unknown_because` when not known, `program`, `program_version` and
+    /// The choices as one JSON object: `known`, `unknown_because` when not known, `program`, `program_version`,
+    /// `cache_lifetime` (the provider's sentence on what it does with the prompt-cache lifetime) and
     /// `models`, each `{id, name?, description?, resolved?, version?, efforts, default_effort?, is_default?}`.
     #[must_use]
     pub fn to_json(&self) -> Value {
@@ -71,6 +80,8 @@ impl Choices {
         put("unknown_because", &self.unknown_because);
         put("program", &self.program);
         put("program_version", &self.program_version);
+        put("cache_lifetime", &self.cache_lifetime);
+        put("cache_lifetime_setting", &self.configured_cache_lifetime);
         out.insert(
             "models".into(),
             Value::Array(self.models.iter().map(model_json).collect()),
@@ -129,7 +140,10 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
         false,
         Vec::new(),
     ) {
-        Ok(configured) => ask(configured.connection(None, None).harness.as_ref()),
+        Ok(configured) => ask(configured
+            .connection(None, None, CacheLifetime::Default)
+            .harness
+            .as_ref()),
         Err(error) => Choices::unknown(error.to_string()),
     }
 }
@@ -160,7 +174,16 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
                 Err(error) => return Some(Choices::unknown(error.to_string())),
             };
             match kind::Harness::new(&registry, harness, &configured, false, Vec::new()) {
-                Ok(built) => ask(built.connection(None, None).harness.as_ref()),
+                Ok(built) => {
+                    let mut choices = ask(built
+                        .connection(None, None, CacheLifetime::Default)
+                        .harness
+                        .as_ref());
+                    choices.configured_cache_lifetime = options
+                        .cache_lifetime
+                        .map(|lifetime| cache_lifetime_name(lifetime).to_owned());
+                    choices
+                }
                 Err(error) => Choices::unknown(error.to_string()),
             }
         }
@@ -187,6 +210,8 @@ fn ask(harness: &dyn AcpHarness) -> Choices {
         models: listing.models,
         program,
         program_version,
+        cache_lifetime: harness.describe().ok().and_then(|info| info.cache_lifetime),
+        configured_cache_lifetime: None,
     }
 }
 

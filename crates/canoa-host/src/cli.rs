@@ -368,6 +368,15 @@ struct AgentArgs {
     /// Offer the Bypass mode, which asks for nothing: for a person running the agent for themselves, as the app does.
     #[arg(long)]
     allow_bypass: bool,
+    /// How long the prompt cache should live: default (the harness's own), short (about five minutes, for one-shot and
+    /// background runs) or long (about an hour, for an interactive session). Claude Code takes it; Codex has no such setting.
+    #[arg(long, value_name = "LIFETIME", default_value = "default", value_parser = parse_lifetime)]
+    cache_lifetime: coqui_acp_api::CacheLifetime,
+}
+
+fn parse_lifetime(text: &str) -> Result<coqui_acp_api::CacheLifetime, String> {
+    crate::config::cache_lifetime_named(text)
+        .ok_or_else(|| format!("one of {}", crate::config::CACHE_LIFETIMES.join(", ")))
 }
 
 impl AgentHarness {
@@ -417,6 +426,7 @@ impl AgentHarness {
         options.max_version = common.max_acp_version;
         options.max_sessions = common.max_sessions;
         options.allow_bypass = common.allow_bypass;
+        options.cache_lifetime = common.cache_lifetime;
         // `canoa agent` is the person's own command line: it offers every mode, Bypass when asked for.
         options.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
         options.resume_roots.clone_from(&common.working_roots);
@@ -1150,6 +1160,14 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             let name = options.harness.as_str();
             let notice: coqui_acp_harness::acp::NoticeHook =
                 Arc::new(move |text: &str| eprintln!("canoa agent {name}: {text}"));
+            if options.harness == crate::Harness::Codex
+                && options.cache_lifetime != coqui_acp_api::CacheLifetime::Default
+            {
+                eprintln!(
+                    "canoa agent {name}: --cache-lifetime is ignored: {}",
+                    crate::harness::CODEX_IGNORES_LIFETIME
+                );
+            }
             let settings = options.settings(notice);
             coqui_acp_harness::serve(
                 options.agent(),
@@ -1395,6 +1413,50 @@ mod tests {
         assert!(bare.permission_prompts && bare.client_mcp_servers);
         assert_eq!(bare.setting_sources, None);
         assert_eq!(bare.max_version, 2);
+    }
+
+    #[test]
+    fn agent_takes_a_cache_lifetime_and_claude_code_gets_its_variables() {
+        use coqui_acp_api::CacheLifetime;
+        let ttl = |lifetime: &str| {
+            let options = agent_options(&["claude", "--cache-lifetime", lifetime]);
+            assert_eq!(
+                options.cache_lifetime,
+                crate::config::cache_lifetime_named(lifetime).expect("a lifetime")
+            );
+            options
+                .claude_launch()
+                .env
+                .iter()
+                .filter(|(name, _)| name.to_string_lossy().ends_with("PROMPT_CACHE_TTL"))
+                .map(|(name, value)| {
+                    (
+                        name.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ttl("short"),
+            [
+                ("CLAUDE_CODE_PROMPT_CACHE_TTL".to_owned(), "5m".to_owned()),
+                (
+                    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL".to_owned(),
+                    "5m".to_owned()
+                ),
+            ]
+        );
+        assert_eq!(ttl("long")[0].1, "1h");
+        assert!(ttl("default").is_empty(), "default leaves the environment");
+        assert_eq!(
+            agent_options(&["codex"]).cache_lifetime,
+            CacheLifetime::Default
+        );
+        assert!(
+            Cli::try_parse_from(["canoa", "agent", "claude", "--cache-lifetime", "forever"])
+                .is_err()
+        );
     }
 
     #[test]

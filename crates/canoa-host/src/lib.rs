@@ -24,11 +24,13 @@ mod worktree;
 
 pub use accounts::ACCOUNT_META;
 pub use config::{
-    AccountConfig, AccountStore, Config, ConfigError, Entry, EntryKind, HarnessOptions, Origin,
-    Settings, UsageSource, WebConfig,
+    AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, Entry, EntryKind,
+    HarnessOptions, Origin, Settings, UsageSource, WebConfig, cache_lifetime_name,
+    cache_lifetime_named,
 };
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
+pub use kind::CACHE_META;
 pub use peers::{Peer, PeerState, PeersError};
 pub use provider::{HostLine, ProviderError, ProviderOptions, serve_stdio};
 pub use serve::{Listening, ServeError, ServeOptions, Serving, Stopper};
