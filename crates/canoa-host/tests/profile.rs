@@ -296,3 +296,95 @@ fn a_body_that_is_not_text_refuses_the_overlay() {
         refusal.subject
     );
 }
+
+/// The skills of one overlay as canoa's layer gives them: the bundled ones it can deliver by name, and the rest, which
+/// canoa never resolves or fetches itself (it has no catalogs): `(name, origin, source, pin)`.
+fn layer_skills(
+    identity: &str,
+    files: &serde_json::Map<String, Value>,
+) -> Vec<(String, String, String, String)> {
+    use canoa_host::profile::{OverlayInput, overlay_layer};
+    use coqui_aos::SkillOrigin;
+    let tree = coqui_aos::OverlayTree::from_texts(
+        files
+            .iter()
+            .map(|(path, text)| (path.clone(), text.as_str().expect("text"))),
+    );
+    let layer =
+        overlay_layer(&OverlayInput::new(identity, "/ov/team", "linux", &tree)).expect("applies");
+    let mut out: Vec<(String, String, String, String)> = layer
+        .profile
+        .skills
+        .keys()
+        .map(|name| {
+            (
+                name.clone(),
+                "bundled".to_owned(),
+                String::new(),
+                String::new(),
+            )
+        })
+        .collect();
+    for entry in &layer.aos.expect("aos").elsewhere {
+        let origin = match entry.origin {
+            SkillOrigin::Source => "source",
+            SkillOrigin::Catalog => "catalog",
+            _ => panic!("bundled skills are in the profile"),
+        };
+        out.push((
+            entry.name.clone(),
+            origin.to_owned(),
+            entry.source.clone().unwrap_or_default(),
+            entry.pin.clone().unwrap_or_default(),
+        ));
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn canoa_and_dotagents_give_the_same_skills_for_one_overlay() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/vectors/skills_from_source.json"
+    ))
+    .expect("the case is readable");
+    let cases: Value = serde_json::from_str(&text).expect("JSON");
+    for case in cases["cases"].as_array().expect("cases") {
+        let name = case["name"].as_str().expect("name");
+        for (identity, files) in case["overlays"].as_object().expect("overlays") {
+            let got = layer_skills(identity, files.as_object().expect("files"));
+            // Canoa holds no catalogs: a name it was not given a source for is "catalog" however the consumer that has
+            // catalogs resolved it (resolved, missing or ambiguous).
+            let mut want: Vec<(String, String, String, String)> = case["expect"]["skills"]
+                .as_array()
+                .expect("skills")
+                .iter()
+                .filter(|skill| skill["overlay"] == identity.as_str())
+                .map(|skill| {
+                    let origin = match skill["origin"].as_str().expect("origin") {
+                        "bundled" => "bundled",
+                        "source" => "source",
+                        _ => "catalog",
+                    };
+                    let known = origin == "source";
+                    let text = |key: &str| {
+                        if known {
+                            skill[key].as_str().unwrap_or("").to_owned()
+                        } else {
+                            String::new()
+                        }
+                    };
+                    (
+                        skill["name"].as_str().expect("name").to_owned(),
+                        origin.to_owned(),
+                        text("source"),
+                        text("pin"),
+                    )
+                })
+                .collect();
+            want.sort();
+            assert_eq!(got, want, "{name}: {identity}");
+        }
+    }
+}

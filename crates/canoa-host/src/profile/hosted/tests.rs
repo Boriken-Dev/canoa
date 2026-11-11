@@ -498,3 +498,227 @@ fn a_profile_whose_environment_cannot_be_built_starts_no_agent() {
     let error = Connection::prepare(&offer, 0, "a", &|_| None).expect_err("HOST_SECRET is not set");
     assert!(error.contains("env.TOKEN"), "{error}");
 }
+
+const SKILL_SOURCE: &str = "https://skills.example.test/tools.git#skills/audit";
+
+/// The tree digest of the directory `path` under `temp`.
+fn digest_of(temp: &Temp, path: &str) -> String {
+    aos::read_tree(&aos::StdFs, &temp.0.join(path), &aos::Settings::default())
+        .expect("read")
+        .1
+        .digest
+        .to_string()
+}
+
+/// An installed overlay `team` naming skill `audit` by `source` and `pin`, as the app installs one.
+fn install_naming(temp: &Temp, source: &str, pin: Option<&str>) {
+    let pin = pin.map_or_else(String::new, |pin| format!(", pin = \"{pin}\""));
+    temp.write(
+        "overlays/team/overlay.cfg",
+        &format!(
+            "name = \"team\"\nskills = [{{ name = \"audit\", source = \"{source}\"{pin} }}]\n"
+        ),
+    );
+    let digest = digest_of(temp, "overlays/team");
+    temp.write(
+        "overlays/team.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+}
+
+/// The files of a fetched `audit` and the record the app keeps of it, given by `record` but for its digest.
+fn fetch_audit(temp: &Temp, front_name: &str, record: &Value) -> String {
+    temp.write(
+        "overlays/.skills/audit/SKILL.md",
+        &format!("---\nname: {front_name}\n---\nAudit it.\n"),
+    );
+    temp.write("overlays/.skills/audit/notes/more.md", "More.\n");
+    let digest = digest_of(temp, "overlays/.skills/audit");
+    let mut record = record.clone();
+    record["digest"] = json!(digest);
+    temp.write("overlays/.skills/audit.json", &record.to_string());
+    digest
+}
+
+fn record_for(overlays: &[&str]) -> Value {
+    json!({"name": "audit", "source": SKILL_SOURCE, "overlays": overlays, "chosen": false})
+}
+
+/// The profile's parts for Claude Code; the connection stays alive with them, since the plugin goes with either.
+fn audit_parts(temp: &Temp) -> (Connection, Parts) {
+    let offer = offer_of(temp, &config_with("overlays = [\"team\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    (connection, parts)
+}
+
+fn plugin_of(parts: &Parts) -> PathBuf {
+    PathBuf::from(
+        parts.meta.as_ref().expect("a plugin")["claudeCode"]["options"]["plugins"][0]["path"]
+            .as_str()
+            .expect("a path"),
+    )
+}
+
+#[test]
+fn a_skill_an_overlay_names_by_source_is_delivered_from_its_fetched_copy_at_its_pin() {
+    let temp = temp_with_skill();
+    let digest = fetch_audit(&temp, "audit", &record_for(&["team"]));
+    install_naming(&temp, SKILL_SOURCE, Some(&digest));
+    let (_connection, parts) = audit_parts(&temp);
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "applied", "{}", parts.report);
+    assert_eq!(audit["layer"], "overlay:team", "{}", parts.report);
+    let plugin = plugin_of(&parts);
+    assert!(plugin.join("skills/audit/SKILL.md").is_file());
+    assert!(plugin.join("skills/audit/notes/more.md").is_file());
+    assert!(
+        plugin.join("skills/review/SKILL.md").is_file(),
+        "the profile's own"
+    );
+}
+
+#[test]
+fn a_skill_with_no_pin_is_delivered_and_reported_as_unpinned() {
+    let temp = temp_with_skill();
+    fetch_audit(&temp, "audit", &record_for(&["team"]));
+    install_naming(&temp, SKILL_SOURCE, None);
+    let (_connection, parts) = audit_parts(&temp);
+    assert_eq!(item(&parts.report, "skills.audit")["state"], "applied");
+    assert!(
+        item(&parts.report, "skills.audit.unpinned")["how"]
+            .as_str()
+            .expect("how")
+            .contains("no pin"),
+        "{}",
+        parts.report
+    );
+}
+
+#[test]
+fn a_fetched_copy_that_is_not_what_its_record_names_or_is_another_skill_is_not_delivered() {
+    // Files changed after the record was written.
+    let temp = temp_with_skill();
+    fetch_audit(&temp, "audit", &record_for(&["team"]));
+    install_naming(&temp, SKILL_SOURCE, None);
+    temp.write("overlays/.skills/audit/notes/more.md", "Changed.\n");
+    let (_connection, parts) = audit_parts(&temp);
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "refused", "{}", parts.report);
+    assert!(
+        audit["how"].as_str().expect("how").contains("digest"),
+        "{audit}"
+    );
+    assert!(!plugin_of(&parts).join("skills/audit").exists());
+    assert!(
+        plugin_of(&parts).join("skills/review").is_dir(),
+        "the profile's own skill still goes"
+    );
+
+    // A skill whose front matter names another, at the digest its record names.
+    let temp = temp_with_skill();
+    fetch_audit(&temp, "other", &record_for(&["team"]));
+    install_naming(&temp, SKILL_SOURCE, None);
+    let (_connection, parts) = audit_parts(&temp);
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "refused", "{}", parts.report);
+    assert!(
+        audit["how"]
+            .as_str()
+            .expect("how")
+            .contains("skill-name-mismatch"),
+        "{audit}"
+    );
+}
+
+#[test]
+fn a_skill_nothing_fetched_is_reported_and_the_overlays_other_parts_still_apply() {
+    let temp = temp_with_skill();
+    install_naming(&temp, SKILL_SOURCE, None);
+    let (_connection, parts) = audit_parts(&temp);
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "not supported", "{}", parts.report);
+    let how = audit["how"].as_str().expect("how");
+    assert!(
+        how.contains("skills.example.test/tools.git#skills/audit"),
+        "{how}"
+    );
+    assert!(how.contains("not fetched"), "{how}");
+    assert_eq!(item(&parts.report, "skills.review")["state"], "applied");
+    assert_eq!(item(&parts.report, "context")["state"], "applied");
+}
+
+#[test]
+fn a_named_skill_with_no_record_is_reported_as_resolved_by_no_catalog() {
+    let temp = temp_with_skill();
+    temp.write(
+        "overlays/team/overlay.cfg",
+        "name = \"team\"\nskills = [\"audit\"]\n",
+    );
+    let digest = digest_of(&temp, "overlays/team");
+    temp.write(
+        "overlays/team.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+    let (_connection, parts) = audit_parts(&temp);
+    let how = item(&parts.report, "skills.audit")["how"]
+        .as_str()
+        .expect("how")
+        .to_owned();
+    assert!(how.contains("no catalog resolved it"), "{how}");
+}
+
+#[test]
+fn a_record_that_does_not_list_the_overlay_or_names_another_source_or_pin_is_not_used() {
+    let other_pin = format!("sha256:{}", "ab".repeat(32));
+    for (what, record, pin, state) in [
+        (
+            "another overlay's",
+            record_for(&["elsewhere"]),
+            None,
+            "not supported",
+        ),
+        (
+            "another source",
+            json!({"name": "audit", "source": "https://skills.example.test/other.git", "overlays": ["team"]}),
+            None,
+            "refused",
+        ),
+        (
+            "another pin",
+            record_for(&["team"]),
+            Some(other_pin.as_str()),
+            "refused",
+        ),
+        (
+            "another skill's",
+            json!({"name": "other", "source": SKILL_SOURCE, "overlays": ["team"]}),
+            None,
+            "refused",
+        ),
+    ] {
+        let temp = temp_with_skill();
+        fetch_audit(&temp, "audit", &record);
+        install_naming(&temp, SKILL_SOURCE, pin);
+        let (_connection, parts) = audit_parts(&temp);
+        assert_eq!(
+            item(&parts.report, "skills.audit")["state"],
+            state,
+            "{what}: {}",
+            parts.report
+        );
+        assert!(!plugin_of(&parts).join("skills/audit").exists(), "{what}");
+    }
+}
+
+#[test]
+fn a_skill_name_that_is_not_one_path_component_is_never_read_from_the_store() {
+    for name in [
+        "con", "NUL.txt", "..", ".hidden", "a/b", "a\\b", "pdf.", "PROGRA~1", "", "nul",
+    ] {
+        assert!(!fetched::confined(name), "{name:?}");
+    }
+    for name in ["audit", "Review", "pdf-2", "a_b.c"] {
+        assert!(fetched::confined(name), "{name:?}");
+    }
+}

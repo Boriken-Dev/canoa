@@ -44,6 +44,9 @@ pub struct AosLayer {
     pub references: Vec<(String, String, bool)>,
     /// What it declares that Canoa does not apply yet, each as `<field>` or `<field>: <detail>`.
     pub not_applied: Vec<String>,
+    /// The skills it names that it does not bundle: by source, or by a name for a catalog to resolve. Canoa fetches and
+    /// resolves nothing itself; what the app fetched for them is read when a session starts.
+    pub elsewhere: Vec<aos::SkillEntry>,
 }
 
 /// What Canoa needs to make a layer of an AOS overlay.
@@ -346,11 +349,17 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         .map(|(name, value)| (name, Change::Set(value)))
         .collect();
 
-    for name in aos::skills_of(&manifest, &paths) {
-        profile.skills.insert(
-            name.clone(),
-            Change::Set(Skill::new(format!("skills/{name}"))),
-        );
+    // Only a bundled skill has a directory here; the others are the app's to fetch and are carried by origin.
+    let mut elsewhere = Vec::new();
+    for entry in aos::skill_entries(&manifest, &paths) {
+        if entry.origin == aos::SkillOrigin::Bundled {
+            profile.skills.insert(
+                entry.name.clone(),
+                Change::Set(Skill::new(format!("skills/{}", entry.name))),
+            );
+        } else {
+            elsewhere.push(entry);
+        }
     }
 
     let insecure: BTreeSet<String> = match probe(
@@ -594,6 +603,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         texts,
         references,
         not_applied,
+        elsewhere,
     }));
     Ok(layer)
 }

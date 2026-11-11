@@ -21,8 +21,8 @@ use serde_json::{Map, Value, json};
 
 use super::overlay::{Built, build_each, granted, resolve_path};
 use super::{
-    Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput, Secret,
-    Sourced, merge, overlay_layer, resolve,
+    Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput,
+    Secret, Skill, Sourced, merge, overlay_layer, resolve,
 };
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
@@ -34,6 +34,8 @@ pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
 
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
+mod fetched;
+
 /// What one skill's directory may hold: 1024 files, 16 MiB.
 fn skill_limits() -> Settings {
     Settings::default()
@@ -208,6 +210,9 @@ struct ReadOverlay {
     identity: String,
     root: String,
     tree: OverlayTree,
+    /// The skills it names from elsewhere that the app fetched and that passed the checks, by the name it gives each:
+    /// their files by path.
+    fetched: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
 }
 
 impl ReadOverlay {
@@ -218,6 +223,12 @@ impl ReadOverlay {
 
     /// The member files under `prefix/`, by path below it.
     fn under(&self, prefix: &str) -> BTreeMap<String, Vec<u8>> {
+        if let Some(name) = prefix
+            .strip_prefix(fetched::SKILLS_DIR)
+            .and_then(|rest| rest.strip_prefix('/'))
+        {
+            return self.fetched.get(name).cloned().unwrap_or_default();
+        }
         let prefix = format!("{prefix}/");
         self.tree
             .paths()
@@ -419,13 +430,38 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
             leave_out("its files are not those its record's digest names: sync it");
             continue;
         }
+        let fetched = fetched_skills(&store, identity, &tree, &layer, notes);
         out.push(ReadOverlay {
             identity: identity.clone(),
             root: root.to_string_lossy().into_owned(),
             tree,
+            fetched,
         });
     }
     out
+}
+
+/// The skills `tree`'s manifest names that it does not bundle, as the app fetched them: what passed the checks, and a
+/// report of the rest.
+fn fetched_skills(
+    store: &Path,
+    identity: &str,
+    tree: &OverlayTree,
+    layer: &LayerId,
+    notes: &mut Vec<Item>,
+) -> BTreeMap<String, BTreeMap<String, Vec<u8>>> {
+    let Ok(read) = aos::read_overlay(tree, &Settings::default()) else {
+        return BTreeMap::new();
+    };
+    let elsewhere: Vec<aos::SkillEntry> = aos::skill_entries(&read.manifest, tree)
+        .into_iter()
+        .filter(|entry| entry.origin != aos::SkillOrigin::Bundled)
+        .collect();
+    let found = fetched::read(store, identity, &elsewhere);
+    for (name, state, how) in found.notes {
+        notes.push(Item::new(format!("skills.{name}"), layer, state, how));
+    }
+    found.files
 }
 
 /// The layers of `host` for `harness`: its overlays in composition order, then its own.
@@ -458,7 +494,13 @@ fn layers_of(
                     ));
                 }
             }
-            Ok(layer) => {
+            Ok(mut layer) => {
+                for name in overlay.fetched.keys() {
+                    layer.profile.skills.insert(
+                        name.clone(),
+                        Change::Set(Skill::new(format!("{}/{name}", fetched::SKILLS_DIR))),
+                    );
+                }
                 let key = aos::normalize_name(&overlay.identity);
                 if let Some(aos) = &layer.aos {
                     manifests.insert(key.clone(), aos.manifest.clone());
