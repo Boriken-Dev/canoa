@@ -15,6 +15,7 @@ import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
+import 'package:canoa/profile/profiles_dialog.dart';
 import 'package:canoa/profile/skill_copies.dart';
 import 'package:canoa/store/skills.dart';
 import 'package:canoa/store/store.dart';
@@ -412,6 +413,18 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       expect((tile.subtitle! as Text).data, contains('named by team'));
       expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'pdf is here now');
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the sync dialog names the skills with their sources before the one yes', (tester) async {
+      final shown = await preview(overlays);
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(body: OverlayUpdateDialog(update: shown.update, skills: shown.skills))));
+      expect(find.byKey(const Key('overlay-skills')), findsOneWidget);
+      final text = shownText(tester);
+      expect(text, contains('$skillsHost/tools.git#skills/review'));
+      expect(text, contains('$skillsHost/pdf.git'));
+      expect(text, contains('Fetching runs nothing'));
+      expect(overlays.skillFetches, isEmpty);
     });
 
     testWidgets('a skill the catalog offers is installed by choice after its source and pin are shown', (tester) async {
