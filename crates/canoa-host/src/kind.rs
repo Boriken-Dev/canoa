@@ -206,7 +206,7 @@ impl Harness {
         let held = offer
             .host
             .begin(name, config, info, holder)
-            .map_err(|refusal| refusal.to_string())?;
+            .map_err(|refusal| refusal.client_reason())?;
         // What using the kind weakens is said at every start, and so is a credential the host's own environment sets that
         // the account takes the place of.
         for notice in &info.notices {

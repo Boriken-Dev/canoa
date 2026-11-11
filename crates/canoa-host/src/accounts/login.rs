@@ -6,7 +6,6 @@
 )]
 
 use std::fmt;
-use std::fs;
 use std::sync::Arc;
 
 use coqui_acp_api::guatiao::library::ProviderError;
@@ -97,12 +96,18 @@ pub(crate) fn sign_in(
     interaction: Arc<dyn Interaction>,
     timeout_ms: Option<u64>,
 ) -> Result<LoginOutcome, SignInError> {
+    // The directory goes when this returns, however the sign-in ended.
     let dir = accounts
         .login_dir()
         .map_err(|error| SignInError(error.to_string()))?;
-    let result = run(provider, method, inputs, &dir, interaction, timeout_ms);
-    let _ = fs::remove_dir_all(&dir);
-    result
+    run(
+        provider,
+        method,
+        inputs,
+        dir.path(),
+        interaction,
+        timeout_ms,
+    )
 }
 
 fn run(

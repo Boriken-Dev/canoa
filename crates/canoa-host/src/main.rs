@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use canoa_host::cli::{self, Cli, Front, Program};
 use clap::Parser as _;
+use zeroize::Zeroize as _;
 
 /// This process's own standard streams.
 struct Standard;
@@ -69,8 +70,10 @@ impl Front for Standard {
             return rpassword::read_password().map(Some);
         }
         let mut line = String::new();
-        stdin.read_line(&mut line)?;
-        Ok(Some(line.trim_end_matches(['\r', '\n']).to_owned()))
+        let read = stdin.read_line(&mut line);
+        let answer = line.trim_end_matches(['\r', '\n']).to_owned();
+        line.zeroize();
+        read.map(|_| Some(answer))
     }
 }
 

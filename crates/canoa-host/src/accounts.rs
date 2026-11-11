@@ -15,6 +15,7 @@
 pub(crate) mod commands;
 mod gate;
 pub(crate) mod login;
+mod private;
 mod spawner;
 pub(crate) mod store;
 #[cfg(test)]
@@ -35,7 +36,6 @@ use coqui_acp_api::{
     HARNESS_LOGIN, ProcessSpawner,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize as _;
 
 use crate::config::{AccountConfig, AccountStore, Settings};
@@ -47,9 +47,6 @@ use store::{FileStore, KeyringStore, SecretStore, StoreError};
 
 /// The `_meta` key a client names an account under in `initialize`, and the host reports the account under in its answer.
 pub const ACCOUNT_META: &str = "dev.boriken.canoa/account";
-
-/// The service name under which the operating system's store keeps Canoa's accounts.
-const SERVICE: &str = "dev.boriken.canoa";
 
 /// What the host keeps of an account, sealed by the store.
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,8 +96,21 @@ pub(crate) enum Refusal {
     InUse(String),
     /// The account has no stored credentials.
     NoCredentials,
-    /// The store failed.
+    /// The store failed; the reason is for the host's log, not for a client.
     Store(String),
+}
+
+impl Refusal {
+    /// What a client is told: nothing of a path or of the system's words.
+    pub(crate) fn client_reason(&self) -> String {
+        match self {
+            Self::Store(why) => {
+                tracing::warn!("an account could not be used: {why}");
+                "the host's account store could not be used for this account".to_owned()
+            }
+            other => other.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Refusal {
@@ -132,6 +142,8 @@ struct State {
     holds: BTreeMap<String, Hold>,
     /// The newest sequence heard from each provider about each account.
     heard: BTreeMap<(String, u64), u64>,
+    /// The revision each provider last stored for each account, so its next renewal is known for the next of its chain.
+    chains: BTreeMap<(String, u64), u64>,
 }
 
 /// The host's accounts: the store, the directory their state lives in and who holds what.
@@ -155,17 +167,44 @@ impl fmt::Debug for Accounts {
 
 /// The name an account's directory has: a digest of its id, since an id may hold characters a path cannot.
 pub(crate) fn directory_name(id: &str) -> String {
-    let digest = Sha256::digest(id.as_bytes());
-    digest.iter().take(12).map(|b| format!("{b:02x}")).collect()
+    store::tag(id)[..24].to_owned()
+}
+
+/// A directory for one sign-in. It is private to the owner, holds a lock for as long as the sign-in lives so that no other
+/// process sweeps it, and goes when this does.
+pub(crate) struct LoginDir {
+    path: PathBuf,
+    lock: Option<fs::File>,
+}
+
+impl LoginDir {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for LoginDir {
+    fn drop(&mut self) {
+        drop(self.lock.take());
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn io_error(path: &Path, error: &std::io::Error) -> StoreError {
+    StoreError(format!("{}: {error}", path.display()))
 }
 
 impl Accounts {
     /// The accounts under `home` (the directory `accounts/` of it), kept in `choice`. The file store is a weakening, and
     /// is logged as one.
-    pub(crate) fn open(choice: AccountStore, home: &Path) -> Arc<Self> {
+    ///
+    /// # Errors
+    ///
+    /// The directory could not be made private to this user.
+    pub(crate) fn open(choice: AccountStore, home: &Path) -> Result<Arc<Self>, StoreError> {
         let dir = home.join("accounts");
         let store: Box<dyn SecretStore> = match choice {
-            AccountStore::Os => Box::new(KeyringStore::new(SERVICE)),
+            AccountStore::Os => Box::new(KeyringStore::new(store::service_for(home))),
             AccountStore::File => {
                 tracing::info!(
                     "non-default: host.account_store is file, default os: the credentials rest in files sealed to a key in the same directory, which protects against a copied file and not against anyone who can read {}",
@@ -177,14 +216,21 @@ impl Accounts {
         Self::with_store(dir, store)
     }
 
-    pub(crate) fn with_store(dir: PathBuf, store: Box<dyn SecretStore>) -> Arc<Self> {
-        Arc::new(Self {
+    /// As [`Accounts::open`], on `store`, in the directory `dir`, which is made private and swept of what a crash left.
+    pub(crate) fn with_store(
+        dir: PathBuf,
+        store: Box<dyn SecretStore>,
+    ) -> Result<Arc<Self>, StoreError> {
+        private::create_root(&dir).map_err(|error| io_error(&dir, &error))?;
+        let accounts = Arc::new(Self {
             dir,
             store,
             state: Mutex::new(State::default()),
             sources: AtomicU64::new(1),
             writing: Mutex::new(()),
-        })
+        });
+        accounts.sweep();
+        Ok(accounts)
     }
 
     /// A number for a provider instance, so its sequences are not taken for another's.
@@ -196,7 +242,7 @@ impl Accounts {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The directory of account `id`'s own: its `state` and its lease.
+    /// The directory of account `id`'s own: its `state`, its lease and the note of what was placed in it.
     pub(crate) fn account_dir(&self, id: &str) -> PathBuf {
         self.dir.join(directory_name(id))
     }
@@ -206,16 +252,72 @@ impl Accounts {
         self.account_dir(id).join("state")
     }
 
-    /// A directory for one sign-in, which the caller removes.
-    pub(crate) fn login_dir(&self) -> Result<PathBuf, StoreError> {
+    /// A directory for one sign-in, after sweeping those a crash left.
+    pub(crate) fn login_dir(&self) -> Result<LoginDir, StoreError> {
+        self.sweep_logins();
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random)
             .map_err(|error| StoreError(format!("no randomness: {error}")))?;
         let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let dir = self.dir.join("login").join(name);
-        fs::create_dir_all(&dir)
-            .map_err(|error| StoreError(format!("{}: {error}", dir.display())))?;
-        Ok(dir)
+        let path = self.dir.join("login").join(name);
+        private::create_dir(&path).map_err(|error| io_error(&path, &error))?;
+        let lock =
+            private::lease_file(&path.join(".lock")).map_err(|error| io_error(&path, &error))?;
+        lock.try_lock()
+            .map_err(|_| StoreError("a sign-in directory is already taken".into()))?;
+        Ok(LoginDir {
+            path,
+            lock: Some(lock),
+        })
+    }
+
+    /// Removes the sign-in directories that no sign-in holds any more.
+    pub(crate) fn sweep_logins(&self) {
+        let Ok(entries) = fs::read_dir(self.dir.join("login")) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let free = match fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path.join(".lock"))
+            {
+                Ok(lock) => lock.try_lock().is_ok(),
+                Err(_) => true,
+            };
+            if free && let Err(error) = fs::remove_dir_all(&path) {
+                tracing::warn!("a sign-in directory a crash left could not be removed: {error}");
+            }
+        }
+    }
+
+    /// Removes what a crash left: sign-in directories, and the credential files a connection placed for an account that
+    /// nothing holds now.
+    fn sweep(&self) {
+        self.sweep_logins();
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let own = entry.path();
+            let note = own.join("placed");
+            if !note.is_file() {
+                continue;
+            }
+            let Ok(lease) = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(own.join("lease"))
+            else {
+                continue;
+            };
+            if lease.try_lock().is_err() {
+                continue;
+            }
+            spawner::remove_placed(&own, &note);
+            drop(lease);
+        }
     }
 
     pub(crate) fn load(&self, id: &str) -> Result<Option<Record>, StoreError> {
@@ -236,18 +338,21 @@ impl Accounts {
         stored
     }
 
-    /// Forgets the credentials and the state directory of `id`.
-    pub(crate) fn forget(&self, id: &str) -> Result<(), StoreError> {
-        self.store.remove(id)?;
+    /// Forgets the stored credentials of `id`.
+    pub(crate) fn forget_credentials(&self, id: &str) -> Result<(), StoreError> {
+        self.store.remove(id)
+    }
+
+    /// Forgets the state directory of `id`, once the credentials are gone and nothing holds it.
+    pub(crate) fn forget_directory(&self, id: &str) -> Result<(), StoreError> {
         let dir = self.account_dir(id);
         if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .map_err(|error| StoreError(format!("{}: {error}", dir.display())))?;
+            fs::remove_dir_all(&dir).map_err(|error| io_error(&dir, &error))?;
         }
         Ok(())
     }
 
-    /// Whether another process or connection holds `id` now.
+    /// Whether another process or connection holds `id` exclusively now. It looks, and lets go at once.
     pub(crate) fn held(&self, id: &str) -> bool {
         if self
             .state()
@@ -257,8 +362,7 @@ impl Accounts {
         {
             return true;
         }
-        let path = self.account_dir(id).join("lease");
-        let Ok(file) = fs::File::open(&path) else {
+        let Ok(file) = fs::File::open(self.account_dir(id).join("lease")) else {
             return false;
         };
         matches!(file.try_lock_shared(), Err(fs::TryLockError::WouldBlock))
@@ -305,11 +409,9 @@ impl Accounts {
             .map_err(|error| Refusal::Store(error.to_string()))?
             .ok_or(Refusal::NoCredentials)?;
         let rotates = info.rotates;
-        let lock = if rotates {
-            Some(self.lease(&id, holder)?)
-        } else {
-            None
-        };
+        // Every connection on the account holds its lease: one that rotates alone, any other with the rest, so that a
+        // command which signs in again or removes the account waits for them all.
+        let lock = self.lease(&id, holder, rotates)?;
         let files = {
             let mut state = self.state();
             let hold = state.holds.entry(id.clone()).or_default();
@@ -324,71 +426,112 @@ impl Accounts {
             .revision(record.revision);
         if info.state_dir {
             let dir = self.state_dir(&id);
-            match fs::create_dir_all(&dir) {
+            match private::create_dir(&dir) {
                 Ok(()) => grant = grant.state_dir(dir.to_string_lossy().into_owned()),
                 Err(error) => {
-                    let held = Held::new(self, name, grant, lock, files, rotates);
-                    drop(held);
+                    drop(Held::new(self, name, grant, Some(lock), files, rotates));
                     return Err(Refusal::Store(format!("{}: {error}", dir.display())));
                 }
             }
         }
-        Ok(Held::new(self, name, grant, lock, files, rotates))
+        Ok(Held::new(self, name, grant, Some(lock), files, rotates))
     }
 
-    /// The exclusive lock of a rotating account: a file in the account's directory, which a second process cannot take.
-    fn lease(&self, id: &str, holder: &str) -> Result<fs::File, Refusal> {
-        if let Some(by) = self
-            .state()
-            .holds
-            .get(id)
-            .and_then(|hold| hold.exclusive.clone())
+    /// The lock on an account's lease file, `exclusive` or shared. A look that `held` is taking can hold it for an
+    /// instant, so a refusal is only believed after a few tries.
+    fn lease(&self, id: &str, holder: &str, exclusive: bool) -> Result<fs::File, Refusal> {
+        if exclusive
+            && let Some(by) = self
+                .state()
+                .holds
+                .get(id)
+                .and_then(|hold| hold.exclusive.clone())
         {
             return Err(Refusal::InUse(by));
         }
         let dir = self.account_dir(id);
-        fs::create_dir_all(&dir)
+        private::create_dir(&dir)
             .map_err(|error| Refusal::Store(format!("{}: {error}", dir.display())))?;
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(dir.join("lease"))
+        let file = private::lease_file(&dir.join("lease"))
             .map_err(|error| Refusal::Store(error.to_string()))?;
-        match file.try_lock() {
-            Ok(()) => Ok(file),
-            Err(fs::TryLockError::WouldBlock) => {
-                let _ = holder;
-                Err(Refusal::InUse("another process".to_owned()))
+        for attempt in 0..LEASE_TRIES {
+            let locked = if exclusive {
+                file.try_lock()
+            } else {
+                file.try_lock_shared()
+            };
+            match locked {
+                Ok(()) => return Ok(file),
+                Err(fs::TryLockError::WouldBlock) if attempt + 1 < LEASE_TRIES => {
+                    std::thread::sleep(LEASE_WAIT);
+                }
+                Err(fs::TryLockError::WouldBlock) => {
+                    let _ = holder;
+                    return Err(Refusal::InUse("another connection or command".to_owned()));
+                }
+                Err(fs::TryLockError::Error(error)) => {
+                    return Err(Refusal::Store(error.to_string()));
+                }
             }
-            Err(fs::TryLockError::Error(error)) => Err(Refusal::Store(error.to_string())),
         }
+        Err(Refusal::InUse("another connection or command".to_owned()))
     }
 
-    /// A lock on `id` for a command that signs in again or removes it, refused while a connection holds it.
+    /// A lock on `id` for a command that signs in again or removes it, refused while any connection holds it.
     pub(crate) fn exclusive(&self, id: &str) -> Result<fs::File, Refusal> {
-        self.lease(id, "this command")
+        self.lease(id, "this command", true)
     }
 
-    /// What a provider reported about the renewal of `id`: stored when it is newer than the stored copy.
+    /// What a provider reported about the renewal of `id`: stored when it is the next of its chain or newer than the stored
+    /// copy, and never when it is empty or lacks what the stored login has.
     fn renewed(&self, source: u64, id: &str, renewal: &AccountRenewal) {
         if self.already_heard(source, id, renewal.sequence) {
             return;
         }
         let credentials = renewal.credentials.expose();
+        if credentials.is_empty()
+            || credentials
+                .iter()
+                .any(|(key, value)| key.is_empty() || value.is_empty())
+        {
+            tracing::warn!(
+                "a renewal of account {id} was ignored: it holds no credential or an empty one"
+            );
+            return;
+        }
         let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         let Ok(Some(mut record)) = self.load(id) else {
             tracing::info!("a renewal for an account this host does not hold was ignored");
             return;
         };
-        let newer = is_newer(
-            record.expires_at.as_deref(),
-            record.revision,
-            renewal.expires_at.as_deref(),
-            renewal.from_revision,
-            record.credentials.iter().eq(credentials.iter()),
+        if let Some(missing) = record
+            .credentials
+            .keys()
+            .find(|key| credentials.get(key).is_none())
+        {
+            tracing::warn!(
+                "a renewal of account {id} was ignored: it lacks {missing}, which the stored login has"
+            );
+            return;
+        }
+        let same = record.credentials.iter().eq(credentials.iter());
+        // A provider's hold names the revision it began from in each renewal of the hold and counts them: the next of a
+        // chain is the one that follows what this source stored last, whatever revision it names.
+        let chained = self.state().chains.get(&(id.to_owned(), source)) == Some(&record.revision);
+        // A report that goes back in time is an older copy coming back, which is no successor whoever sends it.
+        let goes_back = matches!(
+            (instant(record.expires_at.as_deref()), instant(renewal.expires_at.as_deref())),
+            (Some(stored), Some(new)) if new < stored
         );
+        let newer = !same
+            && !goes_back
+            && (chained
+                || is_newer(
+                    record.expires_at.as_deref(),
+                    record.revision,
+                    renewal.expires_at.as_deref(),
+                    renewal.from_revision,
+                ));
         if !newer {
             tracing::info!(
                 "a renewal of account {id} was ignored: it is not newer than revision {}",
@@ -396,15 +539,26 @@ impl Accounts {
             );
             return;
         }
-        record.credentials = credentials
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let mut replaced = core::mem::replace(
+            &mut record.credentials,
+            credentials
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        );
+        for value in replaced.values_mut() {
+            value.zeroize();
+        }
         record.revision += 1;
         record.expires_at.clone_from(&renewal.expires_at);
         record.needs_sign_in = false;
         match self.save(id, &record) {
-            Ok(()) => tracing::info!("account {id} renewed: now revision {}", record.revision),
+            Ok(()) => {
+                self.state()
+                    .chains
+                    .insert((id.to_owned(), source), record.revision);
+                tracing::info!("account {id} renewed: now revision {}", record.revision);
+            }
             Err(error) => tracing::warn!("account {id} renewed but could not be stored: {error}"),
         }
     }
@@ -436,45 +590,52 @@ impl Accounts {
         false
     }
 
-    fn release(&self, id: &str, rotates: bool, files: &Mutex<BTreeSet<String>>, dir: Option<&str>) {
-        let last = {
-            let mut state = self.state();
-            let Some(hold) = state.holds.get_mut(id) else {
-                return;
-            };
+    /// One connection lets go of the account. In one step, under the state's lock: the last connection's placed files go,
+    /// the holds are cleared and the lease is given up, so that no one who takes the lease next has a file of theirs
+    /// removed, nor finds a hold left over.
+    fn release(
+        &self,
+        id: &str,
+        rotates: bool,
+        files: &Mutex<BTreeSet<String>>,
+        dir: Option<&Path>,
+        lease: Option<fs::File>,
+    ) {
+        let mut state = self.state();
+        if let Some(hold) = state.holds.get_mut(id) {
             hold.connections = hold.connections.saturating_sub(1);
             if rotates {
                 hold.exclusive = None;
             }
-            let last = hold.connections == 0;
-            if last {
+            if hold.connections == 0 {
                 state.holds.remove(id);
+                // The credential files go with the last connection; the harness's own state stays.
+                if let Some(dir) = dir {
+                    let placed =
+                        core::mem::take(&mut *files.lock().unwrap_or_else(PoisonError::into_inner));
+                    spawner::remove_these(dir, &placed);
+                }
             }
-            last
-        };
-        if !last {
-            return;
         }
-        // The credential files go with the last connection; the harness's own state stays.
-        let Some(dir) = dir else { return };
-        let placed = core::mem::take(&mut *files.lock().unwrap_or_else(PoisonError::into_inner));
-        let files = spawner::local(dir);
-        for path in placed {
-            let _ = files.remove_file(&path);
-        }
+        drop(lease);
+        drop(state);
     }
 }
 
-/// Whether a renewal replaces the stored copy: the stored `expires_at` and `revision` against the renewal's, which says
-/// which revision it renews. An older revision or an earlier expiry is stale; the same credentials are no change.
+/// How many times a lease is tried, and how long between tries.
+const LEASE_TRIES: u32 = 6;
+const LEASE_WAIT: core::time::Duration = core::time::Duration::from_millis(25);
+
+/// Whether a renewal that is not the next of its provider's chain replaces the stored copy: the stored `expires_at` and
+/// `revision` against the renewal's, which says which revision it began from. An older revision or an earlier expiry is
+/// stale.
 fn is_newer(
     stored_expires: Option<&str>,
     stored_revision: u64,
     new_expires: Option<&str>,
     from_revision: u64,
-    same: bool,
 ) -> bool {
-    if same || from_revision < stored_revision {
+    if from_revision < stored_revision {
         return false;
     }
     match (instant(stored_expires), instant(new_expires)) {
@@ -575,12 +736,12 @@ impl Drop for Held {
         if self.grant.kind == HARNESS_LOGIN {
             return;
         }
-        drop(self.lock.take());
         self.accounts.release(
             &self.grant.id,
             self.rotates,
             &self.files,
-            self.grant.state_dir.as_deref(),
+            self.grant.state_dir.as_deref().map(Path::new),
+            self.lock.take(),
         );
     }
 }
@@ -645,17 +806,7 @@ pub(crate) fn check_settings(
     }
     // Each key against its own field: the kind's schema also lists its credentials, which are required and are not here.
     for (key, setting) in &map {
-        let field = schema
-            .find(key)
-            .ok_or_else(|| format!("{key} is not a setting of this kind of account"))?;
-        let one = Value::from(map_of(&Settings::new(
-            core::iter::once((key.clone(), setting.clone())).collect(),
-        ))?);
-        let typed =
-            coqui_acp_api::guatiao::TryAsRef::<coqui_acp_api::guatiao::Map>::try_as_ref(&one)
-                .and_then(|m| m.get(key))
-                .ok_or_else(|| format!("{key} cannot be a setting"))?;
-        validate_value(field, typed).map_err(|error| format!("{key}: {error}"))?;
+        check_key(schema, key, setting, "a setting of this kind of account")?;
     }
     for slot in &info.endpoints {
         let Some(key) = &slot.key else { continue };
@@ -668,6 +819,25 @@ pub(crate) fn check_settings(
         }
     }
     Ok(())
+}
+
+/// `value` against the field `key` of `schema`; the reason names the key and never the value.
+pub(crate) fn check_key(
+    schema: SchemaRef<'_>,
+    key: &str,
+    value: &serde_json::Value,
+    what: &str,
+) -> Result<(), String> {
+    let field = schema
+        .find(key)
+        .ok_or_else(|| format!("{key} is not {what}"))?;
+    let one = Value::from(map_of(&Settings::new(
+        core::iter::once((key.to_owned(), value.clone())).collect(),
+    ))?);
+    let typed = coqui_acp_api::guatiao::TryAsRef::<coqui_acp_api::guatiao::Map>::try_as_ref(&one)
+        .and_then(|m| m.get(key))
+        .ok_or_else(|| format!("{key} cannot be set"))?;
+    validate_value(field, typed).map_err(|error| format!("{key}: {error}"))
 }
 
 /// Whether `url` is an `https` address, or an `http` one to this machine.

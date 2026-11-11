@@ -3,7 +3,8 @@
 //! The operating system's credential store is the default. Windows' Credential Manager refuses a credential over 2560
 //! bytes and a Codex `auth.json` is several times that, so a record is cut into chunks of [`CHUNK`] bytes, each its own
 //! entry, and an index entry names the generation that is current. A new generation's chunks are written before the index
-//! points at them, so a write that stops half way leaves the old record whole.
+//! points at them, so a write that stops half way leaves the old record whole. Entry names hold a digest of the account's
+//! id, never the id, and the service holds one of the host's home, so two accounts or two homes never share an entry.
 //!
 //! The file store is for a host with no credential store: a file per account sealed with AES-256-GCM to a key in the same
 //! directory, so it protects against a copied file and not against whoever can read the directory.
@@ -13,14 +14,18 @@
     reason = "files are std's"
 )]
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, PoisonError};
 
 use aes_gcm::aead::{Aead, Generate, Key, KeyInit, Payload};
 use aes_gcm::aes::cipher::consts::U12;
 use aes_gcm::{Aes256Gcm, Nonce};
+use keyring_core::{Entry, Error as KeyError};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize as _;
 
@@ -33,6 +38,8 @@ const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 /// The most a sealed file or a stored record may hold; a record is a few kilobytes.
 const MAX_RECORD: usize = 1 << 20;
+/// How many generations a removal looks for when the index is damaged and cannot say.
+const DAMAGED_SWEEP: u64 = 16;
 
 /// Why a store could not be used. It carries the store's words and never a credential.
 #[derive(Debug)]
@@ -65,7 +72,61 @@ pub(crate) trait SecretStore: Send + Sync + fmt::Debug {
     fn remove(&self, id: &str) -> Result<(), StoreError>;
 }
 
-/// The operating system's credential store, through the `keyring` crate: one entry per chunk, under `service`.
+/// A digest of `text`, as 32 hex digits: a name that holds no character a store reads as structure.
+pub(crate) fn tag(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The service under which `home`'s accounts rest, so two homes of one user never share a credential.
+pub(crate) fn service_for(home: &Path) -> String {
+    format!("dev.boriken.canoa.{}", &tag(&home.to_string_lossy())[..16])
+}
+
+/// The one writer of an account's entries in this process, whichever store object it reaches them through.
+fn writer(service: &str, id: &str) -> Arc<Mutex<()>> {
+    static WRITERS: LazyLock<Mutex<BTreeMap<String, Arc<Mutex<()>>>>> =
+        LazyLock::new(Mutex::default);
+    let mut writers = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
+    Arc::clone(writers.entry(format!("{service}/{id}")).or_default())
+}
+
+/// Makes the platform's credential store the default of `keyring_core`, once.
+fn use_platform_store() -> Result<(), StoreError> {
+    static ONCE: OnceLock<Result<(), String>> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        #[cfg(target_os = "windows")]
+        let store = windows_native_keyring_store::Store::new();
+        #[cfg(target_os = "macos")]
+        let store = apple_native_keyring_store::keychain::Store::new();
+        #[cfg(all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        ))]
+        let store = zbus_secret_service_keyring_store::Store::new();
+        #[cfg(any(windows, unix))]
+        {
+            store
+                .map(|store| keyring_core::set_default_store(store))
+                .map_err(|error| error.to_string())
+        }
+        #[cfg(not(any(windows, unix)))]
+        {
+            Err("this platform has no credential store".to_owned())
+        }
+    })
+    .clone()
+    .map_err(|why| {
+        StoreError(format!(
+            "the operating system's credential store is not available ({why}); set [host] account_store = \"file\" for a host with none"
+        ))
+    })
+}
+
+/// The operating system's credential store, through `keyring-core`: one entry per chunk, under `service`.
 pub(crate) struct KeyringStore {
     service: String,
 }
@@ -86,6 +147,26 @@ struct Index {
     len: usize,
 }
 
+/// Why an index could not be had.
+enum IndexError {
+    /// The store failed; nothing is known about the account.
+    Unreadable(StoreError),
+    /// The entry is there and is not an index of ours.
+    Damaged,
+}
+
+impl IndexError {
+    fn into_error(self) -> StoreError {
+        match self {
+            Self::Unreadable(error) => error,
+            Self::Damaged => StoreError(
+                "the credential store's index for this account is damaged: remove the account and make it again"
+                    .into(),
+            ),
+        }
+    }
+}
+
 impl KeyringStore {
     pub(crate) fn new(service: impl Into<String>) -> Self {
         Self {
@@ -93,35 +174,65 @@ impl KeyringStore {
         }
     }
 
-    fn entry(&self, user: &str) -> Result<keyring::Entry, StoreError> {
-        keyring::Entry::new(&self.service, user).map_err(|error| {
-            failed(
-                "the operating system's credential store is not available (set [host] account_store = \"file\" for a host with none)",
-                error,
-            )
-        })
+    pub(crate) fn entry(&self, user: &str) -> Result<Entry, StoreError> {
+        use_platform_store()?;
+        // Windows' Credential Manager roams an enterprise credential with the profile; this one stays on this machine.
+        let modifiers: std::collections::HashMap<&str, &str> = if cfg!(windows) {
+            std::collections::HashMap::from([("persistence", "local")])
+        } else {
+            std::collections::HashMap::new()
+        };
+        Entry::new_with_modifiers(&self.service, user, &modifiers)
+            .map_err(|error| failed("the credential store refused an entry", error))
     }
 
-    fn index(&self, id: &str) -> Result<Option<Index>, StoreError> {
-        match self.entry(id)?.get_secret() {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map(Some)
-                .map_err(|_| StoreError("the credential store's index is not one of ours".into())),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(failed("the credential store could not be read", error)),
+    pub(crate) fn index_user(id: &str) -> String {
+        format!("acct.{}", tag(id))
+    }
+
+    pub(crate) fn chunk_user(id: &str, generation: u64, number: usize) -> String {
+        format!("acct.{}.{generation}.{number}", tag(id))
+    }
+
+    fn index(&self, id: &str) -> Result<Option<Index>, IndexError> {
+        let entry = self
+            .entry(&Self::index_user(id))
+            .map_err(IndexError::Unreadable)?;
+        match entry.get_secret() {
+            Ok(mut bytes) => {
+                let index = serde_json::from_slice(&bytes);
+                bytes.zeroize();
+                index.map(Some).map_err(|_| IndexError::Damaged)
+            }
+            Err(KeyError::NoEntry) => Ok(None),
+            Err(error) => Err(IndexError::Unreadable(failed(
+                "the credential store could not be read",
+                error,
+            ))),
         }
     }
 
-    fn chunk_user(id: &str, generation: u64, number: usize) -> String {
-        format!("{id}#{generation}#{number}")
-    }
-
-    fn forget_chunks(&self, id: &str, index: &Index) {
-        for number in 0..index.chunks {
-            if let Ok(entry) = self.entry(&Self::chunk_user(id, index.generation, number)) {
-                let _ = entry.delete_credential();
+    /// Deletes every chunk of `generation`, however many there are.
+    fn forget_generation(&self, id: &str, generation: u64) {
+        for number in 0.. {
+            let Ok(entry) = self.entry(&Self::chunk_user(id, generation, number)) else {
+                return;
+            };
+            if entry.delete_credential().is_err() {
+                return;
             }
         }
+    }
+
+    /// The persistence Windows keeps the account's index with.
+    #[cfg(all(test, windows))]
+    pub(crate) fn persistence_of(&self, id: &str) -> Option<String> {
+        self.entry(&Self::index_user(id))
+            .ok()?
+            .get_attributes()
+            .ok()?
+            .get("persistence")
+            .cloned()
     }
 }
 
@@ -131,7 +242,7 @@ impl SecretStore for KeyringStore {
     }
 
     fn get(&self, id: &str) -> Result<Option<Vec<u8>>, StoreError> {
-        let Some(index) = self.index(id)? else {
+        let Some(index) = self.index(id).map_err(IndexError::into_error)? else {
             return Ok(None);
         };
         if index.len > MAX_RECORD {
@@ -141,12 +252,23 @@ impl SecretStore for KeyringStore {
         }
         let mut whole = Vec::with_capacity(index.len);
         for number in 0..index.chunks {
-            let entry = self.entry(&Self::chunk_user(id, index.generation, number))?;
-            let mut chunk = entry
-                .get_secret()
-                .map_err(|error| failed("a chunk of the stored record is missing", error))?;
-            whole.extend_from_slice(&chunk);
-            chunk.zeroize();
+            let read = self
+                .entry(&Self::chunk_user(id, index.generation, number))
+                .and_then(|entry| {
+                    entry
+                        .get_secret()
+                        .map_err(|error| failed("a chunk of the stored record is missing", error))
+                });
+            match read {
+                Ok(mut chunk) => {
+                    whole.extend_from_slice(&chunk);
+                    chunk.zeroize();
+                }
+                Err(error) => {
+                    whole.zeroize();
+                    return Err(error);
+                }
+            }
         }
         if whole.len() != index.len {
             whole.zeroize();
@@ -156,40 +278,65 @@ impl SecretStore for KeyringStore {
     }
 
     fn put(&self, id: &str, bytes: &[u8]) -> Result<(), StoreError> {
-        let before = self.index(id).ok().flatten();
+        let writer = writer(&self.service, id);
+        let _writing = writer.lock().unwrap_or_else(PoisonError::into_inner);
+        // An index that cannot be read is not a reason to start again at generation 1 over what it names.
+        let before = self.index(id).map_err(IndexError::into_error)?;
         let generation = before.as_ref().map_or(1, |index| index.generation + 1);
+        // What an earlier put that stopped half way left under this generation.
+        self.forget_generation(id, generation);
         let chunks = bytes.len().div_ceil(CHUNK).max(1);
-        let now = Index {
+        let parts: Vec<&[u8]> = if bytes.is_empty() {
+            vec![&[][..]]
+        } else {
+            bytes.chunks(CHUNK).collect()
+        };
+        for (number, part) in parts.into_iter().enumerate() {
+            let written = self
+                .entry(&Self::chunk_user(id, generation, number))?
+                .set_secret(part)
+                .map_err(|error| failed("the credential store refused a credential", error));
+            if let Err(error) = written {
+                self.forget_generation(id, generation);
+                return Err(error);
+            }
+        }
+        let mut index = serde_json::to_vec(&Index {
             generation,
             chunks,
             len: bytes.len(),
-        };
-        for (number, part) in bytes.chunks(CHUNK).enumerate() {
-            self.entry(&Self::chunk_user(id, generation, number))?
-                .set_secret(part)
-                .map_err(|error| failed("the credential store refused a credential", error))?;
-        }
-        if bytes.is_empty() {
-            self.entry(&Self::chunk_user(id, generation, 0))?
-                .set_secret(&[])
-                .map_err(|error| failed("the credential store refused a credential", error))?;
-        }
-        let index = serde_json::to_vec(&now).map_err(|error| failed("index", error))?;
-        self.entry(id)?
+        })
+        .map_err(|error| failed("index", error))?;
+        let pointed = self
+            .entry(&Self::index_user(id))?
             .set_secret(&index)
-            .map_err(|error| failed("the credential store refused a credential", error))?;
+            .map_err(|error| failed("the credential store refused a credential", error));
+        index.zeroize();
+        if let Err(error) = pointed {
+            self.forget_generation(id, generation);
+            return Err(error);
+        }
         if let Some(before) = before {
-            self.forget_chunks(id, &before);
+            self.forget_generation(id, before.generation);
         }
         Ok(())
     }
 
     fn remove(&self, id: &str) -> Result<(), StoreError> {
-        if let Some(index) = self.index(id)? {
-            self.forget_chunks(id, &index);
+        let writer = writer(&self.service, id);
+        let _writing = writer.lock().unwrap_or_else(PoisonError::into_inner);
+        let newest = match self.index(id) {
+            Ok(Some(index)) => index.generation,
+            Ok(None) => 0,
+            Err(IndexError::Damaged) => DAMAGED_SWEEP,
+            Err(error @ IndexError::Unreadable(_)) => return Err(error.into_error()),
+        };
+        // Every generation there may be: a put that failed left chunks under one the index never named.
+        for generation in 1..=newest + 1 {
+            self.forget_generation(id, generation);
         }
-        match self.entry(id)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        match self.entry(&Self::index_user(id))?.delete_credential() {
+            Ok(()) | Err(KeyError::NoEntry) => Ok(()),
             Err(error) => Err(failed("the credential store could not forget it", error)),
         }
     }
@@ -201,6 +348,29 @@ pub(crate) struct FileStore {
     dir: PathBuf,
 }
 
+/// A name for a file being written, which no other writer in this process or another has.
+fn unique_suffix() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    format!(
+        "{}.{nanos}.{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Makes what was just renamed or linked into `dir` survive a crash, where the system lets a directory be synced.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(dir) = fs::File::open(dir) {
+        let _ = dir.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
 impl FileStore {
     pub(crate) fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
@@ -208,56 +378,63 @@ impl FileStore {
 
     /// The file of `id`: a digest, since an id may hold any character a path cannot.
     pub(crate) fn path_of(&self, id: &str) -> PathBuf {
-        let digest = Sha256::digest(id.as_bytes());
-        let name: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
-        self.dir.join(format!("{name}.sealed"))
+        self.dir.join(format!("{}.sealed", tag(id)))
     }
 
     fn key_path(&self) -> PathBuf {
         self.dir.join("store.key")
     }
 
-    /// The sealing key, made when there is none.
-    fn key(&self) -> Result<Vec<u8>, StoreError> {
-        let path = self.key_path();
-        match fs::read(&path) {
-            Ok(key) if key.len() == KEY_LEN => return Ok(key),
+    fn read_key(path: &Path) -> Result<Option<Vec<u8>>, StoreError> {
+        match fs::read(path) {
+            Ok(key) if key.len() == KEY_LEN => Ok(Some(key)),
             Ok(mut key) => {
                 key.zeroize();
-                return Err(StoreError(format!(
+                Err(StoreError(format!(
                     "{} is not a sealing key of ours",
                     path.display()
-                )));
+                )))
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(failed("the sealing key could not be read", error)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(failed("the sealing key could not be read", error)),
         }
-        fs::create_dir_all(&self.dir).map_err(|error| failed("the account directory", error))?;
+    }
+
+    /// The sealing key, made when there is none: written whole beside its place and linked in without replacing a key
+    /// another writer made first, so no one reads half of it.
+    fn key(&self) -> Result<Vec<u8>, StoreError> {
+        let path = self.key_path();
+        if let Some(key) = Self::read_key(&path)? {
+            return Ok(key);
+        }
+        super::private::create_dir(&self.dir)
+            .map_err(|error| failed("the account directory", error))?;
         let mut fresh = Key::<Aes256Gcm>::generate();
-        let written = private_file(&path).and_then(|mut file| file.write_all(&fresh));
+        let beside = self.dir.join(format!("store.key.{}", unique_suffix()));
+        let written = super::private::create_file(&beside)
+            .and_then(|mut file| file.write_all(&fresh).and_then(|()| file.sync_all()))
+            .and_then(|()| fs::hard_link(&beside, &path));
+        let _ = fs::remove_file(&beside);
         let key = fresh.to_vec();
         fresh.zeroize();
         match written {
-            Ok(()) => Ok(key),
-            // Another process made it first: its key is the one.
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                fs::read(&path).map_err(|error| failed("the sealing key could not be read", error))
+            Ok(()) => {
+                sync_dir(&self.dir);
+                Ok(key)
             }
-            Err(error) => Err(failed("the sealing key could not be written", error)),
+            // Another writer linked its key first: that one is the key, once it is a whole one.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let mut ours = key;
+                ours.zeroize();
+                Self::read_key(&path)?.ok_or_else(|| StoreError("the sealing key vanished".into()))
+            }
+            Err(error) => {
+                let mut ours = key;
+                ours.zeroize();
+                Err(failed("the sealing key could not be written", error))
+            }
         }
     }
-}
-
-/// A new file only this user can read where the system lets the host say so, and only where nothing is.
-fn private_file(path: &Path) -> io::Result<fs::File> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    options.open(path)
 }
 
 impl SecretStore for FileStore {
@@ -317,15 +494,17 @@ impl SecretStore for FileStore {
         sealed.extend_from_slice(&text);
         let path = self.path_of(id);
         // Beside its place and then over it, so nobody reads half of it.
-        let beside = path.with_extension(format!("tmp{}", std::process::id()));
-        let _ = fs::remove_file(&beside);
-        let written = private_file(&beside)
+        let beside = self
+            .dir
+            .join(format!("{}.tmp.{}", tag(id), unique_suffix()));
+        let written = super::private::create_file(&beside)
             .and_then(|mut file| file.write_all(&sealed).and_then(|()| file.sync_all()))
             .and_then(|()| fs::rename(&beside, &path));
         if let Err(error) = written {
             let _ = fs::remove_file(&beside);
             return Err(failed("the account could not be written", error));
         }
+        sync_dir(&self.dir);
         Ok(())
     }
 

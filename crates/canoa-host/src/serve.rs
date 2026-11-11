@@ -556,7 +556,11 @@ impl Serving {
                     what: "accounts need the host's directory to keep their state in".to_owned(),
                 });
             };
-            Some(Accounts::open(config.account_store, home))
+            Some(Accounts::open(config.account_store, home).map_err(|error| {
+                ServeError::Accounts {
+                    what: error.to_string(),
+                }
+            })?)
         };
         let agents = Arc::new(Mutex::new(Agents::default()));
         let mut registry = Registry::new();

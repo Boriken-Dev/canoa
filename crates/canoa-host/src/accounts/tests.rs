@@ -132,6 +132,7 @@ fn accounts(dir: &Dir) -> Arc<Accounts> {
         dir.0.join("accounts"),
         Box::new(FileStore::new(dir.0.join("accounts"))),
     )
+    .expect("opens")
 }
 
 fn credentials(access: &str) -> Credentials {
@@ -154,67 +155,6 @@ fn renewal(
 
 fn stored(accounts: &Accounts, id: &str) -> Record {
     accounts.load(id).expect("reads").expect("there")
-}
-
-#[test]
-fn a_newer_renewal_is_stored_and_an_older_report_is_ignored() {
-    let dir = Dir::new();
-    let accounts = accounts(&dir);
-    accounts
-        .store_login(
-            "a",
-            &credentials("1"),
-            Some("2026-11-11T10:00:00Z".to_owned()),
-        )
-        .expect("stored");
-    assert_eq!(stored(&accounts, "a").revision, 1);
-
-    accounts.renewed(
-        1,
-        "a",
-        &renewal("a", 1, 1, "2", Some("2026-11-11T18:00:00Z")),
-    );
-    let record = stored(&accounts, "a");
-    assert_eq!(record.revision, 2);
-    assert_eq!(record.credentials["credentials_file"], "{\"access\":\"2\"}");
-    assert_eq!(record.expires_at.as_deref(), Some("2026-11-11T18:00:00Z"));
-
-    // A report of an earlier expiry, or of a copy older than the stored one, changes nothing.
-    accounts.renewed(
-        1,
-        "a",
-        &renewal("a", 2, 2, "stale", Some("2026-11-11T09:00:00Z")),
-    );
-    accounts.renewed(
-        1,
-        "a",
-        &renewal("a", 1, 3, "older", Some("2026-11-12T00:00:00Z")),
-    );
-    let record = stored(&accounts, "a");
-    assert_eq!(record.revision, 2);
-    assert_eq!(record.credentials["credentials_file"], "{\"access\":\"2\"}");
-
-    // The same event heard twice, as two keepers of one provider do, is stored once; an event of another provider with
-    // the same sequence is not taken for it.
-    accounts.renewed(
-        1,
-        "a",
-        &renewal("a", 2, 4, "3", Some("2026-11-11T20:00:00Z")),
-    );
-    accounts.renewed(
-        1,
-        "a",
-        &renewal("a", 3, 4, "4", Some("2026-11-11T22:00:00Z")),
-    );
-    assert_eq!(stored(&accounts, "a").revision, 3);
-    accounts.renewed(
-        2,
-        "a",
-        &renewal("a", 3, 4, "4", Some("2026-11-11T22:00:00Z")),
-    );
-    let record = stored(&accounts, "a");
-    assert_eq!(record.revision, 4);
-    assert_eq!(record.credentials["credentials_file"], "{\"access\":\"4\"}");
 }
 
 #[test]
@@ -369,7 +309,7 @@ fn config(id: &str) -> AccountConfig {
 #[test]
 fn windows_refuses_one_credential_over_2560_bytes() {
     let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
-    let entry = keyring::Entry::new(&service, "limit").expect("an entry");
+    let entry = KeyringStore::new(service).entry("limit").expect("an entry");
     let at_limit = entry.set_secret(&vec![b'x'; 2560]);
     let _ = entry.delete_credential();
     let over = entry.set_secret(&vec![b'x'; 2561]);
@@ -377,3 +317,5 @@ fn windows_refuses_one_credential_over_2560_bytes() {
     at_limit.expect("2560 bytes are held");
     assert!(over.is_err(), "2561 bytes were held in one credential");
 }
+
+mod more;

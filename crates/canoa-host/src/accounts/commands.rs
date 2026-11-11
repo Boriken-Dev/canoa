@@ -11,10 +11,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+use coqui_acp_api::guatiao::schema::{SchemaRef, inline_refs};
 use coqui_acp_api::{AccountKindInfo, LoginAnswer, LoginForm, LoginMethodInfo, OpenUrl};
 
 use super::login::{self, Interaction};
@@ -100,12 +101,12 @@ fn sign_in(
     method: &str,
     inputs: &serde_json::Map<String, serde_json::Value>,
     format: Format,
-    cancel: &Arc<AtomicBool>,
+    cancel: &Cancel,
 ) -> Result<coqui_acp_api::LoginOutcome, Failed> {
     let (events, incoming) = mpsc::channel();
     let relay = Arc::new(Relay {
         events: Mutex::new(events),
-        cancelled: Arc::clone(cancel),
+        cancelled: Arc::clone(&cancel.flag),
     });
     let front = env.front;
     thread::scope(|scope| {
@@ -143,6 +144,8 @@ fn sign_in(
         // The pump ends when the relay, which holds the only sender, is dropped.
         drop(relay);
         let _ = pump.join();
+        // The sign-in's directory went with it.
+        cancel.finish();
         outcome.map_err(|error| Failed::run(error.to_string()))
     })
 }
@@ -176,13 +179,44 @@ fn show(
     }
 }
 
-/// Cancels a sign-in when the front's input closes, for an application that runs the command as a job.
-fn cancel_on_input_closing(front: &dyn Front, until: bool) -> Result<Arc<AtomicBool>, Failed> {
-    let cancel = Arc::new(AtomicBool::new(false));
+/// Whether the person has given up on a sign-in, and whether it has cleaned up after itself.
+struct Cancel {
+    flag: Arc<AtomicBool>,
+    done: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl Cancel {
+    /// The sign-in has ended and removed what it made: whoever is waiting to end the process may.
+    fn finish(&self) {
+        *self.done.0.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.done.1.notify_all();
+    }
+}
+
+/// How long ending the process on a cancel waits for the sign-in to remove what it made, under the five seconds after
+/// which a process that ends on its input closing ends whatever is left.
+const CLEANUP_WAIT: Duration = Duration::from_secs(3);
+
+/// Cancels a sign-in when the front's input closes, for an application that runs the command as a job, and, before a front
+/// that ends the process afterwards does, waits for the sign-in to clean up.
+fn cancel_on_input_closing(front: &dyn Front, until: bool) -> Result<Cancel, Failed> {
+    let cancel = Cancel {
+        flag: Arc::new(AtomicBool::new(false)),
+        done: Arc::new((Mutex::new(false), Condvar::new())),
+    };
     if until {
-        let flag = Arc::clone(&cancel);
+        let (flag, done) = (Arc::clone(&cancel.flag), Arc::clone(&cancel.done));
         front
-            .when_input_closes(1, Box::new(move || flag.store(true, Ordering::SeqCst)))
+            .when_input_closes(
+                1,
+                Box::new(move || {
+                    flag.store(true, Ordering::SeqCst);
+                    let ended = done.0.lock().unwrap_or_else(PoisonError::into_inner);
+                    let _ = done
+                        .1
+                        .wait_timeout_while(ended, CLEANUP_WAIT, |ended| !*ended);
+                }),
+            )
             .map_err(Failed::run)?;
     }
     Ok(cancel)
@@ -243,6 +277,28 @@ fn describe_methods(methods: &[LoginMethodInfo]) -> String {
         .join(", ")
 }
 
+/// `inputs` against the schema the method asks them by: each is one the method names, of its type, and none is a secret,
+/// which is asked for and never taken from a command line.
+fn check_inputs(
+    method: &LoginMethodInfo,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), Failed> {
+    let schema = inline_refs(&method.inputs)
+        .map_err(|_| Failed::run("the method's inputs cannot be read"))?;
+    let schema = SchemaRef::new(&schema)
+        .ok_or_else(|| Failed::run("the method's inputs are not a schema"))?;
+    for (key, value) in inputs {
+        if schema.find(key).is_some_and(|field| field.is_sensitive()) {
+            return Err(Failed::usage(format!(
+                "{key} is a secret: the sign-in asks for it, and it is never taken from the command line"
+            )));
+        }
+        super::check_key(schema, key, value, &format!("an input of {}", method.id))
+            .map_err(Failed::usage)?;
+    }
+    Ok(())
+}
+
 /// `--input KEY=VALUE` as the sign-in's inputs.
 pub(crate) fn inputs_of(
     pairs: &[String],
@@ -257,8 +313,9 @@ pub(crate) fn inputs_of(
     Ok(map)
 }
 
-fn accounts_of(env: &Env<'_>) -> Arc<Accounts> {
+fn accounts_of(env: &Env<'_>) -> Result<Arc<Accounts>, Failed> {
     Accounts::open(env.config.account_store, env.home.dir())
+        .map_err(|error| Failed::run(error.to_string()))
 }
 
 fn state_of(accounts: &Accounts, account: &AccountConfig) -> (String, u64, Option<String>) {
@@ -283,7 +340,7 @@ fn state_of(accounts: &Accounts, account: &AccountConfig) -> (String, u64, Optio
 
 /// `canoa accounts list`.
 pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
-    let accounts = accounts_of(env);
+    let accounts = accounts_of(env)?;
     for (name, account) in &env.config.accounts {
         let (state, revision, expires_at) = state_of(&accounts, account);
         let line = match format {
@@ -347,7 +404,8 @@ pub(crate) fn add(
             describe_methods(&methods)
         )));
     };
-    let accounts = accounts_of(env);
+    check_inputs(method, inputs)?;
+    let accounts = accounts_of(env)?;
     let cancel = cancel_on_input_closing(env.front, until_stdin_closes)?;
     let outcome = sign_in(
         env, &accounts, &provider, &method.id, inputs, format, &cancel,
@@ -375,7 +433,8 @@ pub(crate) fn add(
         settings: (!settings.is_empty()).then(|| Settings::new(settings)),
     };
     if let Err(failed) = append_account(&env.config_path, name, &account) {
-        let _ = accounts.forget(&id);
+        let _ = accounts.forget_credentials(&id);
+        let _ = accounts.forget_directory(&id);
         return Err(failed);
     }
     let line = match format {
@@ -431,7 +490,8 @@ pub(crate) fn login(
                 .join(", ")
         )));
     };
-    let accounts = accounts_of(env);
+    check_inputs(method, inputs)?;
+    let accounts = accounts_of(env)?;
     let _lease = accounts.exclusive(&account.id).map_err(refused)?;
     let cancel = cancel_on_input_closing(env.front, until_stdin_closes)?;
     let outcome = sign_in(
@@ -479,12 +539,18 @@ pub(crate) fn remove(env: &Env<'_>, name: &str) -> Result<(), Failed> {
             entry.name
         )));
     }
-    let accounts = accounts_of(env);
+    let accounts = accounts_of(env)?;
     let lease = accounts.exclusive(&account.id).map_err(refused)?;
+    let before = read_cfg(&env.config_path)?;
     remove_account(&env.config_path, name)?;
-    accounts
-        .forget(&account.id)
-        .map_err(|error| Failed::run(error.to_string()))?;
+    // The stored credential goes with the account; were it to stay, nothing would name it any more.
+    if let Err(error) = accounts.forget_credentials(&account.id) {
+        let _ = write_cfg(&env.config_path, &before);
+        return Err(Failed::run(error.to_string()));
+    }
+    if let Err(error) = accounts.forget_directory(&account.id) {
+        tracing::warn!("the directory of the removed account {name} could not be removed: {error}");
+    }
     drop(lease);
     env.front
         .print(&format!("removed {name}"))

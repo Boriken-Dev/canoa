@@ -493,6 +493,33 @@ fn a_canary_credential_is_in_no_configuration_log_argument_or_message() {
         .expect("runs");
     let record = std::fs::read_to_string(&record).expect("the stand-in's record");
     let config = std::fs::read_to_string(&cfg).expect("canoa.cfg");
+    // Everything the host left on disk, the account store and its directories included (the host has no ledger of its own:
+    // the session ledger is the app's, and takes only what the app is shown, which the messages above are).
+    let mut on_disk = String::new();
+    let mut found = vec![host.scratch.0.clone()];
+    while let Some(path) = found.pop() {
+        for entry in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.push(path);
+            } else if path.extension().is_some_and(|e| e == "exe")
+                || path.file_name().is_some_and(|n| n == "claude")
+            {
+                // The stand-in's own program holds the canary as text, to write it into a login.
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(CANARY),
+                    "the canary is in {}",
+                    path.display()
+                );
+                on_disk.push_str(&path.to_string_lossy());
+            }
+        }
+    }
+    assert!(
+        on_disk.contains("accounts"),
+        "the walk found the accounts directory: {on_disk}"
+    );
     for (place, content) in [
         ("canoa.cfg", config),
         ("the host's log", log),

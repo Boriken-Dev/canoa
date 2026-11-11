@@ -49,10 +49,10 @@ percent-encoding.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# An account's credential in the operating system's store (Windows Credential Manager, macOS Keychain, Secret Service).
-keyring = "4"
+# An account's credential in the operating system's store, through keyring-core and the platform's store below.
+keyring-core = "1"
 # The file store's sealing, at the version the dependency graph already holds.
-aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "getrandom"] }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "getrandom", "zeroize"] }
 # A credential's memory wiped once it is used.
 zeroize = "1"
 # An account's renewal compared with the stored copy by when each stops working.
@@ -69,9 +69,19 @@ tracing-subscriber.workspace = true
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
 
+# The operating system's credential store: Secret Service on a Linux or other Unix desktop.
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+
+# The Keychain.
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
 # A job object per provider process, which ends everything in it.
 [target.'cfg(windows)'.dependencies]
 win32job = "2.0.3"
+# Windows' Credential Manager, whose credentials are made local to the machine and not roamed with the profile.
+windows-native-keyring-store = "1"
 
 [dev-dependencies]
 # The address a test client dials; already in the graph through coqui-web-channel.

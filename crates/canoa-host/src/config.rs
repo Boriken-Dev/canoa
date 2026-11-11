@@ -1391,7 +1391,6 @@ fn check_title(name: &str, title: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Checked before anything quotes the name, since a key in the file may hold any character.
 /// One `[host.accounts.NAME]`. Errors name a key, never a value: a credential written here is refused, and not quoted.
 fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, ConfigError> {
     check_name(name)?;
@@ -1426,6 +1425,7 @@ fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, ConfigError>
     })
 }
 
+/// Checked before anything quotes the name, since a key in the file may hold any character.
 pub(crate) fn check_name(name: &str) -> Result<(), ConfigError> {
     if name.is_empty()
         || name.len() > MAX_NAME
