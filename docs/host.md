@@ -1,7 +1,7 @@
 # The host
 
 `canoa` serves agents to Canoa's chat on this machine. Each entry of canoa.cfg's `[host]` table is one agent, on a
-WebSocket of its own, on loopback unless its `listen` says otherwise:
+WebSocket of its own, on loopback unless its `listen` says otherwise (or on a [pipe or Unix socket](#a-pipe-or-unix-socket)):
 
 - **Claude Code or Codex**: the installed `claude` or `codex`, served by the host's own translators of their stdio
   protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
@@ -463,6 +463,34 @@ you can read, or reach the host from the browser extension.
 
 The API header lists every setting.
 
+## A pipe or Unix socket
+
+A native client on the same machine can reach an entry without a port: set its `listen` to `pipe:NAME` on Windows, a named
+pipe `\\.\pipe\NAME`, or to `unix:PATH` on Unix, a socket at an absolute path (`pipe:NAME` also works on Unix, and means
+`NAME.sock` in `$XDG_RUNTIME_DIR`, else `$TMPDIR`).
+
+```toml
+[host.agents.claude]
+harness = "claude"
+listen = "pipe:canoa-claude"          # Windows
+# listen = "unix:/run/user/1000/canoa/claude.sock"   # Linux and macOS
+```
+
+The proof is the same as on an address: the entry serves a key only once it is paired (`canoa accept`), `peers` and
+`max_peers` apply, and every message after the proof is sealed. What is added is the operating system's access control
+before the proof, from [`coqui-transport-pipe`](https://github.com/Boriken-Dev/coqui-transport-pipe) with its defaults:
+
+- **Windows**: the pipe is open to the current user alone (and, in an elevated host, not to a process of that user at a
+  lower integrity level), is created as the first of its name so no other program can already hold it, and refuses
+  clients from other machines. A second host on the same name does not start.
+- **Unix**: the socket is `0600` in a directory that only its owner (or root) can write, which the host refuses to use
+  otherwise; a leftover socket nothing listens on is replaced, and one that something answers on is never taken.
+
+That decides who can reach the entry, not who is let in: only a paired key is. A pipe name is visible to every user on
+Windows, so a client that connects before any host listens would reach whoever listens first, and only the key proof tells
+it from your host; pin the host's id as for an address. The web app never lists a pipe entry in `/canoa.json` or lets the
+page connect to one, since a browser cannot reach it. `canoa check` prints the entry and refuses a name the system cannot
+use, and a `unix:` path is refused on Windows. A native client in Rust dials with `canoa_host::pipe::PipeChannel::connect`.
 ## What the host allows
 
 - **Loopback by default.** An entry listens on loopback unless its `listen` names another address, which `serve` logs as

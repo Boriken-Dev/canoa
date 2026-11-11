@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`) and `coqui-acp-provider` (coqui-acp `75342dcf`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`e513bb7`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-web-channel` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`) and `coqui-acp-provider` (coqui-acp `75342dcf`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`e513bb7`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-web-channel` (`websocket`), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -96,7 +96,7 @@ send = "text"
 text = "{assistantMessageEvent.delta}"
 
 # Any of the three tables, each optional:
-listen = "127.0.0.1:7801"             # default 127.0.0.1:0, any free port; another address is configuration, logged
+listen = "127.0.0.1:7801"             # default 127.0.0.1:0, any free port; another address is configuration, logged; or "pipe:NAME" (Windows) or "unix:PATH" (Unix) for a native client on this machine, see "A pipe or Unix socket"
 working_roots = ["/home/me/src"]      # absolute, no . or ..; a session's cwd must be under one; default any
 worktrees = true                      # agents and tools: a git worktree per session inside working_roots; see "Worktrees"
 peers = ["sha256:…"]                  # paired keys that may use it; default every paired key
@@ -138,8 +138,11 @@ pub fn Config::load(path: &Path) -> Result<Config, ConfigError>
 pub fn Config::from_str_in(text: &str, base: &Path) -> Result<Config, ConfigError>   // touches no file
 pub fn Config::entry(&self, name: &str) -> Option<&Entry>
 
+#[non_exhaustive] pub enum Listen { Address(SocketAddr), Pipe(PipeName) }   // Clone, Eq, Display (the text `listen` is written in), From<SocketAddr>
+pub fn Listen::parse(text: &str) -> Result<Listen, String>   // "ADDRESS:PORT", "pipe:NAME" or "unix:PATH"; the error is a clause naming `listen` and quoting nothing
+pub const fn Listen::address(&self) -> Option<SocketAddr>    // None for a pipe
 #[non_exhaustive] pub struct HostProfile { pub profile: Profile, pub overlays: Vec<String>, pub allow_mcp: BTreeMap<String, String>, pub directory: PathBuf }
-#[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: SocketAddr, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize, pub title: Option<String> }
+#[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: Listen, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize, pub title: Option<String> }
 #[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String>, usage: Option<UsageSource> }, Harness { harness: String, origin: Option<Origin>, executable: Option<OsString>, options: HarnessOptions, settings: Option<Settings>, profiles: Vec<String>, accounts: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
 #[non_exhaustive] pub struct AccountConfig { pub harness: String, pub kind: String, pub id: String, pub settings: Option<Settings> }   // Clone, Eq: one [host.accounts.NAME]
 #[non_exhaustive] pub enum AccountStore { Os, File }   // Copy, Default (Os), Eq: `[host] account_store`
@@ -173,6 +176,7 @@ pub const SANDBOXES: &[&str];          // read-only, workspace-write, danger-ful
 ```
 - `[host.accounts.NAME]`: a name as an entry's, with `harness`, `kind` and `id` (1 to 128 bytes, no control character, another account's refused) required and `settings` optional. Any other key is refused by name (`api_key is not a key of an account`), never quoting its value: **a credential never goes in canoa.cfg**. `[host] account_store` is `os` or `file`. An agent entry's `accounts` names accounts the file holds, none twice; with `program` it is refused. When `serve` starts, each account an entry offers is checked against the provider's catalog: its harness is the entry's, its kind is listed, its `settings` fit the kind's schema (a key the kind marks as a credential is refused as one, naming the key) and an endpoint setting is an `https` address or an `http` one to this machine.
 - `[host.profiles.NAME]`: a name as an entry's; `overlays` valid AOS overlay names; `allow_mcp` values `sha256:` and 64 lower-case hex digits; the rest `Profile::from_table` as `LayerKind::User`, its relative paths from the file's directory. An agent's `profiles` must name profiles the file holds, each once. Errors say `profile NAME:` and a setting, never a value.
+- An entry's `listen` is `ADDRESS:PORT`, `pipe:NAME` or `unix:PATH` (`Listen::parse`). `pipe:NAME` is a Windows named pipe `\\.\pipe\NAME`, and on Unix the socket `$XDG_RUNTIME_DIR/NAME.sock` (else `$TMPDIR/NAME.sock`); `unix:PATH` is an absolute socket path, and is refused on Windows. A name or path `coqui-transport-pipe` cannot use is refused naming `listen`, never quoting it. Two entries cannot share a pipe or an address with a port; a pipe never conflicts with `[host.web]`'s address.
 - A tool entry's `listen`, `working_roots`, `worktrees`, `peers` and `max_peers` are read as in the other tables; the rest is a `ToolSpec`, refused as a whole when `ToolSpec::check` refuses it. Its errors name a setting and a rule's index, never a value.
 - `library` and `source` are made absolute against `base` (the file's directory for `load`); `directory` is `base` made absolute, where the provider's process runs.
 - In `source_settings`, every text in a `dirs`, `manifests`, `paths` or `import_dirs` list, and `home` when it is text, is made absolute against the directory, since a source may otherwise resolve it against a later working directory or its own file's; other keys, `isolation` included, pass as written, for the source to refuse.
@@ -207,13 +211,14 @@ pub fn Serving::stopper(&self) -> Stopper      // Clone, Send: for another threa
 pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed and every agent ended
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
 pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
-#[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String, pub harness: Option<String>, pub title: Option<String> }   // kind: "agent", "provider" or "tool"; harness: a harness entry's provider id; title: an agent entry's title
+#[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String, pub harness: Option<String>, pub title: Option<String> }   // url: ws://ADDRESS, or pipe:NAME / unix:PATH for an entry on a pipe
+pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it; false for a pipe entry   // kind: "agent", "provider" or "tool"; harness: a harness entry's provider id; title: an agent entry's title
 ```
 
 - `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound.
 - `stop` does that and ends the rest, so an application can start a host again in its own process: each listener closes within 100 ms, when `run` returns, and a fixed address can be bound again; a proven link ends within about a second; a link still in its proof ends by `PROOF_LIMIT` at the latest, holding no address. An entry could one day be served from a stream in this process rather than a program: `run` keeps what serves a connection behind one private enum.
 
-- `bind` binds every entry before any is served, so a failure leaves none listening. An entry on an address beyond loopback is bound with `Listener::bind_plain` and logged at `info` as `non-default: host.agents.NAME.listen is ADDRESS, default loopback`: every message after the proof is sealed, so the address is the person's to choose.
+- `bind` binds every entry before any is served, so a failure leaves none listening. An entry that listens on a pipe is bound by `coqui-transport-pipe` with its defaults (see "A pipe or Unix socket"); a failure is `ServeError::Pipe`, and `Listening::url` is then `pipe:NAME` or `unix:PATH`, as `Listen` prints it, not a `ws://` URL. An entry on an address beyond loopback is bound with `Listener::bind_plain` and logged at `info` as `non-default: host.agents.NAME.listen is ADDRESS, default loopback`: every message after the proof is sealed, so the address is the person's to choose.
 - Each connection: the WebSocket handshake, then the proof of the identity's method, Noise (`coqui-peer-noise`) or WebCrypto (`coqui-peer-webcrypto`), within `PROOF_LIMIT`; a client of the other method fails it, and the log names both methods. Then the trust store decides (a stranger that proved its key is recorded as waiting), then the entry's `peers`, through a `canoa::Registry` holding one verified `Service` per entry and a grant of `ACP_CAPABILITY` per listed key. Every later message is sealed in the proof's session, which is checked against the store every second: a removed key loses its link.
 - On an agent or tool entry, worktree requests (see "Worktrees") are answered by the host before anything else, up to 16 per connection, then the connection ends; once a first other message has come, one is answered `-32600`.
 - The first message must be plain ACP: a link of streams (`coqui_agentic_peer::mux`) is refused. Then a fresh process serves that connection, relayed by `coqui_acp_bridge::relay`, and is stopped with its process tree when either side ends.
@@ -230,9 +235,27 @@ pub fn Stopper::stop_agents(&self)             // ends every agent process runni
 - `max_peers` connections per entry at once; past it a proven peer is turned away. Past `MAX_UNPROVEN` handshakes at once across entries, a new connection is dropped.
 
 ```rust
-#[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure }, Proof(String), Harness { entry: String, what: String }, Accounts { what: String } }
+#[non_exhaustive] pub enum ServeError { NothingToServe, Listen { entry: String, failure: Failure }, Pipe { entry: String, error: pipe::Error }, Proof(String), Harness { entry: String, what: String }, Accounts { what: String } }
 ```
 
+## A pipe or Unix socket (`canoa_host::pipe`)
+
+```rust
+pub use coqui_transport_pipe::{Error, Listener, PipeName};
+#[derive(Debug)] pub struct PipeChannel;   // Send, Sync; coqui_web_channel::Channel
+impl PipeChannel {
+    pub fn new(stream: coqui_transport_pipe::Stream, max_message: usize) -> PipeChannel   // a connected stream
+    pub fn connect(name: &PipeName, max_message: usize) -> Result<PipeChannel, Error>     // a client; Error::NotListening / AccessDenied / TimedOut
+    pub fn peer(&self) -> io::Result<coqui_transport_pipe::OsIdentity>                    // who the system says is at the other end
+}
+```
+
+- An entry whose `listen` is `pipe:NAME` or `unix:PATH` is served as one on an address is: a fresh agent per proven connection, the same proof of the host's method, the same trust store (a key that is not paired is turned away and waits for `canoa accept`), `peers`, `max_peers`, worktree requests and the 64 unproven connections at once, shared with the sockets. Nothing differs after the connection opens.
+- What differs is the transport: the operating system's access control stands before the proof, and `coqui-transport-pipe`'s defaults are kept (Windows: a security descriptor for the current user alone, plus the integrity label of an elevated host, the first instance of the name taken so nobody else holds it, remote clients refused; Unix: a `0600` socket in a directory only its owner (or root) can write, a stale socket replaced and a live one not). Neither replaces the key proof, and the proof does not trust the access control: the same user's other processes reach the pipe, and so would anyone the descriptor let in. The peer's process and user are logged at `debug`.
+- A message is a little-endian `u32` length and then its body (coqui-web-channel's stream format), with no WebSocket handshake and no origin check. `PipeChannel` reads on demand with no read-ahead, so a bound `set_max_message` changes applies to the next message the peer sends. Zero length, over the bound, or a peer that leaves mid-message ends the channel (`Failure::Protocol` or `PathLost`); a clean end between messages is `Ok(None)`. A write that times out ends the channel (a cancelled pipe write on Windows leaves the stream's position unknown).
+- Every peer on pipes shares one bucket of the trust store's waiting queue, since there is no address to tell them apart by.
+- The served web page never offers or allows a pipe entry: `/canoa.json` and the page's Content-Security-Policy leave it out (`Listening::on_address`), and no browser can reach it.
+- A pipe name on Windows is visible to every user: the first instance is taken at bind, so a second host on one name is `ServeError::Pipe` (`NameTaken`), but a client that connects before any host bound reaches whoever bound first, and only the key proof tells it from the host.
 ## The web app (`canoa_host::web`)
 
 ```rust
