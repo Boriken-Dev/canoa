@@ -12,11 +12,14 @@ import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/profile/launch.dart' show StartAgent;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'source_choices.dart';
 
 /// Worktrees that are only counted.
 final class CountedWorktrees implements Worktrees {
@@ -92,6 +95,7 @@ Future<List<CanoaConfig>> pumpApp(
   DesktopShell? shell,
   HostSupervisor? host,
   String? documents,
+  ChoicesLoader? askChoices,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -117,6 +121,7 @@ Future<List<CanoaConfig>> pumpApp(
     worktrees: () => worktrees ?? CountedWorktrees(),
     shell: shell,
     host: host,
+    askChoices: askChoices ?? FakeHost().call,
   ));
   await tester.pumpAndSettle();
   return written;

@@ -305,7 +305,7 @@ final class Choice {
 /// Something the agent lets a person choose, such as its model.
 final class ConfigOption {
   const ConfigOption({required this.id, required this.label, required this.current, required this.choices, this.isMode = false,
-      this.category});
+      this.category, this.defaultLabel});
   final String id;
   final String label;
   final String current;
@@ -313,6 +313,9 @@ final class ConfigOption {
 
   /// What ACP says it is, such as `model`, `thought_level` or `mode`, when the agent says.
   final String? category;
+
+  /// What taking no choice stands for, such as `Default (Opus 5.5)`, when the provider says; a draft shows it for its Default.
+  final String? defaultLabel;
 
   /// Set with `session/set_mode` rather than `session/set_config_option`.
   final bool isMode;

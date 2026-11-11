@@ -16,7 +16,8 @@ import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'profile/apply.dart';
 import 'profile/profile_layers.dart' show LayerNote;
-import 'sources/known_options.dart';
+import 'sources/source_choices.dart';
+import 'sources/source_options.dart';
 import 'sources/sources.dart';
 import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
@@ -317,6 +318,41 @@ class SessionStore extends ChangeNotifier {
   /// Starts a draft's agent on its first message; set by the app. Without it a draft cannot start.
   DraftStarter? starter;
 
+  /// Asks the host for a source's models and efforts before its agent runs; set by the app. Without it nothing is asked.
+  ChoicesLoader? choicesLoader;
+
+  /// What each source's provider listed, by [sourceKey], as last asked.
+  final Map<String, SourceChoices> _choices = {};
+  final Set<String> _asking = {};
+  bool _disposed = false;
+
+  /// What [source]'s provider listed before a session starts; null while it has not said.
+  SourceChoices? choicesOf(AgentSource source) => _choices[sourceKey(source)];
+
+  /// Asks for [source]'s choices unless they are held and recent or being asked now. A source whose provider cannot say, or a
+  /// host that cannot be asked, leaves the composer saying its choices come after the agent starts.
+  void _askChoices(AgentSource? source) {
+    final load = choicesLoader;
+    if (load == null || source == null) return;
+    final key = sourceKey(source);
+    final held = _choices[key];
+    if (_asking.contains(key) || (held != null && DateTime.now().difference(held.fetchedAt) < choicesLife)) return;
+    _asking.add(key);
+    unawaited(() async {
+      try {
+        final got = await load(source);
+        if (got != null && !_disposed) {
+          _choices[key] = got.at(DateTime.now());
+          notifyListeners();
+        }
+      } catch (error) {
+        debugPrint('Canoa: choices of ${source.label} could not be asked: ${reasonOf(error)}');
+      } finally {
+        _asking.remove(key);
+      }
+    }());
+  }
+
   /// The largest file, in bytes, sent as the agent's embedded context; a larger one goes as a link to it.
   int embedLimit;
 
@@ -575,6 +611,7 @@ class SessionStore extends ChangeNotifier {
     session.attachments.addAll(attachments.take(maxAttachments));
     _insert(session);
     _keepDraft(session);
+    _askChoices(source);
     return session;
   }
 
@@ -591,6 +628,7 @@ class SessionStore extends ChangeNotifier {
         // Choices for another source's options mean nothing to this one's.
         session.pending.clear();
         session.bypass = false;
+        _askChoices(source);
       }
       if (cwd != null) session.cwd = cwd;
       if (clearFolder) session.cwd = null;
@@ -724,13 +762,17 @@ class SessionStore extends ChangeNotifier {
     return images == null || files == null ? null : PromptTakes(images: images, files: files);
   }
 
-  /// The choices shown for [session]: the agent's own once it runs; before, what its source's agent offered last time, and for
-  /// a role it has not, what the app knows the source's agent offers.
+  /// The choices shown for [session]: the agent's own once it runs. Before, the models and efforts its source's provider
+  /// lists (each model's own efforts, following the model chosen), then what the agent offered last time, and for a role
+  /// neither has, the modes the app knows the source's agent offers.
   List<ConfigOption> optionsOf(ChatSession session) {
     if (!session.isDraft) return session.options;
     final source = session.source;
     if (source == null) return const [];
-    return withKnown(ledger?.source(sourceKey(source))?.options ?? const [], knownOptions(source));
+    final model = session.pending.values.where((choice) => choice.role == OptionRole.model).firstOrNull?.value;
+    final listed = choicesOf(source)?.options(model: model) ?? const <ConfigOption>[];
+    final remembered = ledger?.source(sourceKey(source))?.options ?? const <ConfigOption>[];
+    return overlaid(overlaid(listed, remembered), knownModes(source));
   }
 
   /// When [session]'s source's choices were last seen, for a draft showing them; null otherwise, and when they are only what
@@ -1254,6 +1296,7 @@ class SessionStore extends ChangeNotifier {
     }
     if (session.isDraft || session.status == SessionStatus.working || isStarting(session)) {
       session.pending[option.id] = PendingChoice(option.id, role, value, byPerson: true);
+      if (session.isDraft && role == OptionRole.model) _dropUnofferedEffort(session);
       _keepDraft(session);
       notifyListeners();
       return false;
@@ -1265,6 +1308,12 @@ class SessionStore extends ChangeNotifier {
       _rememberSource(session);
     }
     return refused;
+  }
+
+  /// A new model's efforts replace the old one's: an effort chosen for the draft that the model does not take is taken back.
+  void _dropUnofferedEffort(ChatSession session) {
+    final effort = optionIn(optionsOf(session), OptionRole.effort);
+    session.pending.removeWhere((_, choice) => choice.role == OptionRole.effort && effort != null && !effort.choices.any((each) => each.value == choice.value));
   }
 
   /// Sets one of the agent's choices. It stays as it was unless the agent agrees, which it says in its answer or an update; a
@@ -2003,6 +2052,7 @@ class SessionStore extends ChangeNotifier {
   }
   @override
   void dispose() {
+    _disposed = true;
     for (final subscription in _subscriptions.values) {
       unawaited(subscription.cancel());
     }

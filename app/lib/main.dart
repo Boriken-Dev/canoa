@@ -7,6 +7,7 @@ import 'desktop/desktop_shell.dart';
 import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'desktop/hosting_dialog.dart';
+import 'sources/source_choices.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/connect.dart' show chatEndpoints;
@@ -99,7 +100,7 @@ class CanoaApp extends StatefulWidget {
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.ledger, this.notifier, this.drafts,
     this.checkSource, this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard, this.startAgent,
-    this.worktrees, this.documents,
+    this.worktrees, this.documents, this.askChoices,
   });
 
   /// Where sessions not yet started are kept between runs, for a store this app makes.
@@ -132,6 +133,10 @@ class CanoaApp extends StatefulWidget {
   /// Makes worktrees for agents on this computer; by default by git.
   @visibleForTesting
   final Worktrees? Function()? worktrees;
+
+  /// Asks for a source's models and efforts before its agent runs; by default the host this app carries is asked.
+  @visibleForTesting
+  final ChoicesLoader? askChoices;
 
   final SessionStore? store;
 
@@ -521,6 +526,25 @@ class _CanoaAppState extends State<CanoaApp> {
         : SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
   }
 
+  /// What `canoa options` says of [source]: the models and efforts its provider lists with no session. A preset the host runs
+  /// is asked by its harness, a hosted entry by its name in canoa.cfg; any other source lists them only once it has started.
+  Future<SourceChoices?> _askChoices(AgentSource source) async {
+    if (widget.askChoices case final ask?) return ask(source);
+    final tool = widget.host?.tool;
+    if (tool == null) return null;
+    final command = source.command;
+    final List<String> args;
+    if (command != null && source.kind == SourceKind.preset && command.hosts && command.args.length > 1) {
+      args = ['options', command.args[1], '--format', 'json'];
+    } else if (source.hostEntry != null && _configPath != null) {
+      args = ['options', source.hostEntry!, '--entry', '--config', _configPath!, '--format', 'json'];
+    } else {
+      return null;
+    }
+    final ran = await tool.run(args);
+    return ran.exitCode == 0 ? SourceChoices.parse(ran.stdout) : null;
+  }
+
   /// Whether the sources have been looked for: only once a new session or Settings needs them, since each runs a lookup.
   bool _checked = false;
 
@@ -903,6 +927,7 @@ class _CanoaAppState extends State<CanoaApp> {
         SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, defaultMode: config.defaultMode,
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.starter = _startDraft;
+    store.choicesLoader = _askChoices;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
     unawaited(store.restoreDrafts((kind, label) =>
@@ -932,6 +957,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.removeListener(_showWaiting);
     store.removeListener(_noteLast);
     if (identical(store.starter, _startDraft)) store.starter = null;
+    if (identical(store.choicesLoader, _askChoices)) store.choicesLoader = null;
     widget.host?.removeListener(_hostChanged);
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);

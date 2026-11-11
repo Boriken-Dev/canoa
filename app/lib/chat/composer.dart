@@ -513,10 +513,7 @@ class _SourceChooser extends StatelessWidget {
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(switch (each.kind) {
-                SourceKind.hosted => providerIcon(each.harness),
-                _ => Icons.terminal,
-              }, size: 18),
+              leading: Icon(sourceIcon(each), size: 18),
               title: Text(each.displayName),
               subtitle: switch (kit.checks[each]) {
                 final check? when !check.ready => Text('Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}',
@@ -534,7 +531,7 @@ class _SourceChooser extends StatelessWidget {
         message: problem ?? 'Where its agent comes from',
         child: _Pill(
           label: source?.displayName ?? 'Choose a source',
-          icon: source?.kind == SourceKind.hosted ? providerIcon(source?.harness) : Icons.terminal,
+          icon: sourceIcon(source),
           danger: problem != null || source == null,
         ),
       ),
@@ -620,7 +617,7 @@ class _OptionChooser extends StatelessWidget {
       );
     }
     final current = pending?.value ?? (draft ? null : option?.current);
-    final label = current == null ? (draft ? 'Default' : name) : _labelOf(option, current, role);
+    final label = current == null ? (draft ? option?.defaultLabel ?? 'Default' : name) : _labelOf(option, current, role);
     return PopupMenuButton<String?>(
       key: Key('option-${role.name}'),
       tooltip: _seenLabel(draft ? seen : null, name),
@@ -636,7 +633,7 @@ class _OptionChooser extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
-        if (draft) const PopupMenuItem<String?>(value: null, child: Text('Default')),
+        if (draft) PopupMenuItem<String?>(value: null, child: Text(option?.defaultLabel ?? 'Default')),
         for (final choice in option?.choices ?? const [])
           CheckedPopupMenuItem<String?>(value: choice.value, checked: choice.value == current, child: Text(choiceLabel(role, choice))),
       ],
