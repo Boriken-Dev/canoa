@@ -531,7 +531,7 @@ impl Reading {
         }
     }
 
-    /// A session opened: reads, again after 2, 4, 8 and 16 seconds while the agent has no port.
+    /// A session opened: reads, again after 2, 4, 8 and 16 seconds while the agent has no port or does not answer in time.
     pub(crate) fn opened(self: &Arc<Self>, models: Vec<AcpModel>) {
         if !models.is_empty() {
             *lock(&self.models) = models;
@@ -546,7 +546,7 @@ impl Reading {
                 me.flush_waiters();
                 match read {
                     Ok(()) => return,
-                    Err(ReadError::NoPort) if index + 1 < delays.len() => {}
+                    Err(ReadError::NoPort | ReadError::Io(_)) if index + 1 < delays.len() => {}
                     Err(why) => {
                         tracing::debug!("antigravity usage: {why}");
                         return;

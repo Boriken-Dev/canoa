@@ -18,6 +18,8 @@ const GATEWAY: &str =
 const PROVIDER: &str =
     "litellm.RateLimitError: RateLimitError: OpenAIException - Rate limit reached for gpt";
 const CAPACITY: &str = "UNAVAILABLE (code 503): No capacity available for model gemini";
+/// How long a test waits for an event it needs; a loaded machine is slow, a wait that ends sooner than this is not a bound.
+const PATIENCE: Duration = Duration::from_secs(300);
 /// 2099-01-01T00:00:00Z.
 const FAR: i64 = 4_070_908_800;
 
@@ -84,13 +86,31 @@ fn failed(id: u64, message: &str) -> Value {
     json!({"id": id, "error": {"code": -32603, "message": message}})
 }
 
+/// The report the host answers a usage request with. A reading older than the cache makes the host hold the request until
+/// a new reading ends, so the answer is then collected as the connection would send it.
 fn report_of(splice: &Splice) -> Value {
-    read_client(
-        splice,
-        &json!({"id": 99, "method": USAGE_METHOD, "params": {}}),
-    )
-    .expect("the host answers")["result"]
-        .clone()
+    let request = json!({"id": 99, "method": USAGE_METHOD, "params": {}});
+    match splice.read_client(&bytes(&request)) {
+        Client::Answer(answer) => {
+            serde_json::from_slice::<Value>(&answer).expect("JSON")["result"].clone()
+        }
+        Client::Forward => panic!("the host answers"),
+        Client::Held => {
+            let answer = RefCell::new(None);
+            let until = std::time::Instant::now() + PATIENCE;
+            while answer.borrow().is_none() && std::time::Instant::now() < until {
+                splice.tick(|message| {
+                    let message: Value = serde_json::from_slice(message).expect("JSON");
+                    if message["id"] == 99 {
+                        *answer.borrow_mut() = Some(message["result"].clone());
+                    }
+                    Ok(())
+                });
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            answer.into_inner().expect("the held request is answered")
+        }
+    }
 }
 
 #[test]
@@ -631,7 +651,7 @@ fn a_private_agent_is_started_only_where_allowed_one_at_a_time_and_not_often() {
         let _ = ended.send(());
     }));
     // The program does not exist, so the attempt ends at once; and a second is refused for being too soon either way.
-    wait.recv_timeout(Duration::from_secs(10))
+    wait.recv_timeout(PATIENCE)
         .expect("the attempt ends and says so");
     assert!(!quota.read_privately(done));
     let _ = std::fs::remove_dir_all(&state);
@@ -695,7 +715,7 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
             {"modelId": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)"}]}}}),
     );
     let told = RefCell::new(Vec::<Value>::new());
-    let until = std::time::Instant::now() + Duration::from_secs(30);
+    let until = std::time::Instant::now() + PATIENCE;
     while !told.borrow().iter().any(|message| {
         message["params"]["report"]["buckets"]
             .as_array()
@@ -751,7 +771,7 @@ fn connections_of_an_entry_with_profiles_never_answer_from_each_others_readings(
         &json!({"id": 5, "method": "session/new", "params": {"cwd": "/work"}}),
     );
     from_agent(&first, &json!({"id": 5, "result": {"sessionId": "s"}}));
-    let until = std::time::Instant::now() + Duration::from_secs(30);
+    let until = std::time::Instant::now() + PATIENCE;
     let told = std::cell::Cell::new(false);
     while !told.get() && std::time::Instant::now() < until {
         first.tick(|message| {
@@ -777,22 +797,33 @@ fn notices_from_two_threads_go_in_order_and_the_told_revision_only_grows() {
     let splice = Arc::new(Splice::new(Arc::clone(&inference), Some("work".to_owned())));
     initialize(&splice, true, plain_answer());
     let sent = Arc::new(Mutex::new(Vec::<u64>::new()));
+    let done = Arc::new(core::sync::atomic::AtomicBool::new(false));
     let moving = {
-        let inference = Arc::clone(&inference);
+        let (inference, sent) = (Arc::clone(&inference), Arc::clone(&sent));
         std::thread::spawn(move || {
             for at in 0..200_i64 {
                 // A new retry-after each time is a change, which the report numbers.
                 let text = format!("Error 429 Retry-After: {}", 1_000 + at);
                 inference.observe(&text, 1_000);
+                if at == 0 {
+                    // The readers have told the first revision before the rest move, whatever the machine's load.
+                    let until = std::time::Instant::now() + PATIENCE;
+                    while lock(&sent).is_empty() && std::time::Instant::now() < until {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
                 std::thread::sleep(Duration::from_micros(200));
             }
         })
     };
     let readers: Vec<_> = (0..4)
         .map(|_| {
-            let (splice, sent) = (Arc::clone(&splice), Arc::clone(&sent));
+            let (splice, sent, done) = (Arc::clone(&splice), Arc::clone(&sent), Arc::clone(&done));
             std::thread::spawn(move || {
-                for _ in 0..400 {
+                // One tick more after the changes ended, so the last revision is told.
+                let mut last = false;
+                while !last {
+                    last = done.load(core::sync::atomic::Ordering::SeqCst);
                     splice.tick(|message| {
                         let notice: Value = serde_json::from_slice(message).expect("JSON");
                         let revision = notice["params"]["report"]["revision"]
@@ -808,6 +839,7 @@ fn notices_from_two_threads_go_in_order_and_the_told_revision_only_grows() {
         })
         .collect();
     moving.join().expect("the changes end");
+    done.store(true, core::sync::atomic::Ordering::SeqCst);
     for reader in readers {
         reader.join().expect("a reader ends");
     }
@@ -833,13 +865,13 @@ fn a_panic_in_a_reading_frees_the_connection_and_answers_the_request_that_waited
     ));
     reading.wait_for(json!(7));
     assert!(reading.spawn(|_| panic!("a reading that goes wrong")));
-    let until = std::time::Instant::now() + Duration::from_secs(10);
+    let until = std::time::Instant::now() + PATIENCE;
     while link.take().is_empty() && std::time::Instant::now() < until {
         std::thread::sleep(Duration::from_millis(20));
     }
     // Free again: another job starts.
     let (ran, done) = std::sync::mpsc::channel();
-    let until = std::time::Instant::now() + Duration::from_secs(10);
+    let until = std::time::Instant::now() + PATIENCE;
     let mut tries = 0;
     while done.try_recv().is_err() && std::time::Instant::now() < until {
         let ran = ran.clone();
@@ -868,7 +900,7 @@ fn a_panic_in_a_private_reading_still_answers_who_asked() {
     assert!(quota.read_privately(move || {
         let _ = ended.send(());
     }));
-    wait.recv_timeout(Duration::from_secs(10))
+    wait.recv_timeout(PATIENCE)
         .expect("the request is answered although the reading panicked");
     let _ = std::fs::remove_dir_all(&state);
 }
@@ -900,10 +932,27 @@ fn a_request_that_comes_while_a_private_agent_reads_waits_for_it() {
     assert!(quota.read_privately(note("second")));
     assert!(lock(&answered).is_empty());
     release.send(()).expect("released");
-    let until = std::time::Instant::now() + Duration::from_secs(10);
+    let until = std::time::Instant::now() + PATIENCE;
     while lock(&answered).len() < 2 && std::time::Instant::now() < until {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(lock(&answered).len(), 2);
     let _ = std::fs::remove_dir_all(&state);
+}
+
+#[test]
+fn a_failed_turn_is_in_the_report_before_its_answer_reaches_the_client() {
+    let splice = splice(None);
+    initialize(&splice, false, plain_answer());
+    prompt(&splice, 7, "s");
+    // The client asks at once, as soon as it has the answer: the send is the moment it has it.
+    let asked = RefCell::new(None);
+    splice
+        .relay(&bytes(&failed(7, AGY)), |_| {
+            *asked.borrow_mut() = Some(report_of(&splice));
+            Ok(())
+        })
+        .expect("sent");
+    let report = asked.into_inner().expect("the answer was sent");
+    assert_eq!(report["buckets"][0]["id"], "inferred", "{report}");
 }
