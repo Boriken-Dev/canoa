@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- A `[host.agents.NAME]` entry may carry a `title`, and the host's line for each entry it serves (and each entry of `/canoa.json`) names the entry's provider id as `harness` (a `harness` entry only) and its `title`, each absent when there is none. The app's source picker shows the title, else the name, with an icon chosen by the provider id (Claude, Codex, Grok, Antigravity, Pi, else a generic one). `Entry` and `Listening` gain `title` and `harness` fields, and `MAX_TITLE` is 64.
+
 ### Changed
 - The app's hosted sources are the agent entries the `canoa` it runs lists as serving, not its own reading of canoa.cfg's `[host]`: an entry added there, a `harness` entry for any provider included, shows in the new-session source picker and Settings once the host serves it, and goes when it stops. A draft kept on a hosted source gets it back when the host serves it.
 - Every coqui-acp crate, and the Dart `coqui_acp` package, is at `953c43e2`, where the Claude and Codex providers take `modes` and Claude's takes `setting_sources`.

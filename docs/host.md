@@ -199,7 +199,7 @@ commands and usage arrived in that turn; its README also lists diffs for `edit` 
 choice; the tool entry is for a Pi, or a tool like it, with no adapter.
 
 `canoa serve` reads the same canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
-prints one JSON line per entry: its name, kind, address, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
+prints one JSON line per entry: its name, kind, address, its provider id (a `harness` entry) and `title` when it has them, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
 saves its own settings.
 
 ## Profiles

@@ -71,7 +71,7 @@ paths = ["python/guatiao", "python/coqui_acp_provider"]
 ```
 
 ```sh
-canoa serve            # one JSON line per entry: name, kind, url, this host's peer id and its method
+canoa serve            # one JSON line per entry: name, kind, url, its provider id and title when it has them, this host's peer id and its method
 canoa peers            # a client that connected once is waiting
 canoa accept <PEER>    # pair it, after comparing the id with the one the client shows
 ```
