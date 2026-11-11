@@ -1304,6 +1304,13 @@
         "default": false,
         "description": "Whether the store may run each copy's version flag. False asks from what is on disk alone.",
         "type": "boolean"
+      },
+      "probe_copy": {
+        "description": "The one copy outside the host's own that the person picked to be run; with `probe`, no other outside copy is.",
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
     "type": "object"
@@ -1505,7 +1512,7 @@
       },
       "endpoints": {
         "default": [],
-        "description": "The `https` origins it fetches from, and the only ones the host lets a download or a redirect reach.",
+        "description": "The `https` places it fetches from, and the only ones the host lets a download or a redirect reach: an origin (`https://host`), or a prefix with a path (`https://host/bucket/`) that a URL has to start with.",
         "items": {
           "type": "string"
         },

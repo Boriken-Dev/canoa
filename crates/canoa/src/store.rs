@@ -132,7 +132,8 @@ pub struct StoreInfo {
     /// Its release channels; the first is the default, and none means it has none.
     #[map(default)]
     pub channels: Vec<String>,
-    /// The `https` origins it fetches from, and the only ones the host lets a download or a redirect reach.
+    /// The `https` places it fetches from, and the only ones the host lets a download or a redirect reach: an origin
+    /// (`https://host`), or a prefix with a path (`https://host/bucket/`) that a URL has to start with.
     #[map(default)]
     pub endpoints: Vec<String>,
 }
@@ -200,6 +201,8 @@ pub struct ProgramQuery {
     /// Whether the store may run each copy's version flag. False asks from what is on disk alone.
     #[map(default)]
     pub probe: bool,
+    /// The one copy outside the host's own that the person picked to be run; with `probe`, no other outside copy is.
+    pub probe_copy: Option<String>,
 }
 
 /// Whether, and by whom, a copy can be updated.
