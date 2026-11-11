@@ -152,7 +152,7 @@ fn the_accounts_directories_and_files_are_the_owners_alone() {
             (own.clone(), 0o700),
             (own.join("state"), 0o700),
             (own.join("lease"), 0o600),
-            (login, 0o700),
+            (login.path().to_owned(), 0o700),
         ] {
             let mode = fs::metadata(&path).expect("exists").permissions().mode() & 0o777;
             assert_eq!(mode, wanted, "{}", path.display());
