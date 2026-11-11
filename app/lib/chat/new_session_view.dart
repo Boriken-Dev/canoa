@@ -19,6 +19,9 @@ class NewSessionView extends StatelessWidget {
   /// The composer, built by the conversation that owns its text.
   final Widget composer;
 
+  /// The menu value for the scratch folder; no folder's path holds a NUL.
+  static const _scratchChoice = '\u0000scratch';
+
   Future<void> _open(BuildContext context) async {
     final folder = await kit.pickFolder?.call();
     if (folder != null) store.updateDraft(session, cwd: folder);
@@ -29,14 +32,24 @@ class NewSessionView extends StatelessWidget {
     final look = context.look;
     final theme = Theme.of(context);
     final cwd = session.cwd;
+    final scratch = kit.scratchFolder?.call(session);
     final folders = {?cwd, ...kit.recentFolders}.toList();
     final notices = session.messages.where((message) => message.role == MessageRole.notice).toList();
     final folder = PopupMenuButton<String>(
       key: const Key('new-session-folder'),
       tooltip: 'The folder it works in',
       enabled: session.status == SessionStatus.draft,
-      onSelected: (chosen) => chosen.isEmpty ? unawaited(_open(context)) : store.updateDraft(session, cwd: chosen),
+      onSelected: (chosen) => chosen.isEmpty
+          ? unawaited(_open(context))
+          : chosen == _scratchChoice ? store.updateDraft(session, clearFolder: true) : store.updateDraft(session, cwd: chosen),
       itemBuilder: (context) => [
+        if (scratch != null)
+          CheckedPopupMenuItem(
+            key: const Key('new-session-scratch'),
+            value: _scratchChoice,
+            checked: cwd == null,
+            child: Text('Scratch  $scratch', overflow: TextOverflow.ellipsis),
+          ),
         for (final each in folders)
           CheckedPopupMenuItem(value: each, checked: each == cwd, child: Text(each, overflow: TextOverflow.ellipsis)),
         if (folders.isNotEmpty) const PopupMenuDivider(),
@@ -56,7 +69,19 @@ class NewSessionView extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.folder_outlined, size: 18, color: look.muted),
           const SizedBox(width: 8),
-          Flexible(child: Text(cwd ?? 'Choose a folder', overflow: TextOverflow.ellipsis, maxLines: 1)),
+          Flexible(
+            child: cwd == null && scratch != null
+                ? Text.rich(
+                    TextSpan(children: [
+                      const TextSpan(text: 'Scratch', style: TextStyle(fontWeight: FontWeight.w600)),
+                      TextSpan(text: '  $scratch', style: TextStyle(color: look.muted)),
+                    ]),
+                    key: const Key('new-session-scratch-path'),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  )
+                : Text(cwd ?? 'Choose a folder', overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
           Icon(Icons.expand_more, size: 18, color: look.muted),
         ]),
       ),

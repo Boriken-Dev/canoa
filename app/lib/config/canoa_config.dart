@@ -12,6 +12,7 @@ import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
+import '../workspace/workspace_template.dart' show defaultWorkspace, workspaceProblem;
 
 /// One entry of `[host]`, as canoa.cfg has it.
 final class HostEntry {
@@ -458,7 +459,7 @@ final class CanoaConfig {
     final network = table('network', {'prefer_webtransport','connect_timeout'});
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
-    final sessions = table('sessions', {'keep', 'keep_text', 'text_messages'});
+    final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace'});
     final permissions = table('permissions', {'default_mode', 'full_access'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
@@ -549,6 +550,9 @@ final class CanoaConfig {
       if (raw is! int || raw < 0) throw FormatException('canoa.cfg: sessions.$key must be a whole number, 0 or more');
       return raw;
     }
+    final workspace = sessions['workspace'] ?? defaultWorkspace;
+    if (workspace is! String) throw const FormatException('canoa.cfg: sessions.workspace must be a string');
+    if (workspaceProblem(workspace) case final problem?) throw FormatException('canoa.cfg: sessions.workspace: $problem');
     final harnesses = data['harnesses'] ?? const <String, Object?>{};
     if (harnesses is! Map || harnesses.values.any((label) => label is! String || label.trim().isEmpty)) {
       throw const FormatException('canoa.cfg: harnesses must map each reported agent name to a label');
@@ -623,6 +627,7 @@ final class CanoaConfig {
         keep: count('keep', LedgerSettings.defaultKeep),
         keepText: flag(sessions, 'keep_text', false),
         textMessages: count('text_messages', LedgerSettings.defaultTextMessages),
+        workspace: workspace,
         harnesses: {for (final MapEntry(:key, :value) in harnesses.entries) '$key': value as String},
       ),
     );
@@ -651,7 +656,7 @@ brightness = "$brightness"
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}
 text_messages = ${sessions.textMessages}
-
+${sessions.workspace == defaultWorkspace ? '' : 'workspace = ${jsonEncode(sessions.workspace)}\n'}
 [notifications]
 permission = ${notifications.permission}
 question = ${notifications.question}

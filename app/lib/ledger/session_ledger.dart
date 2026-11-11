@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../chat/agent_events.dart' show ConfigOption, maxConfigOptions;
 import '../chat/session_options.dart';
+import '../workspace/workspace_template.dart' show defaultWorkspace;
 import '../worktree/worktree.dart';
 
 /// Where a session's agent runs, as the app reached it.
@@ -85,6 +86,7 @@ final class LedgerEntry {
     this.worktree,
     this.mode,
     this.bypass = false,
+    this.canoaId,
     this.messages = const [],
   });
 
@@ -93,6 +95,9 @@ final class LedgerEntry {
 
   /// The agent's own id for the session.
   final String sessionId;
+
+  /// Canoa's own id for the session, which named its scratch folder; null for a session not made here.
+  String? canoaId;
 
   /// The agent entry or preset it was started from, or what the person named a peer.
   final String entry;
@@ -166,6 +171,7 @@ final class LedgerEntry {
     'worktree': ?worktree?.toJson(),
     'mode': ?mode,
     if (bypass) 'bypass': true,
+    'canoaId': ?canoaId,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
   };
 
@@ -198,6 +204,7 @@ final class LedgerEntry {
       worktree: SessionWorktree.fromJson(json['worktree']),
       mode: text('mode'),
       bypass: json['bypass'] == true,
+      canoaId: text('canoaId'),
       messages: [
         if (json['messages'] case final List<dynamic> kept)
           for (final message in kept) ?KeptMessage.fromJson(message),
@@ -256,6 +263,7 @@ final class LedgerSettings {
     this.keep = defaultKeep,
     this.keepText = false,
     this.textMessages = defaultTextMessages,
+    this.workspace = defaultWorkspace,
     this.harnesses = const {},
   });
 
@@ -270,6 +278,9 @@ final class LedgerSettings {
 
   /// How many of a session's latest messages are kept when [keepText] is on.
   final int textMessages;
+
+  /// `[sessions] workspace`: the folder template of a session started with no folder chosen.
+  final String workspace;
 
   /// canoa.cfg's `[harnesses]`: reported name to harness label.
   final Map<String, String> harnesses;
@@ -412,6 +423,7 @@ class SessionLedger extends ChangeNotifier {
     String? fallback,
     String? method,
     SessionWorktree? worktree,
+    String? canoaId,
   }) {
     if (_settings.keep <= 0) return null;
     final now = _clock();
@@ -440,7 +452,8 @@ class SessionLedger extends ChangeNotifier {
       ..reopenBy = reopenBy
       ..cwd = cwd ?? found.cwd
       ..title = title ?? found.title
-      ..worktree = worktree ?? found.worktree;
+      ..worktree = worktree ?? found.worktree
+      ..canoaId = canoaId ?? found.canoaId;
     _apply();
     _changed();
     return find(peerId, sessionId);

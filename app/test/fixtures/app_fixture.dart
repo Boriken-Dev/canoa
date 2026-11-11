@@ -91,13 +91,18 @@ Future<List<CanoaConfig>> pumpApp(
   Worktrees? worktrees,
   DesktopShell? shell,
   HostSupervisor? host,
+  String? documents,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final dir = Directory.systemTemp.createTempSync('canoa-app');
   addTearDown(() => dir.deleteSync(recursive: true));
+  // A session with no folder chosen makes its own under Documents: never the person's.
+  final home = Directory.systemTemp.createTempSync('canoa-documents');
+  addTearDown(() => home.deleteSync(recursive: true));
   final written = <CanoaConfig>[];
   await tester.pumpWidget(CanoaApp(
+    documents: documents ?? home.path,
     store: store,
     config: config,
     configPath: '${dir.path}/canoa.cfg',

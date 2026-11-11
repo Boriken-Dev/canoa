@@ -5,10 +5,11 @@ import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
 import '../sources/sources.dart';
 import '../theme/look.dart';
+import '../workspace/workspace_template.dart';
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.onProfiles,
-      this.onAllowNotifications, this.onPreview, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
+      this.onAllowNotifications, this.onPreview, this.workspacePreview, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
   final CanoaConfig config;
 
   /// The built-in sources, which can be hidden from a new session but not changed.
@@ -29,6 +30,10 @@ class SettingsDialog extends StatefulWidget {
   /// Told the dialog's look and brightness each time either is picked, so the app can show them before they are saved.
   final void Function(CanoaConfig preview)? onPreview;
 
+  /// The folder a template makes for a session, as the app would make it now; null where this build has no folders for
+  /// sessions, and Settings then shows no workspace row.
+  final String? Function(String template)? workspacePreview;
+
   /// The session list, whose kept text Settings can clear.
   final SessionLedger? ledger;
 
@@ -44,6 +49,8 @@ class SettingsDialogState extends State<SettingsDialog> {
   late CanoaConfig config = widget.config;
   final _sourceName = TextEditingController();
   final _sourceCommand = TextEditingController();
+  late final _workspace = TextEditingController(text: widget.config.sessions.workspace);
+  String? _workspaceProblem;
   String? _sourceProblem;
   final Map<AgentSource, Future<SourceCheck>> _checks = {};
 
@@ -51,6 +58,7 @@ class SettingsDialogState extends State<SettingsDialog> {
   void dispose() {
     _sourceName.dispose();
     _sourceCommand.dispose();
+    _workspace.dispose();
     super.dispose();
   }
 
@@ -153,12 +161,48 @@ class SettingsDialogState extends State<SettingsDialog> {
     ],
   );
 
-  LedgerSettings _sessions({int? keep, bool? keepText}) => LedgerSettings(
+  LedgerSettings _sessions({int? keep, bool? keepText, String? workspace}) => LedgerSettings(
     keep: keep ?? config.sessions.keep,
     keepText: keepText ?? config.sessions.keepText,
     textMessages: config.sessions.textMessages,
+    workspace: workspace ?? config.sessions.workspace,
     harnesses: config.sessions.harnesses,
   );
+
+  /// The template of the folder a session with none chosen works in, with what it makes now.
+  Widget _workspaceRow() {
+    final problem = _workspaceProblem;
+    final preview = problem == null ? widget.workspacePreview!(_workspace.text) : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: TextField(
+        key: const Key('settings-workspace'),
+        controller: _workspace,
+        decoration: InputDecoration(
+          labelText: 'Folder of a session with none chosen',
+          helperText: preview == null ? null : 'Now: $preview',
+          helperMaxLines: 3,
+          errorText: problem,
+          errorMaxLines: 3,
+          suffixIcon: _workspace.text == defaultWorkspace
+              ? null
+              : IconButton(
+                  key: const Key('settings-workspace-reset'),
+                  tooltip: 'Use the default',
+                  icon: const Icon(Icons.restart_alt),
+                  onPressed: () => _setWorkspace(defaultWorkspace, text: true),
+                ),
+        ),
+        onChanged: _setWorkspace,
+      ),
+    );
+  }
+
+  void _setWorkspace(String template, {bool text = false}) => setState(() {
+    if (text) _workspace.text = template;
+    _workspaceProblem = workspaceProblem(template);
+    if (_workspaceProblem == null) config = config.copyWith(sessions: _sessions(workspace: template));
+  });
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -290,6 +334,7 @@ class SettingsDialogState extends State<SettingsDialog> {
             },
           ),
         ),
+        if (widget.workspacePreview != null) _workspaceRow(),
         SwitchListTile(
           title: const Text('Keep what was said with each session'),
           subtitle: const Text('Off: only the session\'s name and place are kept. Turning it off clears what was kept.'),
@@ -324,7 +369,10 @@ class SettingsDialogState extends State<SettingsDialog> {
       if (widget.onQuit != null)
         TextButton(onPressed: () => widget.onQuit!(), child: const Text('Quit Canoa')),
       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      FilledButton(onPressed: () => Navigator.pop(context, config), child: const Text('Save')),
+      FilledButton(
+        onPressed: _workspaceProblem == null ? () => Navigator.pop(context, config) : null,
+        child: const Text('Save'),
+      ),
     ],
   );
 }

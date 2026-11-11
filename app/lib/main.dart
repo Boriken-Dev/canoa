@@ -54,6 +54,9 @@ import 'drafts/draft_store.dart';
 import 'theme/canoa_mark.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
+import 'workspace/documents.dart' show hasWorkspaceFolders, makeFolder, removeEmptyFolder;
+import 'workspace/scratch.dart';
+import 'workspace/workspace_template.dart' show exampleSessionId;
 import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
 import 'worktree/local.dart';
@@ -96,7 +99,7 @@ class CanoaApp extends StatefulWidget {
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.ledger, this.notifier, this.drafts,
     this.checkSource, this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard, this.startAgent,
-    this.worktrees,
+    this.worktrees, this.documents,
   });
 
   /// Where sessions not yet started are kept between runs, for a store this app makes.
@@ -121,6 +124,10 @@ class CanoaApp extends StatefulWidget {
   /// Starts an agent on this computer; by default as a child of this app.
   @visibleForTesting
   final StartAgent? startAgent;
+
+  /// The Documents folder `${documents}` stands for; by default the system's.
+  @visibleForTesting
+  final String? documents;
 
   /// Makes worktrees for agents on this computer; by default by git.
   @visibleForTesting
@@ -218,6 +225,9 @@ class _CanoaAppState extends State<CanoaApp> {
           config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger,
           onProfiles: _showProfiles,
           onPreview: (preview) => setState(() => _preview = preview),
+          workspacePreview: hasWorkspaceFolders && canRunLocalAgents
+              ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
+              : null,
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
           presets: canRunLocalAgents ? agentPresets : const [],
           hosted: [for (final source in _hostedSources) source.hostEntry!],
@@ -563,7 +573,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final source = sources.contains(_lastSource)
         ? _lastSource
         : sources.where((source) => _checks[source]?.ready ?? false).firstOrNull ?? sources.firstOrNull;
-    final draft = store.createDraft(source: source, cwd: _lastFolder ?? _recentFolders.firstOrNull ?? defaultWorkingDirectory());
+    final draft = store.createDraft(source: source, cwd: _lastFolder ?? _recentFolders.firstOrNull);
     _hint(draft);
   }
 
@@ -620,10 +630,20 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!check.ready) {
       throw StateError(check.describe(source.label, needs: source.command == null ? const [] : commandNeeds(source.command!))!);
     }
-    final folder = draft.cwd == null || draft.cwd!.isEmpty ? defaultWorkingDirectory() : draft.cwd;
+    // With none chosen the session works in its scratch folder, which is made now and not before.
+    final scratch = draft.cwd == null || draft.cwd!.isEmpty;
+    final folder = scratch ? _scratchOf(draft) : draft.cwd;
     if (folder == null) throw StateError('Choose its folder first');
+    var madeFolder = false;
+    if (scratch) {
+      try {
+        madeFolder = await makeFolder(folder);
+      } on Object catch (error) {
+        throw StateError('Cannot make its folder $folder: ${reasonOf(error)}');
+      }
+    }
     // Worktree shows, and applies, only for a folder in a git repository.
-    final worktree = draft.wantsWorktree && (widget.isGitRepository ?? inGitRepository)(folder);
+    final worktree = !scratch && draft.wantsWorktree && (widget.isGitRepository ?? inGitRepository)(folder);
     final starting = _Starting();
     _inFlight.add(starting);
     try {
@@ -632,6 +652,9 @@ class _CanoaAppState extends State<CanoaApp> {
       } else {
         await _startHosted(draft, source.hostEntry!, folder, worktree, starting);
       }
+    } catch (_) {
+      if (madeFolder) await removeEmptyFolder(folder);
+      rethrow;
     } finally {
       _inFlight.remove(starting);
     }
@@ -920,6 +943,12 @@ class _CanoaAppState extends State<CanoaApp> {
     super.dispose();
   }
 
+  /// The folder [session] works in when none is chosen, from canoa.cfg's `[sessions] workspace`; null for a session not made here.
+  String? _scratchOf(ChatSession session) {
+    final id = session.workspaceId;
+    return id == null ? null : scratchFolder(config.sessions.workspace, id, source: session.source, documents: widget.documents);
+  }
+
   /// What the composer offers, from this app's sources, folders, files and clipboard.
   ComposerKit get _kit => ComposerKit(
     sources: _sources,
@@ -927,6 +956,7 @@ class _CanoaAppState extends State<CanoaApp> {
     recentFolders: _recentFolders,
     inGitRepository: widget.isGitRepository ?? inGitRepository,
     pickFolder: widget.pickFolder ?? (canRunLocalAgents ? () => getDirectoryPath() : null),
+    scratchFolder: hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     clipboard: widget.clipboard ?? const SystemClipboard(),

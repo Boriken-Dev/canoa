@@ -43,6 +43,7 @@ final class ComposerKit {
     this.recentFolders = const [],
     this.inGitRepository,
     this.pickFolder,
+    this.scratchFolder,
     this.pickFiles,
     this.statFile,
     this.clipboard = const TextClipboard(),
@@ -66,6 +67,9 @@ final class ComposerKit {
   final List<String> recentFolders;
   final bool Function(String folder)? inGitRepository;
   final Future<String?> Function()? pickFolder;
+
+  /// The folder a draft with none chosen works in; null where there is none.
+  final String? Function(ChatSession session)? scratchFolder;
   final Future<List<XFile>> Function()? pickFiles;
 
   /// A file's size in bytes, or null where it cannot be read.

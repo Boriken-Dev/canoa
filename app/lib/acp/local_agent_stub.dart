@@ -6,8 +6,6 @@ const bool canRunLocalAgents = false;
 
 Future<bool> isInstalled(AgentCommand command) async => false;
 
-String? defaultWorkingDirectory() => null;
-
 Future<String?> findProgram(String program, {List<String> searchDirs = const []}) async => null;
 
 String? environmentVariable(String name) => null;

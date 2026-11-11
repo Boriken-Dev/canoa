@@ -18,6 +18,7 @@ import 'profile/apply.dart';
 import 'profile/profile_layers.dart' show LayerNote;
 import 'sources/known_options.dart';
 import 'sources/sources.dart';
+import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
 
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
@@ -145,6 +146,10 @@ class ChatSession {
 
   /// The id a draft is kept under between runs; null once it starts.
   String? draftId;
+
+  /// Canoa's own id for the session, a UUID minted with its draft: it names the scratch folder before any agent runs, and the
+  /// ledger keeps it beside the id the agent later reports. Null for a session not made here.
+  String? workspaceId;
 
   /// The source a restored draft was kept with, by kind and label, while no source of that name is here.
   ({String kind, String label})? keptSource;
@@ -545,7 +550,7 @@ class SessionStore extends ChangeNotifier {
   /// is made then if [worktree]. It is kept between runs until it starts or is closed, and never noted in the ledger before.
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
-      ({String kind, String label})? keptSource, bool bypass = false}) {
+      ({String kind, String label})? keptSource, bool bypass = false, String? workspaceId}) {
     final session = ChatSession(
       id: 'local-${++_nextId}',
       title: title ?? draftTitle,
@@ -557,6 +562,7 @@ class SessionStore extends ChangeNotifier {
       ..wantsWorktree = worktree
       ..overlays = overlays
       ..draftId = id ?? newDraftId()
+      ..workspaceId = workspaceId ?? newSessionUuid()
       ..draftText = text
       ..keptSource = source == null ? keptSource : null
       ..agentNames = title == null
@@ -570,8 +576,8 @@ class SessionStore extends ChangeNotifier {
   }
 
   /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
-  void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool? worktree, Set<String>? overlays,
-      bool allOverlays = false, String? text}) {
+  void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool clearFolder = false, bool? worktree,
+      Set<String>? overlays, bool allOverlays = false, String? text}) {
     if (text != null) session.draftText = text;
     if (session.status == SessionStatus.draft) {
       if (source != null && source != session.source) {
@@ -584,6 +590,7 @@ class SessionStore extends ChangeNotifier {
         session.bypass = false;
       }
       if (cwd != null) session.cwd = cwd;
+      if (clearFolder) session.cwd = null;
       if (worktree != null) session.wantsWorktree = worktree;
       if (overlays != null || allOverlays) session.overlays = allOverlays ? null : overlays;
     }
@@ -610,6 +617,7 @@ class SessionStore extends ChangeNotifier {
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
         bypass: record['bypass'] == true,
+        workspaceId: record['workspaceId'] is String ? record['workspaceId'] as String : null,
         pending: {
           for (final choice in [
             for (final json in record['pending'] is List ? record['pending'] as List : const []) ?PendingChoice.fromJson(json),
@@ -650,6 +658,7 @@ class SessionStore extends ChangeNotifier {
         _ => null,
       },
       'cwd': ?session.cwd,
+      'workspaceId': ?session.workspaceId,
       'worktree': session.wantsWorktree,
       'overlays': ?session.overlays?.toList(),
       'text': session.draftText,
@@ -1179,6 +1188,7 @@ class SessionStore extends ChangeNotifier {
       fallback: session.websocketFallback?.toString(),
       method: session.method,
       worktree: session.worktree,
+      canoaId: session.workspaceId,
     );
   }
 
