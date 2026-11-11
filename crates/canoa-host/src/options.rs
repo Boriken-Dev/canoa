@@ -129,7 +129,7 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
         false,
         Vec::new(),
     ) {
-        Ok(configured) => ask(configured.connection(None).0.as_ref()),
+        Ok(configured) => ask(configured.connection(None, None).harness.as_ref()),
         Err(error) => Choices::unknown(error.to_string()),
     }
 }
@@ -160,7 +160,7 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
                 Err(error) => return Some(Choices::unknown(error.to_string())),
             };
             match kind::Harness::new(&registry, harness, &configured, false, Vec::new()) {
-                Ok(built) => ask(built.connection(None).0.as_ref()),
+                Ok(built) => ask(built.connection(None, None).harness.as_ref()),
                 Err(error) => Choices::unknown(error.to_string()),
             }
         }
