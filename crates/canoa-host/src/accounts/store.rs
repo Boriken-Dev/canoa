@@ -39,6 +39,8 @@ const NONCE_LEN: usize = 12;
 const MAX_RECORD: usize = 1 << 20;
 /// How many generations a removal looks for when the index is damaged and cannot say.
 const DAMAGED_SWEEP: u64 = 16;
+/// How many half-seconds a put waits for the index of an account the store showed before it takes the account as gone.
+const SHOWN_PATIENCE: u32 = 10;
 
 /// Why a store could not be used. It carries the store's words and never a credential.
 #[derive(Debug)]
@@ -143,6 +145,9 @@ fn use_platform_store() -> Result<(), StoreError> {
 /// The operating system's credential store, through `keyring-core`: one entry per chunk, under `service`.
 pub(crate) struct KeyringStore {
     service: String,
+    /// The accounts this store has shown to this process: written, or read with an index. An index that later reads as
+    /// missing, though the store held it a moment ago, is not the account's absence.
+    shown: Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl fmt::Debug for KeyringStore {
@@ -185,6 +190,33 @@ impl KeyringStore {
     pub(crate) fn new(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
+            shown: Mutex::new(std::collections::BTreeSet::new()),
+        }
+    }
+
+    fn shown(&self) -> std::sync::MutexGuard<'_, std::collections::BTreeSet<String>> {
+        self.shown.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The index of an account this store has shown, which must not read as missing: Windows' Credential Manager under load
+    /// answers "no such credential" for an entry that is there, for longer than [`Self::index`] waits. The miss is asked
+    /// again for a while, and an account still missing then is not written over.
+    fn index_of_shown(&self, id: &str) -> Result<Option<Index>, IndexError> {
+        let mut waited = 0;
+        loop {
+            match self.index(id)? {
+                None if self.shown().contains(id) => {
+                    if waited >= SHOWN_PATIENCE {
+                        return Err(IndexError::Unreadable(StoreError(
+                            "the credential store does not show an account it held a moment ago: nothing is written over it"
+                                .into(),
+                        )));
+                    }
+                    waited += 1;
+                    std::thread::sleep(core::time::Duration::from_millis(500));
+                }
+                found => return Ok(found),
+            }
         }
     }
 
@@ -306,7 +338,7 @@ impl SecretStore for KeyringStore {
     fn put(&self, id: &str, bytes: &[u8]) -> Result<(), StoreError> {
         let _turn = one_at_a_time();
         // An index that cannot be read is not a reason to start again at generation 1 over what it names.
-        let before = self.index(id).map_err(IndexError::into_error)?;
+        let before = self.index_of_shown(id).map_err(IndexError::into_error)?;
         let generation = before.as_ref().map_or(1, |index| index.generation + 1);
         // What an earlier put that stopped half way left under this generation.
         self.forget_generation(id, generation);
@@ -339,6 +371,7 @@ impl SecretStore for KeyringStore {
             self.forget_generation(id, generation);
             return Err(error);
         }
+        self.shown().insert(id.to_owned());
         if let Some(before) = before {
             self.forget_generation(id, before.generation);
         }
@@ -347,6 +380,7 @@ impl SecretStore for KeyringStore {
 
     fn remove(&self, id: &str) -> Result<(), StoreError> {
         let _turn = one_at_a_time();
+        self.shown().remove(id);
         let newest = match self.index(id) {
             Ok(Some(index)) => index.generation,
             Ok(None) => 0,
