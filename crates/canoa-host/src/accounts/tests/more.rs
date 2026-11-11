@@ -359,15 +359,18 @@ fn a_chunk_a_failed_write_left_and_every_old_generation_are_removed_with_the_acc
     // The record shrinks: the new generation has fewer chunks, and the old one's go.
     store.put("x", b"small").expect("puts");
     assert_eq!(store.get("x").expect("reads"), Some(b"small".to_vec()));
-    // A write that stopped half way left a chunk under the next generation: the next put overwrites and clears it.
-    store
-        .entry(&KeyringStore::chunk_user("x", 3, 7))
-        .expect("an entry")
-        .set_secret(b"left over")
-        .expect("planted");
+    // A write that stopped half way left chunks under the next generation: the next put clears them, those past its own
+    // count included.
+    for number in 0..3 {
+        store
+            .entry(&KeyringStore::chunk_user("x", 3, number))
+            .expect("an entry")
+            .set_secret(b"left over")
+            .expect("planted");
+    }
     store.put("x", b"third").expect("puts");
     let stale = store
-        .entry(&KeyringStore::chunk_user("x", 3, 7))
+        .entry(&KeyringStore::chunk_user("x", 3, 2))
         .expect("an entry")
         .get_secret();
     store.remove("x").expect("removes");
@@ -375,7 +378,7 @@ fn a_chunk_a_failed_write_left_and_every_old_generation_are_removed_with_the_acc
         .entry(&KeyringStore::chunk_user("x", 1, 0))
         .expect("an entry")
         .get_secret();
-    assert!(stale.is_err() || store.get("x").is_ok());
+    assert!(stale.is_err(), "a chunk of the failed write was kept");
     assert!(first_gone.is_err(), "an old generation's chunk was kept");
     assert!(store.get("x").expect("reads").is_none());
 }
