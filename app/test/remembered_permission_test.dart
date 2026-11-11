@@ -11,6 +11,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/sources/sources.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -48,18 +49,21 @@ final class _Agent {
 
   void reply(Object? id, Object? result) => incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': result}));
 
-  void ask(int id, String title, {String kind = 'execute', Object? rawInput, List<Map<String, Object?>> options = _all}) =>
+  void ask(int id, String title, {String kind = 'execute', Object? rawInput, List<Map<String, Object?>> options = _all, String? toolName}) =>
       incoming.add(jsonEncode({
         'jsonrpc': '2.0', 'id': id, 'method': 'session/request_permission',
         'params': {
           'sessionId': 's1',
-          'toolCall': {'toolCallId': 't$id', 'title': title, 'kind': kind, 'rawInput': rawInput},
+          'toolCall': {
+            'toolCallId': 't$id', 'title': title, 'kind': kind, 'rawInput': rawInput,
+            if (toolName != null) '_meta': {'claudeCode': {'toolName': toolName}},
+          },
           'options': options,
         },
       }));
 
-  void run(int id, String command, {List<Map<String, Object?>> options = _all}) =>
-      ask(id, 'Run a command', rawInput: {'command': command}, options: options);
+  void run(int id, String command, {List<Map<String, Object?>> options = _all, String? toolName}) =>
+      ask(id, 'Run a command', rawInput: {'command': command}, options: options, toolName: toolName);
 
   void editFile(int id, String path, {List<Map<String, Object?>> options = _all}) =>
       ask(id, 'Edit a file', kind: 'edit', rawInput: {'file_path': path, 'old_string': 'a', 'new_string': 'b'}, options: options);
@@ -119,6 +123,16 @@ Future<_Shown> _shown(WidgetTester tester, {PermissionRules? rules, MemoryLedger
 }
 
 final _offer = find.byKey(const Key('always-allow-here'));
+
+/// A rule as the dialog would make it for [s]'s session.
+PermissionRule _add(_Shown s, {String kind = 'execute', required RuleType type, required String value, String toolName = ''}) =>
+    s.rules.add(source: 'Scripted', peer: s.session.peerId ?? '', folder: '/work/calc', kind: kind, toolName: toolName, type: type, value: value)!;
+
+/// Taps confirm and expects the dialog to stay, with its problem shown.
+Future<void> _confirmKeeping(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('rule-confirm')));
+  await tester.pump();
+}
 
 Future<void> _confirm(WidgetTester tester) async {
   await tester.tap(find.byKey(const Key('rule-confirm')));
@@ -215,7 +229,7 @@ void main() {
     testWidgets('answers with allow once even when the agent lists its always first, and never when it offers no allow once',
         (tester) async {
       final s = await _shown(tester);
-      s.rules.add(source: 'Scripted', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test');
+      _add(s, type: RuleType.command, value: 'npm test');
       s.agent.run(1, 'npm test');
       await _settle(tester);
       expect(s.agent.chose(1), 'allow-once');
@@ -232,7 +246,7 @@ void main() {
 
     testWidgets('a near-miss command, another folder and another source still ask', (tester) async {
       final s = await _shown(tester);
-      s.rules.add(source: 'Scripted', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test');
+      _add(s, type: RuleType.command, value: 'npm test');
       for (final (i, command) in ['npm test -- a.js', 'npm test; rm -rf ~', 'npm  test', 'NPM test'].indexed) {
         s.agent.run(10 + i, command);
         await _settle(tester);
@@ -260,7 +274,7 @@ void main() {
       await tester.tap(_offer);
       await tester.pumpAndSettle();
       await _confirm(tester);
-      await tester.runAsync(s.rules.flush);
+      await tester.runAsync(s.rules.settled);
       final again = PermissionRules(s.backend);
       await tester.runAsync(again.load);
       expect(again.rules.single.value, 'npm test');
@@ -285,6 +299,11 @@ void main() {
       return s;
     }
 
+    testWidgets('is prefilled with the whole command, never a guessed prefix', (tester) async {
+      await openDialog(tester, 'npm test -- a.js');
+      expect(tester.widget<TextField>(find.byKey(const Key('rule-value'))).controller!.text, 'npm test -- a.js');
+    });
+
     testWidgets('covers arguments after the edited prefix and nothing past it', (tester) async {
       final s = await openDialog(tester, 'npm test -- a.js');
       await tester.enterText(find.byKey(const Key('rule-value')), 'npm test');
@@ -304,7 +323,7 @@ void main() {
 
     testWidgets('refuses a prefix that is not the start of the command, or holds a second command, and keeps nothing', (tester) async {
       final s = await openDialog(tester, 'npm test -- a.js');
-      for (final bad in ['yarn', 'npm test -- a.js; rm', 'npm test ', '', 'npm test && curl x']) {
+      for (final bad in ['yarn', 'npm', 'npm test -- a.js; rm', 'npm test ', '', 'npm test && curl x', 'npm run test', 'sh -c']) {
         await tester.enterText(find.byKey(const Key('rule-value')), bad);
         await tester.tap(find.byKey(const Key('rule-confirm')));
         await tester.pump();
@@ -355,18 +374,20 @@ void main() {
   group('a rule for an MCP tool', () {
     testWidgets('is made for that tool on that server', (tester) async {
       final s = await _shown(tester);
-      s.agent.ask(1, 'mcp__marker__mark', kind: 'other', rawInput: {'text': 'x'});
+      s.agent.ask(1, 'mark', kind: 'other', rawInput: {'text': 'x'}, toolName: 'mcp__marker__mark');
       await _settle(tester);
       await tester.tap(_offer);
       await tester.pumpAndSettle();
       expect(find.textContaining('Any use of the tool mark of marker'), findsOneWidget);
       await _confirm(tester);
       expect(s.agent.chose(1), 'allow-once');
-      s.agent.ask(2, 'mcp__marker__mark', kind: 'other', rawInput: {'text': 'y'});
-      s.agent.ask(3, 'mcp__marker__erase', kind: 'other', rawInput: {'text': 'y'});
+      s.agent.ask(2, 'mark', kind: 'other', rawInput: {'text': 'y'}, toolName: 'mcp__marker__mark');
+      s.agent.ask(3, 'mark', kind: 'other', rawInput: {'text': 'y'}, toolName: 'mcp__marker__erase');
+      s.agent.ask(4, 'mcp__marker__mark', kind: 'other', rawInput: {'text': 'y'});
       await _settle(tester);
       expect(s.agent.chose(2), 'allow-once');
       expect(s.agent.answerTo(3), isNull);
+      expect(s.agent.answerTo(4), isNull, reason: 'a title is not a tool name');
     });
   });
 
@@ -382,8 +403,8 @@ void main() {
     testWidgets('lists each rule with when it was made and how often it answered, and revokes it in one action', (tester) async {
       final rules = PermissionRules(MemoryLedgerBackend(), clock: () => DateTime.utc(2026, 11, 12, 9));
       final rule = rules.add(source: 'Scripted', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test')!;
-      rules.recordUse(rule);
-      rules.recordUse(rule);
+      rules.recordUse(rule, 'npm test');
+      rules.recordUse(rule, 'npm test');
       await open(tester, rules);
       expect(find.text('Run: npm test'), findsOneWidget);
       expect(find.textContaining('Scripted in /work/calc'), findsOneWidget);
@@ -395,9 +416,20 @@ void main() {
       expect(find.textContaining('Nothing is allowed without asking'), findsOneWidget);
     });
 
+    testWidgets('flags a rule the app did not write, and says when a write failed', (tester) async {
+      final backend = MemoryLedgerBackend()
+        ..document = '{"version":1,"rules":[{"id":"hand","source":"s","folder":"/f","tool":"execute","type":"command","value":"ls","made":"2026-11-12T00:00:00Z"}]}';
+      final rules = PermissionRules(backend);
+      await tester.runAsync(rules.load);
+      rules.writeProblem = 'could not write the file: disk full';
+      await open(tester, rules);
+      expect(find.textContaining('Not made in this app'), findsOneWidget);
+      expect(find.byKey(const Key('rules-write-problem')), findsOneWidget);
+    });
+
     testWidgets('a revoked rule asks again', (tester) async {
       final s = await _shown(tester);
-      final rule = s.rules.add(source: 'Scripted', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test')!;
+      final rule = _add(s, type: RuleType.command, value: 'npm test');
       s.agent.run(1, 'npm test');
       await _settle(tester);
       expect(s.agent.chose(1), 'allow-once');
@@ -406,6 +438,113 @@ void main() {
       await _settle(tester);
       expect(s.agent.answerTo(2), isNull);
       expect(find.byType(PermissionCard), findsOneWidget);
+    });
+  });
+
+  group('what the dialog refuses and says', () {
+    testWidgets('says what a command rule runs and what a path rule never covers', (tester) async {
+      final s = await _shown(tester);
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      await tester.tap(_offer);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('runs whatever the files in this folder make it do'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(s.session.pendingPermissions, hasLength(1), reason: 'cancelling keeps nothing and answers nothing');
+      s.store.cancelPermission(s.session);
+      s.agent.editFile(2, '/work/calc/src/a.js');
+      await _settle(tester);
+      await tester.tap(_offer);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Never version control, settings, hooks, build scripts'), findsOneWidget);
+    });
+
+    testWidgets('refuses a path rule for version control, however it is asked for', (tester) async {
+      final s = await _shown(tester);
+      s.agent.editFile(1, '/work/calc/.git/hooks/pre-commit');
+      await _settle(tester);
+      await tester.tap(_offer);
+      await tester.pumpAndSettle();
+      await _confirmKeeping(tester);
+      expect(find.byKey(const Key('rule-problem')), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('rule-value')), '/work/calc');
+      await _confirmKeeping(tester);
+      expect(find.byKey(const Key('rule-problem')), findsOneWidget, reason: 'a wider scope that holds it is refused too');
+      expect(s.rules.rules, isEmpty);
+    });
+
+    testWidgets('offers no rule for a path that is relative, starts with ~, names a stream or is a network path', (tester) async {
+      final s = await _shown(tester);
+      var id = 1;
+      for (final path in ['src/a.js', '~/a.js', '/work/calc/a.js:stream', r'\\server\share\a.js', 'C:a.js']) {
+        s.agent.editFile(id, path);
+        await _settle(tester);
+        expect(_offer, findsNothing, reason: path);
+        expect(find.byType(PermissionCard), findsOneWidget, reason: path);
+        s.store.cancelPermission(s.session);
+        id++;
+      }
+    });
+
+    testWidgets('keeps commands and file changes apart for one source and folder', (tester) async {
+      final s = await _shown(tester);
+      _add(s, type: RuleType.command, value: 'npm test');
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      await tester.tap(_offer);
+      await tester.pumpAndSettle();
+      await _confirmKeeping(tester);
+      expect(find.byKey(const Key('rule-problem')), findsOneWidget);
+      expect(find.textContaining('A rule for commands already stands here'), findsOneWidget);
+      expect(s.rules.rules, hasLength(1));
+      expect(s.agent.answerTo(1), isNull);
+    });
+
+    testWidgets('a rule made for Bash is not one for PowerShell', (tester) async {
+      final s = await _shown(tester);
+      s.agent.run(1, 'npm test', toolName: 'Bash');
+      await _settle(tester);
+      await tester.tap(_offer);
+      await tester.pumpAndSettle();
+      await _confirm(tester);
+      expect(s.rules.rules.single.toolName, 'Bash');
+      s.agent.run(2, 'npm test', toolName: 'Bash');
+      s.agent.run(3, 'npm test', toolName: 'PowerShell');
+      s.agent.run(4, 'npm test');
+      await _settle(tester);
+      expect(s.agent.chose(2), 'allow-once');
+      expect(s.agent.answerTo(3), isNull);
+      expect(s.agent.answerTo(4), isNull);
+    });
+
+    testWidgets('a rule is made for the request the dialog was opened for, not the one that is first by then', (tester) async {
+      final s = await _shown(tester);
+      s.agent.run(1, 'npm test');
+      s.agent.run(2, 'cargo test');
+      await _settle(tester);
+      final opened = s.session.pendingPermissions.first;
+      s.store.cancelPermission(s.session);
+      expect(s.store.rememberHere(s.session, opened, RuleType.command, 'npm test'), contains('no longer waiting'));
+      expect(s.rules.rules, isEmpty);
+      expect(s.agent.answerTo(2), isNull, reason: 'the second request was not answered by a rule made for the first');
+      expect(s.session.pendingPermissions.single.title, 'Run a command');
+      final second = s.session.pendingPermissions.single;
+      expect(s.store.rememberHere(s.session, second, RuleType.command, 'npm test'), isNotNull, reason: 'the scope is not the command asked');
+      expect(s.store.rememberHere(s.session, second, RuleType.command, 'cargo test'), isNull);
+      await _settle(tester);
+      expect(s.agent.chose(2), 'allow-once');
+    });
+
+    testWidgets('two sources that share a label do not share rules', (tester) async {
+      final s = await _shown(tester);
+      expect(SessionStore.ruleSource(s.session), 'Scripted');
+      s.session.source = const AgentSource.hosted('Scripted');
+      expect(SessionStore.ruleSource(s.session), 'canoa/Scripted');
+      s.rules.add(source: 'Scripted', peer: s.session.peerId ?? '', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test');
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull, reason: 'a preset\'s rule is not a hosted entry\'s');
     });
   });
 

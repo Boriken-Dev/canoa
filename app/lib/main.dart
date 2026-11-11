@@ -43,6 +43,7 @@ import 'ledger/ledger_backend.dart';
 import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
+import 'permissions/real_path.dart';
 import 'profile/apply.dart';
 import 'profile/launch.dart';
 import 'profile/profile.dart' show OverlaySource;
@@ -58,7 +59,7 @@ import 'drafts/draft_store.dart';
 import 'theme/canoa_mark.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
-import 'workspace/documents.dart' show hasWorkspaceFolders, makeFolder, removeEmptyFolder;
+import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
 import 'workspace/scratch.dart';
 import 'workspace/workspace_template.dart' show exampleSessionId;
 import 'worktree/close_dialog.dart';
@@ -66,6 +67,14 @@ import 'worktree/host.dart';
 import 'worktree/local.dart';
 import 'worktree/worktree.dart';
 import 'selectable.dart';
+
+/// The folder [file] is in, else null.
+String? _parentFolder(String? file) {
+  if (file == null) return null;
+  final text = file.replaceAll('\\', '/');
+  final cut = text.lastIndexOf('/');
+  return cut <= 0 ? null : text.substring(0, cut);
+}
 
 Future<void> main(List<String> args) async {
   // The executable's own entry takes this before Flutter starts; reaching here means a runner built without it, which must
@@ -76,7 +85,16 @@ Future<void> main(List<String> args) async {
   // Beside canoa.cfg on a desktop, in this origin's IndexedDB on the web.
   final ledger = SessionLedger(platformLedgerBackend(configPath: desktopConfigPath()), settings: config.sessions);
   await ledger.load();
-  final rules = PermissionRules(platformLedgerBackend(configPath: desktopConfigPath(), name: 'permissions'));
+  final configFile = desktopConfigPath();
+  final rules = PermissionRules(
+    platformLedgerBackend(configPath: configFile, name: 'permissions'),
+    log: platformLedgerBackend(configPath: configFile, name: 'permissions-log'),
+    guards: PermissionGuards(
+      home: homeFolder(),
+      config: _parentFolder(configFile),
+    ),
+    real: platformRealPath,
+  );
   await rules.load();
   final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
   final shell = createDesktopShell();

@@ -32,7 +32,7 @@ class _RememberDialogState extends State<RememberDialog> {
   };
   late final TextEditingController text = TextEditingController(
     text: switch (subject) {
-      CommandSubject(:final command) => command.split(' ').take(2).join(' '),
+      CommandSubject(:final command) => command,
       PathSubject(:final path) => path,
       McpSubject(:final name) => name,
     },
@@ -52,7 +52,7 @@ class _RememberDialogState extends State<RememberDialog> {
   };
 
   void confirm() {
-    final failed = widget.store.rememberHere(widget.session, type, value);
+    final failed = widget.store.rememberHere(widget.session, widget.question, type, value);
     if (failed == null) {
       Navigator.pop(context, true);
     } else {
@@ -92,7 +92,10 @@ class _RememberDialogState extends State<RememberDialog> {
                 style: mono,
                 enabled: type == RuleType.prefix,
                 onChanged: (_) => setState(() => problem = null),
-                decoration: const InputDecoration(isDense: true, helperText: 'Whole words, then arguments only: never a second command.'),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  helperText: 'Cut words off the end. At least two words; never a shell, interpreter or launcher.',
+                ),
               ),
             ),
           ]),
@@ -104,7 +107,7 @@ class _RememberDialogState extends State<RememberDialog> {
           onChanged: (_) => setState(() => problem = null),
           decoration: InputDecoration(
             labelText: 'This file, or this folder and what is under it',
-            helperText: 'Has to be inside $folder.',
+            helperText: 'An absolute path inside $folder. Never version control, settings, hooks, build scripts or Canoa\'s own files.',
           ),
         ),
         McpSubject(:final server, :final tool) => Text('Any use of the tool $tool of $server, with any input.'),
@@ -125,6 +128,15 @@ class _RememberDialogState extends State<RememberDialog> {
             const SizedBox(height: 8),
             ...fields,
             const SizedBox(height: 12),
+            if (subject is CommandSubject)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'A command runs whatever the files in this folder make it do: a test or build command runs the scripts and tests '
+                  'there, as they are when it runs. Only one of commands or file changes can be allowed here at a time.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
             Text(
               'Canoa then answers a matching request with allow once, itself, without asking you, until you revoke the rule in '
               'Settings, Permissions. It never answers an "always", a request from another source or folder, or one the agent '

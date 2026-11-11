@@ -963,16 +963,18 @@ class SessionStore extends ChangeNotifier {
         return Future.value(AcpSelect(allow.optionId));
       }
     }
-    final subject = forPerson
-        ? null
-        : subjectOf(kind: request.kind, title: request.title, rawInput: request.rawInput, toolCall: request.toolCall);
+    final subject = forPerson ? null : subjectOf(kind: request.kind, rawInput: request.rawInput, toolCall: request.toolCall);
     final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
     final folder = target.cwd;
     final keepable = rules != null && subject != null && once != null && folder != null && folder.isNotEmpty;
     if (keepable) {
-      final rule = rules!.match(source: target.agent, folder: folder, kind: request.kind, subject: subject);
+      final rule = rules!.match(source: ruleSource(target), peer: target.peerId ?? '', folder: folder, kind: request.kind, subject: subject);
       if (rule != null) {
-        rules!.recordUse(rule);
+        rules!.recordUse(rule, switch (subject) {
+          CommandSubject(:final command) => command,
+          PathSubject(:final path) => path,
+          McpSubject(:final name) => name,
+        });
         _note(target, 'A remembered rule allowed: $title (${rule.describe}). Settings, Permissions shows it and revokes it.');
         notifyListeners();
         return Future.value(AcpSelect(once.optionId));
@@ -1055,21 +1057,27 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The scope the person set for the oldest request in [session], as [type] and [value]: remembered as a rule for this source
-  /// in this folder, and the request answered with the agent's allow-once answer. Returns why it cannot be made, or null once
-  /// it is.
-  String? rememberHere(ChatSession session, RuleType type, String value) {
+  /// What a rule calls [session]'s source: its identity (the key the session list remembers it under), not the name it is shown
+  /// by, so two sources that share a label do not share rules.
+  static String ruleSource(ChatSession session) => session.source == null ? session.agent : sourceKey(session.source!);
+
+  /// The scope the person set, as [type] and [value], for [question], the request the dialog was opened for: remembered as a rule
+  /// for this source in this folder, and that request answered with the agent's allow-once answer. Returns why it cannot be made,
+  /// or null once it is.
+  String? rememberHere(ChatSession session, PermissionQuestion question, RuleType type, String value) {
     final store = rules, folder = session.cwd;
-    if (session.pendingPermissions.isEmpty || store == null || folder == null || folder.isEmpty) return 'There is nowhere to keep a rule.';
-    final question = session.pendingPermissions.first;
+    if (store == null || folder == null || folder.isEmpty) return 'There is nowhere to keep a rule.';
+    if (!session.pendingPermissions.contains(question)) return 'That request is no longer waiting.';
     final subject = question.subject, kind = question.kind;
     final once = question.options.where((option) => option.kind == 'allow_once').firstOrNull;
     if (subject == null || kind == null || once == null) return 'No rule can cover this request.';
-    final problem = scopeProblem(type, value, subject, folder);
+    final problem = store.checkScope(type, value, subject, folder) ??
+        store.conflict(ruleSource(session), session.peerId ?? '', folder, type);
     if (problem != null) return problem;
-    final rule = store.add(source: session.agent, folder: folder, kind: kind, type: type, value: value);
+    final rule = store.add(
+        source: ruleSource(session), peer: session.peerId ?? '', folder: folder, kind: kind, toolName: subject.toolName, type: type, value: value);
     if (rule == null) return 'Canoa keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
-    session.pendingPermissions.removeAt(0);
+    session.pendingPermissions.remove(question);
     _note(session, 'Always allow here: ${rule.describe}, for ${shortText(session.agent) ?? 'this source'} in $folder. Canoa now '
         'answers a matching request with allow once, without asking you. Settings, Permissions revokes it.');
     question._answer.complete(AcpSelect(once.optionId));

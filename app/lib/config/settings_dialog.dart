@@ -121,6 +121,11 @@ class SettingsDialogState extends State<SettingsDialog> {
         children: [
           if (widget.rules!.problem case final problem?)
             Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+          if (widget.rules!.writeProblem case final problem?)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(problem, key: const Key('rules-write-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
           if (rules.isEmpty)
             const ListTile(title: Text('"Always allow here" on a permission card remembers a rule for a source and a folder; it is listed here.')),
           for (final rule in rules)
@@ -130,9 +135,10 @@ class SettingsDialogState extends State<SettingsDialog> {
               subtitle: Text(
                 '${rule.source} in ${rule.folder}\n'
                 'Made ${day(rule.made)}; used ${rule.fired == 1 ? 'once' : '${rule.fired} times'}'
-                '${rule.lastUsed == null ? '' : ', last ${day(rule.lastUsed!)}'}',
+                '${rule.lastUsed == null ? '' : ', last ${day(rule.lastUsed!)}'}'
+                '${rule.external ? '\nNot made in this app: the file was edited, or another program wrote it.' : ''}',
               ),
-              isThreeLine: true,
+              isThreeLine: !rule.external,
               trailing: TextButton(key: Key('revoke-${rule.id}'), onPressed: () => widget.rules!.revoke(rule.id), child: const Text('Revoke')),
             ),
         ],
