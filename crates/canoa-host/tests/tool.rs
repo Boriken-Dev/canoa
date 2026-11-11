@@ -536,13 +536,21 @@ fn the_tools_processes_end_with_the_link() {
         .expect("a turn left running");
     })
     .expect("linked");
-    let pids: Vec<u32> = std::fs::read_to_string(Path::new(&dir).join("tool.pid"))
-        .expect("the fixture wrote its id")
-        .lines()
-        .map(|line| line.parse().expect("a process id"))
-        .collect();
-    assert_eq!(pids.len(), 2);
-    let until = Instant::now() + Duration::from_secs(10);
+    // The file is read once each fixture's line is whole: a process creates it before it writes its id.
+    let written = Instant::now() + Duration::from_secs(300);
+    let pids: Vec<u32> = loop {
+        let pids: Vec<u32> = std::fs::read_to_string(Path::new(&dir).join("tool.pid"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.parse().ok())
+            .collect();
+        if pids.len() >= 2 || Instant::now() > written {
+            break pids;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(pids.len(), 2, "each fixture wrote its id");
+    let until = Instant::now() + Duration::from_secs(300);
     while pids.iter().any(|pid| running(*pid)) {
         assert!(
             Instant::now() < until,
