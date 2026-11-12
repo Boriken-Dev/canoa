@@ -36,6 +36,7 @@ coqui-acp-pi.workspace = true
 coqui-acp-harness.workspace = true
 coqui-acp-provider.workspace = true
 coqui-aos.workspace = true
+coqui-a2a.workspace = true
 coqui-agentic-peer.workspace = true
 coqui-peer.workspace = true
 coqui-peer-webcrypto.workspace = true

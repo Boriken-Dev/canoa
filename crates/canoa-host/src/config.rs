@@ -52,6 +52,8 @@ pub struct Config {
     pub account_store: AccountStore,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
+    /// `[host.delegate]`: what an agent may hand to another one.
+    pub delegate: DelegateConfig,
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
     /// such table, which leaves the channel to this process.
     pub control: Option<ControlConfig>,
@@ -163,6 +165,97 @@ pub struct StoreConfig {
     pub protected: Option<Vec<String>>,
     /// `credential_variables`: the variables an install is never given, matched against a name, in the same form.
     pub credential_variables: Option<Vec<String>>,
+}
+
+/// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
+/// default and no floor; a value away from its default is logged when the host starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DelegateConfig {
+    /// `enabled`: whether the host offers the delegation tools at all. A client still has to ask for them.
+    pub enabled: bool,
+    /// `sources`: the entries a task may name. `None` is every entry the delegating connection may use; a list narrows that, an
+    /// empty one allows none.
+    pub sources: Option<Vec<String>>,
+    /// `max_children`: tasks one session has running at once.
+    pub max_children: usize,
+    /// `max_running`: tasks the whole host has running at once.
+    pub max_running: usize,
+    /// `max_depth`: how many levels of tasks may delegate in turn; 1 lets a session hand tasks out and no task hand any on.
+    pub max_depth: usize,
+    /// `task_bytes`: the longest task text.
+    pub task_bytes: usize,
+    /// `result_bytes`: the most of a task's reply that one `task_status` answer carries.
+    pub result_bytes: usize,
+    /// `history_bytes`: the updates of a task the host keeps, oldest dropped first.
+    pub history_bytes: usize,
+}
+
+impl DelegateConfig {
+    /// The default of `max_children`.
+    pub const DEFAULT_MAX_CHILDREN: usize = 8;
+    /// The default of `max_running`.
+    pub const DEFAULT_MAX_RUNNING: usize = 16;
+    /// The default of `max_depth`.
+    pub const DEFAULT_MAX_DEPTH: usize = 1;
+    /// The default of `task_bytes`.
+    pub const DEFAULT_TASK_BYTES: usize = 64 * 1024;
+    /// The default of `result_bytes`.
+    pub const DEFAULT_RESULT_BYTES: usize = 64 * 1024;
+    /// The default of `history_bytes`.
+    pub const DEFAULT_HISTORY_BYTES: usize = 1024 * 1024;
+}
+
+impl Default for DelegateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sources: None,
+            max_children: Self::DEFAULT_MAX_CHILDREN,
+            max_running: Self::DEFAULT_MAX_RUNNING,
+            max_depth: Self::DEFAULT_MAX_DEPTH,
+            task_bytes: Self::DEFAULT_TASK_BYTES,
+            result_bytes: Self::DEFAULT_RESULT_BYTES,
+            history_bytes: Self::DEFAULT_HISTORY_BYTES,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawDelegate {
+    enabled: Option<bool>,
+    sources: Option<Vec<String>>,
+    max_children: Option<usize>,
+    max_running: Option<usize>,
+    max_depth: Option<usize>,
+    task_bytes: Option<usize>,
+    result_bytes: Option<usize>,
+    history_bytes: Option<usize>,
+}
+
+impl RawDelegate {
+    fn into_config(self) -> Result<DelegateConfig, ConfigError> {
+        let defaults = DelegateConfig::default();
+        if let Some(sources) = &self.sources
+            && sources.iter().any(|name| name.trim().is_empty())
+        {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "host.delegate: sources holds an empty name".to_owned(),
+            });
+        }
+        Ok(DelegateConfig {
+            enabled: self.enabled.unwrap_or(defaults.enabled),
+            sources: self.sources,
+            max_children: self.max_children.unwrap_or(defaults.max_children),
+            max_running: self.max_running.unwrap_or(defaults.max_running),
+            max_depth: self.max_depth.unwrap_or(defaults.max_depth),
+            task_bytes: self.task_bytes.unwrap_or(defaults.task_bytes),
+            result_bytes: self.result_bytes.unwrap_or(defaults.result_bytes),
+            history_bytes: self.history_bytes.unwrap_or(defaults.history_bytes),
+        })
+    }
 }
 
 /// A list of lines as canoa.cfg writes it: one string, a line a line, or a list of strings.
@@ -746,6 +839,7 @@ struct RawHost {
     web: Option<RawWeb>,
     control: Option<RawControl>,
     store: Option<RawStore>,
+    delegate: Option<RawDelegate>,
 }
 
 /// `[host.control]`.
@@ -949,6 +1043,11 @@ impl Config {
                 protected: raw.protected.map(RawLines::lines),
                 credential_variables: raw.credential_variables.map(RawLines::lines),
             });
+        let delegate = host
+            .delegate
+            .map(RawDelegate::into_config)
+            .transpose()?
+            .unwrap_or_default();
         let mut accounts = IndexMap::new();
         for (name, raw) in host.accounts {
             let account = account_of(&name, raw)?;
@@ -1255,6 +1354,7 @@ impl Config {
             local_profiles,
             control,
             store,
+            delegate,
         })
     }
 
