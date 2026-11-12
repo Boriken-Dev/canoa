@@ -82,6 +82,10 @@ struct Setup {
 }
 
 fn setup(name: &str, store_variant: Variant) -> Setup {
+    setup_with(name, store_variant, |_| {})
+}
+
+fn setup_with(name: &str, store_variant: Variant, tune: impl FnOnce(&mut Options)) -> Setup {
     let dir = Dir::new(name);
     let home = dir.0.join("home");
     fs::create_dir_all(&home).expect("home");
@@ -105,6 +109,7 @@ fn setup(name: &str, store_variant: Variant) -> Setup {
         }
         env
     };
+    tune(&mut options);
     let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
         .transport(transport.clone())
         .options(options);
@@ -1050,6 +1055,59 @@ fn a_state_folder_is_a_folder_named_for_the_program_and_never_a_place_the_system
         |_| {},
     );
     assert!(ok.is_ok(), "a folder named for the program: {ok:?}");
+}
+
+#[test]
+fn a_declared_target_on_the_hosts_list_is_refused_and_accepted_once_the_person_removes_it() {
+    let own = |s: &Setup| Rig::DeclaresState(s.dir.0.join("home").join(".echo"));
+    let recommended = || -> Vec<String> {
+        canoa_host::store::protect::RECOMMENDED_PLACES
+            .iter()
+            .map(|line| (*line).to_owned())
+            .collect()
+    };
+    let listed = |extra: &'static str| {
+        move |options: &mut Options| {
+            options.protected = recommended();
+            options.protected.push(extra.to_owned());
+        }
+    };
+    let s = setup_with("listed", Variant::Normal, listed("~/.echo"));
+    refuses_with_declares(&s, own(&s));
+    let s = setup_with("listed_below", Variant::Normal, listed(".ec*"));
+    refuses_with_declares(&s, own(&s));
+    // The person removes the entry: the recommended list alone accepts the folder.
+    let s = setup("unlisted", Variant::Normal);
+    let ok = apply_rigged(&s, rigged(&s, own(&s)), |_| {});
+    assert!(ok.is_ok(), "{ok:?}");
+    // Or allows it back with a later line.
+    let s = setup_with("allowed_back", Variant::Normal, |options| {
+        options.protected = recommended();
+        options.protected.push("~/.echo".to_owned());
+        options.protected.push("!~/.echo".to_owned());
+    });
+    let ok = apply_rigged(&s, rigged(&s, own(&s)), |_| {});
+    assert!(ok.is_ok(), "{ok:?}");
+    // The person's list is the whole list: what it does not name is not protected, and what it names is.
+    let s = setup_with("cut", Variant::Normal, |options| {
+        options.protected = vec!["~/.ssh".to_owned()];
+    });
+    refuses_with_declares(&s, Rig::DeclaresState(s.dir.0.join("home").join(".ssh")));
+    // The home itself stays refused whatever the list says.
+    let s = setup_with("empty", Variant::Normal, |options| {
+        options.protected = Vec::new()
+    });
+    refuses_with_declares(&s, Rig::DeclaresState(s.dir.0.join("home")));
+    let ok = apply_rigged(&s, rigged(&s, own(&s)), |_| {});
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn a_target_that_holds_a_listed_place_is_refused() {
+    let s = setup_with("holds", Variant::Normal, |options| {
+        options.protected = vec!["~/.echo/secrets".to_owned()];
+    });
+    refuses_with_declares(&s, Rig::DeclaresState(s.dir.0.join("home").join(".echo")));
 }
 
 #[test]

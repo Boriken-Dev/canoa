@@ -47,6 +47,8 @@ pub struct Config {
     pub accounts: IndexMap<String, AccountConfig>,
     /// Where the accounts' credentials are kept: `[host] account_store`.
     pub account_store: AccountStore,
+    /// `[host.store]`: what the program stores' installs are held to.
+    pub store: StoreConfig,
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
     /// such table, which leaves the channel to this process.
     pub control: Option<ControlConfig>,
@@ -143,6 +145,42 @@ pub struct ControlConfig {
     pub max_records: usize,
     /// The largest ledger record, in bytes.
     pub max_record_bytes: usize,
+}
+
+/// `[host.store]`: the lists, in gitignore syntax, that the host holds a program store's installs to. Each is `None` when the
+/// file has no such key, which means the recommended list; a list written here replaces it (an empty one protects nothing).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StoreConfig {
+    /// `protected`: the places an install may not declare a change at, under or holding. A string with a pattern a line, or a
+    /// list of such strings.
+    pub protected: Option<Vec<String>>,
+    /// `credential_variables`: the variables an install is never given, matched against a name, in the same form.
+    pub credential_variables: Option<Vec<String>>,
+}
+
+/// A list of lines as canoa.cfg writes it: one string, a line a line, or a list of strings.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawLines {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl RawLines {
+    fn lines(self) -> Vec<String> {
+        match self {
+            Self::One(text) => text.lines().map(str::to_owned).collect(),
+            Self::Many(lines) => lines,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStore {
+    protected: Option<RawLines>,
+    credential_variables: Option<RawLines>,
 }
 
 /// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
@@ -688,6 +726,7 @@ struct RawHost {
     account_store: Option<String>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
+    store: Option<RawStore>,
 }
 
 /// `[host.control]`.
@@ -880,6 +919,12 @@ impl Config {
                 });
             }
         };
+        let store = host
+            .store
+            .map_or_else(StoreConfig::default, |raw| StoreConfig {
+                protected: raw.protected.map(RawLines::lines),
+                credential_variables: raw.credential_variables.map(RawLines::lines),
+            });
         let mut accounts = IndexMap::new();
         for (name, raw) in host.accounts {
             let account = account_of(&name, raw)?;
@@ -1184,6 +1229,7 @@ impl Config {
             local_agents,
             local_profiles,
             control,
+            store,
         })
     }
 

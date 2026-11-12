@@ -31,6 +31,7 @@ use sha2::{Digest, Sha256};
 
 use super::exec::{GuardedSpawner, is_credential_name};
 use super::footprint::{Difference, Footprint, Watch, is_profile_file, uncovered};
+use super::protect::{Protected, RECOMMENDED_PLACES, RECOMMENDED_VARIABLES};
 use super::shelf::{Current, FileRecord, MadeBy, Shelf, ShelfError};
 use super::tools::{HttpTransport, LocalTools, Lookup, Transport};
 
@@ -252,6 +253,12 @@ pub struct Options {
     pub environment: Environment,
     /// The home whose profile files the footprint watches; the process's own by default.
     pub home: Option<PathBuf>,
+    /// The places a declared change may not be at, under or hold, and the folders it may only enter a place of its own in: lines
+    /// in gitignore syntax (see [`protect`](super::protect)). canoa.cfg's `[host.store] protected`; the recommended list by default.
+    pub protected: Vec<String>,
+    /// The variables an install is never given and a launch never sets, in the same syntax, matched against a name.
+    /// canoa.cfg's `[host.store] credential_variables`; the recommended list by default.
+    pub credential_variables: Vec<String>,
     /// Whether the footprint reads the user's real registry keys (Windows).
     pub watch_registry: bool,
     /// Lets an install take a download nothing checks (Grok's). The plan names each such download, and `current.json` records
@@ -276,6 +283,8 @@ impl Default for Options {
             environment: process_environment(),
             home: std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
                 .map(PathBuf::from),
+            protected: lines(RECOMMENDED_PLACES),
+            credential_variables: lines(RECOMMENDED_VARIABLES),
             watch_registry: cfg!(windows),
             allow_unverified: false,
             keep_versions: super::shelf::DEFAULT_KEEP_VERSIONS,
@@ -283,6 +292,30 @@ impl Default for Options {
             plan_ttl: Duration::from_secs(15 * 60),
             plan_limit: 32,
         }
+    }
+}
+
+fn lines(list: &[&str]) -> Vec<String> {
+    list.iter().map(|line| (*line).to_owned()).collect()
+}
+
+impl Options {
+    /// The defaults, with the lists `config` names in `[host.store]` in place of the recommended ones, and the environment less the
+    /// variables the list protects.
+    #[must_use]
+    pub fn from_config(config: &crate::config::Config) -> Self {
+        let mut options = Self::default();
+        if let Some(list) = &config.store.protected {
+            options.protected.clone_from(list);
+        }
+        if let Some(list) = &config.store.credential_variables {
+            options.credential_variables.clone_from(list);
+            let protect = Protected::new(list);
+            options.environment = std::env::vars()
+                .filter(|(name, _)| !protect.protects_name(name))
+                .collect();
+        }
+        options
     }
 }
 
@@ -303,22 +336,26 @@ struct Ran {
     after: Footprint,
 }
 
-/// Names a launch may not set, because they change what any program loads.
-fn forbidden_variable(name: &str) -> bool {
+/// Names a launch may not set, because they change what any program loads, and the variables `credentials` protects.
+fn forbidden_variable(name: &str, credentials: &Protected) -> bool {
     let upper = name.to_ascii_uppercase();
     upper == "PATH"
         || upper == "PATHEXT"
         || upper.starts_with("NODE_")
         || upper.starts_with("LD_")
         || upper.starts_with("DYLD_")
-        || is_credential_name(name)
+        || credentials.protects_name(name)
 }
 
 /// What a store's launch has to look like before the host records it: the files it names lie inside the version's folder,
 /// and the variables it sets are not ones that steer what a program loads.
-fn check_launch_shape(launch: &Launch, staging: &Path) -> Result<(), StoreError> {
+fn check_launch_shape(
+    launch: &Launch,
+    staging: &Path,
+    credentials: &Protected,
+) -> Result<(), StoreError> {
     for name in launch.environment.keys() {
-        if forbidden_variable(name) {
+        if forbidden_variable(name, credentials) {
             return Err(StoreError::Contract(format!(
                 "its launch sets {name}, which changes what a program loads"
             )));
@@ -641,6 +678,7 @@ impl Programs {
                 change.target, change.kind
             ))
         };
+        let protected = Protected::new(&self.options.protected);
         for change in &plan.changes {
             match change.kind.as_str() {
                 PATH | STATE_DIR | PROFILE_FILE | USER_PATH => {
@@ -652,21 +690,25 @@ impl Programs {
                     }
                     let parts = parts_under_home(&change.target, home)
                         .ok_or_else(|| refuse(change, "that is not under the home"))?;
-                    let starts = |whole: &[&str], prefix: &[String]| {
-                        prefix.len() <= whole.len() && prefix.iter().zip(whole).all(|(a, b)| a == b)
+                    if parts.is_empty() {
+                        return Err(refuse(change, "that is the home itself"));
+                    }
+                    let place = super::exec::normalize(Path::new(&change.target));
+                    let at_home = super::exec::normalize(home);
+                    let (Some(place), Some(at_home)) = (place, at_home) else {
+                        return Err(refuse(change, "that cannot be placed"));
                     };
-                    if SENSITIVE.iter().any(|s| starts(s, &parts)) {
+                    if protected.protects(&place, Some(&at_home)) {
                         return Err(refuse(
                             change,
-                            "that is, or holds, a place the system or a tool reads",
+                            "that is, or is inside, a place on the protected list ([host.store] protected)",
                         ));
                     }
-                    let below = |prefix: &[&str]| {
-                        prefix.len() <= parts.len()
-                            && prefix.iter().zip(&parts).all(|(a, b)| a == b)
-                    };
-                    if FORBIDDEN_BELOW.iter().any(|f| below(f)) {
-                        return Err(refuse(change, "that is a place the system or a tool reads"));
+                    if protected.holds(&place, Some(&at_home)) {
+                        return Err(refuse(
+                            change,
+                            "that holds a place on the protected list ([host.store] protected)",
+                        ));
                     }
                     match change.kind.as_str() {
                         STATE_DIR if !named_for(&parts, program) => {
@@ -815,7 +857,11 @@ impl Programs {
             lock.abandon(&staging);
             return Err(StoreError::Contract("no launch".to_owned()));
         };
-        if let Err(error) = check_launch_shape(&launch, &staging) {
+        if let Err(error) = check_launch_shape(
+            &launch,
+            &staging,
+            &Protected::new(&self.options.credential_variables),
+        ) {
             lock.abandon(&staging);
             return Err(error);
         }
@@ -862,7 +908,8 @@ impl Programs {
         let environment = install_environment(&self.options.environment, staging);
         let watch = self.watch(staging);
         let before = Footprint::take(&watch);
-        let spawner = GuardedSpawner::new(LocalSpawner::new().files(staging), staging_text.clone());
+        let spawner = GuardedSpawner::new(LocalSpawner::new().files(staging), staging_text.clone())
+            .credentials(Arc::new(Protected::new(&self.options.credential_variables)));
         let tools = self
             .tools(info)
             .granted(staging)
@@ -1024,60 +1071,6 @@ impl Programs {
             .collect()
     }
 }
-
-/// The places under the home that the system or a person's tools read, so that a declared change may not be one of them or hold one
-/// (by being the home, or a folder above): each as the parts of its path, lower case.
-const SENSITIVE: &[&[&str]] = &[
-    &[],
-    &[".config"],
-    &[".ssh"],
-    &[".gnupg"],
-    &[".local"],
-    &[".local", "bin"],
-    &[".local", "share"],
-    &[".config", "autostart"],
-    &[".config", "systemd"],
-    &[".config", "systemd", "user"],
-    &[".config", "fish"],
-    &[".config", "fish", "conf.d"],
-    &["appdata"],
-    &["appdata", "roaming"],
-    &["appdata", "local"],
-    &["appdata", "roaming", "microsoft"],
-    &["appdata", "roaming", "microsoft", "windows"],
-    &["appdata", "roaming", "microsoft", "windows", "start menu"],
-    &[
-        "appdata",
-        "roaming",
-        "microsoft",
-        "windows",
-        "start menu",
-        "programs",
-    ],
-    &[
-        "appdata",
-        "roaming",
-        "microsoft",
-        "windows",
-        "start menu",
-        "programs",
-        "startup",
-    ],
-    &["library"],
-    &["library", "launchagents"],
-    &["documents"],
-];
-
-/// The places a declared change may not lie at or below.
-const FORBIDDEN_BELOW: &[&[&str]] = &[
-    &[".ssh"],
-    &[".gnupg"],
-    &[".config", "autostart"],
-    &[".config", "systemd"],
-    &[".config", "fish"],
-    &["library", "launchagents"],
-    &["appdata", "roaming", "microsoft", "windows", "start menu"],
-];
 
 /// The parts of `target` below `home`, lower case, when it is under it; resolved by name (`.` and `..` gone).
 fn parts_under_home(target: &str, home: &Path) -> Option<Vec<String>> {

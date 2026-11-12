@@ -14,6 +14,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use super::protect::{Protected, RECOMMENDED_VARIABLES};
 use canoa::store::InstallPrompter;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Secret, Status};
@@ -36,21 +37,14 @@ pub struct Spawned {
     pub variables: Vec<String>,
 }
 
-/// Whether `name` looks like a credential: a variable a store must never pass on.
+/// Whether `name` is on the recommended list of variables a store must never be given
+/// ([`RECOMMENDED_VARIABLES`](super::protect::RECOMMENDED_VARIABLES)); a host with a list of the person's own asks it instead.
 #[must_use]
 pub fn is_credential_name(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    upper.ends_with("_API_KEY")
-        || upper.ends_with("TOKEN")
-        || upper.ends_with("_SECRET")
-        || upper.ends_with("PASSWORD")
-        || upper.ends_with("_KEY")
-        || upper.ends_with("_PAT")
-        || upper.ends_with("APIKEY")
-        || upper.ends_with("_CREDENTIALS")
-        || upper.ends_with("_CREDENTIAL")
-        || upper == "SSH_AUTH_SOCK"
-        || upper.starts_with("DOTAGENTS_")
+    static RECOMMENDED: std::sync::OnceLock<Protected> = std::sync::OnceLock::new();
+    RECOMMENDED
+        .get_or_init(|| Protected::new(RECOMMENDED_VARIABLES.iter().copied()))
+        .protects_name(name)
 }
 
 /// Whether `name` is a variable that changes what a program loads or where its package manager reads from, so that the host
@@ -116,6 +110,7 @@ pub struct GuardedSpawner<S> {
     staging: String,
     log: Arc<SpawnLog>,
     lenient_cwd: bool,
+    credentials: Option<Arc<Protected>>,
 }
 
 impl<S: ProcessSpawner> GuardedSpawner<S> {
@@ -126,7 +121,14 @@ impl<S: ProcessSpawner> GuardedSpawner<S> {
             staging: staging.into(),
             log: Arc::new(SpawnLog::default()),
             lenient_cwd: false,
+            credentials: None,
         }
+    }
+
+    /// Refuses the variables `list` protects, in place of the recommended ones.
+    pub fn credentials(mut self, list: Arc<Protected>) -> Self {
+        self.credentials = Some(list);
+        self
     }
 
     /// Lets a program start in any working directory: for a probe of a copy that is not in the staging folder.
@@ -179,7 +181,11 @@ impl<S: ProcessSpawner> GuardedSpawner<S> {
             None => return Err("no working directory".to_owned()),
         }
         for name in spec.environment.expose().names() {
-            if is_credential_name(name) {
+            let credential = self
+                .credentials
+                .as_ref()
+                .map_or_else(|| is_credential_name(name), |list| list.protects_name(name));
+            if credential {
                 return Err(format!("a credential variable passed on: {name}"));
             }
         }

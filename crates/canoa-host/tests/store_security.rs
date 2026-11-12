@@ -272,3 +272,36 @@ fn a_script_named_with_a_trailing_space_or_dot_is_still_a_script() {
     }
     assert_eq!(log.violations().len(), 4, "{:?}", log.violations());
 }
+
+#[test]
+fn a_credential_variable_is_refused_by_the_list_the_spawner_was_given() {
+    use canoa_host::store::protect::Protected;
+    let dir = Dir::new("credentials");
+    let staging = dir.0.join("staging");
+    fs::create_dir_all(&staging).expect("staging");
+    let program = if cfg!(windows) {
+        r"C:\Windows\System32\cmd.exe"
+    } else {
+        "/bin/sh"
+    };
+    let spec = || {
+        let mut env = coqui_acp_api::Environment::new();
+        env.insert("MY_TOKEN", "x");
+        coqui_acp_api::SpawnSpec::new(program)
+            .cwd(staging.to_string_lossy())
+            .environment(env)
+    };
+    let refused = |spawner: GuardedSpawner<LocalSpawner>| {
+        let log = spawner.log();
+        let _ = spawner.spawn(spec());
+        log.violations().iter().any(|v| v.contains("credential"))
+    };
+    let recommended = GuardedSpawner::new(LocalSpawner::new(), staging.to_string_lossy());
+    assert!(refused(recommended), "the recommended list protects *TOKEN");
+    let mine = GuardedSpawner::new(LocalSpawner::new(), staging.to_string_lossy())
+        .credentials(std::sync::Arc::new(Protected::new(["*_SECRET"])));
+    assert!(!refused(mine), "the person's list does not name it");
+    let allowed_back = GuardedSpawner::new(LocalSpawner::new(), staging.to_string_lossy())
+        .credentials(std::sync::Arc::new(Protected::new(["*TOKEN", "!MY_TOKEN"])));
+    assert!(!refused(allowed_back), "a later line allows it back");
+}

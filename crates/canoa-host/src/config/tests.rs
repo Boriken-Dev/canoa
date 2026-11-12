@@ -1226,3 +1226,29 @@ fn a_choice_that_is_not_on_off_or_a_digest_is_refused_naming_the_setting() {
     assert!(said.contains("agents.Claude.mcp.files"), "{said}");
     assert!(parse("[overlays]\n\"bad name\" = \"x\"\n").is_err());
 }
+
+#[test]
+fn the_store_table_holds_two_lists_as_text_or_lists() {
+    let none = parse("[host]\n").expect("parses");
+    assert_eq!(none.store, StoreConfig::default());
+    let text = parse(
+        "[host.store]\nprotected = \"\"\"\n# mine\n~/.ssh\n!~/.ssh/known_hosts\n\"\"\"\ncredential_variables = [\"*TOKEN\"]\n",
+    )
+    .expect("parses");
+    assert_eq!(
+        text.store.protected,
+        Some(vec![
+            "# mine".to_owned(),
+            "~/.ssh".to_owned(),
+            "!~/.ssh/known_hosts".to_owned()
+        ])
+    );
+    assert_eq!(
+        text.store.credential_variables,
+        Some(vec!["*TOKEN".to_owned()])
+    );
+    let empty = parse("[host.store]\nprotected = []\n").expect("parses");
+    assert_eq!(empty.store.protected, Some(Vec::new()));
+    assert!(parse("[host.store]\nprotected = 3\n").is_err());
+    assert!(parse("[host.store]\nother = 1\n").is_err());
+}
