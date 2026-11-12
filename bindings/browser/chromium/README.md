@@ -18,6 +18,10 @@ Right-click the toolbar icon for **Let this site ask for my agents** and **Canoa
 
 `npm test` runs coqui-acp's conformance checks against this code. `e2e/run.mjs` runs it in a real browser, under a page with a strict CSP, against an agent on a real socket, with `CANOA_E2E_BRIDGE=<path to coqui-acp-bridge>` through the real companion, bridge and stdio agent over WebTransport and WebSocket, and with `CANOA_E2E_PAGES=<dir>` from a Rust page in WebAssembly and from Canoa's own connection code, as `e2e/run.mjs` describes: `CANOA_E2E_BROWSER=<path to Edge> node e2e/run.mjs`. With a bridge, it also runs an agent with a real MCP client through the browser's tools, and with `CANOA_E2E_REAL_AGENT=claude` and `CLAUDE_CODE_EXECUTABLE` set, a real Claude turn, which spends a little of the subscription. `e2e/standing.mjs` runs a program with no session from what `coqui-acp-bridge mcp-config` prints, with the official MCP SDK's client (`npm install` in `e2e/`) and, with `CANOA_E2E_REAL_AGENT=claude-code`, real Claude Code; it says at its top how to leave it idle. Chrome's own builds ignore `--load-extension`, so use Edge or Chrome for Testing there.
 
+## Install permissions
+
+What the browser's install dialog says about `manifest.json` (read from Edge with `chrome.management.getPermissionWarningsById`): "Read your browsing history" (`tabs`), "Communicate with cooperating native applications" (`nativeMessaging`) and "View and manage your tab groups" (`tabGroups`, for the group around a tab an agent acts on). Access to a website is the browser's own prompt, per site, through `optional_host_permissions`.
+
 ## Browser-facing building blocks
 
 - `permissions.js`, `acp-permissions.js`: independent browser and ACP permission decisions; both have tests.
