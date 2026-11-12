@@ -9,7 +9,13 @@ fn ask(control: &Control, caller: &Caller, method: &str, params: Value) -> Value
 }
 
 fn memory() -> Control {
-    Control::open(None, DEFAULT_MAX_RECORDS, DEFAULT_MAX_RECORD_BYTES).expect("opens")
+    Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
 }
 
 fn peer(id: &str, grants: &[Grant]) -> Caller {
@@ -240,7 +246,7 @@ fn what_is_not_asked_properly_is_refused_naming_why() {
 
 #[test]
 fn the_limits_are_refused_at_not_dropped_to() {
-    let control = Control::open(None, 2, 64).expect("opens");
+    let control = Control::open(None, 2, 64, Vec::new()).expect("opens");
     let owner = Caller::Owner;
     put(&control, &owner, "a");
     put(&control, &owner, "b");
@@ -268,19 +274,29 @@ fn the_ledger_is_kept_across_a_reopen_and_a_file_that_is_not_one_is_said() {
     let dir = std::env::temp_dir().join(format!("canoa-control-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     {
-        let control = Control::open(Some(&dir), DEFAULT_MAX_RECORDS, DEFAULT_MAX_RECORD_BYTES)
-            .expect("opens");
+        let control = Control::open(
+            Some(&dir),
+            DEFAULT_MAX_RECORDS,
+            DEFAULT_MAX_RECORD_BYTES,
+            Vec::new(),
+        )
+        .expect("opens");
         put(&control, &Caller::Owner, "kept");
         put(&control, &peer("k", &[Grant::LedgerWrite]), "theirs");
     }
-    let again = Control::open(Some(&dir), DEFAULT_MAX_RECORDS, DEFAULT_MAX_RECORD_BYTES)
-        .expect("opens again");
+    let again = Control::open(
+        Some(&dir),
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens again");
     let listed = ask(&again, &Caller::Owner, "ledger/list", json!({}));
     let mut found = ids(&listed);
     found.sort_unstable();
     assert_eq!(found, ["kept", "theirs"]);
     fs::write(dir.join("ledger.json"), "[1, 2]").expect("written");
-    let error = Control::open(Some(&dir), 1, 1).expect_err("not a ledger");
+    let error = Control::open(Some(&dir), 1, 1, Vec::new()).expect_err("not a ledger");
     assert!(error.to_string().contains("ledger.json"), "{error}");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -304,4 +320,66 @@ fn a_connection_is_answered_until_it_closes() {
     });
     assert_eq!(serving["id"], 7);
     assert_eq!(serving["result"]["records"], json!([]));
+}
+
+fn with_roots(entries: Vec<EntryRoots>) -> Control {
+    Control::open(None, DEFAULT_MAX_RECORDS, DEFAULT_MAX_RECORD_BYTES, entries).expect("opens")
+}
+
+fn missing_path() -> String {
+    std::env::temp_dir()
+        .join("canoa-control-test-nothing-here")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[test]
+fn a_key_without_the_worktree_grant_is_denied() {
+    let control = with_roots(Vec::new());
+    let answer = ask(
+        &control,
+        &peer("sha256:aa", &[Grant::LedgerRead]),
+        "worktree/status",
+        json!({"path": missing_path()}),
+    );
+    assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+}
+
+#[test]
+fn the_owner_asks_about_any_path_on_the_computer() {
+    let control = with_roots(Vec::new());
+    let answer = ask(
+        &control,
+        &Caller::Owner,
+        "worktree/status",
+        json!({"path": missing_path()}),
+    );
+    assert_eq!(answer["result"]["exists"], false, "{answer}");
+}
+
+#[test]
+fn a_key_reaches_only_the_roots_of_the_entries_it_may_use() {
+    let key = "sha256:aa";
+    let other = "sha256:bb";
+    let control = with_roots(vec![
+        EntryRoots {
+            peers: Some(vec![key.to_owned()]),
+            roots: vec![std::env::temp_dir()],
+        },
+        EntryRoots {
+            peers: Some(vec![other.to_owned()]),
+            roots: Vec::new(),
+        },
+    ]);
+    let params = json!({"path": missing_path()});
+    let granted = [Grant::Worktree];
+    let inside = ask(
+        &control,
+        &peer(key, &granted),
+        "worktree/status",
+        params.clone(),
+    );
+    assert_eq!(inside["result"]["exists"], false, "{inside}");
+    let outside = ask(&control, &peer(other, &granted), "worktree/status", params);
+    assert_eq!(outside["error"]["code"], BAD_PARAMS, "{outside}");
 }

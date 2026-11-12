@@ -221,3 +221,313 @@ fn a_git_file_naming_a_share_is_refused_before_git_runs() {
     );
     let _ = std::fs::remove_dir_all(&scratch);
 }
+
+/// A repository `src/proj` with one commit under a scratch directory, and the worktree rule over `src`.
+struct Fixture {
+    scratch: PathBuf,
+    repo: PathBuf,
+    worktrees: Worktrees,
+}
+
+impl Fixture {
+    fn new(name: &str) -> Option<Self> {
+        if Command::new("git").arg("--version").output().is_err() {
+            eprintln!("skipped: no git on PATH");
+            return None;
+        }
+        let scratch =
+            std::env::temp_dir().join(format!("canoa-worktree-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let repo = scratch.join("src").join("proj");
+        std::fs::create_dir_all(repo.join("sub")).expect("a directory");
+        run_git(&repo, &["init", "-q"]);
+        std::fs::write(repo.join("README"), "hello\n").expect("a file");
+        std::fs::write(repo.join("sub").join("keep"), "").expect("a file");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "first"]);
+        let worktrees = Worktrees::new(vec![scratch.join("src")], true);
+        Some(Self {
+            scratch,
+            repo,
+            worktrees,
+        })
+    }
+
+    fn make(&self, cwd: &Path, branch: &str) -> Result<PathBuf, Refusal> {
+        let made = self.worktrees.make(&cwd.to_string_lossy(), branch)?;
+        Ok(PathBuf::from(made["path"].as_str().expect("a path")))
+    }
+
+    fn status(&self, path: &Path) -> Result<Value, Refusal> {
+        self.worktrees.status(&path.to_string_lossy())
+    }
+
+    fn remove(&self, path: &Path, discard: bool) -> Result<Value, Refusal> {
+        self.worktrees.remove(&path.to_string_lossy(), discard)
+    }
+
+    fn branches(&self) -> String {
+        run_git(&self.repo, &["branch", "--format=%(refname:short)"])
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.scratch);
+    }
+}
+
+#[test]
+fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
+    let Some(fixture) = Fixture::new("two") else {
+        return;
+    };
+    let first = fixture
+        .make(&fixture.repo, "canoa/first-a1b2c3")
+        .expect("first");
+    let second = fixture
+        .make(&fixture.repo.join("sub"), "canoa/second-d4e5f6")
+        .expect("second");
+    assert_ne!(first, second);
+    assert!(first.ends_with("first-a1b2c3") && second.ends_with("second-d4e5f6"));
+    assert!(first.join("README").exists() && second.join("README").exists());
+    let list = run_git(&fixture.repo, &["worktree", "list", "--porcelain"]);
+    assert_eq!(list.matches("worktree ").count(), 3, "{list}");
+
+    std::fs::write(first.join("draft"), "unsaved\n").expect("a file");
+    std::fs::write(second.join("done"), "saved\n").expect("a file");
+    run_git(&second, &["add", "done"]);
+    run_git(&second, &["commit", "-q", "-m", "work"]);
+    let state = fixture.status(&first).expect("status");
+    assert_eq!(state["exists"], true, "{state}");
+    assert_eq!(
+        (&state["changed"], &state["commits"]),
+        (&json!(1), &json!(0))
+    );
+    let state = fixture.status(&second).expect("status");
+    assert_eq!(
+        (&state["changed"], &state["commits"]),
+        (&json!(0), &json!(1))
+    );
+    assert!(!second.join("draft").exists());
+
+    // A change is not deleted without discard; a commit of its own keeps the branch.
+    assert!(fixture.remove(&first, false).is_err());
+    assert!(first.join("draft").exists());
+    let discarded = fixture.remove(&first, true).expect("discarded");
+    assert_eq!(discarded["branchKept"], false, "{discarded}");
+    assert!(!first.exists());
+    let removed = fixture.remove(&second, false).expect("removed");
+    assert_eq!(removed["branchKept"], true, "{removed}");
+    assert_eq!(removed["commits"], 1, "{removed}");
+    let branches = fixture.branches();
+    assert!(
+        !branches.contains("canoa/first-a1b2c3") && branches.contains("canoa/second-d4e5f6"),
+        "{branches}"
+    );
+    assert_eq!(fixture.status(&first).expect("status")["exists"], false);
+}
+
+#[test]
+fn what_is_not_canoas_is_neither_made_over_nor_removed() {
+    let Some(fixture) = Fixture::new("notmine") else {
+        return;
+    };
+    assert!(fixture.make(&fixture.repo, "--orphan").is_err());
+    assert!(
+        fixture
+            .make(&fixture.scratch.join("src").join("none"), "canoa/x")
+            .is_err()
+    );
+    let plain = fixture.scratch.join("src").join("plain");
+    std::fs::create_dir_all(&plain).expect("a directory");
+    assert!(fixture.make(&plain, "canoa/x").is_err());
+    run_git(
+        &fixture.repo,
+        &["worktree", "add", "-q", "-b", "mine", "../mine"],
+    );
+    run_git(
+        &fixture.repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "canoa/hand-made",
+            "../hand-made",
+        ],
+    );
+    for path in [
+        fixture.repo.clone(),
+        fixture.scratch.join("src").join("mine"),
+        fixture.scratch.join("src").join("hand-made"),
+    ] {
+        assert!(
+            fixture
+                .status(&path)
+                .map_or(true, |state| state["exists"] == false),
+            "{path:?}"
+        );
+        assert!(fixture.remove(&path, true).is_err(), "{path:?}");
+        assert!(path.exists(), "{path:?}");
+    }
+}
+
+#[test]
+fn a_worktrees_directory_that_is_a_link_is_not_used() {
+    let Some(fixture) = Fixture::new("linked") else {
+        return;
+    };
+    let elsewhere = fixture.scratch.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("a directory");
+    let link = fixture.scratch.join("src").join("proj.worktrees");
+    if cfg!(windows) {
+        let made = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&elsewhere)
+            .output()
+            .expect("cmd runs");
+        assert!(made.status.success());
+    } else {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, &link).expect("a link");
+    }
+    assert!(fixture.make(&fixture.repo, "canoa/x").is_err());
+    assert_eq!(std::fs::read_dir(&elsewhere).expect("listed").count(), 0);
+    assert!(!fixture.branches().contains("canoa/x"));
+    if cfg!(windows) {
+        let _ = std::fs::remove_dir(&link);
+    }
+}
+
+#[test]
+fn files_git_ignores_are_counted_and_only_discard_removes_them() {
+    let Some(fixture) = Fixture::new("ignored") else {
+        return;
+    };
+    std::fs::write(fixture.repo.join(".gitignore"), ".env\nbuild/\n").expect("a file");
+    run_git(&fixture.repo, &["add", ".gitignore"]);
+    run_git(&fixture.repo, &["commit", "-q", "-m", "ignore"]);
+    let made = fixture
+        .make(&fixture.repo, "canoa/ignored-a1b2c3")
+        .expect("made");
+    std::fs::write(made.join(".env"), "TOKEN=x\n").expect("a file");
+    std::fs::create_dir_all(made.join("build")).expect("a directory");
+    std::fs::write(made.join("build").join("out"), "").expect("a file");
+    assert_eq!(fixture.status(&made).expect("status")["changed"], 2);
+    assert!(fixture.remove(&made, false).is_err());
+    assert!(made.join(".env").exists());
+    fixture.remove(&made, true).expect("discarded");
+    assert!(!made.exists());
+}
+
+#[test]
+fn a_repository_configured_with_a_filter_or_an_include_is_refused_and_no_filter_runs() {
+    let Some(fixture) = Fixture::new("filter") else {
+        return;
+    };
+    std::fs::write(fixture.repo.join("a.txt"), "text\n").expect("a file");
+    run_git(&fixture.repo, &["add", "a.txt"]);
+    run_git(&fixture.repo, &["commit", "-q", "-m", "text"]);
+    let made = fixture
+        .make(&fixture.repo, "canoa/before-a1b2c3")
+        .expect("made");
+    let marker = fixture.scratch.join("filter-ran");
+    std::fs::write(
+        fixture.repo.join(".git").join("info").join("attributes"),
+        "*.txt filter=x\n",
+    )
+    .expect("attributes");
+    let command = format!(
+        "sh -c 'echo ran > \"{}\"; cat'",
+        marker.to_string_lossy().replace('\\', "/")
+    );
+    for key in ["filter.x.smudge", "filter.x.clean"] {
+        run_git(&fixture.repo, &["config", key, &command]);
+    }
+    assert!(fixture.make(&fixture.repo, "canoa/after-d4e5f6").is_err());
+    std::fs::write(made.join("a.txt"), "changed\n").expect("a file");
+    assert!(fixture.status(&made).is_err());
+    assert!(fixture.remove(&made, true).is_err());
+    assert!(!marker.exists(), "a filter ran");
+    run_git(&fixture.repo, &["config", "--remove-section", "filter.x"]);
+    run_git(&fixture.repo, &["config", "include.path", "elsewhere.cfg"]);
+    assert!(fixture.make(&fixture.repo, "canoa/after-d4e5f6").is_err());
+}
+
+#[test]
+fn a_submodule_gets_no_worktree_inside_its_superprojects_git() {
+    let Some(fixture) = Fixture::new("submodule") else {
+        return;
+    };
+    let library = fixture.scratch.join("src").join("library");
+    std::fs::create_dir_all(&library).expect("a directory");
+    run_git(&library, &["init", "-q"]);
+    run_git(&library, &["commit", "-q", "--allow-empty", "-m", "first"]);
+    run_git(
+        &fixture.repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            "../library",
+            "lib",
+        ],
+    );
+    run_git(&fixture.repo, &["commit", "-q", "-m", "submodule"]);
+    assert!(
+        fixture
+            .make(&fixture.repo.join("lib"), "canoa/sub-a1b2c3")
+            .is_err()
+    );
+    assert!(
+        !fixture
+            .repo
+            .join(".git")
+            .join("modules")
+            .join("lib.worktrees")
+            .exists()
+    );
+}
+
+#[test]
+fn a_detached_head_with_commits_of_its_own_is_still_found_and_not_removed() {
+    let Some(fixture) = Fixture::new("detached") else {
+        return;
+    };
+    let made = fixture
+        .make(&fixture.repo, "canoa/detached-a1b2c3")
+        .expect("made");
+    run_git(&made, &["checkout", "-q", "--detach"]);
+    std::fs::write(made.join("work"), "x\n").expect("a file");
+    run_git(&made, &["add", "work"]);
+    run_git(&made, &["commit", "-q", "-m", "detached work"]);
+    let state = fixture.status(&made).expect("status");
+    assert_eq!(state["exists"], true, "{state}");
+    assert_eq!(state["detached"], true, "{state}");
+    assert_eq!(state["commits"], 1, "{state}");
+    for discard in [false, true] {
+        assert!(fixture.remove(&made, discard).is_err());
+    }
+    assert!(made.join("work").exists());
+}
+
+#[test]
+fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
+    let Some(fixture) = Fixture::new("listing") else {
+        return;
+    };
+    let made = fixture
+        .make(&fixture.repo, "canoa/listing-a1b2c3")
+        .expect("made");
+    std::fs::write(made.join("one"), "").expect("a file");
+    let first = fixture.status(&made).expect("status");
+    std::fs::remove_file(made.join("one")).expect("removed");
+    std::fs::write(made.join("two"), "").expect("a file");
+    let second = fixture.status(&made).expect("status");
+    assert_eq!(first["changed"], second["changed"]);
+    assert_ne!(first["listing"], second["listing"]);
+}

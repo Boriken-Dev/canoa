@@ -478,7 +478,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 ```
@@ -487,7 +487,7 @@ max_record_bytes = 262144                           # one ledger record
 | --- | --- |
 | `ledger.read` | `ledger/list` |
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
-| `worktree` | `worktree/new`, `worktree/status`, `worktree/remove` (planned) |
+| `worktree` | `worktree/new`, `worktree/status`, `worktree/remove` |
 | `store.read` | `store/report`, `store/latest`, `store/plan` (planned) |
 | `store.write` | `store/apply`, `store/rollback`, `store/remove` (planned; **owner only**: `[host.control]` refuses it as a grant, since an install runs code as the user) |
 
@@ -504,10 +504,11 @@ as opaque JSON objects the host never reads into: it keeps an `id`, the record, 
 - `ledger/remove` `{"id"}` -> `{"removed": bool}`; `ledger/clear` `{}` -> `{"removed": n}`, the caller's own records.
 - A request over 16 MiB, or not JSON, ends the connection; `-32700` first when it can be answered.
 
-**Planned in this area, not yet built:** `worktree/*` with the params and results of `_canoa/worktree/*` below. For the owner any
-absolute path on this computer, with every other check unchanged (branch names, repositories led out by links or share paths,
-no hooks); for a peer with the grant only under the `working_roots` of the entries it may use. The entry-level
-`_canoa/worktree/*` goes once a client uses these.
+**`worktree/*`** takes the params and answers the results of `_canoa/worktree/*` ("Worktrees" below), with every check of
+theirs unchanged (branch names, repositories led out by links or share paths, no hooks, `MAX_WORKTREES`). The owner (the app)
+may name any absolute path on this computer; a key with the `worktree` grant only paths under the `working_roots` of the entries
+whose `peers` allow it (all paired keys when an entry has none) and that have `worktrees` on, else `-32602`. The entry-level
+`_canoa/worktree/*` stays for a client that reaches an agent over the network and holds no control grant.
 
 **The program Store** (`canoa_host::store`, `Programs`) is carried the same way, one method for each of its calls, with the
 params and results of `canoa::store`'s models: `store/report` `{"program"}` (the copies the host finds, no network),

@@ -13,6 +13,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use coqui_web_channel::{Channel, Failure};
+
+use crate::worktree::Worktrees;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -46,6 +48,8 @@ pub enum Grant {
     LedgerRead,
     /// `ledger/put`, `ledger/remove` and `ledger/clear`, of the records the key owns.
     LedgerWrite,
+    /// `worktree/new`, `worktree/status` and `worktree/remove`, under the working roots of the entries the key may use.
+    Worktree,
 }
 
 impl Grant {
@@ -55,13 +59,14 @@ impl Grant {
         match self {
             Self::LedgerRead => "ledger.read",
             Self::LedgerWrite => "ledger.write",
+            Self::Worktree => "worktree",
         }
     }
 
     /// The grant of that name.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        [Self::LedgerRead, Self::LedgerWrite]
+        [Self::LedgerRead, Self::LedgerWrite, Self::Worktree]
             .into_iter()
             .find(|grant| grant.as_str() == name)
     }
@@ -116,9 +121,18 @@ struct File {
     records: BTreeMap<String, Stored>,
 }
 
+/// The working roots of one entry, and the keys that may use it: what a key's worktrees may be made under.
+#[derive(Clone, Debug)]
+pub(crate) struct EntryRoots {
+    /// The keys that may use the entry; `None` lets every paired key.
+    pub(crate) peers: Option<Vec<String>>,
+    pub(crate) roots: Vec<PathBuf>,
+}
+
 /// The ledger and its limits.
 #[derive(Debug)]
 pub(crate) struct Control {
+    entries: Vec<EntryRoots>,
     path: Option<PathBuf>,
     max_records: usize,
     max_record_bytes: usize,
@@ -146,6 +160,7 @@ impl Control {
         dir: Option<&Path>,
         max_records: usize,
         max_record_bytes: usize,
+        entries: Vec<EntryRoots>,
     ) -> Result<Self, ControlError> {
         let path = dir.map(|dir| dir.join("ledger.json"));
         let mut ledger = BTreeMap::new();
@@ -169,6 +184,7 @@ impl Control {
             }
         }
         Ok(Self {
+            entries,
             path,
             max_records,
             max_record_bytes,
@@ -208,6 +224,9 @@ impl Control {
             Some("ledger/put") => self.put(caller, &params),
             Some("ledger/remove") => self.remove(caller, &params),
             Some("ledger/clear") => self.clear(caller),
+            Some(method @ ("worktree/new" | "worktree/status" | "worktree/remove")) => {
+                return Some(self.worktree(caller, method, &request, &id));
+            }
             _ => Err((NO_METHOD, "this host has no such method".to_owned())),
         };
         Some(match outcome {
@@ -217,6 +236,34 @@ impl Control {
             }
             Err((code, message)) => error_line(&id, code, &message),
         })
+    }
+
+    /// A worktree request, answered by the rule an entry's clients have, over the roots this caller may use: the whole machine
+    /// for the owner, and for a key the working roots of the entries it may use. Every other check of a worktree stands.
+    fn worktree(&self, caller: &Caller, method: &str, request: &Value, id: &Value) -> Vec<u8> {
+        if let Err((code, message)) = allow(caller, Grant::Worktree) {
+            return error_line(id, code, &message);
+        }
+        let roots = match caller {
+            Caller::Owner => whole_machine(),
+            Caller::Peer { id: key, .. } => self
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .peers
+                        .as_ref()
+                        .is_none_or(|peers| peers.iter().any(|peer| peer == key))
+                })
+                .flat_map(|entry| entry.roots.iter().cloned())
+                .collect(),
+        };
+        let mut asked = request.clone();
+        asked["method"] = Value::String(format!("_canoa/{method}"));
+        let bytes = serde_json::to_vec(&asked).unwrap_or_default();
+        Worktrees::new(roots, true)
+            .answer(&bytes)
+            .unwrap_or_else(|| error_line(id, BAD_PARAMS, "that request cannot be answered"))
     }
 
     fn list(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
@@ -344,6 +391,18 @@ impl Control {
             return Err((REFUSED, format!("the ledger could not be written: {why}")));
         }
         Ok(json!({"removed": removed}))
+    }
+}
+
+/// Every place on this computer a path can start: `/`, or each drive that is there.
+fn whole_machine() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ('A'..='Z')
+            .map(|letter| PathBuf::from(format!("{letter}:\\")))
+            .filter(|drive| drive.exists())
+            .collect()
+    } else {
+        vec![PathBuf::from("/")]
     }
 }
 

@@ -1069,6 +1069,18 @@ impl Serving {
                             .control
                             .as_ref()
                             .map_or(control::DEFAULT_MAX_RECORD_BYTES, |c| c.max_record_bytes),
+                        config
+                            .entries
+                            .iter()
+                            .filter(|entry| entry.worktrees && !entry.working_roots.is_empty())
+                            .map(|entry| control::EntryRoots {
+                                peers: entry
+                                    .peers
+                                    .as_ref()
+                                    .map(|peers| peers.iter().map(ToString::to_string).collect()),
+                                roots: entry.working_roots.clone(),
+                            })
+                            .collect(),
                     )
                     .map_err(ServeError::Control)?,
                 ),
