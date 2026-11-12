@@ -92,7 +92,7 @@ enum Kind {
     Pair {
         handshake: Option<PairingHandshake>,
         pin: Option<Pin>,
-        exchange: Option<JoinExchange>,
+        exchange: Option<Box<JoinExchange>>,
     },
 }
 
@@ -243,7 +243,7 @@ fn step_pair(
     peer: &mut Option<String>,
     slot: &mut Option<PairingHandshake>,
     pin: &mut Option<Pin>,
-    exchange: &mut Option<JoinExchange>,
+    exchange: &mut Option<Box<JoinExchange>>,
     received: Option<Vec<u8>>,
 ) -> Result<Vec<Vec<u8>>, JsError> {
     let at = *stage;
@@ -269,7 +269,7 @@ fn step_pair(
         while let Some(record) = joining.transmit().map_err(failed)? {
             sent.push(record);
         }
-        *exchange = Some(joining);
+        *exchange = Some(Box::new(joining));
         return Ok(sent);
     }
     let joining = exchange
