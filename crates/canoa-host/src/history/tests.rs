@@ -191,3 +191,43 @@ fn rfc3339_is_the_time_the_format_reads() {
     let now = rfc3339(SystemTime::now()).expect("a time");
     assert!(coqui_acp_history::conversation::valid_time(&now), "{now}");
 }
+
+#[test]
+fn a_version_2_turn_is_kept_when_the_agent_says_it_is_idle_not_when_the_prompt_is_answered() {
+    let dir = dir("v2");
+    let store = Arc::new(Store::open(Some(dir.clone()), limits()));
+    let (client, host) = local::pair(1 << 20, Arc::new(AtomicBool::new(false)));
+    let recording = Recording::new(&host, &store, "Claude", "claude");
+    let answer = |value: Value| recording.send(value.to_string().as_bytes()).expect("sent");
+    send(
+        &client,
+        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}),
+    );
+    recording.receive(None).expect("read");
+    answer(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":2}}));
+    send(
+        &client,
+        &json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/work"}}),
+    );
+    recording.receive(None).expect("read");
+    answer(json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":ID}}));
+    send(
+        &client,
+        &json!({"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":ID,"prompt":[{"type":"text","text":"hello"}]}}),
+    );
+    recording.receive(None).expect("read");
+    answer(json!({"jsonrpc":"2.0","id":3,"result":{}}));
+    assert!(
+        matches!(store.load("Claude", ID), Err(StoreError::Missing)),
+        "nothing is written before the turn ends"
+    );
+    answer(
+        json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":ID,"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"later words"}}}}),
+    );
+    answer(
+        json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":ID,"update":{"sessionUpdate":"state_update","state":"idle"}}}),
+    );
+    let doc = store.load("Claude", ID).expect("kept at idle");
+    assert!(doc.to_string().expect("written").contains("later words"));
+    let _ = fs::remove_dir_all(dir);
+}

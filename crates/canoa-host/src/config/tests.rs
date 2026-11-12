@@ -1316,7 +1316,11 @@ fn host_history_has_defaults_takes_each_limit_and_refuses_zero_and_the_unknown()
     .expect("parses");
     assert!(!set.history.record);
     assert_eq!(
-        (set.history.max_session_bytes, set.history.max_sessions, set.history.max_total_bytes),
+        (
+            set.history.max_session_bytes,
+            set.history.max_sessions,
+            set.history.max_total_bytes
+        ),
         (1000, 3, 5000)
     );
     for bad in [

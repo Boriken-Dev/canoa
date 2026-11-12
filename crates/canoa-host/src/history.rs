@@ -412,10 +412,31 @@ impl Log {
         for slot in &mut self.slots {
             slot.recorder.observe_at(direction, message, at.as_deref());
         }
-        if direction == Direction::Received
-            && method.is_none()
+        if direction != Direction::Received {
+            return;
+        }
+        // Version 1 ends a turn with the prompt's answer, which then says why; version 2 answers at once and ends the turn
+        // with an idle `state_update`, so a turn is written when its end is the agent's word.
+        if method.is_none()
             && let Some(key) = &key
-            && let Some(session) = self.prompts.remove(key)
+            && let Some(session) = self.prompts.get(key).cloned()
+            && (message.pointer("/result/stopReason").is_some() || message.get("error").is_some())
+        {
+            self.prompts.remove(key);
+            self.checkpoint(&session);
+        } else if method == Some("session/update")
+            && message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str)
+                == Some("state_update")
+            && message
+                .pointer("/params/update/state")
+                .and_then(Value::as_str)
+                == Some("idle")
+            && let Some(session) = message
+                .pointer("/params/sessionId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
         {
             self.checkpoint(&session);
         }
