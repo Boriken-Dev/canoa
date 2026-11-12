@@ -38,7 +38,7 @@ pub struct Spawned {
 }
 
 /// Whether `name` is on the recommended list of variables a store must never be given
-/// ([`RECOMMENDED_VARIABLES`](super::protect::RECOMMENDED_VARIABLES)); a host with a list of the person's own asks it instead.
+/// ([`RECOMMENDED_VARIABLES`]); a host with a list of the person's own asks it instead.
 #[must_use]
 pub fn is_credential_name(name: &str) -> bool {
     static RECOMMENDED: std::sync::OnceLock<Protected> = std::sync::OnceLock::new();
