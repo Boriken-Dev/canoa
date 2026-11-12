@@ -16,7 +16,8 @@ builds it, and [`docs/portable.md`](../../docs/portable.md) is the release recip
 ## What it refuses
 
 - `%LOCALAPPDATA%\Canoa` or the version folder being a symbolic link or junction (any reparse point), not a folder, or not
-  owned by the current user. On Unix also a folder writable by others.
+  owned by someone else (accepted owners: the current user, the folder that holds it, Administrators and the system account,
+  since a window started elevated makes Administrators-owned files). On Unix also a folder writable by others.
 - A payload whose paths leave their folder, hold a drive, a stream (`:`), a device name or a name Windows would rewrite, repeat
   a name in another case, or name the launcher's own manifest copy.
 - Running a file the manifest does not list, and an unpacked folder that holds a file it does not list.

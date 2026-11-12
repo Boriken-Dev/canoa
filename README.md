@@ -59,6 +59,13 @@ The desktop app supports the AI6-style [canoa.cfg](https://boriken-dev.github.io
 
 The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/canoa/browser-mcp/). An agent of Canoa's own chat, and with a person's say an MCP client on a paired machine, reach those tools over a proven link with nothing listening in the browser: see [browser integration](https://boriken-dev.github.io/canoa/browser/).
 
+## One file per platform
+
+`python app/tool/build.py desktop --portable` makes the desktop app as one file: on Windows `target/canoa-windows/CanoaUI.exe`, a launcher
+(`crates/canoa-launch`) that carries the built app folder, unpacks it once per version into `%LOCALAPPDATA%\Canoa\<version>\`, checks it
+against a manifest of SHA-256 digests on every start and runs it; on Linux an AppImage. macOS ships `Canoa.app`. See
+[one file per platform](https://boriken-dev.github.io/canoa/portable/) for the release recipe and what an unsigned file shows.
+
 ## The host
 
 `canoa serve` offers each `[host]` entry of canoa.cfg, a stdio ACP agent or a Guatiao provider, to keys you paired, on loopback unless an entry's `listen` says otherwise. The desktop app starts it, starts it again if it ends, and ends it with its agents on quit. See [the host](https://boriken-dev.github.io/canoa/host/).
