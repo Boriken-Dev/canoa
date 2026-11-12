@@ -2,12 +2,15 @@
 // the tab group around a tab an agent acts on, the toolbar badge, and who may send those messages. The tool call itself is
 // `dispatchBrowserTool` as the worker runs it, called from an extension page with the grants the worker holds.
 //
-//   CANOA_E2E_BROWSER=path/to/edge [CANOA_E2E_SHOTS=dir] node e2e/panel.mjs
+//   CANOA_E2E_BROWSER=path/to/edge [CANOA_E2E_SHOTS=dir] [CANOA_E2E_PANEL_UI=app/build/web] node e2e/panel.mjs
+//
+// CANOA_E2E_PANEL_UI is a `flutter build web --csp --base-href /ui/` output, which then stands in for the packaged panel: the
+// run checks it starts in the extension with the worker's tab bridge beside it.
 //
 // Needs no agent program: the paired agent is a record, since nothing here dials it.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -28,9 +31,18 @@ const manifest = JSON.parse(readFileSync(path.join(unpacked, "manifest.json"), "
 manifest.host_permissions = ["http://127.0.0.1/*"];
 delete manifest.side_panel;
 writeFileSync(path.join(unpacked, "manifest.json"), JSON.stringify(manifest));
-// A page of the packaged UI, as the panel is, without building Flutter for it.
-mkdirSync(path.join(unpacked, "ui"));
-writeFileSync(path.join(unpacked, "ui", "own.html"), "<!doctype html><title>own</title><p>own</p>");
+// A page of the packaged UI, as the panel is, without building Flutter for it; or the built panel itself.
+const builtUi = process.env.CANOA_E2E_PANEL_UI;
+if (builtUi) {
+  cpSync(builtUi, path.join(unpacked, "ui"), { recursive: true, filter: (from) => !from.endsWith(".map") });
+  const index = path.join(unpacked, "ui", "index.html");
+  // As app/tool/build.py's package_ui adds the extension's scripts.
+  const scripts = ["bridge.js", "acp-page.js", "acp-content.js"].map((name) => `<script src="../${name}"></script>`).join("");
+  writeFileSync(index, readFileSync(index, "utf8").replace("<head>", `<head>${scripts}`));
+} else {
+  mkdirSync(path.join(unpacked, "ui"));
+}
+writeFileSync(path.join(unpacked, "ui", "own.html"), '<!doctype html><title>own</title><script src="../bridge.js"></script><p>own</p>');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const site = createServer((request, response) => {
@@ -254,6 +266,36 @@ try {
     assert.deepEqual((await groupTitleOf(b.tabId))?.[0], "Panel agent");
     await send({ type: "canoa.tabs.detach", sessionId: "s5" });
   });
+  await check("the panel's bridge lists web tabs and the sessions, shares from a click's permission, and unshares", async () => {
+    const call = (name, ...args) => panel.run(`window.canoaBridge.tabs.call(${JSON.stringify(name)}, ${JSON.stringify(JSON.stringify(args))}).then((text) => JSON.parse(text), (error) => ({ error: error.message }))`, { gesture: true });
+    await sw.run(`chrome.tabs.update(${a.tabId}, { active: true }).then(() => true)`);
+    const snapshot = await call("snapshot");
+    assert.ok(snapshot.tabs.some((tab) => tab.id === a.tabId && tab.url.startsWith(base)), JSON.stringify(snapshot));
+    assert.ok(snapshot.tabs.every((tab) => /^https?:/.test(tab.url)));
+    await call("attach", "s6", a.tabId);
+    assert.deepEqual(await call("share", "s6", a.tabId, PEER), {});
+    assert.equal((await act(a.tabId)).ok, true);
+    const listed = (await call("snapshot")).sessions.find((item) => item.sessionId === "s6");
+    assert.deepEqual(listed?.shared, [a.tabId]);
+    assert.ok((await call("share", "s6", a.tabId, `sha256:${"00".repeat(32)}`)).error);
+    assert.deepEqual(await call("unshare", "s6", a.tabId), {});
+    assert.equal((await act(a.tabId)).ok, false);
+    assert.ok((await call("claimEverything")).error);
+    await call("detach", "s6");
+  });
+  if (builtUi) {
+    await check("the built panel starts in the extension, beside the worker's tab bridge", async () => {
+      const ui = await open(`chrome-extension://${id}/ui/index.html?view=panel`);
+      try {
+        await waitFor("Flutter", () => ui.run("!!document.querySelector('flt-glass-pane, flutter-view')"), 60_000);
+        assert.equal(await ui.run("typeof window.canoaBridge?.tabs?.call"), "function");
+        await sleep(3000);
+        await shoot(ui, "panel_built");
+      } finally {
+        await ui.call("Page.close").catch(() => {});
+      }
+    });
+  }
   await shoot(panel, "panel_page");
   exitCode = results.some((line) => line.startsWith("FAIL")) ? 1 : 0;
 } catch (error) {
