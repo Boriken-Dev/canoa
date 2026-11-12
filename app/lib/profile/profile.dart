@@ -262,6 +262,10 @@ final class Profile {
 
   static const scalars = ['model', 'effort', 'mode', 'context'];
 
+  /// This profile with [skills] in place of its own.
+  Profile withSkills(Map<String, Skill?> skills) => Profile(model: model, effort: effort, mode: mode, context: context,
+      unset: unset, shareEnv: shareEnv, env: env, skills: skills, mcp: mcp, contexts: contexts);
+
   bool get isEmpty =>
       model == null && effort == null && mode == null && context == null && unset.isEmpty && shareEnv.isEmpty && env.isEmpty &&
       skills.isEmpty && mcp.isEmpty && contexts.isEmpty;
@@ -518,6 +522,12 @@ final class Layer {
 
   /// For an AOS overlay, what building its environment needs and what Canoa does not apply.
   final AosLayer? aos;
+
+  /// This layer without the skills [names].
+  Layer withoutSkills(Set<String> names) => Layer(id, profile.withSkills({
+    for (final MapEntry(:key, :value) in profile.skills.entries)
+      if (!names.contains(key)) key: value,
+  }), dir: dir, aos: aos);
 }
 
 /// A value and the layer it came from.

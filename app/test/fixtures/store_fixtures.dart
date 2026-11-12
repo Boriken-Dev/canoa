@@ -272,8 +272,14 @@ final class MemoryOverlays implements OverlayManager {
     return skillSources[source.shown()] ?? (throw const OverlayException('The source has no such skill'));
   }
 
+  /// Skills (lower-case names) whose copy cannot be written.
+  final failSave = <String>{};
+
   @override
-  Future<void> saveSkill(SkillCopy copy) async => skills[skillKey(copy.name)] = copy;
+  Future<void> saveSkill(SkillCopy copy) async {
+    if (failSave.contains(skillKey(copy.name))) throw const FileSystemException('disk full');
+    skills[skillKey(copy.name)] = copy;
+  }
 
   @override
   Future<void> removeSkill(String name) async => skills.remove(skillKey(name));

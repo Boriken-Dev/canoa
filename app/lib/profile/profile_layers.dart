@@ -59,6 +59,7 @@ Future<ProfileLayers> profileLayers({
   Profile? session,
   String? harness,
   aos.Settings? iconLimits,
+  Map<String, String> skillPins = const {},
 }) async {
   harness ??= presetHarnesses[agent];
   final layers = <Layer>[const Layer(LayerId(LayerKind.builtIn), builtInProfile)];
@@ -132,7 +133,7 @@ Future<ProfileLayers> profileLayers({
     final Layer layer;
     try {
       layer = overlayLayer(identity: name, root: directory, os: home.os, tree: read.tree, harness: harness,
-          iconLimits: iconLimits, fetched: fetched, pinned: switch (source) {
+          iconLimits: iconLimits, fetched: fetched, skillPins: skillPins, pinned: switch (source) {
             GitOverlay(:final pin) => pin != null,
             DirOverlay(:final pin) => pin != null,
           });
@@ -166,7 +167,30 @@ Future<ProfileLayers> profileLayers({
     notes.add(LayerNote(LayerId(LayerKind.overlay, names[by] ?? by),
         'Requires $name, which [overlays] does not name: it applies without it'));
   }
-  layers.addAll([for (final identity in aos.compositionOrder(manifests, resolution.installOrder)) found[identity]!]);
+  final ordered = aos.compositionOrder(manifests, resolution.installOrder);
+  // A name two overlays offer has one holder: a bundled skill wins over one from elsewhere whichever comes first, and
+  // among equals the later overlay does; a skill from elsewhere never takes a name another holds.
+  final delivery = aos.Delivery();
+  for (final identity in ordered) {
+    final layer = found[identity]!;
+    for (final name in layer.profile.skills.keys) {
+      final held = layer.aos?.fetchedSkills[name];
+      delivery.offer(name, identity, held == null,
+          held == null ? aos.Held.bundled(identity) : aos.Held.elsewhere(held.source, held.pin));
+    }
+  }
+  for (final identity in ordered) {
+    final layer = found[identity]!;
+    final lost = {
+      for (final name in layer.profile.skills.keys)
+        if (layer.aos?.fetchedSkills.containsKey(name) == true && !delivery.holds(name, identity)) name,
+    };
+    if (lost.isEmpty) continue;
+    found[identity] = layer.withoutSkills(lost);
+    notes.add(LayerNote(layer.id, 'Not delivered: ${lost.join(', ')}; another overlay holds ${lost.length == 1 ? 'that name' : 'those names'}, '
+        'and a skill from elsewhere never takes a name'));
+  }
+  layers.addAll([for (final identity in ordered) found[identity]!]);
   layers.add(Layer(const LayerId(LayerKind.user), user, dir: home?.configDir));
   ProjectLayer? project;
   if (workingDirectory != null && home != null) {

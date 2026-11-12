@@ -91,7 +91,7 @@ final class SkillCopy {
 /// Why the fetched copy [copy] of the skill [entry] names is not delivered for the overlay [identity], or null when it is:
 /// the record must list the overlay and name the skill, a source entry must be the very source and pin that were
 /// accepted, and the files must still be those whose digest was recorded and be a skill named as the entry names it.
-String? skillCopyRefusal(aos.SkillEntry entry, String identity, SkillCopy? copy) {
+String? skillCopyRefusal(aos.SkillEntry entry, String identity, SkillCopy? copy, {String? configuredPin}) {
   if (copy == null) {
     return entry.origin == 'source'
         ? 'from ${entry.source}, not fetched: install or sync the overlay in Canoa'
@@ -103,6 +103,7 @@ String? skillCopyRefusal(aos.SkillEntry entry, String identity, SkillCopy? copy)
     if (copy.source != entry.key) return stale;
     if (entry.pin case final pin? when !sameDigest(pin, copy.digest)) return stale;
   }
+  if (configuredPin != null && !sameDigest(configuredPin, copy.digest)) return stale;
   try {
     aos.readFetchedSkill(copy.name, copy.pairs, copy.digest, skillLimits);
   } on aos.AosError {

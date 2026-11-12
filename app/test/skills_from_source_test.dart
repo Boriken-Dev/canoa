@@ -15,6 +15,7 @@ import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
+import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/profile/profiles_dialog.dart';
 import 'package:canoa/profile/skill_copies.dart';
 import 'package:canoa/store/skills.dart';
@@ -72,9 +73,10 @@ MemoryOverlays world({String? reviewPin, List<String> names = const [], bool pdf
 final mainCatalog = catalogOf('[skills]\npdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }\n');
 
 Future<OverlayPreview> preview(MemoryOverlays overlays, {String name = 'team', String repo = teamRepo,
-    List<(String, aos.Catalog)>? catalogs}) =>
+    List<(String, aos.Catalog)>? catalogs, Map<String, InstalledManifest> others = const {},
+    Map<String, String> skillPins = const {}}) =>
     previewOverlay(overlays, name, GitOverlay(repo: repo, reference: 'main'), os: 'linux', shared: const {},
-        catalogs: catalogs ?? [('main', mainCatalog)]);
+        catalogs: catalogs ?? [('main', mainCatalog)], others: others, skillPins: skillPins);
 
 Layer layerOf(MemoryOverlays overlays, Map<String, SkillCopy> copies, {String name = 'team'}) => overlayLayer(
     identity: name, root: '/o/$name', os: 'linux', tree: treeOfFiles(overlays.installedFiles[name]!).tree, fetched: copies);
@@ -442,6 +444,207 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
     });
   });
 
+
+  group('one holder for a name, whichever overlay is installed first', () {
+    const baseRepo = 'https://example.invalid/base.git';
+    final config = CanoaConfig.parse('');
+
+    MemoryOverlays withBase() => world(pdf: false)
+      ..put(baseRepo, {'overlay.cfg': 'name = "base"\n', 'skills/review/SKILL.md': skillMd('review')});
+
+    Future<OverlayPreview> previewAgainst(MemoryOverlays overlays, CanoaConfig installed, String name, String repo) async =>
+        preview(overlays, name: name, repo: repo, catalogs: [], others: await installedManifests(MemoryHome(overlays), installed));
+
+    test('a fetched skill does not take the name of an installed overlay\'s bundled skill: shown, not fetched, not delivered',
+        () async {
+      final overlays = withBase();
+      final first = await installPreview(overlays, config,
+          await preview(overlays, name: 'base', repo: baseRepo, catalogs: []), catalog: 'main');
+      final shown = await previewAgainst(overlays, first, 'team', teamRepo);
+      final item = shown.skills!.items.single;
+      expect(item.status, SkillStatus.shadowed);
+      expect(item.why, contains('base'));
+      final report = SkillInstallReport();
+      await installPreview(overlays, first, shown, catalog: 'main', report: report);
+      expect(report.of('review')!.result, SkillResult.notDelivered);
+      expect(overlays.skillFetches, isEmpty, reason: 'a shadowed skill is not fetched');
+      expect(overlays.skills, isEmpty);
+    });
+
+    test('an overlay installed later that bundles the name wins it, and the fetched copy of the earlier one is not delivered',
+        () async {
+      final overlays = withBase();
+      var changed = await installPreview(overlays, config, await preview(overlays, catalogs: []), catalog: 'main');
+      final shown = await previewAgainst(overlays, changed, 'base', baseRepo);
+      expect(shown.skills!.items, isEmpty, reason: 'the incoming overlay names none from elsewhere');
+      changed = await installPreview(overlays, changed, shown, catalog: 'main');
+      expect(overlays.skills.keys, ['review'], reason: 'the copy stays until its overlay is removed');
+
+      final layers = await profileLayers(overlays: changed.overlays, user: const Profile(), agents: const {}, agent: 'Claude',
+          home: MemoryHome(overlays));
+      Layer layer(String name) => layers.layers.firstWhere((layer) => layer.id.name == name);
+      expect(layer('team').profile.skills.keys, isNot(contains('review')));
+      expect(layer('base').profile.skills.keys, contains('review'));
+      expect(layers.effective.skills['review']!.layer.name, 'base');
+      expect(layers.notes.map((note) => note.text), contains(startsWith('Not delivered: review')));
+    });
+  });
+
+  group('what the review and the install do not leave to chance', () {
+    final config = CanoaConfig.parse('');
+
+    test('a copy damaged on disk is shown as an update and not fetched again until the yes', () async {
+      final overlays = world(pdf: false);
+      await installPreview(overlays, config, await preview(overlays, catalogs: []), catalog: 'main');
+      final copy = overlays.skills['review']!;
+      overlays.skills['review'] = SkillCopy(name: copy.name, source: copy.source, pin: copy.pin, digest: copy.digest,
+          overlays: copy.overlays, files: {...copy.files, 'notes.md': utf8.encode('damaged\n')});
+      final fetched = overlays.skillFetches.length;
+      final shown = await preview(overlays, catalogs: []);
+      expect(shown.skills!.items.single.status, SkillStatus.update);
+      expect(shown.skills!.items.single.why, contains('not what was accepted'));
+      expect(overlays.skillFetches.length, fetched);
+      await installPreview(overlays, config, shown, catalog: 'main');
+      expect(overlays.skillFetches.length, fetched + 1, reason: 'the yes fetches it again');
+      expect(utf8.decode(overlays.skills['review']!.files['notes.md']!), 'one\n');
+    });
+
+    test('a copy damaged after the review was shown kept is reported failed, never fetched silently', () async {
+      final overlays = world(pdf: false);
+      await installPreview(overlays, config, await preview(overlays, catalogs: []), catalog: 'main');
+      final shown = await preview(overlays, catalogs: []);
+      expect(shown.skills!.items.single.status, SkillStatus.unchanged);
+      final copy = overlays.skills['review']!;
+      overlays.skills['review'] = SkillCopy(name: copy.name, source: copy.source, pin: copy.pin, digest: copy.digest,
+          overlays: copy.overlays, files: {...copy.files, 'notes.md': utf8.encode('damaged\n')});
+      final fetched = overlays.skillFetches.length;
+      final report = await installSkills(overlays, shown.skills!);
+      expect(report.of('review')!.result, SkillResult.failed);
+      expect(overlays.skillFetches.length, fetched);
+    });
+
+    test('a skill the person chose is kept when an overlay names another source for it', () async {
+      final overlays = world(pdf: false, names: ['pdf'])
+        ..put(teamRepo, {
+          'overlay.cfg': 'name = "team"\nskills = [{ name = "pdf", source = "$skillsHost/pdf-fork.git" }]\n',
+        })
+        ..putSkill('$skillsHost/pdf-fork.git', {'SKILL.md': skillMd('pdf', 'x: y\n')});
+      final item = reviewChosenSkill(overlays, const {}, 'main', 'pdf', mainCatalog.skills!.entries['pdf']!);
+      await installChosenSkill(overlays, item);
+      final shown = await preview(overlays, catalogs: []);
+      expect(shown.skills!.items.single.status, SkillStatus.refused);
+      expect(shown.skills!.items.single.why, contains('you chose'));
+      await installPreview(overlays, config, shown, catalog: 'main');
+      expect(overlays.skills['pdf']!.source, '$skillsHost/pdf.git');
+      expect(overlays.skills['pdf']!.chosen, isTrue);
+    });
+
+    test('an insecure transport and a private address are shown in the review', () async {
+      final overlays = MemoryOverlays()
+        ..put(teamRepo, {
+          'overlay.cfg': 'name = "team"\nskills = [\n'
+              '  { name = "plain", source = "http://skills.example.test/plain.git" },\n'
+              '  { name = "lan", source = "https://10.1.2.3/lan.git" },\n]\n',
+        });
+      final shown = await preview(overlays, catalogs: []);
+      final byName = {for (final item in shown.skills!.items) item.name: item};
+      expect(byName['plain']!.warnings, ['insecure-transport']);
+      expect(byName['lan']!.warnings, ['private-source']);
+    });
+
+    test('a catalog that now gives the name is a change the yes accepts', () async {
+      final overlays = world();
+      await installPreview(overlays, config, await preview(overlays), catalog: 'main');
+      final shown = await preview(overlays, catalogs: [('other', mainCatalog)]);
+      final item = shown.skills!.items.firstWhere((item) => item.name == 'pdf');
+      expect(item.status, SkillStatus.update);
+      expect(item.catalog, 'other');
+      expect(overlays.skills['pdf']!.catalog, 'main', reason: 'nothing changes before the yes');
+    });
+
+    test('a skill whose copy cannot be written is reported failed and the others are installed', () async {
+      final overlays = world()..failSave.add('pdf');
+      final report = SkillInstallReport();
+      await installPreview(overlays, config, await preview(overlays), catalog: 'main', report: report);
+      expect(report.of('pdf')!.result, SkillResult.failed);
+      expect(report.of('review')!.result, SkillResult.installed);
+      expect(overlays.skills.keys, ['review']);
+      expect(overlays.records.keys, ['team']);
+    });
+  });
+
+  group('canoa.cfg [skill_pins]', () {
+    final config = CanoaConfig.parse('');
+    String cfg(String? entryPin) => 'name = "team"\nskills = [{ name = "review", source = "$skillsHost/tools.git#skills/review"'
+        '${entryPin == null ? '' : ', pin = "$entryPin"'} }]\n';
+
+    test('the table is read by lower-case name, and a name or digest that is none is an error', () {
+      final read = CanoaConfig.parse('[skill_pins]\nReview = "${pinOf('review', reviewV1).toUpperCase().replaceFirst('SHA256', 'sha256')}"\n');
+      expect(read.skillPins.keys, ['review']);
+      expect(read.skillPins['review'], pinOf('review', reviewV1));
+      expect(() => CanoaConfig.parse('[skill_pins]\nreview = "abc"\n'), throwsFormatException);
+      expect(() => CanoaConfig.parse('[skill_pins]\n"../x" = "$wrongPin"\n'), throwsFormatException);
+      expect(() => CanoaConfig.parse('[skill_pins]\nA = "$wrongPin"\na = "$wrongPin"\n'), throwsFormatException);
+      expect(CanoaConfig.parse('[skill_pins]\nreview = "$wrongPin"\n').withCatalog('x', 'https://e.invalid/c.git@main#c.toml')
+          .skillPins['review'], wrongPin, reason: 'it survives a save');
+    });
+
+    test('a configured pin anchors an unpinned entry, and what is fetched must equal it', () async {
+      final overlays = MemoryOverlays()
+        ..put(teamRepo, {'overlay.cfg': cfg(null)})
+        ..putSkill('$skillsHost/tools.git#skills/review', reviewV1);
+      final pins = {'review': pinOf('review', reviewV1)};
+      final shown = await preview(overlays, catalogs: [], skillPins: pins);
+      final item = shown.skills!.items.single;
+      expect(item.pin, pins['review']);
+      expect(item.unpinned, isFalse);
+      expect(item.configuredPin, pins['review']);
+      expect(shown.skills!.plan.unpinned, isNotEmpty, reason: 'the entry itself has none, which the plan says');
+      await installPreview(overlays, config, shown, catalog: 'main');
+      expect(overlays.skills['review']!.pin, pins['review']);
+
+      final wrong = MemoryOverlays()
+        ..put(teamRepo, {'overlay.cfg': cfg(null)})
+        ..putSkill('$skillsHost/tools.git#skills/review', reviewV2);
+      final report = SkillInstallReport();
+      await installPreview(wrong, config, await preview(wrong, catalogs: [], skillPins: pins), catalog: 'main', report: report);
+      expect(report.of('review')!.result, SkillResult.refused);
+      expect(wrong.skills, isEmpty);
+    });
+
+    test('a pin of the entry and a pin in canoa.cfg that differ refuse the skill before any fetch', () async {
+      final overlays = MemoryOverlays()
+        ..put(teamRepo, {'overlay.cfg': cfg(pinOf('review', reviewV1))})
+        ..putSkill('$skillsHost/tools.git#skills/review', reviewV1);
+      final shown = await preview(overlays, catalogs: [], skillPins: {'review': wrongPin});
+      expect(shown.skills!.items.single.status, SkillStatus.refused);
+      expect(shown.skills!.items.single.why, contains('[skill_pins]'));
+      await installPreview(overlays, config, shown, catalog: 'main');
+      expect(overlays.skillFetches, isEmpty);
+    });
+
+    test('a catalog\'s pin and a configured pin must both hold for a skill named without a source', () async {
+      final overlays = world(reviewPin: pinOf('review', reviewV1));
+      final shown = await preview(overlays, skillPins: {'pdf': wrongPin});
+      expect(shown.skills!.items.firstWhere((item) => item.name == 'pdf').status, SkillStatus.refused);
+      final chosen = reviewChosenSkill(overlays, const {}, 'main', 'pdf', mainCatalog.skills!.entries['pdf']!,
+          pins: {'pdf': wrongPin});
+      expect(chosen.status, SkillStatus.refused);
+    });
+
+    test('a copy whose digest is not the configured pin is not delivered', () async {
+      final overlays = world(pdf: false);
+      await installPreview(overlays, config, await preview(overlays, catalogs: []), catalog: 'main');
+      final tree = treeOfFiles(overlays.installedFiles['team']!).tree;
+      final copies = await overlays.skillCopies();
+      expect(overlayLayer(identity: 'team', root: '/o', os: 'linux', tree: tree, fetched: copies,
+          skillPins: {'review': pinOf('review', reviewV1)}).profile.skills.keys, contains('review'));
+      final refused = overlayLayer(identity: 'team', root: '/o', os: 'linux', tree: tree, fetched: copies,
+          skillPins: {'REVIEW'.toLowerCase(): wrongPin});
+      expect(refused.profile.skills.keys, isNot(contains('review')));
+    });
+  });
+
   group('from local bare repositories', skip: hasGit ? false : 'git is not on PATH', () {
     late Directory temp;
     late Repo tools, overlayRepo;
@@ -500,6 +703,43 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       expect(OverlayStore.defaultSkillProtocols, isNot(contains('file')));
       expect(environment['GIT_SSH_COMMAND'], contains('IdentityAgent=none'));
       expect(environment['HOME'], contains('.skills'));
+    });
+
+    test('ssh is given no configuration, no key and no agent of the person\'s, only an empty identity', () {
+      final environment = store.isolatedEnvironment();
+      final empty = environment['GIT_CONFIG_GLOBAL']!;
+      expect(environment['GIT_SSH_COMMAND'], OverlayStore.sshCommand(empty));
+      final command = OverlayStore.sshCommand('/cache/empty');
+      for (final option in const ['-F "/cache/empty"', '-o BatchMode=yes', '-o IdentitiesOnly=yes', '-o IdentityAgent=none',
+        '-o IdentityFile="/cache/empty"']) {
+        expect(command, contains(option));
+      }
+      expect(File(empty).readAsStringSync(), isEmpty);
+      expect(empty, contains('.skills'), reason: 'the empty file is in the store\'s own directory');
+    });
+
+    test('every fetch of a skill checks the objects it receives and follows no redirect', () {
+      expect(OverlayStore.isolatedSettings, containsAll(['transfer.fsckObjects=true', 'http.followRedirects=false', 'credential.helper=']));
+    });
+
+    test('a record that names a directory outside .skills is never read, and nothing outside it is removed', () async {
+      final skills = Directory('${temp.path}/home/overlays/.skills')..createSync(recursive: true);
+      final outside = File('${temp.path}/home/overlays/keep.txt')..writeAsStringSync('keep');
+      Map<String, Object> record(String name, [List<String> overlays = const ['team']]) => {
+        'name': name, 'source': '$skillsHost/tools.git', 'digest': wrongPin, 'overlays': overlays, 'chosen': false,
+      };
+      File('${skills.path}/x.json').writeAsStringSync(jsonEncode(record('../../x')));
+      File('${skills.path}/...json').writeAsStringSync(jsonEncode(record('..')));
+      File('${skills.path}/y.json').writeAsStringSync(jsonEncode(record('y', ['../../team'])));
+      File('${skills.path}/z.json').writeAsStringSync(jsonEncode(record('z')));
+      Directory('${skills.path}/z').createSync();
+      File('${skills.path}/z/SKILL.md').writeAsStringSync(skillMd('z'));
+      final copies = await store.skillCopies();
+      expect(copies.keys, ['z'], reason: 'only a record that names its own file, with overlay names, is read');
+      await expectLater(store.removeSkill('..'), throwsA(isA<OverlayException>()));
+      await expectLater(store.removeSkill('../keep.txt'), throwsA(isA<OverlayException>()));
+      expect(outside.existsSync(), isTrue);
+      expect(Directory('${temp.path}/home/overlays').existsSync(), isTrue);
     });
 
     test('an overlay installs with its skills at their pins from git, they are recorded, written and delivered', () async {

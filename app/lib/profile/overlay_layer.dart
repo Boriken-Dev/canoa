@@ -16,7 +16,8 @@ import 'skill_copies.dart';
 final class AosLayer {
   const AosLayer({required this.identity, required this.root, required this.os, required this.digest,
       required this.pinned, required this.manifest, required this.files, required this.texts, required this.references,
-      required this.notApplied, this.about = const {}, this.icon = const {}, this.blobs = const {}});
+      required this.notApplied, this.about = const {}, this.icon = const {}, this.blobs = const {},
+      this.fetchedSkills = const {}});
 
   /// The name canoa.cfg gives it, its identity.
   final String identity;
@@ -49,6 +50,10 @@ final class AosLayer {
   /// The icon `[about]` names, by path, as the bytes its digest covered, once its header passed `readIcon`: what
   /// Settings decodes, never the file read again. Empty when there is none or it was refused.
   final Map<String, List<int>> icon;
+
+  /// The skills it delivers from elsewhere, by name: the source and pin of the copy delivered, which decide who keeps a
+  /// name two overlays offer.
+  final Map<String, ({String source, String? pin})> fetchedSkills;
 
   /// The bytes its digest covered of every file under a skill's directory and of every context file, by relative path:
   /// what a session is given, never the files read again.
@@ -131,6 +136,7 @@ Layer overlayLayer({
   bool pinned = false,
   aos.Settings? iconLimits,
   Map<String, SkillCopy> fetched = const {},
+  Map<String, String> skillPins = const {},
 }) {
   if (!aos.validOverlayName(identity)) throw OverlayRefusal('name', identity);
   final aos.TreeDigest digest;
@@ -226,18 +232,20 @@ Layer overlayLayer({
 
   final skills = <String, Skill?>{};
   final fetchedBlobs = <String, List<int>>{};
+  final fetchedHeld = <String, ({String source, String? pin})>{};
   for (final entry in aos.skillEntries(manifest, paths)) {
     if (entry.origin == 'bundled') {
       skills[entry.name] = Skill('skills/${entry.name}');
       continue;
     }
     final copy = fetched[skillKey(entry.name)];
-    if (skillCopyRefusal(entry, identity, copy) case final why?) {
+    if (skillCopyRefusal(entry, identity, copy, configuredPin: skillPins[skillKey(entry.name)]) case final why?) {
       notApplied.add('skills.${entry.name}: $why');
       continue;
     }
     skills[entry.name] = Skill('skills/${entry.name}');
-    for (final MapEntry(:key, :value) in copy!.files.entries) {
+    fetchedHeld[entry.name] = (source: copy!.source, pin: copy.pin);
+    for (final MapEntry(:key, :value) in copy.files.entries) {
       fetchedBlobs['skills/${entry.name}/$key'] = value;
     }
   }
@@ -382,6 +390,7 @@ Layer overlayLayer({
       notApplied: notApplied,
       about: about,
       icon: icon,
+      fetchedSkills: fetchedHeld,
       blobs: {
         ...fetchedBlobs,
         for (final path in files)

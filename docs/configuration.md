@@ -297,8 +297,10 @@ installs them with the overlay:
   **ambiguous**: both are reported with the overlay naming them, Canoa never picks one, and the overlay applies
   without them. Nothing of a skill is fetched until you apply, and the one yes covers the overlay and its skills.
 - **A skill is fetched like an overlay**, from git objects at its ref (its `HEAD` with none), never checked out, with a
-  Git that gets none of your credential helpers, SSH agent, askpass programs or settings and follows no redirect to
-  another host. Its files are digested before any is read and must match the pin; its `SKILL.md` must begin with YAML
+  Git that gets none of your credential helpers, SSH agent, askpass programs or settings, follows no redirect to
+  another host and checks every object it receives. Over ssh it uses an empty configuration file and an empty identity
+  (`-F` and `IdentityFile` both an empty file, `IdentitiesOnly`, `IdentityAgent=none`, `BatchMode`), since OpenSSH takes
+  your home directory from the password database, not from `HOME`, and would otherwise offer the keys in `~/.ssh`. Its files are digested before any is read and must match the pin; its `SKILL.md` must begin with YAML
   front matter whose `name` is the entry's. A skill with no pin is fetched and reported `unpinned`. A skill whose
   front matter holds a key other than `name`, `description`, `license`, `compatibility` and `metadata` is reported with
   that key, since a harness may take it as a grant. A pin that does not match refuses that skill only: nothing of it
@@ -307,8 +309,20 @@ installs them with the overlay:
 - **Where it is kept.** `overlays/.skills/NAME/` holds the files its digest covers and `overlays/.skills/NAME.json`
   records the source, the ref, the pin, the digest fetched, the catalog, the overlays naming it and whether you chose
   it, under the skill's name in lower case. A later check that resolves to another source or pin is an update, shown
-  as one, never applied because a catalog changed; a skill another overlay already has from another source is refused,
-  the first to install it keeping the name.
+  as one, never applied because a catalog changed. A change of the catalog that gave the name is such a change. A copy
+  whose files are no longer those recorded is shown the same way and fetched again only on your yes. A skill another
+  overlay already has from another source, or one you chose from another source, is refused, the holder keeping the
+  name. A record under `.skills` is read only when it names the skill its own file is named for, and nothing outside
+  `.skills` is read or removed for it.
+- **A name has one holder.** Skills are planned across every installed overlay and the incoming one: a skill from
+  elsewhere never takes a name another overlay's skill holds, a bundled skill of a later overlay takes it from a fetched
+  one, and the review shows a skill that would not be delivered, and by whom the name is held; it is not fetched. The
+  profile built for a session drops the fetched skill that lost its name, and says so. A source over plain `http` or
+  `git://`, or at a private network address, is shown in the review as such.
+- **`[skill_pins]`** pins a skill by its name (compared without regard to ASCII case) to a tree digest:
+  `[skill_pins]\nreview = "sha256:..."`. What is fetched must equal it and the pin of the entry or the catalog; two
+  that differ refuse the skill before any fetch. It anchors a skill named without a pin, which is then not reported
+  unpinned, and a copy whose digest differs is not delivered.
 - **It is delivered like a bundled skill**, to the agents that take one, after the same checks: the record must list
   the overlay and the files must still have the recorded digest. A skill that fails them, or was never fetched, is
   listed in **Settings → Profiles** as not applied (`skills.NAME: from SOURCE, not fetched: install or sync the overlay in

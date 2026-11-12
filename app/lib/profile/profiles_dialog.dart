@@ -7,6 +7,7 @@ import '../config/canoa_config.dart';
 import '../store/programs.dart';
 import '../store/skills.dart';
 import '../store/store_icon.dart';
+import '../store/store.dart' show installedManifests;
 import '../store/store_page.dart';
 import 'aos_support.dart';
 import 'overlay_layer.dart';
@@ -76,6 +77,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
       home: widget.home,
       workingDirectory: dir.isEmpty ? null : dir,
       iconLimits: config.store.iconLimits,
+      skillPins: config.skillPins,
     );
     await widget.home?.trust.load();
     if (mounted) setState(() => layers = found);
@@ -116,7 +118,8 @@ class ProfilesDialogState extends State<ProfilesDialog> {
     try {
       final read = treeOfFiles(await home.overlays.read(update));
       final manifest = aos.readOverlay(read.tree, aos.defaultSettings).manifest;
-      return await reviewSkills(home.overlays, identity: name, manifest: manifest, tree: read.tree);
+      return await reviewSkills(home.overlays, identity: name, manifest: manifest, tree: read.tree,
+          others: await installedManifests(home, config, except: name), pins: config.skillPins);
     } on aos.AosError {
       return null;
     }

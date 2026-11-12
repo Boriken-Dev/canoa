@@ -10,6 +10,7 @@ import '../chat/usage.dart' show defaultWarnPermille;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
 import '../permissions/protected_paths.dart' show protectedLinesOf;
+import '../profile/skill_copies.dart' show validSkillName;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
@@ -294,6 +295,28 @@ final class CanoaConfig {
   /// catalog file.
   Map<String, GitOverlay> get catalogs => _catalogs(tables['catalogs']);
 
+  /// `[skill_pins]`: the tree digest the person requires of a skill from elsewhere, by its name in lower case. A skill is
+  /// fetched only when its digest equals this and the pin its entry or catalog gives.
+  Map<String, String> get skillPins => _skillPins(tables['skill_pins']);
+
+  static Map<String, String> _skillPins(Object? raw) {
+    if (raw == null) return const {};
+    if (raw is! Map) throw const FormatException('canoa.cfg: skill_pins must be a table');
+    final out = <String, String>{};
+    for (final MapEntry(:key, :value) in raw.entries) {
+      final name = '$key'.toLowerCase();
+      if (!validSkillName('$key')) {
+        throw FormatException('canoa.cfg: skill_pins.$key is not a skill name');
+      }
+      if (value is! String || !RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(value)) {
+        throw FormatException('canoa.cfg: skill_pins.$key is a sha256: tree digest');
+      }
+      if (out.containsKey(name)) throw FormatException('canoa.cfg: skill_pins.$key repeats a name');
+      out[name] = value.toLowerCase();
+    }
+    return out;
+  }
+
   /// `[store]`: the store's limits.
   StoreSettings get store => StoreSettings.parse((tables['store'] as Map?) ?? const {});
 
@@ -500,7 +523,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'sources', 'attachments', 'usage'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'sources', 'attachments', 'usage'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -648,6 +671,7 @@ final class CanoaConfig {
     final rawProfile = data['profile'];
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
     _catalogs(data['catalogs']);
+    _skillPins(data['skill_pins']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
@@ -666,6 +690,7 @@ final class CanoaConfig {
         'profile': ?rawProfile,
         if (agentTables.isNotEmpty) 'agents': agentTables,
         'catalogs': ?data['catalogs'],
+        'skill_pins': ?data['skill_pins'],
         'store': ?rawStore,
       },
       agents: agents,

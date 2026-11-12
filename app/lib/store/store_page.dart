@@ -100,7 +100,7 @@ class StorePageState extends State<StorePage> {
   /// Installs the skill [name] [catalog] offers, by the person's own choice, after showing where it comes from.
   Future<void> _installSkill(String label, String name, aos.CatalogEntry offer) async {
     final home = widget.home!;
-    final item = reviewChosenSkill(home.overlays, skills, label, name, offer);
+    final item = reviewChosenSkill(home.overlays, skills, label, name, offer, pins: config.skillPins);
     final yes = await showSelectableDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -480,7 +480,8 @@ class OverlayPageState extends State<OverlayPage> {
     final (name, source) = _target!;
     final found = await previewOverlay(home.overlays, namedAs(config, name) ?? name, source,
         os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), config.profile)]).shareEnv,
-        catalogPin: entry.pin, iconLimits: config.store.iconLimits, catalogs: widget.catalogs);
+        catalogPin: entry.pin, iconLimits: config.store.iconLimits, catalogs: widget.catalogs,
+        others: await installedManifests(home, config, except: namedAs(config, name) ?? name), skillPins: config.skillPins);
     if (mounted) setState(() => preview = found);
   });
 
@@ -834,7 +835,7 @@ class SkillRows extends StatelessWidget {
 
   static String _what(SkillItem item) => switch (item.status) {
     SkillStatus.fetch => 'fetched',
-    SkillStatus.update => 'fetched again: the source or pin changed from the one accepted',
+    SkillStatus.update => item.why ?? 'fetched again: the source, pin or catalog changed from the one accepted',
     SkillStatus.unchanged => 'kept as accepted',
     SkillStatus.missing => 'not delivered: named, and no catalog offers it',
     SkillStatus.ambiguous => 'not delivered: ${item.catalogs?.join(' and ')} both offer it, and Canoa never picks one',
@@ -857,6 +858,13 @@ class SkillRows extends StatelessWidget {
               if (item.source != null) item.source!,
               if (item.fetch != null || item.status == SkillStatus.unchanged)
                 item.pin == null ? 'unpinned: nothing says what it should hold' : 'pinned ${item.pin}',
+              if (item.configuredPin != null) 'pin required by canoa.cfg [skill_pins]',
+              for (final warning in item.warnings)
+                switch (warning) {
+                  'insecure-transport' => 'over a transport that is not encrypted',
+                  'private-source' => 'from a private network address',
+                  _ => warning,
+                },
               if (item.catalog != null) 'from the catalog ${item.catalog}',
             ].join(' · '))),
           ])),

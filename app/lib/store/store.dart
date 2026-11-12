@@ -15,6 +15,7 @@ import '../profile/aos_support.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/overlays.dart';
 import '../profile/profile.dart';
+import '../profile/profile_home.dart';
 import '../profile/skill_copies.dart';
 import 'skills.dart';
 import 'store_settings.dart';
@@ -184,6 +185,25 @@ List<(String, aos.Catalog)> skillCatalogs(List<LoadedCatalog> catalogs) => [
         ),
       ),
 ];
+
+/// The manifest and files of each overlay `[overlays]` names that [home] has installed, by AOS identity, besides
+/// [except]: what a skill is planned against, so a name two overlays offer has one holder. One whose files cannot be
+/// read is left out.
+Future<Map<String, InstalledManifest>> installedManifests(ProfileHome home, CanoaConfig config, {String? except}) async {
+  final out = <String, InstalledManifest>{};
+  final skip = except == null ? null : aos.normalizeName(except);
+  for (final MapEntry(key: name, value: source) in config.overlays.entries) {
+    final identity = aos.normalizeName(name);
+    if (source is! GitOverlay || identity == skip || home.overlays.installed(name) == null) continue;
+    try {
+      final read = await home.readTree(home.overlays.directoryOf(name));
+      out[identity] = (aos.readOverlay(read.tree, aos.defaultSettings).manifest, read.tree);
+    } on Object {
+      continue;
+    }
+  }
+  return out;
+}
 
 /// [source] as a store shows it: without user information or query, which can hold a credential.
 String displaySource(aos.Source source) => source.shown();
@@ -419,6 +439,8 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   String? harness,
   aos.Settings? iconLimits,
   List<(String, aos.Catalog)> catalogs = const [],
+  Map<String, InstalledManifest> others = const {},
+  Map<String, String> skillPins = const {},
 }) async {
   final update = await overlays.check(name, source.pinnedTo(null));
   final files = await overlays.read(update);
@@ -457,10 +479,11 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   Layer? layer;
   OverlayReport? report;
   String? refusal;
-  final skills = await reviewSkills(overlays, identity: name, manifest: manifest, tree: read.tree, catalogs: catalogs);
+  final skills = await reviewSkills(overlays, identity: name, manifest: manifest, tree: read.tree, catalogs: catalogs,
+      others: others, pins: skillPins);
   try {
     layer = overlayLayer(identity: name, root: overlays.directoryOf(name), os: os, tree: read.tree, harness: harness,
-        pinned: true, iconLimits: iconLimits, fetched: await overlays.skillCopies());
+        pinned: true, iconLimits: iconLimits, fetched: await overlays.skillCopies(), skillPins: skillPins);
     report = overlayReport(layer.id, layer.aos!, shared);
   } on OverlayRefusal catch (error) {
     refusal = '$error';

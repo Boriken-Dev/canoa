@@ -238,7 +238,13 @@ final class OverlayStore implements OverlayManager {
       final name = entity.uri.pathSegments.last.replaceFirst(RegExp(r'\.json$'), '');
       try {
         final json = jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
-        if (skillKey(json['name'] as String) != name) continue;
+        final named = json['name'];
+        // A record names a directory under .skills and nothing else: its name is a skill name, the file's own.
+        if (named is! String || !validSkillName(named) || skillKey(named) != name || !validSkillName(name)) continue;
+        if (json['overlays'] case final List<dynamic> listed
+            when listed.any((overlay) => overlay is! String || !aos.validOverlayName(overlay))) {
+          continue;
+        }
         out[name] = SkillCopy.fromJson(json, _skillFiles(Directory('$_skillsDirectory${Platform.pathSeparator}$name')));
       } on Object {
         continue;
@@ -531,9 +537,7 @@ final class OverlayStore implements OverlayManager {
       '-c', 'core.fsmonitor=false',
       '-c', 'credential.interactive=never',
       if (_isolated) ...[
-        '-c', 'credential.helper=',
-        '-c', 'http.followRedirects=false',
-        for (final setting in skillGitConfig) ...['-c', setting],
+        for (final setting in [...isolatedSettings, ...skillGitConfig]) ...['-c', setting],
       ],
       ...args,
     ],
@@ -547,6 +551,16 @@ final class OverlayStore implements OverlayManager {
           },
     includeParentEnvironment: !_isolated,
   );
+
+  /// What every git command that fetches a skill is given: no credential helper, no redirect followed, and every object
+  /// received checked.
+  static const isolatedSettings = ['credential.helper=', 'http.followRedirects=false', 'transfer.fsckObjects=true'];
+
+  /// The ssh command a skill's fetch uses: none of the person's configuration, keys or agent. OpenSSH takes the home
+  /// directory from the password database, not from `HOME`, so its own configuration and identity files are replaced by
+  /// [empty], a file with nothing in it, and only that identity may be tried.
+  static String sshCommand(String empty) => 'ssh -F "$empty" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none '
+      '-o IdentityFile="$empty" -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no';
 
   /// What a skill's fetch runs git with: not the person's settings, credential helpers, askpass programs or SSH agent,
   /// only what git needs to find its programs and the proxy the network is reached through. Public so a test reads it.
@@ -570,7 +584,7 @@ final class OverlayStore implements OverlayManager {
       'GCM_INTERACTIVE': 'never',
       'SSH_ASKPASS_REQUIRE': 'never',
       'GIT_ALLOW_PROTOCOL': skillProtocols.join(':'),
-      'GIT_SSH_COMMAND': 'ssh -F "$nothing" -o BatchMode=yes -o IdentityAgent=none -o PasswordAuthentication=no',
+      'GIT_SSH_COMMAND': sshCommand(nothing),
       'GIT_LITERAL_PATHSPECS': '1',
     };
   }

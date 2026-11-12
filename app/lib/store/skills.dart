@@ -18,7 +18,8 @@ enum SkillStatus {
   /// Not on this computer: it is fetched.
   fetch,
 
-  /// Here from another source or pin than the overlay names now: fetched again, and shown as an update.
+  /// Here from another source, pin or catalog than the overlay names now, or damaged: fetched again, and shown as an
+  /// update the yes accepts.
   update,
 
   /// Here from the very source and pin, and kept.
@@ -40,7 +41,7 @@ enum SkillStatus {
 /// One skill of an overlay that comes from elsewhere, with where from and what installing does with it.
 final class SkillItem {
   const SkillItem({required this.name, required this.overlay, required this.status, this.source, this.pin,
-      this.catalog, this.catalogs, this.fetch, this.previous, this.why});
+      this.configuredPin, this.catalog, this.catalogs, this.fetch, this.previous, this.why, this.warnings = const []});
 
   final String name;
 
@@ -51,8 +52,12 @@ final class SkillItem {
   /// Where it comes from, as shown: no user information and no query.
   final String? source;
 
-  /// The digest it must have, or null for an entry with no pin.
+  /// The digest it must have: the entry's or catalog's pin, else the one canoa.cfg's `[skill_pins]` gives; null when
+  /// neither names one.
   final String? pin;
+
+  /// The pin `[skill_pins]` gives this skill, which the digest fetched must equal as well.
+  final String? configuredPin;
 
   /// The catalog that gave the source, and for an ambiguous name the catalogs that offer it.
   final String? catalog;
@@ -65,7 +70,11 @@ final class SkillItem {
   final SkillCopy? previous;
   final String? why;
 
-  bool get unpinned => pin == null && (status == SkillStatus.fetch || status == SkillStatus.update || status == SkillStatus.unchanged);
+  /// `insecure-transport` and `private-source`, the settings of the source that are not the default.
+  final List<String> warnings;
+
+  bool get unpinned =>
+      pin == null && (status == SkillStatus.fetch || status == SkillStatus.update || status == SkillStatus.unchanged);
 }
 
 /// What an overlay's skills from elsewhere would do, from its manifest, the skills here and the catalogs.
@@ -96,60 +105,135 @@ String? _shown(String key) {
 
 bool _samePin(String? a, String? b) => a == null || b == null ? a == b : sameDigest(a, b);
 
+bool _sound(SkillCopy copy) {
+  try {
+    aos.readFetchedSkill(copy.name, copy.pairs, copy.digest, skillLimits);
+    return true;
+  } on aos.AosError {
+    return false;
+  }
+}
+
 /// Where the skills of the overlays [requested] come from: [manifests] and [trees] by identity, resolved through
 /// [catalogs]. The plan every reader of skills in the app starts from; fetches nothing.
 aos.SkillPlan planSkills(Map<String, aos.Document> manifests, List<String> requested, Map<String, aos.OverlayTree> trees,
         {List<(String, aos.Catalog)> catalogs = const [], List<String> order = const []}) =>
     aos.resolveSkills(manifests, requested, trees, catalogs, order, true, aos.defaultSettings);
 
+/// An installed overlay, to plan its skills with the others': its manifest and files.
+typedef InstalledManifest = (aos.Document, aos.OverlayTree);
+
+/// The pin that holds for a skill whose entry gives [entryPin] and canoa.cfg [configured]: both when they agree, the
+/// one given when only one is, and null with [conflict] when they differ, since no tree has two digests.
+({String? pin, bool conflict}) effectivePin(String? entryPin, String? configured) {
+  if (entryPin != null && configured != null) {
+    return sameDigest(entryPin, configured) ? (pin: entryPin, conflict: false) : (pin: null, conflict: true);
+  }
+  return (pin: entryPin ?? configured, conflict: false);
+}
+
 /// What installing or syncing the overlay [identity], whose manifest is [manifest] and files [tree], would do with the
-/// skills it names from elsewhere. [catalogs] are `(label, catalog)` and [order] ranks their labels where more than one
-/// offers a name. Fetches nothing and writes nothing.
+/// skills it names from elsewhere. The skills are planned across [others], the overlays installed besides it, so a name
+/// two overlays offer has one holder: a skill from elsewhere never takes one another holds. [catalogs] are
+/// `(label, catalog)`, [order] ranks their labels where more than one offers a name, and [pins] are canoa.cfg's
+/// `[skill_pins]`. Fetches nothing and writes nothing.
 Future<SkillReview> reviewSkills(OverlayManager overlays, {
   required String identity,
   required aos.Document manifest,
   required aos.OverlayTree tree,
   List<(String, aos.Catalog)> catalogs = const [],
   List<String> order = const [],
+  Map<String, InstalledManifest> others = const {},
+  Map<String, String> pins = const {},
 }) async {
   final id = aos.normalizeName(identity);
-  final plan = planSkills({id: manifest}, [id], {id: tree}, catalogs: catalogs, order: order);
+  final manifests = <String, aos.Document>{
+    for (final MapEntry(:key, :value) in others.entries) if (aos.normalizeName(key) != id) aos.normalizeName(key): value.$1,
+    id: manifest,
+  };
+  final trees = <String, aos.OverlayTree>{
+    for (final MapEntry(:key, :value) in others.entries) if (aos.normalizeName(key) != id) aos.normalizeName(key): value.$2,
+    id: tree,
+  };
+  aos.SkillPlan plan;
+  try {
+    plan = planSkills(manifests, manifests.keys.toList(), trees, catalogs: catalogs, order: order);
+  } on aos.AosError {
+    // A cycle among the others' requires: this overlay is planned alone.
+    plan = planSkills({id: manifest}, [id], {id: tree}, catalogs: catalogs, order: order);
+  }
   final copies = await overlays.skillCopies();
-  final fetches = {for (final fetch in plan.toFetch) skillKey(fetch.name): fetch};
+  final fetches = {
+    for (final fetch in plan.toFetch)
+      if (fetch.overlay == id) skillKey(fetch.name): fetch,
+  };
+  String? holderOf(String name) {
+    for (final MapEntry(:key, :value) in plan.delivered.entries) {
+      if (skillKey(key) == skillKey(name)) return value;
+    }
+    return null;
+  }
+
   final items = <SkillItem>[];
   final named = <String>{};
-  for (final skill in plan.skills) {
+  for (final skill in plan.skills.where((skill) => skill.overlay == id)) {
     if (skill.origin == 'bundled') continue;
     final key = skillKey(skill.name);
     final copy = copies[key];
+    final configured = pins[key];
+    final both = effectivePin(skill.pin, configured);
+    final warnings = [
+      for (final (setting, name, overlay) in plan.nonDefaults)
+        if (overlay == id && skillKey(name) == key) setting,
+    ];
     SkillItem item(SkillStatus status, {aos.Fetch? fetch, String? why}) => SkillItem(name: skill.name, overlay: id,
-        status: status, source: skill.source, pin: skill.pin, catalog: skill.catalog, catalogs: skill.catalogs,
-        fetch: fetch, previous: copy, why: why);
+        status: status, source: skill.source, pin: both.pin, configuredPin: configured, catalog: skill.catalog,
+        catalogs: skill.catalogs, fetch: fetch, previous: copy, why: why, warnings: warnings);
     if (skill.origin == 'missing' || skill.origin == 'ambiguous') {
       if (copy != null && copy.overlays.contains(id) && copy.catalog != null) {
         // Resolved through a catalog when it was accepted: a catalog that is not here now does not unmake that.
         named.add(key);
         items.add(SkillItem(name: skill.name, overlay: id, status: SkillStatus.unchanged, source: _shown(copy.source),
-            pin: copy.pin, catalog: copy.catalog, previous: copy,
+            pin: copy.pin, configuredPin: configured, catalog: copy.catalog, previous: copy,
             why: 'resolved through the catalog ${copy.catalog} when it was installed, and kept'));
       } else {
         items.add(item(skill.origin == 'missing' ? SkillStatus.missing : SkillStatus.ambiguous));
       }
       continue;
     }
-    final fetch = fetches[key];
-    if (fetch == null) {
-      items.add(item(SkillStatus.shadowed, why: 'a skill of the same name is already delivered'));
+    if (both.conflict) {
+      items.add(item(SkillStatus.refused,
+          why: 'canoa.cfg [skill_pins] and the entry give different pins, and no tree has both'));
       continue;
     }
+    final planned = fetches[key];
+    if (planned == null) {
+      final holder = holderOf(skill.name);
+      items.add(item(SkillStatus.shadowed,
+          why: holder == null || holder == id
+              ? 'a skill of the same name is already delivered'
+              : 'the skill of this name in the overlay $holder is delivered, and a skill from elsewhere never takes a name'));
+      continue;
+    }
+    final fetch = aos.Fetch(name: planned.name, overlay: planned.overlay, from: planned.from, pin: both.pin);
     final wanted = fetch.from.keyWith(null);
     if (copy == null) {
       named.add(key);
       items.add(item(SkillStatus.fetch, fetch: fetch));
-    } else if (copy.source == wanted && _samePin(copy.pin, fetch.pin)) {
+      continue;
+    }
+    final alike = copy.source == wanted && _samePin(copy.pin, both.pin);
+    final shared = copy.overlays.any((other) => other != id);
+    if (copy.chosen && !alike) {
+      items.add(item(SkillStatus.refused,
+          why: 'you chose this skill from another source: remove it first, or keep it as it is'));
+    } else if (alike && (copy.catalog == skill.catalog || shared)) {
       named.add(key);
-      items.add(item(SkillStatus.unchanged, fetch: fetch));
-    } else if (copy.overlays.any((other) => other != id)) {
+      items.add(_sound(copy)
+          ? item(SkillStatus.unchanged, fetch: fetch)
+          : item(SkillStatus.update,
+              fetch: fetch, why: 'its copy here is not what was accepted: fetched again if you say yes'));
+    } else if (shared) {
       items.add(item(SkillStatus.refused,
           why: 'another overlay has this skill from another source or pin, and the first to install it keeps the name'));
     } else {
@@ -194,6 +278,18 @@ String _refusedBecause(aos.AosError error) => switch (error.errorClass) {
   _ => 'refused (${error.errorClass})',
 };
 
+/// Writes [copy]; the reason it could not be, or null.
+Future<String?> _save(OverlayManager overlays, SkillCopy copy) async {
+  try {
+    await overlays.saveSkill(copy);
+    return null;
+  } on OverlayException catch (error) {
+    return error.message;
+  } on Object catch (error) {
+    return 'it could not be written (${error.runtimeType})';
+  }
+}
+
 Future<SkillOutcome> _fetchAndSave(OverlayManager overlays, SkillItem item, Set<String> naming,
     {required bool chosen}) async {
   final fetch = item.fetch!;
@@ -202,15 +298,21 @@ Future<SkillOutcome> _fetchAndSave(OverlayManager overlays, SkillItem item, Set<
     files = await overlays.fetchSkillFiles(fetch.from);
   } on OverlayException catch (error) {
     return SkillOutcome(item.name, SkillResult.failed, 'it could not be fetched: ${error.message}');
+  } on Object catch (error) {
+    return SkillOutcome(item.name, SkillResult.failed, 'it could not be fetched (${error.runtimeType})');
   }
   final aos.FetchedSkill read;
   try {
+    // The digest must equal the pin of the entry and the one canoa.cfg gives: they were made one before this.
     read = aos.readFetchedSkill(item.name, files, item.pin, skillLimits);
   } on aos.AosError catch (error) {
     return SkillOutcome(item.name, SkillResult.refused, _refusedBecause(error));
   }
+  if (item.configuredPin case final configured? when !sameDigest(configured, '${read.digest}')) {
+    return SkillOutcome(item.name, SkillResult.refused, 'the files fetched do not have the pin in canoa.cfg [skill_pins]: refused');
+  }
   final bytes = {for (final (path, data) in files) path: data};
-  await overlays.saveSkill(SkillCopy(
+  final failure = await _save(overlays, SkillCopy(
     name: item.name,
     source: fetch.from.keyWith(null),
     ref: fetch.from.reference,
@@ -221,6 +323,7 @@ Future<SkillOutcome> _fetchAndSave(OverlayManager overlays, SkillItem item, Set<
     chosen: chosen,
     files: {for (final path in read.files) path: bytes[path]!},
   ));
+  if (failure != null) return SkillOutcome(item.name, SkillResult.failed, failure);
   final keys = read.reported.isEmpty ? '' : ', with front matter keys a harness may take as a grant: ${read.reported.join(', ')}';
   return SkillOutcome(item.name, SkillResult.installed,
       'fetched${item.pin == null ? ', unpinned' : ' at its pin'}$keys');
@@ -245,21 +348,18 @@ Future<SkillInstallReport> installSkills(OverlayManager overlays, SkillReview re
       case SkillStatus.shadowed || SkillStatus.refused:
         report.outcomes.add(SkillOutcome(item.name, SkillResult.notDelivered, item.why ?? 'not delivered'));
       case SkillStatus.unchanged:
-        final copy = copies[key]!;
-        var sound = true;
-        try {
-          aos.readFetchedSkill(copy.name, copy.pairs, copy.digest, skillLimits);
-        } on aos.AosError {
-          sound = false;
-        }
-        if (sound) {
-          if (!copy.overlays.contains(id)) await overlays.saveSkill(copy.copyWith(overlays: [...copy.overlays, id]..sort()));
+        final copy = copies[key];
+        if (copy == null || !_sound(copy)) {
+          // It changed since the review, which showed it kept: said, and not fetched without being asked again.
+          report.outcomes.add(SkillOutcome(item.name, SkillResult.failed,
+              'its copy is not what was accepted: review the overlay again to fetch it'));
+        } else if (copy.overlays.contains(id)) {
           report.outcomes.add(SkillOutcome(item.name, SkillResult.kept, item.why ?? 'kept as it was accepted'));
-        } else if (item.fetch != null) {
-          // What is on disk is not what was recorded: fetched again, and held to the same pin.
-          report.outcomes.add(await _fetchAndSave(overlays, item, {...copy.overlays, id}, chosen: copy.chosen));
         } else {
-          report.outcomes.add(SkillOutcome(item.name, SkillResult.failed, 'its copy is not what was accepted'));
+          final failure = await _save(overlays, copy.copyWith(overlays: [...copy.overlays, id]..sort()));
+          report.outcomes.add(failure == null
+              ? SkillOutcome(item.name, SkillResult.kept, item.why ?? 'kept as it was accepted')
+              : SkillOutcome(item.name, SkillResult.failed, failure));
         }
       case SkillStatus.fetch || SkillStatus.update:
         final previous = copies[key];
@@ -283,7 +383,7 @@ Future<List<SkillCopy>> detachOverlay(OverlayManager overlays, String identity, 
   for (final MapEntry(:key, value: copy) in (await overlays.skillCopies()).entries) {
     if (keep.contains(key) || !copy.overlays.contains(id)) continue;
     final rest = copy.copyWith(overlays: [for (final overlay in copy.overlays) if (overlay != id) overlay]);
-    await overlays.saveSkill(rest);
+    if (await _save(overlays, rest) != null) continue;
     if (rest.overlays.isEmpty && !rest.chosen) orphans.add(rest);
   }
   return orphans;
@@ -310,22 +410,26 @@ Future<List<String>> removeOrphans(OverlayManager overlays, Iterable<String> nam
 }
 
 /// What installing the skill [name] that the catalog [label] offers as [entry] would do, by the person's own choice.
+/// [pins] are canoa.cfg's `[skill_pins]`.
 SkillItem reviewChosenSkill(OverlayManager overlays, Map<String, SkillCopy> copies, String label, String name,
-    aos.CatalogEntry entry) {
+    aos.CatalogEntry entry, {Map<String, String> pins = const {}}) {
   final from = entry.source;
   final copy = copies[skillKey(name)];
-  final same = copy != null && copy.source == from.keyWith(null) && _samePin(copy.pin, entry.pin);
-  final fetch = aos.Fetch(name: name, overlay: '', from: from, pin: entry.pin);
-  if (!validSkillName(name)) {
-    return SkillItem(name: name, overlay: '', status: SkillStatus.refused, source: from.shown(), pin: entry.pin,
-        catalog: label, why: 'it is not a skill name');
-  }
+  final configured = pins[skillKey(name)];
+  final both = effectivePin(entry.pin, configured);
+  SkillItem refused(String why) => SkillItem(name: name, overlay: '', status: SkillStatus.refused, source: from.shown(),
+      pin: both.pin, configuredPin: configured, catalog: label, previous: copy, why: why);
+  if (!validSkillName(name)) return refused('it is not a skill name');
+  if (both.conflict) return refused('canoa.cfg [skill_pins] and the catalog give different pins, and no tree has both');
+  final same = copy != null && copy.source == from.keyWith(null) && _samePin(copy.pin, both.pin);
   if (copy != null && !same && copy.overlays.isNotEmpty) {
-    return SkillItem(name: name, overlay: '', status: SkillStatus.refused, source: from.shown(), pin: entry.pin,
-        catalog: label, previous: copy, why: 'an overlay already has a skill of this name from another source or pin');
+    return refused('an overlay already has a skill of this name from another source or pin');
   }
-  return SkillItem(name: name, overlay: '', status: same ? SkillStatus.unchanged : copy == null ? SkillStatus.fetch : SkillStatus.update,
-      source: from.shown(), pin: entry.pin, catalog: label, fetch: fetch, previous: copy);
+  final fetch = aos.Fetch(name: name, overlay: '', from: from, pin: both.pin);
+  final status = same && _sound(copy) ? SkillStatus.unchanged : copy == null ? SkillStatus.fetch : SkillStatus.update;
+  return SkillItem(name: name, overlay: '', status: status, source: from.shown(), pin: both.pin,
+      configuredPin: configured, catalog: label, fetch: fetch, previous: copy,
+      why: same && status == SkillStatus.update ? 'its copy here is not what was accepted: fetched again if you say yes' : null);
 }
 
 /// Installs the skill [item] reviewed as the person's own choice: fetched and checked as an overlay's skill is, recorded
@@ -336,8 +440,10 @@ Future<SkillOutcome> installChosenSkill(OverlayManager overlays, SkillItem item)
   }
   final previous = item.previous;
   if (item.status == SkillStatus.unchanged && previous != null) {
-    await overlays.saveSkill(previous.copyWith(chosen: true));
-    return SkillOutcome(item.name, SkillResult.kept, 'already here, and now yours by choice');
+    final failure = await _save(overlays, previous.copyWith(chosen: true));
+    return failure == null
+        ? SkillOutcome(item.name, SkillResult.kept, 'already here, and now yours by choice')
+        : SkillOutcome(item.name, SkillResult.failed, failure);
   }
   return _fetchAndSave(overlays, item, {...?previous?.overlays}, chosen: true);
 }
@@ -351,6 +457,6 @@ Future<bool> releaseChosenSkill(OverlayManager overlays, String name) async {
     await overlays.removeSkill(copy.name);
     return true;
   }
-  await overlays.saveSkill(copy.copyWith(chosen: false));
-  return false;
+  final failure = await _save(overlays, copy.copyWith(chosen: false));
+  return failure != null ? throw OverlayException(failure) : false;
 }
