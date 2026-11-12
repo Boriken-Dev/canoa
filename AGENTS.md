@@ -15,7 +15,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `app/` | The Flutter chat client: web, desktop and the extension's UI |
 | `app/native/` | The app's own plugin: builds `crates/canoa-ffi` with the desktop runner and declares its C ABI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
-| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app; `examples/` holds the programs the tests run (`stdio_agent`, also scripted with `--scripted`; `web_peer`, the page's peer; `mcp_server`; `harness_standin`) |
+| `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app; `examples/` holds the programs the tests run (`stdio_agent`, also scripted with `--scripted`; `web_peer`, the page's peer; `mcp_server`; `harness_standin`; `store_control`, the control channel over standard streams with a stand-in program as its only Store) |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe` |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
@@ -56,6 +56,8 @@ node --test --test-force-exit "app/test/*.test.mjs"
 # the chat's connection code against the real host
 cargo build -p canoa-host --bin canoa --examples
 (cd app && CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_test.dart)
+# the app's Store code against the real control channel and a stand-in program (needs the examples built)
+(cd app && CANOA_TEST_HOST=../target/debug/canoa flutter test test/program_store_host_test.dart)
 # the host as a library in a test process, and a standalone canoa on the same home
 cargo build -p canoa-ffi --lib
 (cd app && CANOA_TEST_LIBRARY=../target/debug/canoa_ffi.dll CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_library_test.dart)   # libcanoa_ffi.so on Linux

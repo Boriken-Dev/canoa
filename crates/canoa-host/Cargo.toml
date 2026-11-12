@@ -135,6 +135,9 @@ name = "version_standin"
 [[example]]
 name = "web_peer"
 
+[[example]]
+name = "store_control"
+
 [lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"
