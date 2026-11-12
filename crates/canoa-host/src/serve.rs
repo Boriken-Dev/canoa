@@ -825,6 +825,12 @@ impl Serving {
                 )?;
                 (Some(bound), url)
             };
+            // The host's own sources are launched with what canoa.cfg's top level says; an entry on an address, with its
+            // `[host.profiles]`.
+            let local_profile = entry
+                .local
+                .then(|| config.local_profiles.for_agent(&entry.name))
+                .flatten();
             let (kind, run) = match &entry.kind {
                 EntryKind::Agent {
                     program,
@@ -847,8 +853,8 @@ impl Serving {
                                     program: program.clone(),
                                     args: args.clone(),
                                     state_dir: options.state_dir.clone(),
-                                    private: profiles.is_empty(),
-                                    per_connection: !profiles.is_empty(),
+                                    private: profiles.is_empty() && local_profile.is_none(),
+                                    per_connection: !profiles.is_empty() || local_profile.is_some(),
                                     starter: Some(private_starter(&agents)),
                                 }),
                                 None => scope,
@@ -857,6 +863,7 @@ impl Serving {
                         offer: hosted::offer(
                             profiles,
                             &config.profiles,
+                            local_profile.as_ref(),
                             options.provider_program.as_os_str().to_owned(),
                         ),
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
@@ -928,7 +935,7 @@ impl Serving {
                         &registry,
                         harness,
                         &configured,
-                        !profiles.is_empty(),
+                        !profiles.is_empty() || local_profile.is_some(),
                         roots,
                     )
                     .map_err(|error| refused(error.to_string()))?
@@ -957,6 +964,7 @@ impl Serving {
                             offer: hosted::offer(
                                 profiles,
                                 &config.profiles,
+                                local_profile.as_ref(),
                                 options.provider_program.as_os_str().to_owned(),
                             ),
                             worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),

@@ -53,6 +53,82 @@ pub struct Config {
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
     /// [`Entry::local`] set), in the file's order. They are served when the host serves its own sources.
     pub local_agents: Vec<Entry>,
+    /// The top-level `[profile]`, `[overlays]` and `[agents.NAME.profile|mcp]`: what the host's own sources are launched with.
+    pub local_profiles: LocalProfiles,
+}
+
+/// What canoa.cfg's top level says a session of the host's own sources is launched with. Nothing here is served to a network
+/// peer: it applies to the entries reached over [`crate::Local`] only.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LocalProfiles {
+    /// `[profile]`: the person's own layer.
+    pub profile: Option<Profile>,
+    /// The names in `[overlays]`, in the file's order: overlays the app installed in `overlays/` beside canoa.cfg.
+    pub overlays: Vec<String>,
+    /// `[agents.NAME.profile]` and `[agents.NAME.mcp]`, by the agent's label.
+    pub agents: IndexMap<String, AgentProfile>,
+    /// canoa.cfg's directory, absolute.
+    pub directory: PathBuf,
+}
+
+/// One agent's `[agents.NAME.profile]` layer and `[agents.NAME.mcp]` choices.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AgentProfile {
+    /// The agent's layer.
+    pub profile: Option<Profile>,
+    /// For an MCP server of the profile: on or off, or the definition digest an overlay's or a project's server is allowed at.
+    pub mcp: BTreeMap<String, McpChoice>,
+}
+
+/// What the person chose for an MCP server of an agent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum McpChoice {
+    /// `true`: a server of the person's own is on, which is what it is by default.
+    On,
+    /// `false`: off.
+    Off,
+    /// `sha256:` and the digest of the definition an overlay's or a project's server is allowed at.
+    At(String),
+}
+
+impl LocalProfiles {
+    /// The profile `agent` is launched with, or `None` when nothing in canoa.cfg is for it.
+    #[must_use]
+    pub fn for_agent(&self, agent: &str) -> Option<HostProfile> {
+        let layer = self.agents.get(agent);
+        let own = layer.and_then(|layer| layer.profile.clone());
+        if self.profile.is_none()
+            && self.overlays.is_empty()
+            && own.is_none()
+            && layer.is_none_or(|layer| layer.mcp.is_empty())
+        {
+            return None;
+        }
+        let mcp = layer.map(|layer| layer.mcp.clone()).unwrap_or_default();
+        let allow_mcp = mcp
+            .iter()
+            .filter_map(|(name, choice)| match choice {
+                McpChoice::At(digest) => Some((name.clone(), digest.clone())),
+                _ => None,
+            })
+            .collect();
+        let off_mcp = mcp
+            .iter()
+            .filter(|(_, choice)| **choice == McpChoice::Off)
+            .map(|(name, _)| name.clone())
+            .collect();
+        Some(HostProfile {
+            profile: self.profile.clone().unwrap_or_default(),
+            overlays: self.overlays.clone(),
+            allow_mcp,
+            agent: own.map(|profile| (agent.to_owned(), profile)),
+            off_mcp,
+            directory: self.directory.clone(),
+        })
+    }
 }
 
 /// `[host.control]`.
@@ -171,6 +247,10 @@ pub struct HostProfile {
     /// An overlay's MCP server name and the definition digest (`sha256:` and 64 hex digits) it may start at. No other
     /// overlay server starts.
     pub allow_mcp: BTreeMap<String, String>,
+    /// The agent's own layer above the profile, with the agent's label: `[agents.NAME.profile]`.
+    pub agent: Option<(String, Profile)>,
+    /// Servers of the profile turned off, whichever layer they come from.
+    pub off_mcp: BTreeSet<String>,
     /// canoa.cfg's directory, absolute.
     pub directory: PathBuf,
 }
@@ -575,6 +655,12 @@ struct RawFile {
     /// `[agents.NAME]`: the app's table, of which the host reads `program` and `args` and lets the rest go by.
     #[serde(default)]
     agents: IndexMap<String, toml::Value>,
+    /// `[profile]`: the person's own layer.
+    #[serde(default)]
+    profile: Option<toml::Table>,
+    /// `[overlays]`: the app's table, of which the host reads the names.
+    #[serde(default)]
+    overlays: IndexMap<String, toml::Value>,
 }
 
 /// `[usage]`: the app reads `warn_permille`, so only the key the host acts on is named and the others are let go by.
@@ -751,6 +837,7 @@ impl Config {
         let raw: RawFile = toml::from_str(text).map_err(|error| parse_error(text, &error))?;
         let limit_phrases = raw.usage.and_then(|usage| usage.limit_phrases);
         let local_agents = local_agents_of(&raw.agents)?;
+        let local_profiles = local_profiles_of(raw.profile, &raw.overlays, &raw.agents, base)?;
         if limit_phrases
             .iter()
             .flatten()
@@ -765,6 +852,7 @@ impl Config {
             return Ok(Self {
                 limit_phrases,
                 local_agents,
+                local_profiles,
                 ..Self::default()
             });
         };
@@ -1094,6 +1182,7 @@ impl Config {
             accounts,
             account_store,
             local_agents,
+            local_profiles,
             control,
         })
     }
@@ -1453,7 +1542,82 @@ fn profile_of(
         profile,
         overlays,
         allow_mcp,
+        agent: None,
+        off_mcp: BTreeSet::new(),
         directory: directory.to_owned(),
+    })
+}
+
+/// The top-level `[profile]`, `[overlays]` and each agent's `profile` and `mcp`. Errors name a table and a setting, never a value.
+fn local_profiles_of(
+    profile: Option<toml::Table>,
+    overlays: &IndexMap<String, toml::Value>,
+    agents: &IndexMap<String, toml::Value>,
+    base: &Path,
+) -> Result<LocalProfiles, ConfigError> {
+    let invalid = |what: String| ConfigError::Invalid { entry: None, what };
+    let directory = directory_of(base);
+    let profile = profile
+        .map(|table| {
+            Profile::from_table(table, LayerKind::User)
+                .map_err(|error| invalid(format!("profile: {error}")))
+        })
+        .transpose()?;
+    let mut names = Vec::new();
+    for name in overlays.keys() {
+        if !coqui_aos::valid_overlay_name(name) {
+            return Err(invalid(
+                "overlays holds a name that is not an overlay's".to_owned(),
+            ));
+        }
+        names.push(name.clone());
+    }
+    let mut by_agent = IndexMap::new();
+    for (label, table) in agents {
+        let Some(table) = table.as_table() else {
+            continue;
+        };
+        let mut layer = AgentProfile::default();
+        match table.get("profile") {
+            None => {}
+            Some(toml::Value::Table(own)) => {
+                layer.profile = Some(
+                    Profile::from_table(own.clone(), LayerKind::Agent)
+                        .map_err(|error| invalid(format!("agents.{label}.profile: {error}")))?,
+                );
+            }
+            Some(_) => return Err(invalid(format!("agents.{label}.profile is not a table"))),
+        }
+        match table.get("mcp") {
+            None => {}
+            Some(toml::Value::Table(choices)) => {
+                for (server, choice) in choices {
+                    let choice = match choice {
+                        toml::Value::Boolean(true) => McpChoice::On,
+                        toml::Value::Boolean(false) => McpChoice::Off,
+                        toml::Value::String(digest) if is_digest(digest) => {
+                            McpChoice::At(digest.clone())
+                        }
+                        _ => {
+                            return Err(invalid(format!(
+                                "agents.{label}.mcp.{server} is true, false or a sha256: digest"
+                            )));
+                        }
+                    };
+                    layer.mcp.insert(server.clone(), choice);
+                }
+            }
+            Some(_) => return Err(invalid(format!("agents.{label}.mcp is not a table"))),
+        }
+        if layer.profile.is_some() || !layer.mcp.is_empty() {
+            by_agent.insert(label.clone(), layer);
+        }
+    }
+    Ok(LocalProfiles {
+        profile,
+        overlays: names,
+        agents: by_agent,
+        directory,
     })
 }
 

@@ -1183,3 +1183,46 @@ cache_lifetime = "short"
         assert!(error.contains("cache_lifetime"), "{text}: {error}");
     }
 }
+
+#[test]
+fn the_top_level_profile_overlays_and_an_agents_layer_and_choices_are_read_for_the_hosts_own_sources()
+ {
+    let config = parse(
+        "[profile]\nmodel = \"small\"\n\
+         [overlays]\nteam = \"https://example.invalid/team.git@main#team\"\n\
+         [agents.Claude.profile]\nmodel = \"large\"\n\
+         [agents.Claude.mcp]\nfiles = false\ndocs = true\nteam = \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"\n",
+    )
+    .expect("parses");
+    let local = &config.local_profiles;
+    assert_eq!(local.overlays, ["team"]);
+    let claude = local.for_agent("Claude").expect("a profile for Claude");
+    assert_eq!(claude.overlays, ["team"]);
+    assert_eq!(
+        claude.agent.as_ref().map(|(label, _)| label.as_str()),
+        Some("Claude")
+    );
+    assert!(claude.off_mcp.contains("files") && !claude.off_mcp.contains("docs"));
+    assert_eq!(claude.allow_mcp.len(), 1);
+    // The person's layer and the overlays reach every source; an agent's own layer, only that agent.
+    assert!(
+        local
+            .for_agent("Codex")
+            .is_some_and(|codex| codex.agent.is_none())
+    );
+    assert!(
+        parse("")
+            .expect("parses")
+            .local_profiles
+            .for_agent("Claude")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_choice_that_is_not_on_off_or_a_digest_is_refused_naming_the_setting() {
+    let error = parse("[agents.Claude.mcp]\nfiles = \"yes\"\n").expect_err("refused");
+    let said = error.to_string();
+    assert!(said.contains("agents.Claude.mcp.files"), "{said}");
+    assert!(parse("[overlays]\n\"bad name\" = \"x\"\n").is_err());
+}

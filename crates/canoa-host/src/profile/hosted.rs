@@ -89,6 +89,8 @@ struct Item {
     how: String,
     /// An MCP server's definition digest, which `allow_mcp` names.
     digest: Option<String>,
+    /// What `model`, `effort` or `mode` is set to: the session's options take it, as the host cannot. Never a secret.
+    value: Option<String>,
 }
 
 impl Item {
@@ -104,6 +106,7 @@ impl Item {
             state,
             how: how.into(),
             digest: None,
+            value: None,
         }
     }
 
@@ -111,6 +114,9 @@ impl Item {
         let mut out = json!({"key": self.key, "layer": self.layer, "state": self.state.as_str(), "how": self.how});
         if let Some(digest) = &self.digest {
             out["digest"] = json!(digest);
+        }
+        if let Some(value) = &self.value {
+            out["value"] = json!(value);
         }
         out
     }
@@ -434,6 +440,13 @@ fn layers_of(
         Some(host.directory.clone()),
         host.profile.clone(),
     ));
+    if let Some((label, profile)) = &host.agent {
+        layers.push(Layer::new(
+            LayerId::new(LayerKind::Agent, label.clone()),
+            Some(host.directory.clone()),
+            profile.clone(),
+        ));
+    }
     layers
 }
 
@@ -1141,12 +1154,13 @@ fn parts_for(
         names.push(name.clone());
         let ready = ready_mcp(name, sourced, &effective, &after, lookup);
         let key = format!("mcp.{name}");
-        let allowed = !ready.layer.kind.is_confined()
-            || connection
-                .host
-                .allow_mcp
-                .get(name)
-                .is_some_and(|digest| same_digest(digest, &ready.digest));
+        let allowed = !connection.host.off_mcp.contains(name)
+            && (!ready.layer.kind.is_confined()
+                || connection
+                    .host
+                    .allow_mcp
+                    .get(name)
+                    .is_some_and(|digest| same_digest(digest, &ready.digest)));
         let mut item = if let Some(why) = &ready.refused {
             Item::new(key, &ready.layer, State::Refused, why.clone())
         } else if !allowed {
@@ -1205,12 +1219,14 @@ fn parts_for(
         ("mode", &effective.mode),
     ] {
         if let Some(value) = value {
-            items.push(Item::new(
+            let mut item = Item::new(
                 key,
                 &value.layer,
                 State::Unsupported,
                 "the host does not set it; the session's options do",
-            ));
+            );
+            item.value = Some(value.value.to_string());
+            items.push(item);
         }
     }
 
@@ -1574,12 +1590,22 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
     }
 }
 
+/// The name of the one profile a source of the host's own is offered, built from canoa.cfg's top level.
+pub(crate) const LOCAL_PROFILE: &str = "default";
+
 /// An entry's offer, from its profile names and the configuration's `[host.profiles]`.
 pub(crate) fn offer(
     names: &[String],
     profiles: &IndexMap<String, HostProfile>,
+    local: Option<&HostProfile>,
     launcher: OsString,
 ) -> Option<Arc<Offer>> {
+    if let Some(local) = local {
+        return Some(Arc::new(Offer {
+            profiles: vec![(LOCAL_PROFILE.to_owned(), local.clone())],
+            launcher,
+        }));
+    }
     if names.is_empty() {
         return None;
     }
