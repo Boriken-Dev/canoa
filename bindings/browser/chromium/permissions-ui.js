@@ -3,6 +3,7 @@ const tabSelect=document.querySelector('#tab');
 const list=document.querySelector('#grants');
 const status=document.querySelector('#status');
 const tabOrigins=new Map();
+import {agentChoices} from './agent-choices.js';
 const options={peer:document.querySelector('#peer'),
   capability:document.querySelector('#capability'),
   minutes:document.querySelector('#minutes')};
@@ -81,6 +82,17 @@ let standingOn=null;
 async function refreshStanding(){
   const view=await request({type:'canoa.standing.get'});
   standingOn=view.on;
+  const choices=agentChoices(view.machines);
+  const chosenPeer=options.peer.value;
+  options.peer.replaceChildren(...choices.map(({value,label})=>{
+    const item=document.createElement('option');
+    item.value=value;
+    item.textContent=label;
+    return item;
+  }));
+  if (choices.some(({value})=>value===chosenPeer)) options.peer.value=chosenPeer;
+  document.querySelector('#no-agents').hidden=choices.length>0;
+  form.querySelector('button[type=submit]').disabled=choices.length===0;
   const chosen=view.on ?? machine.value;
   machine.replaceChildren(...view.machines.map(({key,label,peer,serves})=>{
     const item=document.createElement('option');

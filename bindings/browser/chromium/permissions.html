@@ -19,12 +19,13 @@
   <h1>Canoa browser permissions</h1>
   <p>Grant a verified agent limited browser access to one tab and origin. A grant does
     not pair or authenticate an agent. Navigation, revocation, or expiry removes access.</p>
+  <p><a href="welcome.html">What an agent can do with a tab</a></p>
   <p class="warn">DevTools access can inspect page content, network responses and execute
     JavaScript. Use only for agents you explicitly trust.</p>
   <form id="grant-form">
-    <label for="peer">Previously paired agent PeerId</label>
-    <input id="peer" required pattern="sha256:[a-f0-9]{64}" placeholder="sha256:…"
-      autocomplete="off" spellcheck="false">
+    <label for="peer">Paired agent</label>
+    <select id="peer" required></select>
+    <p id="no-agents" hidden>No agent is paired yet. <a href="acp-request.html?manage=1">Pair one under Canoa agents</a>.</p>
     <label for="tab">Website tab</label><select id="tab" required></select>
     <label for="capability">Permission</label>
     <select id="capability">

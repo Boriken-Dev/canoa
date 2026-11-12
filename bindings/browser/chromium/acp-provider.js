@@ -335,6 +335,11 @@ export async function forgetSite(origin) {
   for (const grant of await store.grants(origin)) await gateway.revokeByPerson(grant);
 }
 
+/** The keys of the agents this browser holds, for a grant to check its peer against. */
+export async function pairedPeers() {
+  return (await store.agents()).map((agent) => agent.peer).filter((peer) => typeof peer === "string");
+}
+
 export function installProvider() {
   // Without this, a content script could read the agents' secret and turn on what only the person may.
   chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});

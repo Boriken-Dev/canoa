@@ -3,7 +3,8 @@ import {
 } from "./permissions.js";
 import { captureContext, addContext, takeContext } from "./context-transfer.js";
 import { detachOnTabClosed } from "./devtools.js";
-import { installProvider } from "./acp-provider.js";
+import { installProvider, pairedPeers } from "./acp-provider.js";
+import { isPairedPeer } from "./agent-choices.js";
 import { readGrants, updateGrants } from "./browser-grants.js";
 
 installProvider();
@@ -23,7 +24,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changes) => {
 });
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+  // Once, on a fresh install: what an agent can do with a tab, before anything is paired.
+  if (details.reason === "install") chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
   chrome.contextMenus.create({
     id: "canoa-full-page",
     title: "Open Canoa in a tab",
@@ -108,7 +111,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       reply({grants:await updateGrants((current) => current.filter((grant) => !sameGrant(grant,msg.grant)))});
       return;
     }
-    if (!/^sha256:[a-f0-9]{64}$/.test(msg.peerId || '') ||
+    if (!isPairedPeer(await pairedPeers(),msg.peerId) ||
         !Number.isSafeInteger(msg.tabId) || msg.tabId < 0 ||
         ![CAPABILITY.READ,CAPABILITY.INTERACT,CAPABILITY.WEBMCP,
           CAPABILITY.DISCOVER,CAPABILITY.DEBUG].includes(msg.capability) ||
