@@ -102,7 +102,7 @@ void main() {
       expect(find.textContaining('Agent connections and sync'), findsNothing);
     });
 
-    testWidgets('the wordmark keeps to one line beside its four buttons at the default window width', (tester) async {
+    testWidgets('the wordmark keeps to one line, with Hosting named under it, at the default window width', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       try {
         await _shown(tester, const Size(1280, 720), host: HostSupervisor(null));

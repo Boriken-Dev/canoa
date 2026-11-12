@@ -104,14 +104,14 @@ void main() {
   });
 
   group('on a desktop', () {
-    Future<void> openNative(WidgetTester tester) async {
+    Future<void> openNative(WidgetTester tester, {String? noiseWhy = 'this build has no peer key to prove with'}) async {
       await tester.binding.setSurfaceSize(const Size(1280, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
         onPressed: () => showCanoaConnectDialog(
           context,
           (_) async {},
-          methodUnavailable: (method) async => 'this build has no peer key to prove with',
+          methodUnavailable: (method) async => noiseWhy,
           localPeerId: (method) async => throw UnsupportedError('no key'),
           inBrowser: false,
         ),
@@ -136,6 +136,28 @@ void main() {
       expect(find.text('Connect to verified agent'), findsOneWidget);
       expect(find.textContaining('Run '), findsNothing, reason: 'an agent on this computer starts from a new session');
     });
+
+    for (final why in <String?>['this build has no peer key to prove with', null]) {
+      testWidgets('it has no pairing by PIN, ${why == null ? 'even where Noise could run' : 'and no notice about it'}', (tester) async {
+        await openNative(tester, noiseWhy: why);
+        expect(find.textContaining('PIN'), findsNothing);
+        expect(find.textContaining('Pairing'), findsNothing);
+        expect(find.text('Pair'), findsNothing);
+        expect(find.widgetWithText(TextField, 'PIN'), findsNothing);
+        expect(find.widgetWithText(TextField, 'Where it waits to pair'), findsNothing);
+      });
+    }
+
+    testWidgets('it holds the note that agents elsewhere need a verified peer, which the rail no longer carries', (tester) async {
+      await openNative(tester);
+      expect(find.text('Agents on other machines need a verified ACP peer.'), findsOneWidget);
+    });
+  });
+
+  testWidgets('in the browser it holds the browser\'s note, and the PIN section stays', (tester) async {
+    await _open(tester, onConnect: (_) async {});
+    expect(find.text('Agent connections and sync require verified ACP peers.'), findsOneWidget);
+    expect(find.text('Pair'), findsOneWidget);
   });
 
   testWidgets('a refused PIN says so and is cleared, since it is spent', (tester) async {

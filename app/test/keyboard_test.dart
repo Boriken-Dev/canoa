@@ -124,6 +124,34 @@ void main() {
     expect(store.selectedId, store.sessions[2].id);
   });
 
+  testWidgets('Ctrl+1 and Ctrl+Tab count through the list as the rail shows it, a pinned session first', (tester) async {
+    final (_, sessions, store) = await _three(tester);
+    store.setPinned(sessions[0], true);
+    await tester.pump();
+    await _press(tester, LogicalKeyboardKey.digit1);
+    expect(store.selectedId, sessions[0].id);
+    await _press(tester, LogicalKeyboardKey.digit2);
+    expect(store.selectedId, sessions[2].id, reason: 'the newest of the rest');
+    await _press(tester, LogicalKeyboardKey.tab);
+    expect(store.selectedId, sessions[1].id);
+  });
+
+  testWidgets('Search in the rail opens the palette on the sessions alone', (tester) async {
+    final (_, _, store) = await _three(tester);
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CommandPalette), findsOneWidget);
+    for (final session in store.sessions) {
+      expect(find.text('Go to ${session.title}'), findsOneWidget, reason: 'the one in view too');
+    }
+    expect(find.text('Connect to an agent'), findsNothing);
+    await tester.enterText(find.byKey(const Key('palette-search')), 'Agent 1');
+    await tester.pumpAndSettle();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(store.selected?.title, 'Agent 1');
+  });
+
   testWidgets('Ctrl+L puts the cursor in the composer', (tester) async {
     await _three(tester);
     expect(tester.widget<TextField>(_composer).focusNode?.hasFocus, isFalse);
@@ -173,7 +201,7 @@ void main() {
     await _press(tester, LogicalKeyboardKey.keyK);
     expect(find.byType(CommandPalette), findsOneWidget);
     expect(find.text('/review'), findsOneWidget);
-    expect(find.text('New session'), findsOneWidget);
+    expect(find.text('New session'), findsNWidgets(2), reason: "the rail's entry and the palette's");
     expect(find.text('Go to Agent 0'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('palette-search')), 'rev');
     await tester.pumpAndSettle();
