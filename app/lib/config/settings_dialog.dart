@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'canoa_config.dart';
 import '../chat/modes.dart';
@@ -6,6 +8,8 @@ import '../ledger/session_ledger.dart';
 import '../permissions/permission_rules.dart';
 import '../permissions/protected_paths.dart';
 import '../sources/sources.dart';
+import '../store/programs.dart';
+import '../store/programs_view.dart';
 import '../theme/look.dart';
 import '../workspace/workspace_template.dart';
 
@@ -27,7 +31,7 @@ class _ProtectedController extends TextEditingController {
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.rules, this.onProfiles,
-      this.onAllowNotifications, this.onPreview, this.workspacePreview, this.presets = const [], this.hosted = const [], this.checkSource, this.openSources = false});
+      this.onAllowNotifications, this.onPreview, this.workspacePreview, this.presets = const [], this.hosted = const [], this.checkSource, this.programs, this.openSources = false});
   final CanoaConfig config;
 
   /// The built-in sources, which can be hidden from a new session but not changed.
@@ -38,6 +42,9 @@ class SettingsDialog extends StatefulWidget {
 
   /// What a source needs and whether it is here.
   final Future<SourceCheck> Function(AgentSource source)? checkSource;
+
+  /// The programs the Store reports, which the sources show the version of and install or update; none where the host has no Store.
+  final ProgramStores? programs;
 
   /// Whether the dialog opens with its sources shown.
   final bool openSources;
@@ -78,11 +85,28 @@ class SettingsDialogState extends State<SettingsDialog> {
 
   @override
   void dispose() {
+    widget.programs?.removeListener(_programsChanged);
     _sourceName.dispose();
     _sourceCommand.dispose();
     _workspace.dispose();
     _protected.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Opening Settings is when the publishers are asked for the newest versions (kept for an hour); nothing is installed.
+    if (widget.programs case final programs?) {
+      programs.addListener(_programsChanged);
+      unawaited(programs.refresh(latest: true));
+    }
+  }
+
+  /// A program found, installed, updated or removed changes what its sources need, so they are read again.
+  void _programsChanged() {
+    if (!mounted) return;
+    setState(_checks.clear);
   }
 
   Future<SourceCheck> _check(AgentSource source) =>
@@ -94,6 +118,16 @@ class SettingsDialogState extends State<SettingsDialog> {
     builder: (context, snapshot) {
       final check = snapshot.data;
       if (check == null) return const Text('Looking for what it needs…');
+      final programs = widget.programs;
+      final status = check.store == null ? null : programs?.status(check.store!);
+      if (programs != null && status != null) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(statusLines(status).join('\n'), key: Key('source-state ${source.label}')),
+          if (status.problem case final problem?) Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          const SizedBox(height: 4),
+          ProgramButtons(programs: programs, status: status),
+        ]);
+      }
       final problem = check.describe(source.label);
       if (problem != null) return Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error));
       return Text(check.found.isEmpty ? 'Ready' : check.found.entries.map((found) => '${found.key}: ${found.value}').join('\n'));

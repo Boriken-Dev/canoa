@@ -55,7 +55,9 @@ import 'profile/approval_dialog.dart';
 import 'profile/report.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
+import 'sources/readiness.dart';
 import 'sources/sources.dart';
+import 'store/programs.dart';
 import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
 import 'theme/canoa_mark.dart';
@@ -267,6 +269,7 @@ class _CanoaAppState extends State<CanoaApp> {
           ],
           hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
           checkSource: _check,
+          programs: _programs,
           openSources: sources,
         ),
       );
@@ -356,6 +359,7 @@ class _CanoaAppState extends State<CanoaApp> {
     await showSelectableDialog<void>(
       context: above,
       builder: (_) => ProfilesDialog(
+        programs: _programs,
         config: config,
         agents: {
           for (final source in _hostedSources) if (source.local) source.label,
@@ -573,7 +577,24 @@ class _CanoaAppState extends State<CanoaApp> {
     if (listening == null) {
       return SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
     }
+    // The Store's extension for the source's program says whether it is here, which version and whether a newer one exists;
+    // only a source no extension serves keeps the host's own list of what it is missing.
+    if (_programs case final programs?) {
+      final reported = await storeReadiness(programs, source);
+      if (reported != null) return reported;
+    }
     return SourceCheck(missing: listening.missing);
+  }
+
+  /// The programs the host's Store keeps. Nothing is asked of the host until a page that shows them, or a source's readiness,
+  /// needs it; an install runs only when the person confirms its plan.
+  late final ProgramStores? _programs = _control == null
+      ? null
+      : (ProgramStores(control: _control.ready, open: _control.open)..addListener(_programsChanged));
+
+  /// A program found, installed, updated or removed changes whether its sources can run.
+  void _programsChanged() {
+    if (mounted && _checked) unawaited(_checkSources());
   }
 
   /// What `canoa options` says of [source]: the models and efforts its provider lists with no session. A preset the host runs

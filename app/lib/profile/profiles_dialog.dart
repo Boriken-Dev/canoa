@@ -4,6 +4,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../store/programs.dart';
 import '../store/store_icon.dart';
 import '../store/store_page.dart';
 import 'overlay_layer.dart';
@@ -18,7 +19,7 @@ import '../selectable.dart';
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
 class ProfilesDialog extends StatefulWidget {
   const ProfilesDialog({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
-      this.onPin, this.onSave});
+      this.onPin, this.onSave, this.programs});
 
   final CanoaConfig config;
 
@@ -36,6 +37,9 @@ class ProfilesDialog extends StatefulWidget {
 
   /// Saves canoa.cfg as the overlay store changed it, and gives the configuration saved; without it there is no store.
   final SaveConfig? onSave;
+
+  /// The programs the host's Store keeps, which the Store page shows with the overlays.
+  final ProgramStores? programs;
 
   @override
   State<ProfilesDialog> createState() => ProfilesDialogState();
@@ -176,7 +180,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
                 onPressed: busy != null
                     ? null
                     : () async {
-                        final left = await showStore(context, config: config, home: home, onSave: save);
+                        final left = await showStore(context, config: config, home: home, onSave: save, programs: widget.programs);
                         if (left != null && mounted) setState(() => config = left);
                         await _load();
                       },

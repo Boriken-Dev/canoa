@@ -9,6 +9,8 @@ import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/profiles_dialog.dart' show EffectiveTable, OverlayReportView, visible;
 import 'links.dart';
+import 'programs.dart';
+import 'programs_view.dart';
 import 'store.dart';
 import 'store_icon.dart';
 import '../selectable.dart';
@@ -26,13 +28,17 @@ const shownTags = 40;
 /// The overlay store: the catalogs of `[catalogs]`, each fetched as overlays are, their entries searched by text and
 /// tag, an entry two catalogs offer shown once per catalog qualified by its label, and each entry's page.
 class StorePage extends StatefulWidget {
-  const StorePage({super.key, required this.config, required this.home, required this.onSave});
+  const StorePage({super.key, required this.config, required this.home, required this.onSave, this.programs});
 
   final CanoaConfig config;
 
   /// Where overlays install and catalogs are fetched; none in a web build.
   final ProfileHome? home;
   final SaveConfig onSave;
+
+  /// The programs the host's Store keeps, shown above the overlays with their versions and Install and Update; none where
+  /// the host has no Store.
+  final ProgramStores? programs;
 
   @override
   State<StorePage> createState() => StorePageState();
@@ -128,7 +134,7 @@ class StorePageState extends State<StorePage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Overlay store'),
+          title: Text(widget.programs == null ? 'Overlay store' : 'Store'),
           actions: [
             IconButton(
               key: const Key('store-refresh'),
@@ -141,6 +147,11 @@ class StorePageState extends State<StorePage> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (widget.programs case final programs?) ...[
+              ProgramsSection(programs: programs),
+              const SizedBox(height: 16),
+              Text('Overlays', style: text.titleMedium),
+            ],
             if (widget.home == null)
               const Text('The desktop app fetches catalogs and installs overlays.')
             else ...[
@@ -653,7 +664,7 @@ class OverlayPageState extends State<OverlayPage> {
 
 /// Opens the store over [context], and gives the configuration as the store left it.
 Future<CanoaConfig?> showStore(BuildContext context,
-        {required CanoaConfig config, required ProfileHome? home, required SaveConfig onSave}) =>
+        {required CanoaConfig config, required ProfileHome? home, required SaveConfig onSave, ProgramStores? programs}) =>
     Navigator.of(context).push<CanoaConfig>(selectablePage(
-      builder: (_) => StorePage(config: config, home: home, onSave: onSave),
+      builder: (_) => StorePage(config: config, home: home, onSave: onSave, programs: programs),
     ));
