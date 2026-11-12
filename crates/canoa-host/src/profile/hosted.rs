@@ -58,6 +58,12 @@ const INVALID_PARAMS: i64 = -32602;
 const INTERNAL_ERROR: i64 = -32603;
 const REPLY_LIMIT: Duration = Duration::from_secs(30);
 const REPLY_POLL: Duration = Duration::from_millis(10);
+/// The method the host asks the client that opened a session which of the profile's MCP servers it may start.
+pub const APPROVE_METHOD: &str = "_canoa/profile/approve";
+/// The `_meta` key of `initialize` with which a client says it answers [`APPROVE_METHOD`]; one that does not is never asked.
+pub const APPROVE_META: &str = "dev.boriken.canoa/approve";
+/// How long the person has to answer an approval.
+const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
 /// What became of one part of a profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -636,11 +642,22 @@ struct Parts {
     directories: Vec<String>,
     meta: Option<Value>,
     report: Value,
+    /// Servers the configuration does not allow and the person may, each ready to be added to one session.
+    approvable: Vec<Approvable>,
     #[allow(
         dead_code,
         reason = "held so the directory is removed with the connection, not read"
     )]
     written: Option<Written>,
+}
+
+/// An MCP server of an overlay or a project that canoa.cfg does not allow, and what the client is shown of it.
+#[derive(Debug)]
+struct Approvable {
+    name: String,
+    layer: String,
+    digest: String,
+    server: Value,
 }
 
 /// What ACP's `mcpServers` entry carries: the command or URL, the variables or headers, and a stdio server's arguments.
@@ -1149,6 +1166,7 @@ fn parts_for(
 
     let after = environments_after(&effective, lookup);
     let mut servers = Vec::new();
+    let mut approvable = Vec::new();
     let mut names = Vec::new();
     for (name, sourced) in &effective.mcp {
         names.push(name.clone());
@@ -1164,6 +1182,18 @@ fn parts_for(
         let mut item = if let Some(why) = &ready.refused {
             Item::new(key, &ready.layer, State::Refused, why.clone())
         } else if !allowed {
+            if !connection.host.off_mcp.contains(name)
+                && harness != Some("pi")
+                && takes.mcp(ready.transport)
+                && let Some(server) = acp_server(&ready, takes.version)
+            {
+                approvable.push(Approvable {
+                    name: name.clone(),
+                    layer: ready.layer.to_string(),
+                    digest: ready.digest.clone(),
+                    server,
+                });
+            }
             tracing::info!(
                 entry = connection.entry,
                 "mcp.{name} of {} is off: host.profiles.{}.allow_mcp.{name} = \"{}\" allows it",
@@ -1255,6 +1285,7 @@ fn parts_for(
         names,
         directories,
         meta,
+        approvable,
         report: json!({
             "name": connection.name,
             "harness": label,
@@ -1312,6 +1343,24 @@ fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), &'sta
     Ok(())
 }
 
+/// The report with the servers the person allowed for this session shown as applied.
+fn mark_allowed(report: &mut Value, allowed: &[String]) {
+    let Some(items) = report.get_mut("items").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        let named = item
+            .get("key")
+            .and_then(Value::as_str)
+            .and_then(|key| key.strip_prefix("mcp."))
+            .is_some_and(|name| allowed.iter().any(|each| each == name));
+        if named {
+            item["state"] = json!(State::Applied.as_str());
+            item["how"] = json!("ACP mcpServers; allowed for this session when the host asked");
+        }
+    }
+}
+
 /// Puts the report under [`PROFILE_META`] in an answer's `_meta`.
 fn add_report(result: &mut Value, report: &Value) {
     let Some(result) = result.as_object_mut() else {
@@ -1341,7 +1390,8 @@ fn names_profile(message: &[u8]) -> bool {
 #[derive(Debug)]
 enum Pending {
     Initialize,
-    Session,
+    /// A session request, with the servers the client allowed for it.
+    Session(Vec<String>),
 }
 
 #[derive(Debug)]
@@ -1350,6 +1400,11 @@ struct Hold {
     first: bool,
     pending: BTreeMap<String, Pending>,
     parts: Option<Parts>,
+    /// Messages the client sent while the host waited for an approval, in order, to be read before any other.
+    queued: alloc::collections::VecDeque<Vec<u8>>,
+    asked: u64,
+    /// Whether the client said in `initialize` that it answers approvals.
+    approves: bool,
 }
 
 /// A connection's channel to its agent with a profile applied: the launch line first, then each message the client sends
@@ -1387,6 +1442,9 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 first: true,
                 pending: BTreeMap::new(),
                 parts: None,
+                queued: alloc::collections::VecDeque::new(),
+                asked: 0,
+                approves: false,
             }),
             splice: scope.splice(),
         }
@@ -1415,8 +1473,99 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
         }
     }
 
+    /// For a session request, asks the client which of the servers canoa.cfg does not allow it lets this session start, with
+    /// [`APPROVE_METHOD`]: what the person chose, or nothing when the client does not answer it, answers with an error, takes too
+    /// long or goes away. The client's other messages meanwhile wait their turn.
+    fn approvals(&self, bytes: &[u8]) -> Vec<String> {
+        let Ok(request) = serde_json::from_slice::<Value>(bytes) else {
+            return Vec::new();
+        };
+        let session = request
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(|method| SESSION_METHODS.contains(&method));
+        if !session || request.get("id").is_none() {
+            return Vec::new();
+        }
+        let (ask_id, servers) = {
+            let mut hold = self.hold();
+            if !hold.approves {
+                return Vec::new();
+            }
+            let Some(parts) = hold
+                .parts
+                .as_ref()
+                .filter(|parts| !parts.approvable.is_empty())
+            else {
+                return Vec::new();
+            };
+            let servers: Vec<Value> = parts
+                .approvable
+                .iter()
+                .map(|each| json!({"name": each.name, "layer": each.layer, "digest": each.digest}))
+                .collect();
+            hold.asked += 1;
+            (format!("canoa-approve-{}", hold.asked), servers)
+        };
+        let ask = json!({
+            "jsonrpc": "2.0",
+            "id": ask_id,
+            "method": APPROVE_METHOD,
+            "params": {
+                "profile": self.connection.name,
+                "harness": self.connection.entry,
+                "servers": servers,
+            },
+        });
+        let Ok(ask) = serde_json::to_vec(&ask) else {
+            return Vec::new();
+        };
+        if self.reply(&ask).is_err() {
+            return Vec::new();
+        }
+        let until = Instant::now() + APPROVE_WAIT;
+        while Instant::now() < until {
+            match self.inner.receive(Some(Duration::from_millis(50))) {
+                Ok(Some(message)) => {
+                    let value: Value = serde_json::from_slice(&message).unwrap_or(Value::Null);
+                    if value.get("method").is_none() && value.get("id") == Some(&json!(ask_id)) {
+                        let held: Vec<String> = self
+                            .hold()
+                            .parts
+                            .as_ref()
+                            .map(|parts| {
+                                parts
+                                    .approvable
+                                    .iter()
+                                    .map(|each| each.name.clone())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        return value
+                            .get("result")
+                            .and_then(|result| result.get("allow"))
+                            .and_then(Value::as_array)
+                            .map(|names| {
+                                names
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .filter(|name| held.iter().any(|each| each == name))
+                                    .map(str::to_owned)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                    }
+                    self.hold().queued.push_back(message);
+                }
+                Err(Failure::Timeout) => {}
+                Ok(None) | Err(_) => return Vec::new(),
+            }
+        }
+        Vec::new()
+    }
+
     /// Records the request, and adds the profile's parts to a session request; `Err` is the answer refusing it.
-    fn forward(&self, bytes: Vec<u8>) -> Result<Vec<u8>, Vec<u8>> {
+    fn forward(&self, bytes: Vec<u8>, allowed: Vec<String>) -> Result<Vec<u8>, Vec<u8>> {
         let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
             return Ok(bytes);
         };
@@ -1459,7 +1608,17 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             return Err(error(&id, INVALID_PARAMS, "params must be an object"));
         };
         add_parts(params, parts).map_err(|why| error(&id, INVALID_PARAMS, why))?;
-        hold.pending.insert(id.to_string(), Pending::Session);
+        if let Some(servers) = params.get_mut("mcpServers").and_then(Value::as_array_mut) {
+            servers.extend(
+                parts
+                    .approvable
+                    .iter()
+                    .filter(|each| allowed.contains(&each.name))
+                    .map(|each| each.server.clone()),
+            );
+        }
+        hold.pending
+            .insert(id.to_string(), Pending::Session(allowed));
         serde_json::to_vec(&value)
             .map_err(|_| error(&id, INTERNAL_ERROR, "the request could not be written"))
     }
@@ -1504,9 +1663,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     hold.parts = Some(parts);
                 }
             }
-            Some(Pending::Session) => {
+            Some(Pending::Session(allowed)) => {
                 if let (Some(result), Some(parts)) = (value.get_mut("result"), &hold.parts) {
-                    add_report(result, &parts.report);
+                    let mut report = parts.report.clone();
+                    mark_allowed(&mut report, &allowed);
+                    add_report(result, &report);
                 }
             }
             None => {
@@ -1538,8 +1699,13 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             core::mem::replace(&mut hold.first, false)
         };
         self.splice.tick(|sent| self.send_profiled(sent));
-        let Some(message) = self.inner.receive(timeout)? else {
-            return Ok(None);
+        let queued = self.hold().queued.pop_front();
+        let message = match queued {
+            Some(message) => message,
+            None => match self.inner.receive(timeout)? {
+                Some(message) => message,
+                None => return Ok(None),
+            },
         };
         if !first && names_profile(&message) {
             if let Some(id) = serde_json::from_slice::<Value>(&message)
@@ -1558,8 +1724,20 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             );
             return Err(Failure::Timeout);
         }
+        // The scope removes every `_meta` of the client's, so its opt-in is read before.
+        if let Ok(value) = serde_json::from_slice::<Value>(&message)
+            && value.get("method") == Some(&json!("initialize"))
+        {
+            self.hold().approves = value
+                .pointer("/params/_meta")
+                .and_then(|meta| meta.get(APPROVE_META))
+                == Some(&json!(true));
+        }
         let forwarded = match self.scope.check(&message) {
-            Verdict::Forward(bytes) => self.forward(bytes),
+            Verdict::Forward(bytes) => {
+                let allowed = self.approvals(&bytes);
+                self.forward(bytes, allowed)
+            }
             Verdict::Refuse(answer) => Err(answer.unwrap_or_default()),
         };
         match forwarded {

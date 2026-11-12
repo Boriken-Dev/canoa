@@ -134,6 +134,7 @@ final class VerifiedAgent {
     AgentDecider? decider,
     AgentElicitor? elicitor,
     Map<String, Object?> initializeMeta = const {},
+    ProfileApprover? approver,
   }) async {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
@@ -144,10 +145,10 @@ final class VerifiedAgent {
       }
       final proven = actual.channel;
       final identity = AgentIdentity();
-      final usage = UsageWire(proven.send, initializeMeta: initializeMeta);
+      final usage = UsageWire(proven.send, initializeMeta: initializeMeta, approver: approver);
       return VerifiedAgent._(
         (decider, elicitor) => AcpClient(
-          incoming: proven.messages.map(identity._inspect).map(usage.incoming),
+          incoming: proven.messages.where((message) => !usage.answersApproval(message)).map(identity._inspect).map(usage.incoming),
           send: (message) => proven.send(usage.outgoing(message)),
           closeSource: proven.close,
           decider: decider,
@@ -176,12 +177,13 @@ final class VerifiedAgent {
     AgentDecider? decider,
     AgentElicitor? elicitor,
     Map<String, Object?> initializeMeta = const {},
+    ProfileApprover? approver,
   }) {
     final identity = AgentIdentity();
-    final usage = UsageWire(send, initializeMeta: initializeMeta);
+    final usage = UsageWire(send, initializeMeta: initializeMeta, approver: approver);
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
-        incoming: messages.map(identity._inspect).map(usage.incoming),
+        incoming: messages.where((message) => !usage.answersApproval(message)).map(identity._inspect).map(usage.incoming),
         send: (message) => send(usage.outgoing(message)),
         closeSource: close,
         decider: decider,

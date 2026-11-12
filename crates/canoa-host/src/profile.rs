@@ -1391,7 +1391,7 @@ pub(crate) mod hosted;
 mod launch;
 mod overlay;
 
-pub use hosted::PROFILE_META;
+pub use hosted::{APPROVE_META, APPROVE_METHOD, PROFILE_META};
 pub use launch::launch;
 pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
 
