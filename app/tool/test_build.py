@@ -194,10 +194,10 @@ class PackagingTests(unittest.TestCase):
 
 
 
-    def test_pinned_coqui_peer_methods_match_their_git_blobs(self):
+    def test_extension_coqui_peer_methods_match_their_git_blobs(self):
         import hashlib
         import json
-        vendor = Path(__file__).resolve().parents[1] / "web" / "vendor"
+        vendor = Path(__file__).resolve().parents[2] / "bindings" / "browser" / "chromium" / "vendor"
         meta = json.loads((vendor / "COQUI-SOURCE.json").read_text())
         self.assertEqual(sorted(meta), ["coqui-peer-noise.mjs", "coqui-peer-webcrypto.mjs"])
         for name, pinned in meta.items():

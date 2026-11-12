@@ -201,16 +201,13 @@ test("the page cannot claim activation: the content script decides", async () =>
   await assert.rejects(page.acp.request({ activated: true }), { name: "NotAllowedError" });
 });
 
-test("the vendored modules are the recorded ones, and match the app's", () => {
+test("the vendored modules are the recorded ones", () => {
   const blob = (path) => {
     const data = readFileSync(new URL(path, import.meta.url));
     return createHash("sha1").update(`blob ${data.length}\0`).update(data).digest("hex");
   };
   const meta = JSON.parse(readFileSync(new URL("./vendor/coqui-acp/SOURCE.json", import.meta.url), "utf8"));
   for (const [name, sha] of Object.entries(meta.files)) assert.equal(blob(`./vendor/coqui-acp/${name}`), sha, name);
-  const methods = JSON.parse(readFileSync(new URL("../../../app/web/vendor/COQUI-SOURCE.json", import.meta.url), "utf8"));
-  for (const [name, source] of Object.entries(methods)) {
-    assert.equal(blob(`./vendor/${name}`), source.git_blob_sha1, name);
-    assert.equal(blob(`./vendor/${name}`), blob(`../../../app/web/vendor/${name}`), name);
-  }
+  const methods = JSON.parse(readFileSync(new URL("./vendor/COQUI-SOURCE.json", import.meta.url), "utf8"));
+  for (const [name, source] of Object.entries(methods)) assert.equal(blob(`./vendor/${name}`), source.git_blob_sha1, name);
 });
