@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatf
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../extension/composer_extension.dart';
 import '../session_store.dart';
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
@@ -53,7 +54,11 @@ final class ComposerKit {
     this.warnPermille = defaultWarnPermille,
     this.onSourceSettings,
     this.onProfile,
+    this.extension,
   });
+
+  /// What the extension adds above the message and to `+`; null outside it.
+  final ComposerExtension? extension;
 
   /// The most characters a paste puts in the text; a longer one goes as an attachment of its own.
   static const defaultPasteAsFile = 8000;
@@ -268,6 +273,7 @@ class ComposerState extends State<Composer> {
       padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
       decoration: BoxDecoration(color: look.composer, borderRadius: BorderRadius.circular(look.radius + 2)),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        ?widget.kit.extension?.header(context, session, widget.controller),
         if (session.attachments.isNotEmpty) AttachmentChips(store: store, session: session),
         field,
         _Controls(composer: this),
@@ -415,6 +421,7 @@ class _Controls extends StatelessWidget {
       _UsagePill(session: session, warnPermille: kit.warnPermille),
       MenuAnchor(
         menuChildren: [
+          ...?kit.extension?.menuItems(context, session),
           MenuItemButton(
             key: const Key('add-files'),
             leadingIcon: const Icon(Icons.attach_file, size: 18),

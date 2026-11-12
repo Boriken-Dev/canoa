@@ -8,6 +8,7 @@ import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'desktop/hosting_dialog.dart';
 import 'sources/source_choices.dart';
+import 'extension/composer_extension.dart';
 import 'extension_context.dart';
 import 'acp/browser_connect.dart';
 import 'acp/connect.dart' show chatEndpoints;
@@ -356,6 +357,9 @@ class _CanoaAppState extends State<CanoaApp> {
 
   void _showWaiting() => unawaited(widget.shell?.showWaiting(store.waiting));
   bool _claimingContext = false;
+
+  /// The tabs the extension's panel shares with a session; null outside the extension.
+  TabsComposerExtension? _tabs;
 
   Future<void> _claimContext() async {
     if (_claimingContext) return;
@@ -1001,6 +1005,7 @@ class _CanoaAppState extends State<CanoaApp> {
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
     unawaited(_claimContext());
+    _tabs = TabsComposerExtension.platform(store);
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
@@ -1014,6 +1019,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
+    _tabs?.dispose();
     _contextTimer?.cancel();
     unawaited(_attention?.cancel());
     store.removeListener(_showWaiting);
@@ -1052,6 +1058,7 @@ class _CanoaAppState extends State<CanoaApp> {
     pasteAsFile: config.pasteAsFile,
     warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(sources: true)),
+    extension: _tabs,
     onProfile: (session) {
       final above = _navigator.currentContext;
       final report = session.profile;
