@@ -126,7 +126,13 @@ class DesktopTests(unittest.TestCase):
         host = build.host_platform()
         with patch("sys.argv", ["build.py", "desktop", "--debug", "--run"]):
             build.main()
-        desktop.assert_called_once_with(host, True, True)
+        desktop.assert_called_once_with(host, True, True, False)
+        with patch("sys.argv", ["build.py", "desktop", "--portable"]):
+            build.main()
+        desktop.assert_called_with(host, False, False, True)
+        for bad in (["desktop", "--portable", "--debug"], ["desktop", "--portable", "--run"], ["pwa", "--portable"]):
+            with patch("sys.argv", ["build.py", *bad]), self.assertRaises(SystemExit):
+                build.main()
         other = "linux" if host != "linux" else "windows"
         with patch("sys.argv", ["build.py", "desktop", "--platform", other]), self.assertRaises(SystemExit):
             build.main()
@@ -145,6 +151,26 @@ class DesktopTests(unittest.TestCase):
         build.build_desktop("windows", True, True)
         self.assertEqual(run.call_args.args[0], ["flutter", "run", "-d", "windows", "--debug"])
         self.assertEqual(restore.call_count, 2)
+
+    @patch("build.restore_lock", return_value=False)
+    @patch("build.package_portable", return_value=Path("target/canoa-windows/CanoaUI.exe"))
+    @patch("build.build_web_for_host", return_value=Path("app/build/web"))
+    @patch("build.built_executable", return_value=Path("CanoaUI.exe"))
+    @patch("build.ensure_runner")
+    @patch("build.flutter_program", return_value="flutter")
+    @patch("build.require_tools")
+    @patch("build.subprocess.run")
+    def test_portable_builds_the_web_app_in_and_packages_the_release_folder(self, run, _t, _f, _e, _x, web, package, _r):
+        build.build_desktop("windows", False, False, portable=True)
+        web.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release"])
+        self.assertEqual(run.call_args.kwargs["env"]["CANOA_WEB_DIST"], str(Path("app/build/web")))
+        package.assert_called_once_with("windows", Path("CanoaUI.exe"))
+
+    @patch("build.require_tools")
+    def test_portable_macos_points_at_the_bundle(self, _):
+        with self.assertRaisesRegex(RuntimeError, "already one bundle"):
+            build.build_desktop("macos", False, False, portable=True)
 
 
 class PackagingTests(unittest.TestCase):

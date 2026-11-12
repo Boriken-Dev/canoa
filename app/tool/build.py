@@ -9,7 +9,8 @@ import shutil
 import subprocess
 import sys
 
-APP = Path(__file__).resolve().parents[1]
+# Not resolve(): a drive made with `subst` (how a long checkout path stays under MSBuild's limit) must stay as typed.
+APP = Path(os.path.abspath(__file__)).parents[1]
 ROOT = APP.parent
 
 
@@ -125,19 +126,51 @@ def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None
     return found[0] if found else None
 
 
-def build_desktop(platform: str, debug: bool, run: bool) -> None:
+def build_web_for_host() -> Path:
+    """The web app the host serves, built with a CSP (without it the host's policy refuses the page's code)."""
+    subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
+    subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
+    subprocess.run(
+        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn"],
+        check=True, cwd=APP,
+    )
+    dist = APP / "build" / "web"
+    if not (dist / "index.html").is_file():
+        raise RuntimeError("flutter build web left no app/build/web/index.html")
+    return dist
+
+
+def package_portable(platform: str, exe: Path) -> Path:
+    """One file for the platform from the built Release folder around `exe`; see portable.py."""
+    import portable
+
+    folder = exe.parent
+    if platform == "windows":
+        return portable.build_windows_launcher(folder, ROOT, ROOT / "target" / "canoa-windows")
+    if platform == "linux":
+        return portable.build_appimage(folder, ROOT, ROOT / "target" / "canoa-linux")
+    raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
+
+
+def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False) -> None:
     require_tools()
+    if portable and platform == "macos":
+        raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
+    env = None
     lock = ROOT / LOCK
     before = lock.read_bytes() if lock.is_file() else None
     mode = "--debug" if debug else "--release"
     try:
+        if portable:
+            # The built library carries the web app, which the plugin builds in when CANOA_WEB_DIST names it.
+            env = dict(os.environ, CANOA_WEB_DIST=str(build_web_for_host()))
         ensure_runner(platform)
         if platform != "macos" and clear_stale_build(platform):
             print(f"Removed app/build/{platform}, configured before the runner was named")
         if run:
             subprocess.run([flutter_program(), "run", "-d", platform, mode], check=True, cwd=APP)
             return
-        subprocess.run([flutter_program(), "build", platform, mode], check=True, cwd=APP)
+        subprocess.run([flutter_program(), "build", platform, mode], check=True, cwd=APP, env=env)
     finally:
         if restore_lock(before):
             print("Restored app/pubspec.lock")
@@ -145,6 +178,8 @@ def build_desktop(platform: str, debug: bool, run: bool) -> None:
     if exe is None:
         raise RuntimeError(f"flutter build {platform} left no CanoaUI under app/build")
     print(f"Built {exe}")
+    if portable:
+        print(f"Packaged {package_portable(platform, exe)}")
 
 
 def flutter_args(kind: str, wasm: bool) -> list[str]:
@@ -202,20 +237,25 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true",
         help="chromium: package a separate extension with CDP permission; desktop: a debug build")
     parser.add_argument("--run", action="store_true", help="desktop: run the app with flutter run, not build it")
+    parser.add_argument("--portable", action="store_true",
+        help="desktop: also make the one-file form of a release build (Windows: the CanoaUI.exe launcher in "
+             "target/canoa-windows; Linux: an AppImage in target/canoa-linux)")
     parser.add_argument("--platform", choices=tuple(RUNNER_MARKERS),
         help="desktop: the platform (default: this machine's; Flutter cannot cross-build)")
     opts = parser.parse_args()
     if opts.debug and opts.kind not in ("chromium", "desktop"):
         parser.error("--debug is only valid for chromium and desktop")
-    if (opts.run or opts.platform) and opts.kind != "desktop":
-        parser.error("--run and --platform are only valid for desktop")
+    if (opts.run or opts.platform or opts.portable) and opts.kind != "desktop":
+        parser.error("--run, --platform and --portable are only valid for desktop")
+    if opts.portable and (opts.debug or opts.run):
+        parser.error("--portable packages a release build: not with --debug or --run")
     if opts.kind == "desktop":
         platform = opts.platform or host_platform()
         if platform != host_platform():
             parser.error(f"a {platform} build needs a {platform} machine")
         try:
-            build_desktop(platform, opts.debug, opts.run)
-        except RuntimeError as error:
+            build_desktop(platform, opts.debug, opts.run, opts.portable)
+        except (RuntimeError, subprocess.CalledProcessError) as error:
             sys.exit(f"build.py: {error}")
         return
     # The web build carries the Noise method as WebAssembly, built from app/web_noise into app/web/noise.
