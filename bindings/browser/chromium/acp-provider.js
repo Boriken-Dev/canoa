@@ -5,6 +5,7 @@ import { createGateway, dialRecord } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
 import { createTools, OFFER } from "./acp-tools.js";
 import { dispatchBrowserTool } from "./browser-tools.js";
+import { markActing } from "./tab-marks.js";
 import { onGrantsChanged, readGrants, updateGrants } from "./browser-grants.js";
 import { handleMcpRequest } from "./mcp.js";
 import { askableCapabilities, createAccess } from "./mcp-access.js";
@@ -181,7 +182,12 @@ function offerTools({ mux, peer, label, via, still }) {
       peerId: peer,
       trustedPeers: new Set([peer]),
       grants: await readGrants(),
-      dispatch: within(dispatchBrowserTool, TOOL_MS),
+      dispatch: within(async (call) => {
+        const result = await dispatchBrowserTool(call);
+        // A tool that ran on a tab puts it in the agent's group; a failure to do that never fails the tool.
+        if (call.name !== "browser_list_tabs" && Number.isSafeInteger(call.args?.tabId)) await markActing({ tabId: call.args.tabId, label }).catch(() => {});
+        return result;
+      }, TOOL_MS),
       access: {
         capabilities,
         logs: via !== undefined,

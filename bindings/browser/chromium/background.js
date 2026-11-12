@@ -5,9 +5,13 @@ import { captureContext, addContext, takeContext } from "./context-transfer.js";
 import { detachOnTabClosed } from "./devtools.js";
 import { installProvider, pairedPeers } from "./acp-provider.js";
 import { isPairedPeer } from "./agent-choices.js";
+import { installTabBindings } from "./tab-bindings.js";
+import { installMarks } from "./tab-marks.js";
 import { readGrants, updateGrants } from "./browser-grants.js";
 
 installProvider();
+installTabBindings({ pairedPeers });
+installMarks();
 
 // Browser-owned, deny-by-default policy. A page reaches this extension only through the provider, which checks its sender.
 const CONTEXT_KEY = "canoa_pending_contexts";
