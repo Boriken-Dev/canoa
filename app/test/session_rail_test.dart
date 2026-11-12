@@ -34,6 +34,7 @@ Future<List<String>> _show(WidgetTester tester, SessionStore store,
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final asked = closed ?? <String>[];
   await tester.pumpWidget(MaterialApp(
+    debugShowCheckedModeBanner: false,
     theme: themeFor(LookId.canoa, brightness),
     home: Scaffold(
       body: SessionRail(
