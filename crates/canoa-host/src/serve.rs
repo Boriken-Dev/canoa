@@ -1398,7 +1398,15 @@ fn give_agent<C: Channel>(
         }
     };
     let connection = match offer {
-        Some(offer) => match prepare(served, channel, first, peer, offer) {
+        Some(offer) => match prepare(
+            served,
+            channel,
+            first,
+            peer,
+            offer,
+            // Only this process's own link is asked to approve: a key reaches the configuration's behaviour.
+            *peer == shared.method.peer_id(),
+        ) {
             Some(connection) => Some(connection),
             None => return,
         },
@@ -1464,6 +1472,7 @@ fn prepare<C: Channel>(
     first: &[u8],
     peer: &PeerId,
     offer: &Offer,
+    in_process: bool,
 ) -> Option<Connection> {
     let refuse = |answer: Option<Vec<u8>>, log: &str| {
         if let Some(answer) = answer {
@@ -1480,7 +1489,7 @@ fn prepare<C: Channel>(
     };
     let lookup = |name: &str| std::env::var(name).ok();
     match Connection::prepare(offer, index, &served.name, &lookup) {
-        Ok(connection) => Some(connection),
+        Ok(connection) => Some(connection.asking(in_process)),
         Err(why) => {
             let id = serde_json::from_slice::<serde_json::Value>(first)
                 .ok()

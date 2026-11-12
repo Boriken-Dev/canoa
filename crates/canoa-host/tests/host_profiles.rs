@@ -299,9 +299,8 @@ fn an_overlays_mcp_server_stays_off_until_the_hosts_configuration_allows_it() {
     assert!(Path::new(&example("mcp_server", false)).exists());
 }
 
-/// Opens a session on a host whose `main` profile names overlay `team` (not allowed by its configuration), answering the host's
-/// approval request with `answer`, or not at all when it is `None`. Returns what the host asked and the session's answer.
-fn approving(answer: Option<Value>) -> (Option<Value>, Value) {
+#[test]
+fn a_paired_key_is_never_asked_to_approve_even_when_it_says_it_answers() {
     let scratch = Scratch::new();
     install_overlay(&scratch);
     let host = Host::start_in(
@@ -313,53 +312,25 @@ fn approving(answer: Option<Value>) -> (Option<Value>, Value) {
     let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);
-    with_link(host.url("profiled"), &client, host.peer, |rpc| {
+    let (asked, opened) = with_link(host.url("profiled"), &client, host.peer, |rpc| {
         rpc.request(
             "initialize",
             json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {canoa_host::profile::APPROVE_META: true}}),
         )
         .expect("initialize is answered");
-        rpc.send(&json!({"jsonrpc": "2.0", "id": 90, "method": "session/new", "params": {"cwd": dir, "mcpServers": []}}))
-            .expect("sent");
-        let mut asked = None;
-        loop {
-            let message = rpc
-                .next_message(std::time::Duration::from_secs(30))
-                .expect("a message");
-            if message["method"] == canoa_host::profile::APPROVE_METHOD {
-                asked = Some(message["params"].clone());
-                match &answer {
-                    Some(result) => rpc
-                        .send(&json!({"jsonrpc": "2.0", "id": message["id"], "result": result}))
-                        .expect("sent"),
-                    None => rpc
-                        .send(&json!({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "no such method"}}))
-                        .expect("sent"),
-                }
-            } else if message["id"] == 90 {
-                return (asked, message["result"].clone());
-            }
-        }
+        let opened = rpc
+            .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        let asked = rpc
+            .updates
+            .borrow()
+            .iter()
+            .any(|message| message["method"] == canoa_host::profile::APPROVE_METHOD);
+        (asked, opened)
     })
-    .expect("served")
-}
-
-#[test]
-fn the_host_asks_the_client_which_overlay_servers_this_session_may_start() {
-    let (asked, opened) = approving(Some(json!({"allow": ["team"]})));
-    let asked = asked.expect("the host asked");
-    assert_eq!(asked["servers"][0]["name"], "team", "{asked}");
-    assert!(
-        asked["servers"][0]["digest"]
-            .as_str()
-            .is_some_and(|digest| digest.starts_with("sha256:")),
-        "{asked}"
-    );
-    assert_eq!(opened["mcpServers"], json!(["probe", "team"]), "{opened}");
-    assert_eq!(
-        item(&opened["_meta"][PROFILE_META], "mcp.team")["state"],
-        "applied"
-    );
+    .expect("served");
+    assert!(!asked, "a network key gets the configuration's behaviour");
+    assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
 }
 
 #[test]
@@ -369,21 +340,4 @@ fn a_client_that_does_not_say_it_answers_is_never_asked() {
     let (report, opened, _scratch) = with_overlay(scratch, "");
     assert_eq!(item(&report, "mcp.team")["state"], "off", "{report}");
     assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
-}
-
-#[test]
-fn a_client_that_refuses_or_cannot_answer_gets_the_configurations_behaviour() {
-    for answer in [
-        None,
-        Some(json!({"allow": []})),
-        Some(json!({"allow": ["other"]})),
-    ] {
-        let (asked, opened) = approving(answer);
-        assert!(asked.is_some());
-        assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
-        assert_eq!(
-            item(&opened["_meta"][PROFILE_META], "mcp.team")["state"],
-            "off"
-        );
-    }
 }

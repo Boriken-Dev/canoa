@@ -94,3 +94,125 @@ fn a_server_the_person_turned_off_is_not_started() {
     assert_eq!(opened["mcpServers"], json!([]), "{opened}");
     host.stop();
 }
+
+/// Installs overlay `team` as the app does, in `overlays/` beside canoa.cfg, holding a copy of the MCP server.
+fn install_overlay(scratch: &support::Scratch) {
+    let root = scratch.0.join("overlays").join("team");
+    std::fs::create_dir_all(root.join("bin")).expect("a directory");
+    let server = example("mcp_server", false);
+    let file = server
+        .file_name()
+        .expect("a name")
+        .to_string_lossy()
+        .into_owned();
+    std::fs::copy(&server, root.join("bin").join(&file)).expect("copied");
+    std::fs::write(
+        root.join("overlay.cfg"),
+        format!(
+            "[[mcp.servers]]\nname = \"team\"\ntransport = \"stdio\"\ncommand = \"bin/{file}\"\n"
+        ),
+    )
+    .expect("written");
+    let (_, digest) =
+        coqui_aos::read_tree(&coqui_aos::StdFs, &root, &coqui_aos::Settings::default())
+            .expect("read");
+    std::fs::write(
+        scratch.0.join("overlays").join("team.json"),
+        json!({"source": "fixture", "commit": "0", "digest": digest.digest.to_string(), "files": {}})
+            .to_string(),
+    )
+    .expect("written");
+}
+
+/// Opens a session on `Profiled`, which names overlay `team` that canoa.cfg does not allow. `opt_in` says whether `initialize` tells
+/// the host this client answers approvals, and `answer` what it answers (an error when `None`). Returns what the host asked and the
+/// session's answer.
+fn approving(opt_in: bool, answer: Option<Value>) -> (Option<Value>, Value) {
+    let host = Hosted::start_with(
+        &format!("{}[overlays]\nteam = \"fixture\"\n", config("")),
+        &["--local-sources"],
+    );
+    install_overlay(&host.scratch);
+    let link = host.local.open("Profiled").expect("a link");
+    let meta = if opt_in {
+        json!({canoa_host::profile::APPROVE_META: true})
+    } else {
+        json!({})
+    };
+    ask(
+        &link,
+        1,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": meta}),
+    )
+    .expect("initialize is answered");
+    linked::send(
+        &link,
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": support::cwd(&host.scratch), "mcpServers": []}}),
+    );
+    let mut asked = None;
+    let opened = loop {
+        let message = linked::next(&link).expect("a message");
+        if message["method"] == canoa_host::profile::APPROVE_METHOD {
+            asked = Some(message.clone());
+            let reply = match &answer {
+                Some(result) => json!({"jsonrpc": "2.0", "id": message["id"], "result": result}),
+                None => {
+                    json!({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "no"}})
+                }
+            };
+            linked::send(&link, &reply);
+        } else if message["id"] == 2 {
+            break message["result"].clone();
+        }
+    };
+    host.stop();
+    (asked, opened)
+}
+
+#[test]
+fn the_host_asks_its_own_link_which_overlay_servers_this_session_may_start() {
+    let (asked, opened) = approving(true, Some(json!({"allow": ["team"]})));
+    let asked = asked.expect("the host asked");
+    let id = asked["id"].as_str().expect("a text id");
+    assert!(
+        id.starts_with("canoa-approve-") && id.len() > 30,
+        "unguessable: {id}"
+    );
+    assert_eq!(asked["params"]["servers"][0]["name"], "team", "{asked}");
+    assert!(
+        asked["params"]["servers"][0]["digest"]
+            .as_str()
+            .is_some_and(|digest| digest.starts_with("sha256:")),
+        "{asked}"
+    );
+    assert_eq!(opened["mcpServers"], json!(["probe", "team"]), "{opened}");
+    assert_eq!(
+        item(&opened["_meta"][PROFILE_META], "mcp.team")["state"],
+        "applied"
+    );
+}
+
+#[test]
+fn a_link_that_refuses_or_cannot_answer_gets_the_configurations_behaviour() {
+    for answer in [
+        None,
+        Some(json!({"allow": []})),
+        Some(json!({"allow": ["other"]})),
+    ] {
+        let (asked, opened) = approving(true, answer);
+        assert!(asked.is_some());
+        assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
+        assert_eq!(
+            item(&opened["_meta"][PROFILE_META], "mcp.team")["state"],
+            "off"
+        );
+    }
+}
+
+#[test]
+fn a_link_that_does_not_say_it_answers_is_never_asked() {
+    let (asked, opened) = approving(false, None);
+    assert!(asked.is_none());
+    assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
+}

@@ -486,7 +486,7 @@ fn the_whole_ledger_has_a_byte_cap_with_room_kept_for_the_app() {
                 &control,
                 &key,
                 "ledger/put",
-                json!({"id": format!("r{i}"), "record": {"t": text}}),
+                json!({"id": format!("k{n}-r{i}"), "record": {"t": text}}),
             );
             if answer.get("error").is_some() {
                 continue 'keys;
@@ -518,4 +518,40 @@ fn a_key_may_not_run_a_program_through_store_report() {
         let answer = ask(&control, &key, "store/report", params);
         assert_eq!(answer["error"]["code"], DENIED, "{answer}");
     }
+}
+
+#[test]
+fn a_ledger_the_host_cannot_read_at_all_is_moved_aside_too() {
+    let dir = std::env::temp_dir().join(format!("canoa-control-dir-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("ledger.json")).expect("a directory where the file goes");
+    let control = Control::open(Some(&dir), 10, 1024, Vec::new()).expect("opens empty");
+    assert!(
+        put(&control, &Caller::Owner, "after")
+            .get("result")
+            .is_some()
+    );
+    let aside = fs::read_dir(&dir)
+        .expect("listed")
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name().to_string_lossy().contains("json.bad-"));
+    assert!(aside);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_ledger_and_its_folder_are_made_private_whenever_the_host_opens_them() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = std::env::temp_dir().join(format!("canoa-control-mode-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("a folder");
+    fs::write(dir.join("ledger.json"), r#"{"records":{}}"#).expect("a ledger");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("open");
+    fs::set_permissions(dir.join("ledger.json"), fs::Permissions::from_mode(0o644)).expect("open");
+    let _control = Control::open(Some(&dir), 10, 1024, Vec::new()).expect("opens");
+    let mode = |path: &Path| fs::metadata(path).expect("there").permissions().mode() & 0o777;
+    assert_eq!(mode(&dir), 0o700);
+    assert_eq!(mode(&dir.join("ledger.json")), 0o600);
+    let _ = fs::remove_dir_all(&dir);
 }

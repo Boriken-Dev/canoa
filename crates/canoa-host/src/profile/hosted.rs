@@ -252,6 +252,8 @@ pub(crate) struct Connection {
     env_items: Vec<Item>,
     /// The directory every skill directory of this connection is written under, so the provider can be told to work in it.
     skills: PathBuf,
+    /// Whether the client is this process's own link, the only one the host asks to approve servers.
+    in_process: bool,
 }
 
 impl Connection {
@@ -331,7 +333,14 @@ impl Connection {
             env,
             env_items,
             skills,
+            in_process: false,
         })
+    }
+
+    /// This connection's client is (or is not) this process's own link.
+    pub(crate) fn asking(mut self, in_process: bool) -> Self {
+        self.in_process = in_process;
+        self
     }
 
     /// The directory the connection's skills are written under: created when the first is written, removed with the last.
@@ -1489,7 +1498,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
         }
         let (ask_id, servers) = {
             let mut hold = self.hold();
-            if !hold.approves {
+            if !hold.approves || !self.connection.in_process {
                 return Vec::new();
             }
             let Some(parts) = hold
@@ -1505,7 +1514,11 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 .map(|each| json!({"name": each.name, "layer": each.layer, "digest": each.digest}))
                 .collect();
             hold.asked += 1;
-            (format!("canoa-approve-{}", hold.asked), servers)
+            // Unguessable, so nothing else can answer for the person.
+            let mut nonce = [0_u8; 12];
+            let _ = getrandom::fill(&mut nonce);
+            let hex: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+            (format!("canoa-approve-{}-{hex}", hold.asked), servers)
         };
         let ask = json!({
             "jsonrpc": "2.0",
@@ -1627,6 +1640,15 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
 impl<C: Channel + ?Sized> Hosted<'_, C> {
     /// An answer to `initialize` or a session request gets the report; the first also settles what each session is given.
     fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
+        // `_canoa/` is the host's own to ask of its client: an agent's request of that name is never passed on, or the client could
+        // be made to show the host's questions, or to answer the host's real ones, for the agent.
+        if crate::scope::is_host_only(message) {
+            tracing::info!(
+                entry = self.connection.entry,
+                "an agent's `_canoa/` request was dropped"
+            );
+            return Ok(());
+        }
         let stamped = self.scope.stamp(message);
         let message = &*stamped;
         let mut hold = self.hold();

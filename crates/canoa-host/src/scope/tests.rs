@@ -373,3 +373,22 @@ fn stamping_changes_the_account_of_every_vector_report_and_nothing_else() {
         assert_eq!(stamped["params"]["report"], expected, "{}", vector["name"]);
     }
 }
+
+#[test]
+fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
+    for dropped in [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "_canoa/profile/approve", "params": {}}),
+        json!({"jsonrpc": "2.0", "method": "_canoa/anything"}),
+    ] {
+        assert!(is_host_only(dropped.to_string().as_bytes()), "{dropped}");
+    }
+    for passed in [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "session/request_permission"}),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "_coqui_acp/usage"}),
+        // Text that merely mentions it, and an answer, are not requests of that name.
+        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"text": "_canoa/profile/approve"}}),
+        json!({"jsonrpc": "2.0", "id": 1, "result": {"method": "_canoa/x"}}),
+    ] {
+        assert!(!is_host_only(passed.to_string().as_bytes()), "{passed}");
+    }
+}

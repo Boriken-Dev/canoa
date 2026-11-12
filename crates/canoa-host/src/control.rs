@@ -218,11 +218,25 @@ impl Control {
                 },
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
-                    return Err(ControlError {
+                    // A ledger the host cannot read at all (a directory, say) is kept beside like one it cannot parse.
+                    let aside = path.with_extension(format!("json.bad-{}", now_millis()));
+                    fs::rename(path, &aside).map_err(|moved| ControlError {
                         path: path.clone(),
-                        what: error.to_string(),
-                    });
+                        what: format!("cannot be read ({error}) or moved aside ({moved})"),
+                    })?;
+                    tracing::warn!(
+                        "the session ledger {} could not be read ({error}); it was moved to {} and a new one begun",
+                        path.display(),
+                        aside.display()
+                    );
                 }
+            }
+        }
+        if let Some(parent) = path.as_ref().and_then(|path| path.parent()) {
+            // Whoever made them before this host did may have made them open; they are this user's alone.
+            let _ = restrict(parent, 0o700);
+            if let Some(path) = &path {
+                let _ = restrict(path, 0o600);
             }
         }
         Ok(Self {
@@ -613,6 +627,19 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
             Ok(None) | Err(_) => return,
         }
     }
+}
+
+/// Takes every right but this user's from `path` on Unix, whether or not this host made it.
+fn restrict(path: &Path, mode: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if path.exists() {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+        }
+    }
+    let _ = (path, mode);
+    Ok(())
 }
 
 /// Creates `dir` readable by this user alone where the system has such a thing.

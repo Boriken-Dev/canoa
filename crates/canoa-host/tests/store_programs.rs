@@ -1433,3 +1433,53 @@ fn the_user_path_is_not_a_registry_key_a_plan_may_declare() {
     .expect_err("refused");
     assert!(format!("{error}").contains("declares"), "{error}");
 }
+
+#[test]
+fn a_plan_made_only_to_be_read_is_not_kept_and_does_not_replace_the_one_the_owner_holds() {
+    let s = setup("plan-to-read", Variant::Normal);
+    let settings = StoreSettings::default();
+    let store = s.programs.store("echo_store", &settings).expect("store");
+    let kept = s
+        .programs
+        .plan("echo_store", &*store, Action::Install, None, None)
+        .expect("the owner's plan");
+    // The same plan asked for again to be read has the same token; it must not replace or remove the kept one.
+    let read = s
+        .programs
+        .plan_to_read("echo_store", &*store, Action::Install, None, None)
+        .expect("a plan to read");
+    assert_eq!(read.token, kept.token);
+    let applied = s
+        .programs
+        .apply(
+            "echo_store",
+            &settings,
+            &kept,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("the owner's plan is still there")
+        .expect("applied");
+    assert_eq!(applied.current.version, "2.0.0");
+    // And a plan made only to be read cannot be applied at all.
+    let lone = setup("plan-to-read-alone", Variant::Normal);
+    let store = lone.programs.store("echo_store", &settings).expect("store");
+    let read = lone
+        .programs
+        .plan_to_read("echo_store", &*store, Action::Install, None, None)
+        .expect("a plan to read");
+    let refused = lone
+        .programs
+        .apply(
+            "echo_store",
+            &settings,
+            &read,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("not held");
+    assert!(
+        format!("{refused}").contains("made no such plan"),
+        "{refused}"
+    );
+}

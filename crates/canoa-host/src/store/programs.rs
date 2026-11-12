@@ -516,6 +516,35 @@ impl Programs {
         channel: Option<String>,
         version: Option<String>,
     ) -> Result<InstallPlan, StoreError> {
+        self.plan_kept(provider, store, action, channel, version, true)
+    }
+
+    /// As [`plan`](Self::plan), for a caller that only reads what an apply would do: the host keeps nothing, so it neither applies
+    /// the plan nor lets it replace or push out one it holds for someone else.
+    ///
+    /// # Errors
+    ///
+    /// What the store refuses.
+    pub fn plan_to_read(
+        &self,
+        provider: &str,
+        store: &dyn ProgramStore,
+        action: Action,
+        channel: Option<String>,
+        version: Option<String>,
+    ) -> Result<InstallPlan, StoreError> {
+        self.plan_kept(provider, store, action, channel, version, false)
+    }
+
+    fn plan_kept(
+        &self,
+        provider: &str,
+        store: &dyn ProgramStore,
+        action: Action,
+        channel: Option<String>,
+        version: Option<String>,
+        keep: bool,
+    ) -> Result<InstallPlan, StoreError> {
         let info = store.describe()?;
         let mut request = PlanRequest::new(
             action,
@@ -539,7 +568,7 @@ impl Programs {
                 )
             );
         }
-        if !plan.token.is_empty() {
+        if keep && !plan.token.is_empty() {
             self.keep_plan(provider, &plan);
         }
         Ok(plan)
@@ -559,11 +588,6 @@ impl Programs {
                 plans.remove(0);
             }
         }
-    }
-
-    /// Drops the plan made for `provider` under `token`, if the host still holds it.
-    pub fn forget_plan(&self, provider: &str, token: &str) {
-        let _ = self.take_plan(provider, token);
     }
 
     /// The plan made for `provider` under `token`, taken out so that it is applied once.

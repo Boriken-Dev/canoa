@@ -55,6 +55,32 @@ void main() {
     expect(said['params']['_meta'][approveMeta], isTrue);
   });
 
+  testWidgets('a question left open closes by itself with nothing allowed and nothing to keep', (tester) async {
+    var closed = false;
+    ApprovalChoice? chosen = const ApprovalChoice(['x']);
+    final ask = (profile: 'default', harness: 'Claude', servers: [(name: 'team', layer: 'overlay:team', digest: 'sha256:${'a' * 64}')]);
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async {
+            chosen = await showDialog<ApprovalChoice>(
+              context: context,
+              builder: (_) => ProfileApprovalDialog(ask: ask, agent: 'Claude', expires: const Duration(seconds: 5)),
+            );
+            closed = true;
+          },
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(closed, isTrue);
+    expect(chosen, isNull, reason: 'no answer: main allows nothing and writes no canoa.cfg');
+  });
+
   testWidgets('the dialog starts only the servers switched on, and can keep the choice', (tester) async {
     ApprovalChoice? chosen;
     final ask = (

@@ -157,20 +157,21 @@ impl Stores {
                 )?;
                 let optional =
                     |key: &str| params.get(key).and_then(Value::as_str).map(str::to_owned);
-                let plan = self
-                    .programs
-                    .plan(
-                        &provider,
-                        &*store,
-                        action,
-                        optional("channel"),
-                        optional("version"),
-                    )
-                    .map_err(|error| refusal(&error))?;
-                // Only the owner applies a plan, so a key's is not kept: it could not push out the owner's.
-                if !owner {
-                    self.programs.forget_plan(&provider, &plan.token);
-                }
+                // Only the owner applies a plan, so a key's is not kept: it could not replace or push out the owner's.
+                let make = if owner {
+                    Programs::plan
+                } else {
+                    Programs::plan_to_read
+                };
+                let plan = make(
+                    &self.programs,
+                    &provider,
+                    &*store,
+                    action,
+                    optional("channel"),
+                    optional("version"),
+                )
+                .map_err(|error| refusal(&error))?;
                 json_of(&plan)
             }
             _ => Err((NO_METHOD, "this host has no such method".to_owned())),
