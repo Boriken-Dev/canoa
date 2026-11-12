@@ -166,8 +166,9 @@ the app only reports. Once the session is open, the conversation says in one lin
 **Profile** in its header lists each part, its layer, what became of it and through what. Nothing is applied that is not
 listed there. An MCP server of an overlay or a project is off until `[agents.NAME.mcp]` allows it. Before a session starts the host
 asks the app which of those servers this session may start, and the app shows a dialog (**Keep these choices** writes
-`[agents.NAME.mcp]`, used when the host next starts). The per-session overlay choice and project trust are not done in the
-host yet. An agent reached on another machine is
+`[agents.NAME.mcp]`, used when the host next starts). An overlay's hooks are off the same way: the dialog lists them beside the
+servers, with the events they run for and the digest of the overlay's files, and **Keep these choices** writes
+`[agents.NAME.hooks]`. The per-session overlay choice and project trust are not done in the host yet. An agent reached on another machine is
 given what that host's `[host.profiles]` offers; with none, its conversation says so.
 
 Claude Code and Codex are run by `canoa agent claude` and `canoa agent codex`, the host's own translators of their stdio
@@ -213,6 +214,9 @@ A server from your own layers is on unless you turn it off; one from an overlay 
 files = true                 # on
 docs = false                 # off
 team = "sha256:..."          # an overlay's or a project's server, allowed at this definition: one that changes is off again
+
+[agents.Claude.hooks]
+team = "sha256:..."          # an overlay's hooks, allowed at the digest of its files: any change to them is off again
 ```
 
 ### Overlays

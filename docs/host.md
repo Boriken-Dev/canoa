@@ -218,6 +218,7 @@ context = { text = "Review before you change anything." }
 share_env = ["GITHUB_TOKEN"]          # what the overlays below may read
 overlays = ["team"]                   # installed by the app in overlays/ beside canoa.cfg
 allow_mcp = { team = "sha256:…" }     # an overlay's MCP server, at the digest of its definition
+allow_hooks = { team = "sha256:…" }   # an overlay's hooks, at the digest of its files
 
 [host.profiles.review.env.GITHUB_TOKEN]
 from_env = "GITHUB_TOKEN"             # read from the host's own environment when the agent starts
@@ -246,6 +247,11 @@ command = "/usr/local/bin/lint-mcp"
 - **An overlay's MCP server stays off** until `allow_mcp` names it at the digest of its definition; a changed definition
   is off again. The report, and the host's log, give the digest of each server that is off. A client cannot turn one on.
   An overlay is read from the copy the app installed and checked against its record's digest; a changed copy is left out.
+- **An overlay's hooks stay off** until `allow_hooks` names the overlay's tree digest, or the person allows them for one
+  session when the host asks; a changed overlay is off again. A hook runs outside the agent's sandbox with the person's
+  access, from a copy of the files the digest covered, and can add context, block a prompt, deny a tool call or refuse a
+  session, never approve one. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
+  `applied`, `not supported` or `off`; `crates/canoa-host/AGENTS.md`, "Overlay hooks", has what fires on which event.
 - **The client is told what applied.** The answer to `initialize` and to each session request carries, under
   `_meta["dev.boriken.canoa/profile"]`, the profile's name, the harness, a one-line summary and each part with its layer,
   `applied`, `not supported`, `off` or `refused`, and why: names only, never a value.
