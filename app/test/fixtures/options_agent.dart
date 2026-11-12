@@ -167,6 +167,7 @@ final class OptionsAgent {
 
   /// Reached as a source of the host is, over a link: what the app is given in place of the library's.
   HostLink openLink(String name) {
+    if (name == '@control') throw StateError('no control channel in this test');
     starts.add(name);
     if (failStart != null) throw StateError(failStart!);
     final wire = _wire();

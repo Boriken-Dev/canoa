@@ -590,10 +590,15 @@ class _CanoaAppState extends State<CanoaApp> {
   /// needs it; an install runs only when the person confirms its plan.
   late final ProgramStores? _programs = _control == null
       ? null
-      : (ProgramStores(control: _control.ready, open: _control.open)..addListener(_programsChanged));
+      : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open)..addListener(_programsChanged));
+
+  String? _programsSeen;
 
   /// A program found, installed, updated or removed changes whether its sources can run.
   void _programsChanged() {
+    final now = _programs?.signature;
+    if (now == _programsSeen) return;
+    _programsSeen = now;
     if (mounted && _checked) unawaited(_checkSources());
   }
 
@@ -1057,6 +1062,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.starter, _startDraft)) store.starter = null;
     if (identical(store.choicesLoader, _askChoices)) store.choicesLoader = null;
     widget.host?.removeListener(_hostChanged);
+    unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
     widget.shell?.beforeQuit = null;

@@ -13,12 +13,16 @@ final class HostControl {
   final Duration wait;
   ControlClient? _client;
   Future<ControlClient>? _opening;
+  bool _waits = true;
 
-  Future<ControlClient> _connect() => _opening ??= (() async => _client = await open())().whenComplete(() => _opening = null);
+  Future<ControlClient> _connect() => _opening ??= (() async => _client = await open(wait: _waits))().whenComplete(() => _opening = null);
 
   /// A link of its own, which the caller closes: closing it ends what the host is doing for it, such as an install.
-  Future<ControlClient> open() async {
-    final deadline = DateTime.now().add(wait);
+  Future<ControlClient> open({bool wait = true}) async {
+    if (!wait && _host.phase != HostPhase.running && _host.phase != HostPhase.idle) {
+      throw StateError(_host.problem ?? 'the host is not running');
+    }
+    final deadline = DateTime.now().add(this.wait);
     while (_host.phase != HostPhase.running && _host.phase != HostPhase.idle) {
       if (DateTime.now().isAfter(deadline) || _host.phase == HostPhase.failed || _host.phase == HostPhase.held) {
         throw StateError(_host.problem ?? 'the host is not running');
@@ -29,11 +33,12 @@ final class HostControl {
   }
 
   /// A client whose link is up.
-  Future<ControlClient> ready() async {
+  Future<ControlClient> ready({bool wait = true}) async {
     final client = _client;
     // A link ends with the host, which the app may start again.
     if (client != null && !client.over) return client;
     _client = null;
+    _waits = wait;
     return _connect();
   }
 

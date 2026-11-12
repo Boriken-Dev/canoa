@@ -89,4 +89,23 @@ void main() {
     expect(find.text('Codex needs codex on PATH: codex was not found. Install what is missing, or start Canoa where PATH finds it.'),
         findsOneWidget);
   });
+
+  testWidgets('a host whose control channel cannot be opened is asked once, not again for ever', (tester) async {
+    var opened = 0;
+    await pumpApp(
+      tester,
+      SessionStore(includePreview: false),
+      size: const Size(1280, 1400),
+      linked: (name) {
+        if (name == '@control') opened++;
+        throw StateError('no control channel in this test');
+      },
+    );
+    await _openSources(tester);
+    final after = opened;
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(opened, after, reason: 'nothing asks again by itself');
+    expect(opened, lessThan(10));
+  });
 }

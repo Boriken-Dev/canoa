@@ -46,7 +46,7 @@ final class Starts {
   final opened = <String>[];
 
   HostLink open(String name) {
-    opened.add(name);
+    if (name != '@control') opened.add(name);
     throw StateError('nothing starts in this test');
   }
 }

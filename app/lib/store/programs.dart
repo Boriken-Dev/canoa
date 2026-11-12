@@ -437,6 +437,11 @@ class ProgramStores extends ChangeNotifier {
   bool _loading = false;
   String? _problem;
 
+  /// What the page shows of every store, as one text: it changes only when something a source's readiness rests on does.
+  String get signature => [
+    for (final each in statuses) '${each.info.provider} ${each.copies.map((copy) => '${copy.path}@${copy.version}').join(',')} ${each.latest?.version} ${each.problem}',
+  ].join(';');
+
   /// Every store the host offers, in its order.
   List<ProgramStatus> get statuses => [for (final id in _order) ?_status[id]];
 
@@ -469,7 +474,7 @@ class ProgramStores extends ChangeNotifier {
 
   /// Reads the copies if the host has not been asked yet: what a readiness check needs, shared by checks made together.
   Future<void> ensure() {
-    if (_listed) return _running ?? Future<void>.value();
+    if (_listed || _running != null) return _running ?? Future<void>.value();
     return _ensuring ??= refresh().whenComplete(() => _ensuring = null);
   }
 
@@ -506,6 +511,7 @@ class ProgramStores extends ChangeNotifier {
       _problem = error is ControlFailed ? error.message : '$error';
     } finally {
       _loading = false;
+
       notifyListeners();
     }
   }

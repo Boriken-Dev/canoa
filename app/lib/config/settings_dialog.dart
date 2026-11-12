@@ -103,9 +103,13 @@ class SettingsDialogState extends State<SettingsDialog> {
     }
   }
 
+  String? _seenPrograms;
+
   /// A program found, installed, updated or removed changes what its sources need, so they are read again.
   void _programsChanged() {
-    if (!mounted) return;
+    final now = widget.programs?.signature;
+    if (!mounted || now == _seenPrograms) return;
+    _seenPrograms = now;
     setState(_checks.clear);
   }
 
