@@ -49,7 +49,7 @@ python app/tool/build.py desktop --run    # or runs it (needs flutter and cargo 
 
 The desktop app carries the host as a library and lives in the tray. For the web app, `python app/tool/build_noise.py && (cd app && flutter build web --release --csp --no-web-resources-cdn)` then `canoa serve --web app/build/web`; see [getting started](https://boriken-dev.github.io/canoa/getting-started/). A manually pinned Coqui peer connection can also be tested against `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`, a canoa.cfg with `[host.agents.echo]` naming `target/debug/examples/stdio_agent` as its `program`, then `canoa accept` for the key that connects), which is not a production agent. To package the UI for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/canoa/browser/) before loading it as unpacked.
 
-Canoa is one implementation on two shared libraries: [coqui-web](https://github.com/Boriken-Dev/coqui-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
+Canoa is one implementation on two shared libraries: [coqui-transport](https://github.com/Boriken-Dev/coqui-transport) and [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
 
 The [project naming convention](https://boriken-dev.github.io/canoa/naming/) uses `boriken.dev` and reverse-DNS identifiers such as `dev.boriken.canoa` for application and native host identities.
 

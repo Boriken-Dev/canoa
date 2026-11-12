@@ -6,7 +6,7 @@ The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and a
 
 | File | Responsibility |
 | --- | --- |
-| [coqui-web](https://github.com/Boriken-Dev/coqui-web) | Prefer WebTransport and fall back to an explicitly advertised WSS endpoint on transport-opening failure |
+| [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web) | Prefer WebTransport and fall back to an explicitly advertised WSS endpoint on transport-opening failure |
 | [`app/lib/acp/connect.dart`](https://github.com/Boriken-Dev/canoa/blob/main/app/lib/acp/connect.dart) | Verify expected peer ID, initialize ACP v2 and close a rejected link without retrying on WSS |
 | [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) | Correlated JSON-RPC requests and updates, cancellation, session creation and resume, version 1 and 2 |
 | [`app/lib/acp/client.dart`](https://github.com/Boriken-Dev/canoa/blob/main/app/lib/acp/client.dart) | No client until the peer is proven |

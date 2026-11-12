@@ -12,7 +12,7 @@ Canoa and associated Coqui libraries are published under **[Boriken Dev](https:/
 | Chrome native messaging host | lowercase dotted identifier | `dev.boriken.canoa` |
 | Optional future native helper | child of base identifier | `dev.boriken.canoa.host` |
 | Related Java / Kotlin library | `dev.boriken.coqui.*` | `dev.boriken.coqui.web` |
-| Rust crates | ecosystem-standard lowercase kebab-case | `canoa`, `canoa-host`, `coqui-web`, `coqui-acp`, `coqui-peer` |
+| Rust crates | ecosystem-standard lowercase kebab-case | `canoa`, `canoa-host`, `coqui-transport`, `coqui-acp`, `coqui-peer` |
 | Dart / Flutter pub package | lowercase snake_case | `canoa` |
 | Python distribution | PyPI-compatible project name | `coqui-web` only if available |
 | npm package | verified account/scope, ecosystem naming | `@boriken/canoa-chromium` is currently private; availability must be verified before publication |
@@ -26,7 +26,7 @@ Canoa's confirmed repository documentation currently uses [GitHub Pages](https:/
 
 ## Shared libraries
 
-**`coqui-web`** is the shared library for reliable message channels a browser can open natively, and their native peers. **`coqui-acp`** is the shared Agent Client Protocol session library, with the **`coqui-acp-bridge`** command. Canoa consumes both. Application semantics stay out of `coqui-web`, and application policy stays out of `coqui-acp`.
+**`coqui-transport`** is the shared library for streams, message channels and datagrams, and **`coqui-transport-web`** carries them over what a browser can open natively (the Dart package stays `coqui_web`). **`coqui-acp`** is the shared Agent Client Protocol session library, with the **`coqui-acp-bridge`** command. Canoa consumes both. Application semantics stay out of `coqui-transport`, and application policy stays out of `coqui-acp`.
 
 ## Browser peer authentication
 
