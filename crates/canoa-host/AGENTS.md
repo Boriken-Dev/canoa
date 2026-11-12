@@ -488,7 +488,8 @@ max_record_bytes = 262144                           # one ledger record
 | `ledger.read` | `ledger/list` |
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove` (planned) |
-| `store.read`, `store.write` | the overlay store (planned) |
+| `store.read` | `store/report`, `store/latest`, `store/plan` (planned) |
+| `store.write` | `store/apply`, `store/rollback`, `store/remove` (planned; **owner only**: `[host.control]` refuses it as a grant, since an install runs code as the user) |
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
 as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
@@ -506,7 +507,18 @@ as opaque JSON objects the host never reads into: it keeps an `id`, the record, 
 **Planned in this area, not yet built:** `worktree/*` with the params and results of `_canoa/worktree/*` below. For the owner any
 absolute path on this computer, with every other check unchanged (branch names, repositories led out by links or share paths,
 no hooks); for a peer with the grant only under the `working_roots` of the entries it may use. The entry-level
-`_canoa/worktree/*` goes once a client uses these. The overlay store follows, as `store/*` with the grants above.
+`_canoa/worktree/*` goes once a client uses these.
+
+**The program Store** (`canoa_host::store`, `Programs`) is carried the same way, one method for each of its calls, with the
+params and results of `canoa::store`'s models: `store/report` `{"program"}` (the copies the host finds, no network),
+`store/latest` `{"program"}`, `store/plan` `{"program", "version"?, ...}` (what an apply would do, before anything is written),
+`store/apply` `{"plan"}` (carries out the plan the host itself made and is handed back; its `token` is checked, so a plan the host did
+not make is refused), `store/rollback` `{"program"}` and `store/remove` `{"program"}`. An apply takes long and says where it is: the host sends
+`store/progress` notifications `{"id": the apply's request id, "text", "fraction"?}` on the same link before the answer, and a
+question the install asks the person (`InstallPrompter::ask`) comes as the request `store/ask` `{"text", "choices"?}` to the caller, answered
+by the caller; a caller that answers none or closes the link cancels the install. Only the owner installs, updates and removes
+(`store.write` is not a grant a key can hold); a key with `store.read` sees the report and the plan of a program, and nothing it
+writes. The overlay store (AOS overlays) follows as `overlay/*` under the same two grants.
 
 ## Worktrees
 
