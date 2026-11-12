@@ -153,14 +153,18 @@ void main() {
       program: exampleBinary('stdio_agent') ?? fail(exampleMissing('stdio_agent')!),
       args: scriptedArgs('${dir.path}/scripted.json'),
     );
-    HostSupervisor? host;
-    if (_real != null) {
-      final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg')
-        ..writeAsStringSync(_real == 'Claude' ? '[host.agents.Claude]\nharness = "claude"\nbypass = true\nsetting_sources = ["project", "local"]\n' : '');
-      host = HostSupervisor(LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home'));
-      await host.apply(configPath: cfg.path);
-      addTearDown(host.stop);
-    }
+    // The scripted agent is a command of canoa.cfg, which the host serves as it serves Claude.
+    final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg')
+      ..writeAsStringSync(
+        _real == null
+            ? '[agents.Scripted]\nprogram = ${jsonEncode(scripted.program)}\nargs = ${jsonEncode(scripted.args)}\n'
+            : _real == 'Claude'
+            ? '[host.agents.Claude]\nharness = "claude"\nbypass = true\nsetting_sources = ["project", "local"]\n'
+            : '',
+      );
+    final host = HostSupervisor(LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home'));
+    await host.apply(configPath: cfg.path);
+    addTearDown(host.stop);
     final label = _real ?? scripted.label;
     final screen = GlobalKey();
     await tester.pumpWidget(RepaintBoundary(
