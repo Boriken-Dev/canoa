@@ -312,6 +312,11 @@ command); the host keeps who the accounts are, their credentials, who holds one,
 [host]
 account_store = "os"            # the default; "file" for a host with no operating system credential store
 
+# What a program store's install is held to, as gitignore-style lists (see the host's AGENTS.md); absent, the recommended lists apply.
+[host.store]
+protected = ["~/.ssh", "~/.gnupg", "~/.config/autostart"]   # places a declared change may not be at, under or hold
+credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an install is never given
+
 [host.agents.claude]
 harness = "claude"
 accounts = ["work", "personal"] # a session runs on the first unless its client names another

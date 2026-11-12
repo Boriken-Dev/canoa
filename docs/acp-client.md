@@ -89,18 +89,25 @@ opens the rule to read before anything is kept:
   which can follow links. Nothing is offered for a hosted, peer or browser-provided session, in a browser, or where the session
   folder is the person's home folder, holds it, or touches Canoa's configuration folder (read as written and after links are
   resolved). A path that is relative, starts with `~`, holds a `:` other than a drive letter's (a stream, `C:x`) or is a network
-  path is never offered a rule. Below the session folder no segment is ever covered that starts with a dot (`.git`, `.claude`,
-  `.envrc`, ...), is a Windows device name (`CON`, `NUL`, `COM1`, with or without an extension), or is one of the names in
-  `protectedFiles` and `protectedSegment` in `permission_rules.dart`: build and test scripts and manifests (`package.json`,
-  `Makefile`, `pyproject.toml`, `setup.py`, `setup.cfg`, `tox.ini`, `pytest.ini`, `noxfile.py`, `conftest.py`, `build.rs`,
-  `Cargo.toml`, `go.mod`, `go.work`, `pom.xml`, `build.gradle*`, `gradlew`, `mvnw`, `gradle-wrapper.properties`, `*.csproj`,
-  `Directory.Build.*`, `Directory.Packages.props`, `nuget.config`, `CMakeLists.txt`, `meson.build`, `Gemfile`, `Rakefile`,
-  `Dockerfile`, `requirements*.txt`, `rust-toolchain*`, `shell.nix`, `flake.nix`, `mise.toml`, `*.code-workspace`), tool
-  configuration (`vite.config.*`, `webpack.config.*`, `gulpfile.*`, `Gruntfile.*`, `*.config.js|mjs|cjs|ts`), agent instruction
-  files (`AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`) and code a build runs (`node_modules`,
-  `vendor`, `venv`, `env`, `__pycache__`, `*.pth`). Each segment is read the way Windows reads it first (trailing dots and
-  spaces dropped, so `.claude.` and `package.json.` are protected; an 8.3 name with `~1` is refused), and one with anything but
-  printable ASCII is refused rather than normalised. Links are resolved and the result has to satisfy the same rules inside the
+  path is never offered a rule. Below the session folder nothing on the **protected list** is ever covered. The list is `[permissions] protected` in
+  canoa.cfg (text with a pattern a line, or an array of such lines), edited in Settings, Permissions with a **Restore
+  recommended** action; lines that are also in the recommended list show in the accent colour. When the key is absent the
+  recommended list applies (`recommendedProtected` in `protected_paths.dart`): every name that starts with a dot (`.*`: `.git`,
+  `.claude`, `.envrc`, ...), build and test scripts and manifests (`package.json`, `makefile`, `pyproject.toml`, `setup.py`,
+  `cargo.toml`, `go.mod`, `pom.xml`, `build.gradle*`, `requirements*.txt`, `*.csproj`, `dockerfile`, ...), tool configuration
+  (`*.config.*`, `gulpfile.*`, `gruntfile.*`), agent instruction files (`agents.md`, `claude.md`, `gemini.md`, ...) and code a
+  build runs (`node_modules`, `vendor`, `venv`, `env`, `__pycache__`, `*.pth`). A list the person writes replaces the
+  recommended one entirely, so removing a line takes effect for the rules already made as well as new ones. The syntax is the one
+  of coqui-acp-pi's `protected` setting: a line is a pattern; a leading `!` allows what an earlier line protected and the last
+  matching line wins; `#` starts a comment; `*` and `?` stand for part of a name and `**` for any number of names; a pattern that
+  matches a folder covers what is under it; `~/` starts at the home folder, a drive (`C:/x`) or `/` at the file system, and any
+  other pattern matches anywhere (`.env` every file of that name, `a/b` every `b` under an `a`). Names compare whatever their
+  case. A pattern without a start counts only below the session folder, so a dot above the folder a person works in is theirs;
+  one with a start (`~/.ssh`) also protects a session folder inside it. What stays in code is the mechanism, whatever the list
+  says: each segment is read the way Windows reads it first (trailing dots and spaces dropped, so `.claude.` and `package.json.`
+  are the files they look like; an 8.3 name with `~1` is refused; a Windows device name such as `CON`, `NUL` or `COM1`, with or
+  without an extension, is refused), one with anything but printable ASCII is refused rather than normalised, and `.` and `..`
+  are never covered. Links are resolved and the result has to satisfy the same rules inside the
   resolved folder and scope. An `edits` list is read only as entries of `old_string`, `new_string` and `replace_all`; a request
   carrying a patch, a diff or any other key is not covered.
 
