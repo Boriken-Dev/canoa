@@ -41,6 +41,8 @@ dependencies:
   tray_manager: ^0.5.3
   window_manager: ^0.5.2
   web_socket_channel: ^3.0.3
+  # The browser's WebCrypto and IndexedDB, for the web peer bridge.
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
