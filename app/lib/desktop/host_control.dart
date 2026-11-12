@@ -14,7 +14,10 @@ final class HostControl {
   ControlClient? _client;
   Future<ControlClient>? _opening;
 
-  Future<ControlClient> _connect() => _opening ??= () async {
+  Future<ControlClient> _connect() => _opening ??= (() async => _client = await open())().whenComplete(() => _opening = null);
+
+  /// A link of its own, which the caller closes: closing it ends what the host is doing for it, such as an install.
+  Future<ControlClient> open() async {
     final deadline = DateTime.now().add(wait);
     while (_host.phase != HostPhase.running && _host.phase != HostPhase.idle) {
       if (DateTime.now().isAfter(deadline) || _host.phase == HostPhase.failed || _host.phase == HostPhase.held) {
@@ -22,8 +25,8 @@ final class HostControl {
       }
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
-    return _client = ControlClient(_host.openLink('@control'));
-  }().whenComplete(() => _opening = null);
+    return ControlClient(_host.openLink('@control'));
+  }
 
   /// A client whose link is up.
   Future<ControlClient> ready() async {
