@@ -367,7 +367,6 @@ class _SessionRowState extends State<_SessionRow> {
       if (store.inBypass(session)) 'Bypass',
       locationOf(session),
       session.agent,
-      ageLabel(widget.now, session.lastActivity),
     ].nonNulls.join(' · ');
     final showMenu = _hover || widget.active || _menuOpen || widget.touch;
     return MenuAnchor(
@@ -396,10 +395,12 @@ class _SessionRowState extends State<_SessionRow> {
               subtitle: Row(children: [
                 _stateMark(context, state),
                 const SizedBox(width: 5),
-                Text(state.word, maxLines: 1, style: TextStyle(color: stateColor, fontSize: 12)),
+                Flexible(child: Text(state.word, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: stateColor, fontSize: 12))),
                 Expanded(
                   child: Text(' · $where', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: look.muted, fontSize: 12)),
                 ),
+                // The age stays whole: the agent's name is what gives way when the column is narrow.
+                Text(' · ${ageLabel(widget.now, session.lastActivity)}', maxLines: 1, style: TextStyle(color: look.muted, fontSize: 12)),
               ]),
               trailing: showMenu
                   ? IconButton(

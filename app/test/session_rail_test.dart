@@ -148,9 +148,9 @@ void main() {
       _open(store, 'Old one', ago: const Duration(days: 2));
       store.createDraft(title: 'Draft');
       await _show(tester, store, unfold: true);
-      expect(_under(tester, 'Fix the build'), 'Idle| · canoa · Claude Code · 7m');
-      expect(_under(tester, 'On a branch'), 'Idle| · canoa/x · Claude Code · 3h');
-      expect(_under(tester, 'Old one'), 'Idle| · Claude Code · 2d');
+      expect(_under(tester, 'Fix the build'), 'Idle| · canoa · Claude Code| · 7m');
+      expect(_under(tester, 'On a branch'), 'Idle| · canoa/x · Claude Code| · 3h');
+      expect(_under(tester, 'Old one'), 'Idle| · Claude Code| · 2d');
       store.dispose();
     });
 
