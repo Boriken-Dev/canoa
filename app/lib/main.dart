@@ -43,7 +43,6 @@ import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
 import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
-import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
 import 'permissions/protected_paths.dart' show ProtectedPaths;
@@ -54,13 +53,14 @@ import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
 import 'profile/report.dart';
 import 'profile/profiles_dialog.dart';
+import 'rail/session_groups.dart';
+import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/sources.dart';
 import 'store/programs.dart';
 import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
-import 'theme/canoa_mark.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
@@ -1158,7 +1158,7 @@ class _CanoaHome extends StatelessWidget {
 
   /// The session [step] places from the one chosen, going round the list.
   void _step(int step) {
-    final sessions = store.sessions;
+    final sessions = listOrder(store.sessions);
     if (sessions.isEmpty) return;
     final at = sessions.indexWhere((session) => session.id == store.selectedId);
     store.select(sessions[(at + step) % sessions.length].id);
@@ -1178,11 +1178,22 @@ class _CanoaHome extends StatelessWidget {
     if (store.selected?.status == SessionStatus.working) unawaited(store.cancelActiveSession().catchError((Object _) {}));
   }
 
-  Future<void> _palette(BuildContext context) {
+  /// The rail as the window shows it: beside the conversation, or in the drawer.
+  Widget _rail(BuildContext context) => SessionRail(
+    store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession,
+    onSettings: onSettings, onHosting: onHosting, onReopen: onReopen,
+    onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
+    onClose: conversation.close ?? store.close,
+  );
+
+  Future<void> _palette(BuildContext context, {bool sessionsOnly = false}) {
     final session = store.selected;
     return showSelectableDialog<void>(
       context: context,
-      builder: (_) => CommandPalette(items: [
+      builder: (_) => CommandPalette(items: sessionsOnly ? [
+        for (final other in listOrder(store.sessions))
+          PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
+      ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
         PaletteItem('Connect to an agent', () => _connect(context), icon: Icons.link_rounded),
         if (session != null && conversation.showChanges != null && changesOf(session).isNotEmpty)
@@ -1211,7 +1222,8 @@ class _CanoaHome extends StatelessWidget {
       LogicalKeyboardKey.digit7, LogicalKeyboardKey.digit8, LogicalKeyboardKey.digit9,
     ].indexed)
       chord(key): () {
-        if (index < store.sessions.length) store.select(store.sessions[index].id);
+        final ordered = listOrder(store.sessions);
+        if (index < ordered.length) store.select(ordered[index].id);
       },
     chord(LogicalKeyboardKey.tab): () => _step(1),
     chord(LogicalKeyboardKey.tab, shift: true): () => _step(-1),
@@ -1238,7 +1250,7 @@ class _CanoaHome extends StatelessWidget {
 
       return Selectable(child: Scaffold(
         drawer: narrow
-            ? Drawer(child: SafeArea(child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen)))
+            ? Drawer(child: SafeArea(child: _rail(context)))
             : null,
         body: SafeArea(
           child: Row(
@@ -1246,7 +1258,7 @@ class _CanoaHome extends StatelessWidget {
               if (!narrow)
                 SizedBox(
                   width: context.look.railWidth,
-                  child: _SessionRail(store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession, onSettings: onSettings, onHosting: onHosting, onReopen: onReopen),
+                  child: _rail(context),
                 ),
               Expanded(
                 child: _Conversation(
@@ -1265,173 +1277,11 @@ class _CanoaHome extends StatelessWidget {
   }
 }
 
-class _SessionRail extends StatelessWidget {
-  const _SessionRail({
-    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
-    this.onHosting, this.onReopen,
-  });
-
-  final SessionStore store;
-  final Future<void> Function(ConnectTarget) onConnect;
-  final UseBrowserAgents onUseBrowserAgents;
-  final VoidCallback onNewSession;
-  final VoidCallback onSettings;
-  final VoidCallback? onHosting;
-  final Future<void> Function(LedgerEntry)? onReopen;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: context.look.rail,
-      child: Column(children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 10, 12),
-          // The wordmark never wraps: where it and the buttons do not fit on one line, the buttons go under it. The full width puts
-          // them at the right end when they do fit.
-          child: SizedBox(width: double.infinity, child: Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                CanoaMark(color: context.look.accent),
-                const SizedBox(width: 10),
-                const Text('Canoa', softWrap: false, style: TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.w700,
-                )),
-              ]),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(
-                  tooltip: 'Canoa settings',
-                  onPressed: onSettings,
-                  icon: const Icon(Icons.settings_outlined),
-                ),
-                if (onHosting != null)
-                  IconButton(
-                    tooltip: 'Hosting',
-                    onPressed: onHosting,
-                    icon: const Icon(Icons.dns_outlined),
-                  ),
-                IconButton(
-                  tooltip: 'Connect to verified agent',
-                  onPressed: () => showCanoaConnectDialog(
-                    context,
-                    onConnect,
-                    browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
-                    onUseBrowserAgents: onUseBrowserAgents,
-                  ),
-                  icon: const Icon(Icons.link_rounded),
-                ),
-                IconButton(
-                  tooltip: 'New session',
-                  onPressed: () {
-                    onNewSession();
-                    if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
-                      Navigator.pop(context);
-                    }
-                  },
-                  icon: const Icon(Icons.add_comment_outlined),
-                ),
-              ]),
-            ],
-          )),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: store.sessions.length + (store.ledger == null ? 0 : 1),
-            itemBuilder: (context, index) {
-              // The open conversations, then the ledger's sessions that are not open now, by harness.
-              if (index == store.sessions.length) {
-                return LedgerList(ledger: store.ledger!, store: store, onReopen: onReopen);
-              }
-              final session = store.sessions[index];
-              final active = session.id == store.selectedId;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                child: ListTile(
-                  selected: active,
-                  selectedTileColor: context.look.selected,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  leading: !store.inBypass(session)
-                      ? const Icon(Icons.chat_bubble_outline, size: 21)
-                      : Icon(Icons.fast_forward_outlined, size: 21, color: Theme.of(context).colorScheme.tertiary),
-                  title: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: _SessionMark(session: session),
-                  subtitle: Text(
-                    [
-                      if (store.inBypass(session)) 'Bypass',
-                      switch (session.status) {
-                        SessionStatus.preview => 'Preview · offline',
-                        SessionStatus.draft => 'New',
-                        SessionStatus.connecting when session.isDraft => 'Starting',
-                        final status => status.name,
-                      },
-                      if (session.worktree case final worktree?) worktree.branch,
-                    ].join(' · '),
-                    maxLines: 1,
-                  ),
-                  onTap: () {
-                    store.select(session.id);
-                    if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            // An agent this app runs is its own child, and only one elsewhere is reached as a peer.
-            canRunLocalAgents
-                ? 'Agents on other machines need a verified ACP peer.'
-                : 'Agent connections and sync require verified ACP peers.',
-            style: TextStyle(color: context.look.muted, fontSize: 12),
-          ),
-        ),
-      ]),
-    );
-  }
-}
-
 /// What a start under way has made so far, for quitting to take back.
 final class _Starting {
   Worktrees? worktrees;
   SessionWorktree? made;
   VerifiedAgent? client;
-}
-
-/// What a session in the list has for the person: something waiting for their answer, a turn running, or a turn that ended
-/// since they last looked.
-class _SessionMark extends StatelessWidget {
-  const _SessionMark({required this.session});
-
-  final ChatSession session;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (session.needsYou) {
-      return Tooltip(message: 'Needs you', child: Icon(Icons.front_hand_outlined, size: 18, color: scheme.error));
-    }
-    if (session.status == SessionStatus.working) {
-      return const Tooltip(
-        message: 'Working',
-        child: SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-      );
-    }
-    if (session.unread) {
-      return Tooltip(
-        message: 'New since you looked',
-        child: Container(width: 10, height: 10, decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle)),
-      );
-    }
-    return const SizedBox.shrink();
-  }
 }
 
 /// What the conversation shown offers the keyboard and the palette, set by it while it is shown.

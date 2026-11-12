@@ -251,6 +251,16 @@ class ChatSession {
   /// Whether a turn ended here since the person last chose this session.
   bool unread = false;
 
+  /// Whether the last turn failed and the person has not looked since.
+  bool failed = false;
+
+  /// Whether the person pinned the session to the top of the list, or archived it out of the way. Archived hides it only
+  /// while it needs nothing from the person.
+  bool pinned = false, archived = false;
+
+  /// When something last happened here: the newest message, else when it was made.
+  DateTime get lastActivity => messages.isEmpty ? created : messages.last.at;
+
   /// The files of the changes pane the person marked viewed, each with the version of it they saw.
   final Map<String, int> viewedChanges = {};
 
@@ -1815,6 +1825,7 @@ class SessionStore extends ChangeNotifier {
   /// A turn of [session] ended, stopped or failed when [held] says why. The next queued message goes, unless the turn did not
   /// end as it should: then the queue waits for the person, who may send it, edit it or clear it.
   void _turnEnded(ChatSession session, String? held) {
+    if (held == 'the turn failed' && session.id != _selectedId) session.failed = true;
     if (session.reportsUsage) unawaited(refreshUsage(session));
     if (session.queue.isEmpty) return;
     session.queueHeld = held;
@@ -2086,6 +2097,8 @@ class SessionStore extends ChangeNotifier {
     ))
       ..bypass = entry.bypass
       ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
+      ..pinned = entry.pinned
+      ..archived = entry.archived
       ..chosenMode = entry.mode
       ..opening = true;
     attachVerifiedClient(session.id, client, record: false);
@@ -2202,8 +2215,54 @@ class SessionStore extends ChangeNotifier {
     if (chosen == null) return;
     _selectedId = id;
     chosen.unread = false;
+    chosen.failed = false;
     notifyListeners();
   }
+
+  /// Pins [session] to the top of the list, or takes it down; kept with its ledger note where it has one.
+  void setPinned(ChatSession session, bool pinned) {
+    session.pinned = pinned;
+    _keepPlacement(session);
+    notifyListeners();
+  }
+
+  /// Archives [session], out of the way of the list, or brings it back. One that needs the person stays where it is seen.
+  void setArchived(ChatSession session, bool archived) {
+    session.archived = archived;
+    _keepPlacement(session);
+    notifyListeners();
+  }
+
+  void _keepPlacement(ChatSession session) {
+    final peer = session.peerId, remote = session.remoteSessionId;
+    if (peer != null && remote != null) {
+      ledger?.setPlacement(peer, remote, pinned: session.pinned, archived: session.archived);
+    }
+  }
+
+  /// Names [session] as the person says; the agent stops naming it.
+  void rename(ChatSession session, String title) {
+    final named = title.trim();
+    if (named.isEmpty) return;
+    session.title = named;
+    session.agentNames = false;
+    session.titleFromMessage = false;
+    final peer = session.peerId, remote = session.remoteSessionId;
+    if (peer != null && remote != null) ledger?.touch(peer, remote, title: named);
+    notifyListeners();
+  }
+
+  /// A new session that starts as [session] did: the same source, overlays and folder (the repository, in a worktree of its own
+  /// where [session] had one). What was said in [session] is not copied: an agent's history is its own.
+  ChatSession fork(ChatSession session) => createDraft(
+    source: session.source,
+    cwd: session.worktree?.repo ?? session.cwd,
+    worktree: session.worktree != null || session.wantsWorktree,
+    overlays: session.overlays,
+    title: 'Fork of ${session.title}',
+    keptSource: session.keptSource,
+    cacheLifetime: session.cacheLifetime,
+  );
 
   /// This does not send data to an agent. Only the clearly labeled preview
   /// session accepts text until the authenticated ACP transport is connected.

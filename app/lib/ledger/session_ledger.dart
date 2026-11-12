@@ -89,8 +89,13 @@ final class LedgerEntry {
     this.bypass = false,
     this.cacheLifetime,
     this.canoaId,
+    this.pinned = false,
+    this.archived = false,
     this.messages = const [],
   });
+
+  /// Whether the person pinned the session to the top of the list, or archived it out of the way.
+  bool pinned, archived;
 
   /// The proven peer, or `local:<entry>` for an agent this app runs.
   final String peerId;
@@ -178,6 +183,8 @@ final class LedgerEntry {
     if (bypass) 'bypass': true,
     'cacheLifetime': ?cacheLifetime,
     'canoaId': ?canoaId,
+    if (pinned) 'pinned': true,
+    if (archived) 'archived': true,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
   };
 
@@ -212,6 +219,8 @@ final class LedgerEntry {
       bypass: json['bypass'] == true,
       cacheLifetime: text('cacheLifetime'),
       canoaId: text('canoaId'),
+      pinned: json['pinned'] == true,
+      archived: json['archived'] == true,
       messages: [
         if (json['messages'] case final List<dynamic> kept)
           for (final message in kept) ?KeptMessage.fromJson(message),
@@ -475,6 +484,16 @@ class SessionLedger extends ChangeNotifier {
     found.lastUsed = _clock();
     if (title != null) found.title = title;
     _apply();
+    _changed();
+  }
+
+  /// Notes that the person pinned or archived a session, to put it back in the list as it was when it is opened again.
+  void setPlacement(String peerId, String sessionId, {required bool pinned, required bool archived}) {
+    final found = find(peerId, sessionId);
+    if (found == null || (found.pinned == pinned && found.archived == archived)) return;
+    found
+      ..pinned = pinned
+      ..archived = archived;
     _changed();
   }
 

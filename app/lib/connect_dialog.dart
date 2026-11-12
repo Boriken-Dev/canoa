@@ -390,7 +390,8 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   ]);
                 },
               ),
-              FutureBuilder<String?>(
+              // Pairing by PIN is the browser's: a desktop app has no such method, so it offers none.
+              if (widget.inBrowser) FutureBuilder<String?>(
                 future: noiseUnavailable,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState != ConnectionState.done) return const SizedBox.shrink();
@@ -443,6 +444,16 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   hintText: 'sha256:…',
                 )),
               cwdField,
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  // An agent this app runs is its own child, and only one elsewhere is reached as a peer.
+                  widget.inBrowser
+                      ? 'Agent connections and sync require verified ACP peers.'
+                      : 'Agents on other machines need a verified ACP peer.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
