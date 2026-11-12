@@ -192,11 +192,11 @@ thinking-level choice from the chat, since Pi's are set by its own `--model` and
 client; no slash commands listed; and no diff view, since Pi's `edit` result is text. Its model and credentials are Pi's
 own: a `models.json` in `PI_CODING_AGENT_DIR`, whose key it reads from an environment variable the host passes on.
 
-[`pi-acp`](https://www.npmjs.com/package/pi-acp) is an ACP adapter for Pi, MIT, in Zed's ACP registry, which runs `pi
---mode rpc` itself. Version 0.0.34 with Pi 1.5.0 ran a turn as a `[host.agents]` entry (`program = "npx"`, `args = ["-y",
-"pi-acp@0.0.34"]`), and the app offers it as the **Pi** preset. It offers more of Pi than these rules do (its slash
-commands and usage arrived in that turn; its README also lists diffs for `edit` and reopening sessions) and is the better
-choice; the tool entry is for a Pi, or a tool like it, with no adapter.
+The host's own **Pi** source is the better choice: `coqui-acp-pi`, coqui-acp's translator of Pi's RPC mode, runs inside the
+host as the `pi` harness, so it needs only `pi` (no Node, no `npx`, no adapter) and offers more of Pi than these rules do
+(its models and thinking levels, modes, images, and reopening sessions). A `[host.agents]` entry with `harness = "pi"` runs
+it too, with `settings` for `executable`, or `node` with `script`, and `protected`. The tool entry is for a tool like Pi with
+no translator.
 
 `canoa serve` reads the same canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
 prints one JSON line per entry: its name, kind, address, its provider id (a `harness` entry) and `title` when it has them, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it

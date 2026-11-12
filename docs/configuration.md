@@ -172,16 +172,17 @@ given what that host's `[host.profiles]` offers; with none, its conversation say
 
 Claude Code and Codex are run by `canoa agent claude` and `canoa agent codex`, the host's own translators of their stdio
 protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), with no Node; the desktop app runs them from its own
-executable, and a `[host.agents]` entry with `harness` runs them inside the host.
+executable, and a `[host.agents]` entry with `harness` runs them inside the host. Pi is run the same way by coqui-acp's
+`coqui-acp-pi` (`harness = "pi"`), which needs only `pi`.
 
-| Part | Claude Code (`canoa agent claude`) | Codex (`canoa agent codex`) | Gemini CLI (a command you add) | Pi (`pi-acp`) | Another agent |
+| Part | Claude Code (`canoa agent claude`) | Codex (`canoa agent codex`) | Gemini CLI (a command you add) | Pi (`coqui-acp-pi`) | Another agent |
 | --- | --- | --- | --- | --- | --- |
 | Environment | the process of `claude` | the process of `codex app-server` | the agent's process | the agent's process | the agent's process |
-| Initial context | ACP `systemPrompt`, appended: `claude --append-system-prompt` | ACP `systemPrompt`, appended: the thread's developer instructions | not supported | not supported | ACP `systemPrompt` when it advertises it |
+| Initial context | ACP `systemPrompt`, appended: `claude --append-system-prompt` | ACP `systemPrompt`, appended: the thread's developer instructions | not supported | ACP `systemPrompt`, appended: `pi --append-system-prompt` | ACP `systemPrompt` when it advertises it |
 | Skills | a Claude Code plugin, `canoa-profile`, through `_meta.claudeCode.options.plugins`, which becomes `claude --plugin-dir`; a skill is `canoa-profile:<name>` | the Agent Skills directory of a new directory given as ACP `additionalDirectories`, which becomes one of Codex's skill roots | not supported | not supported | not supported |
-| MCP servers | ACP `mcpServers`: stdio, HTTP, SSE (version 1), written to the file `claude --mcp-config` names | ACP `mcpServers`: stdio, HTTP, as the thread's `mcp_servers`; skipped by Codex when its own configuration names a server the same | ACP `mcpServers` | not supported: pi-acp accepts them and starts none | ACP `mcpServers`, as it advertises |
-| Model, effort | the session's config options `model` and `effort`: the models Claude Code lists and their efforts | the same: the models Codex lists and their reasoning efforts | the session's config option offering that value | the same | the same |
-| Mode | not supported: the translator offers no mode | not supported: the translator offers no mode | the session's config option offering that value | the same | the same |
+| MCP servers | ACP `mcpServers`: stdio, HTTP, SSE (version 1), written to the file `claude --mcp-config` names | ACP `mcpServers`: stdio, HTTP, as the thread's `mcp_servers`; skipped by Codex when its own configuration names a server the same | ACP `mcpServers` | not supported: Pi reads its own from its configuration and takes none from a client | ACP `mcpServers`, as it advertises |
+| Model, effort | the session's config options `model` and `effort`: the models Claude Code lists and their efforts | the same: the models Codex lists and their reasoning efforts | the session's config option offering that value | the config options `model` and `effort` (Thinking): the models Pi has credentials for | the same |
+| Mode | not supported: the translator offers no mode | not supported: the translator offers no mode | the session's config option offering that value | the config option `mode`: Pi asks nobody, so the translator asks, and refuses protected paths | the same |
 
 Plugins from a client are off in `canoa agent claude` unless `--allow-client-plugins` is given, since a plugin's hooks and
 MCP servers run with nothing asked. The app passes it, as it writes the only plugin, `canoa-profile`. A host entry allows
