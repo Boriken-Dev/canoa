@@ -296,7 +296,7 @@ async function forTransport(transport) {
     const allowSite = (view) => view.run(`(() => {
       [...document.querySelectorAll('input[name=tab]')].find((input) => input.dataset.origin === ${JSON.stringify(siteOrigin)}).click();
       const tabId = Number(document.querySelector('input[name=tab]:checked').value);
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow this tab').click();
+      [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow this tab')).click();
       return tabId;
     })()`, { gesture: true }).catch(() => undefined);
     const askAndAllow = async (client) => {

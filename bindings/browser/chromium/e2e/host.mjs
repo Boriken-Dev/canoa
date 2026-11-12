@@ -127,7 +127,7 @@ try {
   await view.run(`(() => {
       const inputs = [...document.querySelectorAll('input[type=text]')];
       inputs.at(-1).value = ${JSON.stringify(tmpdir())};
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
+      [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow')).click();
     })()`).catch(() => {});
   assert.equal(await page.run("window.asked"), 1);
   step("the person added the host's entry by hand, pinned to the host's id");

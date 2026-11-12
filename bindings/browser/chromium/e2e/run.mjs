@@ -226,8 +226,20 @@ try {
       return null;
     }
   }, 30_000);
-  const worker = await waitFor("the extension's service worker", async () =>
-    (await targets()).find((target) => target.type === "service_worker" && target.url.startsWith("chrome-extension://") && target.url.endsWith("/background.js")), 20_000);
+  // Edge starts extensions of its own beside the unpacked one, some with a background.js too: ours is the one named Canoa.
+  const worker = await waitFor("the extension's service worker", async () => {
+    for (const target of (await targets()).filter((item) => item.type === "service_worker" && item.url.startsWith("chrome-extension://") && item.url.endsWith("/background.js"))) {
+      const probe = new Session(target.webSocketDebuggerUrl);
+      try {
+        if ((await probe.run("typeof chrome === 'object' && chrome.runtime?.getManifest?.().name")) === "Canoa") return target;
+      } catch {
+        // Not ready yet, or not ours.
+      } finally {
+        probe.socket.close();
+      }
+    }
+    return null;
+  }, 20_000);
   const sw = new Session(worker.webSocketDebuggerUrl);
   // A service worker can be attached to a moment before its extension APIs exist.
   await waitFor("the extension's APIs", async () => (await sw.run("typeof chrome")) === "object");
@@ -290,7 +302,7 @@ try {
   await check("person-refuses: closing with Refuse gives the page nothing", async () => {
     await requested();
     const view = await prompt();
-    await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Refuse').click()").catch(() => {});
+    await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Refuse')).click()").catch(() => {});
     assert.equal(await page.run("window.asked"), "NotAllowedError");
     assert.equal(await page.run("document.acp.agents().then((a) => a.length)"), 0);
   });
@@ -302,7 +314,7 @@ try {
     await view.run(`(() => {
       const inputs = [...document.querySelectorAll('input[type=text]')];
       inputs.at(-1).value = '/granted/dir';
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
+      [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow')).click();
     })()`).catch(() => {});
     assert.equal(await page.run("window.asked"), 1);
     assert.equal(await page.run("window.agent.label"), "Test agent");
@@ -342,7 +354,7 @@ try {
     await page.run("window.answering = window.rpc({ jsonrpc: '2.0', id: 6, method: 'session/prompt', params: { sessionId: 's1', prompt: [] } }); true");
     const view = await prompt();
     assert.match(await view.run("document.querySelector('#main').textContent"), /Run a command/);
-    await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Yes').click()").catch(() => {});
+    await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Yes')).click()").catch(() => {});
     const answered = await page.run("window.answering");
     assert.equal(answered.id, 6, "the page's next message is its own answer, not the request");
     const decision = reached.find((message) => message.id === 900);
@@ -380,7 +392,7 @@ try {
     await view.run(`(() => {
       const inputs = [...document.querySelectorAll('input[type=text]')];
       inputs.at(-1).value = '/plain';
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
+      [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow')).click();
     })()`).catch(() => {});
     assert.equal(await page.run("window.asked"), 1);
     assert.equal(await page.run("window.agent.identity.verified"), false);
@@ -413,7 +425,7 @@ try {
       const row = [...document.querySelectorAll('label.pick')].find((item) => item.textContent.includes(${JSON.stringify(label)}));
       row.querySelector('input[type=checkbox]').click();
       [...document.querySelectorAll('input[type=text]')].at(-1).value = ${JSON.stringify(cwd)};
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
+      [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow')).click();
     })()`).catch(() => {});
 
     await check("discovery: the companion finds an agent, shown unticked with its key, and the page sees nothing until it is chosen", async () => {
@@ -646,16 +658,30 @@ try {
     const tabId = await newestTab();
     const own = await openUrl(`chrome-extension://${new URL(worker.url).hostname}/ui/own.html`);
     await waitFor("the provider in Canoa's own page", () => own.run("typeof document.acp === 'object'"));
-    const answerBrowser = (view, allow) => view.run(allow
+    const press = async (view, key, code, windowsVirtualKeyCode) => {
+      // The window holds its buttons for a moment after it shows, so a key before that answers nothing.
+      await waitFor("the buttons", () => view.run("[...document.querySelectorAll('button')].every((button) => !button.disabled)"));
+      await view.call("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode });
+    };
+    const answerBrowser = (view, allow) => allow === "escape" ? press(view, "Escape", "Escape", 27).catch(() => {}) : view.run(allow
       ? `(() => {
           [...document.querySelectorAll('input[name=tab]')].find((input) => input.value === '${tabId}').click();
-          [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow this tab').click();
+          [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow this tab')).click();
         })()`
-      : "[...document.querySelectorAll('button')].find((b) => b.textContent === 'Refuse').click()", { gesture: true }).catch(() => {});
+      : "[...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Refuse')).click()", { gesture: true }).catch(() => {});
+    // CANOA_E2E_SHOTS=<dir> keeps a picture of the pages a person sees, for the UI samples.
+    const shoot = async (session, name, width = 640, height = 720) => {
+      if (!process.env.CANOA_E2E_SHOTS) return;
+      mkdirSync(process.env.CANOA_E2E_SHOTS, { recursive: true });
+      await session.call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      const { data } = await session.call("Page.captureScreenshot", { format: "png" });
+      writeFileSync(path.join(process.env.CANOA_E2E_SHOTS, name + ".png"), Buffer.from(data, "base64"));
+    };
     const askBrowser = async (allow) => {
       const asking = callTool(own, "browser_request_access", { capability: "browser.read", reason: "I would like to read the page" });
       const view = await prompt();
       const shown = await view.run("document.querySelector('#main').textContent");
+      await shoot(view, "request_window");
       await answerBrowser(view, allow);
       return { answer: await asking, shown };
     };
@@ -698,6 +724,7 @@ try {
       const before = toolEntries().filter((entry) => entry.notified).length;
       const { answer, shown } = await askBrowser(true);
       assert.ok(shown.includes("In its own words: I would like to read the page"), shown);
+      assert.ok(shown.includes("Allow this tab ↵") && shown.includes("Refuse Esc"), shown);
       assert.ok(shown.includes(origin), shown);
       assert.equal(answer.result.isError, false);
       assert.equal(JSON.parse(answer.result.content[0].text).tabId, tabId);
@@ -724,14 +751,60 @@ try {
       assert.deepEqual(await toolNames(own), ["browser_request_access"]);
       assert.equal((await callTool(own, "browser_read_page", { tabId })).result.isError, true);
     });
+    await check("permissions page: a paired agent is chosen from a list, a key outside the list is refused, and the grant works", async () => {
+      const options = await openUrl(`chrome-extension://${new URL(worker.url).hostname}/permissions.html`);
+      try {
+        await waitFor("the picker", () => options.run("document.querySelectorAll('#peer option').length > 0"));
+        assert.equal(await options.run("document.querySelector('#peer').tagName"), "SELECT");
+        const names = await options.run("[...document.querySelectorAll('#peer option')].map((option) => option.textContent)");
+        assert.ok(names.some((name) => name.startsWith("Tool bridge")), names.join("|"));
+        assert.equal(await options.run("document.querySelector('#no-agents').hidden"), true);
+        await shoot(options, "permissions_picker", 760, 900);
+        const unpaired = await options.run(`chrome.runtime.sendMessage({ type: 'canoa.grants.add', peerId: 'sha256:' + '0'.repeat(64), tabId: ${tabId}, capability: 'browser.read', minutes: 5 })`);
+        assert.ok(unpaired.error, JSON.stringify(unpaired));
+        await waitFor("the tab choice", () => options.run(`!!document.querySelector('#tab option[value="${tabId}"]')`));
+        await options.run(`document.querySelector('#tab').value = '${tabId}'; true`);
+        await options.run("document.querySelector('#grant-form button[type=submit]').click(); true", { gesture: true });
+        await waitFor("the grant", () => options.run("document.querySelector('#status').textContent.startsWith('Permission added')"));
+        const listed = await options.run("chrome.runtime.sendMessage({ type: 'canoa.grants.list' }).then(({ grants }) => grants.map((grant) => [grant.tabId, grant.capability]))");
+        assert.deepEqual(listed, [[tabId, "browser.read"]]);
+        await options.run("chrome.runtime.sendMessage({ type: 'canoa.grants.list' }).then(({ grants }) => chrome.runtime.sendMessage({ type: 'canoa.grants.remove', grant: grants[0] })).then(() => true)");
+      } finally {
+        await options.call("Page.close").catch(() => {});
+      }
+      // The first-use page and the agents page, where pairing asks for the browser's name.
+      const host = new URL(worker.url).hostname;
+      const welcome = await openUrl(`chrome-extension://${host}/welcome.html`);
+      const agents = await openUrl(`chrome-extension://${host}/acp-request.html?manage=1`);
+      try {
+        await waitFor("the welcome page", () => welcome.run("document.querySelector('#ok') !== null"));
+        assert.ok(await welcome.run("document.body.textContent.includes('Before you start')"));
+        await shoot(welcome, "welcome", 760, 780);
+        await waitFor("the agents page", () => agents.run("document.body.textContent.includes('Name this browser so you can identify it later')"));
+        const named = await agents.run("[...document.querySelectorAll('fieldset')].find((set) => set.querySelector('legend')?.textContent === 'Pair with a code').querySelector('input[maxlength=\"60\"]').value");
+        assert.ok(named.length > 0, "the name field has a default");
+        await shoot(agents, "agents_pair_name", 760, 1100);
+      } finally {
+        await welcome.call("Page.close").catch(() => {});
+        await agents.call("Page.close").catch(() => {});
+      }
+    });
+    await check("request window: Enter allows the tab that was chosen", async () => {
+      const asking = callTool(own, "browser_request_access", { capability: "browser.read", reason: "keys" });
+      const view = await prompt();
+      await view.run(`[...document.querySelectorAll('input[name=tab]')].find((input) => input.value === '${tabId}').click(); true`, { gesture: true });
+      await press(view, "Enter", "Enter", 13);
+      assert.equal((await asking).result.isError, false);
+      assert.ok((await toolNames(own)).includes("browser_read_page"));
+    });
     await check("tools: navigating the tab away ends the grant", async () => {
       await askBrowser(true);
       assert.ok((await toolNames(own)).includes("browser_read_page"));
       await browserTab.run("location.reload(); true");
       await waitFor("the grant to go", async () => !(await toolNames(own)).includes("browser_read_page"));
     });
-    await check("tools: the person refusing is what the agent hears, and it cannot ask again at once", async () => {
-      const { answer } = await askBrowser(false);
+    await check("tools: the person refusing, here by Escape, is what the agent hears, and it cannot ask again at once", async () => {
+      const { answer } = await askBrowser("escape");
       assert.equal(answer.result.isError, true);
       assert.deepEqual(await toolNames(own), ["browser_request_access"]);
       const again = await callTool(own, "browser_request_access", { capability: "browser.read", reason: "please" });
