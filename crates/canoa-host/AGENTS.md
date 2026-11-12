@@ -589,8 +589,9 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
 - A store is code running as the user. The host's checks catch a store's mistakes and an install's side effects; they are not a sandbox.
 - The host applies the plan it made, found by its token (`Programs::plan` keeps it); a client's copy only names it. The token covers the
   version, platform, launch, every download and its check, and every declared change. A change that declares a place of its own is the only
-  kind accepted: a root, the home itself or an ancestor of it, all of HKCU, is refused (`the plan declares ...`). `USER_PATH` covers the
-  `PATH` value and a profile whose every changed line mentions `PATH`, nothing else.
+  kind accepted: a root, the home itself or an ancestor of it, all of HKCU, is refused (`the plan declares ...`). `USER_PATH` covers
+  the registry `PATH` value gaining exactly the declared directory at its end, and a profile whose only change is a line that is exactly a `PATH`
+  assignment adding it (no whitespace or `\` in a POSIX directory, quotes balanced); a `REGISTRY` change never covers the user `PATH`.
 - An install is measured on every outcome, a failure, a cancel and a timeout included: the machine is snapshotted before and after, the
   registry values put back, and the folder removed. Nothing is exempted for moving: a profile line, a `PATH` directory or a `Run` key that
   changes is undeclared, and the error asks the person to try again. During an install the other programs' folders under the programs root are watched too.

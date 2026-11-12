@@ -1100,7 +1100,6 @@ fn registry_allowed(target: &str) -> bool {
     }
     let below: Vec<&str> = parts[1..].iter().map(String::as_str).collect();
     match below.as_slice() {
-        ["environment", "path"] => true,
         [
             "software",
             "microsoft",

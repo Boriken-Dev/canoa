@@ -500,6 +500,13 @@ fn a_path_line_is_recognised_only_when_it_is_exactly_an_assignment() {
         ("export PATH=$PATH:$HOME/.x/bin", None),
         ("export PATH=$HOMEx/bin:$PATH", None),
         ("# export PATH=/x:$PATH", None),
+        ("export PATH=/opt/my dir/bin:$PATH", None),
+        ("export PATH=/opt/a\tb/bin:$PATH", None),
+        ("export PATH=/opt/a\\b:$PATH", None),
+        ("fish_add_path \"/opt/x/bin", None),
+        ("fish_add_path /opt/x/bin\"", None),
+        ("fish_add_path \"/opt/x/bin\"", Some("/opt/x/bin")),
+        ("$env:Path = \"C:\\my dir\\bin;$env:Path\"", None),
     ] {
         assert_eq!(parse_path_line(line, Some(home)).as_deref(), dir, "{line}");
     }

@@ -1418,3 +1418,18 @@ fn a_plan_is_good_for_the_provider_that_made_it_only() {
         .expect_err("another provider's");
     assert!(format!("{error}").contains("no such plan"), "{error}");
 }
+
+#[test]
+fn the_user_path_is_not_a_registry_key_a_plan_may_declare() {
+    let s = setup("regpath", Variant::Normal);
+    let error = apply_rigged(
+        &s,
+        rigged(
+            &s,
+            Rig::DeclaresRegistry(r"HKCU\Environment\Path".to_owned()),
+        ),
+        |_| {},
+    )
+    .expect_err("refused");
+    assert!(format!("{error}").contains("declares"), "{error}");
+}

@@ -402,13 +402,17 @@ pub fn parse_path_line(line: &str, home: Option<&Path>) -> Option<String> {
         value.strip_suffix(":$PATH")?
     } else if let Some(rest) = line.strip_prefix("fish_add_path ") {
         let rest = rest.trim();
-        rest.strip_prefix('"')
-            .map_or(rest, |q| q.strip_suffix('"').unwrap_or(q))
+        match rest.strip_prefix('"') {
+            Some(quoted) => quoted.strip_suffix('"')?,
+            None => rest,
+        }
     } else {
         line.strip_prefix("$env:Path = \"")?
             .strip_suffix(";$env:Path\"")?
     };
     let mut dir = raw.to_owned();
+    // The part the line wrote itself; the home it names is the host's own and is not checked.
+    let mut written = raw;
     for prefix in ["${HOME}", "$HOME", "~"] {
         if let Some(rest) = raw.strip_prefix(prefix) {
             let home = home?;
@@ -416,29 +420,34 @@ pub fn parse_path_line(line: &str, home: Option<&Path>) -> Option<String> {
                 return None;
             }
             dir = home.to_string_lossy().into_owned() + rest;
+            written = rest;
             break;
         }
     }
+    // POSIX shells split on whitespace and take `\` as an escape; PowerShell paths use `\` but no whitespace is allowed either.
+    let posix = !line.starts_with('$');
     let acted_on = |c: char| {
-        matches!(
-            c,
-            ';' | '|'
-                | '&'
-                | '<'
-                | '>'
-                | '$'
-                | '`'
-                | '('
-                | ')'
-                | '"'
-                | '\''
-                | '\n'
-                | '\r'
-                | '*'
-                | '?'
-        )
+        c.is_whitespace()
+            || (posix && c == '\\')
+            || matches!(
+                c,
+                ';' | '|'
+                    | '&'
+                    | '<'
+                    | '>'
+                    | '$'
+                    | '`'
+                    | '('
+                    | ')'
+                    | '"'
+                    | '\''
+                    | '\n'
+                    | '\r'
+                    | '*'
+                    | '?'
+            )
     };
-    (!dir.is_empty() && !dir.chars().any(acted_on)).then_some(dir)
+    (!dir.is_empty() && !written.chars().any(acted_on)).then_some(dir)
 }
 
 /// The directory a new `PATH` value gained, when it is the old value with `;<dir>` appended and nothing else.
@@ -700,10 +709,8 @@ fn covers(change: &Change, difference: &Difference) -> bool {
             matches!(difference.kind, PATH | PROFILE_FILE)
                 && under(&difference.what, &change.target)
         }
-        REGISTRY => {
-            matches!(difference.kind, REGISTRY | USER_PATH)
-                && under(&difference.what, &change.target)
-        }
+        // The user's PATH is changed only through USER_PATH's exact rule.
+        REGISTRY => difference.kind == REGISTRY && under(&difference.what, &change.target),
         _ => false,
     }
 }
