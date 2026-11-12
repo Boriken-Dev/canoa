@@ -47,6 +47,9 @@ fn names_that_carry_a_secret_are_credentials() {
         "SSH_AUTH_SOCK",
         "DOTAGENTS_SECRET_THING",
         "dotagents_x",
+        "OPENAIAPIKEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AWS_SHARED_CREDENTIALS",
         "AWS_SECRET_ACCESS_KEY_ID_PASSWORD",
     ] {
         assert!(is_credential_name(name), "{name}");
@@ -58,16 +61,30 @@ fn names_that_carry_a_secret_are_credentials() {
 
 #[test]
 fn a_line_the_person_reads_loses_every_character_that_can_hide_or_reorder_text() {
-    let line =
-        "ok\u{2028}hidden\u{2029}\u{061C}\u{200B}\u{200D}\u{2060}\u{FEFF}\u{202E}done\u{1b}[31m";
-    let cleaned = clean(line);
-    for c in [
-        '\u{2028}', '\u{2029}', '\u{061C}', '\u{200B}', '\u{200D}', '\u{2060}', '\u{FEFF}',
-        '\u{202E}', '\u{1b}',
-    ] {
+    let hidden = [
+        '\u{2028}',
+        '\u{2029}',
+        '\u{061C}',
+        '\u{200B}',
+        '\u{200D}',
+        '\u{2060}',
+        '\u{FEFF}',
+        '\u{202E}',
+        '\u{1b}',
+        '\u{ad}',
+        '\u{180e}',
+        '\u{2061}',
+        '\u{2064}',
+        '\u{fe0f}',
+        '\u{e0041}',
+        '\u{e0100}',
+    ];
+    let line: String = "ok".chars().chain(hidden).chain("done".chars()).collect();
+    let cleaned = clean(&line);
+    for c in hidden {
         assert!(!cleaned.contains(c), "{c:?} survived in {cleaned:?}");
     }
-    assert!(cleaned.starts_with("okhidden"));
+    assert!(cleaned.starts_with("ok") && cleaned.ends_with("done"));
 }
 
 #[test]
@@ -242,4 +259,16 @@ fn an_install_is_not_given_npm_node_or_ssh_agent_variables_of_the_person() {
     for gone in ["elsewhere.example", "somewhere", "agent.sock"] {
         assert!(!text.contains(gone), "{gone} was passed on: {text}");
     }
+}
+
+#[test]
+fn a_script_named_with_a_trailing_space_or_dot_is_still_a_script() {
+    let dir = Dir::new("scripts");
+    let spawner = GuardedSpawner::new(LocalSpawner::new(), dir.0.to_string_lossy());
+    let log = spawner.log();
+    for name in ["run.cmd ", "run.bat.", "run.ps1 .", "RUN.CMD"] {
+        let program = dir.0.join(name).to_string_lossy().into_owned();
+        let _ = spawner.spawn(coqui_acp_api::SpawnSpec::new(program).cwd(dir.0.to_string_lossy()));
+    }
+    assert_eq!(log.violations().len(), 4, "{:?}", log.violations());
 }

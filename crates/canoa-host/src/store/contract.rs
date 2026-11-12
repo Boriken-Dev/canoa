@@ -661,7 +661,7 @@ impl Runner<'_> {
         let elapsed = started.elapsed();
         let after = Footprint::take(&watch);
         let differences = uncovered(&before.diff(&after), &plan.changes);
-        let _ = before.restore_registry(&after);
+        let _ = before.restore_registry(&after, &differences);
         drop(machine);
         let lines = prompter.lines.lock().map(|l| l.clone()).unwrap_or_default();
         let mut leaked = lines.iter().any(|l| l.contains(CANARY_VALUE));
@@ -954,12 +954,26 @@ impl Runner<'_> {
             );
             let mut request = ApplyRequest::new(plan, staging.to_string_lossy());
             request.environment = Secret::new(env);
-            match self.store.apply(
+            let watch = Watch::new(sandbox.home())
+                .tree(sandbox.root())
+                .skip(&staging)
+                .registry(cfg!(windows));
+            let machine = REAL_WORLD
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let before = Footprint::take(&watch);
+            let answer = self.store.apply(
                 request,
                 spawner.into_object(),
                 tools.into_object(),
                 SuitePrompter::default().into_object(),
-            ) {
+            );
+            // A store that writes where it should not does so here too: put it back as the measured applies do.
+            let after = Footprint::take(&watch);
+            let changed = before.diff(&after);
+            let _ = before.restore_registry(&after, &changed);
+            drop(machine);
+            match answer {
                 Err(error)
                     if error.status == Status::GUATIAO_ERR_BAD_VALUE
                         && error.message().contains("plan changed") => {}

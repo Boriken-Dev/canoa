@@ -491,3 +491,41 @@ fn an_endpoint_with_a_path_reaches_that_path_and_no_other_part_of_the_host() {
         );
     }
 }
+
+#[test]
+fn a_path_with_an_encoded_dot_segment_or_slash_is_not_inside_the_prefix() {
+    let origin = serve(vec![
+        ("/bucket/a", 200, None, b"in".to_vec()),
+        ("/other/a", 200, None, b"out".to_vec()),
+    ]);
+    let dir = Dir::new("encoded");
+    let tools = LocalTools::new(
+        Arc::new(HttpTransport::default()),
+        vec![format!("{origin}/bucket/")],
+    )
+    .granted(&dir.0)
+    .loopback_http(true)
+    .allow_unverified(true);
+    for path in [
+        "/bucket/%2e%2e/other/a",
+        "/bucket/%2E%2E/other/a",
+        "/bucket/..%2fother/a",
+        "/bucket/%2e/a",
+        "/bucket/x%2Fy",
+    ] {
+        let error = fetch(
+            &tools,
+            &origin,
+            path,
+            Check::Unverified { why: "t".into() },
+            10,
+            false,
+        )
+        .expect_err(path);
+        assert!(
+            error.message().contains("not one of the store's endpoints"),
+            "{path}: {}",
+            error.message()
+        );
+    }
+}

@@ -91,7 +91,7 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
     };
     let before = Footprint::take(&watch(&root));
     let programs = Programs::new(
-        Shelf::new(root.join("programs")),
+        Shelf::unchecked(root.join("programs")),
         built_in().expect("the built-in stores"),
     )
     .options(options);
@@ -108,7 +108,7 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
             "  latest: {:?} {:?}",
             latest.version, latest.unknown_because
         );
-        let plan = match programs.plan(&*store, Action::Install, None, None) {
+        let plan = match programs.plan(&provider, &*store, Action::Install, None, None) {
             Ok(plan) => plan,
             Err(error) => {
                 failed.push(format!("{provider}: plan: {error}"));

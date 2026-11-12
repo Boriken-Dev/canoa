@@ -95,8 +95,22 @@ pub struct Difference {
     pub what: String,
     /// The [`Change`] kind that would have declared it.
     pub kind: &'static str,
-    /// For a profile file: whether every line that changed mentions `PATH`, so that a `USER_PATH` change covers it.
-    pub path_lines_only: bool,
+    /// For a profile file or the user's `PATH` value: the directories it gained, when it gained them by an assignment of exactly
+    /// the shape `export PATH=<dir>:$PATH`, `fish_add_path <dir>` or a PowerShell `$env:Path = "<dir>;$env:Path"`, or by the
+    /// directory appended to the registry value.
+    pub path_dirs_added: Vec<String>,
+    /// Whether anything else changed in it: another line, a removed line, a value not changed by appending.
+    pub other_changes: bool,
+}
+
+/// What putting registry values back did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RegistryRestore {
+    /// How many values were put back or taken out.
+    pub restored: usize,
+    /// The values left as they are because they are no longer what the install wrote: the person's own change since.
+    pub left: Vec<String>,
 }
 
 /// A registry value, raw: its type and bytes.
@@ -291,19 +305,50 @@ impl Footprint {
             }
             let mut difference = describe(key);
             if difference.kind == PROFILE_FILE {
-                difference.path_lines_only =
-                    path_lines_only(self.texts.get(key), after.texts.get(key));
+                let (dirs, other) = profile_additions(
+                    self.texts.get(key),
+                    after.texts.get(key),
+                    self.home.as_deref(),
+                );
+                difference.path_dirs_added = dirs;
+                difference.other_changes = other;
+            } else if difference.kind == USER_PATH {
+                match (self.user_path(), after.user_path()) {
+                    (Some(before), Some(now)) => match registry_path_addition(&before, &now) {
+                        Some(dir) => difference.path_dirs_added = vec![dir],
+                        None => difference.other_changes = true,
+                    },
+                    _ => difference.other_changes = true,
+                }
             }
             out.push(difference);
         }
         out
     }
 
-    /// Puts back the values of the registry keys this snapshot holds (the user's environment, the places a login runs from)
-    /// where `after` differs, and removes the ones `after` added; answers how many it restored. Nothing on other platforms.
+    /// Puts back the values of the registry keys this snapshot holds that `undeclared` names and that `after` shows changed, and
+    /// removes the ones `after` added, but only where the value is still what `after` wrote: a value the person changed since
+    /// is left as it is and named in [`RegistryRestore::left`]. Nothing on other platforms.
     #[must_use]
-    pub fn restore_registry(&self, after: &Self) -> usize {
-        restore_registry(&self.registry, &after.registry)
+    pub fn restore_registry(&self, after: &Self, undeclared: &[Difference]) -> RegistryRestore {
+        restore_registry(&self.registry, &after.registry, undeclared)
+    }
+
+    /// The user's `PATH` registry value as text (Windows), when it was read.
+    fn user_path(&self) -> Option<String> {
+        let raw = self.registry.get("Environment")?.get("Path")?;
+        let units: Vec<u16> = raw
+            .bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .collect();
+        Some(
+            String::from_utf16_lossy(&units)
+                .trim_end_matches('\0')
+                .to_owned(),
+        )
     }
 
     /// The home directory this was taken for.
@@ -313,9 +358,12 @@ impl Footprint {
     }
 }
 
-/// Whether every line that is in one text and not the other mentions `PATH`, and some is. A file that was not kept as text, or
-/// that appeared or went whole, counts only when each of its lines does.
-fn path_lines_only(before: Option<&Vec<String>>, after: Option<&Vec<String>>) -> bool {
+/// The directories a profile gained by lines of exactly the shape of a `PATH` assignment, and whether anything else changed.
+fn profile_additions(
+    before: Option<&Vec<String>>,
+    after: Option<&Vec<String>>,
+    home: Option<&Path>,
+) -> (Vec<String>, bool) {
     let nothing = Vec::new();
     let (before, after) = (before.unwrap_or(&nothing), after.unwrap_or(&nothing));
     let mut counts: BTreeMap<&str, i64> = BTreeMap::new();
@@ -325,15 +373,85 @@ fn path_lines_only(before: Option<&Vec<String>>, after: Option<&Vec<String>>) ->
     for line in after {
         *counts.entry(line.as_str()).or_default() += 1;
     }
-    let changed: Vec<&str> = counts
-        .into_iter()
-        .filter(|(_, n)| *n != 0)
-        .map(|(line, _)| line)
-        .collect();
-    !changed.is_empty()
-        && changed
-            .iter()
-            .all(|line| line.to_ascii_lowercase().contains("path"))
+    let mut dirs = Vec::new();
+    let mut other = false;
+    for (line, n) in counts {
+        match n.cmp(&0) {
+            core::cmp::Ordering::Equal => {}
+            core::cmp::Ordering::Less => other = true,
+            core::cmp::Ordering::Greater => match parse_path_line(line, home) {
+                Some(dir) => dirs.push(dir),
+                None => other = true,
+            },
+        }
+    }
+    (dirs, other)
+}
+
+/// The directory a profile line adds to the `PATH`, when the whole line is exactly such an assignment: `export PATH=<dir>:$PATH`
+/// (the value in double quotes or not), `fish_add_path <dir>`, or `$env:Path = "<dir>;$env:Path"`. `$HOME`, `${HOME}` and a leading
+/// `~` stand for `home`. A line with anything else on it, or a directory with a character a shell would act on, is not one.
+#[must_use]
+pub fn parse_path_line(line: &str, home: Option<&Path>) -> Option<String> {
+    let line = line.trim();
+    let raw = if let Some(rest) = line.strip_prefix("export PATH=") {
+        let value = match rest.strip_prefix('"') {
+            Some(quoted) => quoted.strip_suffix('"')?,
+            None => rest,
+        };
+        value.strip_suffix(":$PATH")?
+    } else if let Some(rest) = line.strip_prefix("fish_add_path ") {
+        let rest = rest.trim();
+        rest.strip_prefix('"')
+            .map_or(rest, |q| q.strip_suffix('"').unwrap_or(q))
+    } else {
+        line.strip_prefix("$env:Path = \"")?
+            .strip_suffix(";$env:Path\"")?
+    };
+    let mut dir = raw.to_owned();
+    for prefix in ["${HOME}", "$HOME", "~"] {
+        if let Some(rest) = raw.strip_prefix(prefix) {
+            let home = home?;
+            if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
+                return None;
+            }
+            dir = home.to_string_lossy().into_owned() + rest;
+            break;
+        }
+    }
+    let acted_on = |c: char| {
+        matches!(
+            c,
+            ';' | '|'
+                | '&'
+                | '<'
+                | '>'
+                | '$'
+                | '`'
+                | '('
+                | ')'
+                | '"'
+                | '\''
+                | '\n'
+                | '\r'
+                | '*'
+                | '?'
+        )
+    };
+    (!dir.is_empty() && !dir.chars().any(acted_on)).then_some(dir)
+}
+
+/// The directory a new `PATH` value gained, when it is the old value with `;<dir>` appended and nothing else.
+#[must_use]
+pub fn registry_path_addition(before: &str, after: &str) -> Option<String> {
+    let (before, after) = (before.trim_end_matches(';'), after.trim_end_matches(';'));
+    let rest = after.strip_prefix(before)?;
+    let dir = if before.is_empty() {
+        rest
+    } else {
+        rest.strip_prefix(';')?
+    };
+    (!dir.is_empty() && !dir.contains(';')).then(|| dir.to_owned())
 }
 
 #[cfg(windows)]
@@ -352,46 +470,82 @@ fn real_documents(home: &Path) -> Option<PathBuf> {
 fn restore_registry(
     before: &BTreeMap<String, BTreeMap<String, RawValue>>,
     after: &BTreeMap<String, BTreeMap<String, RawValue>>,
-) -> usize {
+    undeclared: &[Difference],
+) -> RegistryRestore {
     use windows_registry::{CURRENT_USER, Type};
-    let mut restored = 0;
+    let mut done = RegistryRestore::default();
+    let named = |path: &str, name: &str| {
+        let what = format!("HKCU\\{path}\\{name}");
+        undeclared
+            .iter()
+            .any(|d| d.what.eq_ignore_ascii_case(&what))
+    };
+    let code = |ty: Type| -> u32 {
+        match ty {
+            Type::U32 => 4,
+            Type::U64 => 11,
+            Type::String => 1,
+            Type::ExpandString => 2,
+            Type::MultiString => 7,
+            Type::Bytes => 3,
+            Type::Other(n) => n,
+        }
+    };
     for (path, old_values) in before {
         let Ok(key) = CURRENT_USER.options().read().write().open(path) else {
             continue;
         };
         let empty = BTreeMap::new();
-        let new_values = after.get(path).unwrap_or(&empty);
+        let written = after.get(path).unwrap_or(&empty);
+        // What is there now, to see whether it is still what the install left.
+        let now = |name: &str| {
+            key.get_value(name).ok().map(|v| RawValue {
+                ty: code(v.ty()),
+                bytes: v.as_ref().to_vec(),
+            })
+        };
         for (name, old) in old_values {
-            if new_values.get(name) != Some(old) {
-                let ty = match old.ty {
-                    4 => Type::U32,
-                    11 => Type::U64,
-                    1 => Type::String,
-                    2 => Type::ExpandString,
-                    7 => Type::MultiString,
-                    3 => Type::Bytes,
-                    n => Type::Other(n),
-                };
-                if key.set_bytes(name, ty, &old.bytes).is_ok() {
-                    restored += 1;
-                }
+            if written.get(name) == Some(old) || !named(path, name) {
+                continue;
+            }
+            if now(name).as_ref() != written.get(name) {
+                done.left.push(format!("HKCU\\{path}\\{name}"));
+                continue;
+            }
+            let ty = match old.ty {
+                4 => Type::U32,
+                11 => Type::U64,
+                1 => Type::String,
+                2 => Type::ExpandString,
+                7 => Type::MultiString,
+                3 => Type::Bytes,
+                n => Type::Other(n),
+            };
+            if key.set_bytes(name, ty, &old.bytes).is_ok() {
+                done.restored += 1;
             }
         }
-        for name in new_values.keys() {
-            if !old_values.contains_key(name) && key.remove_value(name).is_ok() {
-                restored += 1;
+        for (name, value) in written {
+            if old_values.contains_key(name) || !named(path, name) {
+                continue;
+            }
+            if now(name).as_ref() != Some(value) {
+                done.left.push(format!("HKCU\\{path}\\{name}"));
+            } else if key.remove_value(name).is_ok() {
+                done.restored += 1;
             }
         }
     }
-    restored
+    done
 }
 
 #[cfg(not(windows))]
 fn restore_registry(
     _before: &BTreeMap<String, BTreeMap<String, RawValue>>,
     _after: &BTreeMap<String, BTreeMap<String, RawValue>>,
-) -> usize {
-    0
+    _undeclared: &[Difference],
+) -> RegistryRestore {
+    RegistryRestore::default()
 }
 
 /// Shell and PowerShell profile files, relative to the home, and the files a login or a tool reads that can run or redirect
@@ -467,26 +621,30 @@ fn describe(key: &str) -> Difference {
         return Difference {
             what: rest.to_owned(),
             kind,
-            path_lines_only: false,
+            path_dirs_added: Vec::new(),
+            other_changes: false,
         };
     }
     if let Some(rest) = key.strip_prefix("profile:") {
         return Difference {
             what: rest.to_owned(),
             kind: PROFILE_FILE,
-            path_lines_only: false,
+            path_dirs_added: Vec::new(),
+            other_changes: false,
         };
     }
     Difference {
         what: key.strip_prefix("file:").unwrap_or(key).to_owned(),
         kind: PATH,
-        path_lines_only: false,
+        path_dirs_added: Vec::new(),
+        other_changes: false,
     }
 }
 
 /// The differences that no declared change covers.
 ///
-/// - `USER_PATH` covers `HKCU\Environment\Path` and a profile file whose changed lines all mention `PATH`.
+/// - `USER_PATH` (its target the directory) covers `HKCU\Environment\Path` gaining exactly that directory at its end, and a profile
+///   whose only change is lines that are exactly an assignment adding that directory to the `PATH`.
 /// - `PROFILE_FILE` covers its own path.
 /// - `PATH` and `STATE_DIR` cover their path and what is under it.
 /// - `REGISTRY` covers its key and what is under it.
@@ -530,8 +688,12 @@ pub fn is_within(path: &Path, root: &Path) -> bool {
 fn covers(change: &Change, difference: &Difference) -> bool {
     match change.kind.as_str() {
         USER_PATH => {
-            difference.kind == USER_PATH
-                || (difference.kind == PROFILE_FILE && difference.path_lines_only)
+            matches!(difference.kind, USER_PATH | PROFILE_FILE)
+                && !difference.other_changes
+                && !difference.path_dirs_added.is_empty()
+                && difference.path_dirs_added.iter().all(|dir| {
+                    parts(dir).len() == parts(&change.target).len() && under(dir, &change.target)
+                })
         }
         PROFILE_FILE => difference.kind == PROFILE_FILE && same(&difference.what, &change.target),
         PATH | STATE_DIR => {
@@ -544,6 +706,20 @@ fn covers(change: &Change, difference: &Difference) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether `target` is one of the profile files the footprint watches under `home` (or a PowerShell profile under Documents).
+#[must_use]
+pub fn is_profile_file(home: &Path, target: &str) -> bool {
+    let same_file = |relative: &str| {
+        let full = home.join(relative);
+        let (a, b) = (
+            parts(&full.to_string_lossy()).join("/"),
+            parts(target).join("/"),
+        );
+        same(&a, &b)
+    };
+    PROFILES.iter().any(|relative| same_file(relative))
 }
 
 /// Whether `path` is `prefix` or lies below it, part by part (not byte by byte), by the file system's idea of case.

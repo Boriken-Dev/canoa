@@ -6,29 +6,31 @@
     reason = "files, paths and the environment are std's"
 )]
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
+use core::time::Duration;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use canoa::store::{
     Action, ApplyRequest, Change, DEFAULT_APPLY_TIMEOUT_MS, ELEVATION, InstallPlan,
     InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, ManagedCopy, PATH,
     PROFILE_FILE, PlanRequest, Platform, ProgramQuery, ProgramReport, ProgramStore, Progress,
-    REGISTRY, STATE_DIR, SYSTEM_PATH, StoreInfo, StoreSettings,
+    REGISTRY, STATE_DIR, SYSTEM_PATH, StoreInfo, StoreSettings, USER_PATH,
 };
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
 use coqui_acp_api::guatiao::{Status, Value};
 use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 use coqui_acp_harness::LocalSpawner;
+use sha2::{Digest, Sha256};
 
 use super::exec::{GuardedSpawner, is_credential_name};
-use super::footprint::{Difference, Footprint, Watch, uncovered};
+use super::footprint::{Difference, Footprint, Watch, is_profile_file, uncovered};
 use super::shelf::{Current, FileRecord, MadeBy, Shelf, ShelfError};
 use super::tools::{HttpTransport, LocalTools, Lookup, Transport};
 
@@ -52,6 +54,15 @@ pub enum StoreError {
         items: Vec<Difference>,
         /// How many registry values were put back.
         restored: usize,
+        /// The values left as they are because the person changed them since.
+        kept: Vec<String>,
+    },
+    /// The install failed after the plan declared changes: the host cannot say that they were not made.
+    LeftBehind {
+        /// Why the install failed.
+        reason: String,
+        /// What the plan declared.
+        changes: Vec<Change>,
     },
     /// The store's answer does not hold what the host checks.
     Contract(String),
@@ -69,15 +80,31 @@ impl fmt::Display for StoreError {
             Self::Elevated => f.write_str(
                 "the host runs as an administrator or root, and installs only when told it may",
             ),
-            Self::Undeclared { items, restored } => {
+            Self::Undeclared {
+                items,
+                restored,
+                kept,
+            } => {
                 f.write_str("the install changed what it did not declare:")?;
                 for item in items {
                     write!(f, " {} ({});", item.what, item.kind)?;
                 }
-                write!(
-                    f,
-                    " {restored} registry values were put back. Something else writing at the same time looks the same: try again"
-                )
+                write!(f, " {restored} registry values were put back")?;
+                if !kept.is_empty() {
+                    write!(
+                        f,
+                        "; left as they are, the person's own change since: {}",
+                        kept.join(", ")
+                    )?;
+                }
+                f.write_str(". Something else writing at the same time looks the same: try again")
+            }
+            Self::LeftBehind { reason, changes } => {
+                write!(f, "{reason}; what the plan declared may be left behind:")?;
+                for change in changes {
+                    write!(f, " {} {} ({});", change.kind, change.target, change.detail)?;
+                }
+                Ok(())
             }
             Self::Unverified(urls) => write!(
                 f,
@@ -232,6 +259,13 @@ pub struct Options {
     pub allow_unverified: bool,
     /// How many versions to keep.
     pub keep_versions: usize,
+    /// How long the host goes on watching after a store's `apply` has returned, before it measures what changed: a change in that
+    /// time is undeclared. A writer outside the apply that waits longer than this is not seen.
+    pub settle: Duration,
+    /// How long a plan the host made stays good.
+    pub plan_ttl: Duration,
+    /// How many plans the host keeps at once.
+    pub plan_limit: usize,
 }
 
 impl Default for Options {
@@ -245,6 +279,9 @@ impl Default for Options {
             watch_registry: cfg!(windows),
             allow_unverified: false,
             keep_versions: super::shelf::DEFAULT_KEEP_VERSIONS,
+            settle: Duration::from_secs(2),
+            plan_ttl: Duration::from_secs(15 * 60),
+            plan_limit: 32,
         }
     }
 }
@@ -321,7 +358,14 @@ pub struct Programs {
     transport: Arc<dyn Transport>,
     options: Options,
     /// The plans this host made, by token: it applies its own copy of a plan, never one a client sends.
-    plans: Mutex<BTreeMap<String, InstallPlan>>,
+    plans: Mutex<Vec<StoredPlan>>,
+}
+
+/// A plan the host made, for the provider whose store made it.
+struct StoredPlan {
+    provider: String,
+    made: Instant,
+    plan: InstallPlan,
 }
 
 impl fmt::Debug for Programs {
@@ -340,7 +384,7 @@ impl Programs {
             registry,
             transport: Arc::new(HttpTransport::default()),
             options: Options::default(),
-            plans: Mutex::new(BTreeMap::new()),
+            plans: Mutex::new(Vec::new()),
         }
     }
 
@@ -458,13 +502,15 @@ impl Programs {
         Ok(store.latest(query, self.tools(&info).into_object())?)
     }
 
-    /// What an install, update or uninstall would do.
+    /// What an install, update or uninstall would do. The host keeps the plan it is given, for `provider` and by its token, and
+    /// applies that copy: what a client sends back only names it.
     ///
     /// # Errors
     ///
     /// What the store refuses.
     pub fn plan(
         &self,
+        provider: &str,
         store: &dyn ProgramStore,
         action: Action,
         channel: Option<String>,
@@ -477,35 +523,89 @@ impl Programs {
         );
         request.channel = channel;
         request.version = version;
-        request.managed = self.managed(&info)?;
-        let plan = store.plan(request, self.tools(&info).into_object())?;
-        if !plan.token.is_empty()
-            && let Ok(mut plans) = self.plans.lock()
-        {
-            plans.insert(plan.token.clone(), plan.clone());
+        let managed = self.managed(&info)?;
+        request.managed.clone_from(&managed);
+        let mut plan = store.plan(request, self.tools(&info).into_object())?;
+        plan.from_version = managed.as_ref().map(|m| m.version.clone());
+        if plan.token.is_empty() && plan.action == Action::Uninstall {
+            let mut nonce = [0u8; 16];
+            getrandom::fill(&mut nonce).map_err(|e| StoreError::Contract(e.to_string()))?;
+            plan.token = format!(
+                "{:x}",
+                Sha256::digest(
+                    [provider.as_bytes(), b"|uninstall|", &nonce]
+                        .concat()
+                        .as_slice()
+                )
+            );
+        }
+        if !plan.token.is_empty() {
+            self.keep_plan(provider, &plan);
         }
         Ok(plan)
     }
 
-    /// The start of the managed copy, after its recorded files are checked against the digests taken when they were
-    /// installed. A file the install unpacked from an archive (Codex's package, Pi's Node and packages) is not recorded one by
-    /// one, so is not checked.
+    fn keep_plan(&self, provider: &str, plan: &InstallPlan) {
+        if let Ok(mut plans) = self.plans.lock() {
+            let now = Instant::now();
+            plans.retain(|p| now.duration_since(p.made) < self.options.plan_ttl);
+            plans.retain(|p| !(p.provider == provider && p.plan.token == plan.token));
+            plans.push(StoredPlan {
+                provider: provider.to_owned(),
+                made: now,
+                plan: plan.clone(),
+            });
+            while plans.len() > self.options.plan_limit.max(1) {
+                plans.remove(0);
+            }
+        }
+    }
+
+    /// The plan made for `provider` under `token`, taken out so that it is applied once.
+    fn take_plan(&self, provider: &str, token: &str) -> Option<InstallPlan> {
+        let mut plans = self.plans.lock().ok()?;
+        let now = Instant::now();
+        plans.retain(|p| now.duration_since(p.made) < self.options.plan_ttl);
+        let at = plans
+            .iter()
+            .position(|p| p.provider == provider && p.plan.token == token)?;
+        Some(plans.remove(at).plan)
+    }
+
+    /// The start of the managed copy, after `current.json` is checked against the digest kept outside the program's folder, the launch
+    /// is found to lie inside the copy and the copy inside the programs folder, and every file of the copy is checked against what was
+    /// recorded when it was installed (a file added since, one gone, one changed). Reading every file costs time in proportion to the
+    /// copy: it is for the moment before a session starts.
     ///
     /// # Errors
     ///
-    /// [`StoreError::Shelf`] when a recorded file changed, or there is no managed copy.
+    /// [`StoreError::Shelf`] when any of that does not hold, or there is no managed copy.
     pub fn launch(&self, store: &dyn ProgramStore) -> Result<Launch, StoreError> {
         let info = store.describe()?;
         let program = self.shelf.program(&info.program)?;
         let current = program
-            .current()?
+            .current_checked()?
             .ok_or(StoreError::Shelf(ShelfError::Nothing("there is no copy")))?;
+        let launch = current.launch.launch();
+        let inside = |path: &Path, root: &Path| {
+            super::exec::normalize(path)
+                .zip(super::exec::normalize(root))
+                .is_some_and(|(path, root)| path.starts_with(root))
+        };
+        if !inside(Path::new(&current.dir), self.shelf.root())
+            || !inside(Path::new(&launch.path), Path::new(&current.dir))
+        {
+            return Err(StoreError::Shelf(ShelfError::Refused(
+                "the launch is not inside the managed copy".to_owned(),
+            )));
+        }
         program.verify(&current)?;
-        Ok(current.launch.launch())
+        Ok(launch)
     }
 
-    /// Refuses a declared change that would cover more than one program's own places.
-    fn check_changes(&self, plan: &InstallPlan) -> Result<(), StoreError> {
+    /// Refuses a plan that declares a change broader than one program's own places: the system's places a login or a tool reads,
+    /// the home or what holds it, a registry key outside the few a program may have.
+    fn check_changes(&self, plan: &InstallPlan, program: &str) -> Result<(), StoreError> {
         let refuse = |change: &Change, why: &str| {
             StoreError::Contract(format!(
                 "the plan declares a change of {} ({}) {why}",
@@ -514,22 +614,46 @@ impl Programs {
         };
         for change in &plan.changes {
             match change.kind.as_str() {
-                PATH | STATE_DIR | PROFILE_FILE => {
-                    let target = Path::new(&change.target);
-                    if !target.is_absolute() || target.parent().is_none() {
-                        return Err(refuse(change, "that is not a place of its own"));
+                PATH | STATE_DIR | PROFILE_FILE | USER_PATH => {
+                    let Some(home) = &self.options.home else {
+                        return Err(refuse(change, "with no home to place it in"));
+                    };
+                    if !Path::new(&change.target).is_absolute() {
+                        return Err(refuse(change, "that is not an absolute path"));
                     }
-                    if let Some(home) = &self.options.home
-                        && super::footprint::path_under(&home.to_string_lossy(), &change.target)
-                    {
-                        return Err(refuse(change, "that holds the whole home"));
+                    let parts = parts_under_home(&change.target, home)
+                        .ok_or_else(|| refuse(change, "that is not under the home"))?;
+                    let starts = |whole: &[&str], prefix: &[String]| {
+                        prefix.len() <= whole.len() && prefix.iter().zip(whole).all(|(a, b)| a == b)
+                    };
+                    if SENSITIVE.iter().any(|s| starts(s, &parts)) {
+                        return Err(refuse(
+                            change,
+                            "that is, or holds, a place the system or a tool reads",
+                        ));
+                    }
+                    let below = |prefix: &[&str]| {
+                        prefix.len() <= parts.len()
+                            && prefix.iter().zip(&parts).all(|(a, b)| a == b)
+                    };
+                    if FORBIDDEN_BELOW.iter().any(|f| below(f)) {
+                        return Err(refuse(change, "that is a place the system or a tool reads"));
+                    }
+                    match change.kind.as_str() {
+                        STATE_DIR if !named_for(&parts, program) => {
+                            return Err(refuse(
+                                change,
+                                "that is not a folder named for the program",
+                            ));
+                        }
+                        PROFILE_FILE if !is_profile_file(home, &change.target) => {
+                            return Err(refuse(change, "that is not a profile file"));
+                        }
+                        _ => {}
                     }
                 }
-                REGISTRY => {
-                    let key = change.target.trim_matches('\\').to_ascii_lowercase();
-                    if matches!(key.as_str(), "" | "hkcu" | "hkey_current_user") {
-                        return Err(refuse(change, "that is the whole of HKCU"));
-                    }
+                REGISTRY if !registry_allowed(&change.target) => {
+                    return Err(refuse(change, "that is not a key a program may declare"));
                 }
                 _ => {}
             }
@@ -570,27 +694,18 @@ impl Programs {
         cancel: Arc<AtomicBool>,
     ) -> Result<Option<Applied>, StoreError> {
         let info = store.describe()?;
-        // The plan applied is the host's own copy, found by its token: what a client sends only names it.
-        let made;
-        let plan = if plan.token.is_empty() {
-            if plan.action != Action::Uninstall {
-                // An update to the version already current: nothing to do and nothing to switch.
-                return Ok(None);
-            }
-            made = InstallPlan::new(Action::Uninstall, None);
-            &made
-        } else {
-            made = self
-                .plans
-                .lock()
-                .ok()
-                .and_then(|plans| plans.get(&plan.token).cloned())
-                .ok_or_else(|| {
-                    StoreError::Contract("this host made no such plan: plan again".to_owned())
-                })?;
-            &made
-        };
-        self.check_changes(plan)?;
+        // The plan applied is the host's own copy, found by its provider and token, and used once.
+        if plan.token.is_empty() && plan.action != Action::Uninstall {
+            // An update to the version already current: nothing to do and nothing to switch.
+            return Ok(None);
+        }
+        let made = self.take_plan(provider, &plan.token).ok_or_else(|| {
+            StoreError::Contract(
+                "this host made no such plan, or it has expired: plan again".to_owned(),
+            )
+        })?;
+        let plan = &made;
+        self.check_changes(plan, &info.program)?;
         if (!self.options.allow_elevated)
             && (running_elevated()
                 || plan
@@ -609,9 +724,17 @@ impl Programs {
         if !unchecked.is_empty() && !self.options.allow_unverified {
             return Err(StoreError::Unverified(unchecked));
         }
+        // One install at a time on the shelf: two measured together would each see the other's changes.
+        let _one_at_a_time = self.shelf.apply_lock()?;
         let program = self.shelf.program(&info.program)?;
         let lock = program.lock()?;
         let managed = self.managed(&info)?;
+        if plan.from_version != managed.as_ref().map(|m| m.version.clone()) {
+            return Err(StoreError::Contract(
+                "the copy was installed, updated or removed since this plan was made: plan again"
+                    .to_owned(),
+            ));
+        }
         if plan.action == Action::Uninstall {
             lock.remove()?;
             return Ok(None);
@@ -621,7 +744,6 @@ impl Programs {
             .clone()
             .ok_or_else(|| StoreError::Contract("a plan with no version".to_owned()))?;
         if plan.downloads.is_empty() {
-            // Already current: nothing to do and nothing to switch.
             return Ok(None);
         }
         let staging = lock.stage(&version)?;
@@ -631,17 +753,24 @@ impl Programs {
         let unexpected = uncovered(&differences, &plan.changes);
         if !unexpected.is_empty() {
             lock.abandon(&staging);
-            let restored = ran.before.restore_registry(&ran.after);
+            let done = ran.before.restore_registry(&ran.after, &unexpected);
             return Err(StoreError::Undeclared {
                 items: unexpected,
-                restored,
+                restored: done.restored,
+                kept: done.left,
             });
         }
         let outcome = match ran.result {
             Ok(outcome) => outcome,
             Err(error) => {
                 lock.abandon(&staging);
-                return Err(StoreError::Store(error));
+                if plan.changes.is_empty() {
+                    return Err(StoreError::Store(error));
+                }
+                return Err(StoreError::LeftBehind {
+                    reason: error.message().to_owned(),
+                    changes: plan.changes.clone(),
+                });
             }
         };
         let _ = fs::remove_dir_all(staging.join("home"));
@@ -661,12 +790,18 @@ impl Programs {
             lock.abandon(&staging);
             return Err(error);
         }
+        // The whole copy is recorded, the files an archive unpacked into it too, so a launch can find what changed.
+        let mut records = ran.records;
+        if let Err(error) = super::shelf::record_tree(&staging, &mut records) {
+            lock.abandon(&staging);
+            return Err(StoreError::Shelf(error));
+        }
         let current = lock
             .commit(
                 &staging,
                 &version,
                 &launch,
-                ran.records,
+                records,
                 MadeBy {
                     provider: provider.to_owned(),
                     version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -718,6 +853,8 @@ impl Programs {
             tools.into_object(),
             prompter.into_object(),
         );
+        // A writer the install left behind gets this long to show itself; one that waits longer is not seen.
+        std::thread::sleep(self.options.settle);
         let after = Footprint::take(&watch);
         let records = fetched
             .lock()
@@ -856,5 +993,127 @@ impl Programs {
                 })
             })
             .collect()
+    }
+}
+
+/// The places under the home that the system or a person's tools read, so that a declared change may not be one of them or hold one
+/// (by being the home, or a folder above): each as the parts of its path, lower case.
+const SENSITIVE: &[&[&str]] = &[
+    &[],
+    &[".config"],
+    &[".ssh"],
+    &[".gnupg"],
+    &[".local"],
+    &[".local", "bin"],
+    &[".local", "share"],
+    &[".config", "autostart"],
+    &[".config", "systemd"],
+    &[".config", "systemd", "user"],
+    &[".config", "fish"],
+    &[".config", "fish", "conf.d"],
+    &["appdata"],
+    &["appdata", "roaming"],
+    &["appdata", "local"],
+    &["appdata", "roaming", "microsoft"],
+    &["appdata", "roaming", "microsoft", "windows"],
+    &["appdata", "roaming", "microsoft", "windows", "start menu"],
+    &[
+        "appdata",
+        "roaming",
+        "microsoft",
+        "windows",
+        "start menu",
+        "programs",
+    ],
+    &[
+        "appdata",
+        "roaming",
+        "microsoft",
+        "windows",
+        "start menu",
+        "programs",
+        "startup",
+    ],
+    &["library"],
+    &["library", "launchagents"],
+    &["documents"],
+];
+
+/// The places a declared change may not lie at or below.
+const FORBIDDEN_BELOW: &[&[&str]] = &[
+    &[".ssh"],
+    &[".gnupg"],
+    &[".config", "autostart"],
+    &[".config", "systemd"],
+    &[".config", "fish"],
+    &["library", "launchagents"],
+    &["appdata", "roaming", "microsoft", "windows", "start menu"],
+];
+
+/// The parts of `target` below `home`, lower case, when it is under it; resolved by name (`.` and `..` gone).
+fn parts_under_home(target: &str, home: &Path) -> Option<Vec<String>> {
+    let target = super::exec::normalize(Path::new(target))?;
+    let home = super::exec::normalize(home)?;
+    let lower = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    let (target, home) = (lower(&target), lower(&home));
+    (target.len() >= home.len() && target.iter().zip(&home).all(|(a, b)| a == b))
+        .then(|| target[home.len()..].to_vec())
+}
+
+/// Whether a state folder, as the parts below the home, is the program's own: `~/.name`, or `name` under the places a program
+/// keeps its state.
+fn named_for(parts: &[String], program: &str) -> bool {
+    let program = program.to_lowercase();
+    let starts = |prefix: &[&str]| {
+        parts.len() > prefix.len()
+            && prefix.iter().zip(parts).all(|(a, b)| a == b)
+            && parts[prefix.len()] == program
+    };
+    parts
+        .first()
+        .is_some_and(|first| first.trim_start_matches('.') == program)
+        || starts(&[".config"])
+        || starts(&[".local", "share"])
+        || starts(&["appdata", "roaming"])
+        || starts(&["appdata", "local"])
+}
+
+/// Whether a registry key may be declared: the user's `Path`, a program's own `Software\<vendor>\<program>` (not Microsoft's, not
+/// `Classes`) or its entry under `Uninstall`. Resolved by name first (`/` and `\`, `.` and `..`), so no spelling widens it.
+fn registry_allowed(target: &str) -> bool {
+    let mut parts: Vec<String> = Vec::new();
+    for part in target.split(['\\', '/']) {
+        match part {
+            "" | "." => {}
+            ".." => return false,
+            other => parts.push(other.to_lowercase()),
+        }
+    }
+    if parts.first().map(String::as_str) != Some("hkcu")
+        && parts.first().map(String::as_str) != Some("hkey_current_user")
+    {
+        return false;
+    }
+    let below: Vec<&str> = parts[1..].iter().map(String::as_str).collect();
+    match below.as_slice() {
+        ["environment", "path"] => true,
+        [
+            "software",
+            "microsoft",
+            "windows",
+            "currentversion",
+            "uninstall",
+            _,
+            ..,
+        ] => true,
+        ["software", vendor, _, ..] => !matches!(
+            *vendor,
+            "microsoft" | "classes" | "policies" | "wow6432node"
+        ),
+        _ => false,
     }
 }

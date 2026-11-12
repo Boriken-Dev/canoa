@@ -46,6 +46,9 @@ pub fn is_credential_name(name: &str) -> bool {
         || upper.ends_with("PASSWORD")
         || upper.ends_with("_KEY")
         || upper.ends_with("_PAT")
+        || upper.ends_with("APIKEY")
+        || upper.ends_with("_CREDENTIALS")
+        || upper.ends_with("_CREDENTIAL")
         || upper == "SSH_AUTH_SOCK"
         || upper.starts_with("DOTAGENTS_")
 }
@@ -153,7 +156,9 @@ impl<S: ProcessSpawner> GuardedSpawner<S> {
                 spec.program
             ));
         }
+        // Windows ignores trailing spaces and dots in a name, so `run.cmd ` is `run.cmd`.
         let lower = spec.program.to_ascii_lowercase();
+        let lower = lower.trim_end_matches([' ', '.']);
         if [".cmd", ".bat", ".ps1"]
             .iter()
             .any(|ext| lower.ends_with(ext))
@@ -390,6 +395,12 @@ pub fn clean(line: &str) -> String {
                     | '\u{2060}'
                     | '\u{061c}'
                     | '\u{feff}'
+                    | '\u{00ad}'
+                    | '\u{180e}'
+                    | '\u{2061}'..='\u{2064}'
+                    | '\u{fe00}'..='\u{fe0f}'
+                    | '\u{e0000}'..='\u{e007f}'
+                    | '\u{e0100}'..='\u{e01ef}'
             )
         })
         .collect();

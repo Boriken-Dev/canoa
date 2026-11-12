@@ -467,7 +467,7 @@ impl<R: Recipe> Engine<R> {
             .push("Run the downloaded program once to read its version".to_owned());
         plan.notices.extend(release.notices.iter().cloned());
         plan.downloads = release.parts.iter().map(|p| p.download.clone()).collect();
-        plan.token = token_of(&release, &request.platform);
+        plan.token = token_of(&release, &request.platform, request.action, from.as_deref());
         Ok(plan)
     }
 
@@ -507,7 +507,13 @@ impl<R: Recipe> Engine<R> {
         let info = spawner.describe()?;
         let platform = Platform::new(info.os, info.arch);
         let release = self.recipe.release(Some(version), None, &platform, tools)?;
-        if token_of(&release, &platform) != plan.token {
+        if token_of(
+            &release,
+            &platform,
+            plan.action,
+            plan.from_version.as_deref(),
+        ) != plan.token
+        {
             return Err(refuse(Status::GUATIAO_ERR_BAD_VALUE, "plan changed"));
         }
         let deadline = Instant::now() + core::time::Duration::from_millis(request.timeout_ms);
@@ -628,11 +634,17 @@ fn numeric(version: &str) -> Vec<u64> {
 }
 
 /// The opaque token of a release: what the plan rests on.
-fn token_of(release: &Release, platform: &Platform) -> String {
+fn token_of(
+    release: &Release,
+    platform: &Platform,
+    action: Action,
+    replaces: Option<&str>,
+) -> String {
     let mut text = format!(
         "{}|{}|{}|{}",
         release.version, platform.os, platform.arch, release.launch
     );
+    let _ = write!(text, "|{action:?}|replaces:{}", replaces.unwrap_or("-"));
     let _ = write!(text, "|{:?}", release.changes.len());
     for change in &release.changes {
         let _ = write!(

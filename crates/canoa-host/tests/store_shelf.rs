@@ -57,7 +57,7 @@ fn install(shelf: &Shelf, version: &str) -> PathBuf {
 #[test]
 fn a_commit_makes_the_copy_current_and_the_old_one_previous() {
     let dir = Dir::new("commit");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     let one = install(&shelf, "1.0.0");
     let two = install(&shelf, "2.0.0");
     let current = shelf
@@ -75,7 +75,7 @@ fn a_commit_makes_the_copy_current_and_the_old_one_previous() {
 #[test]
 fn rollback_swaps_and_a_third_version_prunes_the_oldest() {
     let dir = Dir::new("rollback");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     let one = install(&shelf, "1.0.0");
     let two = install(&shelf, "2.0.0");
     {
@@ -99,7 +99,7 @@ fn rollback_swaps_and_a_third_version_prunes_the_oldest() {
 #[test]
 fn nothing_to_roll_back_to_is_an_error() {
     let dir = Dir::new("noprev");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     install(&shelf, "1.0.0");
     let program = shelf.program("echo").expect("p");
     let lock = program.lock().expect("lock");
@@ -109,7 +109,7 @@ fn nothing_to_roll_back_to_is_an_error() {
 #[test]
 fn a_crashed_operation_leaves_a_folder_the_next_locked_operation_removes() {
     let dir = Dir::new("crash");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     install(&shelf, "1.0.0");
     let leftover = {
         let program = shelf.program("echo").expect("p");
@@ -128,7 +128,7 @@ fn a_crashed_operation_leaves_a_folder_the_next_locked_operation_removes() {
 #[test]
 fn a_failed_commit_removes_the_staged_folder_and_keeps_current() {
     let dir = Dir::new("badlaunch");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     install(&shelf, "1.0.0");
     let program = shelf.program("echo").expect("p");
     let lock = program.lock().expect("lock");
@@ -150,7 +150,7 @@ fn a_failed_commit_removes_the_staged_folder_and_keeps_current() {
 #[test]
 fn a_second_lock_on_one_program_is_refused_while_the_first_is_held() {
     let dir = Dir::new("held");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     let program = shelf.program("echo").expect("p");
     let _first = program.lock().expect("lock");
     assert!(matches!(program.lock(), Err(ShelfError::Held)));
@@ -160,7 +160,7 @@ fn a_second_lock_on_one_program_is_refused_while_the_first_is_held() {
 fn current_json_is_always_whole_for_a_reader_while_versions_switch() {
     use std::sync::atomic::AtomicU32;
     let dir = Dir::new("atomic");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     install(&shelf, "1.0.0");
     let stop = Arc::new(AtomicBool::new(false));
     let reads = Arc::new(AtomicU32::new(0));
@@ -193,7 +193,7 @@ fn current_json_is_always_whole_for_a_reader_while_versions_switch() {
 #[test]
 fn removing_a_copy_deletes_current_first_and_then_every_folder() {
     let dir = Dir::new("remove");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     let one = install(&shelf, "1.0.0");
     let program = shelf.program("echo").expect("p");
     program.lock().expect("lock").remove().expect("remove");
@@ -203,7 +203,7 @@ fn removing_a_copy_deletes_current_first_and_then_every_folder() {
 
 #[test]
 fn a_name_that_is_not_a_program_folder_name_is_refused() {
-    let shelf = Shelf::new(std::env::temp_dir());
+    let shelf = Shelf::unchecked(std::env::temp_dir());
     for name in ["", "..", "a/b", "A", "x y", &"a".repeat(65)] {
         assert!(
             matches!(shelf.program(name), Err(ShelfError::Name)),
@@ -217,7 +217,7 @@ fn a_name_that_is_not_a_program_folder_name_is_refused() {
 fn a_folder_others_can_write_is_refused() {
     use std::os::unix::fs::PermissionsExt;
     let dir = Dir::new("open");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     let program = shelf.program("echo").expect("p");
     drop(program.lock().expect("lock"));
     fs::set_permissions(program.dir(), fs::Permissions::from_mode(0o777)).expect("chmod");
@@ -298,7 +298,12 @@ fn a_declared_change_covers_its_kind_and_nothing_else() {
             .iter()
             .all(|d| d.kind == PROFILE_FILE)
     );
-    let user_path = Change::new(USER_PATH, "PATH", "adds a directory", true);
+    let user_path = Change::new(
+        USER_PATH,
+        home.join("x").to_string_lossy(),
+        "adds a directory",
+        true,
+    );
     assert!(
         uncovered(&diff, &[user_path])
             .iter()
@@ -331,7 +336,8 @@ fn a_registry_value_a_suite_owns_is_detected_restored_and_a_path_rewrite_is_a_us
             .any(|d| d.kind == REGISTRY && d.what.ends_with(&name)),
         "{diff:?}"
     );
-    assert_eq!(before.restore_registry(&after), 1);
+    let restored = before.restore_registry(&after, &diff);
+    assert_eq!(restored.restored, 1);
     assert!(key.get_string(&name).is_err(), "the value was removed");
 }
 
@@ -378,7 +384,12 @@ fn a_user_path_change_covers_a_profile_only_when_every_changed_line_is_about_pat
     fs::write(home.join(".bashrc"), "# mine\n").expect("rc");
     let before = Footprint::take(&watch(&home, &bin));
     fs::write(home.join(".bashrc"), "# mine\nexport PATH=$HOME/x:$PATH\n").expect("rc");
-    let declared = [Change::new(USER_PATH, "PATH", "adds a directory", true)];
+    let declared = [Change::new(
+        USER_PATH,
+        home.join("x").to_string_lossy(),
+        "adds a directory",
+        true,
+    )];
     let diff = before.diff(&Footprint::take(&watch(&home, &bin)));
     assert!(
         uncovered(&diff, &declared).is_empty(),
@@ -404,13 +415,18 @@ fn a_programs_root_outside_the_default_is_not_accepted() {
     if let Some(default) = Shelf::default_root() {
         assert!(Shelf::configured(default.join("sub")).is_ok());
         assert!(Shelf::configured(&default).is_ok());
+        let climbing = default.join("..").join("elsewhere");
+        assert!(
+            matches!(Shelf::configured(climbing), Err(ShelfError::NotPrivate(_))),
+            "a root that climbs out was accepted"
+        );
     }
 }
 
 #[test]
 fn a_recorded_file_that_changed_is_found_before_a_launch() {
     let dir = Dir::new("verify");
-    let shelf = Shelf::new(dir.0.join("programs"));
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
     let program = shelf.program("echo").expect("p");
     let lock = program.lock().expect("lock");
     let staging = lock.stage("1.0.0").expect("stage");
@@ -456,9 +472,99 @@ fn a_run_key_value_is_detected_and_put_back() {
     key.set_string(&name, "calc.exe").expect("set");
     let after = Footprint::take(&watch(&home, &bin).registry(true));
     assert!(before.diff(&after).iter().any(|d| d.what.ends_with(&name)));
-    assert!(before.restore_registry(&after) >= 1);
+    let diff = before.diff(&after);
+    assert!(before.restore_registry(&after, &diff).restored >= 1);
     assert!(
         key.get_string(&name).is_err(),
         "the value was taken out again"
     );
+}
+
+#[test]
+fn a_path_line_is_recognised_only_when_it_is_exactly_an_assignment() {
+    use canoa_host::store::footprint::parse_path_line;
+    let home = Path::new("/home/me");
+    for (line, dir) in [
+        ("export PATH=/opt/x/bin:$PATH", Some("/opt/x/bin")),
+        (
+            "export PATH=\"$HOME/.x/bin:$PATH\"",
+            Some("/home/me/.x/bin"),
+        ),
+        ("export PATH=${HOME}/.x/bin:$PATH", Some("/home/me/.x/bin")),
+        ("fish_add_path ~/.x/bin", Some("/home/me/.x/bin")),
+        ("$env:Path = \"C:\\x\\bin;$env:Path\"", Some("C:\\x\\bin")),
+        ("export PATH=$HOME/.x/bin:$PATH; rm -rf ~", None),
+        ("export PATH=$HOME/.x/bin:$PATH && curl x | sh", None),
+        ("export PATH=$(curl x):$PATH", None),
+        ("alias path=\"$HOME/.x/bin\"", None),
+        ("export PATH=$PATH:$HOME/.x/bin", None),
+        ("export PATH=$HOMEx/bin:$PATH", None),
+        ("# export PATH=/x:$PATH", None),
+    ] {
+        assert_eq!(parse_path_line(line, Some(home)).as_deref(), dir, "{line}");
+    }
+}
+
+#[test]
+fn a_path_value_covers_only_a_directory_appended_to_it() {
+    use canoa_host::store::footprint::registry_path_addition;
+    assert_eq!(
+        registry_path_addition("C:\\a;C:\\b", "C:\\a;C:\\b;C:\\x").as_deref(),
+        Some("C:\\x")
+    );
+    assert_eq!(
+        registry_path_addition("C:\\a;C:\\b;", "C:\\a;C:\\b;C:\\x").as_deref(),
+        Some("C:\\x")
+    );
+    assert_eq!(
+        registry_path_addition("", "C:\\x").as_deref(),
+        Some("C:\\x")
+    );
+    for after in [
+        "C:\\x;C:\\a;C:\\b",
+        "C:\\a;C:\\x;C:\\b",
+        "C:\\a;C:\\b;C:\\x;C:\\y",
+        "C:\\a",
+        "C:\\a;C:\\b",
+    ] {
+        assert_eq!(
+            registry_path_addition("C:\\a;C:\\b", after),
+            None,
+            "{after}"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_value_the_person_changed_since_the_install_is_not_put_back() {
+    use windows_registry::CURRENT_USER;
+    let _turn = REGISTRY_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = Dir::new("kept");
+    let (home, bin) = (dir.0.join("home"), dir.0.join("bin"));
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&bin).expect("bin");
+    let name = format!("COQUI_STORE_CHECK_KEEP_{}", std::process::id());
+    let key = CURRENT_USER.create("Environment").expect("key");
+    let before = Footprint::take(&watch(&home, &bin).registry(true));
+    key.set_string(&name, "the install wrote this")
+        .expect("set");
+    let after = Footprint::take(&watch(&home, &bin).registry(true));
+    let diff = before.diff(&after);
+    key.set_string(&name, "the person wrote this")
+        .expect("the person's change");
+    let done = before.restore_registry(&after, &diff);
+    assert_eq!(done.restored, 0);
+    assert!(
+        done.left.iter().any(|l| l.ends_with(&name)),
+        "{:?}",
+        done.left
+    );
+    assert_eq!(
+        key.get_string(&name).expect("still there"),
+        "the person wrote this"
+    );
+    key.remove_value(&name).expect("clean up");
 }

@@ -17,7 +17,7 @@
     reason = "files, paths and the lock are std's"
 )]
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use canoa::store::{Launch, is_program_name};
 use coqui_acp_api::guatiao::Alloc;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 /// How many versions are kept by default: the current one and the previous.
 pub const DEFAULT_KEEP_VERSIONS: usize = 2;
@@ -53,7 +54,9 @@ pub enum ShelfError {
 impl fmt::Display for ShelfError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Held => f.write_str("another operation holds this program"),
+            Self::Held => f.write_str(
+                "another install, update or removal holds this program or the programs folder",
+            ),
             Self::Name => f.write_str("not a program folder name"),
             Self::NotPrivate(why) => write!(f, "the programs folder is not private: {why}"),
             Self::Refused(why) => f.write_str(why),
@@ -146,6 +149,9 @@ pub struct Previous {
     pub dir: String,
     /// How to start it.
     pub launch: LaunchRecord,
+    /// The files recorded for it.
+    #[serde(default)]
+    pub files: Vec<FileRecord>,
 }
 
 /// `current.json`: the one truth about a program's managed copy.
@@ -178,8 +184,9 @@ pub struct Shelf {
 }
 
 impl Shelf {
-    /// A shelf at `root`.
-    pub fn new(root: impl Into<PathBuf>) -> Self {
+    /// A shelf at `root`, with no check of where it is: for a test, or for a caller that has checked the folder itself. The host
+    /// takes [`configured`](Self::configured).
+    pub fn unchecked(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
             keep: DEFAULT_KEEP_VERSIONS,
@@ -224,16 +231,40 @@ impl Shelf {
     ///
     /// [`ShelfError::NotPrivate`] for a root outside [`default_root`](Self::default_root), or when there is no default.
     pub fn configured(root: impl Into<PathBuf>) -> Result<Self, ShelfError> {
-        let root = root.into();
+        let root = super::exec::normalize(&root.into()).ok_or_else(|| {
+            ShelfError::NotPrivate("a programs folder that climbs above its root".into())
+        })?;
         let default = Self::default_root()
             .ok_or_else(|| ShelfError::NotPrivate("this user has no data folder".into()))?;
+        let default = super::exec::normalize(&default).unwrap_or(default);
         if !super::footprint::path_under(&root.to_string_lossy(), &default.to_string_lossy()) {
             return Err(ShelfError::NotPrivate(
                 "a programs folder outside the user's data folder is not accepted until the access list of the place can be read"
                     .into(),
             ));
         }
-        Ok(Self::new(root))
+        Ok(Self::unchecked(root))
+    }
+
+    /// Takes the lock every install and update takes, so that one runs at a time on the shelf: two measured at once would each
+    /// see the other's changes.
+    ///
+    /// # Errors
+    ///
+    /// [`ShelfError::Held`] while another install or update holds it.
+    pub fn apply_lock(&self) -> Result<ApplyLock, ShelfError> {
+        make_private(&self.root)?;
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.root.join("apply.lock"))?;
+        match file.try_lock() {
+            Ok(()) => Ok(ApplyLock { _file: file }),
+            Err(TryLockError::WouldBlock) => Err(ShelfError::Held),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
     }
 
     /// The root.
@@ -258,6 +289,12 @@ impl Shelf {
     }
 }
 
+/// The lock of the shelf's installs, released when dropped.
+#[derive(Debug)]
+pub struct ApplyLock {
+    _file: File,
+}
+
 /// One program's folder.
 #[derive(Debug, Clone)]
 pub struct ProgramDir {
@@ -266,6 +303,40 @@ pub struct ProgramDir {
 }
 
 impl ProgramDir {
+    /// Where the digest of this program's `current.json` is kept: `<programs>/.digests/<program>`.
+    fn digest_path(&self) -> PathBuf {
+        let name = self.dir.file_name().unwrap_or_default();
+        self.dir
+            .parent()
+            .unwrap_or(&self.dir)
+            .join(".digests")
+            .join(name)
+    }
+
+    /// The managed copy, after `current.json` is checked against the digest the host kept when it wrote it.
+    ///
+    /// # Errors
+    ///
+    /// [`ShelfError::Refused`] for a `current.json` that is not the one this host wrote, or one with no digest on record.
+    pub fn current_checked(&self) -> Result<Option<Current>, ShelfError> {
+        let path = self.dir.join("current.json");
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let kept = fs::read_to_string(self.digest_path())
+            .map_err(|_| ShelfError::Refused("current.json has no digest on record".to_owned()))?;
+        if !format!("{:x}", sha2::Sha256::digest(&bytes)).eq_ignore_ascii_case(kept.trim()) {
+            return Err(ShelfError::Refused(
+                "current.json is not the one this host wrote".to_owned(),
+            ));
+        }
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| ShelfError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+    }
+
     /// The folder.
     #[must_use]
     pub fn dir(&self) -> &Path {
@@ -288,34 +359,38 @@ impl ProgramDir {
         }
     }
 
-    /// Checks the files recorded for `current` against their digests, before a launch. A recorded file that is not there any more
-    /// was an archive the install unpacked and removed, whose files are not recorded one by one, and is not checked.
+    /// Checks the copy against what was recorded when it was installed, before a launch: every recorded file against its digest, a
+    /// file recorded from an unpacked archive being there, and no file in the copy that was not recorded. A fetched file that is not
+    /// there any more was an archive the install unpacked and removed.
     ///
     /// # Errors
     ///
-    /// [`ShelfError::Refused`] naming the first file that no longer matches.
+    /// [`ShelfError::Refused`] naming the first file that no longer matches, is gone, or was added.
     pub fn verify(&self, current: &Current) -> Result<(), ShelfError> {
-        use sha2::{Digest, Sha256};
-        use std::io::Read;
-        for record in &current.files {
-            let path = Path::new(&current.dir).join(&record.path);
-            let Ok(mut file) = File::open(&path) else {
-                continue;
-            };
-            let mut hash = Sha256::new();
-            let mut buffer = vec![0u8; 64 * 1024];
-            loop {
-                let count = file.read(&mut buffer)?;
-                if count == 0 {
-                    break;
+        let root = Path::new(&current.dir);
+        let mut present = BTreeSet::new();
+        list_files(root, root, &mut present)?;
+        let recorded: BTreeMap<String, &FileRecord> = current
+            .files
+            .iter()
+            .map(|record| (record.path.replace('\\', "/"), record))
+            .collect();
+        if let Some(extra) = present.iter().find(|p| !recorded.contains_key(*p)) {
+            return Err(ShelfError::Refused(format!(
+                "{extra} was added to the copy after it was installed"
+            )));
+        }
+        for (path, record) in &recorded {
+            if !present.contains(path) {
+                if record.url.is_empty() {
+                    return Err(ShelfError::Refused(format!("{path} is gone from the copy")));
                 }
-                hash.update(&buffer[..count]);
+                continue;
             }
-            let digest = format!("{:x}", hash.finalize());
+            let digest = digest_of(&root.join(path))?;
             if !digest.eq_ignore_ascii_case(&record.sha256) {
                 return Err(ShelfError::Refused(format!(
-                    "{} no longer matches the digest recorded when it was installed",
-                    record.path
+                    "{path} no longer matches the digest recorded when it was installed"
                 )));
             }
         }
@@ -430,6 +505,7 @@ impl Locked<'_> {
                 version: old.version,
                 dir: old.dir,
                 launch: old.launch,
+                files: old.files,
             }),
         };
         self.write(&current)?;
@@ -460,13 +536,14 @@ impl Locked<'_> {
             version: previous.version,
             dir: previous.dir,
             launch: previous.launch,
-            files: Vec::new(),
+            files: previous.files,
             by: current.by.clone(),
             installed_at: current.installed_at,
             previous: Some(Previous {
                 version: current.version,
                 dir: current.dir,
                 launch: current.launch,
+                files: current.files,
             }),
         };
         self.write(&swapped)?;
@@ -484,16 +561,24 @@ impl Locked<'_> {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
+        let _ = fs::remove_file(self.program.digest_path());
         self.sweep()
     }
 
     fn write(&self, current: &Current) -> Result<(), ShelfError> {
+        let bytes = serde_json::to_vec_pretty(current).map_err(io::Error::other)?;
         let temporary = self.program.dir.join("current.json.tmp");
         let mut file = File::create(&temporary)?;
-        file.write_all(&serde_json::to_vec_pretty(current).map_err(io::Error::other)?)?;
+        file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
         fs::rename(&temporary, self.program.dir.join("current.json"))?;
+        // The digest of what was written is kept beside the programs, not in the program's own folder.
+        let digest = self.program.digest_path();
+        if let Some(parent) = digest.parent() {
+            make_private(parent)?;
+        }
+        fs::write(&digest, format!("{:x}", sha2::Sha256::digest(&bytes)))?;
         Ok(())
     }
 
@@ -588,6 +673,71 @@ fn check_private(dir: &Path) -> Result<(), ShelfError> {
     let meta = fs::symlink_metadata(dir)?;
     if meta.file_type().is_symlink() || !meta.is_dir() {
         return Err(ShelfError::NotPrivate("it is a link, not a folder".into()));
+    }
+    Ok(())
+}
+
+/// The relative paths, with `/`, of every file and link under `dir` (not followed), added to `into`.
+fn list_files(root: &Path, dir: &Path, into: &mut BTreeSet<String>) -> Result<(), ShelfError> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            list_files(root, &path, into)?;
+        } else if let Ok(relative) = path.strip_prefix(root) {
+            let parts: Vec<String> = relative
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            into.insert(parts.join("/"));
+        }
+    }
+    Ok(())
+}
+
+/// The SHA-256 of a file, or of the text of a link (links are not followed).
+fn digest_of(path: &Path) -> Result<String, ShelfError> {
+    use std::io::Read;
+    if fs::symlink_metadata(path)?.file_type().is_symlink() {
+        let target = fs::read_link(path)?;
+        let text = format!("link:{}", target.to_string_lossy());
+        return Ok(format!("{:x}", sha2::Sha256::digest(text.as_bytes())));
+    }
+    let mut file = File::open(path)?;
+    let mut hash = sha2::Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+/// Adds a record for every file under `dir` that `records` does not name, so the whole copy is recorded, and not only what was
+/// fetched: the files an archive unpacked into it too.
+///
+/// # Errors
+///
+/// [`ShelfError::Io`] for a file that cannot be read.
+pub fn record_tree(dir: &Path, records: &mut Vec<FileRecord>) -> Result<(), ShelfError> {
+    let mut present = BTreeSet::new();
+    list_files(dir, dir, &mut present)?;
+    let known: BTreeSet<String> = records.iter().map(|r| r.path.replace('\\', "/")).collect();
+    for path in present {
+        if known.contains(&path) {
+            continue;
+        }
+        let sha256 = digest_of(&dir.join(&path))?;
+        records.push(FileRecord {
+            path,
+            url: String::new(),
+            sha256,
+            verified: true,
+        });
     }
     Ok(())
 }
