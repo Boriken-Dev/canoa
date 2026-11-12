@@ -32,6 +32,7 @@ The first run generates the platform's runner (`flutter create`) in `app/`, name
 ## Web app
 
 ```sh
+python app/tool/build_noise.py   # the Noise method as WebAssembly, into app/web/noise
 (cd app && flutter build web --release --csp --no-web-resources-cdn)   # app/build/web; the host's policy needs --csp
 canoa serve --web app/build/web                                           # served on loopback
 ```

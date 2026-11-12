@@ -27,6 +27,11 @@ jobs:
         working-directory: app
       - name: Python packager tests
         run: python -m unittest discover -s app/tool -p "test_*.py"
+      - name: Build the Noise module
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.128 --locked
+          python app/tool/build_noise.py
       - name: Build PWA
         run: flutter build web --release
         working-directory: app

@@ -1,5 +1,5 @@
 // Canoa's own pairing and chat connection code as a bare page, for a browser test that cannot click through Flutter's canvas.
-// It runs on the web build's peer bridge (canoa_peer_bridge.mjs and its vendored methods), loaded by the page beside it:
+// It runs on the web build's peer bridge, with the Noise module (python tool/build_noise.py) served beside the page as noise/:
 //   dart compile js -O1 -o <dir>/page.js tool/peer_page.dart
 import 'dart:convert';
 import 'dart:js_interop';
@@ -45,6 +45,10 @@ Future<String?> _served() async {
 void main() {
   globalContext
     ..setProperty('canoaServedHost'.toJS, (() => _served().then((json) => json?.toJS).toJS).toJS)
+    ..setProperty(
+      'canoaUnreachable'.toJS,
+      ((JSString method) => browserMethodUnavailable(PeerMethod.parse(method.toDart)).then((why) => why?.toJS).toJS).toJS,
+    )
     ..setProperty(
       'canoaOwnId'.toJS,
       ((JSString method) => localBrowserPeerId(PeerMethod.parse(method.toDart)).then((id) => id.toJS).toJS).toJS,

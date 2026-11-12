@@ -60,11 +60,12 @@ impl NoiseResponder {
         Ok(messages(sent))
     }
 
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = peerId)]
     pub fn peer_id(&self) -> Option<String> {
         self.peer.clone()
     }
 
+    #[wasm_bindgen(js_name = takeSession)]
     pub fn take_session(&mut self) -> Option<NoiseSession> {
         self.session.take()
     }

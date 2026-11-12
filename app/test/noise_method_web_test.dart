@@ -9,12 +9,13 @@ library;
 
 import 'dart:convert';
 import 'dart:js_interop';
-import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
 import 'package:canoa/auth/web/noise_method.dart';
 import 'package:canoa/auth/web/peer_session.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/noise_responder.dart';
 
 Uint8List text(String value) => Uint8List.fromList(utf8.encode(value));
 String string(Uint8List bytes) => utf8.decode(bytes);
@@ -23,35 +24,11 @@ Matcher failure([Pattern? message]) => throwsA(
   message == null ? isA<PeerFailure>() : isA<PeerFailure>().having((e) => e.message, 'message', contains(message)),
 );
 
-extension type _Responder._(JSObject _) implements JSObject {
-  external JSArray<JSUint8Array> step(JSUint8Array received);
-  external String? get peer_id;
-  external JSObject? take_session();
-}
-
-/// The test module's own key and responder.
-Future<(String, _Responder Function(String allowed))> responderSide() async {
-  final module = await loadNoise();
-  final keys = module['NoiseKey']! as JSObject;
-  final key = keys.callMethod<JSObject>('generate'.toJS);
-  final id = key['peer_id']! as JSString;
-  return (
-    id.toDart,
-    (String allowed) => (module['NoiseResponder']! as JSObject).callMethod<_Responder>('new'.toJS, key, allowed.toJS),
-  );
-}
-
-/// The responder's session as the page's own session type, over the same exports.
-extension type _ServerSession._(JSObject _) implements JSObject {
-  external JSUint8Array seal(JSUint8Array message);
-  external JSUint8Array? open(JSUint8Array record);
-  external JSUint8Array close();
-}
-
-Future<({PeerSession client, _ServerSession server, String clientId, String serverId})> prove({String? pinned}) async {
+Future<({PeerSession client, ServerSession server, String clientId, String serverId})> prove({String? pinned}) async {
   final client = await NoiseIdentity.generate();
-  final (serverId, responder) = await responderSide();
-  final server = responder(client.peerId);
+  final side = await ResponderSide.create();
+  final serverId = side.peerId;
+  final server = side.admit(client.peerId);
   final run = await client.prove(pinned ?? serverId);
   var step = run.step(null);
   expect(step.send.single, hasLength(32));
@@ -60,10 +37,10 @@ Future<({PeerSession client, _ServerSession server, String clientId, String serv
   expect(step.send.single, hasLength(64));
   expect(step.peerId, serverId);
   server.step(step.send.single.toJS);
-  expect(server.peer_id, client.peerId);
+  expect(server.peerId, client.peerId);
   return (
     client: step.session!,
-    server: server.take_session()! as _ServerSession,
+    server: server.takeSession()!,
     clientId: client.peerId,
     serverId: serverId,
   );
@@ -107,11 +84,10 @@ void main() {
 
   test('a step out of place or a message that is not the next one ends the proof', () async {
     final client = await NoiseIdentity.generate();
-    final (serverId, _) = await responderSide();
-    final run = await client.prove(serverId);
+    final run = await client.prove((await ResponderSide.create()).peerId);
     run.step(null);
     expect(() => run.step(null), throwsA(isA<PeerFailure>().having((e) => e.message, 'message', contains('without a message'))));
-    final again = await client.prove(serverId);
+    final again = await client.prove((await ResponderSide.create()).peerId);
     again.step(null);
     expect(() => again.step(Uint8List(96)), throwsA(isA<PeerFailure>()));
     expect(() => again.step(Uint8List(96)), throwsA(isA<PeerFailure>()));

@@ -1,5 +1,5 @@
 // The web build's peer code in a real browser: Canoa's own pairing and chat connection code, compiled from
-// app/tool/peer_page.dart, on the web build's peer bridge (canoa_peer_bridge.mjs and its vendored methods), pairing by PIN with
+// app/tool/peer_page.dart, on the web build's Dart peer bridge (the Noise method is its WebAssembly module, noise/), pairing by PIN with
 // a Noise bridge and running a turn over it, then running a turn with a WebCrypto bridge. Each is a real coqui-acp-bridge, and
 // behind real nginx ending TLS when one is given. Nothing of the extension runs.
 //
@@ -8,8 +8,8 @@
 //   CANOA_E2E_APP_PAGE=<dir> [CANOA_E2E_WEB=app/build/web] [CANOA_E2E_NGINX=path/to/nginx] [CANOA_E2E_WSL=distribution] \
 //   node e2e/app-noise.mjs
 //
-// CANOA_E2E_WEB is where canoa_peer_bridge.mjs and vendor/ are served from: a `flutter build web` output, or app/web unless
-// set. With CANOA_E2E_WSL the bridge, the agent and nginx are Linux paths run in that WSL distribution, as in noise.mjs.
+// CANOA_E2E_WEB is where noise/ (canoa_noise.js and its .wasm) is served from: a `flutter build web` output, or app/web after
+// `python app/tool/build_noise.py`, unless set. With CANOA_E2E_WSL the bridge, the agent and nginx are Linux paths run in that WSL distribution, as in noise.mjs.
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { connect } from "node:net";
@@ -32,13 +32,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const work = mkdtempSync(path.join(tmpdir(), "canoa-app-noise-e2e-"));
 const profile = path.join(work, "profile");
 
-// The page: the web build's bridge as a module, then the compiled Dart, each from where it was built.
-const types = { ".mjs": "text/javascript", ".js": "text/javascript", ".html": "text/html" };
+// The page: the compiled Dart, with the Noise module beside it, each from where it was built.
+const types = { ".mjs": "text/javascript", ".js": "text/javascript", ".html": "text/html", ".wasm": "application/wasm" };
 const server = createServer((request, response) => {
   const url = new URL(request.url, "http://localhost");
   if (url.pathname === "/") {
     response.writeHead(200, { "content-type": "text/html" });
-    response.end('<!doctype html><script type="module" src="/canoa_peer_bridge.mjs"></script><script src="/page.js" defer></script>');
+    response.end('<!doctype html><script src="/page.js" defer></script>');
     return;
   }
   const parts = url.pathname.split("/").filter((part) => part !== "" && part !== "..");
@@ -119,13 +119,13 @@ try {
   }, 30_000);
   const opened = await (await fetch(`http://127.0.0.1:${debug}/json/new?${encodeURIComponent(`${origin}/`)}`, { method: "PUT" })).json();
   const page = new Session(opened.webSocketDebuggerUrl);
-  await waitFor("the page's bridge and code", () => page.run("Boolean(globalThis.canoaPeer && globalThis.canoaTurn)").catch(() => false));
+  await waitFor("the page's code", () => page.run("Boolean(globalThis.canoaUnreachable && globalThis.canoaTurn)").catch(() => false));
   console.log(`browser ${await page.run("navigator.userAgent")}`);
   const call = (name, ...args) => page.run(`${name}(${args.map((arg) => JSON.stringify(arg)).join(", ")})`);
   const turn = async (url, peer, method, text) => JSON.parse(await call("canoaTurn", url, peer, method, text));
 
   await check("this browser runs Noise, so nothing selects another method", async () => {
-    const why = await page.run("canoaPeer.unreachable('noise')");
+    const why = await call("canoaUnreachable", "noise");
     if (why !== null) throw new Error(why);
   });
 

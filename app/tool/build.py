@@ -218,6 +218,8 @@ def main() -> None:
         except RuntimeError as error:
             sys.exit(f"build.py: {error}")
         return
+    # The web build carries the Noise method as WebAssembly, built from app/web_noise into app/web/noise.
+    subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
     subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
     if opts.kind == "chromium":

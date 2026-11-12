@@ -13,8 +13,8 @@ import 'subtle.dart' show requestResult;
 const noiseLoader = 'noise/canoa_noise.js';
 
 extension type _NoiseKey._(JSObject _) implements JSObject {
-  external String get peer_id;
-  external String to_pem();
+  external String get peerId;
+  external String toPem();
   external void free();
 }
 
@@ -27,8 +27,8 @@ extension type _NoiseSession._(JSObject _) implements JSObject {
 
 extension type _NoiseRun._(JSObject _) implements JSObject {
   external JSArray<JSUint8Array> step(JSUint8Array? received);
-  external String? get peer_id;
-  external _NoiseSession? take_session();
+  external String? get peerId;
+  external _NoiseSession? takeSession();
   external void free();
 }
 
@@ -76,10 +76,10 @@ final class NoiseIdentity {
 
   final _NoiseKey _key;
 
-  String get peerId => _key.peer_id;
+  String get peerId => _key.peerId;
 
   /// The key as text, for a store.
-  String toPem() => _wrap(() => _key.to_pem());
+  String toPem() => _wrap(() => _key.toPem());
 
   static T _wrap<T>(T Function() call) {
     try {
@@ -96,7 +96,7 @@ final class NoiseIdentity {
 
   static Future<NoiseIdentity> fromPem(String pem, {Uri? base}) async {
     final module = await loadNoise(base: base);
-    return NoiseIdentity._(_wrap(() => _class(module, 'NoiseKey').callMethod<_NoiseKey>('from_pem'.toJS, pem.toJS)));
+    return NoiseIdentity._(_wrap(() => _class(module, 'NoiseKey').callMethod<_NoiseKey>('fromPem'.toJS, pem.toJS)));
   }
 
   /// The identity kept in the origin-local IndexedDB database [name], created when absent.
@@ -169,8 +169,8 @@ final class NoiseRun {
     if (_freed) throw const PeerFailure('Peer proof expired or unknown');
     try {
       final sent = [for (final message in _run.step(received?.toJS).toDart) message.toDart];
-      final peer = _run.peer_id;
-      final session = peer == null ? null : _run.take_session();
+      final peer = _run.peerId;
+      final session = peer == null ? null : _run.takeSession();
       return (send: sent, peerId: peer, session: session == null ? null : NoiseSessionHandle._(session));
     } catch (error) {
       throw noiseFailure(error);

@@ -65,6 +65,7 @@ impl NoiseKey {
     }
 
     /// The key of RFC 8410 PKCS#8 PEM text, exactly as [`to_pem`](NoiseKey::to_pem) writes it.
+    #[wasm_bindgen(js_name = fromPem)]
     pub fn from_pem(text: &str) -> Result<NoiseKey, JsError> {
         Ok(NoiseKey {
             identity: Identity::from_pkcs8_pem(text).map_err(failed)?,
@@ -72,11 +73,12 @@ impl NoiseKey {
     }
 
     /// The private key as PKCS#8 PEM text, for the page's own storage.
+    #[wasm_bindgen(js_name = toPem)]
     pub fn to_pem(&self) -> Result<String, JsError> {
         Ok(self.identity.to_pkcs8_pem().map_err(failed)?.to_string())
     }
 
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = peerId)]
     pub fn peer_id(&self) -> String {
         self.identity.peer_id().to_string()
     }
@@ -175,12 +177,13 @@ impl NoiseRun {
     }
 
     /// The id of the key this run proved or learned, once it has.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = peerId)]
     pub fn peer_id(&self) -> Option<String> {
         self.peer.clone()
     }
 
     /// The session a proof ended in, once; none for a pairing or before the proof ends.
+    #[wasm_bindgen(js_name = takeSession)]
     pub fn take_session(&mut self) -> Option<NoiseSession> {
         match &mut self.kind {
             Kind::Proof { session, .. } => session.take(),

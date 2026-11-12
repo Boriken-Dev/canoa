@@ -33,7 +33,7 @@
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
 | `crates/canoa-host/` | `canoa-host`: the `canoa` program, which serves the agents and providers canoa.cfg names to paired keys, on loopback |
-| `app/web/vendor/` | Pinned browser methods, Noise and WebCrypto, from `coqui-peer-noise` and `coqui-peer-webcrypto` |
+| `app/web_noise/` | `coqui-peer-noise` as WebAssembly for the web app's Noise method, built by `app/tool/build_noise.py` |
 | `app/` | Canonical Flutter chat, canoa.cfg settings and desktop tray UI |
 | `crates/canoa-host/examples/` | Test fixtures, built by `cargo build -p canoa-host --examples`: `stdio_agent` is an ACP agent to serve with `canoa serve` |
 | `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
@@ -47,7 +47,7 @@ python app/tool/build.py desktop          # builds the desktop app and prints th
 python app/tool/build.py desktop --run    # or runs it (needs flutter and cargo on PATH)
 ```
 
-The desktop app carries the host as a library and lives in the tray. For the web app, `(cd app && flutter build web --release --csp --no-web-resources-cdn)` then `canoa serve --web app/build/web`; see [getting started](https://boriken-dev.github.io/canoa/getting-started/). A manually pinned Coqui peer connection can also be tested against `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`, a canoa.cfg with `[host.agents.echo]` naming `target/debug/examples/stdio_agent` as its `program`, then `canoa accept` for the key that connects), which is not a production agent. To package the UI for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/canoa/browser/) before loading it as unpacked.
+The desktop app carries the host as a library and lives in the tray. For the web app, `python app/tool/build_noise.py && (cd app && flutter build web --release --csp --no-web-resources-cdn)` then `canoa serve --web app/build/web`; see [getting started](https://boriken-dev.github.io/canoa/getting-started/). A manually pinned Coqui peer connection can also be tested against `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`, a canoa.cfg with `[host.agents.echo]` naming `target/debug/examples/stdio_agent` as its `program`, then `canoa accept` for the key that connects), which is not a production agent. To package the UI for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/canoa/browser/) before loading it as unpacked.
 
 Canoa is one implementation on two shared libraries: [coqui-web](https://github.com/Boriken-Dev/coqui-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
 

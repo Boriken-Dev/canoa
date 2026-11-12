@@ -32,11 +32,11 @@ const work = mkdtempSync(path.join(tmpdir(), "canoa-served-e2e-"));
 const home = path.join(work, "home");
 const site = path.join(work, "site");
 
-// The built app, and beside it a bare page running the app's own connection code on the app's own peer bridge.
+// The built app, and beside it a bare page running the app's own connection code on the app's own Dart peer bridge.
 cpSync(web, site, { recursive: true });
 copyFileSync(path.join(appPage, "page.js"), path.join(site, "page.js"));
 writeFileSync(path.join(site, "peer.html"),
-  '<!doctype html><title>peer</title><script type="module" src="canoa_peer_bridge.mjs"></script><script src="page.js" defer></script>');
+  '<!doctype html><title>peer</title><script src="page.js" defer></script>');
 writeFileSync(path.join(work, "canoa.cfg"), [
   "[host.agents.echo]", `program = ${JSON.stringify(agent)}`,
   "[host.web]", 'dir = "site"', 'listen = "127.0.0.1:0"',
@@ -121,7 +121,7 @@ try {
   }
 
   const page = await open(`${webUrl}/peer.html`);
-  await waitFor("the page's bridge and code", () => page.run("Boolean(globalThis.canoaPeer && globalThis.canoaTurn && globalThis.canoaServedHost)").catch(() => false));
+  await waitFor("the page's code", () => page.run("Boolean(globalThis.canoaUnreachable && globalThis.canoaTurn && globalThis.canoaServedHost)").catch(() => false));
   console.log(`browser ${await page.run("navigator.userAgent")}`);
   const call = (name, ...args) => page.run(`${name}(${args.map((arg) => JSON.stringify(arg)).join(", ")})`);
   const turn = async (text) => JSON.parse(await call("canoaTurn", entry.url, entry.peer, METHOD, text));

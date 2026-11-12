@@ -20,6 +20,7 @@ flutter analyze
 
 ```sh
 cd app
+python tool/build_noise.py   # the Noise method as WebAssembly, into web/noise (needs cargo, the wasm32-unknown-unknown target and wasm-bindgen-cli)
 flutter build web --release
 flutter build web --release --wasm
 ```
@@ -48,9 +49,9 @@ The [ACP client](lib/acp/client.dart) and [connection orchestrator](lib/acp/conn
 
 ## Shared dependencies
 
-The browser cryptographic methods are owned by [coqui-peer-noise](https://github.com/Boriken-Dev/coqui-peer-noise) and [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto) and vendored in `app/web/vendor` at the exact recorded Git blobs in `COQUI-SOURCE.json`, one entry per file. The app and the extension each prove an agent by the method its record names, with a key of each method's own, and pair by PIN under Noise. A browser whose WebCrypto has no X25519 shows a Noise agent as unavailable, with the reason, and never tries the other method. A native build proves by neither: its connect dialog says so. Browser-side UI code never implements its own ECDSA handshake. The early-message handoff is provided by `coqui_web` as a local Dart package, not a Canoa authentication class.
+The web build proves an agent by the method its record names, with a key of each method's own, and pairs by PIN under Noise, in Dart (`lib/auth/web/`). WebCrypto is [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto)'s wire over `package:web`, its P-256 key non-extractable in IndexedDB. Noise is [coqui-peer-noise](https://github.com/Boriken-Dev/coqui-peer-noise) compiled to WebAssembly from `web_noise/` by `python tool/build_noise.py` into `web/noise/` (generated, never committed; the revision is `web_noise/Cargo.toml`'s `rev` and `Cargo.lock`); a build without it shows a Noise agent as unavailable, with the reason, and never tries the other method. The Noise key is PKCS#8 text in IndexedDB (database `dev.boriken.canoa.peer-noise-key`), since WebAssembly must hold it; unlike the WebCrypto key, script in the page can read it. The browser extension keeps its own JavaScript copies of both methods (`bindings/browser/chromium/vendor`). A native build proves by neither: its connect dialog says so. Browser-side UI code never implements its own ECDSA handshake. The early-message handoff is provided by `coqui_web` as a local Dart package, not a Canoa authentication class.
 
-To upgrade the browser method, update its canonical Coqui source and tests first, then replace the exact vendored source and source metadata together; the vendor tests will reject an unrecorded change.
+To move the Noise method, change `rev` in `web_noise/Cargo.toml` (and `Cargo.lock`), rebuild with `tool/build_noise.py`, and run `web_noise` through the browser tests: `python tool/build_noise.py --out test/noise --test-peer`, then `flutter test --platform chrome test/noise_method_web_test.dart test/web_peer_bridge_web_test.dart test/webcrypto_method_web_test.dart` (a WSL `CHROME_EXECUTABLE=/usr/sbin/chromium-browser` on this setup). `cargo install wasm-bindgen-cli --version 0.2.128 --locked` matches the pinned `wasm-bindgen`.
 
 ## Smoke testing remote chat
 

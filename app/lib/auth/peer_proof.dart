@@ -44,8 +44,8 @@ final class PeerStep {
   final String? session;
 }
 
-/// The calls of `web/canoa_peer_bridge.mjs`: each method's own key, the handshake run a step at a time, then the session it
-/// ends in. The browser build reaches them through JavaScript interop; anything else that runs the same module can stand in.
+/// The calls of the web build's peer bridge (`WebPeerBridge`): each method's own key, the handshake run a step at a time,
+/// then the session it ends in. A test can stand in another implementation.
 abstract interface class PeerBridge {
   /// Why this runtime cannot prove by [method], or null. It asks the local runtime only, so nothing on a network can change it.
   Future<String?> unreachable(PeerMethod method);

@@ -53,7 +53,7 @@ See [interop.md](interop.md) for the minimum interoperability profile.
 
 ## Authentication and transport layering
 
-The sources of the browser's cryptographic handshakes are `Boriken-Dev/coqui-peer-noise` and `Boriken-Dev/coqui-peer-webcrypto`. Canoa bundles an **unchanged, Git-blob-pinned copy** of each so that the extension and PWA work offline and satisfy MV3 local-code restrictions. `app/web/canoa_peer_bridge.mjs` adapts both methods to Canoa's app, one step of a handshake or a PIN pairing at a time, with a key of each method's own; it contains no independent cryptographic handshake.
+The sources of the browser's cryptographic handshakes are `Boriken-Dev/coqui-peer-noise` and `Boriken-Dev/coqui-peer-webcrypto`. The browser extension bundles an **unchanged, Git-blob-pinned copy** of each JavaScript module (`bindings/browser/chromium/vendor`, recorded in `COQUI-SOURCE.json`) so that it works offline and satisfies MV3 local-code restrictions. The Flutter web build has no JavaScript of its own: `app/lib/auth/web/` runs the WebCrypto method over `package:web` and the Noise method as `coqui-peer-noise` compiled to WebAssembly (`app/web_noise`, built at build time, never committed), one step of a handshake or a PIN pairing at a time, with a key of each method's own; it contains no independent cryptographic handshake.
 
 The `coqui_web` Dart package owns pending-message storage across the pre-application phase, in `StagedChannel`. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
 
