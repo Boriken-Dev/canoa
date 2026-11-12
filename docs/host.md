@@ -676,3 +676,7 @@ page, so check its sharing rules before pairing anyone else.
 - An `ANTHROPIC_API_KEY` in the host's environment takes precedence over Claude's subscription sign-in, so it changes who
   pays. The agent inherits the host's environment.
 - A turn in progress ends with its connection: each connection runs a fresh agent process.
+
+## Delegating a task to another agent
+
+With `[host.delegate]` on (the default) and a client that asks for it, an agent that takes HTTP MCP servers is given three tools, `delegate_task`, `task_status` and `cancel`, on a loopback server behind a bearer made for that one session. A task runs as a session of another source in a folder at or inside the delegating session's own, in the delegating session's permission mode or one that asks for more, and everything it asks the person goes to the person on the delegating session. `max_depth`, `max_children`, `max_running` and `sources` bound it; see the host's API header for every setting.
