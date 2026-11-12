@@ -236,9 +236,9 @@ void main() {
       expect(_allows(wide, _edit('/work/calc/src/main.dart')), isTrue);
       expect(_allows(wide, _edit('/work/calc/README.md')), isTrue);
       expect(_allows(wide, _edit('/work/calc/a.config.json')), isTrue);
-      final hidden = _rule(RuleType.path, '/work/.agents/calc', tool: 'edit', folder: '/work/.agents/calc');
-      expect(_allows(hidden, _edit('/work/.agents/calc/a.js'), folder: '/work/.agents/calc'), isTrue);
-      expect(_allows(hidden, _edit('/work/.agents/calc/.x/a.js'), folder: '/work/.agents/calc'), isFalse);
+      final hidden = _rule(RuleType.path, '/work/.hidden/calc', tool: 'edit', folder: '/work/.hidden/calc');
+      expect(_allows(hidden, _edit('/work/.hidden/calc/a.js'), folder: '/work/.hidden/calc'), isTrue);
+      expect(_allows(hidden, _edit('/work/.hidden/calc/.x/a.js'), folder: '/work/.hidden/calc'), isFalse);
     });
 
     test('a scope that is one of them is refused with the reason', () {
