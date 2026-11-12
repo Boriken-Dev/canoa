@@ -34,6 +34,7 @@ use crate::config::{
     Settings, UsageSource,
 };
 use crate::control;
+use crate::delegate::{self, Delegating, Delegation, Peek, Principal};
 use crate::inproc::{self, InProcess};
 use crate::kind;
 use crate::local::{self, Link};
@@ -364,6 +365,8 @@ struct Shared {
     program_args: Vec<OsString>,
     /// The ledger and the rest of what belongs to no entry.
     control: Arc<control::Control>,
+    /// What lets an agent session hand a task to another source; `None` when `[host.delegate]` is off.
+    delegation: Option<Delegation>,
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -481,6 +484,9 @@ impl Stopper {
     /// proof ends by [`PROOF_LIMIT`] at the latest.
     pub fn stop(&self) {
         self.0.stopped.store(true, Ordering::SeqCst);
+        if let Some(delegation) = &self.0.delegation {
+            delegation.stop();
+        }
         self.stop_agents();
     }
 
@@ -565,6 +571,15 @@ impl Local {
     ///
     /// [`LocalError`]: no such entry, the host is stopping, or no thread could be started.
     pub fn open(&self, entry: &str) -> Result<Link, LocalError> {
+        self.open_with(entry, None)
+    }
+
+    /// [`Local::open`], for a task of the delegation when `context` is given: what the task's connection is bounded by.
+    pub(crate) fn open_with(
+        &self,
+        entry: &str,
+        context: Option<delegate::ChildContext>,
+    ) -> Result<Link, LocalError> {
         if entry == control::NAME {
             return self.open_control();
         }
@@ -583,7 +598,7 @@ impl Local {
             .name("canoa-local".to_owned())
             .spawn(move || {
                 let peer = shared.method.peer_id();
-                serve_proven(&shared, &served, &host, &peer);
+                serve_proven(&shared, &served, &host, &peer, context.as_ref());
                 host.close();
             })
             .map_err(|_| LocalError::Thread)?;
@@ -607,6 +622,41 @@ impl Local {
             })
             .map_err(|_| LocalError::Thread)?;
         Ok(client)
+    }
+}
+
+/// The host as the delegation sees it: the agents it serves, who may use them, and a way to open one in process.
+struct DelegationHost {
+    shared: alloc::sync::Weak<Shared>,
+    served: Vec<Arc<Served>>,
+    agents: Vec<delegate::Source>,
+}
+
+impl delegate::Host for DelegationHost {
+    fn sources(&self) -> Vec<delegate::Source> {
+        self.agents.clone()
+    }
+
+    fn may_use(&self, who: &Principal, source: &str) -> bool {
+        let Some(shared) = self.shared.upgrade() else {
+            return false;
+        };
+        let Some(served) = self.served.iter().find(|served| served.name == source) else {
+            return false;
+        };
+        match who {
+            Principal::Owner => true,
+            Principal::Key(peer) => shared.allows(peer, served),
+        }
+    }
+
+    fn open(&self, source: &str, context: delegate::ChildContext) -> Result<Link, LocalError> {
+        let shared = self.shared.upgrade().ok_or(LocalError::Stopped)?;
+        Local {
+            shared,
+            served: self.served.clone(),
+        }
+        .open_with(source, Some(context))
     }
 }
 
@@ -1071,7 +1121,8 @@ impl Serving {
                 bound,
             ));
         }
-        Ok(Self {
+        let delegation = Delegation::start(&config.delegate);
+        let serving = Self {
             shared: Arc::new(Shared {
                 method,
                 store,
@@ -1118,11 +1169,35 @@ impl Serving {
                         None => kept,
                     }
                 }),
+                delegation,
             }),
             listeners,
             local_only,
             listening,
-        })
+        };
+        serving.attach_delegation();
+        Ok(serving)
+    }
+
+    /// Gives the delegation the agents this host serves and the way to open one for a task.
+    fn attach_delegation(&self) {
+        let Some(delegation) = &self.shared.delegation else {
+            return;
+        };
+        let agents = self
+            .listening
+            .iter()
+            .filter(|listening| listening.kind == "agent")
+            .map(|listening| delegate::Source {
+                name: listening.name.clone(),
+                title: listening.title.clone(),
+            })
+            .collect();
+        delegation.attach(Arc::new(DelegationHost {
+            shared: Arc::downgrade(&self.shared),
+            served: self.local().served,
+            agents,
+        }));
     }
 
     /// The method every entry proves by: its identity's.
@@ -1349,12 +1424,18 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
     let checked = peer;
     let sealed = Sealed::new(channel, established.session)
         .with_check(move || !stopped.load(Ordering::SeqCst) && store.is_accepted(&checked));
-    serve_proven(shared, served, &sealed, &peer);
+    serve_proven(shared, served, &sealed, &peer, None);
     sealed.close();
 }
 
 /// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after.
-fn serve_proven<C: Channel>(shared: &Shared, served: &Served, sealed: &C, peer: &PeerId) {
+fn serve_proven<C: Channel>(
+    shared: &Shared,
+    served: &Served,
+    sealed: &C,
+    peer: &PeerId,
+    context: Option<&delegate::ChildContext>,
+) {
     let Some(_running) = served.running.enter() else {
         tracing::info!(entry = served.name, %peer, "turned away: max_peers are running");
         return;
@@ -1386,7 +1467,13 @@ fn serve_proven<C: Channel>(shared: &Shared, served: &Served, sealed: &C, peer: 
         Ok(Some(first)) => {
             tracing::info!(entry = served.name, %peer, "proven");
             let copy = first.clone();
-            give_agent(shared, served, &Prefilled::new(sealed, first), &copy, peer);
+            give_agent(
+                shared,
+                served,
+                &Prefilled::new(sealed, first),
+                (&copy, peer),
+                context,
+            );
         }
         Ok(None) | Err(_) => {}
     }
@@ -1396,8 +1483,8 @@ fn give_agent<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
-    first: &[u8],
-    peer: &PeerId,
+    (first, peer): (&[u8], &PeerId),
+    context: Option<&delegate::ChildContext>,
 ) {
     let (agent, scope, offer) = match &served.run {
         Run::Agent {
@@ -1424,6 +1511,31 @@ fn give_agent<C: Channel>(
             return control::serve(&shared.control, &caller, channel);
         }
     };
+    // What lets this connection's sessions hand tasks to other sources: for a task's own connection, what the host bounded it by.
+    let conn = shared.delegation.as_ref().map(|delegation| {
+        delegation.connection(match context {
+            Some(context) => delegate::ConnInfo {
+                principal: context.principal.clone(),
+                entry: served.name.clone(),
+                roots: context.roots.clone(),
+                depth: context.depth,
+                child: true,
+            },
+            None => delegate::ConnInfo {
+                principal: if *peer == shared.method.peer_id() {
+                    Principal::Owner
+                } else {
+                    Principal::Key(*peer)
+                },
+                entry: served.name.clone(),
+                roots: scope.roots().to_vec(),
+                depth: 0,
+                child: false,
+            },
+        })
+    });
+    let peeked = Peek::new(channel, conn.as_ref());
+    let channel = &peeked;
     let connection = match offer {
         Some(offer) => match prepare(
             served,
@@ -1449,7 +1561,7 @@ fn give_agent<C: Channel>(
                 (peer, first),
                 options,
                 scope,
-                connection.as_ref(),
+                (connection.as_ref(), conn.as_ref()),
             );
         }
     };
@@ -1462,7 +1574,8 @@ fn give_agent<C: Channel>(
                 return tracing::warn!(entry = served.name, "the agent could not start: {error}");
             }
         };
-        let end = relay(&Scoped::new(channel, scope).agent(agent.pid()), &agent);
+        let scoped = Scoped::new(channel, scope).agent(agent.pid());
+        let end = relay(&Delegating::new(&scoped, conn.as_ref()), &agent);
         tracing::info!(entry = served.name, %peer, "left: {end:?}");
         shared.forget(key);
         let _ = agent.stop();
@@ -1484,7 +1597,7 @@ fn give_agent<C: Channel>(
         }
     };
     let hosted = Hosted::new(channel, scope, &connection).agent(agent.pid());
-    let end = relay(&hosted, &agent);
+    let end = relay(&Delegating::new(&hosted, conn.as_ref()), &agent);
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
     let _ = agent.stop();
@@ -1725,7 +1838,7 @@ fn give_harness<C: Channel>(
     (peer, first): (&PeerId, &[u8]),
     harness: &kind::Harness,
     scope: &Scope,
-    connection: Option<&Connection>,
+    (connection, conn): (Option<&Connection>, Option<&Arc<delegate::Conn>>),
 ) {
     let turn_away = |why: String| {
         let id = serde_json::from_slice::<serde_json::Value>(first)
@@ -1781,14 +1894,14 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner, started.keeper);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &Hosted::in_process(&gated, scope, connection),
+            &Delegating::new(&Hosted::in_process(&gated, scope, connection), conn),
             &*started.harness,
             to_provider,
             MAX_LINE,
             &control,
         ),
         None => inproc::serve_kind(
-            &Scoped::new(&gated, scope),
+            &Delegating::new(&Scoped::new(&gated, scope), conn),
             &*started.harness,
             to_provider,
             MAX_LINE,

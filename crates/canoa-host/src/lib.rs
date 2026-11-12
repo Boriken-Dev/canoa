@@ -8,6 +8,7 @@ mod child;
 pub mod cli;
 pub mod config;
 pub mod control;
+mod delegate;
 pub mod harness;
 pub mod home;
 mod inproc;
@@ -29,10 +30,13 @@ mod worktree;
 
 pub use accounts::ACCOUNT_META;
 pub use config::{
-    AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig, Entry,
-    EntryKind, HarnessOptions, Listen, Origin, Settings, StoreConfig, UsageSource, WebConfig,
-    cache_lifetime_name, cache_lifetime_named,
+    AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
+    DelegateConfig, Entry, EntryKind, HarnessOptions, Listen, Origin, Settings, StoreConfig,
+    UsageSource, WebConfig, cache_lifetime_name, cache_lifetime_named,
 };
+/// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
+/// with its task id, title and source.
+pub const DELEGATE_META: &str = delegate::META;
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use kind::CACHE_META;

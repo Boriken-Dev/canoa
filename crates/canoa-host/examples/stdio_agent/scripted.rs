@@ -14,9 +14,17 @@
 //! JSON-RPC error whose message is TEXT, `fail-data TEXT` with a plain message and TEXT in the error's data, and `refuse TEXT`
 //! says TEXT and ends the turn `refusal`: how a limit reaches a client from an agent that reports no usage. `--system-prompt`
 //! says it takes a system prompt with a new session and notes the one it is given, as the session's `system`.
+//!
+//! Delegation: `--mcp-http` advertises HTTP MCP servers, and `--modes=a,b,c` lists the modes of its mode option (the first is the
+//! default). A session given the host's `canoa-delegate` entry can call its tools: `Delegate SOURCE TEXT`, `DelegateIn FOLDER
+//! SOURCE TEXT`, `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
+//! session is in, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
+//! to PATH and waits for a cancel, `Bearer` says the tool server's address and the session's bearer (a stand-in may; the host never
+//! does), `Pid` says its process id and `Cwd` the working directory the session was opened in. `--marker=PATH` appends the process id
+//! to PATH each time the agent starts, so a test can tell whether one did.
 
 use std::collections::HashMap;
-use std::io::{BufRead as _, Write as _};
+use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::PathBuf;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -51,6 +59,14 @@ struct Shared {
     turn: Mutex<Option<Value>>,
     /// The usage extension, when this agent speaks it.
     usage: Option<Usage>,
+    /// The modes its mode option lists.
+    modes: Vec<String>,
+    /// Whether it takes MCP servers over HTTP.
+    http: bool,
+    /// Each session's address and bearer for the host's delegation tools.
+    tools: Mutex<HashMap<String, (String, String)>>,
+    /// The working directory each session was opened in.
+    cwds: Mutex<HashMap<String, String>>,
 }
 
 /// What the usage extension keeps: the client's opt-in and the one window it reports.
@@ -226,8 +242,9 @@ impl Shared {
                 .unwrap_or_else(|| json!(default))
         };
         json!([
-            {"id": "mode", "name": "Mode", "category": "mode", "type": "select", "currentValue": pick("mode", "ask"),
-             "options": [{"value": "ask", "name": "Ask first"}, {"value": "edits", "name": "Accept edits"}]},
+            {"id": "mode", "name": "Mode", "category": "mode", "type": "select",
+             "currentValue": pick("mode", self.modes.first().map_or("ask", String::as_str)),
+             "options": self.modes.iter().map(|mode| json!({"value": mode, "name": mode})).collect::<Vec<_>>()},
             {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": pick("model", "default"),
              "options": [{"value": "default", "name": "Default model"}, {"value": "fast", "name": "Fast"},
                          {"value": "refuse-me", "name": "Refused"}]},
@@ -345,6 +362,111 @@ impl Shared {
         answer
     }
 
+    /// One call of the host's tool server, as an MCP client does it: the text the tool answered, or the failure.
+    fn tool_call(&self, session: &str, name: &str, arguments: &Value) -> String {
+        let Some((url, token)) = lock(&self.tools).get(session).cloned() else {
+            return "this session has no delegation tools".to_owned();
+        };
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments}});
+        match post(&url, &token, &body.to_string()) {
+            Ok((200, text)) => {
+                let answer: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+                let said = answer["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap_or(&text);
+                if answer["result"]["isError"] == true {
+                    format!("error: {said}")
+                } else {
+                    said.to_owned()
+                }
+            }
+            Ok((status, text)) => format!("http {status}: {text}"),
+            Err(error) => format!("no answer: {error}"),
+        }
+    }
+
+    /// The prompts of a session that delegates, or that a task is; `None` for any other.
+    fn delegated(&self, session: &str, text: &str, blocks: usize) -> Option<&'static str> {
+        let (word, rest) = text.split_once(' ').unwrap_or((text, ""));
+        let said = match word {
+            "Delegate" => {
+                let (source, task) = rest.split_once(' ').unwrap_or((rest, ""));
+                self.tool_call(
+                    session,
+                    "delegate_task",
+                    &json!({"source": source, "task": task}),
+                )
+            }
+            "DelegateIn" => {
+                let mut words = rest.splitn(3, ' ');
+                let (folder, source, task) = (
+                    words.next().unwrap_or(""),
+                    words.next().unwrap_or(""),
+                    words.next().unwrap_or(""),
+                );
+                self.tool_call(
+                    session,
+                    "delegate_task",
+                    &json!({"source": source, "task": task, "folder": folder}),
+                )
+            }
+            "Status" => {
+                let (id, wait) = rest.split_once(' ').unwrap_or((rest, "0"));
+                let wait: u64 = wait.trim().parse().unwrap_or(0);
+                self.tool_call(
+                    session,
+                    "task_status",
+                    &json!({"taskId": id, "wait_ms": wait}),
+                )
+            }
+            "Cancel" => self.tool_call(session, "cancel", &json!({"taskId": rest.trim()})),
+            "Call" => {
+                let (name, arguments) = rest.split_once(' ').unwrap_or((rest, "{}"));
+                let arguments = serde_json::from_str(arguments).unwrap_or(Value::Null);
+                self.tool_call(session, name, &arguments)
+            }
+            "Mode" => {
+                let mode = lock(&self.chosen)
+                    .get(session)
+                    .and_then(|chosen| chosen.get("mode"))
+                    .and_then(Value::as_str)
+                    .or_else(|| self.modes.first().map(String::as_str))
+                    .unwrap_or("")
+                    .to_owned();
+                format!("mode: {mode}")
+            }
+            "Verbatim" => {
+                let count = blocks;
+                format!("blocks={count} text={text}")
+            }
+            "Pid" => format!("pid: {}", std::process::id()),
+            "Cwd" => format!(
+                "cwd: {}",
+                lock(&self.cwds).get(session).cloned().unwrap_or_default()
+            ),
+            "Bearer" => match lock(&self.tools).get(session) {
+                Some((url, token)) => format!("{url} {token}"),
+                None => "no bearer".to_owned(),
+            },
+            "Wait" | "PidFile" => {
+                if word == "PidFile" {
+                    let _ = std::fs::write(rest.trim(), std::process::id().to_string());
+                }
+                while lock(&self.turn).is_some() {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                return Some("cancelled");
+            }
+            _ => return None,
+        };
+        self.update(
+            session,
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": said}}),
+        );
+        Some("end_turn")
+    }
+
     fn prompt(&self, session: &str, blocks: &Value) -> &'static str {
         let text = prompt_text(blocks);
         let blocks = blocks.as_array().cloned().unwrap_or_default();
@@ -358,6 +480,9 @@ impl Shared {
                     .to_owned()
             })
             .collect();
+        if let Some(stop) = self.delegated(session, &text, blocks.len()) {
+            return stop;
+        }
         self.remember(session, "user", &text, &attached);
         if let Some(usage) = &self.usage
             && let Some(used) = text
@@ -574,6 +699,9 @@ impl Shared {
                 if self.system_prompt {
                     agent["sessionCapabilities"]["systemPrompt"] = json!({});
                 }
+                if self.http {
+                    agent["mcpCapabilities"] = json!({"http": true});
+                }
                 if self.usage.is_some() {
                     agent["_meta"] = json!({USAGE_CAPABILITY: {"version": 1, "sources": ["reported"], "spend": false}});
                 }
@@ -603,6 +731,25 @@ impl Shared {
                     );
                     created
                 });
+                lock(&self.cwds).insert(
+                    created.clone(),
+                    params["cwd"].as_str().unwrap_or("").to_owned(),
+                );
+                for server in params["mcpServers"].as_array().into_iter().flatten() {
+                    let bearer = server["headers"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|header| header["name"] == "Authorization")
+                        .and_then(|header| header["value"].as_str())
+                        .and_then(|value| value.strip_prefix("Bearer "));
+                    if server["name"] == "canoa-delegate"
+                        && let (Some(url), Some(token)) = (server["url"].as_str(), bearer)
+                    {
+                        lock(&self.tools)
+                            .insert(created.clone(), (url.to_owned(), token.to_owned()));
+                    }
+                }
                 self.send(json!({"id": id, "result": {
                     "sessionId": created, "configOptions": self.config_options(&created)}}));
                 self.update(
@@ -735,11 +882,52 @@ pub fn run(args: &[String]) {
             claims: option_of(args, "usage-claims"),
             state: Mutex::new(UsageState::default()),
         }),
+        modes: option_of(args, "modes").map_or_else(
+            || vec!["ask".to_owned(), "edits".to_owned()],
+            |list| list.split(',').map(str::to_owned).collect(),
+        ),
+        http: args.iter().any(|arg| arg == "--mcp-http"),
+        tools: Mutex::new(HashMap::new()),
+        cwds: Mutex::new(HashMap::new()),
     });
+    if let Some(marker) = option_of(args, "marker")
+        && let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(marker)
+    {
+        let _ = writeln!(file, "{}", std::process::id());
+    }
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { return };
         if let Ok(message) = serde_json::from_str::<Value>(&line) {
             shared.handle(&message);
         }
     }
+}
+
+/// One HTTP POST to the host's tool server with a bearer, on a connection of its own: the status and the body.
+fn post(url: &str, token: &str, body: &str) -> std::io::Result<(u16, String)> {
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    let (authority, path) = match rest.split_once('/') {
+        Some((authority, path)) => (authority, format!("/{path}")),
+        None => (rest, "/".to_owned()),
+    };
+    let mut stream = std::net::TcpStream::connect(authority)?;
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\n\
+         Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )?;
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer)?;
+    let status = answer
+        .split(' ')
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+    let body = answer.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+    Ok((status, body.to_owned()))
 }

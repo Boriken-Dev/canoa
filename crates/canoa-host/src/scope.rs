@@ -53,6 +53,11 @@ pub(crate) enum Verdict {
 }
 
 impl Scope {
+    /// The directories this scope confines a client to; none leaves it unconfined.
+    pub(crate) fn roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
     pub(crate) fn new(roots: Vec<PathBuf>) -> Self {
         Self {
             roots,
