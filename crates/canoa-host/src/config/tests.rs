@@ -1252,3 +1252,57 @@ fn the_store_table_holds_two_lists_as_text_or_lists() {
     assert!(parse("[host.store]\nprotected = 3\n").is_err());
     assert!(parse("[host.store]\nother = 1\n").is_err());
 }
+
+#[test]
+fn an_overlays_hooks_are_allowed_at_a_digest_by_a_profile_or_by_an_agents_table() {
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let config = parse(&format!(
+        "[host.profiles.p]\noverlays = [\"team\"]\nallow_hooks = {{ team = \"{digest}\" }}\n\
+         [agents.Claude.hooks]\nteam = \"{digest}\"\n"
+    ))
+    .expect("parses");
+    assert_eq!(config.profiles["p"].allow_hooks["team"], digest);
+    let claude = config
+        .local_profiles
+        .for_agent("Claude")
+        .expect("a profile for Claude");
+    assert_eq!(claude.allow_hooks["team"], digest);
+    assert!(
+        config
+            .local_profiles
+            .for_agent("Codex")
+            .is_none_or(|codex| codex.allow_hooks.is_empty()),
+        "an agent's allowance is its own"
+    );
+}
+
+#[test]
+fn an_allowance_that_is_not_a_digest_or_names_no_overlay_is_refused_naming_the_setting() {
+    for (text, what) in [
+        (
+            "[host.profiles.p]\nallow_hooks = { team = \"yes\" }\n",
+            "allow_hooks.team",
+        ),
+        (
+            "[host.profiles.p]\nallow_hooks = { team = true }\n",
+            "allow_hooks.team",
+        ),
+        (
+            "[host.profiles.p]\nallow_hooks = [\"team\"]\n",
+            "allow_hooks",
+        ),
+        (
+            "[host.profiles.p]\nallow_hooks = { \"../up\" = \"sha256:0000000000000000000000000000000000000000000000000000000000000000\" }\n",
+            "allow_hooks",
+        ),
+        (
+            "[agents.Claude.hooks]\nteam = \"sha256:12\"\n",
+            "agents.Claude.hooks.team",
+        ),
+        ("[agents.Claude]\nhooks = 3\n", "agents.Claude.hooks"),
+    ] {
+        let said = parse(text).expect_err(text).to_string();
+        assert!(said.contains(what), "{text}: {said}");
+        assert!(!said.contains("sha256:12"), "never a value: {said}");
+    }
+}

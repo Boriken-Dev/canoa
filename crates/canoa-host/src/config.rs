@@ -85,6 +85,8 @@ pub struct AgentProfile {
     pub profile: Option<Profile>,
     /// For an MCP server of the profile: on or off, or the definition digest an overlay's or a project's server is allowed at.
     pub mcp: BTreeMap<String, McpChoice>,
+    /// An overlay's name and the tree digest (`sha256:` and 64 hex digits) its hooks are allowed at: `[agents.NAME.hooks]`.
+    pub hooks: BTreeMap<String, String>,
 }
 
 /// What the person chose for an MCP server of an agent.
@@ -108,7 +110,7 @@ impl LocalProfiles {
         if self.profile.is_none()
             && self.overlays.is_empty()
             && own.is_none()
-            && layer.is_none_or(|layer| layer.mcp.is_empty())
+            && layer.is_none_or(|layer| layer.mcp.is_empty() && layer.hooks.is_empty())
         {
             return None;
         }
@@ -129,6 +131,7 @@ impl LocalProfiles {
             profile: self.profile.clone().unwrap_or_default(),
             overlays: self.overlays.clone(),
             allow_mcp,
+            allow_hooks: layer.map(|layer| layer.hooks.clone()).unwrap_or_default(),
             agent: own.map(|profile| (agent.to_owned(), profile)),
             off_mcp,
             directory: self.directory.clone(),
@@ -288,6 +291,9 @@ pub struct HostProfile {
     /// An overlay's MCP server name and the definition digest (`sha256:` and 64 hex digits) it may start at. No other
     /// overlay server starts.
     pub allow_mcp: BTreeMap<String, String>,
+    /// An overlay's name and the tree digest (`sha256:` and 64 hex digits) its hooks are allowed at. No other overlay's hooks
+    /// run unless the person allows them for a session when the host asks.
+    pub allow_hooks: BTreeMap<String, String>,
     /// The agent's own layer above the profile, with the agent's label: `[agents.NAME.profile]`.
     pub agent: Option<(String, Profile)>,
     /// Servers of the profile turned off, whichever layer they come from.
@@ -1601,12 +1607,20 @@ fn profile_of(
         }
         Some(_) => return Err(refused("allow_mcp has the wrong type".to_owned())),
     }
+    let allow_hooks = match table.remove("allow_hooks") {
+        None => BTreeMap::new(),
+        Some(toml::Value::Table(allowed)) => {
+            hook_allowances(allowed).map_err(|what| refused(format!("allow_hooks{what}")))?
+        }
+        Some(_) => return Err(refused("allow_hooks has the wrong type".to_owned())),
+    };
     let profile =
         Profile::from_table(table, LayerKind::User).map_err(|error| refused(error.to_string()))?;
     Ok(HostProfile {
         profile,
         overlays,
         allow_mcp,
+        allow_hooks,
         agent: None,
         off_mcp: BTreeSet::new(),
         directory: directory.to_owned(),
@@ -1674,7 +1688,15 @@ fn local_profiles_of(
             }
             Some(_) => return Err(invalid(format!("agents.{label}.mcp is not a table"))),
         }
-        if layer.profile.is_some() || !layer.mcp.is_empty() {
+        match table.get("hooks") {
+            None => {}
+            Some(toml::Value::Table(allowed)) => {
+                layer.hooks = hook_allowances(allowed.clone())
+                    .map_err(|what| invalid(format!("agents.{label}.hooks{what}")))?;
+            }
+            Some(_) => return Err(invalid(format!("agents.{label}.hooks is not a table"))),
+        }
+        if layer.profile.is_some() || !layer.mcp.is_empty() || !layer.hooks.is_empty() {
             by_agent.insert(label.clone(), layer);
         }
     }
@@ -1684,6 +1706,24 @@ fn local_profiles_of(
         agents: by_agent,
         directory,
     })
+}
+
+/// A table of overlay names and the tree digests their hooks are allowed at. The error completes a setting's name and never
+/// quotes a value.
+fn hook_allowances(allowed: toml::Table) -> Result<BTreeMap<String, String>, String> {
+    let mut out = BTreeMap::new();
+    for (overlay, digest) in allowed {
+        if !coqui_aos::valid_overlay_name(&overlay) {
+            return Err(" names something that is not an overlay's name".to_owned());
+        }
+        match digest {
+            toml::Value::String(text) if is_digest(&text) => {
+                out.insert(overlay, text);
+            }
+            _ => return Err(format!(".{overlay} is not sha256: and 64 hex digits")),
+        }
+    }
+    Ok(out)
 }
 
 /// `sha256:` and 64 lower-case hex digits.
