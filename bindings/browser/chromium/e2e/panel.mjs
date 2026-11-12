@@ -131,7 +131,7 @@ try {
     const { markActing } = await import(chrome.runtime.getURL("tab-marks.js"));
     try {
       const result = await tools.dispatchBrowserTool({ name: ${JSON.stringify(name)}, args: { tabId: ${tabId} }, peerId: "${PEER}", trustedPeers: new Set(["${PEER}"]), grants: await readGrants() });
-      await markActing({ tabId: ${tabId}, label: "Panel agent" });
+      await markActing({ tabId: ${tabId}, peer: "${PEER}", label: "Panel agent" });
       return { ok: true, title: result?.title };
     } catch (error) {
       return { ok: false, why: String(error.message) };
@@ -222,6 +222,37 @@ try {
     assert.equal((await act(b.tabId)).ok, true);
     assert.deepEqual((await groupTitleOf(b.tabId))?.[0], "Mine");
     await send({ type: "canoa.tabs.detach", sessionId: "s3" });
+  });
+  await check("a detach with no session ends no one's grants", async () => {
+    const ordinary = { direction: "agent-to-page", peerId: PEER, tabId: b.tabId, origin: base, capability: "browser.read", expiresAt: Date.now() + 600_000 };
+    await sw.run(`chrome.storage.session.get("canoa_grants").then((held) => chrome.storage.session.set({ canoa_grants: [...(held.canoa_grants ?? []), ${JSON.stringify(ordinary)}] })).then(() => true)`);
+    for (const message of [{ type: "canoa.tabs.detach" }, { type: "canoa.tabs.detach", sessionId: "" }, { type: "canoa.tabs.detach", sessionId: 7 }]) {
+      assert.ok((await send(message)).error, JSON.stringify(message));
+    }
+    assert.equal((await act(b.tabId)).ok, true);
+    await sw.run(`chrome.storage.session.set({ canoa_grants: [] }).then(() => true)`);
+  });
+  await check("a tab the person moved to a group of their own stays there when the share ends", async () => {
+    await sw.run(`chrome.tabs.ungroup(${b.tabId}).then(() => true)`);
+    await send({ type: "canoa.tabs.attach", sessionId: "s4", tabId: b.tabId });
+    await send({ type: "canoa.tabs.share", sessionId: "s4", tabId: b.tabId, peerId: PEER });
+    assert.equal((await act(b.tabId)).ok, true);
+    assert.equal((await groupTitleOf(b.tabId))?.[0], "Panel agent");
+    await sw.run(`chrome.tabs.group({ tabIds: [${b.tabId}] }).then((groupId) => chrome.tabGroups.update(groupId, { title: "Moved" })).then(() => true)`);
+    await send({ type: "canoa.tabs.unshare", sessionId: "s4", tabId: b.tabId });
+    await sleep(1000);
+    assert.equal((await groupTitleOf(b.tabId))?.[0], "Moved");
+    await sw.run(`chrome.tabs.ungroup(${b.tabId}).then(() => true)`);
+    await send({ type: "canoa.tabs.detach", sessionId: "s4" });
+  });
+  await check("when the agent's group has been closed, the next tool call makes a new one", async () => {
+    await send({ type: "canoa.tabs.attach", sessionId: "s5", tabId: b.tabId });
+    await send({ type: "canoa.tabs.share", sessionId: "s5", tabId: b.tabId, peerId: PEER });
+    assert.equal((await act(b.tabId)).ok, true);
+    await sw.run(`chrome.tabs.ungroup(${b.tabId}).then(() => true)`);
+    assert.equal((await act(b.tabId)).ok, true);
+    assert.deepEqual((await groupTitleOf(b.tabId))?.[0], "Panel agent");
+    await send({ type: "canoa.tabs.detach", sessionId: "s5" });
   });
   await shoot(panel, "panel_page");
   exitCode = results.some((line) => line.startsWith("FAIL")) ? 1 : 0;
