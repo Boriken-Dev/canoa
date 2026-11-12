@@ -4,13 +4,12 @@
 import 'dart:async';
 import 'dart:io' show Directory;
 
-import 'package:canoa/acp/agent_commands.dart';
-import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/session_options.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/drafts/draft_store.dart';
+import 'package:canoa/desktop/host_tool.dart' show HostLink;
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_icons.dart';
@@ -23,7 +22,7 @@ import 'fixtures/app_fixture.dart';
 import 'fixtures/fake_host.dart';
 import 'fixtures/options_agent.dart';
 
-const _source = AgentSource.command(scripted);
+const _source = AgentSource.hosted('Scripted', local: true);
 
 /// The line `canoa serve` prints for an agent entry it serves.
 String _serving(String name) =>
@@ -63,18 +62,34 @@ final class _HeldStart {
   bool get waiting => !_go.isCompleted;
   void go() => _go.complete();
 
-  Future<VerifiedAgent> call(AgentCommand command, {AgentDecider? decider, AgentElicitor? elicitor, String? workingDirectory,
-      Map<String, String> environment = const {}}) async {
-    await _go.future;
-    return agent.start(command, decider: decider, elicitor: elicitor, workingDirectory: workingDirectory, environment: environment);
+  /// The agent's link, whose first message waits until [go].
+  HostLink open(String name) => _HeldLink(agent.openLink(name), _go.future);
+}
+
+final class _HeldLink implements HostLink {
+  _HeldLink(this._inner, this._go);
+
+  final HostLink _inner;
+  final Future<void> _go;
+
+  @override
+  Stream<String> get messages => _inner.messages;
+
+  @override
+  Future<void> send(String message) async {
+    await _go;
+    return _inner.send(message);
   }
+
+  @override
+  Future<void> close() => _inner.close();
 }
 
 void main() {
   testWidgets('a second Send while the first message is still being delivered sends nothing', (tester) async {
     final agent = OptionsAgent()..holdChoices = true;
     final store = _remembering();
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await pick(tester, 'option-model', 'Opus');
@@ -97,7 +112,7 @@ void main() {
     final held = _HeldStart(OptionsAgent());
     final agent = held.agent;
     final store = _remembering();
-    await pumpApp(tester, store, startAgent: held.call);
+    await pumpApp(tester, store, linked: held.open);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     final first = store.selected!;
@@ -118,7 +133,7 @@ void main() {
   testWidgets('a message the agent cannot be given stays in the composer, with what goes with it', (tester) async {
     final agent = OptionsAgent();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await send(tester, 'Say hello');
@@ -136,7 +151,7 @@ void main() {
   testWidgets('a first message the started agent cannot be given says so, not that nothing started, and stays', (tester) async {
     final agent = OptionsAgent();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     final session = store.selected!;
@@ -180,7 +195,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final folders = ['/work/repo', '/work/plain'];
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, worktrees: worktrees, pickFolder: () async => folders.removeAt(0));
+    await pumpApp(tester, store, linked: agent.openLink, worktrees: worktrees, pickFolder: () async => folders.removeAt(0));
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -199,7 +214,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final shell = _Shell();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: held.call, worktrees: worktrees, shell: shell);
+    await pumpApp(tester, store, linked: held.open, worktrees: worktrees, shell: shell);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -219,7 +234,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final keeper = DraftKeeper(MemoryDraftBackend());
     final store = SessionStore(includePreview: false, drafts: keeper, ledger: SessionLedger(MemoryLedgerBackend()));
-    await pumpApp(tester, store, startAgent: held.call, worktrees: worktrees);
+    await pumpApp(tester, store, linked: held.open, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -232,28 +247,11 @@ void main() {
     held.go();
     await until(tester, () => worktrees.removed.isNotEmpty, 'the worktree to be taken back');
     await tester.runAsync(keeper.flush);
-    expect(held.agent.clients.single.isClosed, isTrue);
+    expect(held.agent.links.single.closed, isTrue);
     expect(held.agent.methods, isNot(contains('session/prompt')));
     expect(await (keeper.backend as MemoryDraftBackend).ids(), isEmpty);
     expect(store.ledger!.entries, isEmpty);
     expect(store.sessions, isEmpty);
-    await finish(tester);
-  });
-
-  testWidgets('a declined profile says once that it did not start', (tester) async {
-    final agent = OptionsAgent();
-    final store = SessionStore(includePreview: false);
-    final config = CanoaConfig.parse('[agents.Scripted]\nprogram = "scripted-agent"\nargs = ["--acp"]\n\n'
-        '[profile]\ncontext = { text = "Be brief." }\n');
-    await pumpApp(tester, store, config: config, startAgent: agent.start, linked: agent.openLink);
-    await newSession(tester);
-    await chooseSource(tester, 'Scripted');
-    await send(tester, 'Hello');
-    await until(tester, () => find.text('Cancel').evaluate().isNotEmpty, 'the profile dialog');
-    await tester.tap(find.text('Cancel'));
-    await settle(tester);
-    expect(store.selected!.messages.map((message) => message.text), ['Not started: its profile was not accepted']);
-    expect(agent.starts, isEmpty);
     await finish(tester);
   });
 
@@ -267,7 +265,7 @@ void main() {
     await newSession(tester);
     await chooseSource(tester, 'hosted');
     await settle(tester, 200);
-    expect(store.selected!.source?.kind, SourceKind.hosted);
+    expect(store.selected!.source?.local, isFalse);
     expect(store.selected!.pending, isEmpty);
     await finish(tester);
   });
@@ -330,24 +328,13 @@ void main() {
 
   test('a draft restored before the host served its source gets the source when the host does', () {
     final store = SessionStore(includePreview: false);
-    final draft = store.createDraft(keptSource: (kind: 'hosted', label: 'late'));
-    store.resolveKeptSources((kind, label) => null);
+    final draft = store.createDraft(keptSource: 'late');
+    store.resolveKeptSources((label) => null);
     expect(draft.source, isNull);
-    store.resolveKeptSources((kind, label) => AgentSource.hosted(label));
+    store.resolveKeptSources((label) => AgentSource.hosted(label));
     expect(draft.source, const AgentSource.hosted('late'));
     expect(draft.keptSource, isNull);
     expect(draft.agent, 'late');
-  });
-
-  test('what a source offered is its own, not another\'s of the same name', () {
-    final ledger = SessionLedger(MemoryLedgerBackend())
-      ..rememberSource(sourceKey(const AgentSource.command(AgentCommand(label: 'Same', program: 'x'))),
-          options: OptionsAgentOptions.parsed, images: true, files: true);
-    final store = SessionStore(includePreview: false, ledger: ledger);
-    final command = store.createDraft(source: const AgentSource.command(AgentCommand(label: 'Same', program: 'x')));
-    final hosted = store.createDraft(source: const AgentSource.hosted('Same'));
-    expect(store.optionsOf(command), isNotEmpty);
-    expect(store.optionsOf(hosted), isEmpty);
   });
 
   test('a choice made before the start that the agent took is the source\'s last choice', () async {
@@ -389,14 +376,14 @@ void main() {
     await before.drafts!.flush();
 
     final without = SessionStore(includePreview: false, drafts: DraftKeeper(backend));
-    await without.restoreDrafts((kind, label) => null);
+    await without.restoreDrafts((label) => null);
     final orphan = without.sessions.single;
     expect(orphan.source, isNull);
     without.keepDraftText(orphan, 'still here');
     await without.drafts!.flush();
 
     final again = SessionStore(includePreview: false, drafts: DraftKeeper(backend));
-    await again.restoreDrafts((kind, label) => kind == 'command' && label == 'Scripted' ? _source : null);
+    await again.restoreDrafts((label) => label == 'Scripted' ? _source : null);
     expect((again.sessions.single.source, again.sessions.single.draftText), (_source, 'still here'));
   });
 }

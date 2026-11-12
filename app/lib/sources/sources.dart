@@ -1,26 +1,15 @@
-import '../acp/agent_commands.dart';
 import '../desktop/host_tool.dart';
 
-/// Where a source's agent comes from: a command from canoa.cfg's `[agents.NAME]` that this app starts, or an agent entry of
-/// the `canoa` this app runs, which is either one of the host's own sources or one canoa.cfg names.
-enum SourceKind { command, hosted }
-
-/// One way to run an agent, as Settings lists it and the new-session picker offers it.
+/// One way to run an agent, as Settings lists it and the new-session picker offers it: an agent entry of the `canoa` this app
+/// runs, which is one of the host's own sources (a built-in one, or a command of canoa.cfg's `[agents.NAME]`), or an entry
+/// canoa.cfg's `[host]` names.
 final class AgentSource {
-  const AgentSource.command(AgentCommand this.command)
-      : kind = SourceKind.command, hostEntry = null, harness = null, title = null, local = false;
-  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title, this.local = false})
-      : kind = SourceKind.hosted, command = null;
+  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title, this.local = false});
 
-  final SourceKind kind;
-
-  /// The program and its arguments, and what else it needs, for a source this app starts.
-  final AgentCommand? command;
-
-  /// The name of the `[host]` agent entry, for a source `canoa` serves.
+  /// The name of the agent entry the host serves.
   final String? hostEntry;
 
-  String get label => command?.label ?? hostEntry!;
+  String get label => hostEntry!;
 
   /// The provider id of a hosted `harness` entry; null for any other entry.
   final String? harness;
@@ -34,14 +23,11 @@ final class AgentSource {
   /// What a person is shown: a hosted entry's title, else its name. [label] stays the identity, which sessions remember.
   String get displayName => title ?? label;
 
-  /// Whether this app starts the program itself, on this computer.
-  bool get runsHere => command != null;
+  @override
+  bool operator ==(Object other) => other is AgentSource && other.label == label;
 
   @override
-  bool operator ==(Object other) => other is AgentSource && other.kind == kind && other.label == label;
-
-  @override
-  int get hashCode => Object.hash(kind, label);
+  int get hashCode => label.hashCode;
 }
 
 /// The sources the host lists: each agent entry it is serving, in its order. An entry added to canoa.cfg, a harness entry
@@ -80,27 +66,5 @@ final class SourceCheck {
       words.length < 2 ? words.join() : '${words.sublist(0, words.length - 1).join(', ')} and ${words.last}';
 }
 
-/// Finds a program the way a command is found, answering its absolute path or null.
-typedef ProgramLookup = Future<String?> Function(String program);
-
-/// Whether [command]'s program can be found.
-Future<SourceCheck> checkCommand(AgentCommand command, ProgramLookup find) async {
-  final found = <String, String>{};
-  final missing = <String>[];
-  for (final program in commandNeeds(command)) {
-    final path = await find(program);
-    if (path == null) {
-      missing.add(program);
-    } else {
-      found[program] = path;
-    }
-  }
-  return SourceCheck(found: found, missing: missing);
-}
-
-/// The programs a command runs.
-List<String> commandNeeds(AgentCommand command) => [command.program];
-
-/// What the session list keeps a source's memory under: its label, and for a hosted entry the host's name before it, since a
-/// preset and a hosted entry can share a label.
-String sourceKey(AgentSource source) => source.kind == SourceKind.hosted ? 'canoa/${source.label}' : source.label;
+/// What the session list keeps a source's memory under: its label, which the host keeps unique among its entries.
+String sourceKey(AgentSource source) => source.label;

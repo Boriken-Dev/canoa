@@ -1,22 +1,9 @@
-import 'agent_commands.dart';
-import 'client.dart';
-
 /// A page cannot start a program.
 const bool canRunLocalAgents = false;
-
-Future<bool> isInstalled(AgentCommand command) async => false;
 
 Future<String?> findProgram(String program, {List<String> searchDirs = const []}) async => null;
 
 String? environmentVariable(String name) => null;
-
-Future<VerifiedAgent> startLocalAgent(
-  AgentCommand command, {
-  AgentDecider? decider,
-  AgentElicitor? elicitor,
-  String? workingDirectory,
-  Map<String, String> environment = const {},
-}) => throw const AcpFailure('A page cannot start a program');
 
 Future<List<int>> readLocalFile(String path) => throw UnsupportedError('A page cannot read a file by its path');
 

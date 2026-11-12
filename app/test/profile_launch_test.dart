@@ -15,6 +15,7 @@ import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'fixtures/process_agent.dart';
 
 late Directory temp;
 final running = <ProfiledAgent>[];
@@ -62,7 +63,7 @@ Future<(ChatSession, Map<String, dynamic>, ProfiledAgent)> launch(String label, 
   final (prepared, home) = await prepare(label);
   final store = SessionStore(includePreview: false);
   final started = await startProfiled(command, cwd: temp.path, prepared: prepared, mcpOn: {'marker'}, files: home,
-      decider: store.askPermission);
+      decider: store.askPermission, start: startProcessAgent);
   running.add(started);
   final opened = await started.client.openSession(cwd: temp.path, setup: started.launch.setup);
   final session = store.addProviderSession(title: label, agent: label, peerId: started.client.peerId,

@@ -2,17 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import '../sources/sources.dart' show commandNeeds;
-import 'agent_commands.dart';
-import 'client.dart';
 
 const bool canRunLocalAgents = true;
-
-/// What a child may say on standard error before the oldest goes, for saying why it would not start.
-const int _maxStderr = 8 * 1024;
-
-/// How long a child gets to leave on its own once its input closes.
-const Duration _leaving = Duration(seconds: 2);
 
 /// A `.cmd` such as `npx` on Windows can only be started through a shell.
 final bool _useShell = Platform.isWindows;
@@ -78,122 +69,6 @@ String? environmentVariable(String name) {
   if (!Platform.isWindows) return null;
   final upper = name.toUpperCase();
   return environment.entries.where((entry) => entry.key.toUpperCase() == upper).firstOrNull?.value;
-}
-
-/// Whether what it needs is on this computer, so nothing is offered that cannot start.
-Future<bool> isInstalled(AgentCommand command) async {
-  for (final program in commandNeeds(command)) {
-    if (await _find(program, program == command.program ? command.searchDirs : const []) == null) return false;
-  }
-  return true;
-}
-
-/// Everything under [pid], found while it can still be: a child that has died leaves its own children with no link back to it.
-Future<List<int>> _descendants(int pid) async {
-  final ProcessResult found;
-  try {
-    found = await Process.run('pgrep', ['-P', '$pid']);
-  } on ProcessException {
-    // A system without it still has to end the child itself.
-    return const [];
-  }
-  final children = LineSplitter.split(found.stdout as String).map(int.tryParse).whereType<int>().toList();
-  return [
-    ...children,
-    for (final child in children) ...await _descendants(child),
-  ];
-}
-
-/// Ends a child and everything it started, which an adapter usually has. Input closes first where that can be seen through, since a
-/// well-made agent leaves on its own. On Windows the child is a shell, and a shell can leave on that and strand what it started, so
-/// the tree goes first: ACP keeps nothing that a clean exit would save.
-Future<void> _end(Process process) async {
-  if (Platform.isWindows) {
-    await Process.run('taskkill', ['/T', '/F', '/PID', '${process.pid}']);
-    await process.exitCode;
-    return;
-  }
-  final tree = await _descendants(process.pid);
-  try {
-    await process.stdin.close();
-  } on Object {
-    // It has gone already.
-  }
-  await process.exitCode.timeout(_leaving, onTimeout: () {
-    process.kill(ProcessSignal.sigkill);
-    return process.exitCode;
-  });
-  for (final pid in tree) {
-    Process.killPid(pid, ProcessSignal.sigkill);
-  }
-}
-
-/// Starts an agent as a child of this app, and speaks ACP to it. A child is the person's own program, so there is no peer to prove,
-/// and the client refuses nothing on its behalf: [decider] puts each permission request to the person. [environment] is added to
-/// this app's own, as a profile's is.
-Future<VerifiedAgent> startLocalAgent(
-  AgentCommand command, {
-  AgentDecider? decider,
-  AgentElicitor? elicitor,
-  String? workingDirectory,
-  Map<String, String> environment = const {},
-}) async {
-  var program = command.program;
-  final args = command.args;
-  // A program its installer left off PATH starts from where it was found.
-  if (command.searchDirs.isNotEmpty) program = await _find(program, command.searchDirs) ?? program;
-  final Process process;
-  try {
-    process = await Process.start(
-      program,
-      args,
-      workingDirectory: workingDirectory,
-      environment: environment,
-      runInShell: _useShell,
-    );
-  } on ProcessException catch (error) {
-    throw AcpFailure('${command.label} could not start: ${error.message}');
-  }
-  final errors = StringBuffer();
-  process.stderr.transform(utf8.decoder).listen((text) {
-    errors.write(text);
-    if (errors.length > _maxStderr) {
-      final kept = errors.toString();
-      errors
-        ..clear()
-        ..write(kept.substring(kept.length - _maxStderr));
-    }
-  });
-  var closing = false;
-  var writing = Future<void>.value();
-  final client = VerifiedAgent.fromChild(
-    label: command.label,
-    messages: process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
-    // A sink that is flushing takes no write: each message waits for the one before it to be written and flushed.
-    send: (message) {
-      final written = writing.then((_) async {
-        process.stdin.writeln(message);
-        await process.stdin.flush();
-      });
-      writing = written.then((_) {}, onError: (Object _) {});
-      return written;
-    },
-    close: () async {
-      if (closing) return;
-      closing = true;
-      await _end(process);
-    },
-    decider: decider,
-    elicitor: elicitor,
-  );
-  try {
-    await client.initialize();
-    return client;
-  } on Object catch (error) {
-    await client.close();
-    final said = errors.toString().trim();
-    throw AcpFailure('${command.label} did not start: ${said.isEmpty ? error : said}');
-  }
 }
 
 /// The bytes of the file at [path] on this computer.

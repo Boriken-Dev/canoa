@@ -6,7 +6,6 @@ import 'dart:io';
 
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
-import 'package:canoa/acp/local_agent.dart';
 import 'package:canoa/chat/question_card.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
@@ -14,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';
+import 'fixtures/process_agent.dart';
 
 final class _Agent {
   final incoming = StreamController<String>();
@@ -192,7 +192,7 @@ void main() {
       }
     });
     final store = SessionStore(includePreview: false);
-    final client = await startLocalAgent(
+    final client = await startProcessAgent(
       AgentCommand(label: 'Scripted', program: scripted!, args: scriptedArgs('${dir.path}/s.json')),
       decider: store.askPermission,
       elicitor: store.askQuestion,

@@ -17,7 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 
-const _source = AgentSource.command(scripted);
+const _source = AgentSource.hosted('Scripted', local: true);
 
 void main() {
   testWidgets('the first Send makes the worktree and starts the agent, once, with model and effort set before the message', (tester) async {
@@ -26,7 +26,7 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend())
       ..rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true);
     final store = SessionStore(includePreview: false, ledger: ledger);
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, worktrees: worktrees);
+    await pumpApp(tester, store, linked: agent.openLink, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -64,7 +64,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final ledger = SessionLedger(MemoryLedgerBackend());
     final store = SessionStore(includePreview: false, ledger: ledger);
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, worktrees: worktrees);
+    await pumpApp(tester, store, linked: agent.openLink, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await openFolder(tester);
@@ -77,7 +77,7 @@ void main() {
     expect(session.status, SessionStatus.draft);
     expect(session.title, SessionStore.draftTitle);
     expect(find.widgetWithText(TextField, 'Fix the failing test'), findsOneWidget);
-    expect(find.textContaining('Not started: scripted-agent could not start: no such file'), findsWidgets);
+    expect(find.textContaining('scripted-agent could not start: no such file'), findsWidgets);
     expect(worktrees.removed.single.branch, worktrees.made.single.$2);
     expect(session.worktree, isNull);
     expect(ledger.entries, isEmpty);
@@ -87,7 +87,7 @@ void main() {
   testWidgets('what goes with the first message, added before the agent starts, goes with it', (tester) async {
     final agent = OptionsAgent();
     final store = SessionStore(includePreview: false);
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     final session = store.selected!;
@@ -136,7 +136,7 @@ void main() {
     await before.drafts!.flush();
 
     final after = SessionStore(includePreview: false, drafts: DraftKeeper(FileDraftBackend('${dir.path}/drafts')));
-    await after.restoreDrafts((kind, label) => kind == 'command' && label == 'Scripted' ? _source : null);
+    await after.restoreDrafts((label) => label == 'Scripted' ? _source : null);
     final back = after.sessions.single;
     expect((back.isDraft, back.source, back.cwd, back.wantsWorktree, back.draftText), (true, _source, '/work/repo', true, 'Half a thought'));
     expect(back.overlays, {'team'});

@@ -33,7 +33,7 @@ void main() {
   group('the control', () {
     testWidgets('sits at the composer\'s bottom left, before the add button', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       final mode = tester.getTopLeft(find.byKey(const Key('option-mode')));
@@ -48,7 +48,7 @@ void main() {
       for (final (modes, native) in [(OptionsAgent.claudeModes, true), (OptionsAgent.codexModes, false)]) {
         final agent = OptionsAgent(modes: modes);
         final store = _store(SessionLedger(MemoryLedgerBackend()));
-        await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+        await pumpApp(tester, store, linked: agent.openLink);
         await _draft(tester);
         await send(tester, 'Say hello');
         expect(await menuOf(tester, 'option-mode'), ['Manual', 'Accept edits', 'Auto', 'Plan', 'Bypass']);
@@ -62,7 +62,7 @@ void main() {
 
     testWidgets('an agent with no mode of its own still offers Bypass', (tester) async {
       final agent = OptionsAgent(modes: const []);
-      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       expect(await menuOf(tester, 'option-mode'), ['Bypass']);
@@ -73,7 +73,7 @@ void main() {
   group('the row', () {
     testWidgets('stays on one line at desktop width, a new session too: mode, Add, then model and effort by Send', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), startAgent: agent.start, linked: agent.openLink, size: const Size(1280, 800));
+      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), linked: agent.openLink, size: const Size(1280, 800));
       await _draft(tester);
       Offset centre(String key) => tester.getCenter(find.byKey(Key(key)));
       void inOneRow(List<Offset> points) {
@@ -94,7 +94,7 @@ void main() {
 
     testWidgets('may wrap at phone width, with Send still at the end', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), startAgent: agent.start, linked: agent.openLink, size: const Size(390, 844));
+      await pumpApp(tester, _store(SessionLedger(MemoryLedgerBackend())), linked: agent.openLink, size: const Size(390, 844));
       await _draft(tester);
       await send(tester, 'Say hello');
       expect(tester.takeException(), isNull);
@@ -107,7 +107,7 @@ void main() {
     testWidgets('by the menu reaches the agent, and by Shift+Tab goes on through the modes and round', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final store = _store(SessionLedger(MemoryLedgerBackend()));
-      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, store, linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       await pick(tester, 'option-mode', 'Plan');
@@ -127,7 +127,7 @@ void main() {
     testWidgets('to Bypass asks nothing and shows as a status, never in the colour of an error', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final store = _store(SessionLedger(MemoryLedgerBackend()));
-      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, store, linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       await tester.tap(find.byKey(const Key('option-mode')));
@@ -170,7 +170,7 @@ void main() {
       var ledger = SessionLedger(backend);
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final store = _store(ledger);
-      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, store, linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       await pick(tester, 'option-mode', 'Plan');
@@ -202,7 +202,7 @@ void main() {
       var ledger = SessionLedger(backend);
       final agent = OptionsAgent(modes: OptionsAgent.codexModes);
       final store = _store(ledger);
-      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, store, linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       await pick(tester, 'option-mode', 'Plan');
@@ -239,7 +239,7 @@ void main() {
         ..rememberSource('Scripted', options: parseConfigOptions(OptionsAgent(modes: OptionsAgent.claudeModes).options)!, images: true, files: true);
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final store = _store(ledger)..defaultMode = 'plan';
-      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, store, linked: agent.openLink);
       await _draft(tester);
       await settle(tester);
       expect(store.modeOf(store.selected!), 'plan');
@@ -251,7 +251,7 @@ void main() {
     testWidgets('Bypass as the default puts a session with an agent that has none in Canoa\'s own', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.codexModes);
       final store = _store(SessionLedger(MemoryLedgerBackend()))..defaultMode = 'bypass';
-      await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+      await pumpApp(tester, store, linked: agent.openLink);
       await _draft(tester);
       await settle(tester);
       expect(store.selected?.bypass, isTrue);

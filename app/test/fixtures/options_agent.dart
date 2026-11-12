@@ -27,6 +27,9 @@ final class OptionsAgent {
   final starts = <Object>[];
   final clients = <VerifiedAgent>[];
 
+  /// The links the app opened, each told whether the app has closed it.
+  final links = <_WireLink>[];
+
   String model = 'default', effort = 'low', mode;
 
   /// The modes it offers, each with its label: Claude's translator offers five, Codex's four with no Bypass.
@@ -163,7 +166,9 @@ final class OptionsAgent {
     starts.add(name);
     if (failStart != null) throw StateError(failStart!);
     final wire = _wire();
-    return _WireLink(wire.messages, wire.send, wire.close);
+    final link = _WireLink(wire.messages, wire.send, wire.close);
+    links.add(link);
+    return link;
   }
 
   ({Stream<String> messages, Future<void> Function(String) send, Future<void> Function() close}) _wire() {
@@ -271,8 +276,14 @@ final class _WireLink implements HostLink {
   @override
   Future<void> send(String message) => _send(message);
 
+  /// Whether the app has closed it, as the host ends an agent when its link ends.
+  bool closed = false;
+
   @override
-  Future<void> close() => _close();
+  Future<void> close() {
+    closed = true;
+    return _close();
+  }
 }
 
 /// What [OptionsAgent] offers at the start, as the app reads it.

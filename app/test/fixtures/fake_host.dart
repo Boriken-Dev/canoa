@@ -70,12 +70,15 @@ final class FakeTool implements HostTool {
 /// The host's own sources a test's app is shown, as `canoa serve --local-sources` lists them.
 const defaultLocalSources = [('Claude', 'claude'), ('Codex', 'codex'), ('Antigravity', null), ('Grok', null), ('Pi', null)];
 
+List<(String, String?)> _defaultSources() => defaultLocalSources;
+
 /// A host that serves [sources] to this process only, and whose links are the test's: [open] gives the agent behind a
 /// source, or throws.
 final class LinkedTool implements HostTool {
-  LinkedTool({this.sources = defaultLocalSources, this.missing = const {}, required this.open});
+  LinkedTool({this.sources = _defaultSources, this.missing = const {}, required this.open});
 
-  final List<(String, String?)> sources;
+  /// The sources the host serves each time it starts, so a restart can serve more or fewer.
+  final List<(String, String?)> Function() sources;
 
   /// The programs each source is missing, by name.
   final Map<String, List<String>> missing;
@@ -86,7 +89,7 @@ final class LinkedTool implements HostTool {
 
   @override
   Future<HostChild> start(List<String> args) async => LinkedChild([
-    for (final (name, harness) in sources)
+    for (final (name, harness) in sources())
       jsonEncode({
         'name': name, 'kind': 'agent', 'local': true, 'missing': missing[name] ?? const <String>[],
         'harness': ?harness, 'peer': 'sha256:${'0' * 64}', 'method': 'noise',
@@ -116,8 +119,12 @@ final class LinkedChild extends FakeChild implements HostLinks {
 }
 
 /// A supervisor over a [LinkedTool], already told to run: its sources are listed once the app has drawn a frame.
-HostSupervisor linkedHost(HostLink Function(String name) open, {Map<String, List<String>> missing = const {}}) {
-  final host = HostSupervisor(LinkedTool(open: open, missing: missing));
+HostSupervisor linkedHost(
+  HostLink Function(String name) open, {
+  Map<String, List<String>> missing = const {},
+  List<(String, String?)> Function()? sources,
+}) {
+  final host = HostSupervisor(LinkedTool(open: open, missing: missing, sources: sources ?? _defaultSources));
   unawaited(host.apply(configPath: '/c/canoa.cfg'));
   return host;
 }

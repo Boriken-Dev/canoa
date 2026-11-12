@@ -4,23 +4,20 @@ import 'dart:io' show Directory;
 import 'dart:typed_data';
 
 import 'package:canoa/acp/agent_commands.dart';
-import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/composer.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/main.dart';
-import 'package:canoa/profile/launch.dart' show StartAgent;
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_choices.dart';
-import 'package:canoa/sources/sources.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fake_host.dart' show linkedHost;
+import 'fake_host.dart' show defaultLocalSources, linkedHost;
 import 'source_choices.dart';
 
 /// Worktrees that are only counted.
@@ -46,12 +43,11 @@ final class CountedWorktrees implements Worktrees {
 
 /// Everything the app would start, counted, and nothing started.
 final class Starts {
-  final commands = <AgentCommand>[];
+  final opened = <String>[];
 
-  Future<VerifiedAgent> call(AgentCommand command, {AgentDecider? decider, AgentElicitor? elicitor, String? workingDirectory,
-      Map<String, String> environment = const {}}) async {
-    commands.add(command);
-    throw const AcpFailure('nothing starts in this test');
+  HostLink open(String name) {
+    opened.add(name);
+    throw StateError('nothing starts in this test');
   }
 }
 
@@ -74,16 +70,6 @@ const scripted = AgentCommand(label: 'Scripted', program: 'scripted-agent', args
 /// The programs each of the host's own sources needs, by name.
 const _needs = {'Claude': ['claude'], 'Codex': ['codex'], 'Antigravity': ['agy'], 'Grok': ['grok'], 'Pi': ['npx', 'pi']};
 
-/// Every program is found, except those in [missing].
-Future<SourceCheck> Function(AgentSource) checkFinding({Set<String> missing = const {}}) => (source) async {
-  final command = source.command;
-  if (command == null) return const SourceCheck();
-  return SourceCheck(
-    found: {for (final program in commandNeeds(command)) if (!missing.contains(program)) program: '/usr/bin/$program'},
-    missing: [for (final program in commandNeeds(command)) if (missing.contains(program)) program],
-  );
-};
-
 /// The app on [store] at [size], each outside service the test's. Answers what canoa.cfg was written as.
 Future<List<CanoaConfig>> pumpApp(
   WidgetTester tester,
@@ -95,7 +81,6 @@ Future<List<CanoaConfig>> pumpApp(
   Future<List<XFile>> Function()? pickFiles,
   Map<String, int> files = const {},
   ClipboardReader? clipboard,
-  StartAgent? startAgent,
   HostLink Function(String name)? linked,
   Worktrees? worktrees,
   DesktopShell? shell,
@@ -117,18 +102,22 @@ Future<List<CanoaConfig>> pumpApp(
     config: config,
     configPath: '${dir.path}/canoa.cfg',
     writeConfig: (changed) async => written.add(changed),
-    checkSource: checkFinding(missing: missing),
     isGitRepository: (folder) => folder.endsWith('repo'),
     pickFolder: pickFolder ?? () async => '/work/repo',
     pickFiles: pickFiles ?? () async => const [],
     statFile: (path) async => files[path],
     clipboard: clipboard ?? FakeClipboard(),
-    startAgent: startAgent ?? Starts().call,
     worktrees: () => worktrees ?? CountedWorktrees(),
     shell: shell,
     // The host's own sources are listed, and a session on one runs over a link that is the test's.
     host: host ??
-        linkedHost(linked ?? (name) => throw StateError('nothing starts in this test: $name'), missing: {
+        linkedHost(linked ?? (name) => throw StateError('nothing starts in this test: $name'),
+            // The commands of canoa.cfg are sources the host serves, and a Settings save that changes them restarts it.
+            sources: () => [
+              ...defaultLocalSources,
+              for (final agent in (written.isEmpty ? config : written.last).agents) (agent.label, null),
+            ],
+            missing: {
           for (final MapEntry(:key, :value) in _needs.entries)
             if (value.any(missing.contains)) key: [for (final program in value) if (missing.contains(program)) program],
         }),

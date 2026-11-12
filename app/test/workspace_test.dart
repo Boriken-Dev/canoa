@@ -2,7 +2,6 @@
 // canoa.cfg refuses, and where Documents is on each platform.
 import 'dart:io';
 
-import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/sources/sources.dart';
@@ -161,7 +160,7 @@ void main() {
       const other = AgentSource.hosted('plain');
       const antigravity = AgentSource.hosted('Antigravity', local: true);
       const pi = AgentSource.hosted('Pi', local: true);
-      const mine = AgentSource.command(AgentCommand(label: 'My Agent', program: 'mine'));
+      const mine = AgentSource.hosted('My Agent', local: true);
       const template = r'${documents}/${handler}/${source}/${session}';
       expect(scratchFolder(template, _session, source: claude, documents: '/d', separator: '/'), '/d/claude/Claude/$_session');
       expect(scratchFolder(template, _session, source: hosted, documents: '/d', separator: '/'), '/d/codex/lab/$_session');

@@ -79,7 +79,7 @@ void main() {
   testWidgets('the person overrides it for one session, and the agent that starts is asked for that', (tester) async {
     final agent = OptionsAgent();
     final store = _store();
-    await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
+    await pumpApp(tester, store, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
     final menu = await menuOf(tester, 'option-cache');
     expect(menu, ['Not chosen (Long)', 'Default, the harness\'s own', 'Short, about 5 minutes', 'Long, about an hour']);
@@ -96,7 +96,7 @@ void main() {
 
   testWidgets('a session nobody chose for is asked long', (tester) async {
     final agent = OptionsAgent();
-    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
+    await pumpApp(tester, _store(), linked: agent.openLink, askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
     await send(tester, 'Fix the failing test');
     expect(_asked(agent), {'lifetime': 'long', 'chosen': false});
@@ -127,7 +127,7 @@ void main() {
     await keeper.flush();
     expect((await keeper.load()).single.record['cacheLifetime'], 'short');
     final again = SessionStore(includePreview: false, drafts: keeper);
-    await again.restoreDrafts((kind, label) => null);
+    await again.restoreDrafts((label) => null);
     expect(again.sessions.single.cacheLifetime, CacheLifetime.short);
     again.setCacheLifetime(again.sessions.single, null);
     await keeper.flush();

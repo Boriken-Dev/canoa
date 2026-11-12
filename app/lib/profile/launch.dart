@@ -1,9 +1,8 @@
 import '../acp/agent_commands.dart';
 import '../acp/client.dart';
-import '../acp/local_agent.dart';
 import 'apply.dart';
 
-/// Starts an agent on this computer with the environment of [prepared], as [startLocalAgent] does.
+/// Starts an agent on this computer with the environment of [prepared].
 typedef StartAgent = Future<VerifiedAgent> Function(
   AgentCommand command, {
   AgentDecider? decider,
@@ -33,7 +32,7 @@ Future<ProfiledAgent> startProfiled(
   SessionFiles? files,
   AgentDecider? decider,
   AgentElicitor? elicitor,
-  StartAgent start = startLocalAgent,
+  required StartAgent start,
 }) async {
   final client = await start(
     command,

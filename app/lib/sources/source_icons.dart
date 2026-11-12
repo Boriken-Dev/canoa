@@ -15,7 +15,5 @@ IconData providerIcon(String? harness) => switch (harness) {
 
 /// The icon of [source]: its provider's for a hosted entry, and the terminal for a command a person wrote. A source of the
 /// host's own that runs no harness has the provider its name says (Grok, Pi, Antigravity).
-IconData sourceIcon(AgentSource? source) => switch (source?.kind) {
-  SourceKind.hosted => providerIcon(source?.harness ?? (source!.local ? source.label.toLowerCase() : null)),
-  _ => Icons.terminal,
-};
+IconData sourceIcon(AgentSource? source) =>
+    source == null ? Icons.terminal : providerIcon(source.harness ?? (source.local ? source.label.toLowerCase() : null));

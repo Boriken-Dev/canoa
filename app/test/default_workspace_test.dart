@@ -16,7 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 
-const _source = AgentSource.command(scripted);
+const _source = AgentSource.hosted('Scripted', local: true);
 final _sep = Platform.pathSeparator;
 
 /// Where [documents] puts the default scratch folder of [session].
@@ -52,7 +52,7 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final store = SessionStore(includePreview: false, ledger: ledger);
     final started = _Agent();
-    await pumpApp(tester, store, documents: documents.path, startAgent: started.start, linked: started.openLink);
+    await pumpApp(tester, store, documents: documents.path, linked: started.openLink);
     await newSession(tester);
     final draft = store.selected!;
     expect(draft.cwd, isNull, reason: 'no folder was chosen');
@@ -96,7 +96,7 @@ void main() {
     final started = _Agent();
     final work = Directory.systemTemp.createTempSync('canoa-work');
     addTearDown(() => work.deleteSync(recursive: true));
-    await pumpApp(tester, store, documents: documents.path, startAgent: started.start, linked: started.openLink, pickFolder: () async => work.path);
+    await pumpApp(tester, store, documents: documents.path, linked: started.openLink, pickFolder: () async => work.path);
     await newSession(tester);
     final draft = store.selected!;
     await openFolder(tester);
@@ -154,7 +154,7 @@ void main() {
     final store = SessionStore(includePreview: false);
     final started = _Agent();
     const config = CanoaConfig(agents: [scripted], sessions: LedgerSettings(workspace: r'${documents}/${datetime}/${session}'));
-    await pumpApp(tester, store, documents: documents.path, config: config, startAgent: started.start, linked: started.openLink);
+    await pumpApp(tester, store, documents: documents.path, config: config, linked: started.openLink);
     await newSession(tester);
     final draft = store.selected!;
     final shown = tester.widget<Text>(find.byKey(const Key('new-session-scratch-path'))).textSpan!.toPlainText();

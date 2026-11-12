@@ -509,7 +509,7 @@ class _SourceChooser extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = session.source;
-    final problem = source == null ? null : kit.checks[source]?.describe(source.displayName, needs: _needs(source));
+    final problem = source == null ? null : kit.checks[source]?.describe(source.displayName);
     return PopupMenuButton<Object>(
       key: const Key('new-session-source'),
       tooltip: 'Where its agent comes from',
@@ -547,7 +547,6 @@ class _SourceChooser extends StatelessWidget {
     );
   }
 
-  static List<String> _needs(AgentSource source) => source.command == null ? const [] : commandNeeds(source.command!);
   static String _and(List<String> words) =>
       words.length < 2 ? words.join() : '${words.sublist(0, words.length - 1).join(', ')} and ${words.last}';
 }

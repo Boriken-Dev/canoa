@@ -164,7 +164,7 @@ class ChatSession {
   String? workspaceId;
 
   /// The source a restored draft was kept with, by kind and label, while no source of that name is here.
-  ({String kind, String label})? keptSource;
+  String? keptSource;
 
   /// Whether [title] is taken from the first message: shown here, and never kept in the session list.
   bool titleFromMessage = false;
@@ -623,7 +623,7 @@ class SessionStore extends ChangeNotifier {
   /// is made then if [worktree]. It is kept between runs until it starts or is closed, and never noted in the ledger before.
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
-      ({String kind, String label})? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
+      String? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
       CacheLifetime? cacheLifetime}) {
     final session = ChatSession(
       id: 'local-${++_nextId}',
@@ -695,17 +695,15 @@ class SessionStore extends ChangeNotifier {
   }
 
   /// Every draft kept from an earlier run, as sessions; [source] finds each one's source again by its kind and label.
-  Future<void> restoreDrafts(AgentSource? Function(String kind, String label) source) async {
+  Future<void> restoreDrafts(AgentSource? Function(String label) source) async {
     final kept = await drafts?.load() ?? const <KeptDraft>[];
     for (final draft in kept) {
       final record = draft.record;
       final from = record['source'] is Map ? record['source'] as Map : const {};
-      final kept = from['kind'] is String && from['label'] is String
-          ? (kind: from['kind'] as String, label: from['label'] as String)
-          : null;
+      final kept = from['label'] is String ? from['label'] as String : null;
       createDraft(
         id: draft.id,
-        source: kept == null ? null : source(kept.kind, kept.label),
+        source: kept == null ? null : source(kept),
         keptSource: kept,
         cwd: record['cwd'] is String ? record['cwd'] as String : null,
         worktree: record['worktree'] == true,
@@ -729,12 +727,12 @@ class SessionStore extends ChangeNotifier {
 
   /// Gives each draft restored without its source that source, now that [source] finds it: a hosted source exists only once
   /// the host serves it.
-  void resolveKeptSources(AgentSource? Function(String kind, String label) source) {
+  void resolveKeptSources(AgentSource? Function(String label) source) {
     var changed = false;
     for (final session in sessions) {
       final kept = session.keptSource;
       if (!session.isDraft || session.source != null || kept == null) continue;
-      final found = source(kept.kind, kept.label);
+      final found = source(kept);
       if (found == null) continue;
       session
         ..source = found
@@ -751,8 +749,8 @@ class SessionStore extends ChangeNotifier {
     drafts!.save(id, {
       'created': session.created.toUtc().toIso8601String(),
       'source': ?switch ((session.source, session.keptSource)) {
-        (final source?, _) => {'kind': source.kind.name, 'label': source.label},
-        (null, final kept?) => {'kind': kept.kind, 'label': kept.label},
+        (final source?, _) => {'label': source.label},
+        (null, final kept?) => {'label': kept},
         _ => null,
       },
       'cwd': ?session.cwd,

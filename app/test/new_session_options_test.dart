@@ -34,7 +34,7 @@ void main() {
 
   testWidgets('Claude offers every mode, and the models its provider lists with their versions and Fable, in sentence case', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, _store(), linked: agent.openLink);
     await _draft(tester, 'Claude');
     expect(await menuOf(tester, 'option-mode'), modes);
     expect(await menuOf(tester, 'option-model'), ['Default (Opus 5.5)', 'Opus 5.5', 'Fable 5.1', 'Sonnet 5.5', 'Haiku 5.5']);
@@ -46,7 +46,7 @@ void main() {
 
   testWidgets('Codex offers its models and their efforts before it starts, and the efforts follow the model', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, _store(), linked: agent.openLink);
     await _draft(tester, 'Codex');
     expect(await menuOf(tester, 'option-mode'), modes);
     expect(await menuOf(tester, 'option-model'), ['Default', 'GPT-6 Luna', 'GPT-6 Sol']);
@@ -58,7 +58,7 @@ void main() {
 
   testWidgets('an effort the newly chosen model does not take is taken back', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, _store(), linked: agent.openLink);
     await _draft(tester, 'Codex');
     await pick(tester, 'option-model', 'GPT-6 Sol');
     await pick(tester, 'option-effort', 'Extra high');
@@ -136,7 +136,7 @@ void main() {
   testWidgets('the mode, model and effort chosen before the first message reach the agent that starts', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
     final ledger = SessionLedger(MemoryLedgerBackend());
-    await pumpApp(tester, _store(ledger), startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, _store(ledger), linked: agent.openLink);
     await _draft(tester, 'Claude');
     await pick(tester, 'option-mode', 'Accept edits');
     await pick(tester, 'option-model', 'Opus 5.5');
@@ -152,7 +152,7 @@ void main() {
 
   testWidgets("Bypass chosen before the start is the agent's own mode, asked for when it starts", (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), startAgent: agent.start, linked: agent.openLink);
+    await pumpApp(tester, _store(), linked: agent.openLink);
     await _draft(tester, 'Claude');
     await pick(tester, 'option-mode', 'Bypass');
     await send(tester, 'Go');
@@ -167,7 +167,7 @@ void main() {
     expect(sourceIcon(preset('Grok')), providerIcon('grok'));
     expect(sourceIcon(preset('Antigravity')), providerIcon('antigravity'));
     expect(sourceIcon(AgentSource.hosted('review', harness: 'claude')), sourceIcon(preset('Claude', 'claude')));
-    expect(sourceIcon(AgentSource.command(scripted)), Icons.terminal, reason: 'a command a person wrote');
+    expect(sourceIcon(const AgentSource.hosted('Scripted', local: true)), providerIcon(null), reason: 'a command a person wrote');
   });
 
   group('labels', () {

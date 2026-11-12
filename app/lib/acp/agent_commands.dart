@@ -4,7 +4,6 @@ final class AgentCommand {
     required this.label,
     required this.program,
     this.args = const [],
-    this.searchDirs = const [],
     this.usage,
   });
 
@@ -16,10 +15,6 @@ final class AgentCommand {
   /// `antigravity` for an agent that serves its quota from its own process and reports nothing over ACP. Null reads only
   /// its failed turns.
   final String? usage;
-
-  /// Where the tool's own installer puts [program], looked in when PATH does not have it: `~` is the home directory, and a
-  /// `%NAME%` an environment variable (the directory is skipped where it is not set).
-  final List<String> searchDirs;
 }
 
 /// The `usage` canoa.cfg's host entry for [command] gets: the command's own, else the one of the program the host knows the

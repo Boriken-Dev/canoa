@@ -6,7 +6,6 @@ import 'dart:io';
 
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
-import 'package:canoa/acp/local_agent.dart';
 import 'package:canoa/chat/modes.dart';
 import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -16,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';
+import 'fixtures/process_agent.dart';
 
 /// An agent in memory, speaking v1, whose requests offer what a test gives them.
 final class _Agent {
@@ -291,7 +291,7 @@ void main() {
       }
     });
     final store = SessionStore(includePreview: false);
-    final client = await startLocalAgent(
+    final client = await startProcessAgent(
       AgentCommand(label: 'Scripted', program: scripted!, args: scriptedArgs('${dir.path}/s.json')),
       decider: store.askPermission,
       workingDirectory: dir.path,

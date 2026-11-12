@@ -33,7 +33,7 @@ void main() {
       _line('{"name":"mine","kind":"agent","url":"ws://127.0.0.1:1","peer":"$_peer"}'),
     ]);
     expect([for (final source in sources) (source.label, source.local)], [('Claude', true), ('Grok', true), ('mine', false)]);
-    expect(sourceKey(sources.first), 'canoa/Claude');
+    expect(sourceKey(sources.first), 'Claude');
   });
 
   test('a local source looks like its provider, and Claude and Codex offer their modes before they start', () {

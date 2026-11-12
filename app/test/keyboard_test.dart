@@ -7,7 +7,6 @@ import 'package:canoa/chat/changes.dart';
 import 'package:canoa/chat/palette.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
-import 'package:canoa/sources/sources.dart' show SourceCheck;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -87,7 +86,7 @@ Future<(List<_Agent>, List<ChatSession>, SessionStore)> _three(WidgetTester test
   // The list holds the newest first.
   store.select(store.sessions.first.id);
   // Sources are checked with no program looked for.
-  await tester.pumpWidget(CanoaApp(store: store, checkSource: (_) async => const SourceCheck()));
+  await tester.pumpWidget(CanoaApp(store: store));
   await tester.pump();
   return (agents, sessions, store);
 }

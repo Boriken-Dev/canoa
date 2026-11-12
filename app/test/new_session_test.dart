@@ -24,7 +24,7 @@ Future<(SessionStore, Starts, CountedWorktrees, List<CanoaConfig>)> _app(
   final starts = Starts();
   final worktrees = CountedWorktrees();
   final written = await pumpApp(tester, store, config: config, missing: missing, size: size, pickFolder: pickFolder,
-      startAgent: starts.call, worktrees: worktrees);
+      linked: starts.open, worktrees: worktrees);
   return (store, starts, worktrees, written);
 }
 
@@ -136,7 +136,7 @@ void main() {
     expect(find.textContaining('Not started: Claude needs claude on PATH'), findsWidgets);
     expect(logged.where((line) => line.contains('Claude was not started: Claude needs claude on PATH')), hasLength(1),
         reason: 'the reason on screen is in the log too');
-    expect(starts.commands, isEmpty);
+    expect(starts.opened, isEmpty);
     expect(store.selected?.status, SessionStatus.draft);
     expect(find.widgetWithText(TextField, 'Fix it'), findsOneWidget, reason: 'the message stays to send again');
   });
@@ -170,7 +170,7 @@ void main() {
     expect((session.agent, session.cwd, session.wantsWorktree), ('Scripted', '/work/repo', true));
     expect(session.worktree, isNull);
     expect(session.remoteSessionId, isNull);
-    expect(starts.commands, isEmpty, reason: 'no process before the first message');
+    expect(starts.opened, isEmpty, reason: 'no process before the first message');
     expect(worktrees.made, isEmpty, reason: 'no worktree before the first message');
     expect(find.descendant(of: find.byType(ListTile), matching: find.text('New')), findsOneWidget);
   });
@@ -188,7 +188,7 @@ void main() {
     await tester.tap(find.byTooltip('Close conversation'));
     await tester.pumpAndSettle();
     expect(store.sessions, isEmpty);
-    expect(starts.commands, isEmpty);
+    expect(starts.opened, isEmpty);
     expect(worktrees.made, isEmpty);
   });
 

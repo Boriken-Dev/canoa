@@ -17,7 +17,7 @@ const _allow = [
 ];
 
 Future<void> _started(WidgetTester tester, OptionsAgent agent, SessionStore store) async {
-  await pumpApp(tester, store, startAgent: agent.start, linked: agent.openLink);
+  await pumpApp(tester, store, linked: agent.openLink);
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await openFolder(tester);

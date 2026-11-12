@@ -10,11 +10,11 @@ import 'desktop/hosting_dialog.dart';
 import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
 import 'extension_context.dart';
+import 'acp/agent_commands.dart' show AgentCommand;
 import 'acp/browser_connect.dart';
 import 'acp/connect.dart' show chatEndpoints;
 import 'acp/pipe_channel.dart' show isPipeUrl;
 import 'acp/provider_connect.dart';
-import 'acp/agent_commands.dart';
 import 'acp/client.dart';
 import 'acp/local_agent.dart';
 import 'desktop/child_flag.dart';
@@ -32,7 +32,6 @@ import 'chat/changes.dart';
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
 import 'chat/new_session_view.dart';
-import 'chat/session_options.dart' show OptionRole;
 import 'chat/palette.dart';
 import 'chat/queue_panel.dart';
 import 'chat/question_card.dart';
@@ -46,12 +45,7 @@ import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
-import 'profile/apply.dart';
-import 'profile/launch.dart';
-import 'profile/profile.dart' show OverlaySource;
-import 'profile/profile_home.dart';
 import 'profile/profile_home_platform.dart';
-import 'profile/profile_layers.dart';
 import 'profile/profile_start_dialog.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
@@ -125,16 +119,12 @@ class CanoaApp extends StatefulWidget {
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
-    this.checkSource, this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard, this.startAgent,
+    this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices,
   });
 
   /// Where sessions not yet started are kept between runs, for a store this app makes.
   final DraftKeeper? drafts;
-
-  /// What a source needs and whether it is here; by default its programs are looked for on PATH.
-  @visibleForTesting
-  final Future<SourceCheck> Function(AgentSource source)? checkSource;
 
   /// The folder, file and clipboard services the composer uses, each the platform's by default.
   @visibleForTesting
@@ -147,10 +137,6 @@ class CanoaApp extends StatefulWidget {
   final Future<int?> Function(String path)? statFile;
   @visibleForTesting
   final ClipboardReader? clipboard;
-
-  /// Starts an agent on this computer; by default as a child of this app.
-  @visibleForTesting
-  final StartAgent? startAgent;
 
   /// The Documents folder `${documents}` stands for; by default the system's.
   @visibleForTesting
@@ -263,7 +249,10 @@ class _CanoaAppState extends State<CanoaApp> {
               ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
               : null,
           onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
-          presets: [for (final source in _hostedSources) if (source.local) source],
+          presets: [
+            for (final source in _hostedSources)
+              if (source.local && !config.agents.any((agent) => agent.label == source.label)) source,
+          ],
           hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
           checkSource: _check,
           openSources: sources,
@@ -277,7 +266,15 @@ class _CanoaAppState extends State<CanoaApp> {
     if (fromDialog == null || !mounted) return;
     // [host] and the profile tables stay as the app has them now: Hosting may have changed one, and an overlay installed
     // from Profiles is pinned in [overlays], while Settings was open.
-    final changed = fromDialog.withHost(config.host).withProfilesOf(config);
+    var changed = fromDialog.withHost(config.host).withProfilesOf(config);
+    // The host serves a source from the moment it starts, so adding or removing one restarts it, which ends the sessions open
+    // on any of its sources.
+    var restart = widget.host != null && !_sameAgents(changed.agents, config.agents);
+    if (restart && _openOnHost() > 0 && !await _confirmRestart()) {
+      changed = changed.copyWith(agents: config.agents);
+      restart = false;
+    }
+    if (!mounted) return;
     setState(() => config = changed);
     store.embedLimit = changed.embedLimit;
     if (_checked) unawaited(_checkSources());
@@ -287,6 +284,7 @@ class _CanoaAppState extends State<CanoaApp> {
     await widget.shell?.update(changed);
     try {
       await _write(changed);
+      if (restart && _configPath != null) await widget.host!.apply(configPath: _configPath);
     } on UnsupportedError {
       // canoa.cfg in web/PWA deployments is read-only.
     } catch (error) {
@@ -296,6 +294,40 @@ class _CanoaAppState extends State<CanoaApp> {
         );
       }
     }
+  }
+
+  static bool _sameAgents(List<AgentCommand> a, List<AgentCommand> b) =>
+      a.length == b.length &&
+      [for (var i = 0; i < a.length; i++) a[i].label == b[i].label && a[i].program == b[i].program && _sameWords(a[i].args, b[i].args)]
+          .every((same) => same);
+
+  static bool _sameWords(List<String> a, List<String> b) =>
+      a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((same) => same);
+
+  /// How many sessions are open on this computer's own host, which restarting it ends.
+  int _openOnHost() => store.sessions
+      .where((session) => session.place == SessionPlace.local && session.status != SessionStatus.draft && session.status != SessionStatus.disconnected)
+      .length;
+
+  Future<bool> _confirmRestart() async {
+    final above = _navigator.currentContext;
+    if (above == null || !above.mounted) return false;
+    final count = _openOnHost();
+    final ok = await showSelectableDialog<bool>(
+      context: above,
+      builder: (context) => AlertDialog(
+        key: const Key('restart-host'),
+        title: const Text('Restart the host?'),
+        content: Text('A source added or removed takes effect when Canoa\'s host restarts, and that ends the '
+            '${count == 1 ? 'session' : '$count sessions'} open on this computer now. Their conversations stay in the list '
+            'to open again.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep the sources as they were')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restart')),
+        ],
+      ),
+    );
+    return ok ?? false;
   }
 
   /// The profiles as canoa.cfg has them now, for every agent the app offers or the file gives a profile.
@@ -404,50 +436,6 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Whether canoa.cfg sets any profile, so an agent given none of it says so.
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
-  /// The profile [agent] starts with in [cwd], from [overlays] (by default all of canoa.cfg's), once the person has seen it and
-  /// chosen its MCP servers; empty where there is none or no profile home. The dialog is shown only for a profile with more
-  /// than a model, effort or mode, which are chosen beside Send. Throws when the person does not start it, or its environment
-  /// cannot be built.
-  Future<(PreparedProfile, Set<String>, List<LayerNote>)> _prepareProfile(String agent, String? cwd, ProfileHome? home,
-      {Map<String, OverlaySource>? overlays}) async {
-    if (home == null) return (PreparedProfile.empty, const <String>{}, const <LayerNote>[]);
-    final layers = await profileLayers(
-      overlays: overlays ?? config.overlays, user: config.profile, agents: config.agentProfiles, agent: agent,
-      home: home, workingDirectory: cwd, iconLimits: config.store.iconLimits,
-    );
-    final prepared = await prepareProfile(layers, home: home, lookup: environmentVariable, findProgram: findProgram);
-    final approve = prepared.environment.isNotEmpty || prepared.contexts.isNotEmpty || prepared.skills.isNotEmpty ||
-        prepared.mcp.isNotEmpty || prepared.problems.isNotEmpty;
-    if (!approve) return (prepared, const <String>{}, layers.notes);
-    final above = _navigator.currentContext;
-    if (above == null || !above.mounted) throw StateError('Canoa UI closed');
-    final choice = await showSelectableDialog<ProfileStartChoice>(
-      context: above,
-      builder: (_) => ProfileStartDialog(
-        agent: agent, prepared: prepared, harness: presetHarnesses[agent],
-        remembered: config.agentMcp[agent] ?? const {}, notes: layers.notes,
-      ),
-    );
-    if (choice == null) throw StateError('its profile was not accepted');
-    if (choice.remember) {
-      final changed = config.withAgentMcp(agent, {
-        for (final server in prepared.mcp)
-          server.name: choice.on.contains(server.name) ? (server.confined ? server.digest : true) : false,
-      });
-      try {
-        await _write(changed);
-        if (mounted) setState(() => config = changed);
-      } on UnsupportedError {
-        // canoa.cfg in web/PWA deployments is read-only.
-      } catch (error) {
-        // The choices still apply to this session; only keeping them failed.
-        _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not save canoa.cfg: $error')));
-      }
-    }
-    // What the dialog showed is what goes: its notes are said once, there.
-    return (prepared, choice.on, const <LayerNote>[]);
-  }
-
   /// Makes, reads and removes worktrees where a session's agent runs: by git here for one this app runs, through the host for
   /// one it reached at [endpoint]; null where neither can.
   Worktrees? _worktrees(SessionPlace place, {String? endpoint, String? fallback, String? peerId, String? method}) {
@@ -550,7 +538,6 @@ class _CanoaAppState extends State<CanoaApp> {
   List<AgentSource> get _sources => [
     for (final source in _hostedSources)
       if (source.local && !config.hiddenSources.contains(source.label)) source,
-    for (final command in config.agents) AgentSource.command(command),
     for (final source in _hostedSources)
       if (!source.local) source,
   ];
@@ -559,10 +546,6 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<AgentSource, SourceCheck> _checks = const {};
 
   Future<SourceCheck> _check(AgentSource source) async {
-    if (source.command != null && widget.checkSource != null) return widget.checkSource!(source);
-    if (source.command case final command?) {
-      return checkCommand(command, (program) => findProgram(program, searchDirs: program == command.program ? command.searchDirs : const []));
-    }
     final listening = widget.host?.listening.where((listening) => listening.name == source.hostEntry).firstOrNull;
     if (listening == null) {
       return SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
@@ -657,37 +640,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _hinted[draft.id] = source;
     if (source == null) return;
     // A hosted agent is given none of the profile, so its defaults are only the person's last choices.
-    if (source.kind == SourceKind.hosted) {
-      store.defaultChoices(draft);
-      return;
-    }
-    unawaited(() async {
-      try {
-        final layers = await profileLayers(
-          overlays: _overlaysFor(draft), user: config.profile, agents: config.agentProfiles, agent: source.label,
-          home: platformProfileHome(configPath: _configPath), workingDirectory: draft.cwd, iconLimits: config.store.iconLimits,
-        );
-        // The person may have chosen another source meanwhile, whose own defaults are on their way.
-        if (draft.source != source) return;
-        final effective = layers.effective;
-        store.defaultChoices(draft, hints: {
-          if (effective.model case final model?) OptionRole.model: model.value,
-          if (effective.effort case final effort?) OptionRole.effort: effort.value,
-          if (effective.mode case final mode?) OptionRole.mode: mode.value,
-        });
-      } on Object catch (error) {
-        debugPrint('Canoa: no profile defaults for ${source.label}: $error');
-        if (draft.source == source) store.defaultChoices(draft);
-      }
-    }());
-  }
-
-  /// canoa.cfg's overlays that [session] starts with.
-  Map<String, OverlaySource> _overlaysFor(ChatSession session) {
-    final chosen = session.overlays;
-    return chosen == null
-        ? config.overlays
-        : {for (final MapEntry(:key, :value) in config.overlays.entries) if (chosen.contains(key)) key: value};
+    store.defaultChoices(draft);
   }
 
   /// Starts [draft]'s agent on its first message: the worktree is made, the profile prepared and shown where it has something
@@ -698,7 +651,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (source == null) throw StateError('Choose where its agent comes from first');
     final check = _checks[source] ?? await _check(source);
     if (!check.ready) {
-      throw StateError(check.describe(source.label, needs: source.command == null ? const [] : commandNeeds(source.command!))!);
+      throw StateError(check.describe(source.label)!);
     }
     // With none chosen the session works in its scratch folder, which is made now and not before.
     final scratch = draft.cwd == null || draft.cwd!.isEmpty;
@@ -717,11 +670,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final starting = _Starting();
     _inFlight.add(starting);
     try {
-      if (source.command case final command?) {
-        await _startLocal(draft, command, folder, worktree, starting);
-      } else {
-        await _startHosted(draft, source.hostEntry!, folder, worktree, starting);
-      }
+      await _startHosted(draft, source.hostEntry!, folder, worktree, starting);
     } catch (_) {
       if (madeFolder) await removeEmptyFolder(folder);
       rethrow;
@@ -741,44 +690,6 @@ class _CanoaAppState extends State<CanoaApp> {
       await starting.client?.close();
       if (starting.made case final made?) await _unmake(starting.worktrees!, made);
     }
-  }
-
-  Future<void> _startLocal(ChatSession draft, AgentCommand command, String folder, bool worktree, _Starting starting) async {
-    final worktrees = worktree ? (widget.worktrees ?? localWorktrees)() : null;
-    if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
-    // Named after the source: a branch is kept in the session list, which keeps no words of a message.
-    final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(command.label));
-    starting
-      ..worktrees = worktrees
-      ..made = made;
-    if (_quitting) throw StateError('Canoa is quitting');
-    final where = made?.path ?? folder;
-    VerifiedAgent? client;
-    final ProfiledAgent started;
-    final PreparedProfile prepared;
-    final List<LayerNote> notes;
-    try {
-      final home = platformProfileHome(configPath: _configPath);
-      final Set<String> on;
-      (prepared, on, notes) = await _prepareProfile(command.label, where, home, overlays: _overlaysFor(draft));
-      started = await startProfiled(
-        command,
-        cwd: where, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
-        decider: store.askPermission, elicitor: store.askQuestion, start: widget.startAgent ?? startLocalAgent,
-      );
-      client = started.client;
-      starting.client = client;
-      if (_quitting) throw StateError('Canoa is quitting');
-      final opened = await client.openSession(cwd: where, setup: started.launch.setup);
-      if (!mounted || _quitting) throw StateError('Canoa UI closed');
-      store.bindDraft(draft, client, opened, cwd: where, worktree: made);
-      _ownedClients.add(client);
-    } catch (_) {
-      await client?.close();
-      if (made != null) await _unmake(worktrees!, made);
-      rethrow;
-    }
-    await store.applyProfile(draft, started.launch, prepared, harness: started.harness, notes: notes);
   }
 
   /// What `initialize` carries to a host to say how long this session's prompt cache should live.
@@ -897,9 +808,6 @@ class _CanoaAppState extends State<CanoaApp> {
     if (why != null) throw StateError(why);
     await _findWorktree(entry);
     final VerifiedAgent client;
-    ProfiledAgent? started;
-    PreparedProfile? prepared;
-    var notes = const <LayerNote>[];
     switch (entry.place) {
       case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entry.entry):
         client = await _linkAgent(entry.entry, _cacheMeta((
@@ -907,20 +815,7 @@ class _CanoaAppState extends State<CanoaApp> {
           chosen: entry.cacheLifetime != null,
         )));
       case SessionPlace.local:
-        final command = config.agents.where((agent) => agent.label == entry.entry).firstOrNull;
-        if (command == null) throw StateError('No agent named ${entry.entry} is set up here now');
-        if (!canRunLocalAgents) throw StateError('This build cannot run agents on this computer');
-        final cwd = entry.cwd;
-        if (cwd == null) throw StateError('Canoa did not note where this session was, which the agent needs to open it');
-        final home = platformProfileHome(configPath: _configPath);
-        final Set<String> on;
-        (prepared, on, notes) = await _prepareProfile(command.label, cwd, home);
-        started = await startProfiled(
-          command,
-          cwd: cwd, prepared: prepared, mcpOn: on, files: home is SessionFiles ? home as SessionFiles : null,
-          decider: store.askPermission, elicitor: store.askQuestion,
-        );
-        client = started.client;
+        throw StateError('${entry.entry} is not one of the sources of this computer now');
       case SessionPlace.host || SessionPlace.peer:
         final endpoint = Uri.tryParse(entry.endpoint ?? '');
         final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
@@ -952,7 +847,7 @@ class _CanoaAppState extends State<CanoaApp> {
         throw StateError(why ?? 'Reopen it from Earlier conversations');
     }
     try {
-      await store.reopen(entry, client, launch: started?.launch, prepared: prepared, harness: started?.harness, notes: notes);
+      await store.reopen(entry, client);
       _ownedClients.add(client);
     } catch (_) {
       await client.close();
@@ -966,8 +861,8 @@ class _CanoaAppState extends State<CanoaApp> {
     final serving = _hostedSources;
     if (_serving != null && _serving!.length == serving.length && _serving!.every(serving.contains)) return;
     _serving = serving;
-    store.resolveKeptSources((kind, label) =>
-        _sources.where((source) => source.kind.name == kind && source.label == label).firstOrNull);
+    store.resolveKeptSources((label) =>
+        _sources.where((source) => source.label == label).firstOrNull);
     if (_checked) {
       unawaited(_checkSources());
     } else if (mounted) {
@@ -1059,8 +954,8 @@ class _CanoaAppState extends State<CanoaApp> {
     store.choicesLoader = _askChoices;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
-    unawaited(store.restoreDrafts((kind, label) =>
-        _sources.where((source) => source.kind.name == kind && source.label == label).firstOrNull));
+    unawaited(store.restoreDrafts((label) =>
+        _sources.where((source) => source.label == label).firstOrNull));
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     _conversation.close = _closeSession;

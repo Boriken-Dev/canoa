@@ -75,7 +75,7 @@ class SettingsDialogState extends State<SettingsDialog> {
     builder: (context, snapshot) {
       final check = snapshot.data;
       if (check == null) return const Text('Looking for what it needs…');
-      final problem = check.describe(source.label, needs: source.command == null ? const [] : commandNeeds(source.command!));
+      final problem = check.describe(source.label);
       if (problem != null) return Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error));
       return Text(check.found.isEmpty ? 'Ready' : check.found.entries.map((found) => '${found.key}: ${found.value}').join('\n'));
     },
@@ -159,7 +159,7 @@ class SettingsDialogState extends State<SettingsDialog> {
     key: const Key('settings-sources'),
     initiallyExpanded: widget.openSources,
     title: const Text('Sources'),
-    subtitle: const Text('Where a new session\'s agent comes from'),
+    subtitle: const Text('Where a new session\'s agent comes from. Adding or removing one restarts Canoa\'s host, which ends the sessions open now.'),
     expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       for (final preset in widget.presets)
@@ -180,7 +180,7 @@ class SettingsDialogState extends State<SettingsDialog> {
           title: Text(agent.label),
           subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text([agent.program, ...agent.args].join(' '), style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12)),
-            _state(AgentSource.command(agent)),
+            _state(AgentSource.hosted(agent.label, local: true)),
           ]),
           trailing: IconButton(
             tooltip: 'Remove ${agent.label}',
