@@ -4,6 +4,7 @@ const list=document.querySelector('#grants');
 const status=document.querySelector('#status');
 const tabOrigins=new Map();
 import {agentChoices} from './agent-choices.js';
+import {expiryLabel} from './permissions.js';
 const options={peer:document.querySelector('#peer'),
   capability:document.querySelector('#capability'),
   minutes:document.querySelector('#minutes')};
@@ -35,7 +36,7 @@ async function refresh(){
     const row=document.createElement('li');
     const text=document.createElement('code');
     text.textContent=grant.capability+' • tab '+grant.tabId+' • '+grant.origin+
-      ' • '+grant.peerId.slice(0,24)+'… • expires '+new Date(grant.expiresAt).toLocaleString();
+      ' • '+grant.peerId.slice(0,24)+'… • '+expiryLabel(grant.expiresAt);
     const button=document.createElement('button');
     button.textContent='Revoke';
     button.addEventListener('click',async()=>{

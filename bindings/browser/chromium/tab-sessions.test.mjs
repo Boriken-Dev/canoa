@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CAPABILITY, DIRECTION, isAllowed, makeGrant, revokeTab, sameGrant } from "./permissions.js";
 import {
   addShare, attach, detachSession, detachTab, endSession, fromUiPage, groupTitle, noteActing, sessionsFor, shareGrant, sharedTabs,
-  groupOf, tabsToRelease, unshare
+  groupOf, leftTheirGroup, tabsToRelease, unshare
 } from "./tab-sessions.js";
 
 const PEER = `sha256:${"a".repeat(64)}`;
@@ -37,6 +37,11 @@ test("sessionsFor names the sessions of one origin and nothing else", () => {
   assert.deepEqual(sessionsFor(bindings, `${ORIGIN}/a/b`), ["s1"]);
   assert.deepEqual(sessionsFor(bindings, "https://nobody.example"), []);
   assert.deepEqual(sessionsFor(bindings, "not a url"), []);
+});
+
+test("ending a session needs a session: no id ends nothing", () => {
+  const ordinary = makeGrant({ direction: DIRECTION.AGENT_TO_PAGE, peerId: PEER, tabId: 4, origin: ORIGIN, capability: CAPABILITY.READ, expiresAt: Date.now() + 60_000 });
+  for (const bad of [undefined, null, "", 7, {}]) assert.deepEqual(endSession([ordinary], bad), [ordinary]);
 });
 
 test("a share is read on that tab, has no expiry and no cap, and only reads", () => {
@@ -73,17 +78,31 @@ test("unshare leaves a grant the person made another way", () => {
 });
 
 test("a tab leaves its group when no grant names it any more, and not before", () => {
-  const acting = noteActing(noteActing([], { tabId: 4, label: "Desk" }), { tabId: 5, label: "Desk" });
+  const acting = noteActing(noteActing([], { tabId: 4, peer: PEER, label: "Desk" }), { tabId: 5, peer: PEER, label: "Desk" });
   assert.deepEqual(tabsToRelease(acting, [share("s1", 4)]).map((entry) => entry.tabId), [5]);
   assert.deepEqual(tabsToRelease(acting, []).map((entry) => entry.tabId), [4, 5]);
-  assert.equal(noteActing(acting, { tabId: 4, label: "x" }), acting);
+  assert.equal(noteActing(acting, { tabId: 4, peer: PEER, label: "x" }), acting);
 });
 
 test("a second tab of the same agent joins the group already made in that window", () => {
-  const acting = noteActing([], { tabId: 4, label: "Desk", groupId: 11, windowId: 1 });
-  assert.equal(groupOf(acting, "Desk", 1), 11);
-  assert.equal(groupOf(acting, "Desk", 2), undefined);
-  assert.equal(groupOf(acting, "Other", 1), undefined);
+  const acting = noteActing([], { tabId: 4, peer: PEER, label: "Desk", groupId: 11, windowId: 1 });
+  assert.equal(groupOf(acting, PEER, 1), 11);
+  assert.equal(groupOf(acting, PEER, 2), undefined);
+  assert.equal(groupOf(acting, `sha256:${"b".repeat(64)}`, 1), undefined);
+});
+
+test("groups belong to a peer, not to the name it gave itself: two agents called the same keep two groups", () => {
+  const other = `sha256:${"b".repeat(64)}`;
+  let acting = noteActing([], { tabId: 4, peer: PEER, label: "Desk", groupId: 11, windowId: 1 });
+  acting = noteActing(acting, { tabId: 5, peer: other, label: "Desk", groupId: 12, windowId: 1 });
+  assert.equal(groupOf(acting, PEER, 1), 11);
+  assert.equal(groupOf(acting, other, 1), 12);
+});
+
+test("a tab that left its group, or the browser, is no longer ours to move", () => {
+  const acting = noteActing(noteActing(noteActing([], { tabId: 4, peer: PEER, label: "D", groupId: 11, windowId: 1 }), { tabId: 5, peer: PEER, label: "D", groupId: 11, windowId: 1 }), { tabId: 6, peer: PEER, label: "D", groupId: 11, windowId: 1 });
+  const nowIn = new Map([[4, 11], [5, 99]]);
+  assert.deepEqual(leftTheirGroup(acting, (tabId) => nowIn.get(tabId)).map((entry) => entry.tabId), [5, 6]);
 });
 
 test("the group is titled with the agent's name, cleaned and bounded", () => {

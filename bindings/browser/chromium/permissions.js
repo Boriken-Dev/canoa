@@ -21,6 +21,14 @@ export const CAPABILITY = Object.freeze({
   DEBUG: "browser.debug"
 });
 
+/** What the permissions page says of when a grant ends. */
+export function expiryLabel(expiresAt) {
+  if (expiresAt === UNTIL_REVOKED) return "until unshared";
+  if (!Number.isSafeInteger(expiresAt)) return "expiry unknown";
+  const date = new Date(expiresAt);
+  return Number.isNaN(date.getTime()) ? "expiry unknown" : `expires ${date.toLocaleString()}`;
+}
+
 /** An expiry for a grant that lasts until it is taken away: a tab shared with a session. */
 export const UNTIL_REVOKED = Number.MAX_SAFE_INTEGER;
 

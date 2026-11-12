@@ -37,6 +37,8 @@ async function handle(message, pairedPeers) {
     return {};
   }
   if (message.type === "canoa.tabs.detach") {
+    // Without a session it would end every grant made some other way.
+    if (typeof message.sessionId !== "string" || message.sessionId.length === 0 || message.sessionId.length > 128) throw new Error("Invalid session");
     await updateBindings((bindings) => detachSession(bindings, message.sessionId));
     await updateGrants((grants) => endSession(grants, message.sessionId));
     return {};

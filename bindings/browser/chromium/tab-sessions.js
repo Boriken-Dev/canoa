@@ -55,7 +55,8 @@ export function addShare(grants, grant) {
 }
 
 export const unshare = (grants, { sessionId, tabId }) => grants.filter((grant) => !(isShare(grant) && grant.session === sessionId && grant.tabId === tabId));
-export const endSession = (grants, sessionId) => grants.filter((grant) => grant.session !== sessionId);
+/** Ends a session's shares. Without a session id it ends nothing: an undefined id would match every grant made some other way. */
+export const endSession = (grants, sessionId) => (validId(sessionId) ? grants.filter((grant) => grant.session !== sessionId) : grants);
 export const sharedTabs = (grants, sessionId) => [...new Set(grants.filter((grant) => isShare(grant) && grant.session === sessionId).map((grant) => grant.tabId))];
 
 /** Tabs that were grouped for an agent and no longer have any grant: they leave the group, and nothing else does. */
@@ -63,14 +64,19 @@ export function tabsToRelease(acting, grants) {
   return acting.filter((entry) => !grants.some((grant) => grant.tabId === entry.tabId));
 }
 
-/** Notes a tab as acted on by an agent, once, with the group it was put in. */
-export function noteActing(acting, { tabId, label, groupId, windowId }) {
-  return acting.some((entry) => entry.tabId === tabId) ? acting : [...acting, { tabId, label: groupTitle(label), groupId, windowId }];
+/** Notes a tab as acted on by a peer, once, with the group it was put in. The name is only what the group is called. */
+export function noteActing(acting, { tabId, peer, label, groupId, windowId }) {
+  return acting.some((entry) => entry.tabId === tabId) ? acting : [...acting, { tabId, peer, label: groupTitle(label), groupId, windowId }];
 }
 
-/** The group already made for this agent's name in that window, so its tabs gather in one. */
-export function groupOf(acting, label, windowId) {
-  return acting.find((entry) => entry.label === groupTitle(label) && entry.windowId === windowId)?.groupId;
+/** The group already made for this peer in that window, so its tabs gather in one. Two agents with one name are two peers. */
+export function groupOf(acting, peer, windowId) {
+  return acting.find((entry) => entry.peer === peer && entry.windowId === windowId)?.groupId;
+}
+
+/** Tabs recorded as ours that are no longer in the group we put them in (the person moved them, or they are gone). */
+export function leftTheirGroup(acting, groupIdOf) {
+  return acting.filter((entry) => groupIdOf(entry.tabId) !== entry.groupId);
 }
 
 /** Only the extension's own UI pages (the panel, the full-page view) may bind sessions and share tabs: a web page or a content script is refused. */

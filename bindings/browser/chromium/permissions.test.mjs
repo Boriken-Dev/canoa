@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CAPABILITY, debuggedTabs, DIRECTION, isAllowed, makeGrant, pruneExpired, revokePeer, revokeTab
+  CAPABILITY, debuggedTabs, DIRECTION, expiryLabel, isAllowed, makeGrant, pruneExpired, revokePeer, revokeTab, UNTIL_REVOKED
 } from "./permissions.js";
 
 const NOW = 1_800_000_000_000;
@@ -90,4 +90,11 @@ test("the tabs a peer's debugger grants name are what has to be detached when th
   ];
   assert.deepEqual(debuggedTabs(grants, "a"), [1]);
   assert.deepEqual(debuggedTabs(undefined, "a"), []);
+});
+
+test("a grant with no expiry says so, and one with an expiry says when", () => {
+  assert.equal(expiryLabel(UNTIL_REVOKED), "until unshared");
+  assert.match(expiryLabel(NOW), /^expires /);
+  assert.doesNotMatch(expiryLabel(NOW), /Invalid/);
+  assert.equal(expiryLabel(undefined), "expiry unknown");
 });

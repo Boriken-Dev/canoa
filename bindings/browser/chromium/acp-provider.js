@@ -185,7 +185,7 @@ function offerTools({ mux, peer, label, via, still }) {
       dispatch: within(async (call) => {
         const result = await dispatchBrowserTool(call);
         // A tool that ran on a tab puts it in the agent's group; a failure to do that never fails the tool.
-        if (call.name !== "browser_list_tabs" && Number.isSafeInteger(call.args?.tabId)) await markActing({ tabId: call.args.tabId, label }).catch(() => {});
+        if (call.name !== "browser_list_tabs" && Number.isSafeInteger(call.args?.tabId)) await markActing({ tabId: call.args.tabId, peer, label }).catch(() => {});
         return result;
       }, TOOL_MS),
       access: {
