@@ -416,3 +416,96 @@ fn context_a_hook_prints_is_kept_to_the_spec_s_characters() {
     assert_eq!(causes(&fired), ["output"], "a terminal escape is refused");
     assert!(fired.context.is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_process_that_leaves_the_hooks_group_and_holds_its_output_does_not_hold_the_relay() {
+    let temp = Temp::new();
+    let digest = temp.install("[hooks]\nprompt = {}\n", &[("prompt", Arm::Daemon)]);
+    let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+    let began = std::time::Instant::now();
+    let fired = prompt(&connection, "hello");
+    assert!(
+        began.elapsed() < Duration::from_secs(10),
+        "waited {:?} on a descendant: {:?}",
+        began.elapsed(),
+        causes(&fired)
+    );
+}
+
+#[test]
+fn context_past_the_sessions_bound_is_not_added_and_is_reported() {
+    let temp = Temp::new();
+    temp.install("", &[]);
+    let mut connection = connect(&temp, None, &real).expect("prepared");
+    connection.hooks.settings = Settings::default().context_bytes(aos::Limit::at(10));
+    let mut used = 0;
+    let (kept, items) = connection.hooks.admit(
+        &mut used,
+        vec![
+            ("team".to_owned(), "123456".to_owned()),
+            ("team".to_owned(), "123456".to_owned()),
+            ("team".to_owned(), "12".to_owned()),
+        ],
+        "post-tool",
+    );
+    assert_eq!(kept.len(), 2, "6 and then 2 fit, the second 6 does not");
+    assert_eq!(used, 8);
+    assert_eq!(items.len(), 1);
+    assert!(
+        items[0].how.contains("hook-not-applied"),
+        "{}",
+        items[0].how
+    );
+}
+
+/// Gives a directory an old modification time.
+fn age(dir: &Path, old: std::time::SystemTime) {
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(windows)]
+    {
+        open.write(true);
+        std::os::windows::fs::OpenOptionsExt::custom_flags(&mut open, 0x0200_0000);
+    }
+    open.open(dir)
+        .and_then(|handle| handle.set_modified(old))
+        .expect("aged");
+}
+
+#[test]
+fn copies_a_killed_host_left_in_the_temporary_directory_are_removed_when_old_and_only_those() {
+    let temp = Temp::new();
+    for name in ["canoa-hooks-old", "canoa-hooks-new", "other-old"] {
+        std::fs::create_dir_all(temp.0.join(name)).expect("a directory");
+    }
+    let old = std::time::SystemTime::now() - Duration::from_secs(2 * 3600);
+    for name in ["canoa-hooks-old", "other-old"] {
+        age(&temp.0.join(name), old);
+    }
+    remove_stale(&temp.0);
+    assert!(!temp.0.join("canoa-hooks-old").exists());
+    assert!(temp.0.join("canoa-hooks-new").exists());
+    assert!(temp.0.join("other-old").exists(), "only copies are removed");
+}
+
+#[test]
+fn a_connections_copies_go_with_it() {
+    let temp = Temp::new();
+    let digest = temp.install(
+        "[hooks]\nprompt = {}\n",
+        &[("prompt", Arm::LogEnv(aos::root_variable("team")))],
+    );
+    let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+    prompt(&connection, "hello");
+    let raw = std::fs::read_to_string(temp.log()).expect("logged");
+    let root = raw
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("envprobe="))
+        .expect("the root variable")
+        .to_owned();
+    assert!(Path::new(&root).exists(), "kept while the connection lasts");
+    drop(connection);
+    assert!(!Path::new(&root).exists(), "removed with it");
+}

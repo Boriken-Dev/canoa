@@ -26,7 +26,7 @@ String _ask(Object id) => jsonEncode({
         'failClosed': true,
         'events': [
           {'event': 'session-start', 'run': 'hook.py', 'timeout': 30, 'onFailure': 'refuse', 'match': ['new'], 'fires': true},
-          {'event': 'cd', 'run': 'hook.py', 'onFailure': 'report', 'fires': false},
+          {'event': 'cd', 'run': 'hook.py', 'onFailure': 'report', 'fires': false, 'note': 'only canoa.cfg'},
           {'event': 7},
         ],
       },
@@ -55,6 +55,7 @@ void main() {
     expect(hook.events.first.onFailure, 'refuse');
     expect(hook.events.first.timeout, 30);
     expect(hook.events.last.fires, isFalse);
+    expect(hook.events.last.note, 'only canoa.cfg');
     final answer = jsonDecode(sent.single) as Map<String, dynamic>;
     expect(answer['id'], 'canoa-approve-1');
     expect(answer['result'], {'allow': ['team'], 'allowHooks': ['team']});
@@ -157,8 +158,8 @@ void main() {
           changed: true,
           failClosed: true,
           events: <ApprovalHookEvent>[
-            (event: 'prompt', run: 'hook.py', timeout: 5, onFailure: 'refuse', match: <String>[], sets: <String>['X'], fires: true),
-            (event: 'cd', run: 'hook.py', timeout: null, onFailure: 'report', match: <String>[], sets: <String>[], fires: false),
+            (event: 'prompt', run: 'hook.py', timeout: 5, onFailure: 'refuse', match: <String>[], sets: <String>['X'], fires: true, note: null),
+            (event: 'cd', run: 'hook.py', timeout: null, onFailure: 'report', match: <String>[], sets: <String>[], fires: false, note: 'runs before the agent starts, so only canoa.cfg allows it'),
           ],
         ),
       ],
@@ -178,7 +179,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Claude asks to start hooks'), findsOneWidget);
     expect(find.textContaining('prompt: hook.py, 5 s at most, refuses on failure, may set X'), findsOneWidget);
-    expect(find.textContaining('never runs'), findsOneWidget, reason: 'an event Canoa does not see is said so');
+    expect(find.textContaining('only canoa.cfg allows it'), findsOneWidget, reason: 'why an event does not run is said');
     expect(find.textContaining('another version'), findsOneWidget);
     expect(find.textContaining(digest), findsOneWidget);
     await tester.tap(find.byKey(const Key('approve-start')));

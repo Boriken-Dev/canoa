@@ -141,6 +141,35 @@ fn plan(
     (!plan.hooks.is_empty()).then_some(plan)
 }
 
+/// What a host that was killed mid-connection left in `dir`: copies of overlays' files (`canoa-hooks-*`) older than this are
+/// removed when a connection starts, so the temporary directory does not fill.
+const STALE: Duration = Duration::from_secs(3600);
+
+/// Removes the `canoa-hooks-*` entries of `dir` older than [`STALE`].
+pub(super) fn remove_stale(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("canoa-hooks-")
+        {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|made| made.elapsed().ok())
+            .is_some_and(|age| age > STALE);
+        if old {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// The hooks of a connection's overlays and the means to run them.
 #[derive(Debug)]
 pub(super) struct Hooks {
@@ -153,6 +182,17 @@ pub(super) struct Hooks {
     /// Where the copies of the overlays' files are made, removed with the connection.
     under: PathBuf,
     copies: Mutex<BTreeMap<String, Written>>,
+}
+
+impl Drop for Hooks {
+    /// The copies of the overlays' files are removed with the connection.
+    fn drop(&mut self) {
+        self.copies
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        let _ = std::fs::remove_dir(&self.under);
+    }
 }
 
 impl Hooks {
@@ -226,6 +266,7 @@ impl Hooks {
                 hooks: found.hooks,
             });
         }
+        remove_stale(&std::env::temp_dir());
         let mut random = [0_u8; 16];
         let _ = getrandom::fill(&mut random);
         let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -237,6 +278,41 @@ impl Hooks {
             under: std::env::temp_dir().join(format!("canoa-hooks-{name}")),
             copies: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// The parts of `context` that fit the session's bound, counting what the session already holds in `used`; a part past it is
+    /// not added and is reported `hook-not-applied`.
+    pub(super) fn admit(
+        &self,
+        used: &mut usize,
+        context: Vec<(String, String)>,
+        event: &str,
+    ) -> (Vec<(String, String)>, Vec<Item>) {
+        let mut kept = Vec::new();
+        let mut items = Vec::new();
+        for (overlay, text) in context {
+            if self
+                .settings
+                .context_bytes
+                .allows(used.saturating_add(text.len()))
+            {
+                *used += text.len();
+                kept.push((overlay, text));
+            } else {
+                tracing::info!(
+                    overlay,
+                    event,
+                    "a hook's context passes the session's bound and was not added"
+                );
+                items.push(Item::new(
+                    format!("hooks.{overlay}.{event}"),
+                    LayerId::new(LayerKind::Overlay, overlay),
+                    State::Unsupported,
+                    "hook-not-applied: its context passes the session's context bound",
+                ));
+            }
+        }
+        (kept, items)
     }
 
     /// Whether any overlay has hooks.
@@ -275,6 +351,13 @@ impl Hooks {
                             each["sets"] = json!(hook.sets);
                         }
                         each["fires"] = json!(FIRES.contains(&hook.event));
+                        if hook.event == HookEvent::PreEnv {
+                            // It runs before the agent starts, when nobody can be asked: only canoa.cfg's allowance runs it.
+                            each["fires"] = json!(false);
+                            each["note"] = json!(
+                                "runs before the agent starts, so only canoa.cfg's allowance runs it, never this question"
+                            );
+                        }
                         each
                     })
                     .collect();
@@ -340,7 +423,15 @@ impl Hooks {
                             .iter()
                             .any(|reason| REASONS.contains(&reason.as_str()))
                     });
-                let item = if unsupported {
+                let only_for_session = hook.event == HookEvent::PreEnv && !overlay.allowed;
+                let item = if only_for_session {
+                    Item::new(
+                        key,
+                        &layer,
+                        State::Unsupported,
+                        "hook-not-applied: pre-env runs before the agent starts, when nobody can be asked; only canoa.cfg's allowance runs it",
+                    )
+                } else if unsupported {
                     Item::new(
                         key,
                         &layer,

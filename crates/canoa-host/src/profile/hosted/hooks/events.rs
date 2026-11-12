@@ -68,6 +68,8 @@ pub(in crate::profile::hosted) struct Book {
     turns: BTreeMap<String, String>,
     /// Context for a session's next prompt, by Canoa's id for it: `(overlay, text)`.
     carry: BTreeMap<String, Vec<(String, String)>>,
+    /// Bytes of hook context each session (by Canoa's id for it) has been given.
+    used: BTreeMap<String, usize>,
     /// Tool calls shown and not yet ended, by session and call.
     tools: BTreeMap<(String, String), Tool>,
     /// Messages Canoa answers the agent with, read before the client's.
@@ -87,6 +89,20 @@ impl Book {
         let mut notes = self.notes.remove(id).unwrap_or_default();
         notes.extend(core::mem::take(&mut self.items));
         notes
+    }
+
+    /// The part of `context` the session's bound admits; the rest is reported.
+    fn admit(
+        &mut self,
+        hooks: &super::Hooks,
+        session: &str,
+        context: Vec<(String, String)>,
+        event: &str,
+    ) -> Vec<(String, String)> {
+        let used = self.used.entry(session.to_owned()).or_default();
+        let (kept, items) = hooks.admit(used, context, event);
+        self.remember(items);
+        kept
     }
 
     fn remember(&mut self, items: impl IntoIterator<Item = Item>) {
@@ -291,7 +307,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .map(str::to_owned);
         let mut random = [0_u8; 12];
         let _ = getrandom::fill(&mut random);
-        let session = SessionHooks {
+        // A session the host already holds keeps its record, its id and its allowances.
+        let known = named
+            .as_ref()
+            .and_then(|agent| self.hold().book.sessions.get(agent).cloned());
+        let session = known.unwrap_or_else(|| SessionHooks {
             id: format!(
                 "canoa-session-{}",
                 random
@@ -305,7 +325,8 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned(),
-        };
+        });
+        let allowed = &session.allowed;
         let reason = if method == "session/new" {
             "new"
         } else {
@@ -337,14 +358,20 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     "an overlay's hook that guards sessions failed, so the session did not open",
                 ));
             }
-            if !fired.context.is_empty() {
+            let context = self.hold().book.admit(
+                &self.connection.hooks,
+                &session.id,
+                fired.context,
+                "session-start",
+            );
+            if !context.is_empty() {
                 let takes = self
                     .hold()
                     .parts
                     .as_ref()
                     .is_some_and(|parts| parts.system_prompt_taken);
                 if method == "session/new" && takes {
-                    let blocks = blocks_of(&fired.context, "session-start");
+                    let blocks = blocks_of(&context, "session-start");
                     match params
                         .get_mut("systemPrompt")
                         .and_then(Value::as_object_mut)
@@ -372,7 +399,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                         .carry
                         .entry(session.id.clone())
                         .or_default()
-                        .extend(fired.context);
+                        .extend(context);
                 }
             }
         }
@@ -449,7 +476,12 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "refusal"}});
                 return Err(serde_json::to_vec(&answer).unwrap_or_default());
             }
-            fresh = fired.context;
+            fresh = self.hold().book.admit(
+                &self.connection.hooks,
+                &session.id,
+                fired.context,
+                "prompt",
+            );
         }
         let mut context = self
             .hold()
@@ -547,7 +579,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             if value.get("error").is_none()
                 && let Some(agent) = agent
             {
-                hold.book.sessions.insert(agent, opening.hooks);
+                // A session already held keeps its record: loading it again does not replace it.
+                if hold.book.sessions.len() < MAX_TRACKED || hold.book.sessions.contains_key(&agent)
+                {
+                    hold.book.sessions.entry(agent).or_insert(opening.hooks);
+                }
             }
             hold.book.notes.insert(key, opening.notes);
             return None;
@@ -704,12 +740,18 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 );
                 let mut hold = self.hold();
                 hold.book.remember(fired.reports.iter().map(report_item));
-                if !fired.context.is_empty() {
+                let context = hold.book.admit(
+                    &self.connection.hooks,
+                    &session.id,
+                    fired.context,
+                    "post-tool",
+                );
+                if !context.is_empty() {
                     hold.book
                         .carry
                         .entry(session.id)
                         .or_default()
-                        .extend(fired.context);
+                        .extend(context);
                 }
             }
         }

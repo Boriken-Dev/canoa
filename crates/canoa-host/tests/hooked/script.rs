@@ -20,6 +20,8 @@ pub enum Arm {
     Sleep(u64),
     /// Writes this many bytes.
     Big(usize),
+    /// Leaves a process that outlives the hook and holds its standard output (Unix only).
+    Daemon,
     /// Logs the value of this environment variable, as the line `envprobe=<value>`.
     LogEnv(String),
 }
@@ -44,6 +46,7 @@ pub fn body(log: &Path, arms: &[(&str, Arm)]) -> String {
                 Arm::Exit(status) => format!("exit {status}"),
                 Arm::Sleep(seconds) => format!("Start-Sleep -Seconds {seconds}"),
                 Arm::Big(bytes) => format!("[Console]::Out.Write(('x' * {bytes}))"),
+                Arm::Daemon => "exit 0".to_owned(),
                 Arm::LogEnv(name) => {
                     format!(
                         "Add-Content -LiteralPath '{}' -Value \"envprobe=$env:{name}\"",
@@ -67,6 +70,7 @@ pub fn body(log: &Path, arms: &[(&str, Arm)]) -> String {
                 Arm::Exit(status) => format!("exit {status}"),
                 Arm::Sleep(seconds) => format!("sleep {seconds}"),
                 Arm::Big(bytes) => format!("head -c {bytes} /dev/zero | tr '\\0' x"),
+                Arm::Daemon => "setsid sleep 15 &".to_owned(),
                 Arm::LogEnv(name) => format!(
                     "printf 'envprobe=%s\\n' \"${name}\" >> '{}'",
                     log.replace('\'', "'\\''")

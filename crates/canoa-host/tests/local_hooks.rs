@@ -185,6 +185,16 @@ fn a_session_that_is_loaded_again_starts_with_the_reason_resume() {
         .filter_map(|payload| payload["reason"].as_str())
         .collect();
     assert_eq!(reasons, ["new", "resume"], "{events:?}");
+    assert_eq!(
+        events[0]["session"], events[1]["session"],
+        "a session loaded again is the same session to its hooks"
+    );
+    let (turn, _) = setup.turn(4, &session, "hello", "yes");
+    turn.expect("the turn ends");
+    assert_eq!(
+        setup.events("turn-end", 1)[0]["session"],
+        events[0]["session"]
+    );
     setup.host.stop();
 }
 
@@ -604,6 +614,19 @@ fn the_host_lists_the_hooks_it_asks_about_and_runs_only_those_the_person_allows(
         assert!(
             events.contains(&"session-start") && events.contains(&"prompt"),
             "{events:?}"
+        );
+        let pre_env = listed[0]["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .find(|each| each["event"] == "pre-env")
+            .expect("the default hook is bound to pre-env");
+        assert_eq!(pre_env["fires"], false, "{pre_env}");
+        assert!(
+            pre_env["note"]
+                .as_str()
+                .is_some_and(|note| note.contains("canoa.cfg")),
+            "{pre_env}"
         );
         let prompt = listed[0]["events"]
             .as_array()

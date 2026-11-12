@@ -1,6 +1,7 @@
 //! One run of a hook's process: its payload on standard input, its output read up to a bound, a time limit, and every
 //! process it started ended when it ends.
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
@@ -8,10 +9,13 @@ use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 /// How often the run looks to see whether the process ended.
 const POLL: Duration = Duration::from_millis(5);
+/// How long a pipe held open past the hook's end is waited for.
+const GRACE: Duration = Duration::from_millis(500);
 
 /// What to run.
 pub(super) struct Job<'a> {
@@ -166,23 +170,25 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
         #[cfg(windows)]
         job: job_object,
     };
-    let over = AtomicBool::new(false);
     let max = job.max_output;
-    let mut output = Vec::new();
-    let mut exit = None;
-    let mut timed_out = false;
-    std::thread::scope(|scope| {
-        // The payload is written on a thread of its own: a process that never reads it must not hold the run.
-        scope.spawn(move || {
-            let _ = stdin.write_all(job.input);
-        });
-        let reading = scope.spawn(|| {
-            let mut kept = Vec::new();
+    let over = Arc::new(AtomicBool::new(false));
+    let closed = Arc::new(AtomicBool::new(false));
+    let out = Arc::new(Mutex::new(Vec::new()));
+    // Threads of their own that nothing waits on past a deadline: a process that left its group (setsid) can hold a pipe
+    // open after the hook has ended, and must not hold the relay with it.
+    let input = job.input.to_vec();
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(&input);
+    });
+    {
+        let (over, closed, out) = (Arc::clone(&over), Arc::clone(&closed), Arc::clone(&out));
+        std::thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             while let Ok(read) = stdout.read(&mut buffer) {
                 if read == 0 {
                     break;
                 }
+                let mut kept = out.lock().unwrap_or_else(PoisonError::into_inner);
                 let room = (max + 1).saturating_sub(kept.len());
                 kept.extend_from_slice(&buffer[..read.min(room)]);
                 if kept.len() > max {
@@ -190,36 +196,49 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
                     break;
                 }
             }
-            kept
+            closed.store(true, Ordering::SeqCst);
         });
-        // Standard error is for the user's log and never reaches the agent: it is read so the process does not wait on it.
-        scope.spawn(|| {
+    }
+    {
+        // Standard error never reaches the agent: it is read to its end so the process never waits on it.
+        std::thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
             while stderr.read(&mut buffer).is_ok_and(|read| read > 0) {}
         });
-        let until = started + job.timeout;
-        loop {
-            if let Some(code) = held.finished() {
-                exit = Some(code);
-                break;
-            }
-            if over.load(Ordering::SeqCst) {
-                held.end();
-                break;
-            }
-            if Instant::now() >= until {
-                timed_out = true;
-                held.end();
-                break;
-            }
-            std::thread::sleep(POLL);
+    }
+    let until = started + job.timeout;
+    let mut exit = None;
+    let mut timed_out = false;
+    loop {
+        if let Some(code) = held.finished() {
+            exit = Some(code);
+            break;
         }
-        // Every process of the run is ended, so each pipe closes and the readers return.
-        output = reading.join().unwrap_or_default();
-    });
+        if over.load(Ordering::SeqCst) {
+            held.end();
+            break;
+        }
+        if Instant::now() >= until {
+            timed_out = true;
+            held.end();
+            break;
+        }
+        std::thread::sleep(POLL);
+    }
+    // What the process wrote is read to its end when the pipe closes; a holder outside its group gets a short grace, no more.
+    let grace = Instant::now() + GRACE;
+    while !closed.load(Ordering::SeqCst) && Instant::now() < grace {
+        std::thread::sleep(POLL);
+    }
+    let take = |buffer: &Mutex<Vec<u8>>| {
+        buffer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    };
     Outcome {
         started: true,
-        stdout: output,
+        stdout: take(&out),
         exit: exit.unwrap_or(-1),
         timed_out,
         seconds: started.elapsed().as_secs(),

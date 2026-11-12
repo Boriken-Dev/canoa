@@ -24,6 +24,7 @@ typedef ApprovalHookEvent = ({
   List<String> match,
   List<String> sets,
   bool fires,
+  String? note,
 });
 
 /// The hooks of one overlay the host asks about: the overlay, the digest of its files (what an allowance names), whether canoa.cfg
@@ -152,6 +153,7 @@ final class UsageWire {
             match: texts(one['match']),
             sets: texts(one['sets']),
             fires: one['fires'] != false,
+            note: one['note'] is String ? one['note'] as String : null,
           ));
         }
         hooks.add((

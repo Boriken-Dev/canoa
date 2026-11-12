@@ -125,7 +125,7 @@ class _ProfileApprovalDialogState extends State<ProfileApprovalDialog> {
             '${each.timeout == null ? '' : ', ${each.timeout} s at most'}'
             '${each.onFailure == 'refuse' ? ', refuses on failure' : ''}'
             '${each.sets.isEmpty ? '' : ', may set ${each.sets.join(', ')} (not applied over ACP)'}'
-            '${each.fires ? '' : ' (Canoa does not see this event, so it never runs)'}',
+            '${each.fires ? '' : ' (${each.note ?? 'Canoa does not see this event, so it never runs'})'}',
     ];
     return lines.join('\n');
   }
