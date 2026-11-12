@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Canoa — Before you start</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{color-scheme:dark;font:15px system-ui;background:#101820;color:#e4f2f2}
+    main{max-width:760px;margin:2rem auto;padding:0 1.5rem}p,li{line-height:1.6;color:#c3d1d8}li{margin:.5rem 0}
+    a{color:#7fd0c7}button{font:inherit;padding:.65rem 1rem;border-radius:.4rem;background:#397e78;color:white;border:0;cursor:pointer;margin-top:1rem}
+    .warn{color:#f3be86}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Before you start</h1>
+  <p>Canoa lets an agent you have paired use this browser. That is useful, and it has risks you should know first.</p>
+  <h2>What an agent can do with a tab you give it</h2>
+  <ul>
+    <li><strong>Read it.</strong> Its text and what can be clicked in it, including anything you are signed in to there.</li>
+    <li><strong>Act in it, if you allow that too.</strong> Click and type as you, on that site.</li>
+    <li class="warn"><strong>Be talked into things.</strong> A page can contain text meant to steer an agent. Share only what you would show the agent yourself, and be careful with banking, mail and anything private.</li>
+  </ul>
+  <h2>What Canoa does about it</h2>
+  <ul>
+    <li>Nothing is shared until you choose it, one tab at a time. Pairing an agent gives it no tab.</li>
+    <li>What you allow belongs to one tab and one site, and ends when the tab closes or goes to another page.</li>
+    <li>Acting on a page, as against reading it, is a separate question. The browser's own prompt comes first for a site it has not been given.</li>
+    <li>Take any of it back under <a href="permissions.html">Canoa browser permissions</a>.</li>
+  </ul>
+  <button type="button" id="ok">I understand</button>
+  <p><a href="acp-request.html?manage=1">Pair an agent</a></p>
+</main>
+<script type="module" src="welcome.js"></script>
+</body>
+</html>
