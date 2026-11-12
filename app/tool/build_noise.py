@@ -2,8 +2,9 @@
 """Build the web app's Noise method (app/web_noise, coqui-peer-noise) to WebAssembly and its loader.
 
 Writes canoa_noise.js and canoa_noise_bg.wasm to app/web/noise/ (generated, never committed), which `flutter build web`
-copies into the page. Needs cargo with the wasm32-unknown-unknown target and a wasm-bindgen command line of exactly the
-version app/web_noise/Cargo.toml pins.
+copies into the page. With --test-peer it builds a variant with a responder into app/test/noise/, for the browser tests.
+Needs cargo with the wasm32-unknown-unknown target and a wasm-bindgen command line of exactly the version
+app/web_noise/Cargo.toml pins.
 """
 from __future__ import annotations
 
@@ -58,11 +59,15 @@ def build(out: Path, test_peer: bool) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=APP / "web" / "noise", help="where the loader and the wasm go")
-    parser.add_argument("--test-peer", action="store_true", help="also build the responder the browser tests use")
+    parser.add_argument("--out", type=Path, help="where the loader and the wasm go (default web/noise, or test/noise with --test-peer)")
+    parser.add_argument("--test-peer", action="store_true", help="also build the responder the browser tests use, into test/noise only")
     opts = parser.parse_args()
+    out = opts.out or (APP / ("test" if opts.test_peer else "web") / "noise")
+    # The responder is for tests: a page that ships it would carry code no user of the app needs.
+    if opts.test_peer and (APP / "web").resolve() in (out.resolve(), *out.resolve().parents):
+        parser.error("--test-peer builds into test/noise, never into web/")
     try:
-        wasm = build(opts.out, opts.test_peer)
+        wasm = build(out, opts.test_peer)
     except (RuntimeError, subprocess.CalledProcessError) as error:
         sys.exit(f"build_noise.py: {error}")
     print(f"{wasm} {wasm.stat().st_size} bytes")

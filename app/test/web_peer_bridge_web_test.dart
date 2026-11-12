@@ -1,6 +1,6 @@
 // The web build's peer bridge a step at a time, as the app drives it, against each method's own responder, in a real browser.
 //
-// Needs the Noise module with its test responder (python tool/build_noise.py --out test/noise --test-peer):
+// Needs the Noise module with its test responder (python tool/build_noise.py --test-peer):
 //   flutter test --platform chrome test/web_peer_bridge_web_test.dart   (CHROME_EXECUTABLE may name Edge or Chromium)
 //
 // A PIN pairing has no responder here: its desk needs a trust store on disk. The pairing runs against a real

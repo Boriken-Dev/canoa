@@ -5,6 +5,11 @@
 //! The Noise method of the web app's peer bridge: `coqui-peer-noise`'s handshake and session, and
 //! `coqui-peer`'s PIN pairing inside it, behind a surface a page can call one step at a time.
 //!
+//! The page's private key is a non-extractable WebCrypto X25519 key, so this module never holds
+//! it: it knows the public half, and the dialing handshake pauses at the one Diffie-Hellman that
+//! uses the private key (`pendingDh`), which the page computes with WebCrypto and hands back
+//! (`provideDh`).
+//!
 //! A [`NoiseRun`] is a proof or a pairing. Its `step` takes the peer's last message (none for the
 //! first) and gives back the messages to send, in order. A proof ends in a [`NoiseSession`], a
 //! pairing in the id of the key it learned. Nothing here reads a clock, a file or the network.
@@ -27,9 +32,9 @@ fn failed(error: impl core::fmt::Display) -> JsError {
 }
 
 /// `The pairing was refused: wrong-code`, the words a refusal has always had on the page.
-fn pairing_failed(error: Error) -> JsError {
+fn pairing_message(error: Error) -> String {
     let Error::Pairing(PairingError::Refused(refusal)) = &error else {
-        return failed(error);
+        return error.to_string();
     };
     let reason = match refusal {
         PairRefusal::WrongCode => "wrong-code",
@@ -40,7 +45,11 @@ fn pairing_failed(error: Error) -> JsError {
         PairRefusal::Disabled => "disabled",
         _ => "refused",
     };
-    JsError::new(&format!("The pairing was refused: {reason}"))
+    format!("The pairing was refused: {reason}")
+}
+
+fn pairing_failed(error: Error) -> JsError {
+    JsError::new(&pairing_message(error))
 }
 
 fn messages(sent: Vec<Vec<u8>>) -> Array {
@@ -49,7 +58,8 @@ fn messages(sent: Vec<Vec<u8>>) -> Array {
         .collect()
 }
 
-/// This page's Noise key: an X25519 key, whose SHA-256 is the peer id.
+/// This page's Noise key as far as this module knows it: the public half of an X25519 key whose
+/// private half stays in WebCrypto. The id is the one the full key has.
 #[wasm_bindgen]
 pub struct NoiseKey {
     identity: Identity,
@@ -57,25 +67,14 @@ pub struct NoiseKey {
 
 #[wasm_bindgen]
 impl NoiseKey {
-    /// A new key from the browser's random generator.
-    pub fn generate() -> Result<NoiseKey, JsError> {
+    /// The key of a 32-byte public key (RFC 7748's encoding), refused unless it is the one
+    /// canonical encoding of a key.
+    #[wasm_bindgen(js_name = fromPublicKey)]
+    pub fn from_public_key(public: &[u8]) -> Result<NoiseKey, JsError> {
+        let public: [u8; 32] = public.try_into().map_err(|_| failed("A key is 32 bytes"))?;
         Ok(NoiseKey {
-            identity: Identity::generate().map_err(failed)?,
+            identity: Identity::from_public_key(&public).map_err(failed)?,
         })
-    }
-
-    /// The key of RFC 8410 PKCS#8 PEM text, exactly as [`to_pem`](NoiseKey::to_pem) writes it.
-    #[wasm_bindgen(js_name = fromPem)]
-    pub fn from_pem(text: &str) -> Result<NoiseKey, JsError> {
-        Ok(NoiseKey {
-            identity: Identity::from_pkcs8_pem(text).map_err(failed)?,
-        })
-    }
-
-    /// The private key as PKCS#8 PEM text, for the page's own storage.
-    #[wasm_bindgen(js_name = toPem)]
-    pub fn to_pem(&self) -> Result<String, JsError> {
-        Ok(self.identity.to_pkcs8_pem().map_err(failed)?.to_string())
     }
 
     #[wasm_bindgen(getter, js_name = peerId)]
@@ -100,9 +99,16 @@ enum Kind {
 #[wasm_bindgen]
 pub struct NoiseRun {
     kind: Kind,
+    /// 0 the first message, 1 the responder's second, 2 waiting for the page's Diffie-Hellman
+    /// result, 3 and on the rest.
     stage: u8,
     peer: Option<String>,
+    failure: Option<String>,
 }
+
+const NOT_AGAIN: &str = "Unexpected message after the run";
+const NO_MESSAGE: &str = "Unexpected step without a message";
+const WAITING: &str = "Unexpected step before the static key's result";
 
 #[wasm_bindgen]
 impl NoiseRun {
@@ -123,6 +129,7 @@ impl NoiseRun {
             },
             stage: 0,
             peer: None,
+            failure: None,
         })
     }
 
@@ -143,35 +150,95 @@ impl NoiseRun {
             },
             stage: 0,
             peer: None,
+            failure: None,
         })
     }
 
     /// The next step, given the peer's last message or nothing for the first: the messages to
-    /// send now, as an array of `Uint8Array`. After the step that ends the run, [`peer_id`] names
-    /// the key it proved or learned.
-    ///
-    /// [`peer_id`]: NoiseRun::peer_id
+    /// send now, as an array of `Uint8Array`. The step that takes the responder's second message
+    /// sends nothing: [`pending_dh`](NoiseRun::pending_dh) then names the point the page's private
+    /// key is to compute X25519 with, and [`provide_dh`](NoiseRun::provide_dh) goes on. After the
+    /// step that ends the run, [`peer_id`](NoiseRun::peer_id) names the key it proved or learned.
     pub fn step(&mut self, received: Option<Vec<u8>>) -> Result<Array, JsError> {
+        let at = self.stage;
+        self.stage = at.saturating_add(1);
         let sent = match &mut self.kind {
-            Kind::Proof { handshake, session } => step_proof(
-                &mut self.stage,
-                &mut self.peer,
+            Kind::Proof { handshake, .. } => step_proof(at, handshake, received)?,
+            Kind::Pair {
                 handshake,
-                session,
+                exchange,
+                ..
+            } => step_pair(
+                at,
+                &mut self.peer,
+                &mut self.failure,
+                handshake,
+                exchange,
                 received,
             )?,
+        };
+        Ok(messages(sent))
+    }
+
+    /// While the run waits for the page's static key: the 32-byte point to compute X25519 with.
+    #[wasm_bindgen(getter, js_name = pendingDh)]
+    pub fn pending_dh(&self) -> Option<Vec<u8>> {
+        let point = match &self.kind {
+            Kind::Proof { handshake, .. } => handshake.as_ref()?.pending_static_dh(),
+            Kind::Pair { handshake, .. } => handshake.as_ref()?.pending_static_dh(),
+        };
+        point.map(|point| point.to_vec())
+    }
+
+    /// Goes on with the X25519 result the page's static key computed for
+    /// [`pending_dh`](NoiseRun::pending_dh): the messages to send now. A result of all zeros is
+    /// refused and ends the run.
+    #[wasm_bindgen(js_name = provideDh)]
+    pub fn provide_dh(&mut self, shared: &[u8]) -> Result<Array, JsError> {
+        if self.stage != 2 {
+            return Err(failed(NOT_AGAIN));
+        }
+        self.stage = 3;
+        let sent = match &mut self.kind {
+            Kind::Proof { handshake, session } => {
+                let active = handshake.as_mut().ok_or_else(|| failed(NOT_AGAIN))?;
+                active.provide_static_dh(shared).map_err(failed)?;
+                let sent = drain(active)?;
+                let established = handshake
+                    .take()
+                    .ok_or_else(|| failed(NOT_AGAIN))?
+                    .finish()
+                    .map_err(failed)?;
+                self.peer = Some(established.peer.to_string());
+                *session = Some(NoiseSession {
+                    inner: established.session,
+                });
+                sent
+            }
             Kind::Pair {
                 handshake,
                 pin,
                 exchange,
-            } => step_pair(
-                &mut self.stage,
-                &mut self.peer,
-                handshake,
-                pin,
-                exchange,
-                received,
-            )?,
+            } => {
+                let active = handshake.as_mut().ok_or_else(|| failed(NOT_AGAIN))?;
+                active.provide_static_dh(shared).map_err(failed)?;
+                let mut sent = drain(active)?;
+                let session = handshake
+                    .take()
+                    .ok_or_else(|| failed(NOT_AGAIN))?
+                    .finish()
+                    .map_err(failed)?
+                    .session;
+                let pin = pin.take().ok_or_else(|| failed(NOT_AGAIN))?;
+                let mut joining = session
+                    .joiner(Pairing::pin(pin, PinRole::Typed))
+                    .map_err(pairing_failed)?;
+                while let Some(record) = joining.transmit().map_err(failed)? {
+                    sent.push(record);
+                }
+                *exchange = Some(Box::new(joining));
+                sent
+            }
         };
         Ok(messages(sent))
     }
@@ -180,6 +247,13 @@ impl NoiseRun {
     #[wasm_bindgen(getter, js_name = peerId)]
     pub fn peer_id(&self) -> Option<String> {
         self.peer.clone()
+    }
+
+    /// Why a pairing ended in a refusal. The messages its step gave are the refusal to send the
+    /// responder first.
+    #[wasm_bindgen(getter)]
+    pub fn failure(&self) -> Option<String> {
+        self.failure.clone()
     }
 
     /// The session a proof ended in, once; none for a pairing or before the proof ends.
@@ -192,9 +266,6 @@ impl NoiseRun {
     }
 }
 
-const NOT_AGAIN: &str = "Unexpected message after the run";
-const NO_MESSAGE: &str = "Unexpected step without a message";
-
 /// Everything a handshake has to send until it waits for the peer.
 fn drain<H: coqui_peer::Handshake>(handshake: &mut H) -> Result<Vec<Vec<u8>>, JsError> {
     let mut sent = Vec::new();
@@ -204,79 +275,63 @@ fn drain<H: coqui_peer::Handshake>(handshake: &mut H) -> Result<Vec<Vec<u8>>, Js
     Ok(sent)
 }
 
-/// A Noise proof: the initiator holds the session once it sends its third message, before the
-/// responder decides.
+/// A Noise proof: hello, then the responder's second message, which pauses the run at the
+/// static key's Diffie-Hellman. The initiator holds the session once it sends its third message,
+/// before the responder decides.
 fn step_proof(
-    stage: &mut u8,
-    peer: &mut Option<String>,
+    at: u8,
     slot: &mut Option<NoiseHandshake>,
-    session: &mut Option<NoiseSession>,
     received: Option<Vec<u8>>,
 ) -> Result<Vec<Vec<u8>>, JsError> {
-    let at = *stage;
-    *stage = stage.saturating_add(1);
     match at {
         0 => drain(slot.as_mut().ok_or_else(|| failed(NOT_AGAIN))?),
         1 => {
             let message = received.ok_or_else(|| failed(NO_MESSAGE))?;
             let handshake = slot.as_mut().ok_or_else(|| failed(NOT_AGAIN))?;
             handshake.receive(&message).map_err(failed)?;
-            let sent = drain(handshake)?;
-            let established = slot
-                .take()
-                .ok_or_else(|| failed(NOT_AGAIN))?
-                .finish()
-                .map_err(failed)?;
-            *peer = Some(established.peer.to_string());
-            *session = Some(NoiseSession {
-                inner: established.session,
-            });
-            Ok(sent)
+            Ok(Vec::new())
         }
+        2 => Err(failed(WAITING)),
         _ => Err(failed("Unexpected message after the proof")),
     }
 }
 
-/// A PIN pairing: the Noise pairing handshake, then the exchange inside it, a record at a time.
+/// A PIN pairing: the Noise pairing handshake, which pauses like a proof, then the exchange
+/// inside it, a record at a time.
 fn step_pair(
-    stage: &mut u8,
+    at: u8,
     peer: &mut Option<String>,
+    failure: &mut Option<String>,
     slot: &mut Option<PairingHandshake>,
-    pin: &mut Option<Pin>,
     exchange: &mut Option<Box<JoinExchange>>,
     received: Option<Vec<u8>>,
 ) -> Result<Vec<Vec<u8>>, JsError> {
-    let at = *stage;
-    *stage = stage.saturating_add(1);
-    if at == 0 {
-        return drain(slot.as_mut().ok_or_else(|| failed(NOT_AGAIN))?);
+    match at {
+        0 => return drain(slot.as_mut().ok_or_else(|| failed(NOT_AGAIN))?),
+        1 => {
+            let message = received.ok_or_else(|| failed(NO_MESSAGE))?;
+            let handshake = slot.as_mut().ok_or_else(|| failed(NOT_AGAIN))?;
+            handshake.receive(&message).map_err(failed)?;
+            return Ok(Vec::new());
+        }
+        2 => return Err(failed(WAITING)),
+        _ => {}
     }
     let message = received.ok_or_else(|| failed(NO_MESSAGE))?;
-    if at == 1 {
-        let handshake = slot.as_mut().ok_or_else(|| failed(NOT_AGAIN))?;
-        handshake.receive(&message).map_err(failed)?;
-        let mut sent = drain(handshake)?;
-        let session = slot
-            .take()
-            .ok_or_else(|| failed(NOT_AGAIN))?
-            .finish()
-            .map_err(failed)?
-            .session;
-        let pin = pin.take().ok_or_else(|| failed(NOT_AGAIN))?;
-        let mut joining = session
-            .joiner(Pairing::pin(pin, PinRole::Typed))
-            .map_err(pairing_failed)?;
-        while let Some(record) = joining.transmit().map_err(failed)? {
-            sent.push(record);
-        }
-        *exchange = Some(Box::new(joining));
-        return Ok(sent);
-    }
     let joining = exchange
         .as_mut()
-        .filter(|_| peer.is_none())
+        .filter(|_| peer.is_none() && failure.is_none())
         .ok_or_else(|| failed("Unexpected message after the pairing"))?;
-    joining.receive(&message).map_err(pairing_failed)?;
+    if let Err(error) = joining.receive(&message) {
+        // The responder is told why, as far as the page can still send it; the page then reports
+        // the failure.
+        let mut sent = Vec::new();
+        while let Ok(Some(record)) = joining.transmit() {
+            sent.push(record);
+        }
+        *failure = Some(pairing_message(error));
+        return Ok(sent);
+    }
     let mut sent = Vec::new();
     while let Some(record) = joining.transmit().map_err(failed)? {
         sent.push(record);

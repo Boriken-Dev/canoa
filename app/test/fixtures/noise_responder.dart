@@ -27,7 +27,7 @@ final class ResponderSide {
 
   static Future<ResponderSide> create() async {
     final module = await loadNoise();
-    final key = (module['NoiseKey']! as JSObject).callMethod<JSObject>('generate'.toJS);
+    final key = (module['TestKey']! as JSObject).callMethod<JSObject>('generate'.toJS);
     return ResponderSide._(module, key, (key['peerId']! as JSString).toDart);
   }
 

@@ -20,8 +20,8 @@ crate-type = ["cdylib"]
 test-peer = []
 
 [dependencies]
-# The pairing joiner a record at a time is a revision past the one the host builds on.
-coqui-peer-noise = { git = "https://github.com/Boriken-Dev/coqui-peer-noise", rev = "95155f4219d99fc3d20bbe458ce945a31621289b", features = ["pin"] }
+# A revision past the one the host builds on: the pairing joiner a record at a time, and a dialer whose key is held elsewhere.
+coqui-peer-noise = { git = "https://github.com/Boriken-Dev/coqui-peer-noise", rev = "384ac068f9b8d8b0cd852e99e7192dc3222c6514", features = ["pin"] }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5", features = ["pin"] }
 # Exactly the wasm-bindgen command line's version, which has to match it.
 wasm-bindgen = "=0.2.128"

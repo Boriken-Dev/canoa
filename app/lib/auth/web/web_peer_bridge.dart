@@ -10,11 +10,10 @@ import 'peer_session.dart';
 import 'subtle.dart';
 import 'webcrypto_method.dart';
 
-/// Each method's key in a database of its own, so one key is never used by both. The WebCrypto database is the one the
-/// extension's UI page shares with the extension. The Noise key is raw PKCS#8 text in WebAssembly's reach, so it has a
-/// database no other format shares.
+/// Each method's key in a database of its own, so one key is never used by both. The extension's UI page shares them with the
+/// extension, which keeps the same two records.
 const webcryptoStore = 'dev.boriken.canoa.peer';
-const noiseStore = 'dev.boriken.canoa.peer-noise-key';
+const noiseStore = 'dev.boriken.canoa.peer-noise';
 
 const _proofTtl = Duration(seconds: 30);
 // A pairing waits for the person at the other end only as long as its PIN does.
@@ -23,9 +22,11 @@ const _maxActive = 16;
 
 Uint8List _needs(Uint8List? received) => received ?? (throw const PeerFailure('Unexpected step without a message'));
 
+typedef _RunStep = ({List<Uint8List> send, String? peerId, PeerSession? session, String? failure});
+
 /// One proof or pairing, advanced a message at a time.
 abstract interface class _Run {
-  Future<({List<Uint8List> send, String? peerId, PeerSession? session})> step(Uint8List? received);
+  Future<_RunStep> step(Uint8List? received);
   void abort();
 }
 
@@ -37,16 +38,16 @@ final class _WebCryptoRun implements _Run {
   int _stage = 0;
 
   @override
-  Future<({List<Uint8List> send, String? peerId, PeerSession? session})> step(Uint8List? received) async {
+  Future<_RunStep> step(Uint8List? received) async {
     switch (_stage++) {
       case 0:
-        return (send: [Uint8List.fromList(utf8.encode(_started.hello()))], peerId: null, session: null);
+        return (send: [Uint8List.fromList(utf8.encode(_started.hello()))], peerId: null, session: null, failure: null);
       case 1:
         final answer = await _started.answer(_needs(received));
-        return (send: [Uint8List.fromList(utf8.encode(answer))], peerId: null, session: null);
+        return (send: [Uint8List.fromList(utf8.encode(answer))], peerId: null, session: null, failure: null);
       case 2:
         final done = await _started.finish(_needs(received));
-        return (send: const <Uint8List>[], peerId: done.peerId, session: done.session);
+        return (send: const <Uint8List>[], peerId: done.peerId, session: done.session, failure: null);
       default:
         throw const PeerFailure('Unexpected message after the proof');
     }
@@ -64,9 +65,9 @@ final class _NoiseRunStep implements _Run {
   final NoiseRun _run;
 
   @override
-  Future<({List<Uint8List> send, String? peerId, PeerSession? session})> step(Uint8List? received) async {
-    final step = _run.step(received);
-    return (send: step.send, peerId: step.peerId, session: step.session);
+  Future<_RunStep> step(Uint8List? received) async {
+    final step = await _run.step(received);
+    return (send: step.send, peerId: step.peerId, session: step.session, failure: step.failure);
   }
 
   @override
@@ -172,6 +173,10 @@ final class WebPeerBridge implements PeerBridge {
     try {
       final done = await _running(token).step(received == null ? null : Uint8List.fromList(received));
       final session = done.session;
+      if (done.failure != null) {
+        _active.remove(token)?.run.abort();
+        return PeerStep(send: done.send, failure: done.failure);
+      }
       if (session == null) return PeerStep(send: done.send, peerId: done.peerId);
       final sealing = randomToken(24);
       _sessions[sealing] = session;

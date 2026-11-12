@@ -5,6 +5,7 @@ import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
 import '../acp/sealed_channel.dart';
+import 'web/peer_session.dart' show PeerFailure;
 
 /// The proof an agent's key makes, which the agent's record names: chosen per agent and never negotiated on a connection.
 enum PeerMethod {
@@ -38,10 +39,13 @@ final class MethodUnavailable implements Exception {
 /// One step of a proof or a pairing: what to send now, and once it is over, the peer it proved and, for a proof, the
 /// session that seals everything after it.
 final class PeerStep {
-  const PeerStep({this.send = const [], this.peerId, this.session});
+  const PeerStep({this.send = const [], this.peerId, this.session, this.failure});
   final List<Uint8List> send;
   final String? peerId;
   final String? session;
+
+  /// Why the exchange ended in a refusal. [send] is then the last thing to tell the peer, and nothing follows.
+  final String? failure;
 }
 
 /// The calls of the web build's peer bridge (`WebPeerBridge`): each method's own key, the handshake run a step at a time,
@@ -90,10 +94,12 @@ Future<PeerStep> _exchange(
           await channel.sendBytes(message);
         }
       } catch (_) {
-        // A finished pairing's last record is this side's close, which a peer that confirmed and hung up does not need.
-        if (!paired) rethrow;
+        // A finished pairing's last record is this side's close, which a peer that confirmed and hung up does not need; a
+        // refusal is told as far as the peer still listens.
+        if (!paired && step.failure == null) rethrow;
       }
     }
+    if (step.failure != null) throw PeerFailure(step.failure!);
     if (step.peerId != null) return step;
     received = await channel.nextSetupBytes().timeout(wait);
   }

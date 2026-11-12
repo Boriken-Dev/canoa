@@ -30,6 +30,6 @@ Canoa's confirmed repository documentation currently uses [GitHub Pages](https:/
 
 ## Browser peer authentication
 
-The reusable browser methods are [`coqui-peer-noise`](https://github.com/Boriken-Dev/coqui-peer-noise), profile `dev.boriken.coqui.peer-noise/v1`, and [`coqui-peer-webcrypto`](https://github.com/Boriken-Dev/coqui-peer-webcrypto), profile `dev.boriken.coqui.peer-webcrypto/v1`. The Canoa-specific browser private-key stores are named `dev.boriken.canoa.peer-noise-key` (the Flutter web build's Noise key, PKCS#8 text for WebAssembly), `dev.boriken.canoa.peer-noise` (the extension's non-extractable Noise key) and `dev.boriken.canoa.peer` (WebCrypto, shared by both), one per method and format; another application must use its **own** isolated store name rather than share that identity implicitly.
+The reusable browser methods are [`coqui-peer-noise`](https://github.com/Boriken-Dev/coqui-peer-noise), profile `dev.boriken.coqui.peer-noise/v1`, and [`coqui-peer-webcrypto`](https://github.com/Boriken-Dev/coqui-peer-webcrypto), profile `dev.boriken.coqui.peer-webcrypto/v1`. The Canoa-specific browser private-key stores are named `dev.boriken.canoa.peer-noise` and `dev.boriken.canoa.peer`, one per method, shared with the extension; another application must use its **own** isolated store name rather than share that identity implicitly.
 
 The extension bundles the methods' experimental JavaScript modules locally as Git-blob-pinned vendor artifacts to comply with offline/MV3 constraints.
