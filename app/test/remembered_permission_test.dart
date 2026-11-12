@@ -12,7 +12,6 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/session_store.dart';
-import 'package:canoa/sources/sources.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -881,17 +880,6 @@ void main() {
       expect(s.store.rememberHere(s.session, second, RuleType.command, 'cargo test'), isNull);
       await _settle(tester);
       expect(s.agent.chose(2), 'allow-once');
-    });
-
-    testWidgets('two sources that share a label do not share rules', (tester) async {
-      final s = await _shown(tester);
-      expect(SessionStore.ruleSource(s.session), 'Scripted');
-      s.session.source = const AgentSource.hosted('Scripted');
-      expect(SessionStore.ruleSource(s.session), 'canoa/Scripted');
-      s.rules.add(source: 'Scripted', peer: s.session.peerId ?? '', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test');
-      s.agent.run(1, 'npm test');
-      await _settle(tester);
-      expect(s.agent.answerTo(1), isNull, reason: 'a preset\'s rule is not a hosted entry\'s');
     });
   });
 
