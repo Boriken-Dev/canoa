@@ -79,6 +79,8 @@ pub struct LocalProfiles {
     pub agents: IndexMap<String, AgentProfile>,
     /// canoa.cfg's directory, absolute.
     pub directory: PathBuf,
+    /// `[skill_pins]`, by lower-case skill name.
+    pub skill_pins: BTreeMap<String, String>,
 }
 
 /// One agent's `[agents.NAME.profile]` layer and `[agents.NAME.mcp]` choices.
@@ -139,6 +141,7 @@ impl LocalProfiles {
             agent: own.map(|profile| (agent.to_owned(), profile)),
             off_mcp,
             directory: self.directory.clone(),
+            skill_pins: self.skill_pins.clone(),
         })
     }
 }
@@ -1000,7 +1003,7 @@ impl Config {
             .and_then(|permissions| permissions.protected)
             .map(RawLines::lines);
         let local_agents = local_agents_of(&raw.agents)?;
-        let local_profiles = local_profiles_of(raw.profile, &raw.overlays, &raw.agents, base)?;
+        let mut local_profiles = local_profiles_of(raw.profile, &raw.overlays, &raw.agents, base)?;
         if limit_phrases
             .iter()
             .flatten()
@@ -1012,6 +1015,7 @@ impl Config {
             });
         }
         let skill_pins = skill_pins_of(raw.skill_pins)?;
+        local_profiles.skill_pins.clone_from(&skill_pins);
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
@@ -1817,6 +1821,7 @@ fn local_profiles_of(
         overlays: names,
         agents: by_agent,
         directory,
+        skill_pins: BTreeMap::new(),
     })
 }
 
