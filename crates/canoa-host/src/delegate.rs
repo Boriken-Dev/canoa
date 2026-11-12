@@ -63,6 +63,8 @@ pub(crate) enum Principal {
 pub(crate) struct Source {
     pub(crate) name: String,
     pub(crate) title: Option<String>,
+    /// The provider id of a `harness` entry.
+    pub(crate) harness: Option<String>,
 }
 
 /// What a task's connection is given when the host opens it, which a client's messages cannot set.
@@ -79,6 +81,9 @@ pub(crate) trait Host: Send + Sync {
     fn sources(&self) -> Vec<Source>;
     /// Whether a connection of `who` may use `source`.
     fn may_use(&self, who: &Principal, source: &str) -> bool;
+    /// What kind of agent `source` is: equal for entries that run the same provider or program, so that a mode id means the same
+    /// in both. `None` when it is not known.
+    fn kind(&self, source: &str) -> Option<String>;
     /// A connection to `source` for a task.
     fn open(&self, source: &str, context: ChildContext) -> Result<Link, LocalError>;
 }
@@ -283,6 +288,8 @@ pub(crate) struct Session {
     pub(crate) store: TaskStore,
     pub(crate) children: Mutex<HashMap<String, Arc<child::Child>>>,
     live: AtomicUsize,
+    /// Calls of the tool server this session's bearer has under way.
+    pub(crate) calls: AtomicUsize,
 }
 
 impl Session {
@@ -388,6 +395,11 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 impl Conn {
+    /// The entry this connection is to.
+    pub(crate) fn entry(&self) -> &str {
+        &self.info.entry
+    }
+
     pub(crate) fn principal(&self) -> &Principal {
         &self.info.principal
     }
@@ -830,6 +842,7 @@ impl Engine {
                     .build(),
                 children: Mutex::new(HashMap::new()),
                 live: AtomicUsize::new(0),
+                calls: AtomicUsize::new(0),
             }
         });
         lock(&self.state)

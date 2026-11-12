@@ -18,11 +18,16 @@ use serde_json::{Value, json};
 
 use super::{Engine, Session, tools};
 
-/// Connections served at once; past it a new one is closed unread.
+/// Connections that have not yet shown a bearer, at once; past it a new one is closed unread.
 const MAX_CONNECTIONS: usize = 32;
+/// Calls one session's bearer has under way at once, waits included; past it a call is answered 429. A call that has shown a
+/// bearer is counted here and no longer against [`MAX_CONNECTIONS`], so one session's long waits cannot crowd out another's.
+const MAX_PER_SESSION: usize = 8;
+/// How long a connection has to send a whole request head, before any bearer is checked.
+const HEAD_LIMIT: Duration = Duration::from_secs(2);
 /// The largest request head.
 const MAX_HEAD: usize = 16 * 1024;
-/// How long a client has to send a whole request.
+/// How long a client that has shown a bearer has to send the rest of its request.
 const REQUEST_LIMIT: Duration = Duration::from_secs(20);
 /// How long a socket may take nothing while an answer waits.
 const WRITE_LIMIT: Duration = Duration::from_secs(30);
@@ -80,21 +85,53 @@ fn accept(listener: &TcpListener, engine: &Arc<Engine>, stop: &AtomicBool, port:
                 }
                 live.fetch_add(1, Ordering::SeqCst);
                 let engine = Arc::clone(engine);
-                let counted = Arc::clone(&live);
+                let slot = Slot(Some(Arc::clone(&live)));
                 let spawned = std::thread::Builder::new()
                     .name("canoa-delegate-request".to_owned())
                     .spawn(move || {
                         let _ = stream.set_nonblocking(false);
-                        serve(stream, &engine, port);
-                        counted.fetch_sub(1, Ordering::SeqCst);
+                        serve(stream, &engine, port, slot);
                     });
-                if spawned.is_err() {
-                    live.fetch_sub(1, Ordering::SeqCst);
-                }
+                // The slot a failed spawn dropped with its closure is given back there.
+                drop(spawned);
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => std::thread::sleep(POLL),
             Err(_) => std::thread::sleep(POLL),
         }
+    }
+}
+
+/// A place among the connections that have shown no bearer yet, given back when dropped or [`Slot::release`]d.
+struct Slot(Option<Arc<AtomicUsize>>);
+
+impl Slot {
+    fn release(&mut self) {
+        if let Some(live) = self.0.take() {
+            live.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// A call under way for one session, counted until dropped.
+struct Counted(Arc<Session>);
+
+impl Counted {
+    fn take(session: &Arc<Session>) -> Option<Self> {
+        let held = session.calls.fetch_add(1, Ordering::SeqCst);
+        let counted = Self(Arc::clone(session));
+        (held < MAX_PER_SESSION).then_some(counted)
+    }
+}
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.0.calls.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -117,10 +154,10 @@ enum Refusal {
     Closed,
 }
 
-fn serve(mut stream: TcpStream, engine: &Arc<Engine>, port: u16) {
+fn serve(mut stream: TcpStream, engine: &Arc<Engine>, port: u16, mut slot: Slot) {
     let _ = stream.set_write_timeout(Some(WRITE_LIMIT));
     let started = Instant::now();
-    let answer = match request(&mut stream, engine, port, started) {
+    let answer = match request(&mut stream, engine, port, started, &mut slot) {
         Ok(answer) => answer,
         Err(Refusal::Status(code, reason)) => reply(code, reason, &[], ""),
         Err(Refusal::Closed) => return,
@@ -136,6 +173,7 @@ fn request(
     engine: &Arc<Engine>,
     port: u16,
     started: Instant,
+    slot: &mut Slot,
 ) -> Result<String, Refusal> {
     let mut buffer: Vec<u8> = Vec::new();
     let (head, body_start) = loop {
@@ -172,7 +210,7 @@ fn request(
         if buffer.len() > MAX_HEAD {
             return Err(Refusal::Status(431, "Request Header Fields Too Large"));
         }
-        read_more(stream, &mut buffer, started)?;
+        read_more(stream, &mut buffer, started + HEAD_LIMIT)?;
     };
     // A page of any origin can reach this port; a name other than this socket's is a rebinding attempt.
     let names = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
@@ -194,6 +232,12 @@ fn request(
             "",
         ));
     };
+    // From here the call is the session's, whatever it waits for, and holds no place among the unproven.
+    slot.release();
+    let Some(_counted) = Counted::take(&session) else {
+        return Ok(reply(429, "Too Many Requests", &[], ""));
+    };
+    let body_by = Instant::now() + REQUEST_LIMIT;
     if head.path != "/mcp" {
         return Err(Refusal::Status(404, "Not Found"));
     }
@@ -215,7 +259,7 @@ fn request(
         return Err(Refusal::Status(413, "Content Too Large"));
     }
     while buffer.len() < body_start + length {
-        read_more(stream, &mut buffer, started)?;
+        read_more(stream, &mut buffer, body_by)?;
     }
     let body = &buffer[body_start..body_start + length];
     let Ok(message) = serde_json::from_slice::<Value>(body) else {
@@ -234,9 +278,9 @@ fn request(
 fn read_more(
     stream: &mut TcpStream,
     buffer: &mut Vec<u8>,
-    started: Instant,
+    deadline: Instant,
 ) -> Result<(), Refusal> {
-    let left = REQUEST_LIMIT.saturating_sub(started.elapsed());
+    let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
         return Err(Refusal::Closed);
     }

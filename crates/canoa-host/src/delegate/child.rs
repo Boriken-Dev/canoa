@@ -340,7 +340,15 @@ impl Work<'_> {
         };
         *lock(&self.child.session) = Some(id.clone());
         let modes = privilege::modes_of(&opened);
-        let parent = self.session.mode();
+        // A mode id means something only to the kind of agent that named it: `auto` of one provider is not another's.
+        let same_kind = match (self.session.conn(), self.engine.host()) {
+            (Some(conn), Some(host)) => {
+                let (parent, child) = (host.kind(conn.entry()), host.kind(&self.child.source));
+                parent.is_some() && parent == child
+            }
+            _ => false,
+        };
+        let parent = self.session.mode().filter(|_| same_kind);
         let wanted = privilege::choose_mode(parent.as_deref(), &modes.available)
             .map_err(Outcome::Rejected)?;
         if modes.current.as_deref() != Some(wanted.as_str()) {

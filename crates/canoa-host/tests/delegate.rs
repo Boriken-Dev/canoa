@@ -963,3 +963,137 @@ fn the_bearer_is_in_no_log_report_or_error() {
 fn say(rpc: &support::Rpc<'_, Socket>, session: &str, text: &str) -> String {
     rpc.prompt(session, text).expect("a turn")
 }
+
+#[test]
+fn a_mode_id_is_kept_only_for_the_same_kind_of_agent() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    // The same scripted program under another name stands for another provider: its `bypass` is not the parent's.
+    let other = dir
+        .0
+        .join(format!("other_agent{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example("stdio_agent", false), &other).expect("copied");
+    let foreign = |name: &str, modes: &str| {
+        agent(name, modes, "").replace(
+            &quoted(&example("stdio_agent", false).to_string_lossy()),
+            &quoted(&other.to_string_lossy()),
+        )
+    };
+    let config = format!(
+        "{}{}{}{}",
+        agent("parent", "default,manual,bypass", ""),
+        agent("same", "default,manual,bypass", ""),
+        foreign("foreign", "default,manual,bypass"),
+        foreign("foreign_none", "acceptEdits,bypass")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    let run = |convo: &mut Convo<'_>, source: &str| {
+        let id = convo.delegate(&session, source, "Mode");
+        convo.status(&session, &id, 20_000)
+    };
+    convo.mode(&session, "bypass");
+    assert_eq!(run(&mut convo, "same")["result"], "mode: bypass");
+    assert_eq!(
+        run(&mut convo, "foreign")["result"],
+        "mode: manual",
+        "never the parent's id in another agent"
+    );
+    let none = run(&mut convo, "foreign_none");
+    assert_eq!(none["state"], "rejected", "{none}");
+    drop(link);
+    host.stop();
+}
+
+/// Sockets that connect and say nothing.
+fn idle(url: &str, count: usize) -> Vec<TcpStream> {
+    let authority = url
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .expect("an address");
+    (0..count)
+        .map(|_| TcpStream::connect(authority).expect("connects"))
+        .collect()
+}
+
+#[test]
+fn connections_that_never_send_a_request_do_not_hold_the_server() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let host = Hosted::start(&agent("parent", "default", ""));
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    let (url, token) = bearer(&mut convo, &session);
+    let held = idle(&url, 40);
+    let started = Instant::now();
+    let auth = bearer_header(&token);
+    loop {
+        let answered =
+            std::panic::catch_unwind(|| post(&url, &[("Authorization", auth.as_str())], LIST).0)
+                .unwrap_or(0);
+        if answered == 200 {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "the silent connections still hold the server after {:?}",
+            started.elapsed()
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    drop(held);
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn one_session_waiting_cannot_starve_another() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let host = Hosted::start(&format!(
+        "{}{}",
+        agent("parent", "default", ""),
+        agent("child", "default", "")
+    ));
+    let first = host.local.open("parent").expect("a link");
+    let mut one = Convo::new(&first);
+    let one_session = one.open(true, &work);
+    let second = host.local.open("parent").expect("a link");
+    let mut two = Convo::new(&second);
+    let two_session = two.open(true, &work);
+    let (url, mine) = bearer(&mut one, &one_session);
+    let (_, theirs) = bearer(&mut two, &two_session);
+    let task = one.delegate(&one_session, "child", "Wait");
+    let call = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"task_status","arguments":{{"taskId":"{task}","wait_ms":6000}}}}}}"#
+    );
+    let waiters: Vec<_> = (0..40)
+        .map(|_| {
+            let (url, call, auth) = (url.clone(), call.clone(), bearer_header(&mine));
+            std::thread::spawn(move || post(&url, &[("Authorization", auth.as_str())], &call).0)
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(1000));
+    // The other session is answered while the first one's waits are still running.
+    let (status, _) = post(
+        &url,
+        &[("Authorization", bearer_header(&theirs).as_str())],
+        LIST,
+    );
+    assert_eq!(status, 200, "another session was starved by waits");
+    let statuses: Vec<u16> = waiters
+        .into_iter()
+        .map(|waiter| waiter.join().expect("no panic"))
+        .collect();
+    assert!(
+        statuses.contains(&429),
+        "one session may hold only so many calls: {statuses:?}"
+    );
+    assert!(statuses.contains(&200), "{statuses:?}");
+    drop((first, second));
+    host.stop();
+}

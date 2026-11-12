@@ -650,6 +650,26 @@ impl delegate::Host for DelegationHost {
         }
     }
 
+    fn kind(&self, source: &str) -> Option<String> {
+        let served = self.served.iter().find(|served| served.name == source)?;
+        match &served.run {
+            Run::Agent {
+                agent: Agent::Harness(_),
+                ..
+            } => self
+                .agents
+                .iter()
+                .find(|agent| agent.name == source)
+                .and_then(|agent| agent.harness.as_deref())
+                .map(|harness| format!("harness:{harness}")),
+            Run::Agent {
+                agent: Agent::Program { program, .. },
+                ..
+            } => Some(format!("program:{}", program.to_string_lossy())),
+            _ => None,
+        }
+    }
+
     fn open(&self, source: &str, context: delegate::ChildContext) -> Result<Link, LocalError> {
         let shared = self.shared.upgrade().ok_or(LocalError::Stopped)?;
         Local {
@@ -1191,6 +1211,7 @@ impl Serving {
             .map(|listening| delegate::Source {
                 name: listening.name.clone(),
                 title: listening.title.clone(),
+                harness: listening.harness.clone(),
             })
             .collect();
         delegation.attach(Arc::new(DelegationHost {

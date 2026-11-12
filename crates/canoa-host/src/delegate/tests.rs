@@ -17,11 +17,16 @@ impl Host for Fake {
         vec![Source {
             name: "a".to_owned(),
             title: None,
+            harness: None,
         }]
     }
 
     fn may_use(&self, _who: &Principal, _source: &str) -> bool {
         true
+    }
+
+    fn kind(&self, _source: &str) -> Option<String> {
+        Some("fake".to_owned())
     }
 
     fn open(&self, _source: &str, _context: super::ChildContext) -> Result<Link, LocalError> {
