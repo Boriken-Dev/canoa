@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { lastCall, Session } from "./cdp.mjs";
+import { findCanoaWorker, lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
@@ -87,7 +87,7 @@ try {
     }
   }, 30_000);
   const worker = await waitFor("the extension's service worker", async () =>
-    (await targets()).find((target) => target.type === "service_worker" && target.url.startsWith("chrome-extension://") && target.url.endsWith("/background.js")), 20_000);
+    findCanoaWorker(await targets()), 20_000);
   const sw = new Session(worker.webSocketDebuggerUrl);
   await waitFor("the extension's APIs", async () => (await sw.run("typeof chrome")) === "object");
   const origin = new URL(pageUrl).origin;

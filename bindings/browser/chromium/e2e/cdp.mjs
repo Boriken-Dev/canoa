@@ -47,3 +47,18 @@ export class Session {
     this.socket.close();
   }
 }
+
+/** Edge starts extensions of its own beside the unpacked one, some with a background.js too: ours is the worker whose manifest is named Canoa. */
+export async function findCanoaWorker(targets) {
+  for (const target of targets.filter((item) => item.type === "service_worker" && item.url.startsWith("chrome-extension://") && item.url.endsWith("/background.js"))) {
+    const probe = new Session(target.webSocketDebuggerUrl);
+    try {
+      if ((await probe.run("typeof chrome === 'object' && chrome.runtime?.getManifest?.().name")) === "Canoa") return target;
+    } catch {
+      // Not ready yet, or not ours.
+    } finally {
+      probe.socket.close();
+    }
+  }
+  return undefined;
+}

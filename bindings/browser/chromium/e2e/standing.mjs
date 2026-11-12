@@ -25,7 +25,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { LoggingMessageNotificationSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
-import { lastCall, Session } from "./cdp.mjs";
+import { findCanoaWorker, lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
@@ -134,7 +134,7 @@ class Browser {
     }, 30_000);
   }
   targets = async () => (await fetch(`http://127.0.0.1:${this.debug}/json/list`)).json();
-  worker = async () => (await this.targets()).find((target) => target.type === "service_worker" && target.url.endsWith("/background.js"));
+  worker = async () => findCanoaWorker(await this.targets());
   async open(url) {
     const made = await (await fetch(`http://127.0.0.1:${this.debug}/json/new?${encodeURIComponent(url)}`, { method: "PUT" })).json();
     const session = new Session(made.webSocketDebuggerUrl);

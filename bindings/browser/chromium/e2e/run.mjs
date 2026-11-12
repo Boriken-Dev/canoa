@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 import * as noiseMethod from "../vendor/coqui-peer-noise.mjs";
 import * as webcryptoMethod from "../vendor/coqui-peer-webcrypto.mjs";
-import { lastCall, Session } from "./cdp.mjs";
+import { findCanoaWorker, lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
@@ -226,20 +226,7 @@ try {
       return null;
     }
   }, 30_000);
-  // Edge starts extensions of its own beside the unpacked one, some with a background.js too: ours is the one named Canoa.
-  const worker = await waitFor("the extension's service worker", async () => {
-    for (const target of (await targets()).filter((item) => item.type === "service_worker" && item.url.startsWith("chrome-extension://") && item.url.endsWith("/background.js"))) {
-      const probe = new Session(target.webSocketDebuggerUrl);
-      try {
-        if ((await probe.run("typeof chrome === 'object' && chrome.runtime?.getManifest?.().name")) === "Canoa") return target;
-      } catch {
-        // Not ready yet, or not ours.
-      } finally {
-        probe.socket.close();
-      }
-    }
-    return null;
-  }, 20_000);
+  const worker = await waitFor("the extension's service worker", async () => findCanoaWorker(await targets()), 20_000);
   const sw = new Session(worker.webSocketDebuggerUrl);
   // A service worker can be attached to a moment before its extension APIs exist.
   await waitFor("the extension's APIs", async () => (await sw.run("typeof chrome")) === "object");
@@ -734,6 +721,8 @@ try {
       assert.equal(read.result.isError, false);
       assert.equal(read.result.structuredContent.result.title, "strict page");
       assert.equal(read.result.structuredContent.result.text.trim(), "page");
+      // The tab the tool ran on is in a group named for the agent.
+      await waitFor("the agent's tab group", async () => (await sw.run(`chrome.tabGroups.query({}).then((groups) => groups.map((group) => group.title))`)).includes("Tool bridge"));
       // Another tab of the same site was not what the person chose.
       const another = await openUrl(pageUrl);
       const anotherId = await newestTab();
@@ -802,6 +791,7 @@ try {
       assert.ok((await toolNames(own)).includes("browser_read_page"));
       await browserTab.run("location.reload(); true");
       await waitFor("the grant to go", async () => !(await toolNames(own)).includes("browser_read_page"));
+      await waitFor("the tab group to go", async () => !(await sw.run(`chrome.tabGroups.query({}).then((groups) => groups.map((group) => group.title))`)).includes("Tool bridge"));
     });
     await check("tools: the person refusing, here by Escape, is what the agent hears, and it cannot ask again at once", async () => {
       const { answer } = await askBrowser("escape");
