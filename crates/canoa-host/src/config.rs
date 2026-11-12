@@ -62,6 +62,8 @@ pub struct Config {
     pub local_agents: Vec<Entry>,
     /// The top-level `[profile]`, `[overlays]` and `[agents.NAME.profile|mcp]`: what the host's own sources are launched with.
     pub local_profiles: LocalProfiles,
+    /// `[skill_pins]`, by lower-case skill name: the tree digest each skill from elsewhere must have.
+    pub skill_pins: BTreeMap<String, String>,
 }
 
 /// What canoa.cfg's top level says a session of the host's own sources is launched with. Nothing here is served to a network
@@ -393,6 +395,9 @@ pub struct HostProfile {
     pub off_mcp: BTreeSet<String>,
     /// canoa.cfg's directory, absolute.
     pub directory: PathBuf,
+    /// `[skill_pins]`: the tree digest a skill from elsewhere must have, by lower-case skill name. A skill is
+    /// delivered only when this digest, its record's and the overlay's own pin (if it has one) are all the same.
+    pub skill_pins: BTreeMap<String, String>,
 }
 
 /// Where an entry listens, as an entry's `listen` writes it.
@@ -804,6 +809,8 @@ struct RawFile {
     /// `[overlays]`: the app's table, of which the host reads the names.
     #[serde(default)]
     overlays: IndexMap<String, toml::Value>,
+    #[serde(default)]
+    skill_pins: toml::Table,
 }
 
 /// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
@@ -1004,12 +1011,14 @@ impl Config {
                 what: "[usage] limit_phrases holds an empty phrase, which would match every failed turn".to_owned(),
             });
         }
+        let skill_pins = skill_pins_of(raw.skill_pins)?;
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
                 protected_paths,
                 local_agents,
                 local_profiles,
+                skill_pins,
                 ..Self::default()
             });
         };
@@ -1024,7 +1033,8 @@ impl Config {
         let directory = directory_of(base);
         let mut profiles = IndexMap::new();
         for (name, table) in host.profiles {
-            let profile = profile_of(&name, table, &directory)?;
+            let mut profile = profile_of(&name, table, &directory)?;
+            profile.skill_pins.clone_from(&skill_pins);
             profiles.insert(name, profile);
         }
         let account_store = match host.account_store.as_deref() {
@@ -1355,6 +1365,7 @@ impl Config {
             control,
             store,
             delegate,
+            skill_pins,
         })
     }
 
@@ -1724,6 +1735,7 @@ fn profile_of(
         agent: None,
         off_mcp: BTreeSet::new(),
         directory: directory.to_owned(),
+        skill_pins: BTreeMap::new(),
     })
 }
 
@@ -1821,6 +1833,35 @@ fn hook_allowances(allowed: toml::Table) -> Result<BTreeMap<String, String>, Str
                 out.insert(overlay, text);
             }
             _ => return Err(format!(".{overlay} is not sha256: and 64 hex digits")),
+        }
+    }
+    Ok(out)
+}
+
+/// `[skill_pins]`: a skill's name (compared without regard to ASCII case) and the `sha256:` tree digest it must have.
+fn skill_pins_of(table: toml::Table) -> Result<BTreeMap<String, String>, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("[skill_pins] {what}"),
+    };
+    let mut out = BTreeMap::new();
+    for (name, value) in table {
+        if !crate::profile::hosted::fetched::confined(&name) {
+            return Err(refused("names something that is not a skill's name"));
+        }
+        let toml::Value::String(text) = value else {
+            return Err(refused("holds a value that is not a digest"));
+        };
+        let Ok(digest) = coqui_aos::Digest::parse(&text) else {
+            return Err(refused(
+                "holds a value that is not sha256: and 64 hex digits",
+            ));
+        };
+        if out
+            .insert(name.to_ascii_lowercase(), digest.to_string())
+            .is_some()
+        {
+            return Err(refused("names a skill twice, spelt in another case"));
         }
     }
     Ok(out)

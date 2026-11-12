@@ -252,6 +252,10 @@ command = "/usr/local/bin/lint-mcp"
   access, from a copy of the files the digest covered, and can add context, block a prompt, deny a tool call or refuse a
   session, never approve one. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
   `applied`, `not supported` or `off`; `crates/canoa-host/AGENTS.md`, "Overlay hooks", has what fires on which event.
+- **A skill an overlay names from elsewhere** is delivered only from the copy the app fetched (`overlays/.skills/`), at
+  its record's digest, the overlay's pin and any pin a top-level `[skill_pins]` table in canoa.cfg gives its name
+  (`review = "sha256:…"`). It never takes a name another overlay's skill holds; one kept out, one not fetched and one
+  from plain `http` or a private network address are reported.
 - **The client is told what applied.** The answer to `initialize` and to each session request carries, under
   `_meta["dev.boriken.canoa/profile"]`, the profile's name, the harness, a one-line summary and each part with its layer,
   `applied`, `not supported`, `off` or `refused`, and why: names only, never a value.

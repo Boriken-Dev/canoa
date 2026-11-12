@@ -19,15 +19,15 @@ use serde_json::Value;
 use super::State;
 
 /// The directory under an overlay store the fetched skills are kept in.
-pub(crate) const SKILLS_DIR: &str = ".skills";
+pub(super) const SKILLS_DIR: &str = ".skills";
 
 /// What one skill came to: delivered with its files, or reported.
 #[derive(Debug, Default)]
-pub(crate) struct Fetched {
+pub(super) struct Fetched {
     /// The files of each delivered skill, by the name its overlay gives it, then by path below the skill's directory.
-    pub(crate) files: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
+    pub(super) files: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
     /// What to report: the skill's name, the state and why.
-    pub(crate) notes: Vec<(String, State, String)>,
+    pub(super) notes: Vec<(String, State, String)>,
 }
 
 /// What one skill's directory may hold: 1024 files, 16 MiB.
@@ -39,7 +39,7 @@ fn limits() -> Settings {
 
 /// A skill name, which is also one component of a path the host reads: letters, digits, `_`, `.` and `-`, starting
 /// with a letter or digit, and no name Windows keeps for a device.
-pub(super) fn confined(name: &str) -> bool {
+pub(crate) fn confined(name: &str) -> bool {
     let shaped = name
         .chars()
         .next()
@@ -54,15 +54,24 @@ fn same_digest(a: &str, b: &str) -> bool {
     matches!((aos::Digest::parse(a), aos::Digest::parse(b)), (Ok(a), Ok(b)) if a == b)
 }
 
+/// The most bytes a record may hold; the app's holds a few hundred.
+const MAX_RECORD: u64 = 64 * 1024;
+
 /// Reads the skills `entries` (those of overlay `identity` that are not bundled) from `store`, the directory of the
-/// installed overlays.
-pub(crate) fn read(store: &Path, identity: &str, entries: &[SkillEntry]) -> Fetched {
+/// installed overlays. `pins` are the digests canoa.cfg's `[skill_pins]` holds, by lower-case skill name.
+pub(super) fn read(
+    store: &Path,
+    identity: &str,
+    entries: &[SkillEntry],
+    pins: &BTreeMap<String, String>,
+) -> Fetched {
     let mut out = Fetched::default();
     for entry in entries {
         let name = entry.name.as_str();
-        match one(store, identity, entry) {
+        let pinned = pins.contains_key(&name.to_ascii_lowercase());
+        match one(store, identity, entry, pins) {
             Ok((files, keys)) => {
-                if entry.origin == SkillOrigin::Source && entry.pin.is_none() {
+                if entry.origin == SkillOrigin::Source && entry.pin.is_none() && !pinned {
                     out.notes.push((
                         format!("{name}.unpinned"),
                         State::Applied,
@@ -90,7 +99,28 @@ pub(crate) fn read(store: &Path, identity: &str, entries: &[SkillEntry]) -> Fetc
 
 type Read = (BTreeMap<String, Vec<u8>>, Vec<String>);
 
-fn one(store: &Path, identity: &str, entry: &SkillEntry) -> Result<Read, (State, String)> {
+/// Whether `path` is a link of any kind, which the app never makes in the store.
+fn is_link(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // A reparse point: a symbolic link or a junction.
+        if meta.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    meta.file_type().is_symlink()
+}
+
+fn one(
+    store: &Path,
+    identity: &str,
+    entry: &SkillEntry,
+    pins: &BTreeMap<String, String>,
+) -> Result<Read, (State, String)> {
     let name = entry.name.as_str();
     if !confined(name) {
         return Err((State::Refused, "its name is not a skill name".to_owned()));
@@ -105,13 +135,28 @@ fn one(store: &Path, identity: &str, entry: &SkillEntry) -> Result<Read, (State,
         _ => "a named skill; no catalog resolved it here: install or sync the overlay in Canoa"
             .to_owned(),
     };
-    let Ok(bytes) = std::fs::read(dir.join(format!("{lower}.json"))) else {
+    let refused = |why: &str| (State::Refused, format!("not delivered: {why}"));
+    if is_link(&dir) {
+        return Err(refused("the store of fetched skills is a link"));
+    }
+    let record_path = dir.join(format!("{lower}.json"));
+    let Ok(meta) = std::fs::symlink_metadata(&record_path) else {
+        return Err((State::Unsupported, not_fetched()));
+    };
+    if !meta.is_file() || is_link(&record_path) || meta.len() > MAX_RECORD {
+        return Err(refused(
+            "its record is not a plain file of a size the app writes",
+        ));
+    }
+    let Ok(bytes) = std::fs::read(&record_path) else {
         return Err((State::Unsupported, not_fetched()));
     };
     let record: Value = serde_json::from_slice(&bytes)
         .map_err(|_| (State::Refused, "its record is not JSON".to_owned()))?;
+    if !record.is_object() {
+        return Err(refused("its record is not an object"));
+    }
     let text = |key: &str| record.get(key).and_then(Value::as_str);
-    let refused = |why: &str| (State::Refused, format!("not delivered: {why}"));
     if !text("name").is_some_and(|recorded| recorded.eq_ignore_ascii_case(name)) {
         return Err(refused("its record is for another skill"));
     }
@@ -144,7 +189,19 @@ fn one(store: &Path, identity: &str, entry: &SkillEntry) -> Result<Read, (State,
             return Err(refused("its record is not at the pin the overlay names"));
         }
     }
-    let (tree, read) = aos::read_tree(&StdFs, &dir.join(&lower), &limits())
+    if pins
+        .get(&lower)
+        .is_some_and(|pin| !same_digest(pin, digest))
+    {
+        return Err(refused(
+            "its record is not at the pin canoa.cfg's skill_pins names",
+        ));
+    }
+    let skill_dir = dir.join(&lower);
+    if is_link(&skill_dir) {
+        return Err(refused("its directory is a link"));
+    }
+    let (tree, read) = aos::read_tree(&StdFs, &skill_dir, &limits())
         .map_err(|error| refused(&format!("its files cannot be read ({})", error.class)))?;
     if !same_digest(&read.digest.to_string(), digest) {
         return Err(refused(

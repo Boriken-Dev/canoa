@@ -34,7 +34,7 @@ pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
 
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
-mod fetched;
+pub(crate) mod fetched;
 
 /// What one skill's directory may hold: 1024 files, 16 MiB.
 fn skill_limits() -> Settings {
@@ -222,6 +222,21 @@ impl ReadOverlay {
     }
 
     /// The member files under `prefix/`, by path below it.
+    /// What planning the skills needs of the tree: every path, and the text of each bundled skill's `SKILL.md`.
+    fn skill_view(&self) -> OverlayTree {
+        let mut view = OverlayTree::from_paths(self.tree.paths().map(str::to_owned));
+        for path in self.tree.paths() {
+            let skill_md = path
+                .strip_prefix("skills/")
+                .and_then(|rest| rest.strip_suffix("/SKILL.md"))
+                .is_some_and(|name| !name.contains('/'));
+            if let (true, Some(bytes)) = (skill_md, self.tree.bytes(path)) {
+                view = view.with_bytes(path, bytes.to_vec());
+            }
+        }
+        view
+    }
+
     fn under(&self, prefix: &str) -> BTreeMap<String, Vec<u8>> {
         if let Some(name) = prefix
             .strip_prefix(fetched::SKILLS_DIR)
@@ -430,7 +445,7 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
             leave_out("its files are not those its record's digest names: sync it");
             continue;
         }
-        let fetched = fetched_skills(&store, identity, &tree, &layer, notes);
+        let fetched = fetched_skills(&store, identity, &tree, &layer, &host.skill_pins, notes);
         out.push(ReadOverlay {
             identity: identity.clone(),
             root: root.to_string_lossy().into_owned(),
@@ -448,6 +463,7 @@ fn fetched_skills(
     identity: &str,
     tree: &OverlayTree,
     layer: &LayerId,
+    pins: &BTreeMap<String, String>,
     notes: &mut Vec<Item>,
 ) -> BTreeMap<String, BTreeMap<String, Vec<u8>>> {
     let Ok(read) = aos::read_overlay(tree, &Settings::default()) else {
@@ -457,11 +473,118 @@ fn fetched_skills(
         .into_iter()
         .filter(|entry| entry.origin != aos::SkillOrigin::Bundled)
         .collect();
-    let found = fetched::read(store, identity, &elsewhere);
+    let found = fetched::read(store, identity, &elsewhere, pins);
     for (name, state, how) in found.notes {
         notes.push(Item::new(format!("skills.{name}"), layer, state, how));
     }
     found.files
+}
+
+/// Plans the skills of all the overlays read together, as the specification has a consumer do before it delivers
+/// any, and gives each layer the fetched skills it is to deliver: a skill from elsewhere never takes a name another
+/// skill holds. Said once, with the first harness-less pass.
+fn deliver_fetched(
+    overlays: &[ReadOverlay],
+    manifests: &BTreeMap<String, Map<String, Value>>,
+    active: &[String],
+    found: &mut BTreeMap<String, Layer>,
+    harness: Option<&str>,
+    notes: &mut Vec<Item>,
+) {
+    let views: BTreeMap<String, OverlayTree> = overlays
+        .iter()
+        .map(|overlay| (aos::normalize_name(&overlay.identity), overlay.skill_view()))
+        .filter(|(key, _)| manifests.contains_key(key))
+        .collect();
+    let layer_of = |key: &str| LayerId::new(LayerKind::Overlay, key.to_owned());
+    let plan = match aos::resolve_skills(
+        manifests,
+        active,
+        &views,
+        &[],
+        &[],
+        true,
+        &Settings::default(),
+    ) {
+        Ok(plan) => plan,
+        Err(error) => {
+            if harness.is_none() {
+                notes.push(Item::new(
+                    "skills",
+                    LayerId::new(LayerKind::User, ""),
+                    State::Refused,
+                    format!(
+                        "no skill from elsewhere is delivered: the overlays' skills cannot be planned ({})",
+                        error.class
+                    ),
+                ));
+            }
+            return;
+        }
+    };
+    let holder = |name: &str| {
+        plan.delivered
+            .iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(name))
+            .map(|(_, overlay)| overlay.as_str())
+    };
+    for overlay in overlays {
+        let key = aos::normalize_name(&overlay.identity);
+        let Some(layer) = found.get_mut(&key) else {
+            continue;
+        };
+        for name in overlay.fetched.keys() {
+            if holder(name) == Some(key.as_str()) {
+                layer.profile.skills.insert(
+                    name.clone(),
+                    Change::Set(Skill::new(format!("{}/{name}", fetched::SKILLS_DIR))),
+                );
+            }
+        }
+    }
+    if harness.is_some() {
+        return;
+    }
+    for (name, overlay) in &plan.shadowing {
+        notes.push(Item::new(
+            format!("skills.{name}"),
+            layer_of(overlay),
+            State::Refused,
+            format!(
+                "not delivered: a skill from elsewhere never takes a name another skill holds ({} holds it)",
+                holder(name).unwrap_or("another overlay")
+            ),
+        ));
+    }
+    for name in &plan.collisions {
+        if let Some(winner) = holder(name) {
+            notes.push(Item::new(
+                format!("skills.{name}.collision"),
+                layer_of(winner),
+                State::Applied,
+                "more than one overlay offers a skill of this name; this overlay's is the one delivered",
+            ));
+        }
+    }
+    for (id, name, overlay) in &plan.non_defaults {
+        let delivered = holder(name) == Some(overlay.as_str())
+            && overlays.iter().any(|read| {
+                aos::normalize_name(&read.identity) == *overlay && read.fetched.contains_key(name)
+            });
+        if delivered {
+            let how = if id == "insecure-transport" {
+                "its source is not over an encrypted transport"
+            } else {
+                "its source is on a private network address"
+            };
+            notes.push(Item::new(
+                format!("skills.{name}.{id}"),
+                layer_of(overlay),
+                State::Applied,
+                how,
+            ));
+        }
+    }
 }
 
 /// The layers of `host` for `harness`: its overlays in composition order, then its own.
@@ -494,13 +617,7 @@ fn layers_of(
                     ));
                 }
             }
-            Ok(mut layer) => {
-                for name in overlay.fetched.keys() {
-                    layer.profile.skills.insert(
-                        name.clone(),
-                        Change::Set(Skill::new(format!("{}/{name}", fetched::SKILLS_DIR))),
-                    );
-                }
+            Ok(layer) => {
                 let key = aos::normalize_name(&overlay.identity);
                 if let Some(aos) = &layer.aos {
                     manifests.insert(key.clone(), aos.manifest.clone());
@@ -521,6 +638,7 @@ fn layers_of(
         }
     }
     let active: Vec<String> = manifests.keys().cloned().collect();
+    deliver_fetched(overlays, &manifests, &active, &mut found, harness, notes);
     let mut layers: Vec<Layer> = aos::composition_order(&manifests, &active)
         .into_iter()
         .filter_map(|key| found.remove(&key))

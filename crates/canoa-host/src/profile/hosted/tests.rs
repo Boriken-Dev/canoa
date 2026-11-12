@@ -546,7 +546,11 @@ fn record_for(overlays: &[&str]) -> Value {
 
 /// The profile's parts for Claude Code; the connection stays alive with them, since the plugin goes with either.
 fn audit_parts(temp: &Temp) -> (Connection, Parts) {
-    let offer = offer_of(temp, &config_with("overlays = [\"team\"]\n"));
+    audit_parts_in(temp, &config_with("overlays = [\"team\"]\n"))
+}
+
+fn audit_parts_in(temp: &Temp, config: &str) -> (Connection, Parts) {
+    let offer = offer_of(temp, config);
     let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
     let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
     (connection, parts)
@@ -721,4 +725,202 @@ fn a_skill_name_that_is_not_one_path_component_is_never_read_from_the_store() {
     for name in ["audit", "Review", "pdf-2", "a_b.c"] {
         assert!(fetched::confined(name), "{name:?}");
     }
+}
+
+/// Every item of the report with `key` that belongs to `layer`.
+fn items_of<'a>(report: &'a Value, key: &str, layer: &str) -> Vec<&'a Value> {
+    report["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter(|item| item["key"] == key && item["layer"] == layer)
+        .collect()
+}
+
+/// An installed overlay `name` with `files`, and the record the app wrote for it.
+fn install_files(temp: &Temp, name: &str, files: &[(&str, &str)]) {
+    for (path, text) in files {
+        temp.write(&format!("overlays/{name}/{path}"), text);
+    }
+    let digest = digest_of(temp, &format!("overlays/{name}"));
+    temp.write(
+        &format!("overlays/{name}.json"),
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+}
+
+#[test]
+fn a_later_overlays_fetched_skill_does_not_take_the_name_an_earlier_overlays_bundled_one_holds() {
+    let temp = temp_with_skill();
+    install_files(
+        &temp,
+        "base",
+        &[
+            ("overlay.cfg", "name = \"base\"\n"),
+            (
+                "skills/audit/SKILL.md",
+                "---\nname: audit\n---\nBase audit.\n",
+            ),
+        ],
+    );
+    fetch_audit(&temp, "audit", &record_for(&["team"]));
+    install_files(
+        &temp,
+        "team",
+        &[(
+            "overlay.cfg",
+            &format!(
+                "name = \"team\"\nrequires = [\"base\"]\nskills = [{{ name = \"audit\", source = \"{SKILL_SOURCE}\" }}]\n"
+            ),
+        )],
+    );
+    let (_connection, parts) =
+        audit_parts_in(&temp, &config_with("overlays = [\"base\", \"team\"]\n"));
+    let text = std::fs::read_to_string(plugin_of(&parts).join("skills/audit/SKILL.md"))
+        .expect("the skill is written");
+    assert!(text.contains("Base audit."), "{text}");
+    assert!(
+        !plugin_of(&parts)
+            .join("skills/audit/notes/more.md")
+            .exists(),
+        "none of the fetched copy"
+    );
+    assert_eq!(
+        items_of(&parts.report, "skills.audit", "overlay:base")[0]["state"],
+        "applied"
+    );
+    let shadowed = items_of(&parts.report, "skills.audit", "overlay:team");
+    assert_eq!(shadowed.len(), 1, "{}", parts.report);
+    assert_eq!(shadowed[0]["state"], "refused", "{}", parts.report);
+}
+
+#[test]
+fn a_fetched_skill_over_plain_http_is_reported_with_its_setting() {
+    let temp = temp_with_skill();
+    let source = "http://skills.example.test/tools.git#skills/audit";
+    let mut record = record_for(&["team"]);
+    record["source"] = json!(source);
+    fetch_audit(&temp, "audit", &record);
+    install_naming(&temp, source, None);
+    let (_connection, parts) = audit_parts(&temp);
+    assert_eq!(item(&parts.report, "skills.audit")["state"], "applied");
+    let note = item(&parts.report, "skills.audit.insecure-transport");
+    assert_eq!(note["state"], "applied", "{}", parts.report);
+}
+
+#[test]
+fn a_pin_in_canoa_cfg_must_match_too_and_anchors_a_skill_that_names_none() {
+    let temp = temp_with_skill();
+    let digest = fetch_audit(&temp, "audit", &record_for(&["team"]));
+    install_naming(&temp, SKILL_SOURCE, None);
+    let configured = |digest: &str| {
+        format!(
+            "{}\n[skill_pins]\nAudit = \"{digest}\"\n",
+            config_with("overlays = [\"team\"]\n")
+        )
+    };
+
+    let (_connection, parts) = audit_parts_in(&temp, &configured(&digest));
+    assert_eq!(item(&parts.report, "skills.audit")["state"], "applied");
+    assert!(
+        !parts.report.to_string().contains("skills.audit.unpinned"),
+        "a configured pin anchors it: {}",
+        parts.report
+    );
+
+    let other = format!("sha256:{}", "ab".repeat(32));
+    let (_connection, parts) = audit_parts_in(&temp, &configured(&other));
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "refused", "{}", parts.report);
+    assert!(
+        audit["how"].as_str().expect("how").contains("skill_pins"),
+        "{audit}"
+    );
+    assert!(!plugin_of(&parts).join("skills/audit").exists());
+
+    // The entry's own pin must match as well: the configured one does not stand in for it.
+    install_naming(&temp, SKILL_SOURCE, Some(&other));
+    let (_connection, parts) = audit_parts_in(&temp, &configured(&digest));
+    assert_eq!(
+        item(&parts.report, "skills.audit")["state"],
+        "refused",
+        "{}",
+        parts.report
+    );
+}
+
+#[test]
+fn skill_pins_in_canoa_cfg_are_names_and_digests_or_the_file_is_refused() {
+    let base = |pins: &str| {
+        Config::from_str_in(
+            &format!("{}\n[skill_pins]\n{pins}\n", config_with("")),
+            Path::new("."),
+        )
+    };
+    let digest = format!("sha256:{}", "ab".repeat(32));
+    assert!(base(&format!("audit = \"{digest}\"")).is_ok());
+    for bad in [
+        "audit = \"sha256:abc\"".to_owned(),
+        "audit = 3".to_owned(),
+        format!("\"../x\" = \"{digest}\""),
+        format!("con = \"{digest}\""),
+        format!("audit = \"{digest}\"\nAudit = \"{digest}\""),
+    ] {
+        assert!(base(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_malformed_record_is_reported_and_never_stops_the_session_or_reads_outside_the_store() {
+    let long = "x".repeat(200_000);
+    let digest_less = json!({"name": "audit", "source": SKILL_SOURCE, "overlays": ["team"]});
+    for (what, text) in [
+        ("an array", "[1, 2]".to_owned()),
+        ("a number", "3".to_owned()),
+        ("not JSON", "{".to_owned()),
+        ("wrong types", json!({"name": 3, "overlays": "team", "digest": 4, "source": []}).to_string()),
+        ("overlays of numbers", json!({"name": "audit", "overlays": [1, null, {"a": 1}], "digest": null}).to_string()),
+        ("no digest", digest_less.to_string()),
+        ("a path as the digest", json!({"name": "audit", "source": SKILL_SOURCE, "overlays": ["team"], "digest": "../../team"}).to_string()),
+        ("a huge record", json!({"name": "audit", "overlays": ["team"], "pad": long}).to_string()),
+    ] {
+        let temp = temp_with_skill();
+        fetch_audit(&temp, "audit", &record_for(&["team"]));
+        temp.write("overlays/.skills/audit.json", &text);
+        install_naming(&temp, SKILL_SOURCE, None);
+        let (_connection, parts) = audit_parts(&temp);
+        let audit = item(&parts.report, "skills.audit");
+        assert!(
+            audit["state"] == "refused" || audit["state"] == "not supported",
+            "{what}: {}",
+            parts.report
+        );
+        assert!(!plugin_of(&parts).join("skills/audit").exists(), "{what}");
+    }
+}
+
+#[test]
+fn a_skill_directory_that_is_a_link_is_never_read() {
+    let temp = temp_with_skill();
+    fetch_audit(&temp, "audit", &record_for(&["team"]));
+    install_naming(&temp, SKILL_SOURCE, None);
+    // `.skills/audit` becomes a link to a directory with the same files: the record's digest still matches them.
+    let real = temp.0.join("overlays/.skills/audit");
+    let moved = temp.0.join("elsewhere");
+    std::fs::rename(&real, &moved).expect("moved");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&moved, &real).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(&moved, &real).is_ok();
+    if !linked {
+        eprintln!("SKIPPED: this account cannot make a symbolic link");
+        return;
+    }
+    let (_connection, parts) = audit_parts(&temp);
+    assert_ne!(
+        item(&parts.report, "skills.audit")["state"],
+        "applied",
+        "{}",
+        parts.report
+    );
 }
