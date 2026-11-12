@@ -1304,7 +1304,10 @@ fn an_allowance_that_is_not_a_digest_or_names_no_overlay_is_refused_naming_the_s
         let said = parse(text).expect_err(text).to_string();
         assert!(said.contains(what), "{text}: {said}");
         assert!(!said.contains("sha256:12"), "never a value: {said}");
+    }
+}
 
+#[test]
 fn host_history_has_defaults_takes_each_limit_and_refuses_zero_and_the_unknown() {
     let none = Config::from_str_in("", &base()).expect("parses");
     assert_eq!(none.history, HistoryConfig::default());
@@ -1335,4 +1338,18 @@ fn host_history_has_defaults_takes_each_limit_and_refuses_zero_and_the_unknown()
             "{bad}"
         );
     }
+}
+
+#[test]
+fn host_history_and_the_hooks_tables_are_read_together() {
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let config = parse(&format!(
+        "[host.history]\nmax_sessions = 5\n\
+         [host.profiles.p]\noverlays = [\"team\"]\nallow_hooks = {{ team = \"{digest}\" }}\n\
+         [agents.Claude.hooks]\nteam = \"{digest}\"\n"
+    ))
+    .expect("parses");
+    assert_eq!(config.history.max_sessions, 5);
+    assert_eq!(config.profiles["p"].allow_hooks["team"], digest);
+    assert!(config.local_profiles.for_agent("Claude").is_some());
 }
