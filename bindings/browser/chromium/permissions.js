@@ -21,6 +21,9 @@ export const CAPABILITY = Object.freeze({
   DEBUG: "browser.debug"
 });
 
+/** An expiry for a grant that lasts until it is taken away: a tab shared with a session. */
+export const UNTIL_REVOKED = Number.MAX_SAFE_INTEGER;
+
 const directions = new Set(Object.values(DIRECTION));
 const capabilities = new Set(Object.values(CAPABILITY));
 
@@ -43,6 +46,7 @@ function validGrant(value) {
   if (typeof value.peerId !== "string" || value.peerId.length < 1 || value.peerId.length > 256) return false;
   if (!validOrigin(value.origin)) return false;
   if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= 0) return false;
+  if (value.session !== undefined && (typeof value.session !== "string" || value.session.length < 1 || value.session.length > 128)) return false;
 
   if (value.direction === DIRECTION.AGENT_TO_PAGE) {
     if (!Number.isSafeInteger(value.tabId) || value.tabId < 0) return false;
@@ -59,10 +63,11 @@ function validGrant(value) {
  * Create a grant after an explicit local user decision.
  * A grant by itself never authorizes an unverified peer.
  */
-export function makeGrant({ direction, peerId, origin, tabId, capability, expiresAt }) {
+export function makeGrant({ direction, peerId, origin, tabId, capability, expiresAt, session }) {
   const grant = {
     direction, peerId, origin, capability, expiresAt,
-    ...(tabId === undefined ? {} : { tabId })
+    ...(tabId === undefined ? {} : { tabId }),
+    ...(session === undefined ? {} : { session })
   };
   if (!validGrant(grant)) throw new TypeError("Invalid Canoa permission grant");
   return Object.freeze(grant);
@@ -97,7 +102,7 @@ export function revokeTab(grants, tabId) {
 /** Whether two grants are the same one: a position in the list says nothing, since grants come and go behind whoever is looking. */
 export function sameGrant(a, b) {
   return a?.direction === b?.direction && a?.peerId === b?.peerId && a?.tabId === b?.tabId
-    && a?.origin === b?.origin && a?.capability === b?.capability && a?.expiresAt === b?.expiresAt;
+    && a?.origin === b?.origin && a?.capability === b?.capability && a?.expiresAt === b?.expiresAt && a?.session === b?.session;
 }
 
 export function revokePeer(grants, peerId) {
