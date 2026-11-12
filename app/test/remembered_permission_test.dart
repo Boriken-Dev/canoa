@@ -177,6 +177,23 @@ final class _GatedBackend implements LedgerBackend {
   Future<void> write(String document) async => this.document = document;
 }
 
+/// A file whose lock is never free.
+final class _NoLock implements LedgerBackend, LockableBackend {
+  @override
+  String get location => 'a locked file';
+
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String document) async {}
+
+  @override
+  Future<T> exclusively<T>(Future<T> Function() body, {Duration timeout = const Duration(seconds: 2)}) async {
+    throw TimeoutException('the lock was not free in ${timeout.inMilliseconds} ms', timeout);
+  }
+}
+
 void raceTests() {
   group('a request waiting for the rules to be read again', () {
     Future<(_Shown, _GatedBackend)> gated(WidgetTester tester, {String mode = 'manual'}) async {
@@ -239,6 +256,49 @@ void raceTests() {
       expect(s.session.messages.where((m) => m.text.contains('Bypass allowed')), isNotEmpty);
     });
 
+    testWidgets('is answered cancelled the moment Stop is pressed, without waiting for the read', (tester) async {
+      final (s, backend) = await gated(tester);
+      s.agent.run(1, 'npm test');
+      s.agent.run(2, 'cargo test');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull, reason: 'the read is still held');
+      await tester.runAsync(s.store.cancelActiveSession);
+      await _settle(tester);
+      expect(s.agent.answerTo(1)?['result'], {'outcome': {'outcome': 'cancelled'}}, reason: 'answered with the read still held');
+      expect(s.agent.answerTo(2)?['result'], {'outcome': {'outcome': 'cancelled'}});
+      await done(tester, s, backend);
+      expect(s.rules.rules.single.fired, 0);
+      expect(s.session.pendingPermissions, isEmpty);
+    });
+
+    testWidgets('a rules file that failed to read is read again for the next request, so the rules come back', (tester) async {
+      final s = await _shown(tester);
+      _add(s, type: RuleType.command, value: 'npm test');
+      await tester.runAsync(s.rules.settled);
+      final good = s.backend.document;
+      s.backend.document = '{not json';
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull, reason: 'a file that cannot be read applies no rule');
+      expect(s.rules.problem, isNotNull);
+      s.store.cancelPermission(s.session);
+      s.backend.document = good;
+      s.agent.run(2, 'npm test');
+      await _settle(tester);
+      expect(s.agent.chose(2), 'allow-once', reason: 'no restart was needed');
+      expect(s.rules.problem, isNull);
+    });
+
+    testWidgets('a lock that is not free in time means the request is asked, not matched', (tester) async {
+      final s = await _shown(tester, rules: PermissionRules(_NoLock(), real: _plain, lockTimeout: const Duration(milliseconds: 50)));
+      _add(s, type: RuleType.command, value: 'npm test');
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.agent.answerTo(1), isNull);
+      expect(s.session.pendingPermissions, hasLength(1));
+      expect(s.rules.rules, isEmpty, reason: 'a read that gave up applies nothing');
+    });
+
     testWidgets('keeps the cards in the order the requests came, whether or not they needed the read', (tester) async {
       final (s, backend) = await gated(tester);
       s.agent.run(1, 'cargo test');
@@ -256,11 +316,23 @@ void toolRuleTests() {
   group('a rule for an MCP tool is held to the mode like a command', () {
     testWidgets('it does not apply while the mode accepts edits, and it is not offered', (tester) async {
       final s = await _shown(tester, mode: 'accept_edits');
-      _add(s, kind: 'other', type: RuleType.mcp, value: 'mcp__marker__mark', toolName: 'mcp__marker__mark');
-      s.agent.ask(1, 'mark', kind: 'other', rawInput: {'x': 1}, toolName: 'mcp__marker__mark');
+      _add(s, kind: 'other', type: RuleType.mcp, value: 'mcp__marker__get_mark', toolName: 'mcp__marker__get_mark');
+      s.agent.ask(1, 'mark', kind: 'other', rawInput: {'x': 1}, toolName: 'mcp__marker__get_mark');
       await _settle(tester);
       expect(s.agent.answerTo(1), isNull);
       expect(_offer, findsNothing);
+    });
+
+    testWidgets('it is offered only for a tool that reads, and stands alone in the folder', (tester) async {
+      final s = await _shown(tester);
+      s.agent.ask(1, 'write', kind: 'other', rawInput: {'path': '/work/calc/a.js', 'content': 'x'}, toolName: 'mcp__filesystem__write_file');
+      s.agent.ask(2, 'edit', kind: 'other', rawInput: {'path': '/work/calc/a.js'}, toolName: 'mcp__filesystem__edit_file');
+      s.agent.ask(3, 'move', kind: 'other', rawInput: {'path': '/work/calc/a.js'}, toolName: 'mcp__filesystem__move_file');
+      s.agent.ask(4, 'read', kind: 'other', rawInput: {'path': '/work/calc/a.js'}, toolName: 'mcp__filesystem__read_file');
+      await _settle(tester);
+      expect([for (final asked in s.session.pendingPermissions) asked.subject != null], [false, false, false, true]);
+      _add(s, type: RuleType.command, value: 'npm test');
+      expect(s.rules.conflict('/work/calc', RuleType.mcp), isNotNull, reason: 'a command rule stands here: a tool cannot join it');
     });
 
     testWidgets('it is never offered for a tool that executes', (tester) async {
@@ -589,16 +661,16 @@ void main() {
   group('a rule for an MCP tool', () {
     testWidgets('is made for that tool on that server', (tester) async {
       final s = await _shown(tester);
-      s.agent.ask(1, 'mark', kind: 'other', rawInput: {'text': 'x'}, toolName: 'mcp__marker__mark');
+      s.agent.ask(1, 'mark', kind: 'other', rawInput: {'text': 'x'}, toolName: 'mcp__marker__get_mark');
       await _settle(tester);
       await tester.tap(_offer);
       await tester.pumpAndSettle();
-      expect(find.textContaining('Any use of the tool mark of marker'), findsOneWidget);
+      expect(find.textContaining('Any use of the tool get_mark of marker'), findsOneWidget);
       await _confirm(tester);
       expect(s.agent.chose(1), 'allow-once');
-      s.agent.ask(2, 'mark', kind: 'other', rawInput: {'text': 'y'}, toolName: 'mcp__marker__mark');
+      s.agent.ask(2, 'mark', kind: 'other', rawInput: {'text': 'y'}, toolName: 'mcp__marker__get_mark');
       s.agent.ask(3, 'mark', kind: 'other', rawInput: {'text': 'y'}, toolName: 'mcp__marker__erase');
-      s.agent.ask(4, 'mcp__marker__mark', kind: 'other', rawInput: {'text': 'y'});
+      s.agent.ask(4, 'mcp__marker__get_mark', kind: 'other', rawInput: {'text': 'y'});
       await _settle(tester);
       expect(s.agent.chose(2), 'allow-once');
       expect(s.agent.answerTo(3), isNull);
@@ -737,7 +809,7 @@ void main() {
       await tester.pumpAndSettle();
       await _confirmKeeping(tester);
       expect(find.byKey(const Key('rule-problem')), findsOneWidget);
-      expect(find.textContaining('A rule for commands or tools already stands'), findsOneWidget);
+      expect(find.textContaining('A rule of another kind (commands, tools or file changes) already stands'), findsOneWidget);
       expect(s.rules.rules, hasLength(1));
       expect(s.agent.answerTo(1), isNull);
     });

@@ -74,9 +74,10 @@ opens the rule to read before anything is kept:
   character) and no control or line break gets a rule. A command runs whatever the files in the folder make it do, which the
   dialog says.
 - An MCP tool is allowed as that tool of that server with any input, by the structured tool name the agent sends
-  (`_meta.claudeCode.toolName`, `mcp__<server>__<tool>`); a title is never read as one. A tool counts as a command: it may run
-  one. None is offered for a tool of the `execute` kind or whose server or tool name says it runs things (run, exec, process,
-  shell, terminal, eval, bash, command, cmd, spawn, script, invoke, powershell).
+  (`_meta.claudeCode.toolName`, `mcp__<server>__<tool>`); a title is never read as one. It is offered only for a tool whose name
+  begins with a verb that reads (`readVerbs`: read, get, list, search, find, view, show, describe, status, stat, info), and never
+  for one of the `execute` kind or whose server or tool name says it runs things (run, exec, process, shell, terminal, eval, bash,
+  command, cmd, spawn, script, invoke, powershell, pwsh).
 - Commands and tools apply only while the session is in a mode Canoa can see asks about commands (the agent's Manual or Plan);
   in Accept edits, in Bypass, in the mode an agent's own "always" switches to, in any other mode or before the agent has said, a
   request asks as it would.
@@ -100,9 +101,9 @@ opens the rule to read before anything is kept:
   resolved folder and scope. An `edits` list is read only as entries of `old_string`, `new_string` and `replace_all`; a request
   carrying a patch, a diff or any other key is not covered.
 
-Commands and tools are not kept together with file changes, for any source or peer: not in one folder, not in two where one holds
-the other once links are resolved, and not in two folders of one repository (the nearest `.git`), because a command can write any
-file and a file change can write what a command runs. A rule has to cover the very request it was made from (the one the dialog
+A folder keeps one kind of rule: commands, tools and file changes can each write what another runs, so a second kind is refused for
+any source or peer, in one folder, in two where one holds the other once links are resolved, and in two folders of one repository
+(the nearest `.git`; a linked worktree or a submodule counts as its main repository). A rule has to cover the very request it was made from (the one the dialog
 was opened for), and is kept for one source (the key the session list remembers it under: a preset's or command's label, and
 `canoa/<name>` for an entry the host serves), the peer it ran on, one folder (exactly the session's, not what is under it) and the
 tool the agent named (`Bash` is not `PowerShell`). A later request that matches is answered with the agent's `allow_once` answer,
@@ -115,10 +116,16 @@ ended is answered cancelled, and one that finds the mode, Bypass or the cards di
 made and each use is said in the conversation. Rules are kept in `permissions.json` beside canoa.cfg (in the browser, the origin's
 IndexedDB). On a desktop the file is replaced through a temp file named for that write, under a lock that the read-merge-write holds,
 so another instance cannot write between; a rule another program added is kept and shown as not made in this app, and a rule
-another instance revoked is dropped. A file that cannot be read or does not parse applies no rule at all and is not written over;
-Settings says so. A write that fails is shown in Settings. On a desktop `permissions-log.jsonl` beside it gets one JSON line
+another instance revoked is dropped. A rename another process's open file refuses is tried again for up to two seconds; the read and the
+write wait for the lock for as long, and a read that gives up applies no rule (the request is asked). A file that cannot be read or
+does not parse applies no rule at all and is not written over, and is read again before the next request, so the rules come back
+when it reads again; Settings says so. A write that fails is shown in Settings, together with "not yet saved": the change, a revoke
+among them, is in effect here (a revoked rule is not matched) and is written at the next change or read. A temp file a killed
+writer left is taken away by the next write once it is a minute old. Stop answers a request still waiting on the file cancelled at
+once. On a desktop `permissions-log.jsonl` beside it gets one JSON line
 appended for each rule made, used and revoked: the time, the rule's id, source and folder, and for a command only its program
-(never an argument, an assignment or a URL), for a path or tool the thing itself. It holds no hash of the text, only grows, and a
+and only when the command begins with a plain program or path (otherwise `(command)`, which covers an assignment such as `NAME=value`
+or `$name=...` before it, a quoted value, and a URL), never an argument; for a path or tool the thing itself. It holds no hash of the text, only grows, and a
 browser keeps none. A rule an earlier version wrote that this one does not understand (the prefix rules it once had) is kept,
 shown as no longer supported and never applied, until it is revoked. Settings lists the rules under **Permissions** with when each
 was made and how often it answered, and **Revoke** takes one back at once. Canoa adds no rule when the person picks the agent's own
@@ -127,7 +134,7 @@ by this app, per client, for every session it shows, wherever the agent runs; th
 that moves.
 
 Known limits, said in the dialog too: a hard link to a file outside the folder is not detected; the list of names that are never
-covered cannot be complete; and what the agent has itself been set to allow (its own permission rules, rules it remembered) is
+covered, and the list of tool names that execute, cannot be complete; and what the agent has itself been set to allow (its own permission rules, rules it remembered) is
 outside what Canoa can see, and can make its Manual mode silent.
 
 ## The changes pane

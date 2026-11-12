@@ -43,6 +43,10 @@ const Set<String> _editKeys = {'old_string', 'new_string', 'replace_all'};
 
 const List<String> _pathKeys = ['file_path', 'path', 'notebook_path'];
 
+/// The first word of an MCP tool's name for which a rule for any input is offered: tools that only read. A tool that writes, moves,
+/// deletes, sends or fetches (which can have effects at the other end) is never offered one.
+const Set<String> readVerbs = {'read', 'get', 'list', 'search', 'find', 'view', 'show', 'describe', 'status', 'stat', 'info'};
+
 /// Names that say a tool executes what it is given.
 final RegExp _executes = RegExp(r'run|exec|process|shell|terminal|eval|bash|command|cmd|spawn|script|invoke|powershell|pwsh', caseSensitive: false);
 
@@ -64,6 +68,8 @@ RuleSubject? subjectOf({String? kind, Object? rawInput, Map<String, dynamic>? to
     if (match != null) {
       // A tool that executes anything is a command with input no rule here can read: it is never remembered.
       if (kind == 'execute' || _executes.hasMatch('${match.group(1)} ${match.group(2)}')) return null;
+      // Any input is allowed for such a tool, so only for a verb that reads; a list of names that write cannot be complete.
+      if (!readVerbs.contains(match.group(2)!.split(RegExp(r'[_\-\s]|(?<=[a-z])(?=[A-Z])')).first.toLowerCase())) return null;
       return McpSubject(structured, match.group(1)!, match.group(2)!);
     }
   }
@@ -165,7 +171,8 @@ final class PermissionGuards {
 
 /// A folder that can be locked while the rules file is read, changed and replaced, so two instances cannot write over each other.
 abstract interface class LockableBackend {
-  Future<T> exclusively<T>(Future<T> Function() body);
+  /// Runs [body] holding the lock; throws a [TimeoutException] when it cannot be had within [timeout], and then runs nothing.
+  Future<T> exclusively<T>(Future<T> Function() body, {Duration timeout = const Duration(seconds: 2)});
 }
 
 /// The nearest folder at or above [folder] that holds version control (`.git`), or null; a build only on a desktop has files to ask.
@@ -235,10 +242,6 @@ enum RuleType {
 
   static RuleType? named(Object? name) => values.where((type) => type.name == name).firstOrNull;
 
-  /// Which kind of power it grants. A command can write any file, and an MCP tool may run one or write files, so it counts as one;
-  /// a file change can write what a command then runs. A folder keeps commands and tools, or file changes, never both.
-  bool get isCommand => this == command || this == mcp;
-  bool get isFilesystem => this == path;
 }
 
 /// One thing the person said to allow, for a source in a folder. Canoa answers a request it matches with the agent's allow-once
@@ -406,30 +409,28 @@ final class MemoryRuleLog implements RuleLog {
   String get location => 'memory only';
 }
 
-final RegExp _assignment = RegExp(r'^(\$env:)?[A-Za-z_][A-Za-z0-9_]*=|^\$env:', caseSensitive: false);
+/// A first word that is plainly a program or a path to one: letters, digits and the characters of a path, no quote, `=`, `$` or `@`.
+final RegExp _plainProgram = RegExp(r'^[A-Za-z0-9_./\\:+~-]+$');
 
-/// What a log line says of [detail] instead of the text: for a command only its program, with a mark that more followed; the
-/// arguments, assignments before it (`NAME=value`, `$env:NAME=...`) and anything that is a URL are left out, since any of them can
-/// hold a secret. A path or a tool is itself. A line can be matched to its rule by the rule's id.
+/// What a log line says of [detail] instead of the text: for a command only its program, with a mark that more followed, when its
+/// first word is a plain program or path; the arguments are left out, and so is any command that begins with something else (an
+/// assignment such as `NAME=value`, `$name=...` or `$env:NAME=...` with a quoted value, a URL, a quote), which is logged as
+/// `(command)`. Any of them can hold a secret. A path or a tool is itself. A line can be matched to its rule by the rule's id.
 String redacted(RuleType type, String detail) {
   if (type != RuleType.command) return detail;
   final words = detail.trim().split(RegExp(r'\s+'));
-  var at = 0;
-  while (at < words.length && _assignment.hasMatch(words[at])) {
-    at++;
-  }
-  if (at >= words.length) return '(only assignments)';
-  var program = words[at];
-  if (program.contains('://') || program.contains('@')) program = '(a URL or an address)';
+  var program = words.first;
+  if (!_plainProgram.hasMatch(program) || program.contains('://')) return '(command)';
   if (program.length > 64) program = '${program.substring(0, 64)}…';
-  return at + 1 < words.length ? '$program …' : program;
+  return words.length > 1 ? '$program …' : program;
 }
 
 /// The rules the person made, kept in a file beside canoa.cfg (IndexedDB in a browser), and a log of each rule made, used and
 /// revoked. A change is written at once. The stored file is read again before each write and before a request is matched, so a
 /// rule another program added is kept (and flagged) and a rule another instance revoked stops applying.
 class PermissionRules extends ChangeNotifier {
-  PermissionRules(this.backend, {this.log, this.guards = const PermissionGuards(), this.real, this.repoRoot, DateTime Function()? clock, Random? random})
+  PermissionRules(this.backend,
+      {this.log, this.guards = const PermissionGuards(), this.real, this.repoRoot, this.lockTimeout = const Duration(seconds: 2), DateTime Function()? clock, Random? random})
       : _clock = clock ?? DateTime.now,
         _random = random ?? Random.secure();
 
@@ -444,6 +445,9 @@ class PermissionRules extends ChangeNotifier {
 
   /// Where the repository of a folder starts, when that can be asked.
   final RepoRoot? repoRoot;
+
+  /// How long a change or a read waits for the file's lock before it gives up; a read that gives up applies no rule.
+  final Duration lockTimeout;
   final DateTime Function() _clock;
   final Random _random;
   final List<PermissionRule> _rules = [];
@@ -463,6 +467,12 @@ class PermissionRules extends ChangeNotifier {
   /// Why the last write of the rules or the log failed, if it did.
   String? writeProblem;
 
+  bool _dirty = false;
+
+  /// Whether a change (a revoke among them) is in effect here but not yet written, because the write failed. It is tried again at
+  /// the next change and the next read, and until then it is applied here: a revoked rule is not matched.
+  bool get unsaved => _dirty;
+
   /// The rules, the oldest first.
   List<PermissionRule> get rules => List.unmodifiable(_rules);
 
@@ -477,7 +487,8 @@ class PermissionRules extends ChangeNotifier {
   Future<void> load() async {
     final String? document;
     try {
-      document = await backend.read();
+      final locking = backend;
+      document = await (locking is LockableBackend ? (locking as LockableBackend).exclusively(backend.read, timeout: lockTimeout) : backend.read());
     } on Object catch (error) {
       problem = 'could not read ${backend.location}: $error';
       notifyListeners();
@@ -519,15 +530,14 @@ class PermissionRules extends ChangeNotifier {
     return (folder: resolved, root: root == null ? null : cleanPath(root));
   }
 
-  /// Why a rule of [type] cannot be made for [folder] beside the rules already made, or null. Commands and tools (which may run
-  /// one) are not kept together with file changes (which can write what a command runs) for any source or peer: not in this
-  /// folder, one that holds it or lies in it once links are resolved, or one in the same repository.
+  /// Why a rule of [type] cannot be made for [folder] beside the rules already made, or null. Commands, file changes and tools are
+  /// three kinds that can each write what another runs, so a folder keeps one kind: a second kind is refused for any source or
+  /// peer, in this folder, one that holds it or lies in it once links are resolved, or one in the same repository.
   String? conflict(String folder, RuleType type) {
     if (type == RuleType.unsupported) return null;
     final mine = _tree(folder);
     for (final rule in _rules) {
-      if (rule.type == RuleType.unsupported) continue;
-      if (!((type.isCommand && rule.type.isFilesystem) || (type.isFilesystem && rule.type.isCommand))) continue;
+      if (rule.type == RuleType.unsupported || rule.type == type) continue;
       final theirs = _tree(rule.folder);
       final related = mine == null ||
           theirs == null ||
@@ -535,9 +545,7 @@ class PermissionRules extends ChangeNotifier {
           _under(theirs.folder, mine.folder) ||
           (mine.root != null && mine.root == theirs.root);
       if (related) {
-        return type.isCommand
-            ? 'A rule for file changes already stands in this folder, one next to it or in the same repository: revoke it before allowing commands or tools.'
-            : 'A rule for commands or tools already stands in this folder, one next to it or in the same repository: revoke it before allowing file changes.';
+        return 'A rule of another kind (commands, tools or file changes) already stands in this folder, one next to it or in the same repository, for some source: revoke it before allowing this.';
       }
     }
     return null;
@@ -614,6 +622,7 @@ class PermissionRules extends ChangeNotifier {
   String encode() => jsonEncode({'version': 1, 'rules': [for (final rule in _rules) rule.toJson()]});
 
   void _changed() {
+    _dirty = true;
     notifyListeners();
     unawaited(flush());
   }
@@ -644,34 +653,43 @@ class PermissionRules extends ChangeNotifier {
     if (changed) notifyListeners();
   }
 
-  /// Reads the stored file again and takes up what it says, in order with the writes: call it before matching a request.
-  Future<void> refresh() => _writing = _writing.then((_) async {
-    try {
-      await _mergeStored();
-    } on Object catch (error) {
-      _failClosed('could not read ${backend.location}: $error');
-    }
-  });
+  /// Reads the stored file again and takes up what it says, in order with the writes: call it before matching a request. A read that
+  /// fails (or waits too long for the lock) applies no rule until one succeeds; a change still unsaved is tried again.
+  Future<void> refresh() => _sync(write: false);
 
-  Future<void> flush() {
+  Future<void> flush() => _sync(write: true);
+
+  /// Reads the stored file under its lock and merges it, then writes when asked or when a change is still unsaved.
+  Future<void> _sync({required bool write}) {
     return _writing = _writing.then((_) async {
-      Future<void> replace() async {
+      Future<void> body() async {
         await _mergeStored();
         if (problem != null) {
-          writeProblem = 'nothing was written, so the file is left as it is: $problem';
+          if (write || _dirty) writeProblem = 'nothing was written, so the file is left as it is: $problem';
           return;
         }
-        await backend.write(encode());
-        _persisted = {for (final rule in _rules) rule.id};
-        if (writeProblem?.startsWith('could not write the log') != true) writeProblem = null;
+        if (!write && !_dirty) return;
+        try {
+          await backend.write(encode());
+          _persisted = {for (final rule in _rules) rule.id};
+          _dirty = false;
+          if (writeProblem?.startsWith('could not write the log') != true) writeProblem = null;
+        } on Object catch (error) {
+          writeProblem = 'could not write ${backend.location}: $error';
+          debugPrint('Canoa permissions: $writeProblem');
+        }
       }
 
       try {
         final locking = backend;
-        await (locking is LockableBackend ? (locking as LockableBackend).exclusively(replace) : replace());
+        await (locking is LockableBackend ? (locking as LockableBackend).exclusively(body, timeout: lockTimeout) : body());
       } on Object catch (error) {
-        writeProblem = 'could not write ${backend.location}: $error';
-        debugPrint('Canoa permissions: $writeProblem');
+        if (write) {
+          writeProblem = 'could not write ${backend.location}: $error';
+          debugPrint('Canoa permissions: $writeProblem');
+        } else {
+          _failClosed('could not read ${backend.location}: $error');
+        }
       }
       notifyListeners();
     });

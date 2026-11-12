@@ -107,13 +107,21 @@ class _RememberDialogState extends State<RememberDialog> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   'A command runs whatever the files in this folder make it do: a test or build command runs the scripts and tests '
-                  'there, as they are when it runs. Only one of commands or file changes and tools can be allowed for this source in '
-                  'this folder, or one next to it, at a time.',
+                  'there, as they are when it runs.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Commands, tools and file changes can each write what another runs, so this folder keeps one kind. The rule applies '
+                'to every source and peer here, and to this folder, the folders around it and the rest of its repository.',
+                key: const Key('rule-alone'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
             Text(
-              'Limits: a hard link is not detected; the list of files never covered cannot be complete; and what the agent has '
+              'Limits: a hard link is not detected; the lists of files and of tool names never covered cannot be complete; and what the agent has '
               'itself been set to allow (its own permissions, or rules it remembered) is outside what Canoa can see, and can make '
               'Manual silent.',
               key: const Key('rule-limits'),

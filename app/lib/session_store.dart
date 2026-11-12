@@ -221,6 +221,9 @@ class ChatSession {
   /// The permission request before this one, which this one waits on so that cards keep the order the requests came in.
   Future<void> askTail = Future.value();
 
+  /// The requests that are not yet a card or an answer, waiting on the rules file: Stop answers them cancelled at once.
+  final List<Completer<AcpDecision>> askWaiters = [];
+
   /// Whether Bypass was chosen before the agent was known, so it is the agent's own where the agent turns out to have one.
   bool bypassBeforeAgent = false;
 
@@ -952,22 +955,32 @@ class SessionStore extends ChangeNotifier {
       if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
     }
     if (target == null) return const AcpDeny('not a session here');
+    final ChatSession asked = target;
     // Each request waits for the one before it, so a request that needs the rules read again cannot be passed by one that does not.
-    final epoch = target.epoch;
-    final prior = target.askTail;
+    final epoch = asked.epoch;
+    final prior = asked.askTail;
     final gate = Completer<void>();
-    target.askTail = gate.future;
-    try {
-      await prior;
-      // What another instance revoked since the file was read stops applying before this request is matched.
-      if (rules != null && rules!.rules.isNotEmpty) await rules!.refresh();
-      // Stop, closing the conversation or a connection that ended while this waited: nothing is answered but cancelled, and what
-      // the mode, Bypass and the waiting cards are now is read after this point, not before it.
-      if (target.epoch != epoch || !_sessions.contains(target) || !identical(_verifiedClients[target.id], from)) return const AcpCancel();
-      return _decide(target, request);
-    } finally {
-      gate.complete();
-    }
+    final waiter = Completer<AcpDecision>();
+    asked.askTail = gate.future;
+    asked.askWaiters.add(waiter);
+    unawaited(() async {
+      try {
+        await prior;
+        // What another instance revoked since the file was read stops applying before this request is matched, and a file that
+        // could not be read earlier is tried again. A read that waits too long applies no rule: the request is asked.
+        if (rules != null && (rules!.rules.isNotEmpty || rules!.problem != null)) await rules!.refresh();
+        // Stop, closing the conversation or a connection that ended while this waited: nothing is answered but cancelled, and what
+        // the mode, Bypass and the waiting cards are now is read after this point, not before it.
+        final gone = asked.epoch != epoch || !_sessions.contains(asked) || !identical(_verifiedClients[asked.id], from);
+        if (!waiter.isCompleted) waiter.complete(gone ? const AcpCancel() : _decide(asked, request));
+      } on Object catch (error, stack) {
+        if (!waiter.isCompleted) waiter.completeError(error, stack);
+      } finally {
+        asked.askWaiters.remove(waiter);
+        gate.complete();
+      }
+    }());
+    return waiter.future;
   }
 
   Future<AcpDecision> _decide(ChatSession target, AcpPermissionRequest request) {
@@ -1140,11 +1153,21 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Ends what [session] had in hand: a request still waiting on the rules file is answered cancelled now, and one that is not
+  /// told so by the time it is decided finds it so by the count.
+  void _cancelWaiters(ChatSession session) {
+    session.epoch++;
+    for (final waiter in [...session.askWaiters]) {
+      if (!waiter.isCompleted) waiter.complete(const AcpCancel());
+    }
+    session.askWaiters.clear();
+  }
+
   /// Takes away what [session] was still asking of the person when its connection ended or was replaced: the permission cards
   /// and questions go, and the tool line each card was about is marked stopped. Nothing is answered, since the agent that asked
   /// is gone or is no longer the one this conversation is with.
   void _strand(ChatSession session) {
-    session.epoch++;
+    _cancelWaiters(session);
     for (final question in session.pendingPermissions) {
       if (question.toolCallId case final id?) _stop(session.toolEntries[id]?.tool);
     }
@@ -1166,7 +1189,7 @@ class SessionStore extends ChangeNotifier {
 
   /// Answers everything still waiting in [session]: its permission requests with [answer], and its questions cancelled.
   void _endWaiting(ChatSession session, AcpDecision answer) {
-    session.epoch++;
+    _cancelWaiters(session);
     for (final question in session.pendingPermissions) {
       question._answer.complete(answer);
     }

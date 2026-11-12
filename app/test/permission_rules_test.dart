@@ -1,11 +1,12 @@
 // What a remembered rule covers and what it never does: the matcher is the one place a request is allowed without the person.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/ledger/ledger_backend_io.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
-import 'package:canoa/permissions/real_path_io.dart' show resolveExisting;
+import 'package:canoa/permissions/real_path_io.dart' show findRepoRoot, resolveExisting;
 import 'package:flutter_test/flutter_test.dart';
 
 const _source = 'Scripted';
@@ -316,36 +317,45 @@ void main() {
   });
 
   group('a rule for an MCP tool', () {
-    final rule = _rule(RuleType.mcp, 'mcp__marker__mark', tool: 'other', toolName: 'mcp__marker__mark');
+    final rule = _rule(RuleType.mcp, 'mcp__marker__get_mark', tool: 'other', toolName: 'mcp__marker__get_mark');
     RuleSubject? mcp(String name, {String kind = 'other'}) =>
         subjectOf(kind: kind, rawInput: {'x': 1}, toolCall: {'_meta': {'claudeCode': {'toolName': name}}});
 
     test('allows that tool on that server with any input, and no other', () {
-      expect(_allows(rule, mcp('mcp__marker__mark')), isTrue);
-      expect(_allows(rule, mcp('mcp__marker__mark2')), isFalse);
-      expect(_allows(rule, mcp('mcp__other__mark')), isFalse);
-      expect(_allows(rule, mcp('mcp__marker__mark'), source: 'Other'), isFalse);
+      expect(_allows(rule, mcp('mcp__marker__get_mark')), isTrue);
+      expect(_allows(rule, mcp('mcp__marker__get_mark2')), isFalse);
+      expect(_allows(rule, mcp('mcp__other__get_mark')), isFalse);
+      expect(_allows(rule, mcp('mcp__marker__get_mark'), source: 'Other'), isFalse);
     });
 
     test('is made only from the structured tool name, never from a title', () {
       expect(subjectOf(kind: 'other', rawInput: {'x': 1}), isNull);
-      expect(subjectOf(kind: 'other', rawInput: {'x': 1}, toolCall: {'title': 'mcp__marker__mark'}), isNull);
-      expect(mcp('mcp__a__b__c'), isA<McpSubject>().having((s) => s.server, 'server', 'a'));
+      expect(subjectOf(kind: 'other', rawInput: {'x': 1}, toolCall: {'title': 'mcp__marker__get_mark'}), isNull);
+      expect(mcp('mcp__a__get__c'), isA<McpSubject>().having((s) => s.server, 'server', 'a'));
       expect(mcp('mcp____x'), isNull, reason: 'a server named by nothing');
       expect(mcp('mark'), isNull);
+    });
+
+    test('is offered only for a tool whose name begins with a verb that reads', () {
+      for (final name in ['read', 'read_file', 'get_mark', 'list_directory', 'search_files', 'find', 'view_image', 'show', 'describe_table', 'status', 'stat', 'info', 'getUser', 'readFile', 'List-things']) {
+        expect(mcp('mcp__fs__$name'), isA<McpSubject>(), reason: name);
+      }
+      for (final name in ['write_file', 'edit_file', 'move_file', 'create_directory', 'delete', 'mark', 'fetch', 'send_message', 'upload', 'put', 'set', 'rename', 'copy_file', 'append', 'listen_and_write', 'x_read', 'readonly_but_unknown']) {
+        expect(mcp('mcp__fs__$name'), name == 'readonly_but_unknown' ? isNull : isNull, reason: name);
+      }
     });
 
     test('is never made for a tool that executes, by its kind or by its name', () {
       expect(mcp('mcp__shell__list', kind: 'execute'), isNull);
       for (final name in ['mcp__marker__run', 'mcp__marker__exec_cmd', 'mcp__terminal__open', 'mcp__marker__process_file', 'mcp__marker__eval', 'mcp__sh__Shell',
-        'mcp__marker__run_script', 'mcp__marker__powershell', 'mcp__marker__bash']) {
+        'mcp__marker__run_script', 'mcp__marker__powershell', 'mcp__marker__bash', 'mcp__marker__get_shell', 'mcp__terminal__read_output', 'mcp__marker__list_processes']) {
         expect(mcp(name), isNull, reason: name);
       }
-      expect(mcp('mcp__marker__mark'), isA<McpSubject>());
+      expect(mcp('mcp__marker__get_mark'), isA<McpSubject>());
     });
 
     test('is described by tool and server', () {
-      expect(rule.describe, 'Use the tool mark of marker, with any input');
+      expect(rule.describe, 'Use the tool get_mark of marker, with any input');
       expect(_rule(RuleType.mcp, 'mcp__my_server__do_it').describe, 'Use the tool do_it of my_server, with any input');
     });
   });
@@ -419,23 +429,24 @@ void main() {
       expect(again.rules, isEmpty, reason: 'the revoke was written');
     });
 
-    test('commands and tools are not kept with file changes, for any source or peer, in nested folders too', () {
+    test('a folder keeps one kind of rule: commands, tools and file changes each exclude the other two, for any source or peer', () {
       final rules = make();
       rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test');
       expect(rules.conflict(_folder, RuleType.path), isNotNull);
+      expect(rules.conflict(_folder, RuleType.mcp), isNotNull, reason: 'a tool that writes files beside a command that runs them');
       expect(rules.conflict('/work/calc/sub', RuleType.path), isNotNull, reason: 'a folder inside it');
-      expect(rules.conflict('/work', RuleType.path), isNotNull, reason: 'a folder that holds it');
+      expect(rules.conflict('/work', RuleType.mcp), isNotNull, reason: 'a folder that holds it');
       expect(rules.conflict('/work/other', RuleType.path), isNull);
-      expect(rules.conflict(_folder, RuleType.mcp), isNull, reason: 'a tool is a command');
-      expect(rules.conflict('/work/calc/sub', RuleType.command), isNull);
-      final others = make();
-      others.add(source: 'Elsewhere', peer: 'peer-b', folder: _folder, kind: 'other', toolName: 'mcp__a__b', type: RuleType.mcp, value: 'mcp__a__b');
-      expect(others.conflict(_folder, RuleType.path), isNotNull, reason: 'a tool can run a command: another source and peer count');
-      expect(others.conflict(_folder, RuleType.command), isNull);
+      expect(rules.conflict(_folder, RuleType.command), isNull, reason: 'the same kind stands together');
+      final tools = make();
+      tools.add(source: 'Elsewhere', peer: 'peer-b', folder: _folder, kind: 'other', toolName: 'mcp__a__get_b', type: RuleType.mcp, value: 'mcp__a__get_b');
+      expect(tools.conflict(_folder, RuleType.command), isNotNull, reason: 'another source and peer count');
+      expect(tools.conflict(_folder, RuleType.path), isNotNull);
+      expect(tools.conflict(_folder, RuleType.mcp), isNull);
       final paths = make();
       paths.add(source: _source, folder: _folder, kind: 'edit', type: RuleType.path, value: '/work/calc/src');
       expect(paths.conflict('/work', RuleType.command), isNotNull);
-      expect(paths.conflict(_folder, RuleType.mcp), isNotNull, reason: 'a tool counts as a command');
+      expect(paths.conflict(_folder, RuleType.mcp), isNotNull);
       expect(paths.conflict(_folder, RuleType.path), isNull);
     });
 
@@ -568,6 +579,55 @@ void main() {
       expect(rules.rules, isEmpty);
     });
 
+    test('a revoke whose write failed still holds: it is not matched, is shown as not yet saved, and is written at the next read', () async {
+      final backend = _FailingBackend()..fail = false;
+      final rules = PermissionRules(backend, real: _plain);
+      final rule = rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test')!;
+      await rules.settled();
+      expect(rules.unsaved, isFalse);
+      backend.fail = true;
+      rules.revoke(rule.id);
+      await rules.settled();
+      expect(rules.unsaved, isTrue);
+      expect(rules.writeProblem, contains('could not write'));
+      expect(rules.rules, isEmpty);
+      expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNull, reason: 'a revoke applies at once');
+      await rules.refresh();
+      expect(rules.rules, isEmpty, reason: 'the file still holds the rule, and reading it does not bring it back');
+      expect(rules.unsaved, isTrue);
+      backend.fail = false;
+      await rules.refresh();
+      expect(rules.unsaved, isFalse);
+      expect(rules.writeProblem, isNull);
+      expect(jsonDecode(backend.document!)['rules'], isEmpty, reason: 'the pending revoke is written once the disk allows');
+    });
+
+    test('rules come back when a file that failed to read reads again, with no restart', () async {
+      final backend = _FailingBackend()..fail = false;
+      final rules = PermissionRules(backend, real: _plain);
+      rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test');
+      await rules.settled();
+      backend.failReads = true;
+      await rules.refresh();
+      expect(rules.rules, isEmpty);
+      expect(rules.problem, isNotNull);
+      backend.failReads = false;
+      await rules.refresh();
+      expect(rules.problem, isNull);
+      expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNotNull);
+    });
+
+    test('a read that cannot get the lock in time applies no rule', () async {
+      final backend = _StuckLockBackend();
+      final rules = PermissionRules(backend, real: _plain, lockTimeout: const Duration(milliseconds: 50));
+      rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: 'npm test');
+      await rules.settled();
+      await rules.refresh();
+      expect(rules.rules, isEmpty);
+      expect(rules.problem, contains('did not finish'));
+      expect(rules.match(source: _source, folder: _folder, kind: 'execute', subject: _run('npm test')), isNull);
+    });
+
     test('a failed write is said, and a later one clears it', () async {
       final backend = _FailingBackend();
       final rules = PermissionRules(backend);
@@ -593,7 +653,7 @@ void main() {
         for (final leak in ['sk-live', 'Authorization', 'user:pw', 'TOKEN', 'api.example', 'sha256']) {
           expect(line, isNot(contains(leak)), reason: leak);
         }
-        expect(line, contains('"what":"curl …"'));
+        expect(line, contains('"what":"(command)"'));
         expect(RegExp('[0-9a-f]{64}').hasMatch(line), isFalse, reason: 'no hash of the text');
       }
       expect(log.lines[0], allOf(contains('"event":"made"'), contains('"rule":"${rule.id}"')));
@@ -605,16 +665,28 @@ void main() {
       expect(log.lines.take(3).toList(), before, reason: 'a line once written is not touched');
     });
 
-    test('what a log line says of a command: a program, never an assignment, a URL or an argument', () {
+    test('what a log line says of a command: a program when it begins with one, else (command); never an argument', () {
       expect(redacted(RuleType.command, 'ls'), 'ls');
       expect(redacted(RuleType.command, 'ls -la /secret'), 'ls …');
-      expect(redacted(RuleType.command, 'A=1 B=2 make test'), 'make …');
-      expect(redacted(RuleType.command, r'$env:TOKEN=abc; ls'), 'ls');
-      expect(redacted(RuleType.command, r'$env:TOKEN=abc'), '(only assignments)');
-      expect(redacted(RuleType.command, 'TOKEN=abc'), '(only assignments)');
-      expect(redacted(RuleType.command, 'https://u:p@h.example/x'), '(a URL or an address)');
+      expect(redacted(RuleType.command, r'C:\tools\run.exe --token x'), r'C:\tools\run.exe …');
+      expect(redacted(RuleType.command, './deploy.sh now'), './deploy.sh …');
+      for (final command in [
+        'A=1 B=2 make test', r'$env:TOKEN=abc; ls', r'$env:TOKEN=abc', 'TOKEN=abc', r'$name=hunter2 ls', r'$password = "x y"', 'PASSWORD="hunter2 hunter3" ./deploy.sh',
+        "PASSWORD='a b' ./deploy.sh", 'https://u:p@h.example/x', '"quoted prog" arg', r'$(cat secret)', '@echo off', 'user@host ls', '',
+      ]) {
+        expect(redacted(RuleType.command, command), '(command)', reason: command);
+      }
       expect(redacted(RuleType.command, 'curl'), 'curl');
       expect(redacted(RuleType.command, 'x' * 100), '${'x' * 64}…');
+    });
+
+    test('a command that begins with a quoted assignment is logged as (command), whatever follows the space in its value', () async {
+      final log = MemoryRuleLog();
+      final rules = make(MemoryLedgerBackend(), log);
+      const quoted = 'PASSWORD="hunter2 hunter3" ./deploy.sh';
+      rules.add(source: _source, folder: _folder, kind: 'execute', type: RuleType.command, value: quoted);
+      await rules.settled();
+      expect(log.lines.single, allOf(contains('"what":"(command)"'), isNot(contains('hunter')), isNot(contains('PASSWORD'))));
     });
 
     test('a path or a tool is logged as it is', () async {
@@ -639,6 +711,25 @@ void main() {
 String? pathsProblem(RealPath? real) => folderProblem(_folder, real: real);
 
 void fileBackendTests() {
+  group('a linked worktree', () {
+    test('counts as its main repository', () {
+      final dir = Directory.systemTemp.createTempSync('canoa-repos-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final main = Directory('${dir.path}/main/.git/worktrees/w')..createSync(recursive: true);
+      final tree = Directory('${dir.path}/tree/sub')..createSync(recursive: true);
+      File('${dir.path}/tree/.git').writeAsStringSync('gitdir: ${main.path}\n');
+      final plain = Directory('${dir.path}/main/pkg')..createSync();
+      final root = cleanPath('${dir.path}/main');
+      expect(cleanPath(findRepoRoot(tree.path)!), root, reason: 'a worktree maps to the repository it was made from');
+      expect(cleanPath(findRepoRoot(plain.path)!), root);
+      File('${dir.path}/tree/.git').writeAsStringSync('gitdir: ../main/.git/worktrees/w\n');
+      expect(cleanPath(findRepoRoot(tree.path)!), root, reason: 'a relative gitdir is read from the worktree');
+      File('${dir.path}/tree/.git').writeAsStringSync('not a gitdir line');
+      expect(cleanPath(findRepoRoot(tree.path)!), cleanPath('${dir.path}/tree'));
+      expect(findRepoRoot('${dir.path}/nowhere'), anyOf(isNull, isNot(contains('nowhere'))));
+    });
+  });
+
   group('the rules file', () {
     late Directory dir;
     setUp(() => dir = Directory.systemTemp.createTempSync('canoa-rulesfile-'));
@@ -652,6 +743,59 @@ void fileBackendTests() {
       expect(await backend.read(), contains('"n":7'));
       final names = [for (final entity in dir.listSync()) entity.uri.pathSegments.where((part) => part.isNotEmpty).last];
       expect(names, ['permissions.json'], reason: 'no .new or .tmp file stays');
+    });
+
+    test('a rename another process\'s open file refuses is tried again, for a while and no longer', () async {
+      var tries = 0;
+      final backend = FileLedgerBackend('${dir.path}/permissions.json', renameFile: (from, to) async {
+        tries++;
+        if (tries < 4) throw FileSystemException('denied', to, const OSError('Access is denied.', 5));
+        await from.rename(to);
+      });
+      await backend.write('{"version":1,"rules":[]}');
+      expect(tries, 4);
+      expect(await backend.read(), '{"version":1,"rules":[]}');
+      final stuck = FileLedgerBackend('${dir.path}/stuck.json',
+          retryFor: const Duration(milliseconds: 150),
+          renameFile: (from, to) async => throw FileSystemException('denied', to, const OSError('Sharing violation', 32)));
+      final started = DateTime.now();
+      await expectLater(stuck.write('x'), throwsA(isA<FileSystemException>()));
+      expect(DateTime.now().difference(started), lessThan(const Duration(seconds: 3)));
+      expect(File('${dir.path}/stuck.json').existsSync(), isFalse);
+      expect([for (final entity in dir.listSync()) entity.path.endsWith('.tmp')].where((tmp) => tmp), isEmpty, reason: 'no temp file stays');
+      var other = 0;
+      final broken = FileLedgerBackend('${dir.path}/other.json', renameFile: (from, to) async {
+        other++;
+        throw FileSystemException('no', to, const OSError('Not found', 2));
+      });
+      await expectLater(broken.write('x'), throwsA(isA<FileSystemException>()));
+      expect(other, 1, reason: 'an error waiting cannot cure is not tried again');
+    });
+
+    test('a temp file a killed writer left is taken away by the next write once it is old, a fresh one is not', () async {
+      final backend = FileLedgerBackend('${dir.path}/permissions.json');
+      final old = File('${dir.path}/permissions.json.4242.abcd.tmp')..writeAsStringSync('half');
+      old.setLastModifiedSync(DateTime.now().subtract(const Duration(minutes: 5)));
+      final fresh = File('${dir.path}/permissions.json.4343.ef01.tmp')..writeAsStringSync('being written');
+      final other = File('${dir.path}/notes.json.1.2.tmp')..writeAsStringSync('not ours');
+      other.setLastModifiedSync(DateTime.now().subtract(const Duration(minutes: 5)));
+      await backend.write('{}');
+      expect(old.existsSync(), isFalse);
+      expect(fresh.existsSync(), isTrue);
+      expect(other.existsSync(), isTrue, reason: 'only this file\'s temps');
+    });
+
+    test('a lock that cannot be had in time fails the call and runs nothing', () async {
+      final backend = FileLedgerBackend('${dir.path}/permissions.json');
+      final hold = Completer<void>();
+      final holder = backend.exclusively(() => hold.future);
+      var ran = false;
+      await expectLater(backend.exclusively(() async => ran = true, timeout: const Duration(milliseconds: 100)), throwsA(isA<TimeoutException>()));
+      expect(ran, isFalse);
+      hold.complete();
+      await holder;
+      await backend.exclusively(() async => ran = true);
+      expect(ran, isTrue, reason: 'giving up did not leave the lock held');
     });
 
     test('is changed under a lock, one caller at a time', () async {
@@ -684,6 +828,24 @@ void fileBackendTests() {
       expect(a.rules.map((rule) => rule.value), unorderedEquals(['ls', 'pwd']));
     });
   });
+}
+
+/// A backend whose lock is never free.
+final class _StuckLockBackend implements LedgerBackend, LockableBackend {
+  @override
+  String get location => 'a locked file';
+
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String document) async {}
+
+  @override
+  Future<T> exclusively<T>(Future<T> Function() body, {Duration timeout = const Duration(seconds: 2)}) async {
+    await Future<void>.delayed(timeout);
+    throw TimeoutException('did not finish in ${timeout.inMilliseconds} ms', timeout);
+  }
 }
 
 /// A backend whose writes fail while [fail] is set.
