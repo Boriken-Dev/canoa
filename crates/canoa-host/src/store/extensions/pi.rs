@@ -1,5 +1,5 @@
 //! Pi: a private Node (the publisher's standalone build, checked against its `SHASUMS256.txt`) unpacked into the version's
-//! folder, then Pi and its ACP adapter installed into it by that Node's own npm with install scripts off.
+//! folder, then Pi installed into it by that Node's own npm with install scripts off.
 //!
 //! npm fetches the packages itself, from the registry, and checks each against the registry's integrity: the host does not
 //! see those bytes, and the plan says so. A copy is started by the absolute path of its Node and its script, never through a
@@ -10,21 +10,18 @@ use alloc::string::String;
 
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
+    MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
 use super::{
-    bad_value, dotted, get_json, internal, measured_platforms, path_has, pinned, serves_when,
-    spell, unsupported,
+    bad_value, dotted, get_json, internal, measured_platforms, path_has, pinned, spell, unsupported,
 };
 use crate::store::engine::{Finish, Part, Recipe, Release, UnpackStep};
 
 /// The Node this store installs Pi with: Pi needs 22.19 or newer.
 pub const NODE_VERSION: &str = "24.22.2";
-/// The ACP adapter version installed beside Pi.
-pub const PI_ACP_VERSION: &str = "0.0.34";
 
 const PACKAGE: &str = "@earendil-works/pi-coding-agent";
 const REGISTRY: &str = "https://registry.npmjs.org";
@@ -45,7 +42,7 @@ fn relative(windows: bool) -> (&'static str, &'static str) {
 impl Recipe for PiRecipe {
     fn info(&self) -> StoreInfo {
         let mut info = StoreInfo::new("pi", "Pi", "Earendil Works");
-        info.serves = vec![serves_when("stdio", "harness", "pi")];
+        info.serves = vec![Serves::any("pi")];
         info.platforms = measured_platforms();
         info.endpoints = vec![format!("{NODE_ORIGIN}/dist/"), format!("{REGISTRY}/")];
         info
@@ -161,7 +158,7 @@ impl Recipe for PiRecipe {
         release.facts.insert("node".to_owned(), node.to_owned());
         release.facts.insert("npm".to_owned(), npm.to_owned());
         release.steps.push(format!(
-            "Run the downloaded Node's npm to install {PACKAGE}@{version} and pi-acp@{PI_ACP_VERSION} with install scripts off"
+            "Run the downloaded Node's npm to install {PACKAGE}@{version} with install scripts off"
         ));
         release.notices.push(format!(
             "npm fetches Pi's packages from {REGISTRY} itself and checks each against the registry's integrity; the host does not see those bytes. Node {NODE_VERSION} is checked against nodejs.org's SHASUMS256.txt, whose signature is not checked by this store."
@@ -224,7 +221,6 @@ impl Recipe for PiRecipe {
             .into_owned();
         let prefix = staging.join("pi").to_string_lossy().into_owned();
         let pi = format!("{PACKAGE}@{}", finish.release.version);
-        let acp = format!("pi-acp@{PI_ACP_VERSION}");
         let output = finish.run.exec(
             &node.to_string_lossy(),
             &[
@@ -238,7 +234,6 @@ impl Recipe for PiRecipe {
                 "--prefix",
                 &prefix,
                 &pi,
-                &acp,
             ],
             &[
                 ("npm_config_userconfig", &user),

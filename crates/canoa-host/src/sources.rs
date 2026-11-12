@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::{Config, Entry};
+use crate::store::shelf::Shelf;
 
 /// One source the host serves, and what it needs that this computer lacks.
 pub(crate) struct Source {
@@ -19,7 +20,7 @@ pub(crate) struct Source {
 /// What one source is: a built-in harness, or a program speaking ACP on its standard streams.
 struct Preset {
     name: &'static str,
-    /// `claude` or `codex` for a harness; otherwise `program` and `args` run.
+    /// `claude`, `codex` or `pi` for a harness; otherwise `program` and `args` run.
     harness: Option<&'static str>,
     program: &'static str,
     args: &'static [&'static str],
@@ -29,6 +30,15 @@ struct Preset {
     /// environment variable.
     search: &'static [&'static str],
     usage: Option<&'static str>,
+    /// The program store whose managed copy runs in place of a program found on the computer, when it has one.
+    managed: Option<&'static str>,
+}
+
+/// A managed Pi: a Node and Pi's CLI script, which the Store's Pi extension installed and its launch names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManagedPi {
+    pub(crate) node: PathBuf,
+    pub(crate) script: PathBuf,
 }
 
 const PRESETS: &[Preset] = &[
@@ -40,6 +50,7 @@ const PRESETS: &[Preset] = &[
         requires: &[],
         search: &[],
         usage: None,
+        managed: None,
     },
     Preset {
         name: "Codex",
@@ -49,6 +60,7 @@ const PRESETS: &[Preset] = &[
         requires: &[],
         search: &[],
         usage: None,
+        managed: None,
     },
     Preset {
         name: "Antigravity",
@@ -58,6 +70,7 @@ const PRESETS: &[Preset] = &[
         requires: &[],
         search: &["%LOCALAPPDATA%/agy/bin"],
         usage: Some("antigravity"),
+        managed: None,
     },
     Preset {
         name: "Grok",
@@ -67,15 +80,18 @@ const PRESETS: &[Preset] = &[
         requires: &[],
         search: &["~/.grok/bin"],
         usage: None,
+        managed: None,
     },
     Preset {
         name: "Pi",
-        harness: None,
-        program: "npx",
-        args: &["-y", "pi-acp@0.0.34"],
-        requires: &["pi"],
-        search: &[],
+        harness: Some("pi"),
+        program: "pi",
+        args: &[],
+        requires: &[],
+        // The places the Store's Pi extension looks beyond `PATH`.
+        search: &["~/.pi/agent/bin", "~/.local/bin"],
         usage: None,
+        managed: Some("pi"),
     },
 ];
 
@@ -88,10 +104,45 @@ pub(crate) fn names() -> Vec<&'static str> {
 /// The sources this host serves besides `config`'s entries: every preset whose name `config` leaves free, found or not, so a
 /// client can say what is missing.
 pub(crate) fn entries(config: &Config) -> Vec<Source> {
-    sources_in(config, &|program, search| find(program, search))
+    sources_in(
+        config,
+        &|program, search| find(program, search),
+        &|program| {
+            Shelf::default_root().and_then(|root| managed_in(&Shelf::unchecked(root), program))
+        },
+    )
 }
 
-fn sources_in(config: &Config, find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>) -> Vec<Source> {
+/// The copy of `program` that `shelf` manages, as a Node and a script, when `current.json` is the one this host wrote, every file
+/// of the copy is as it was installed and both lie inside the copy.
+fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedPi> {
+    let dir = shelf.program(program).ok()?;
+    let current = dir.current_checked().ok()??;
+    dir.verify(&current).ok()?;
+    let setting = |key: &str| {
+        current
+            .launch
+            .settings
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(PathBuf::from)
+    };
+    let (node, script) = (setting("node")?, setting("script")?);
+    let inside = |path: &Path| {
+        path.is_absolute()
+            && path.is_file()
+            && crate::store::exec::normalize(path)
+                .zip(crate::store::exec::normalize(Path::new(&current.dir)))
+                .is_some_and(|(path, root)| path.starts_with(root))
+    };
+    (inside(&node) && inside(&script)).then_some(ManagedPi { node, script })
+}
+
+fn sources_in(
+    config: &Config,
+    find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>,
+    managed: &dyn Fn(&str) -> Option<ManagedPi>,
+) -> Vec<Source> {
     // The person's own commands come after the built-in ones, and take a built-in's name from it.
     let mut own: Vec<Source> = config
         .local_agents
@@ -136,9 +187,14 @@ fn sources_in(config: &Config, find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>) 
             !taken
         })
         .filter_map(|preset| {
-            let found = find(preset.program, preset.search);
+            let copy = preset.managed.and_then(managed);
+            let found = if copy.is_some() {
+                None
+            } else {
+                find(preset.program, preset.search)
+            };
             let mut missing: Vec<String> = Vec::new();
-            if found.is_none() {
+            if found.is_none() && copy.is_none() {
                 missing.push(preset.program.to_owned());
             }
             for needed in preset.requires {
@@ -146,7 +202,7 @@ fn sources_in(config: &Config, find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>) 
                     missing.push((*needed).to_owned());
                 }
             }
-            let entry = entry_of(preset, found.as_deref())?;
+            let entry = entry_of(preset, found.as_deref(), copy.as_ref(), config)?;
             Some(Source { entry, missing })
         })
         .filter(|source| own.iter().all(|mine| mine.entry.name != source.entry.name))
@@ -156,7 +212,12 @@ fn sources_in(config: &Config, find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>) 
 }
 
 /// `preset` as the entry canoa.cfg would have said, run through the same reading so that it is checked the same.
-fn entry_of(preset: &Preset, found: Option<&Path>) -> Option<Entry> {
+fn entry_of(
+    preset: &Preset,
+    found: Option<&Path>,
+    managed: Option<&ManagedPi>,
+    config: &Config,
+) -> Option<Entry> {
     let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
     let program = found.map_or_else(
         || preset.program.to_owned(),
@@ -171,6 +232,9 @@ fn entry_of(preset: &Preset, found: Option<&Path>) -> Option<Entry> {
         text.push_str(&format!("harness = {}\nbypass = true\n", quoted(harness)));
         if found.is_some() {
             text.push_str(&format!("executable = {}\n", quoted(&program)));
+        }
+        if harness == "pi" {
+            text.push_str(&pi_settings(managed, config.protected_paths.as_deref()));
         }
     } else {
         let args: Vec<String> = preset.args.iter().map(|arg| quoted(arg)).collect();
@@ -197,6 +261,29 @@ fn entry_of(preset: &Preset, found: Option<&Path>) -> Option<Entry> {
     }
 }
 
+/// Pi's provider settings for the source: a managed copy runs as its Node and script, and the person's `[permissions]
+/// protected` list, when canoa.cfg has one, replaces the provider's recommended places a session may not read or change
+/// (absent, those stay: nothing was said).
+fn pi_settings(managed: Option<&ManagedPi>, protected: Option<&[String]>) -> String {
+    let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
+    let mut text = String::new();
+    if managed.is_some() || protected.is_some() {
+        text.push_str("[host.agents.Pi.settings]\n");
+    }
+    if let Some(managed) = managed {
+        text.push_str(&format!(
+            "node = {}\nscript = {}\n",
+            quoted(&managed.node.to_string_lossy()),
+            quoted(&managed.script.to_string_lossy())
+        ));
+    }
+    if let Some(lines) = protected {
+        let lines: Vec<String> = lines.iter().map(|line| quoted(line)).collect();
+        text.push_str(&format!("protected = [{}]\n", lines.join(", ")));
+    }
+    text
+}
+
 /// `directory` with `~` and `%NAME%` filled in; `None` when a variable is not set.
 fn expand(directory: &str) -> Option<String> {
     let mut out = directory.to_owned();
@@ -215,7 +302,7 @@ fn expand(directory: &str) -> Option<String> {
 }
 
 /// The file that runs `program`: on `PATH`, else in `search`. On Windows only a program the system starts counts, as `where`
-/// lists `npx` the shell script before `npx.cmd`.
+/// lists `npm` the shell script before `npm.cmd`.
 fn find(program: &str, search: &[&str]) -> Option<PathBuf> {
     let direct = Path::new(program);
     if direct.is_absolute() && is_program(direct) {
@@ -274,7 +361,7 @@ mod tests {
 
     #[test]
     fn every_source_is_a_local_entry_and_a_missing_program_is_said() {
-        let sources = sources_in(&nothing_found(), &|_, _| None);
+        let sources = sources_in(&nothing_found(), &|_, _| None, &|_| None);
         let named: Vec<&str> = sources.iter().map(|s| s.entry.name.as_str()).collect();
         assert_eq!(named, names());
         assert!(sources.iter().all(|source| source.entry.local));
@@ -285,14 +372,16 @@ mod tests {
                 .map(|source| source.missing.clone())
         };
         assert_eq!(missing("Claude"), Some(vec!["claude".to_owned()]));
-        assert_eq!(missing("Pi"), Some(vec!["npx".to_owned(), "pi".to_owned()]));
+        assert_eq!(missing("Pi"), Some(vec!["pi".to_owned()]));
     }
 
     #[test]
     fn a_found_program_is_what_runs_and_nothing_is_missing() {
-        let sources = sources_in(&nothing_found(), &|program, _| {
-            Some(PathBuf::from(format!("/opt/bin/{program}")))
-        });
+        let sources = sources_in(
+            &nothing_found(),
+            &|program, _| Some(PathBuf::from(format!("/opt/bin/{program}"))),
+            &|_| None,
+        );
         assert!(sources.iter().all(|source| source.missing.is_empty()));
         let grok = sources
             .iter()
@@ -311,7 +400,7 @@ mod tests {
     fn a_name_canoa_cfg_uses_is_left_to_it() {
         let config = Config::from_str_in("[host.agents.Claude]\nprogram = \"x\"\n", Path::new("."))
             .expect("parses");
-        let sources = sources_in(&config, &|_, _| None);
+        let sources = sources_in(&config, &|_, _| None, &|_| None);
         assert!(sources.iter().all(|source| source.entry.name != "Claude"));
         assert_eq!(sources.len(), names().len() - 1);
     }
@@ -332,9 +421,11 @@ mod tests {
             2,
             "a table with no program is no command"
         );
-        let sources = sources_in(&config, &|program, _| {
-            (program == "seen").then(|| PathBuf::from("/bin/seen"))
-        });
+        let sources = sources_in(
+            &config,
+            &|program, _| (program == "seen").then(|| PathBuf::from("/bin/seen")),
+            &|_| None,
+        );
         let named: Vec<&str> = sources.iter().map(|s| s.entry.name.as_str()).collect();
         let mut expected = names();
         expected.extend(["My Agent", "Seen"]);
@@ -355,7 +446,7 @@ mod tests {
     #[test]
     fn a_command_takes_the_name_of_a_built_in_source_from_it() {
         let config = with_agents("[agents.Pi]\nprogram = \"my-pi\"\n");
-        let sources = sources_in(&config, &|_, _| None);
+        let sources = sources_in(&config, &|_, _| None, &|_| None);
         let pis: Vec<_> = sources.iter().filter(|s| s.entry.name == "Pi").collect();
         assert_eq!(pis.len(), 1);
         assert!(matches!(
@@ -396,6 +487,180 @@ mod tests {
             let error = Config::from_str_in(text, Path::new(".")).expect_err("refused");
             assert!(error.to_string().contains("agents.A"), "{error}");
         }
+    }
+
+    fn pi_of(sources: &[Source]) -> &Source {
+        sources
+            .iter()
+            .find(|source| source.entry.name == "Pi")
+            .expect("Pi")
+    }
+
+    /// Pi's entry: its executable, and its `settings.protected` when it has one.
+    fn pi_harness(source: &Source) -> (Option<String>, Option<serde_json::Value>) {
+        match &source.entry.kind {
+            crate::EntryKind::Harness {
+                harness,
+                executable,
+                settings,
+                ..
+            } => {
+                assert_eq!(harness, "pi");
+                (
+                    executable
+                        .as_ref()
+                        .map(|executable| executable.to_string_lossy().into_owned()),
+                    settings
+                        .as_ref()
+                        .and_then(|settings| settings.as_map().get("protected").cloned()),
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn pi_is_ready_when_a_pi_is_found_and_needs_nothing_else() {
+        let sources = sources_in(
+            &nothing_found(),
+            &|program, _| (program == "pi").then(|| PathBuf::from("/opt/bin/pi")),
+            &|_| None,
+        );
+        let pi = pi_of(&sources);
+        assert!(pi.missing.is_empty(), "{:?}", pi.missing);
+        let (executable, protected) = pi_harness(pi);
+        assert!(
+            executable
+                .as_deref()
+                .is_some_and(|e| Path::new(e).ends_with("opt/bin/pi")),
+            "{executable:?}"
+        );
+        assert_eq!(protected, None, "nothing was said of protected paths");
+    }
+
+    #[test]
+    fn pis_search_places_are_the_stores() {
+        use crate::store::engine::Recipe as _;
+        let preset = PRESETS.iter().find(|p| p.name == "Pi").expect("Pi");
+        assert_eq!(preset.search, crate::store::extensions::pi::PiRecipe.dirs());
+        assert_eq!(
+            [preset.program],
+            crate::store::extensions::pi::PiRecipe.names()
+        );
+    }
+
+    #[test]
+    fn a_managed_pi_runs_as_its_node_and_script_and_no_program_is_looked_for() {
+        let copy = ManagedPi {
+            node: PathBuf::from("/data/pi/node/bin/node"),
+            script: PathBuf::from("/data/pi/cli.js"),
+        };
+        let sources = sources_in(&nothing_found(), &|_, _| None, &|program| {
+            (program == "pi").then(|| copy.clone())
+        });
+        let pi = pi_of(&sources);
+        assert!(pi.missing.is_empty());
+        match &pi.entry.kind {
+            crate::EntryKind::Harness {
+                executable,
+                settings,
+                ..
+            } => {
+                assert!(executable.is_none());
+                let map = settings.as_ref().expect("settings").as_map();
+                assert_eq!(map["node"], "/data/pi/node/bin/node");
+                assert_eq!(map["script"], "/data/pi/cli.js");
+                assert!(!map.contains_key("protected"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_persons_protected_list_replaces_pis_recommended_one_and_absent_leaves_it() {
+        let config = with_agents(
+            "[permissions]\nallow_once_only = true\nprotected = \"\"\"\n~/.ssh\n!~/.ssh/known_hosts\n\"\"\"\n",
+        );
+        assert_eq!(
+            config.protected_paths,
+            Some(vec!["~/.ssh".to_owned(), "!~/.ssh/known_hosts".to_owned()])
+        );
+        let sources = sources_in(
+            &config,
+            &|program, _| (program == "pi").then(|| PathBuf::from("/opt/bin/pi")),
+            &|_| None,
+        );
+        let (_, protected) = pi_harness(pi_of(&sources));
+        assert_eq!(
+            protected,
+            Some(serde_json::json!(["~/.ssh", "!~/.ssh/known_hosts"]))
+        );
+        let other = with_agents("[permissions]\ndefault_mode = \"plan\"\n");
+        assert_eq!(other.protected_paths, None);
+        let empty = with_agents("[permissions]\nprotected = []\n");
+        assert_eq!(empty.protected_paths, Some(Vec::new()));
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("canoa-{name}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("made");
+        dir
+    }
+
+    /// A shelf holding a `pi` whose launch is a node and a script inside the copy, as the Store's Pi extension records it.
+    fn shelf_with_pi(root: &Path) -> (Shelf, PathBuf) {
+        use crate::store::shelf::MadeBy;
+        use coqui_acp_api::guatiao::{Map, Value};
+        let shelf = Shelf::unchecked(root);
+        let program = shelf.program("pi").expect("a name");
+        let locked = program.lock().expect("locked");
+        let staging = locked.stage("1.5.2").expect("staged");
+        let node = staging.join("node.bin");
+        let script = staging.join("cli.js");
+        std::fs::write(&node, b"node").expect("written");
+        std::fs::write(&script, b"script").expect("written");
+        let mut launch = canoa::store::Launch::new(node.to_string_lossy().into_owned());
+        let mut settings = Map::new();
+        settings.set("node", Value::from(node.to_string_lossy().as_ref()));
+        settings.set("script", Value::from(script.to_string_lossy().as_ref()));
+        launch.settings = Value::from(settings);
+        let mut files = Vec::new();
+        crate::store::shelf::record_tree(&staging, &mut files).expect("recorded");
+        locked
+            .commit(
+                &staging,
+                "1.5.2",
+                &launch,
+                files,
+                MadeBy {
+                    provider: "pi_store".to_owned(),
+                    version: "0".to_owned(),
+                },
+            )
+            .expect("committed");
+        drop(locked);
+        (shelf, script)
+    }
+
+    #[test]
+    fn the_stores_managed_copy_is_read_from_the_shelf_and_checked() {
+        let root = scratch("managed-pi");
+        let (shelf, script) = shelf_with_pi(&root);
+        let copy = managed_in(&shelf, "pi").expect("a managed Pi");
+        assert_eq!(copy.script, script);
+        assert!(copy.node.ends_with("node.bin"));
+        assert_eq!(
+            managed_in(&shelf, "grok"),
+            None,
+            "no copy of another program"
+        );
+        // A file changed since the install is no copy to run.
+        std::fs::write(&script, b"changed").expect("written");
+        assert_eq!(managed_in(&shelf, "pi"), None);
+        std::fs::remove_dir_all(&root).expect("removed");
     }
 
     #[test]

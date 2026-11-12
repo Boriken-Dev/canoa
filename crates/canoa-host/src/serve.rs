@@ -1587,7 +1587,7 @@ fn say_origin(entry: &Entry, origin: &Origin) {
 }
 
 /// The settings a harness entry's provider is configured with: the entry's `settings`, then the entry's own keys of the
-/// same names, and for the built-in `claude` and `codex` the host's own values where nothing is set, never the person's
+/// same names, and for the built-in `claude`, `codex` and `pi` the host's own values where nothing is set, never the person's
 /// configuration on this machine, because a paired key reaches it. What a client may choose stays within the entry's mode.
 /// A setting that acts with nothing asked is logged as configuration.
 pub(crate) fn harness_settings(
@@ -1662,7 +1662,7 @@ pub(crate) fn harness_settings(
             &["bypassPermissions", "acceptEdits", "auto"],
             "default",
         );
-    } else {
+    } else if harness == "codex" {
         chosen(
             "approval_policy",
             asks.approval_policy.as_ref(),

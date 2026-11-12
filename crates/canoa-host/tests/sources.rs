@@ -37,7 +37,7 @@ fn the_hosts_own_sources_run_over_a_link_and_say_what_they_miss() {
     assert_eq!(claude["harness"], "claude");
     assert_eq!(
         host.line_of("Pi").expect("printed")["missing"],
-        json!(["npx", "pi"])
+        json!(["pi"])
     );
 
     let link = host.local.open("Grok").expect("a link");

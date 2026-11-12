@@ -542,6 +542,8 @@ fn harness_of(reported: Option<&str>, entry: &str) -> Option<&'static str> {
         Some("coqui-acp-codex" | "@agentclientprotocol/codex-acp") => Some("codex"),
         Some("gemini-cli") => Some("gemini-cli"),
         Some("pi-acp") => Some("pi"),
+        // Pi's own translator says what it takes, as Claude's and Codex's do, so the entry's name does not decide.
+        Some("coqui-acp-pi") => None,
         Some("OpenCode") => Some("opencode"),
         _ => match entry {
             "Claude" => Some("claude-code"),

@@ -340,12 +340,14 @@ fn codex_reads_skills_from_a_directory_given_as_additional_directories() {
 }
 
 #[test]
-fn the_rust_translators_are_claude_code_and_codex() {
+fn the_rust_translators_are_named_by_what_they_report() {
     assert_eq!(
         harness_of(Some("coqui-acp-claude"), "hosted"),
         Some("claude-code")
     );
     assert_eq!(harness_of(Some("coqui-acp-codex"), "hosted"), Some("codex"));
+    assert_eq!(harness_of(Some("coqui-acp-pi"), "Pi"), None);
+    assert_eq!(harness_of(Some("pi-acp"), "mine"), Some("pi"));
 }
 
 #[test]

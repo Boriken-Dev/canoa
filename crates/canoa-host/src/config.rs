@@ -43,6 +43,9 @@ pub struct Config {
     /// `[usage] limit_phrases`: the words that make a failed turn of an agent that reports no usage a limit. `None` is
     /// unset, which means coqui-acp-api's defaults; a list replaces them, and an empty one infers nothing.
     pub limit_phrases: Option<Vec<String>>,
+    /// `[permissions] protected`: the places a session may not read or change without leave, in gitignore syntax, as the app
+    /// reads it. `None` is unset, which leaves each provider its own recommended list; a list replaces it.
+    pub protected_paths: Option<Vec<String>>,
     /// `[host.accounts]`, by name, in the file's order: the accounts a harness entry may offer.
     pub accounts: IndexMap<String, AccountConfig>,
     /// Where the accounts' credentials are kept: `[host] account_store`.
@@ -690,6 +693,9 @@ struct RawFile {
     host: Option<RawHost>,
     #[serde(default)]
     usage: Option<RawUsage>,
+    /// `[permissions]`: the app's table, of which the host reads `protected` and lets the rest go by.
+    #[serde(default)]
+    permissions: Option<RawPermissions>,
     /// `[agents.NAME]`: the app's table, of which the host reads `program` and `args` and lets the rest go by.
     #[serde(default)]
     agents: IndexMap<String, toml::Value>,
@@ -699,6 +705,13 @@ struct RawFile {
     /// `[overlays]`: the app's table, of which the host reads the names.
     #[serde(default)]
     overlays: IndexMap<String, toml::Value>,
+}
+
+/// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
+#[derive(Deserialize)]
+struct RawPermissions {
+    #[serde(default)]
+    protected: Option<RawLines>,
 }
 
 /// `[usage]`: the app reads `warn_permille`, so only the key the host acts on is named and the others are let go by.
@@ -875,6 +888,10 @@ impl Config {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let raw: RawFile = toml::from_str(text).map_err(|error| parse_error(text, &error))?;
         let limit_phrases = raw.usage.and_then(|usage| usage.limit_phrases);
+        let protected_paths = raw
+            .permissions
+            .and_then(|permissions| permissions.protected)
+            .map(RawLines::lines);
         let local_agents = local_agents_of(&raw.agents)?;
         let local_profiles = local_profiles_of(raw.profile, &raw.overlays, &raw.agents, base)?;
         if limit_phrases
@@ -890,6 +907,7 @@ impl Config {
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
+                protected_paths,
                 local_agents,
                 local_profiles,
                 ..Self::default()
@@ -1074,13 +1092,13 @@ impl Config {
                     if built_in && origin.is_some() {
                         return Err(invalid(
                             &name,
-                            "claude and codex are built in: library and source load an outside provider under its own id",
+                            "claude, codex and pi are built in: library and source load an outside provider under its own id",
                         ));
                     }
                     if origin.is_none() && !built_in {
                         return Err(invalid(
                             &name,
-                            "harness is claude, codex, or the id of an outside provider that library or source loads",
+                            "harness is claude, codex, pi, or the id of an outside provider that library or source loads",
                         ));
                     }
                     let settings = agent
@@ -1114,7 +1132,7 @@ impl Config {
                                 return Err(invalid(
                                     &name,
                                     &format!(
-                                        "{key} goes with harness claude or codex; an outside provider takes its own settings"
+                                        "{key} goes with a built-in harness; an outside provider takes its own settings"
                                     ),
                                 ));
                             }
@@ -1224,6 +1242,7 @@ impl Config {
             profiles,
             web,
             limit_phrases,
+            protected_paths,
             accounts,
             account_store,
             local_agents,
@@ -1297,7 +1316,7 @@ fn invalid(name: &str, what: &str) -> ConfigError {
 }
 
 /// The harnesses the host carries: providers of `acp_harness` registered in this process.
-pub const BUILT_IN_HARNESSES: &[&str] = &["claude", "codex"];
+pub const BUILT_IN_HARNESSES: &[&str] = &["claude", "codex", "pi"];
 
 /// The keys that say where an outside provider's code is.
 struct OriginKeys<'a> {
@@ -1374,13 +1393,13 @@ fn built_in_settings(
             "executable is set twice: as a key and in settings",
         ));
     }
-    let checked: &[(&str, &[&str])] = if harness == "claude" {
-        &[("permission_mode", PERMISSION_MODES)]
-    } else {
-        &[
+    let checked: &[(&str, &[&str])] = match harness {
+        "claude" => &[("permission_mode", PERMISSION_MODES)],
+        "codex" => &[
             ("approval_policy", APPROVAL_POLICIES),
             ("sandbox", SANDBOXES),
-        ]
+        ],
+        _ => &[],
     };
     for (key, allowed) in checked {
         match map.get(*key) {
@@ -1411,7 +1430,7 @@ fn built_in_settings(
     Ok(Some(Settings::new(map)))
 }
 
-/// A `claude` or `codex` entry's own keys, each checked against what the provider takes, and refused for the other one.
+/// A built-in entry's own keys, each checked against what the provider takes, and refused for the others.
 /// A key that `settings` also holds is refused: the entry would say it twice.
 fn harness_options(
     name: &str,
@@ -1427,10 +1446,10 @@ fn harness_options(
         ("approval_policy", agent.approval_policy.is_some()),
         ("sandbox", agent.sandbox.is_some()),
     ];
-    let theirs = if harness == "claude" {
-        &codexs[..]
-    } else {
-        &claudes[..]
+    let theirs: Vec<(&str, bool)> = match harness {
+        "claude" => codexs.to_vec(),
+        "codex" => claudes.to_vec(),
+        _ => [claudes, codexs].concat(),
     };
     if let Some((key, _)) = theirs.iter().find(|(_, set)| *set) {
         return Err(invalid(

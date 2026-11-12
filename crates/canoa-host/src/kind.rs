@@ -1,5 +1,5 @@
 //! The host's end of the `acp_harness` kind: the providers an entry can offer by id, the instance an entry configures, and
-//! the request a connection starts with. `claude` and `codex` are compiled into this binary and registered in this process;
+//! the request a connection starts with. `claude`, `codex` and `pi` are compiled into this binary and registered in this process;
 //! an outside provider is loaded from the library or source an entry names, into a registry of its own, so one entry never
 //! resolves an id that only another entry's file offers. Both are chosen and started the same way.
 #![allow(
@@ -25,16 +25,17 @@ use coqui_acp_api::{
 };
 use coqui_acp_claude::ClaudeProvider;
 use coqui_acp_codex::CodexProvider;
+use coqui_acp_pi::PiProvider;
 
 use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
 
-// What `Registry::register_local` takes: the two built-in providers, linked into this binary.
+// What `Registry::register_local` takes: the three built-in providers, linked into this binary.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [ClaudeProvider, CodexProvider]
+    providers = [ClaudeProvider, CodexProvider, PiProvider]
 );
 
 /// The `_meta` key of a client's `initialize` that says how long its session's prompt cache should live: an object

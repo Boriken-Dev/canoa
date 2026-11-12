@@ -40,9 +40,10 @@ coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b
 coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
-# Claude Code and Codex as ACP agents, run in this process with no Node: their translators and what they share.
+# Claude Code, Codex and Pi as ACP agents, run in this process with no Node: their translators and what they share.
 coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
+coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a", features = ["antigravity", "kind"] }
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.
 coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "8dad1766ba1b925f2bee9ebd403805e42e6afc47" }
