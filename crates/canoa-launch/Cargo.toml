@@ -1,0 +1,44 @@
+[package]
+name = "canoa-launch"
+description = "The portable CanoaUI.exe: carries the built app folder, unpacks it once per version, verifies it and starts it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["launcher", "portable", "windows"]
+categories = ["os::windows-apis"]
+exclude = [".*", "*.local.*"]
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "canoa-launch"
+path = "src/main.rs"
+
+[[bin]]
+name = "canoa-pack"
+path = "src/bin/canoa-pack.rs"
+
+[dependencies]
+# The digest of every file and of the payload.
+sha2 = { version = "0.10", default-features = false }
+# The payload is a zip archive, written and read with the workspace's one zip.
+zip.workspace = true
+# zip's deflate runs on flate2, which needs a backend chosen; the workspace picks the pure Rust one.
+flate2.workspace = true
+
+# The owner of a folder, through safe wrappers (this crate forbids unsafe code); a message box for a launch that failed,
+# since the launcher has no console.
+[target.'cfg(windows)'.dependencies]
+windows-permissions = "0.2"
+win-msgbox = "0.2"
+
+[build-dependencies]
+sha2 = { version = "0.10", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"

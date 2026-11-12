@@ -1,0 +1,170 @@
+//! Checks on the folders the launcher reads and writes: not a link, made by this user, and not writable by others.
+//!
+//! A folder that fails is refused, never repaired: something other than this launcher put it there.
+
+use crate::error::{Error, Result};
+use std::fs::{self, File, Metadata};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// A name no other call or process shares, for a probe or a temporary sibling.
+pub fn unique(prefix: &str) -> String {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "{prefix}{}-{nanos}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Whether `meta` (from `symlink_metadata`) is a link: a symbolic link, or on Windows any reparse point, which covers
+/// junctions and mount points.
+pub fn is_link(meta: &Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// The folder at `path` when it exists, is a real directory (not a link) and is owned by this user; `Ok(None)` when absent.
+///
+/// `parent` is a folder already checked, in which the launcher makes a probe file to learn what "this user" owns.
+pub fn check_dir(parent: &Path, path: &Path) -> Result<Option<()>> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Error::io(format!("inspect {}", path.display()), e)),
+    };
+    if is_link(&meta) {
+        return Err(Error::Refused(format!("{} is a link", path.display())));
+    }
+    if !meta.is_dir() {
+        return Err(Error::Refused(format!(
+            "{} is not a folder",
+            path.display()
+        )));
+    }
+    if !owned_by_me(parent, path)? {
+        return Err(Error::Refused(format!(
+            "{} is not owned by the current user",
+            path.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o022 != 0 {
+            return Err(Error::Refused(format!(
+                "{} is writable by others",
+                path.display()
+            )));
+        }
+    }
+    Ok(Some(()))
+}
+
+/// Makes `base` when absent and checks it, as [`check_dir`] does for a folder inside it.
+///
+/// `base` is under the user's own data folder, which the operating system keeps private to the user; its parents are
+/// not checked, since a profile may be redirected on purpose.
+pub fn ensure_base(base: &Path) -> Result<()> {
+    if fs::symlink_metadata(base).is_err() {
+        fs::create_dir_all(base).map_err(|e| Error::io(format!("create {}", base.display()), e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(base, fs::Permissions::from_mode(0o700))
+                .map_err(|e| Error::io(format!("restrict {}", base.display()), e))?;
+        }
+    }
+    check_dir(base, base).map(|_| ())
+}
+
+/// Whether the owner of `path` is the owner of a file this process creates in `parent`.
+fn owned_by_me(parent: &Path, path: &Path) -> Result<bool> {
+    let probe: PathBuf = parent.join(unique(".probe-"));
+    File::options()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .map_err(|e| Error::io(format!("create a probe in {}", parent.display()), e))?;
+    let result = same_owner(&probe, path);
+    let _ = fs::remove_file(&probe);
+    result.map_err(|e| Error::io(format!("read the owner of {}", path.display()), e))
+}
+
+#[cfg(unix)]
+fn same_owner(a: &Path, b: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(fs::symlink_metadata(a)?.uid() == fs::symlink_metadata(b)?.uid())
+}
+
+#[cfg(windows)]
+fn same_owner(a: &Path, b: &Path) -> io::Result<bool> {
+    use windows_permissions::constants::{SeObjectType, SecurityInformation};
+    use windows_permissions::wrappers::GetNamedSecurityInfo;
+
+    let owner = |p: &Path| {
+        GetNamedSecurityInfo(p, SeObjectType::SE_FILE_OBJECT, SecurityInformation::Owner)
+    };
+    let (first, second) = (owner(a)?, owner(b)?);
+    match (first.owner(), second.owner()) {
+        (Some(x), Some(y)) => Ok(x == y),
+        _ => Ok(false),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_owner(_: &Path, _: &Path) -> io::Result<bool> {
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(unique(name));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_folder_this_user_made_passes_and_an_absent_one_is_none() {
+        let base = scratch("guard-ok-");
+        let sub = base.join("v1");
+        assert!(check_dir(&base, &sub).unwrap().is_none());
+        fs::create_dir(&sub).unwrap();
+        assert!(check_dir(&base, &sub).unwrap().is_some());
+        ensure_base(&base).unwrap();
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_file_where_a_folder_belongs_is_refused() {
+        let base = scratch("guard-file-");
+        let file = base.join("v1");
+        fs::write(&file, b"x").unwrap();
+        assert!(matches!(check_dir(&base, &file), Err(Error::Refused(_))));
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn names_do_not_repeat() {
+        assert_ne!(unique("a-"), unique("a-"));
+    }
+}
