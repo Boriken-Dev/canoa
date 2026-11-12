@@ -38,6 +38,7 @@ import 'chat/session_views.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
+import 'history/session_move.dart';
 import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
 import 'ledger/session_ledger.dart';
@@ -560,6 +561,34 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// The agent entries the canoa this app runs is serving now, as it lists them.
+  /// The other sources of this computer a session that ran on one can be moved to, by name and as shown.
+  Map<String, String> _moveTargets(ChatSession session) => store.canMove(session) && _control != null
+      ? {
+          for (final source in _hostedSources)
+            if (source.local && source.label != session.agent) source.label: source.displayName,
+        }
+      : const {};
+
+  /// Asks which source to move [session] to, has the host carry its history over, and opens the result beside it.
+  Future<void> _moveTo(BuildContext context, ChatSession session) async {
+    final control = _control;
+    final to = control == null ? null : await pickTarget(context, targets: _moveTargets(session));
+    if (to == null || control == null || !mounted || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await moveSession(
+        store: store,
+        control: await control.ready(),
+        session: session,
+        to: to,
+        connect: (entry) => _linkAgent(entry, _cacheMeta((lifetime: CacheLifetime.chat, chosen: false))),
+        keep: _ownedClients.add,
+      );
+    } on Object catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('That session could not be moved: ${reasonOf(error)}')));
+    }
+  }
+
   List<AgentSource> get _hostedSources => hostedSources(widget.host?.listening ?? const []);
 
   /// The sources Settings has: the host's own that it does not hide, canoa.cfg's `[agents.NAME]` commands, and the other agent
@@ -1045,6 +1074,9 @@ class _CanoaAppState extends State<CanoaApp> {
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     _conversation.close = _closeSession;
+    _conversation
+      ..moveTargets = _moveTargets
+      ..move = _moveTo;
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
@@ -1308,6 +1340,10 @@ final class _ConversationHandle {
 
   /// Ends a conversation as the app does, asking after its worktree; set by the app.
   Future<void> Function(ChatSession)? close;
+
+  /// The sources a session can move to, by name and as shown, and the move itself; set by the app.
+  Map<String, String> Function(ChatSession)? moveTargets;
+  Future<void> Function(BuildContext, ChatSession)? move;
 }
 
 class _Conversation extends StatefulWidget {
@@ -1485,6 +1521,8 @@ class _ConversationState extends State<_Conversation> {
       if (session != null && widget.store.canListEarlier(session))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
       if (session != null && sessionChanges(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
+      if (session != null && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
+        ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
       if (session?.profile case final report?)
         ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
           context: context,

@@ -1982,6 +1982,10 @@ class SessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether [session] ran on one of this computer's own sources and has started, so the host has its history to move.
+  bool canMove(ChatSession session) =>
+      session.place == SessionPlace.local && !session.isDraft && session.remoteSessionId != null;
+
   /// Whether a person can ask this session's agent for its earlier conversations.
   bool canListEarlier(ChatSession session) {
     final client = _verifiedClients[session.id];
@@ -2028,6 +2032,50 @@ class SessionStore extends ChangeNotifier {
       applyOpened(session, opened);
       if (from.profile case final profile?) _note(session, profile.summary);
       if (!opened.replayed) _note(session, 'The agent resumed this without sending what was said before.');
+      session.status = SessionStatus.connected;
+      _record(session, client);
+      notifyListeners();
+      return session;
+    } catch (_) {
+      forget(session);
+      rethrow;
+    }
+  }
+
+  /// Opens the session a move made, [sessionId] on [client] (the agent [agent] of this computer), beside [from], which stays as it
+  /// was. What the move did not carry is [notes]; [carried] is what was said, shown when the agent does not send it itself.
+  Future<ChatSession> openMoved(
+    ChatSession from,
+    VerifiedAgent client, {
+    required String sessionId,
+    required String agent,
+    required String cwd,
+    required List<String> notes,
+    List<({MessageRole role, String text})> carried = const [],
+  }) async {
+    if (!client.canReopenSessions) throw AcpFailure('$agent offers neither session/load nor session/resume');
+    final session = addProviderSession(
+      title: from.title,
+      agent: agent,
+      peerId: client.peerId,
+      remoteSessionId: sessionId,
+      cwd: cwd,
+    );
+    attachVerifiedClient(session.id, client, record: false);
+    try {
+      final opened = await client.reopenSession(sessionId, cwd: cwd);
+      applyOpened(session, opened);
+      // An agent that sent all of what was said before has shown it; one that sent less is shown the host's copy of it instead.
+      final shown = session.messages.where((m) => m.role == MessageRole.user || m.role == MessageRole.agent).length;
+      if (shown < carried.length) {
+        session.messages.removeWhere((m) => m.role == MessageRole.user || m.role == MessageRole.agent);
+        for (final each in carried) {
+          session.messages.add(ChatMessage(role: each.role, text: each.text, at: DateTime.now()));
+        }
+      }
+      for (final note in notes) {
+        _note(session, note);
+      }
       session.status = SessionStatus.connected;
       _record(session, client);
       notifyListeners();
