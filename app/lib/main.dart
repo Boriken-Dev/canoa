@@ -50,7 +50,7 @@ import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
 import 'profile/profile_home_platform.dart';
-import 'acp/usage_wire.dart' show ProfileApprover;
+import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
 import 'profile/report.dart';
 import 'profile/profiles_dialog.dart';
@@ -794,31 +794,36 @@ class _CanoaAppState extends State<CanoaApp> {
     await store.applyHostProfile(draft, expected: _hasProfiles);
   }
 
-  /// Answers the host's question, before a session of [agent] starts, of which MCP servers of an overlay or a project it may
+  /// Answers the host's question, before a session of [agent] starts, of which MCP servers and which overlays' hooks it may
   /// start: the person's choice for this session, kept in canoa.cfg when they ask. Nothing is allowed when there is no window.
   ProfileApprover _approver(String agent) => (ask) async {
     final above = _navigator.currentContext;
-    if (above == null || ask.servers.isEmpty) return const [];
+    if (above == null || (ask.servers.isEmpty && ask.hooks.isEmpty)) return noApproval;
     final choice = await showSelectableDialog<ApprovalChoice>(
       context: above,
       builder: (_) => ProfileApprovalDialog(ask: ask, agent: agent),
     );
-    if (choice == null) return const [];
-    if (choice.remember && choice.allow.isNotEmpty && mounted) {
+    if (choice == null) return noApproval;
+    if (choice.remember && (choice.allow.isNotEmpty || choice.hooks.isNotEmpty) && mounted) {
       final kept = <String, Object>{
         ...?config.agentMcp[agent],
         for (final server in ask.servers)
           if (choice.allow.contains(server.name)) server.name: server.digest,
       };
+      final keptHooks = <String, String>{
+        ...?config.agentHooks[agent],
+        for (final hook in ask.hooks)
+          if (choice.hooks.contains(hook.overlay)) hook.overlay: hook.digest,
+      };
       try {
-        final changed = config.withAgentMcp(agent, kept);
+        final changed = config.withAgentMcp(agent, kept).withAgentHooks(agent, keptHooks);
         await _write(changed);
         if (mounted) setState(() => config = changed);
       } on Object catch (error) {
         debugPrint('Canoa could not keep the choices for $agent: $error');
       }
     }
-    return choice.allow;
+    return (servers: choice.allow, hooks: choice.hooks);
   };
 
   /// The agent behind the host's own source [name], reached through the in-process link and ready to open a session.

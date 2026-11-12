@@ -138,4 +138,18 @@ provider = "echo_provider"
     expect(off.withHost(const {}).localHost, isFalse);
     expect(off.withProfileTables(overlays: const {}, tables: const {}).localHost, isFalse);
   });
+  test('an overlay\'s hooks are allowed per agent at a digest, kept across a save, and refused for anything else', () {
+    final digest = 'sha256:${'a' * 64}';
+    final config = CanoaConfig.parse('[agents.Claude.hooks]\nteam = "$digest"\n');
+    expect(config.agentHooks, {'Claude': {'team': digest}});
+    final other = 'sha256:${'b' * 64}';
+    final changed = config.withAgentHooks('Claude', {'team': other, 'mine': digest});
+    expect(CanoaConfig.parse(changed.encode()).agentHooks, {'Claude': {'team': other, 'mine': digest}});
+    expect(changed.withAgentHooks('Claude', const {}).agentHooks, isEmpty);
+    expect(config.withAgentMcp('Claude', {'files': false}).agentHooks['Claude'], {'team': digest}, reason: 'mcp is separate');
+    for (final bad in ['team = true', 'team = "sha256:12"', 'team = "yes"']) {
+      expect(() => CanoaConfig.parse('[agents.Claude.hooks]\n$bad\n'), throwsFormatException, reason: bad);
+    }
+    expect(() => CanoaConfig.parse('[agents.Claude]\nhooks = 3\n'), throwsFormatException);
+  });
 }

@@ -322,6 +322,48 @@ final class CanoaConfig {
     return out;
   }
 
+  /// `[agents.NAME.hooks]`: for each agent, by label, the overlays whose hooks the person allowed, each at the digest of the
+  /// overlay's files (`sha256:...`) it was shown.
+  Map<String, Map<String, String>> get agentHooks => _agentHooks(tables['agents']);
+
+  static Map<String, Map<String, String>> _agentHooks(Object? agents) {
+    final out = <String, Map<String, String>>{};
+    if (agents is! Map) return out;
+    for (final MapEntry(key: agent, :value) in agents.entries) {
+      final table = value is Map ? value['hooks'] : null;
+      if (table == null) continue;
+      if (table is! Map) throw FormatException('canoa.cfg: agents.$agent.hooks must be a table');
+      final allowed = <String, String>{};
+      for (final MapEntry(:key, value: digest) in table.entries) {
+        if (!isEntryName('$key') || digest is! String || !RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(digest)) {
+          throw FormatException('canoa.cfg: agents.$agent.hooks.$key is the sha256: digest of the overlay\'s files that were '
+              'allowed');
+        }
+        allowed['$key'] = digest;
+      }
+      out['$agent'] = allowed;
+    }
+    return out;
+  }
+
+  /// This configuration with [allowed] as `[agents.NAME.hooks]` of [agent], as [agentHooks] reads them.
+  CanoaConfig withAgentHooks(String agent, Map<String, String> allowed) {
+    final raw = _deepCopy((tables['agents'] as Map?) ?? const {});
+    final entry = (raw[agent] as Map<String, dynamic>?) ?? <String, dynamic>{};
+    if (allowed.isEmpty) {
+      entry.remove('hooks');
+    } else {
+      entry['hooks'] = <String, dynamic>{...allowed};
+    }
+    if (entry.isEmpty) {
+      raw.remove(agent);
+    } else {
+      raw[agent] = entry;
+    }
+    _agentHooks(raw);
+    return _withTable('agents', raw);
+  }
+
   /// This configuration with [choices] as `[agents.NAME.mcp]` of [agent], as [agentMcp] reads them.
   CanoaConfig withAgentMcp(String agent, Map<String, Object> choices) {
     final raw = _deepCopy((tables['agents'] as Map?) ?? const {});
@@ -539,18 +581,18 @@ final class CanoaConfig {
       if (rawAgents is! Map) throw const FormatException('canoa.cfg: agents must be a table of agents');
       for (final entry in rawAgents.entries) {
         final agent = entry.value;
-        if (agent is Map && (agent['profile'] != null || agent['mcp'] != null)) {
+        if (agent is Map && (agent['profile'] != null || agent['mcp'] != null || agent['hooks'] != null)) {
           final table = agent['profile'];
           if (table != null && table is! Map) throw FormatException('canoa.cfg: agents.${entry.key}.profile must be a table');
           if (table is Map) agentProfiles['${entry.key}'] = _profile('agents.${entry.key}.profile', table, LayerKind.agent);
-          agentTables['${entry.key}'] = {'profile': ?table, 'mcp': ?agent['mcp']};
-          if (!agent.containsKey('program') && agent.keys.every(const {'profile', 'mcp'}.contains)) continue;
+          agentTables['${entry.key}'] = {'profile': ?table, 'mcp': ?agent['mcp'], 'hooks': ?agent['hooks']};
+          if (!agent.containsKey('program') && agent.keys.every(const {'profile', 'mcp', 'hooks'}.contains)) continue;
         }
         if (agent is! Map || agent['program'] is! String || (agent['program'] as String).isEmpty) {
           throw FormatException('canoa.cfg: agents.${entry.key} needs a program');
         }
         for (final key in agent.keys) {
-          if (key != 'program' && key != 'args' && key != 'profile' && key != 'mcp') {
+          if (key != 'program' && key != 'args' && key != 'profile' && key != 'mcp' && key != 'hooks') {
             throw FormatException('canoa.cfg: agents.${entry.key}: invalid key $key');
           }
         }
@@ -607,6 +649,7 @@ final class CanoaConfig {
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
     _catalogs(data['catalogs']);
     _agentMcp(agentTables);
+    _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
     if (permissions['protected'] != null && protectedPaths == null) {
       throw const FormatException('canoa.cfg: permissions.protected must be text, or a list of text, with a path pattern a line');
