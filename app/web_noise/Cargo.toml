@@ -1,0 +1,38 @@
+[package]
+name = "canoa-noise-web"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/canoa"
+description = "The Noise method of the web app's peer bridge, coqui-peer-noise compiled to WebAssembly"
+publish = false
+
+# Its own workspace: it builds only for wasm32-unknown-unknown, which the repository's
+# `cargo test --workspace` does not target.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+# A responder, for browser tests of the page's side. Never part of the app's build.
+test-peer = []
+
+[dependencies]
+# The pairing joiner a record at a time is a revision past the one the host builds on.
+coqui-peer-noise = { git = "https://github.com/Boriken-Dev/coqui-peer-noise", rev = "95155f4219d99fc3d20bbe458ce945a31621289b", features = ["pin"] }
+coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5", features = ["pin"] }
+# Exactly the wasm-bindgen command line's version, which has to match it.
+wasm-bindgen = "=0.2.128"
+js-sys = "0.3"
+# Their browser backends: the random generator is the page's crypto.getRandomValues. 0.2 is spake2's, 0.4 the Noise crate's.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
