@@ -150,7 +150,7 @@ class HostSupervisor extends ChangeNotifier {
   List<HostListening> get listening => List.unmodifiable(_listening);
 
   /// The entries a client on the network can reach.
-  List<HostListening> get served => List.unmodifiable(_listening.where((entry) => !entry.local));
+  List<HostListening> get served => List.unmodifiable(_listening.where((entry) => !entry.local && entry.kind != 'control'));
   final List<HostListening> _listening = [];
 
   /// The host's peer id, once it has said it.

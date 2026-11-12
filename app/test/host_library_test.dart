@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/ledger/host_ledger_backend.dart';
 import 'package:canoa/desktop/child_flag.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
@@ -162,6 +163,37 @@ void main() {
       await supervisor.stop();
       await ended.timeout(const Duration(seconds: 30));
       await expectLater(second.send('{}'), throwsStateError);
+    });
+
+    test('the session list is kept by the host over its control channel, and is there when the host starts again', () async {
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.idle, 'the host to be up');
+      final backend = HostLedgerBackend(supervisor);
+      expect(await backend.read(), isNull, reason: 'nothing kept yet');
+      Map<String, Object?> session(String id, String title) => {'peerId': 'local:Claude', 'sessionId': id, 'title': title};
+      final document = jsonEncode({
+        'version': 1,
+        'sessions': [session('b', 'Newest'), session('a', 'Oldest')],
+        'sources': {'Claude': {'seen': 1}},
+      });
+      await backend.write(document);
+      expect(jsonDecode((await backend.read())!), jsonDecode(document), reason: 'the same list, in the same order');
+
+      // Only what changed is sent, and what the list dropped goes from the host too.
+      await backend.write(jsonEncode({'version': 1, 'sessions': [session('b', 'Renamed')]}));
+      final after = jsonDecode((await backend.read())!) as Map<String, dynamic>;
+      expect([for (final each in after['sessions'] as List) (each as Map)['title']], ['Renamed']);
+      expect(after.containsKey('sources'), isFalse);
+
+      // The host ending takes its link; the list is its own, in its home, for the next one to read.
+      await supervisor.stop();
+      final again = HostSupervisor(tool);
+      await again.apply(configPath: cfg);
+      await _until(() => again.phase == HostPhase.idle, 'the host to be up again');
+      final reopened = HostLedgerBackend(again);
+      expect(jsonDecode((await reopened.read())!), after);
+      await again.stop();
     });
 
     test('its other commands run too: keys, check, and pairing given up', () async {

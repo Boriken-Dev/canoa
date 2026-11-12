@@ -39,6 +39,7 @@ import 'chat/permission_card.dart';
 import 'chat/transcript.dart';
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
+import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
 import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
@@ -78,8 +79,18 @@ Future<void> main(List<String> args) async {
   if (args.firstOrNull == canoaChildFlag) throw StateError('this build has no entry for $canoaChildFlag');
   WidgetsFlutterBinding.ensureInitialized();
   final config = await loadConfig();
-  // Beside canoa.cfg on a desktop, in this origin's IndexedDB on the web.
-  final ledger = SessionLedger(platformLedgerBackend(configPath: desktopConfigPath()), settings: config.sessions);
+  final shell = createDesktopShell();
+  final host = shell.isDesktop
+      ? HostSupervisor(findHostTool(), off: !config.localHost || args.contains('--no-local-host'))
+      : null;
+  // The host starts first: it keeps the session list, which it answers once it is up.
+  final hosting = host?.apply(configPath: desktopConfigPath());
+  // In the host's home on a desktop that runs one, else beside canoa.cfg, or in this origin's IndexedDB on the web.
+  final keptByHost = host != null && host.phase != HostPhase.off && host.phase != HostPhase.absent;
+  final ledger = SessionLedger(
+    keptByHost ? HostLedgerBackend(host) : platformLedgerBackend(configPath: desktopConfigPath()),
+    settings: config.sessions,
+  );
   await ledger.load();
   final configFile = desktopConfigPath();
   final rules = PermissionRules(
@@ -94,12 +105,8 @@ Future<void> main(List<String> args) async {
   );
   await rules.load();
   final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
-  final shell = createDesktopShell();
   final settingsSignal = ValueNotifier<int>(0);
   final hostingSignal = ValueNotifier<int>(0);
-  final host = shell.isDesktop
-      ? HostSupervisor(findHostTool(), off: !config.localHost || args.contains('--no-local-host'))
-      : null;
   await shell.initialize(
     config,
     onSettings: () => settingsSignal.value++,
@@ -109,7 +116,7 @@ Future<void> main(List<String> args) async {
     config: config, shell: shell, settingsSignal: settingsSignal,
     host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts,
   ));
-  await host?.apply(configPath: desktopConfigPath());
+  await hosting;
 }
 
 /// Shared Flutter application for standalone desktop/web and extension views.
