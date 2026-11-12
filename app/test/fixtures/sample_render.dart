@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The directory named by CANOA_SAMPLES_DIR, or null when sample rendering is off.
 String? get samplesDir {
+  // A browser test has no environment to read.
+  if (kIsWeb) return null;
   final dir = Platform.environment['CANOA_SAMPLES_DIR'];
   return dir == null || dir.isEmpty ? null : dir;
 }
