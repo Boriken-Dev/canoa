@@ -4,6 +4,7 @@ import 'dart:async';
 import 'config/canoa_config.dart';
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
+import 'desktop/host_control.dart';
 import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'desktop/hosting_dialog.dart';
@@ -61,7 +62,6 @@ import 'workspace/scratch.dart';
 import 'workspace/workspace_template.dart' show exampleSessionId;
 import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
-import 'worktree/local.dart';
 import 'worktree/worktree.dart';
 import 'selectable.dart';
 
@@ -149,7 +149,7 @@ class CanoaApp extends StatefulWidget {
   @visibleForTesting
   final String? documents;
 
-  /// Makes worktrees for agents on this computer; by default by git.
+  /// Makes worktrees for agents on this computer; by default through this app's host.
   @visibleForTesting
   final Worktrees? Function()? worktrees;
 
@@ -443,10 +443,14 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Whether canoa.cfg sets any profile, so an agent given none of it says so.
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
-  /// Makes, reads and removes worktrees where a session's agent runs: by git here for one this app runs, through the host for
+  late final HostControl? _control = widget.host == null ? null : HostControl(widget.host!);
+
+  Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
+
+  /// Makes, reads and removes worktrees where a session's agent runs: by this app's host for one it runs, through the host for
   /// one it reached at [endpoint]; null where neither can.
   Worktrees? _worktrees(SessionPlace place, {String? endpoint, String? fallback, String? peerId, String? method}) {
-    if (place == SessionPlace.local) return localWorktrees();
+    if (place == SessionPlace.local) return _localWorktrees();
     if (place != SessionPlace.host && place != SessionPlace.peer) return null;
     final uri = Uri.tryParse(endpoint ?? '');
     final proof = PeerMethod.values.where((each) => each.id == method).firstOrNull;
@@ -778,7 +782,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Starts a session on one of the host's own sources, over the in-process link: no address and no proof, since the host
   /// is in this process.
   Future<void> _startViaLink(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
-    final worktrees = worktree ? (widget.worktrees ?? localWorktrees)() : null;
+    final worktrees = worktree ? (widget.worktrees ?? _localWorktrees)() : null;
     if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
     final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(name));
     starting

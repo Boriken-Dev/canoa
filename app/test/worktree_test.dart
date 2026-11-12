@@ -1,7 +1,5 @@
-// A git worktree per session: the branch a session gets, git on this computer against repositories in a temporary directory,
-// the host's answers, the ledger's note of it, the list showing the branch, and what closing a session asks. A widget test
-// cannot wait on git processes, so git runs in plain tests and the widgets are given its state.
-import 'dart:io';
+// A git worktree per session: the branch a session gets, the host's answers, the ledger's note of it, the list showing the
+// branch, and what closing a session asks. A widget test cannot wait on a host, so the widgets are given its state.
 import 'dart:math';
 
 import 'package:canoa/auth/peer_proof.dart' show PeerMethod;
@@ -11,40 +9,9 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/worktree/close_dialog.dart';
 import 'package:canoa/worktree/host.dart';
-import 'package:canoa/worktree/local_io.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-/// `git -C dir args`, which must succeed.
-Future<String> _git(String dir, List<String> args) async {
-  final result = await Process.run('git', [
-    '-C', dir, '-c', 'user.name=Canoa Test', '-c', 'user.email=test@canoa.invalid', '-c', 'commit.gpgsign=false', ...args,
-  ]);
-  expect(result.exitCode, 0, reason: 'git $args: ${result.stderr}');
-  return '${result.stdout}';
-}
-
-/// A repository at [dir] with one commit.
-Future<void> _repository(String dir) async {
-  await Directory('$dir/sub').create(recursive: true);
-  await _git(dir, ['init', '-q']);
-  await File('$dir/README').writeAsString('hello\n');
-  await File('$dir/sub/keep').writeAsString('');
-  await _git(dir, ['add', '.']);
-  await _git(dir, ['commit', '-q', '-m', 'first']);
-}
-
-Future<List<String>> _branches(String repo) async =>
-    (await _git(repo, ['branch', '--format=%(refname:short)'])).split('\n').where((line) => line.isNotEmpty).toList();
-
-final bool _hasGit = () {
-  try {
-    return Process.runSync('git', ['--version']).exitCode == 0;
-  } on ProcessException {
-    return false;
-  }
-}();
 
 void main() {
   group('a branch', () {
@@ -83,163 +50,6 @@ void main() {
       expect(worktreeLocation('/src/proj', 'canoa/x-1'), '/src/proj.worktrees/x-1');
       expect(worktreeLocation(r'C:\src\proj\', 'canoa/x-1'), 'C:/src/proj.worktrees/x-1');
     });
-  });
-
-  group('git on this computer', () {
-    late Directory scratch;
-    late String repo;
-    final worktrees = LocalWorktrees();
-
-    setUp(() async {
-      scratch = await Directory.systemTemp.createTemp('canoa-worktree-test');
-      repo = '${scratch.path}/src/proj';
-      if (_hasGit) await _repository(repo);
-    });
-    tearDown(() => scratch.delete(recursive: true));
-
-    final skip = _hasGit ? null : 'no git on PATH';
-
-    test('two sessions on one repository each work in a worktree of their own', () async {
-      final first = await worktrees.create(repo, 'canoa/first-a1b2c3');
-      final second = await worktrees.create('$repo/sub', 'canoa/second-d4e5f6');
-      expect(first.path, isNot(second.path));
-      expect(first.path.replaceAll(r'\', '/'), endsWith('/src/proj.worktrees/first-a1b2c3'));
-      expect(second.path.replaceAll(r'\', '/'), endsWith('/src/proj.worktrees/second-d4e5f6'));
-      expect(File('${first.path}/README').existsSync() && File('${second.path}/README').existsSync(), isTrue);
-      expect(await _branches(repo), containsAll(['canoa/first-a1b2c3', 'canoa/second-d4e5f6']));
-      expect('worktree '.allMatches(await _git(repo, ['worktree', 'list', '--porcelain'])).length, 3);
-
-      // Work in each stays apart.
-      await File('${first.path}/draft').writeAsString('unsaved\n');
-      await File('${second.path}/done').writeAsString('saved\n');
-      await _git(second.path, ['add', 'done']);
-      await _git(second.path, ['commit', '-q', '-m', 'work']);
-      final firstState = await worktrees.status(first), secondState = await worktrees.status(second);
-      expect((firstState.exists, firstState.branch, firstState.changed, firstState.commits), (true, first.branch, 1, 0));
-      expect((secondState.exists, secondState.branch, secondState.changed, secondState.commits), (true, second.branch, 0, 1));
-      expect(File('${second.path}/draft').existsSync(), isFalse);
-
-      // A change is not deleted without discard; a commit of its own keeps the branch.
-      await expectLater(worktrees.remove(first), throwsA(isA<WorktreeFailure>()));
-      expect(File('${first.path}/draft').existsSync(), isTrue);
-      final discarded = await worktrees.remove(first, discard: true);
-      expect((discarded.branch, discarded.branchKept), (first.branch, false));
-      expect(Directory(first.path).existsSync(), isFalse);
-      final removed = await worktrees.remove(second);
-      expect((removed.branchKept, removed.commits), (true, 1));
-      expect(await _branches(repo), isNot(contains(first.branch)));
-      expect(await _branches(repo), contains(second.branch));
-
-      // A reopened session finds its worktree again, or finds it gone.
-      expect((await worktrees.status(first)).exists, isFalse);
-    }, skip: skip);
-
-    test('what is not Canoa\'s is neither made over nor removed', () async {
-      await expectLater(worktrees.create(repo, '--orphan'), throwsA(isA<WorktreeFailure>()));
-      await expectLater(worktrees.create('${scratch.path}/none', 'canoa/x'), throwsA(isA<WorktreeFailure>()));
-      await Directory('${scratch.path}/plain').create();
-      await expectLater(worktrees.create('${scratch.path}/plain', 'canoa/x'), throwsA(isA<WorktreeFailure>()));
-      await _git(repo, ['worktree', 'add', '-q', '-b', 'mine', '../mine']);
-      await _git(repo, ['worktree', 'add', '-q', '-b', 'canoa/hand-made', '../hand-made']);
-      for (final (path, branch) in [(repo, 'canoa/x'), ('${scratch.path}/src/mine', 'canoa/mine'),
-          ('${scratch.path}/src/hand-made', 'canoa/hand-made')]) {
-        final worktree = SessionWorktree(path: path, branch: branch, repo: repo);
-        expect((await worktrees.status(worktree)).exists, isFalse, reason: path);
-        await expectLater(worktrees.remove(worktree, discard: true), throwsA(isA<WorktreeFailure>()), reason: path);
-        expect(Directory(path).existsSync(), isTrue, reason: path);
-      }
-    }, skip: skip);
-
-    test('a .worktrees directory that is a link is not used', () async {
-      final elsewhere = await Directory('${scratch.path}/elsewhere').create();
-      final link = '${scratch.path}/src/proj.worktrees';
-      if (Platform.isWindows) {
-        final made = await Process.run('cmd', ['/C', 'mklink', '/J', link.replaceAll('/', r'\'), elsewhere.path.replaceAll('/', r'\')]);
-        expect(made.exitCode, 0, reason: '${made.stderr}');
-      } else {
-        await Link(link).create(elsewhere.path);
-      }
-      await expectLater(worktrees.create(repo, 'canoa/x'), throwsA(isA<WorktreeFailure>()));
-      expect(elsewhere.listSync(), isEmpty);
-      expect(await _branches(repo), isNot(contains('canoa/x')));
-      if (Platform.isWindows) await Directory(link).delete();
-    }, skip: skip);
-
-    test('files git ignores are counted, and only discard removes them', () async {
-      await File('$repo/.gitignore').writeAsString('.env\nbuild/\n');
-      await _git(repo, ['add', '.gitignore']);
-      await _git(repo, ['commit', '-q', '-m', 'ignore']);
-      final made = await worktrees.create(repo, 'canoa/ignored-a1b2c3');
-      await File('${made.path}/.env').writeAsString('TOKEN=x\n');
-      await File('${made.path}/build/out').create(recursive: true);
-      expect((await worktrees.status(made)).changed, 2);
-      await expectLater(worktrees.remove(made), throwsA(isA<WorktreeFailure>()));
-      expect(File('${made.path}/.env').existsSync(), isTrue);
-      await worktrees.remove(made, discard: true);
-      expect(Directory(made.path).existsSync(), isFalse);
-    }, skip: skip);
-
-    test('a repository whose own configuration names a filter or an include is refused, and no filter runs', () async {
-      await File('$repo/a.txt').writeAsString('text\n');
-      await _git(repo, ['add', 'a.txt']);
-      await _git(repo, ['commit', '-q', '-m', 'text']);
-      final made = await worktrees.create(repo, 'canoa/before-a1b2c3');
-      final marker = '${scratch.path}/filter-ran'.replaceAll(r'\', '/');
-      await File('$repo/.git/info/attributes').writeAsString('*.txt filter=x\n');
-      for (final key in ['filter.x.smudge', 'filter.x.clean']) {
-        await _git(repo, ['config', key, 'sh -c \'echo ran > "$marker"; cat\'']);
-      }
-      await expectLater(worktrees.create(repo, 'canoa/after-d4e5f6'), throwsA(isA<WorktreeFailure>()));
-      await File('${made.path}/a.txt').writeAsString('changed\n');
-      await expectLater(worktrees.status(made), throwsA(isA<WorktreeFailure>()));
-      await expectLater(worktrees.remove(made, discard: true), throwsA(isA<WorktreeFailure>()));
-      expect(File(marker).existsSync(), isFalse, reason: 'a filter ran');
-      await _git(repo, ['config', '--remove-section', 'filter.x']);
-      await _git(repo, ['config', 'include.path', 'elsewhere.cfg']);
-      await expectLater(worktrees.create(repo, 'canoa/after-d4e5f6'), throwsA(isA<WorktreeFailure>()));
-    }, skip: skip);
-
-    test('a submodule gets no worktree inside its superproject\'s .git', () async {
-      final library = '${scratch.path}/src/library';
-      await _repository(library);
-      await _git(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', '../library', 'lib']);
-      await _git(repo, ['commit', '-q', '-m', 'submodule']);
-      await expectLater(worktrees.create('$repo/lib', 'canoa/sub-a1b2c3'), throwsA(isA<WorktreeFailure>()));
-      expect(Directory('$repo/.git/modules/lib.worktrees').existsSync(), isFalse);
-    }, skip: skip);
-
-    test('a detached HEAD with commits of its own is still found, and not removed', () async {
-      final made = await worktrees.create(repo, 'canoa/detached-a1b2c3');
-      await _git(made.path, ['checkout', '-q', '--detach']);
-      await File('${made.path}/work').writeAsString('x\n');
-      await _git(made.path, ['add', 'work']);
-      await _git(made.path, ['commit', '-q', '-m', 'detached work']);
-      final state = await worktrees.status(made);
-      expect((state.exists, state.detached, state.commits), (true, true, 1));
-      for (final discard in [false, true]) {
-        await expectLater(worktrees.remove(made, discard: discard), throwsA(isA<WorktreeFailure>()));
-      }
-      expect(File('${made.path}/work').existsSync(), isTrue);
-    }, skip: skip);
-
-    test('a status tells one set of changes from another of the same size', () async {
-      final made = await worktrees.create(repo, 'canoa/listing-a1b2c3');
-      await File('${made.path}/one').writeAsString('');
-      final first = await worktrees.status(made);
-      await File('${made.path}/one').delete();
-      await File('${made.path}/two').writeAsString('');
-      final second = await worktrees.status(made);
-      expect(first.changed, second.changed);
-      expect(first.listing, isNot(second.listing));
-    }, skip: skip);
-
-    test('a commit made after the count keeps its branch', () async {
-      final made = await worktrees.create(repo, 'canoa/race-a1b2c3');
-      final racing = LocalWorktrees(afterCount: () => _git(made.path, ['commit', '-q', '--allow-empty', '-m', 'late']));
-      final removed = await racing.remove(made);
-      expect(removed.branchKept, isTrue);
-      expect(await _branches(repo), contains('canoa/race-a1b2c3'));
-    }, skip: skip);
   });
 
   group('the host', () {

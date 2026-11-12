@@ -10,6 +10,9 @@ import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/host_ledger_backend.dart';
 import 'package:canoa/desktop/child_flag.dart';
+import 'package:canoa/desktop/host_control.dart';
+import 'package:canoa/worktree/host.dart';
+import 'package:canoa/worktree/worktree.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
@@ -194,6 +197,32 @@ void main() {
       final reopened = HostLedgerBackend(again);
       expect(jsonDecode((await reopened.read())!), after);
       await again.stop();
+    });
+
+    test('a worktree is made, read and removed by the host over its control channel, anywhere the person points', () async {
+      final git = Process.runSync('git', ['--version']);
+      if (git.exitCode != 0) return;
+      final repo = Directory('${dir.path}/proj')..createSync();
+      void run(List<String> args) {
+        final done = Process.runSync('git', ['-C', repo.path, '-c', 'user.name=Canoa Test', '-c', 'user.email=test@canoa.invalid', ...args]);
+        expect(done.exitCode, 0, reason: '${done.stderr}');
+      }
+
+      run(['init', '-q']);
+      run(['commit', '-q', '--allow-empty', '-m', 'first']);
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.idle, 'the host to be up');
+      final worktrees = controlWorktrees(HostControl(supervisor));
+      final made = await worktrees.create(repo.path, 'canoa/control-a1b2c3');
+      expect(Directory(made.path).existsSync(), isTrue);
+      final state = await worktrees.status(made);
+      expect((state.exists, state.changed, state.commits), (true, 0, 0));
+      await expectLater(worktrees.create(repo.path, 'main'), throwsA(isA<WorktreeFailure>()));
+      final removed = await worktrees.remove(made);
+      expect(removed.branchKept, isFalse);
+      expect(Directory(made.path).existsSync(), isFalse);
+      await supervisor.stop();
     });
 
     test('its other commands run too: keys, check, and pairing given up', () async {

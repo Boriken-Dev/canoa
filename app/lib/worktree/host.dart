@@ -5,7 +5,25 @@ import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
 import '../acp/pipe_channel.dart';
+import '../desktop/control_client.dart';
+import '../desktop/host_control.dart';
 import 'worktree.dart';
+
+/// Worktrees this app's own host makes anywhere on this computer, over its control channel: the person is its owner, so no
+/// working root limits them, and every other check of the host stands.
+Worktrees controlWorktrees(HostControl control) => HostWorktrees((method, params) async {
+  try {
+    final client = await control.ready();
+    final answer = await client.call(method.replaceFirst('_canoa/', ''), params);
+    return answer is Map ? answer.cast<String, Object?>() : throw const WorktreeFailure('The host answered no result.');
+  } on ControlFailed catch (failed) {
+    throw WorktreeFailure(failed.message);
+  } on StateError catch (error) {
+    throw WorktreeFailure(error.message);
+  } on TimeoutException {
+    throw const WorktreeFailure('The host did not answer.');
+  }
+});
 
 /// One request to a host on a connection of its own, its `result` or a [WorktreeFailure] with the host's words.
 typedef HostWorktreeCall = Future<Map<String, Object?>> Function(String method, Map<String, Object?> params);

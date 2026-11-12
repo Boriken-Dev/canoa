@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../desktop/control_client.dart';
+import '../desktop/host_control.dart';
 import '../desktop/host_supervisor.dart';
 import 'session_ledger.dart';
 
@@ -17,8 +18,7 @@ final class HostLedgerBackend implements LedgerBackend {
 
   /// How long the host has to be up when the list is read.
   final Duration wait;
-  ControlClient? _client;
-  Future<ControlClient>? _opening;
+  late final HostControl _control = HostControl(_host, wait: wait);
 
   /// What the host holds, by record id, as last read or written: what a write need not send again.
   final _held = <String, String>{};
@@ -32,24 +32,7 @@ final class HostLedgerBackend implements LedgerBackend {
   static String idOf(Map<Object?, Object?> session) =>
       's/${sha256.convert(utf8.encode('${session['peerId']}\n${session['sessionId']}')).toString().substring(0, 40)}';
 
-  Future<ControlClient> _connect() => _opening ??= () async {
-    final deadline = DateTime.now().add(wait);
-    while (_host.phase != HostPhase.running && _host.phase != HostPhase.idle) {
-      if (DateTime.now().isAfter(deadline) || _host.phase == HostPhase.failed || _host.phase == HostPhase.held) {
-        throw StateError(_host.problem ?? 'the host is not running');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 25));
-    }
-    return _client = ControlClient(_host.openLink('@control'));
-  }().whenComplete(() => _opening = null);
-
-  Future<ControlClient> _ready() async {
-    final client = _client;
-    // A link ends with the host, which the app may start again.
-    if (client != null && !client.over) return client;
-    _client = null;
-    return _connect();
-  }
+  Future<ControlClient> _ready() => _control.ready();
 
   @override
   Future<String?> read() async {
@@ -111,5 +94,5 @@ final class HostLedgerBackend implements LedgerBackend {
     }
   }
 
-  Future<void> close() async => _client?.close();
+  Future<void> close() async => _control.close();
 }
