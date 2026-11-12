@@ -2,7 +2,6 @@
 // row per state, and a menu with Pin, Rename, Fork, Archive and Close that its keys also reach.
 import 'dart:io' show Directory;
 
-import 'package:canoa/ledger/ledger_backend.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/rail/session_groups.dart';
 import 'package:canoa/rail/session_rail.dart';
@@ -77,7 +76,9 @@ Future<void> _openMenu(WidgetTester tester, String title) async {
   await mouse.moveTo(tester.getCenter(_row(title)));
   await tester.pump();
   await tester.tap(find.descendant(of: _row(title), matching: find.byTooltip('Session actions')));
-  await tester.pumpAndSettle();
+  // A working row's spinner never settles, so this waits long enough for the menu to open.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
   await mouse.removePointer();
 }
 
