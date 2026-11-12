@@ -806,6 +806,7 @@ fn reason(class: aos::Class) -> &'static str {
             "an overlay sets a variable both by env and by a path addition"
         }
         aos::Class::ReservedVariable => "an overlay sets a variable the consumer sets",
+        aos::Class::HookRefused => "a hook of an overlay that guards its session failed",
         _ => "an overlay's environment cannot be built",
     }
 }
@@ -816,6 +817,8 @@ fn reason(class: aos::Class) -> &'static str {
 pub(crate) struct Built {
     env: Environment,
     base: BTreeMap<String, String>,
+    /// What the `pre-env` hooks' runs reported.
+    pub(crate) hook_reports: Vec<aos::HookReport>,
 }
 
 impl Built {
@@ -868,6 +871,7 @@ pub(crate) fn build_each(
     layers: &[AosLayer],
     shared: &IndexMap<String, LayerId>,
     lookup: &dyn Fn(&str) -> Option<String>,
+    pre_env: &BTreeMap<String, aos::HookRun>,
 ) -> Vec<Result<Built, ProfileError>> {
     let windows = layers.first().is_some_and(|first| first.os == "windows");
     let mut named = BTreeSet::new();
@@ -915,13 +919,14 @@ pub(crate) fn build_each(
             let composed = aos::composed_environment(
                 &active[..=last],
                 process.clone(),
-                &BTreeMap::new(),
+                pre_env,
                 &mut Vec::new(),
             );
             match composed.env {
                 Ok(env) => Ok(Built {
                     env,
                     base: base.clone(),
+                    hook_reports: composed.hook_reports,
                 }),
                 Err(error) => Err(ProfileError::Resolve {
                     key: format!("overlay:{}.env.{}", layers[last].identity, error.subject),
@@ -937,12 +942,14 @@ pub(crate) fn build(
     layers: &[AosLayer],
     shared: &IndexMap<String, LayerId>,
     lookup: &dyn Fn(&str) -> Option<String>,
+    pre_env: &BTreeMap<String, aos::HookRun>,
 ) -> Result<Built, ProfileError> {
-    match build_each(layers, shared, lookup).pop() {
+    match build_each(layers, shared, lookup, pre_env).pop() {
         Some(built) => built,
         None => Ok(Built {
             env: Environment::new(Vec::new(), cfg!(windows)),
             base: BTreeMap::new(),
+            hook_reports: Vec::new(),
         }),
     }
 }

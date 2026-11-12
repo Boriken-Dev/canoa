@@ -385,6 +385,12 @@ impl Splice {
     /// This connection's agent is the process `pid`, which is where its quota is read from, if the entry reads one.
     #[must_use]
     pub(crate) fn agent(mut self, pid: u32) -> Self {
+        self.set_agent(pid);
+        self
+    }
+
+    /// As [`Splice::agent`], in place: for an owner that cannot give the splice up.
+    pub(crate) fn set_agent(&mut self, pid: u32) {
         if let Some(quota) = &self.quota {
             self.reading = Some(Arc::new(Reading::new(
                 Arc::clone(&self.inference),
@@ -394,7 +400,6 @@ impl Splice {
                 pid,
             )));
         }
-        self
     }
 
     /// Reads a message from the client: it goes on to the agent, stops here with this host's own answer, or stops here with

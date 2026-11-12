@@ -3,7 +3,7 @@
 //! report of what applied sent to the client. The client names a profile only among those its entry offers, and never
 //! anything inside one.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -27,6 +27,7 @@ use super::{
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
 use crate::usage_splice::{Client, Splice};
+use hooks::{Book, Hooks, PreEnv, Seen};
 
 /// The `_meta` key a client names a profile under in `initialize`, and the host's report under in its answers.
 pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
@@ -64,6 +65,8 @@ pub const APPROVE_METHOD: &str = "_canoa/profile/approve";
 pub const APPROVE_META: &str = "dev.boriken.canoa/approve";
 /// How long the person has to answer an approval.
 const APPROVE_WAIT: Duration = Duration::from_secs(120);
+
+mod hooks;
 
 /// What became of one part of a profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -246,6 +249,10 @@ pub(crate) struct Connection {
     entry: String,
     host: HostProfile,
     overlays: Vec<ReadOverlay>,
+    /// The overlays' hooks, and the means to run them.
+    hooks: Hooks,
+    /// The `pre-env` runs the environment was built with: the same for every environment built after.
+    pre_env: PreEnv,
     /// What was left out before any harness is known: overlays, and entries that read a variable not shared.
     notes: Vec<Item>,
     env: Vec<(String, Secret)>,
@@ -273,9 +280,17 @@ impl Connection {
         let overlays = read_overlays(host, &mut notes);
         let layers = layers_of(host, &overlays, None, &mut notes);
         let effective = merge(&layers);
-        let env = effective
-            .environment(lookup)
+        let hooks = Hooks::new(host, &effective.aos, &overlays, lookup);
+        // Before the agent starts nobody can be asked, so only what canoa.cfg allows runs.
+        let directory = host.directory.clone();
+        let harness = harness_of(None, entry).unwrap_or("canoa");
+        let pre_env = hooks.pre_env(&overlays, harness, &directory);
+        let resolved = effective
+            .environment_with(lookup, &pre_env.runs, &pre_env.exported)
             .map_err(|error| error.to_string())?;
+        notes.extend(resolved.hook_reports.iter().map(hooks::report_item));
+        notes.extend(pre_env.refused.iter().cloned());
+        let env = resolved.env;
         let mut env_items = Vec::new();
         for (key, value) in &effective.env {
             if env.iter().any(|(name, _)| name == key) {
@@ -329,6 +344,8 @@ impl Connection {
             entry: entry.to_owned(),
             host: host.clone(),
             overlays,
+            hooks,
+            pre_env,
             notes,
             env,
             env_items,
@@ -425,6 +442,22 @@ fn layers_of(
         input.harness = harness;
         input.pinned = true;
         match overlay_layer(&input) {
+            Ok(layer)
+                if layer
+                    .aos
+                    .as_ref()
+                    .is_some_and(|aos| !hooks::activates(host, aos, overlay)) =>
+            {
+                // A guard that is off would fail open, so the overlay waits for its hooks to be allowed.
+                if harness.is_none() {
+                    notes.push(Item::new(
+                        "overlay",
+                        LayerId::new(LayerKind::Overlay, overlay.identity.clone()),
+                        State::Refused,
+                        "left out: a hook of it fails closed and its hooks are not allowed; canoa.cfg's agents.NAME.hooks names the digest that allows them",
+                    ));
+                }
+            }
             Ok(layer) => {
                 let key = aos::normalize_name(&overlay.identity);
                 if let Some(aos) = &layer.aos {
@@ -647,6 +680,8 @@ impl Drop for Written {
 #[derive(Debug, Default)]
 struct Parts {
     system_prompt: Option<String>,
+    /// Whether the agent takes a system prompt with a new session, whether the profile gives one or not.
+    system_prompt_taken: bool,
     servers: Vec<Value>,
     /// Every MCP server name the profile holds, started or not: a client's server may not take one.
     names: Vec<String>,
@@ -774,8 +809,9 @@ fn runnable(path: &Path) -> bool {
 fn environments_after(
     effective: &Effective,
     lookup: &dyn Fn(&str) -> Option<String>,
+    pre_env: &BTreeMap<String, aos::HookRun>,
 ) -> BTreeMap<String, Result<Built, String>> {
-    build_each(&effective.aos, &effective.share_env, lookup)
+    build_each(&effective.aos, &effective.share_env, lookup, pre_env)
         .into_iter()
         .zip(&effective.aos)
         .map(|(built, layer)| {
@@ -1175,7 +1211,7 @@ fn parts_for(
         }
     }
 
-    let after = environments_after(&effective, lookup);
+    let after = environments_after(&effective, lookup, &connection.pre_env.runs);
     let mut servers = Vec::new();
     let mut approvable = Vec::new();
     let mut names = Vec::new();
@@ -1271,6 +1307,8 @@ fn parts_for(
         }
     }
 
+    items.extend(connection.hooks.items(&BTreeSet::new()));
+
     let label = harness.unwrap_or(&connection.entry);
     let applied = items
         .iter()
@@ -1292,6 +1330,7 @@ fn parts_for(
     );
     Parts {
         system_prompt,
+        system_prompt_taken: takes.system_prompt(),
         servers,
         names,
         directories,
@@ -1372,6 +1411,23 @@ fn mark_allowed(report: &mut Value, allowed: &[String]) {
     }
 }
 
+/// The report with what the hooks of this session did in place of what the profile said of them before any was asked.
+fn replace_hook_items(report: &mut Value, notes: &[Item]) {
+    let Some(items) = report.get_mut("items").and_then(Value::as_array_mut) else {
+        return;
+    };
+    if notes.is_empty() {
+        return;
+    }
+    items.retain(|item| {
+        !item
+            .get("key")
+            .and_then(Value::as_str)
+            .is_some_and(|key| key.starts_with("hooks."))
+    });
+    items.extend(notes.iter().map(Item::json));
+}
+
 /// Puts the report under [`PROFILE_META`] in an answer's `_meta`.
 fn add_report(result: &mut Value, report: &Value) {
     let Some(result) = result.as_object_mut() else {
@@ -1416,6 +1472,15 @@ struct Hold {
     asked: u64,
     /// Whether the client said in `initialize` that it answers approvals.
     approves: bool,
+    /// What the overlays' hooks remember between messages.
+    book: Book,
+}
+
+/// What the person allowed when the host asked: the MCP servers, and the overlays whose hooks run in this session.
+#[derive(Debug, Default)]
+struct Approved {
+    servers: Vec<String>,
+    hooks: BTreeSet<String>,
 }
 
 /// A connection's channel to its agent with a profile applied: the launch line first, then each message the client sends
@@ -1439,7 +1504,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
     /// This channel serves the agent running as process `pid`.
     #[must_use]
     pub(crate) fn agent(mut self, pid: u32) -> Self {
-        self.splice = self.splice.agent(pid);
+        self.splice.set_agent(pid);
         self
     }
 
@@ -1456,6 +1521,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 queued: alloc::collections::VecDeque::new(),
                 asked: 0,
                 approves: false,
+                book: Book::default(),
             }),
             splice: scope.splice(),
         }
@@ -1487,28 +1553,29 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
     /// For a session request, asks the client which of the servers canoa.cfg does not allow it lets this session start, with
     /// [`APPROVE_METHOD`]: what the person chose, or nothing when the client does not answer it, answers with an error, takes too
     /// long or goes away. The client's other messages meanwhile wait their turn.
-    fn approvals(&self, bytes: &[u8]) -> Vec<String> {
+    fn approvals(&self, bytes: &[u8]) -> Approved {
         let Ok(request) = serde_json::from_slice::<Value>(bytes) else {
-            return Vec::new();
+            return Approved::default();
         };
         let session = request
             .get("method")
             .and_then(Value::as_str)
             .is_some_and(|method| SESSION_METHODS.contains(&method));
         if !session || request.get("id").is_none() {
-            return Vec::new();
+            return Approved::default();
         }
+        let hooks = self.connection.hooks.approvable();
         let (ask_id, servers) = {
             let mut hold = self.hold();
             if !hold.approves || !self.connection.in_process {
-                return Vec::new();
+                return Approved::default();
             }
             let Some(parts) = hold
                 .parts
                 .as_ref()
-                .filter(|parts| !parts.approvable.is_empty())
+                .filter(|parts| !parts.approvable.is_empty() || !hooks.is_empty())
             else {
-                return Vec::new();
+                return Approved::default();
             };
             let servers: Vec<Value> = parts
                 .approvable
@@ -1530,13 +1597,14 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 "profile": self.connection.name,
                 "harness": self.connection.entry,
                 "servers": servers,
+                "hooks": hooks,
             },
         });
         let Ok(ask) = serde_json::to_vec(&ask) else {
-            return Vec::new();
+            return Approved::default();
         };
         if self.reply(&ask).is_err() {
-            return Vec::new();
+            return Approved::default();
         }
         let until = Instant::now() + APPROVE_WAIT;
         while Instant::now() < until {
@@ -1556,27 +1624,33 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                                     .collect()
                             })
                             .unwrap_or_default();
-                        return value
-                            .get("result")
-                            .and_then(|result| result.get("allow"))
-                            .and_then(Value::as_array)
-                            .map(|names| {
-                                names
-                                    .iter()
-                                    .filter_map(Value::as_str)
-                                    .filter(|name| held.iter().any(|each| each == name))
-                                    .map(str::to_owned)
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                        let result = value.get("result");
+                        return Approved {
+                            servers: result
+                                .and_then(|result| result.get("allow"))
+                                .and_then(Value::as_array)
+                                .map(|names| {
+                                    names
+                                        .iter()
+                                        .filter_map(Value::as_str)
+                                        .filter(|name| held.iter().any(|each| each == name))
+                                        .map(str::to_owned)
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            // Only an overlay the question listed can be allowed by the answer.
+                            hooks: self.connection.hooks.offered(&hooks::names(
+                                result.and_then(|result| result.get("allowHooks")),
+                            )),
+                        };
                     }
                     self.hold().queued.push_back(message);
                 }
                 Err(Failure::Timeout) => {}
-                Ok(None) | Err(_) => return Vec::new(),
+                Ok(None) | Err(_) => return Approved::default(),
             }
         }
-        Vec::new()
+        Approved::default()
     }
 
     /// Records the request, and adds the profile's parts to a session request; `Err` is the answer refusing it.
@@ -1688,9 +1762,12 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 }
             }
             Some(Pending::Session(allowed)) => {
+                let key = value.get("id").map(ToString::to_string).unwrap_or_default();
+                let notes = hold.book.notes_for(&key);
                 if let (Some(result), Some(parts)) = (value.get_mut("result"), &hold.parts) {
                     let mut report = parts.report.clone();
                     mark_allowed(&mut report, &allowed);
+                    replace_hook_items(&mut report, &notes);
                     add_report(result, &report);
                 }
             }
@@ -1707,10 +1784,27 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
     }
 }
 
+impl<C: Channel + ?Sized> Drop for Hosted<'_, C> {
+    /// A connection that ends without closing its sessions ends them: best effort, for the hooks that listen.
+    fn drop(&mut self) {
+        self.end_all();
+    }
+}
+
 impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
     /// The agent's message to the client: profiled, and with this host's say on usage when the agent reports none.
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
-        self.splice.relay(message, |sent| self.send_profiled(sent))
+        self.splice.relay(message, |sent| {
+            let later = match self.on_agent(sent) {
+                Seen::Dropped => return Ok(()),
+                Seen::Passed(later) => later,
+            };
+            let sent_on = self.send_profiled(sent);
+            if let Some(later) = later {
+                self.later(later);
+            }
+            sent_on
+        })
     }
 
     /// The launch line first; then the client's messages, a refused one reading as a timeout as [`crate::scope`] has it.
@@ -1719,6 +1813,10 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             let mut hold = self.hold();
             if let Some(line) = hold.launch.take() {
                 return Ok(Some(line));
+            }
+            // Canoa's own answers to the agent, made by a hook's denial, go before anything the client sent.
+            if let Some(answer) = hold.book.next_injected() {
+                return Ok(Some(answer));
             }
             core::mem::replace(&mut hold.first, false)
         };
@@ -1759,8 +1857,11 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
         }
         let forwarded = match self.scope.check(&message) {
             Verdict::Forward(bytes) => {
-                let allowed = self.approvals(&bytes);
-                self.forward(bytes, allowed)
+                let approved = self.approvals(&bytes);
+                match self.on_client(bytes, &approved.hooks) {
+                    Ok(bytes) => self.forward(bytes, approved.servers),
+                    Err(answer) => Err(answer),
+                }
             }
             Verdict::Refuse(answer) => Err(answer.unwrap_or_default()),
         };
@@ -1785,6 +1886,7 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
 
     fn close(&self) {
         self.inner.close();
+        self.end_all();
     }
 
     fn set_max_message(&self, bytes: usize) {

@@ -12,7 +12,8 @@
 //! `--usage-claims=ID` makes it report under that account instead of the one it was given. `--name=` and `--version=` are what
 //! it says of itself, and `--no-reopen` leaves out session/load and session/list. A prompt `fail TEXT` is answered with a
 //! JSON-RPC error whose message is TEXT, `fail-data TEXT` with a plain message and TEXT in the error's data, and `refuse TEXT`
-//! says TEXT and ends the turn `refusal`: how a limit reaches a client from an agent that reports no usage.
+//! says TEXT and ends the turn `refusal`: how a limit reaches a client from an agent that reports no usage. `--system-prompt`
+//! says it takes a system prompt with a new session and notes the one it is given, as the session's `system`.
 
 use std::collections::HashMap;
 use std::io::{BufRead as _, Write as _};
@@ -37,6 +38,8 @@ struct Shared {
     state: Mutex<Value>,
     agent_info: Option<Value>,
     reopens: bool,
+    /// Whether it says it takes a system prompt.
+    system_prompt: bool,
     waiting: Mutex<HashMap<u64, Sender<Value>>>,
     next_id: Mutex<u64>,
     /// "<session> <kind>" of a tool the person said to always allow or reject.
@@ -568,6 +571,9 @@ impl Shared {
                     json!({"promptCapabilities": {"embeddedContext": true, "image": true}})
                 };
                 let mut agent = agent;
+                if self.system_prompt {
+                    agent["sessionCapabilities"]["systemPrompt"] = json!({});
+                }
                 if self.usage.is_some() {
                     agent["_meta"] = json!({USAGE_CAPABILITY: {"version": 1, "sources": ["reported"], "spend": false}});
                 }
@@ -593,7 +599,7 @@ impl Shared {
                     object.insert(
                         created.clone(),
                         json!({"cwd": params["cwd"], "title": "Fix the failing test", "history": [],
-                               "updatedAt": now(), "calls": ["session/new"]}),
+                               "updatedAt": now(), "calls": ["session/new"], "system": params["systemPrompt"]}),
                     );
                     created
                 });
@@ -718,6 +724,7 @@ pub fn run(args: &[String]) {
         state: Mutex::new(json!({})),
         agent_info,
         reopens: !args.iter().any(|arg| arg == "--no-reopen"),
+        system_prompt: args.iter().any(|arg| arg == "--system-prompt"),
         waiting: Mutex::new(HashMap::new()),
         next_id: Mutex::new(1000),
         remembered: Mutex::new(HashMap::new()),

@@ -4,6 +4,7 @@
 //! wins per key, named entries merge by name, and a layer can remove what a lower one set. The effective profile keeps the
 //! layer of every value. The app reads the same schema; `tests/vectors/profile.json` holds both to it.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -1113,8 +1114,19 @@ impl Effective {
         &self,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Vec<(String, Secret)>, ProfileError> {
-        let lookup: &dyn Fn(&str) -> Option<String> = &lookup;
-        let built = overlay::build(&self.aos, &self.share_env, lookup)?;
+        self.environment_with(&lookup, &BTreeMap::new(), &[])
+            .map(|resolved| resolved.env)
+    }
+
+    /// As [`Effective::environment`], with the runs of the overlays' `pre-env` hooks (by identity) applied where the specification
+    /// puts them, and what those hooks reported.
+    pub(crate) fn environment_with(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        pre_env: &BTreeMap<String, coqui_aos::HookRun>,
+        exported: &[String],
+    ) -> Result<Resolved, ProfileError> {
+        let built = overlay::build(&self.aos, &self.share_env, lookup, pre_env)?;
         let mut out = Vec::new();
         for (name, value) in &self.env {
             let from_overlay = value.layer.kind == LayerKind::Overlay
@@ -1136,8 +1148,27 @@ impl Effective {
             )?;
             out.push((name.clone(), secret));
         }
-        Ok(out)
+        // Variables a `pre-env` hook set, besides those an overlay declares.
+        for name in exported {
+            if out.iter().any(|(each, _)| each == name) {
+                continue;
+            }
+            if let Some(found) = built.owned(name) {
+                out.push((name.clone(), Secret(found.to_owned())));
+            }
+        }
+        Ok(Resolved {
+            env: out,
+            hook_reports: built.hook_reports,
+        })
     }
+}
+
+/// An environment resolved, and what the `pre-env` hooks that shaped it reported.
+#[derive(Debug)]
+pub(crate) struct Resolved {
+    pub(crate) env: Vec<(String, Secret)>,
+    pub(crate) hook_reports: Vec<coqui_aos::HookReport>,
 }
 
 fn context_json(context: &Context) -> Value {
