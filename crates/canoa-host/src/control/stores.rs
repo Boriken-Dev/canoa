@@ -113,7 +113,7 @@ impl Stores {
     }
 
     /// The answer to a read: `store/list`, `store/report`, `store/latest` or `store/plan`.
-    pub(crate) fn read(&self, method: &str, params: &Value) -> Result<Value, Failed> {
+    pub(crate) fn read(&self, method: &str, params: &Value, owner: bool) -> Result<Value, Failed> {
         if method == "store/list" {
             let ids: Vec<&str> = self.providers.iter().map(String::as_str).collect();
             let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;
@@ -167,6 +167,10 @@ impl Stores {
                         optional("version"),
                     )
                     .map_err(|error| refusal(&error))?;
+                // Only the owner applies a plan, so a key's is not kept: it could not push out the owner's.
+                if !owner {
+                    self.programs.forget_plan(&provider, &plan.token);
+                }
                 json_of(&plan)
             }
             _ => Err((NO_METHOD, "this host has no such method".to_owned())),

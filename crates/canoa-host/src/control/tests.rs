@@ -133,11 +133,26 @@ fn a_key_sees_and_changes_only_its_own_records_and_the_owner_all() {
         ids(&ask(&control, &b, "ledger/list", json!({}))),
         ["from-b"]
     );
+    // The app's own list is its own records: what a key put is never taken for a session. It asks for all to see them.
     assert_eq!(
-        ask(&control, &Caller::Owner, "ledger/list", json!({}))["result"]["records"]
+        ids(&ask(&control, &Caller::Owner, "ledger/list", json!({}))),
+        ["mine"]
+    );
+    assert_eq!(
+        ask(
+            &control,
+            &Caller::Owner,
+            "ledger/list",
+            json!({"all": true})
+        )["result"]["records"]
             .as_array()
             .map(Vec::len),
         Some(3)
+    );
+    // A key cannot ask for all.
+    assert_eq!(
+        ids(&ask(&control, &a, "ledger/list", json!({"all": true}))),
+        ["from-a"]
     );
     // Another key's id is denied for a write, and is not there to remove.
     let taken = put(&control, &b, "from-a");
@@ -156,7 +171,12 @@ fn a_key_sees_and_changes_only_its_own_records_and_the_owner_all() {
         json!({"id": "sly", "owner": "local", "record": {}}),
     );
     assert!(sly.get("result").is_some());
-    let listed = ask(&control, &Caller::Owner, "ledger/list", json!({}));
+    let listed = ask(
+        &control,
+        &Caller::Owner,
+        "ledger/list",
+        json!({"all": true}),
+    );
     let owner_of_sly = listed["result"]["records"]
         .as_array()
         .and_then(|all| all.iter().find(|record| record["id"] == "sly"))
@@ -291,13 +311,28 @@ fn the_ledger_is_kept_across_a_reopen_and_a_file_that_is_not_one_is_said() {
         Vec::new(),
     )
     .expect("opens again");
-    let listed = ask(&again, &Caller::Owner, "ledger/list", json!({}));
+    let listed = ask(&again, &Caller::Owner, "ledger/list", json!({"all": true}));
     let mut found = ids(&listed);
     found.sort_unstable();
     assert_eq!(found, ["kept", "theirs"]);
+    // A file that is not a ledger does not stop the host: it is kept beside and a new ledger begins.
     fs::write(dir.join("ledger.json"), "[1, 2]").expect("written");
-    let error = Control::open(Some(&dir), 1, 1, Vec::new()).expect_err("not a ledger");
-    assert!(error.to_string().contains("ledger.json"), "{error}");
+    let fresh = Control::open(Some(&dir), 1, 1, Vec::new()).expect("opens empty");
+    assert!(
+        ids(&ask(
+            &fresh,
+            &Caller::Owner,
+            "ledger/list",
+            json!({"all": true})
+        ))
+        .is_empty()
+    );
+    let aside = fs::read_dir(&dir)
+        .expect("listed")
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name().to_string_lossy().contains("json.bad-"));
+    assert!(aside, "the unreadable file is kept");
+    put(&fresh, &Caller::Owner, "after");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -413,4 +448,74 @@ fn only_the_owner_installs_updates_rolls_back_or_removes() {
         "not a grant a key can hold"
     );
     assert_eq!(Grant::named("store.read"), Some(Grant::StoreRead));
+}
+
+#[test]
+fn a_key_has_a_quota_of_its_own_and_cannot_fill_the_app_out() {
+    let control = Control::open(None, 2, DEFAULT_MAX_RECORD_BYTES, Vec::new()).expect("opens");
+    let key = peer("k", &[Grant::LedgerWrite, Grant::LedgerRead]);
+    put(&control, &key, "1");
+    put(&control, &key, "2");
+    let full = put(&control, &key, "3");
+    assert_eq!(full["error"]["code"], REFUSED, "{full}");
+    // The key's records do not count against the app's.
+    assert!(
+        put(&control, &Caller::Owner, "mine-1")
+            .get("result")
+            .is_some()
+    );
+    assert!(
+        put(&control, &Caller::Owner, "mine-2")
+            .get("result")
+            .is_some()
+    );
+    let more = put(&control, &Caller::Owner, "mine-3");
+    assert_eq!(more["error"]["code"], REFUSED, "{more}");
+}
+
+#[test]
+fn the_whole_ledger_has_a_byte_cap_with_room_kept_for_the_app() {
+    let control = memory();
+    let text = "x".repeat(200 * 1024);
+    let mut taken = 0;
+    // Owners are held to their own bytes, so several keys fill the part of the ledger a key may use.
+    'keys: for n in 0..8 {
+        let key = peer(&format!("k{n}"), &[Grant::LedgerWrite]);
+        for i in 0..400 {
+            let answer = ask(
+                &control,
+                &key,
+                "ledger/put",
+                json!({"id": format!("r{i}"), "record": {"t": text}}),
+            );
+            if answer.get("error").is_some() {
+                continue 'keys;
+            }
+            taken += 1;
+        }
+    }
+    assert!(
+        taken * 200 * 1024 <= TOTAL_BYTES - OWNER_RESERVE + 200 * 1024,
+        "{taken}"
+    );
+    let mine = ask(
+        &control,
+        &Caller::Owner,
+        "ledger/put",
+        json!({"id": "mine", "record": {"t": text}}),
+    );
+    assert!(mine.get("result").is_some(), "{mine}");
+}
+
+#[test]
+fn a_key_may_not_run_a_program_through_store_report() {
+    let control = memory();
+    let key = peer("k", &[Grant::StoreRead]);
+    for params in [
+        json!({"provider": "claude_store", "probe": true}),
+        json!({"provider": "claude_store", "pick": "x"}),
+    ] {
+        let answer = ask(&control, &key, "store/report", params);
+        assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    }
 }

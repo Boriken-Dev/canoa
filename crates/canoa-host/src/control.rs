@@ -33,6 +33,15 @@ pub const MAX_ID: usize = 128;
 /// The largest request, in bytes.
 pub const MAX_REQUEST: usize = 16 * 1024 * 1024;
 
+/// What one owner (the app, or a key) may hold in the ledger, in bytes of records.
+pub const OWNER_BYTES: usize = 64 * 1024 * 1024;
+/// What the whole ledger may hold; the last [`OWNER_RESERVE`] of it is the app's alone, so a full ledger never refuses the app.
+pub const TOTAL_BYTES: usize = 256 * 1024 * 1024;
+/// The room only the app's records may take.
+pub const OWNER_RESERVE: usize = 64 * 1024 * 1024;
+/// How long a key's connection to the control channel may stay silent before the host ends it.
+const IDLE: Duration = Duration::from_secs(15 * 60);
+
 const POLL: Duration = Duration::from_millis(50);
 
 const NOT_JSON: i32 = -32700;
@@ -124,6 +133,9 @@ struct Stored {
     owner: String,
     updated: u64,
     record: Value,
+    /// The record's size in bytes of JSON, kept so a quota is a sum and not a serialisation of every record.
+    #[serde(default)]
+    size: usize,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -178,14 +190,32 @@ impl Control {
         let mut ledger = BTreeMap::new();
         if let Some(path) = &path {
             match fs::read(path) {
-                Ok(bytes) => {
-                    let file: File =
-                        serde_json::from_slice(&bytes).map_err(|error| ControlError {
+                Ok(bytes) => match serde_json::from_slice::<File>(&bytes) {
+                    Ok(file) => {
+                        ledger = file.records;
+                        for stored in ledger.values_mut() {
+                            if stored.size == 0 {
+                                stored.size =
+                                    serde_json::to_vec(&stored.record).map_or(0, |b| b.len());
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        // A ledger that cannot be read must not keep the host from starting: it is kept beside, and a new one begins.
+                        let aside = path.with_extension(format!("json.bad-{}", now_millis()));
+                        fs::rename(path, &aside).map_err(|error| ControlError {
                             path: path.clone(),
-                            what: format!("is not the host's ledger: {error}"),
+                            what: format!(
+                                "is not the host's ledger and could not be moved aside: {error}"
+                            ),
                         })?;
-                    ledger = file.records;
-                }
+                        tracing::warn!(
+                            "the session ledger {} could not be read ({error}); it was moved to {} and a new one begun",
+                            path.display(),
+                            aside.display()
+                        );
+                    }
+                },
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
                     return Err(ControlError {
@@ -229,12 +259,18 @@ impl Control {
             return Ok(());
         };
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            private_dir(parent).map_err(|error| error.to_string())?;
         }
         let bytes =
             serde_json::to_vec(&json!({"records": ledger})).map_err(|error| error.to_string())?;
         let beside = path.with_extension("json.new");
-        fs::write(&beside, bytes).map_err(|error| error.to_string())?;
+        {
+            use std::io::Write as _;
+            let mut file = private_file(&beside).map_err(|error| error.to_string())?;
+            file.write_all(&bytes).map_err(|error| error.to_string())?;
+            // The bytes are on disk before the name points at them, so a stop in between leaves the old ledger.
+            file.sync_all().map_err(|error| error.to_string())?;
+        }
         fs::rename(&beside, path).map_err(|error| error.to_string())
     }
 
@@ -255,9 +291,18 @@ impl Control {
                 return Some(self.worktree(caller, method, &request, &id));
             }
             Some(method @ ("store/list" | "store/report" | "store/latest" | "store/plan")) => {
+                // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
+                let runs = method == "store/report"
+                    && (params
+                        .get("probe")
+                        .is_some_and(|probe| probe != &Value::Bool(false))
+                        || params.get("pick").is_some_and(|pick| !pick.is_null()));
                 allow(caller, Grant::StoreRead)
+                    .and_then(|()| if runs { owner_only(caller) } else { Ok(()) })
                     .and_then(|()| self.stores())
-                    .and_then(|stores| stores.read(method, &params))
+                    .and_then(|stores| {
+                        stores.read(method, &params, matches!(caller, Caller::Owner))
+                    })
             }
             Some(method @ ("store/rollback" | "store/remove")) => owner_only(caller)
                 .and_then(|()| self.stores())
@@ -316,10 +361,12 @@ impl Control {
                 .ok_or_else(|| bad(&format!("limit is 1 to {MAX_PAGE}")))?,
         };
         let after = text_param(params, "after")?;
+        // What a key put is the key's, never the app's own: the app reads only its own records unless it asks for all.
+        let all = matches!(caller, Caller::Owner) && params.get("all") == Some(&Value::Bool(true));
         let ledger = self.lock();
         let mut mine: Vec<(&String, &Stored)> = ledger
             .iter()
-            .filter(|(_, stored)| caller.reaches(&stored.owner))
+            .filter(|(_, stored)| all || stored.owner == caller.owner())
             .collect();
         // Newest first; the id breaks a tie so a page boundary is the same every time.
         mine.sort_by(|a, b| b.1.updated.cmp(&a.1.updated).then_with(|| a.0.cmp(b.0)));
@@ -371,13 +418,35 @@ impl Control {
             Some(held) if !caller.reaches(&held.owner) => {
                 return Err((DENIED, "that record belongs to another key".to_owned()));
             }
-            None if ledger.len() >= self.max_records => {
-                return Err((
-                    REFUSED,
-                    format!("the host keeps at most {} records", self.max_records),
-                ));
-            }
             _ => {}
+        }
+        // Each owner has a quota of its own, and a key cannot take the room kept for the app.
+        let owner = caller.owner();
+        let (mut count, mut owned, mut total) = (0_usize, 0_usize, 0_usize);
+        for stored in ledger
+            .iter()
+            .filter(|(key, _)| key.as_str() != id)
+            .map(|(_, stored)| stored)
+        {
+            total += stored.size;
+            if stored.owner == owner {
+                count += 1;
+                owned += stored.size;
+            }
+        }
+        let cap = if matches!(caller, Caller::Owner) {
+            TOTAL_BYTES
+        } else {
+            TOTAL_BYTES - OWNER_RESERVE
+        };
+        if count >= self.max_records {
+            return Err((
+                REFUSED,
+                format!("this caller may keep at most {} records", self.max_records),
+            ));
+        }
+        if owned + size > OWNER_BYTES || total + size > cap {
+            return Err((REFUSED, "the ledger has no room for that record".to_owned()));
         }
         let updated = now_millis();
         let before = ledger.insert(
@@ -386,6 +455,7 @@ impl Control {
                 owner: caller.owner().to_owned(),
                 updated,
                 record: record.clone(),
+                size,
             },
         );
         if let Err(why) = self.save(&ledger) {
@@ -515,9 +585,11 @@ impl Control {
 
 /// Answers `channel`'s requests as `caller` until it closes or the host stops it.
 pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C) {
+    let mut last = std::time::Instant::now();
     loop {
         match channel.receive(Some(POLL)) {
             Ok(Some(line)) => {
+                last = std::time::Instant::now();
                 if line.len() > MAX_REQUEST {
                     return;
                 }
@@ -532,10 +604,43 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
                     return;
                 }
             }
-            Err(Failure::Timeout) => {}
+            Err(Failure::Timeout) => {
+                // A key's connection that says nothing is ended; the app's own link lasts as long as the host.
+                if matches!(caller, Caller::Peer { .. }) && last.elapsed() > IDLE {
+                    return;
+                }
+            }
             Ok(None) | Err(_) => return,
         }
     }
+}
+
+/// Creates `dir` readable by this user alone where the system has such a thing.
+fn private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir)
+    }
+}
+
+/// Creates `path` anew, readable and writable by this user alone where the system has such a thing.
+fn private_file(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 mod stores;

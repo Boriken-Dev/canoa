@@ -561,6 +561,11 @@ impl Programs {
         }
     }
 
+    /// Drops the plan made for `provider` under `token`, if the host still holds it.
+    pub fn forget_plan(&self, provider: &str, token: &str) {
+        let _ = self.take_plan(provider, token);
+    }
+
     /// The plan made for `provider` under `token`, taken out so that it is applied once.
     fn take_plan(&self, provider: &str, token: &str) -> Option<InstallPlan> {
         let mut plans = self.plans.lock().ok()?;

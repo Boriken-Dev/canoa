@@ -496,7 +496,8 @@ as opaque JSON objects the host never reads into: it keeps an `id`, the record, 
 
 - Every record has an **owner**: `"local"` for the app, else the peer's id. A peer sees and changes only the records it owns, and
   `put` makes it the owner whatever the request says; the owner (the app) sees and changes all.
-- `ledger/list` `{"after"?: id, "limit"?: 1..=500, default 100}` -> `{"records": [{"id", "updated", "owner", "record"}], "next"?: id}`,
+- **Quotas.** `max_records` and 64 MiB of records are each owner's own (the app's, and each key's), the whole ledger holds 256 MiB, and the last 64 MiB are the app's alone, so a full ledger never refuses the app. A bad `ledger.json` is moved to `ledger.json.bad-<ms>` and an empty ledger begins (logged at `warn`); the file is written, synced and renamed, and `control/` and the file are `0700`/`0600` on Unix. A key's connection silent for 15 minutes is ended.
+- `ledger/list` returns the caller's own records only; the owner (the app) asks for every owner's with `"all": true`, which a key's request cannot do. The app reads only its own, so nothing a key put is ever taken for a session. `{"after"?: id, "limit"?: 1..=500, default 100}` -> `{"records": [{"id", "updated", "owner", "record"}], "next"?: id}`,
   newest `updated` first; `next` is the `after` of the following page.
 - `ledger/put` `{"id": text of 1 to 128 characters with no control character, "record": object}` -> `{"id", "updated"}`; replaces the
   record of that id (a peer cannot replace another owner's: `-32001`); `updated` is the host's clock, in milliseconds. Refused
@@ -530,7 +531,7 @@ The params and results are the JSON of `canoa::store`'s models:
   "fraction"?}` on the same link before the answer, and a question the install asks the person comes as the request `store/ask`
   with the install's form (`{"title", "schema"}`, `ask-N` as its id), answered with `{"values", "secrets"}` as a result. The link
   closing, or ten minutes with no answer, cancels the install. Other requests on the link are still answered meanwhile.
-- `store/list`, `store/report`, `store/latest` and `store/plan` need `store.read`. `store/apply`, `store/rollback` and
+- `store/list`, `store/report`, `store/latest` and `store/plan` need `store.read`; `store/report` with `probe` or `pick`, which runs a program of the user's, is the owner's, and a plan a key asks for is not kept. `store/apply`, `store/rollback` and
   `store/remove` are **the owner's alone**: there is no `store.write` grant and `[host.control]` refuses the name, since an install
   runs code as the user. A store that is not one of the host's is `-32003`; a plan or install the host refuses `-32002`.
 - The overlay store (AOS overlays) follows as `overlay/*` under the same two grants; it is not built.

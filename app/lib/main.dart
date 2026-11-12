@@ -1,6 +1,7 @@
 import 'attention/notifier.dart';
 import 'config/settings_dialog.dart';
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 import 'config/canoa_config.dart';
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
@@ -278,9 +279,12 @@ class _CanoaAppState extends State<CanoaApp> {
     var changed = fromDialog.withHost(config.host).withProfilesOf(config);
     // The host serves a source from the moment it starts, so adding or removing one restarts it, which ends the sessions open
     // on any of its sources.
-    var restart = widget.host != null && !_sameAgents(changed.agents, config.agents);
+    // Profiles are read by the host when it starts too, so a change to them restarts it as well.
+    final sameProfiles = _sameProfiles(changed, config);
+    var restart = widget.host != null && (!_sameAgents(changed.agents, config.agents) || !sameProfiles);
     if (restart && _openOnHost() > 0 && !await _confirmRestart()) {
       changed = changed.copyWith(agents: config.agents);
+      if (!sameProfiles) changed = changed.withProfilesOf(config);
       restart = false;
     }
     if (!mounted) return;
@@ -304,6 +308,10 @@ class _CanoaAppState extends State<CanoaApp> {
       }
     }
   }
+
+  /// Whether `[profile]`, `[overlays]` and the `[agents]` tables (a profile and MCP choices live in them) read the same.
+  static bool _sameProfiles(CanoaConfig a, CanoaConfig b) =>
+      const ['profile', 'overlays', 'agents'].every((key) => jsonEncode(a.tables[key]) == jsonEncode(b.tables[key]));
 
   static bool _sameAgents(List<AgentCommand> a, List<AgentCommand> b) =>
       a.length == b.length &&
