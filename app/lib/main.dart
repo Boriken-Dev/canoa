@@ -46,6 +46,7 @@ import 'ledger/ledger_backend.dart';
 import 'ledger/ledger_list.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
+import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
 import 'profile/profile_home_platform.dart';
@@ -102,6 +103,7 @@ Future<void> main(List<String> args) async {
     guards: PermissionGuards(
       home: homeFolder(),
       config: _parentFolder(configFile),
+      protected: config.protectedPaths == null ? null : ProtectedPaths(config.protectedPaths!),
     ),
     real: platformRealPath,
     repoRoot: platformRepoRoot,

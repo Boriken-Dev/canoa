@@ -4,9 +4,26 @@ import '../chat/modes.dart';
 import '../acp/agent_commands.dart';
 import '../ledger/session_ledger.dart';
 import '../permissions/permission_rules.dart';
+import '../permissions/protected_paths.dart';
 import '../sources/sources.dart';
 import '../theme/look.dart';
 import '../workspace/workspace_template.dart';
+
+/// The protected list's text, with the lines the recommended list also has shown in the accent colour.
+class _ProtectedController extends TextEditingController {
+  _ProtectedController(String text) : super(text: text);
+
+  @override
+  TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
+    final mark = style?.copyWith(color: Theme.of(context).colorScheme.primary);
+    final recommended = recommendedProtected.map((line) => line.trim()).where((line) => line.isNotEmpty).toSet();
+    final lines = text.split('\n');
+    return TextSpan(style: style, children: [
+      for (var i = 0; i < lines.length; i++)
+        TextSpan(text: i == lines.length - 1 ? lines[i] : '${lines[i]}\n', style: recommended.contains(lines[i].trim()) ? mark : null),
+    ]);
+  }
+}
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key, required this.config, this.onQuit, this.ledger, this.rules, this.onProfiles,
@@ -52,6 +69,7 @@ class SettingsDialog extends StatefulWidget {
 class SettingsDialogState extends State<SettingsDialog> {
   late CanoaConfig config = widget.config;
   final _sourceName = TextEditingController();
+  late final _protected = _ProtectedController((widget.config.protectedPaths ?? recommendedProtected).join('\n'));
   final _sourceCommand = TextEditingController();
   late final _workspace = TextEditingController(text: widget.config.sessions.workspace);
   String? _workspaceProblem;
@@ -63,6 +81,7 @@ class SettingsDialogState extends State<SettingsDialog> {
     _sourceName.dispose();
     _sourceCommand.dispose();
     _workspace.dispose();
+    _protected.dispose();
     super.dispose();
   }
 
@@ -150,10 +169,59 @@ class SettingsDialogState extends State<SettingsDialog> {
               isThreeLine: !rule.external,
               trailing: TextButton(key: Key('revoke-${rule.id}'), onPressed: () => widget.rules!.revoke(rule.id), child: const Text('Revoke')),
             ),
+          _protectedPaths(context),
         ],
       );
     },
   );
+
+  /// What a remembered rule never covers: a path on this list asks every time. One pattern a line, like a gitignore file.
+  Widget _protectedPaths(BuildContext context) {
+    final recommended = recommendedProtected.map((line) => line.trim()).where((line) => line.isNotEmpty && !line.startsWith('#')).toList();
+    final mine = _protected.text.split('\n').map((line) => line.trim()).toSet();
+    final removed = recommended.where((line) => !mine.contains(line)).length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Protected paths', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        const Text(
+          'A rule made with "Always allow here" never covers a path on this list: it asks each time. One pattern a line, as in a '
+          'gitignore file: a "!" line allows one back, the last line that matches wins, "#" starts a comment, "~/" is your home '
+          'folder, and a pattern without a start matches anywhere. Lines in the accent colour are Canoa\'s recommendation; remove '
+          'any you do not want.',
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('settings-protected-paths'),
+          controller: _protected,
+          minLines: 6,
+          maxLines: 14,
+          style: const TextStyle(fontFamily: 'monospace'),
+          decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+          onChanged: (text) => setState(() {
+            final lines = text.split('\n');
+            final same = lines.length == recommendedProtected.length && [for (var i = 0; i < lines.length; i++) lines[i] == recommendedProtected[i]].every((v) => v);
+            config = same ? config.copyWith(clearProtectedPaths: true) : config.copyWith(protectedPaths: lines);
+          }),
+        ),
+        Row(children: [
+          Expanded(
+            child: Text(removed == 0 ? 'Every recommended line is kept.' : '$removed recommended ${removed == 1 ? 'line is' : 'lines are'} removed.',
+                key: const Key('protected-paths-state')),
+          ),
+          TextButton(
+            key: const Key('restore-recommended-paths'),
+            onPressed: () => setState(() {
+              _protected.text = recommendedProtected.join('\n');
+              config = config.copyWith(clearProtectedPaths: true);
+            }),
+            child: const Text('Restore recommended'),
+          ),
+        ]),
+      ]),
+    );
+  }
 
   Widget _sources(BuildContext context) => ExpansionTile(
     key: const Key('settings-sources'),
@@ -430,7 +498,12 @@ class SettingsDialogState extends State<SettingsDialog> {
         TextButton(onPressed: () => widget.onQuit!(), child: const Text('Quit Canoa')),
       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
       FilledButton(
-        onPressed: _workspaceProblem == null ? () => Navigator.pop(context, config) : null,
+        onPressed: _workspaceProblem == null
+            ? () {
+                widget.rules?.useProtected(config.protectedPaths == null ? null : ProtectedPaths(config.protectedPaths!));
+                Navigator.pop(context, config);
+              }
+            : null,
         child: const Text('Save'),
       ),
     ],

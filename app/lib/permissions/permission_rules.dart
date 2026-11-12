@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import '../ledger/session_ledger.dart' show LedgerBackend;
+import 'protected_paths.dart';
 
 /// What a permission request would do, in the terms a remembered rule can state. [toolName] is the name the agent gave the tool
 /// in its structured fields (`_meta.claudeCode.toolName`), empty when it gave none: a rule for `Bash` never covers `PowerShell`.
@@ -143,51 +144,39 @@ String? cleanPath(String path) {
 /// Whether [inner] is [outer] or lies under it, both already made by [cleanPath].
 bool _under(String outer, String inner) => inner == outer || inner.startsWith(outer.endsWith('/') ? outer : '$outer/');
 
-/// Files that run code when a build, a test, an editor or an agent starts, and the files agents read their instructions from. A
-/// path rule never covers one, at any depth, with or without its case or a trailing dot or space. Every segment that starts with a
-/// dot is protected as well (see [protectedSegment]).
-const Set<String> protectedFiles = {
-  'package.json', 'makefile', 'justfile', 'pyproject.toml', 'setup.py', 'build.rs', 'rakefile', 'cargo.toml', 'conftest.py',
-  'agents.md', 'agents.override.md', 'claude.md', 'claude.local.md', 'gemini.md',
-  'directory.build.props', 'directory.build.targets', 'mise.toml', 'node_modules',
-  'venv', 'env', '__pycache__', 'pytest.ini', 'tox.ini', 'setup.cfg', 'noxfile.py', 'shell.nix', 'flake.nix', 'gradlew', 'mvnw',
-  'gradle-wrapper.properties', 'pom.xml', 'go.mod', 'go.work', 'directory.packages.props', 'nuget.config', 'cmakelists.txt',
-  'meson.build', 'gemfile', 'dockerfile', 'vendor',
-};
-
-final RegExp _shortName = RegExp(r'~[0-9]');
-final RegExp _configFile = RegExp(
-    r'\.config\.(js|mjs|cjs|ts)$|\.(pth|csproj|code-workspace)$|^requirements.*\.txt$|^build\.gradle|^rust-toolchain|^(vite|webpack)\.config\.|^(gulpfile|gruntfile)\.');
-
-/// Names Windows opens as a device whatever follows the dot: `CON`, `con.txt`, `COM1`.
-final RegExp _deviceName = RegExp(r'^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$');
-
-/// Whether one path segment below the session's folder is out of reach of a path rule. The segment is first read the way a file
-/// system reads it: Windows drops trailing dots and spaces, so `.claude.` and `package.json.` are the files they look like, and
-/// an 8.3 short name (`GIT~1`) is another spelling of a long one. Anything but printable ASCII is refused rather than normalised,
-/// since Unicode normalisation and ignorable characters give one name many spellings. Then it is protected when it starts with a
-/// dot, is one of [protectedFiles], or is a `*.config.js`, `.mjs`, `.cjs` or `.ts`.
-bool protectedSegment(String raw) {
-  if (raw.codeUnits.any((unit) => unit < 0x20 || unit > 0x7e)) return true;
-  var read = raw;
-  while (read.endsWith('.') || read.endsWith(' ')) {
-    read = read.substring(0, read.length - 1);
+/// Whether the path [inner] (under [outer], both made by [cleanPath]) goes through a protected name below [outer]. Every name below
+/// [outer] is first read the way a file system reads it ([readName]) and refused when it cannot be placed; then the list decides.
+/// The names of [outer] and above count only for the list's anchored lines, so a dot above the folder a person works in is theirs.
+bool _touchesProtected(PermissionGuards guards, String outer, String inner) {
+  List<String> split(String path) => path.split('/').where((part) => part.isNotEmpty).toList();
+  final above = split(outer).length;
+  final parts = split(inner);
+  final names = <String>[];
+  for (var i = 0; i < parts.length; i++) {
+    final name = readName(parts[i]);
+    if (name == null) {
+      if (i >= above) return true;
+      names.add(parts[i].toLowerCase());
+    } else {
+      names.add(name);
+    }
   }
-  if (read.isEmpty || raw.startsWith('.') || read.startsWith('.')) return true;
-  final lower = read.toLowerCase();
-  return _shortName.hasMatch(lower) || _deviceName.hasMatch(lower) || protectedFiles.contains(lower) || _configFile.hasMatch(lower);
+  final home = guards.home == null ? null : cleanPath(guards.home!);
+  return guards.list.protects(names, home: home == null ? null : split(home).map((part) => part.toLowerCase()).toList(), from: above);
 }
 
-/// Whether [inner] (under [outer], both made by [cleanPath]) goes through a protected segment below [outer].
-bool _touchesProtected(String outer, String inner) {
-  final below = inner.length <= outer.length ? '' : inner.substring(outer.endsWith('/') ? outer.length : outer.length + 1);
-  return below.split('/').where((part) => part.isNotEmpty).any(protectedSegment);
-}
-
-/// Folders no path rule may reach: the person's home folder and Canoa's own configuration folder.
+/// Folders no path rule may reach: the person's home folder and Canoa's own configuration folder; and the list of protected paths
+/// no rule covers, which is [recommendedProtected] until the person writes their own.
 final class PermissionGuards {
-  const PermissionGuards({this.home, this.config});
+  const PermissionGuards({this.home, this.config, this.protected});
   final String? home, config;
+
+  /// The person's protected paths; null stands for the recommended list.
+  final ProtectedPaths? protected;
+
+  ProtectedPaths get list => protected ?? ProtectedPaths.recommended;
+
+  PermissionGuards withProtected(ProtectedPaths? protected) => PermissionGuards(home: home, config: config, protected: protected);
 }
 
 /// A folder that can be locked while the rules file is read, changed and replaced, so two instances cannot write over each other.
@@ -231,7 +220,7 @@ String? folderProblem(String folder, {PermissionGuards guards = const Permission
 
 /// Why [file] cannot be covered by a rule for [scope] in [folder], or null when it can. All three have to be absolute, and links
 /// must be followable ([real]); the folder is not home and not Canoa's settings; the file lies under the scope and the scope under
-/// the folder; and nothing below the folder is a protected segment; all of it after the links are resolved too.
+/// the folder; and nothing below the folder is on the protected list; all of it after the links are resolved too.
 String? pathProblem({required String scope, required String file, required String folder, PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
   final bad = folderProblem(folder, guards: guards, real: real);
   if (bad != null) return bad;
@@ -240,10 +229,10 @@ String? pathProblem({required String scope, required String file, required Strin
   if (s == null || f == null || d == null) return 'A path has to be absolute, with no ~, no : but a drive letter\'s, and not a network path.';
   if (!_under(d, s)) return 'That is not inside $folder.';
   if (!_under(s, f)) return 'That does not cover the file asked.';
-  if (_touchesProtected(d, s) || _touchesProtected(d, f)) return 'Hidden files and folders, version control, settings, build scripts and agent instructions are never covered.';
+  if (_touchesProtected(guards, d, s) || _touchesProtected(guards, d, f)) return 'That is on your protected list (Settings, Permissions) or has a name no list can judge, so a remembered rule never covers it.';
   final rs = _resolved(real!, s), rf = _resolved(real, f), rd = _resolved(real, d);
   if (rs == null || rf == null || rd == null) return 'A link in that path could not be followed.';
-  if (!_under(rd, rs) || !_under(rs, rf) || _touchesProtected(rd, rf) || _touchesProtected(rd, rs)) return 'A link in that path leads outside it, or to something never covered.';
+  if (!_under(rd, rs) || !_under(rs, rf) || _touchesProtected(guards, rd, rf) || _touchesProtected(guards, rd, rs)) return 'A link in that path leads outside it, or to something never covered.';
   return null;
 }
 
@@ -459,7 +448,7 @@ class PermissionRules extends ChangeNotifier {
 
   /// Where the log is kept; null keeps none.
   final RuleLog? log;
-  final PermissionGuards guards;
+  PermissionGuards guards;
 
   /// How links are followed; null where they cannot be, and no path rule is then made.
   final RealPath? real;
@@ -535,6 +524,13 @@ class PermissionRules extends ChangeNotifier {
     _rules.clear();
     _persisted = {};
     problem = why;
+    notifyListeners();
+  }
+
+  /// Uses [list] as the protected paths from now on, for what is asked and for the rules already made; null returns to the
+  /// recommended list.
+  void useProtected(ProtectedPaths? list) {
+    guards = guards.withProtected(list);
     notifyListeners();
   }
 

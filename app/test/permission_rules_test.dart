@@ -235,15 +235,15 @@ void main() {
     test('and an ordinary file is still covered, a dot above the session folder does not matter', () {
       expect(_allows(wide, _edit('/work/calc/src/main.dart')), isTrue);
       expect(_allows(wide, _edit('/work/calc/README.md')), isTrue);
-      expect(_allows(wide, _edit('/work/calc/a.config.json')), isTrue);
+      expect(_allows(wide, _edit('/work/calc/a.conf.json')), isTrue);
       final hidden = _rule(RuleType.path, '/work/.hidden/calc', tool: 'edit', folder: '/work/.hidden/calc');
       expect(_allows(hidden, _edit('/work/.hidden/calc/a.js'), folder: '/work/.hidden/calc'), isTrue);
       expect(_allows(hidden, _edit('/work/.hidden/calc/.x/a.js'), folder: '/work/.hidden/calc'), isFalse);
     });
 
     test('a scope that is one of them is refused with the reason', () {
-      expect(scopeProblem(RuleType.path, '/work/calc/.git', _edit('/work/calc/.git/config')!, _folder, real: _plain), contains('Hidden'));
-      expect(scopeProblem(RuleType.path, '/work/calc', _edit('/work/calc/.claude./settings.json')!, _folder, real: _plain), contains('Hidden'));
+      expect(scopeProblem(RuleType.path, '/work/calc/.git', _edit('/work/calc/.git/config')!, _folder, real: _plain), contains('protected list'));
+      expect(scopeProblem(RuleType.path, '/work/calc', _edit('/work/calc/.claude./settings.json')!, _folder, real: _plain), contains('protected list'));
       expect(scopeProblem(RuleType.path, '/work/calc/src', _edit('/work/calc/src/a.js')!, _folder, real: _plain), isNull);
     });
   });

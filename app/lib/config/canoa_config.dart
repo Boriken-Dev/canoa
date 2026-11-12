@@ -9,6 +9,7 @@ import '../chat/modes.dart' show modeOrder;
 import '../chat/usage.dart' show defaultWarnPermille;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
+import '../permissions/protected_paths.dart' show protectedLinesOf;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
@@ -78,6 +79,7 @@ final class CanoaConfig {
     this.tables = const {},
     this.defaultMode,
     this.allowOnceOnly = false,
+    this.protectedPaths,
     this.notifications = const NotificationSettings(),
     this.hiddenSources = const {},
     this.pasteAsFile = defaultPasteAsFile,
@@ -138,6 +140,10 @@ final class CanoaConfig {
   /// only an "always" is left to the person. Off, it takes the agent's "always" when that is all there is.
   final bool allowOnceOnly;
 
+  /// `[permissions] protected`: the paths a remembered rule never covers, in gitignore syntax, one line a line (see
+  /// `protected_paths.dart`); null leaves the recommended list, and a list written here replaces it.
+  final List<String>? protectedPaths;
+
   final NotificationSettings notifications;
 
   /// `[sources] hidden`: the presets, by label, that Settings keeps out of the new-session picker.
@@ -155,6 +161,7 @@ final class CanoaConfig {
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
       LookId? look, String? brightness, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
+      List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
@@ -175,6 +182,7 @@ final class CanoaConfig {
         tables: tables,
         defaultMode: clearDefaultMode ? null : defaultMode ?? this.defaultMode,
         allowOnceOnly: allowOnceOnly ?? this.allowOnceOnly,
+        protectedPaths: clearProtectedPaths ? null : protectedPaths ?? this.protectedPaths,
         notifications: notifications ?? this.notifications,
         hiddenSources: hiddenSources ?? this.hiddenSources,
         pasteAsFile: pasteAsFile,
@@ -203,6 +211,7 @@ final class CanoaConfig {
     tables: tables,
     defaultMode: defaultMode,
     allowOnceOnly: allowOnceOnly,
+    protectedPaths: protectedPaths,
     notifications: notifications,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
@@ -425,6 +434,7 @@ final class CanoaConfig {
     tables: tables,
     defaultMode: defaultMode,
     allowOnceOnly: allowOnceOnly,
+    protectedPaths: protectedPaths,
     notifications: notifications,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
@@ -468,7 +478,7 @@ final class CanoaConfig {
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace'});
-    final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only'});
+    final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only', 'protected'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
@@ -597,6 +607,10 @@ final class CanoaConfig {
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
     _catalogs(data['catalogs']);
     _agentMcp(agentTables);
+    final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
+    if (permissions['protected'] != null && protectedPaths == null) {
+      throw const FormatException('canoa.cfg: permissions.protected must be text, or a list of text, with a path pattern a line');
+    }
     final rawStore = data['store'];
     if (rawStore != null && rawStore is! Map) throw const FormatException('canoa.cfg: store must be a table');
     if (rawStore is Map) StoreSettings.parse(rawStore);
@@ -622,6 +636,7 @@ final class CanoaConfig {
       connectTimeout: timeout, cdn: cdn,
       defaultMode: defaultMode as String?,
       allowOnceOnly: flag(permissions, 'allow_once_only', false),
+      protectedPaths: protectedPaths,
       hiddenSources: {for (final name in hidden) name as String},
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
       embedLimit: limit('embed_limit', defaultEmbedLimit),
@@ -674,7 +689,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
