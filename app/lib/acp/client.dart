@@ -190,7 +190,7 @@ final class VerifiedAgent {
         elicitor: elicitor,
         clientName: 'canoa',
         clientVersion: '0.0.1',
-        // An adapter fetched with `npx` downloads itself the first time, before it answers anything.
+        // A command that downloads itself the first time (an `npx` adapter, say) answers nothing until it has.
         requestTimeout: const Duration(minutes: 3),
       ),
       'local:$label',

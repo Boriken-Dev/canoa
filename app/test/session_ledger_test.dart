@@ -84,6 +84,7 @@ void main() {
       expect(names.label(reportedName: '@agentclientprotocol/codex-acp', entry: 'Codex'), 'Codex');
       expect(names.label(reportedName: 'gemini-cli', entry: 'x'), 'Gemini');
       expect(names.label(reportedName: 'pi-acp', entry: 'x'), 'Pi');
+      expect(names.label(reportedName: 'coqui-acp-pi', entry: 'x'), 'Pi');
       expect(names.label(reportedName: 'OpenCode', entry: 'x'), 'OpenCode');
       expect(names.label(grokShell: true, entry: 'x'), 'Grok');
     });

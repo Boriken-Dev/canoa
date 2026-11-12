@@ -141,16 +141,24 @@ void main() {
     expect(find.widgetWithText(TextField, 'Fix it'), findsOneWidget, reason: 'the message stays to send again');
   });
 
-  testWidgets('with no Node on this computer Claude and Codex are ready, and only what runs on Node says so', (tester) async {
+  testWidgets('with no Node on this computer Claude, Codex and Pi are ready, and Pi needs only pi', (tester) async {
     await _app(tester, missing: {'node', 'npx'}, size: const Size(1280, 1400));
     await newSession(tester);
     await tester.tap(find.byKey(const Key('new-session-source')));
     await tester.pumpAndSettle();
-    for (final label in ['Claude', 'Codex']) {
+    for (final label in ['Claude', 'Codex', 'Pi']) {
       expect(find.descendant(of: find.byKey(Key('source $label')), matching: find.textContaining('Needs')), findsNothing,
           reason: label);
     }
-    expect(find.descendant(of: find.byKey(const Key('source Pi')), matching: find.text('Needs npx')), findsOneWidget);
+  });
+
+  testWidgets('Pi is not ready until pi is found, and its readiness names pi alone', (tester) async {
+    await _app(tester, missing: {'pi'}, size: const Size(1280, 1400));
+    await newSession(tester);
+    await tester.tap(find.byKey(const Key('new-session-source')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const Key('source Pi')), matching: find.text('Needs pi')), findsOneWidget);
+    expect(find.textContaining('npx'), findsNothing);
   });
 
   testWidgets('a new session is in the list at once, with no agent started and no worktree made', (tester) async {

@@ -68,7 +68,7 @@ final class FakeClipboard implements ClipboardReader {
 const scripted = AgentCommand(label: 'Scripted', program: 'scripted-agent', args: ['--acp']);
 
 /// The programs each of the host's own sources needs, by name.
-const _needs = {'Claude': ['claude'], 'Codex': ['codex'], 'Antigravity': ['agy'], 'Grok': ['grok'], 'Pi': ['npx', 'pi']};
+const _needs = {'Claude': ['claude'], 'Codex': ['codex'], 'Antigravity': ['agy'], 'Grok': ['grok'], 'Pi': ['pi']};
 
 /// The app on [store] at [size], each outside service the test's. Answers what canoa.cfg was written as.
 Future<List<CanoaConfig>> pumpApp(
