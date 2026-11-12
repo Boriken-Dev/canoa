@@ -407,6 +407,7 @@ void main() {
     debugPrint('DISK node --test exit $exitCode passing $passing failing $failing; old name in ${oldName.length} files, new in ${newName.length}; '
         'maintainer $maintainer; obsolete.txt kept $kept');
 
+    await host.stop();
     final closedAt = DateTime.now();
     while (true) {
       try {
