@@ -35,6 +35,10 @@ flate2.workspace = true
 windows-permissions = "0.2"
 win-msgbox = "0.2"
 
+# The import table of the built launcher, read by a test.
+[target.'cfg(windows)'.dev-dependencies]
+object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }
+
 [build-dependencies]
 sha2 = { version = "0.10", default-features = false }
 

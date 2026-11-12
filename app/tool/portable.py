@@ -96,15 +96,17 @@ def build_windows_launcher(folder: Path, root: Path, out_dir: Path, version: str
     work = root / "target" / "portable"
     work.mkdir(parents=True, exist_ok=True)
     payload = work / "payload.zip"
+    # Cargo reads the launcher's static-runtime setting (crates/canoa-launch/.cargo/config.toml) only from that folder.
+    crate = root / "crates" / "canoa-launch"
     subprocess.run(
         [cargo, "run", "--release", "--locked", "-p", "canoa-launch", "--bin", "canoa-pack", "--",
          str(folder), version, str(payload)],
-        check=True, cwd=root,
+        check=True, cwd=crate,
     )
     env = dict(os.environ, CANOA_LAUNCH_PAYLOAD=str(payload))
     subprocess.run(
         [cargo, "build", "--release", "--locked", "-p", "canoa-launch", "--bin", "canoa-launch"],
-        check=True, cwd=root, env=env,
+        check=True, cwd=crate, env=env,
     )
     built = root / "target" / "release" / "canoa-launch.exe"
     if out_dir.exists():
@@ -151,8 +153,11 @@ def build_appimage(bundle: Path, root: Path, out_dir: Path, arch: str | None = N
     out_dir.mkdir(parents=True, exist_ok=True)
     image = out_dir / f"Canoa-{arch}.AppImage"
     image.unlink(missing_ok=True)
-    # appimagetool is an AppImage itself; running it extracted needs no FUSE.
-    env = dict(os.environ, ARCH=arch, APPIMAGE_EXTRACT_AND_RUN="1")
+    # appimagetool is an AppImage itself; running it extracted needs no FUSE. Its scratch space is ours alone, not /tmp.
+    private = root / "target" / "appimage-tmp"
+    private.mkdir(parents=True, exist_ok=True)
+    private.chmod(0o700)
+    env = dict(os.environ, ARCH=arch, APPIMAGE_EXTRACT_AND_RUN="1", TMPDIR=str(private))
     subprocess.run(
         [str(tool), "--no-appstream", "--runtime-file", str(runtime), str(appdir), str(image)],
         check=True, env=env,

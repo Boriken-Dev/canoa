@@ -23,7 +23,11 @@ archive and its SHA-256 compiled in. Copy the one file anywhere and start it:
    against the manifest as it is written, and renames the folder into place. Otherwise it reuses the folder, after hashing
    every file again, so a second start unpacks nothing and a file changed since is put back.
 3. It removes the folders it made earlier beyond the current version and the newest other one.
-4. It starts `CanoaUI.exe` from that folder with its own arguments, waits, and exits with the app's status.
+4. It starts `CanoaUI.exe` from that folder with its own arguments, with that folder as the working folder (the app reads no
+   file by a path relative to it; a relative `CANOA_CONFIG` is made absolute first), waits, and exits with the app's status.
+
+The launcher links the C runtime in and loads what it still imports from System32 alone, so a runtime or system DLL dropped
+beside it (a download folder) is not picked up before it can check anything.
 
 It refuses, and runs nothing, when `%LOCALAPPDATA%\Canoa` or the version folder is a symbolic link, a junction or another
 reparse point, is not a folder, or is owned by someone else (the current user, Administrators and the system account are accepted: Canoa started from an elevated window leaves Administrators-owned files); it never starts a file the manifest does not list, and a
@@ -83,8 +87,10 @@ deleted and the build stops. They run with `APPIMAGE_EXTRACT_AND_RUN=1`, so the 
 `clang`, `cmake`, `ninja`, `pkg-config` and the GTK 3 development files.
 
 To run it: `chmod +x Canoa-x86_64.AppImage && ./Canoa-x86_64.AppImage`. It mounts itself through FUSE 2 (`libfuse2`, or `fuse-libs`
-on Fedora); where that is missing, `./Canoa-x86_64.AppImage --appimage-extract-and-run` works without it. The AppImage is not
-signed either.
+on Fedora); where that is missing, extract it into a folder only you can use and run it from there:
+`mkdir -m 700 ~/canoa-app && cd ~/canoa-app && ../Canoa-x86_64.AppImage --appimage-extract && squashfs-root/AppRun`. On a shared
+machine prefer that to `--appimage-extract-and-run`, which unpacks under `/tmp`. The build gives appimagetool a private
+`target/appimage-tmp` (mode 0700) for the same reason. The AppImage is not signed either.
 
 ## macOS
 

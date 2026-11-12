@@ -105,6 +105,32 @@ class PinTests(unittest.TestCase):
         self.assertTrue(portable.RUNTIME_RELEASE.startswith("https://"))
 
 
+class AppImageBuildTests(unittest.TestCase):
+    @patch("portable.subprocess.run")
+    @patch("portable.make_appdir")
+    @patch("portable.fetch_pinned", side_effect=lambda url, sha, dest: dest)
+    def test_appimagetool_gets_a_private_temporary_folder_under_target(self, _fetch, _appdir, run):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "target" / "appimage-tmp").mkdir(parents=True, mode=0o755)
+            with patch.object(Path, "chmod"):
+                portable.build_appimage(root / "bundle", root, root / "out", "x86_64")
+            env = run.call_args.kwargs["env"]
+            private = root / "target" / "appimage-tmp"
+            self.assertEqual(env["TMPDIR"], str(private))
+            self.assertTrue(private.is_dir())
+        # The folder is made 0700 even when it already existed with wider rights.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "target" / "appimage-tmp").mkdir(parents=True, mode=0o755)
+            with patch("portable.subprocess.run"), patch("portable.make_appdir"), patch(
+                "portable.fetch_pinned", side_effect=lambda url, sha, dest: dest
+            ), patch("portable.Path.chmod", autospec=True) as chmod:
+                portable.build_appimage(root / "bundle", root, root / "out", "x86_64")
+            modes = {(call.args[0].name, call.args[1]) for call in chmod.call_args_list}
+            self.assertIn(("appimage-tmp", 0o700), modes)
+
+
 class WindowsLauncherTests(unittest.TestCase):
     def test_a_folder_without_the_program_is_refused_before_anything_is_built(self):
         with tempfile.TemporaryDirectory() as tmp, patch("portable.subprocess.run") as run:
@@ -130,6 +156,9 @@ class WindowsLauncherTests(unittest.TestCase):
             self.assertIn("canoa-pack", pack.args[0])
             self.assertEqual(pack.args[0][-3:], [str(folder), "4.5.6", str(tmp / "target" / "portable" / "payload.zip")])
             self.assertEqual(build.kwargs["env"]["CANOA_LAUNCH_PAYLOAD"], str(tmp / "target" / "portable" / "payload.zip"))
+            # From the crate's folder, where cargo reads the static-runtime setting that is scoped to it.
+            for call in (pack, build):
+                self.assertEqual(call.kwargs["cwd"], tmp / "crates" / "canoa-launch")
             self.assertEqual(exe, out / "CanoaUI.exe")
             self.assertEqual(sorted(p.name for p in out.iterdir()), ["CanoaUI.exe"], "one file replaces the folder")
             self.assertEqual(exe.read_text(), "launcher")

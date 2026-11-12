@@ -45,8 +45,15 @@ pub fn is_link(meta: &Metadata) -> bool {
 
 /// The folder at `path` when it exists, is a real directory (not a link) and is owned by this user; `Ok(None)` when absent.
 ///
-/// `parent` is a folder already checked, in which the launcher makes a probe file to learn what "this user" owns.
+/// `parent` is a folder already checked, in which the launcher makes a probe file to learn what "this user" owns, and
+/// whose owner is trusted too.
 pub fn check_dir(parent: &Path, path: &Path) -> Result<Option<()>> {
+    check_dir_in(parent, parent, path)
+}
+
+/// [`check_dir`] with the probe made in `probe_dir` and `trust_dir`'s owner trusted; they differ for the base folder,
+/// whose owner must not vouch for itself.
+fn check_dir_in(probe_dir: &Path, trust_dir: &Path, path: &Path) -> Result<Option<()>> {
     let meta = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -61,7 +68,7 @@ pub fn check_dir(parent: &Path, path: &Path) -> Result<Option<()>> {
             path.display()
         )));
     }
-    if !owned_by_me(parent, path)? {
+    if !owned_by_me(probe_dir, trust_dir, path)? {
         return Err(Error::Refused(format!(
             "{} is not owned by the current user",
             path.display()
@@ -94,23 +101,25 @@ pub fn ensure_base(base: &Path) -> Result<()> {
                 .map_err(|e| Error::io(format!("restrict {}", base.display()), e))?;
         }
     }
-    check_dir(base, base).map(|_| ())
+    // The probe goes in `base`, which the user can write; the owner trusted besides is that of the user's data folder.
+    let trust = base.parent().unwrap_or(base);
+    check_dir_in(base, trust, base).map(|_| ())
 }
 
-/// Whether `path` has an owner this launch can trust: the owner of a file this process creates in `parent`, and on Windows
-/// also the owner of `parent` itself, the Administrators group and the system account.
+/// Whether `path` has an owner this launch can trust: the owner of a file this process creates in `probe_dir`, and on
+/// Windows also the owner of `trust_dir`, the Administrators group and the system account.
 ///
 /// A process started elevated creates files owned by Administrators rather than by the user, so a folder made by the same
 /// person's other kind of window would otherwise be refused for good. Who may make a file owned by those is already
 /// someone who can replace the launcher.
-fn owned_by_me(parent: &Path, path: &Path) -> Result<bool> {
-    let probe: PathBuf = parent.join(unique(PROBE));
+fn owned_by_me(probe_dir: &Path, trust_dir: &Path, path: &Path) -> Result<bool> {
+    let probe: PathBuf = probe_dir.join(unique(PROBE));
     File::options()
         .write(true)
         .create_new(true)
         .open(&probe)
-        .map_err(|e| Error::io(format!("create a probe in {}", parent.display()), e))?;
-    let result = trusted_owner(&probe, parent, path);
+        .map_err(|e| Error::io(format!("create a probe in {}", probe_dir.display()), e))?;
+    let result = trusted_owner(&probe, trust_dir, path);
     let _ = fs::remove_file(&probe);
     result.map_err(|e| Error::io(format!("read the owner of {}", path.display()), e))
 }
@@ -182,6 +191,37 @@ mod tests {
         fs::write(&file, b"x").unwrap();
         assert!(matches!(check_dir(&base, &file), Err(Error::Refused(_))));
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Hands the base folder to an owner nothing else vouches for (Everyone), which only a process holding the restore
+    /// privilege may do; without it the test says so and ends.
+    #[cfg(windows)]
+    #[test]
+    fn a_base_folder_cannot_vouch_for_its_own_owner() {
+        use windows_permissions::constants::{SeObjectType, SecurityInformation};
+        use windows_permissions::wrappers::{CreateWellKnownSid, SetNamedSecurityInfo};
+
+        const WORLD: u32 = 1; // WinWorldSid
+        let parent = scratch("guard-base-");
+        let base = parent.join("Canoa");
+        fs::create_dir(&base).unwrap();
+        ensure_base(&base).expect("a base folder this process made is accepted");
+        let everyone = CreateWellKnownSid(WORLD, None).unwrap();
+        let set = SetNamedSecurityInfo(
+            &base,
+            SeObjectType::SE_FILE_OBJECT,
+            SecurityInformation::Owner,
+            Some(everyone.as_ref()),
+            None,
+            None,
+            None,
+        );
+        if let Err(e) = set {
+            eprintln!("skipped: this process may not give a folder to another owner ({e})");
+        } else {
+            assert!(matches!(ensure_base(&base), Err(Error::Refused(_))));
+        }
+        fs::remove_dir_all(&parent).unwrap();
     }
 
     #[test]

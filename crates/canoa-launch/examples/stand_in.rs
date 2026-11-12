@@ -9,6 +9,12 @@ fn main() {
     println!("stand-in dir={}", dir.display());
     println!("stand-in library={}", dir.join("canoa_ffi.dll").is_file());
     println!("stand-in args={args:?}");
+    let cwd = std::env::current_dir().expect("current_dir");
+    println!("stand-in cwd={}", cwd.display());
+    println!(
+        "stand-in config={}",
+        std::env::var("CANOA_CONFIG").unwrap_or_default()
+    );
     let code = match args.as_slice() {
         [flag, ..] if flag == "--canoa-child" => 2,
         [flag, n, ..] if flag == "--exit" => n.parse().unwrap_or(1),

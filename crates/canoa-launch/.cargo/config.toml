@@ -1,0 +1,5 @@
+# Cargo reads this when run from this crate's folder, which is how the packaging step and the tests build the launcher; the
+# rest of the workspace builds as before. The launcher starts from a folder a download may have filled, so no C runtime
+# library is left for a planted copy to take the place of: it is linked in.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

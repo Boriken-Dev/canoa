@@ -45,8 +45,20 @@ fn run() -> Result<i32, Error> {
     )?;
     let _ = prune(&base, &installed.manifest.version);
     let program = installed.program(APP_PROGRAM)?;
-    let status = Command::new(&program)
+    // The app runs in its own folder, not wherever it was started from, which a download may have filled. It reads no
+    // file by a path relative to its working folder except the one CANOA_CONFIG names, kept as the person gave it.
+    let mut command = Command::new(&program);
+    command
         .args(std::env::args_os().skip(1))
+        .current_dir(&installed.dir);
+    if let Some(config) = std::env::var_os("CANOA_CONFIG").map(PathBuf::from)
+        && config.is_relative()
+    {
+        let absolute = std::path::absolute(&config)
+            .map_err(|e| Error::Refused(format!("CANOA_CONFIG {}: {e}", config.display())))?;
+        command.env("CANOA_CONFIG", absolute);
+    }
+    let status = command
         .status()
         .map_err(|e| Error::Refused(format!("start {}: {e}", program.display())))?;
     Ok(status.code().unwrap_or(1))

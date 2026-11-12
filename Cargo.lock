@@ -567,6 +567,7 @@ name = "canoa-launch"
 version = "0.0.0-alpha.0"
 dependencies = [
  "flate2",
+ "object",
  "sha2 0.10.9",
  "win-msgbox",
  "windows-permissions",

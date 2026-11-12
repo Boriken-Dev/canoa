@@ -26,5 +26,9 @@ fn main() {
     };
     fs::write(out.join("payload.zip"), &bytes).expect("write payload.zip");
     fs::write(out.join("payload.sha256"), digest).expect("write payload.sha256");
+    // Every DLL the launcher still imports is looked for in System32 alone, never beside the program (LOAD_LIBRARY_SEARCH_SYSTEM32).
+    if env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc") {
+        println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    }
     println!("cargo:rerun-if-changed=build.rs");
 }
