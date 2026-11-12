@@ -221,7 +221,7 @@ pub fn Serving::run(self)                      // takes connections until Stoppe
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
 pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
 #[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String, pub harness: Option<String>, pub title: Option<String>, pub local: bool, pub missing: Vec<String> }   // local: no address (url is empty); missing: programs a local entry needs that were not found; url: ws://ADDRESS, or pipe:NAME / unix:PATH for an entry on a pipe
-pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it; false for a pipe entry   // kind: "agent", "provider" or "tool"; harness: a harness entry's provider id; title: an agent entry's title
+pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it; false for a pipe entry   // kind: "agent", "provider", "tool" or "control" (the control channel, which `/canoa.json` never lists); harness: a harness entry's provider id; title: an agent entry's title
 ```
 
 - `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound.

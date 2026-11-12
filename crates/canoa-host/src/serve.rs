@@ -1,7 +1,7 @@
 //! Each entry on a loopback WebSocket of its own: a peer proves a key the trust store accepts, then every message is sealed
 //! in the session the proof ended in, and a fresh agent process serves that connection until either side ends.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -23,14 +23,15 @@ use coqui_agentic_peer::mux;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_web_channel::websocket::{self, Frames};
 use coqui_web_channel::{Channel, Failure, Limits};
+use indexmap::IndexMap;
 
 use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
-use crate::control;
 use crate::config::{
     BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Listen, Origin,
     Settings, UsageSource,
 };
+use crate::control;
 use crate::inproc::{self, InProcess};
 use crate::kind;
 use crate::local::{self, Link};
@@ -317,6 +318,10 @@ enum Run {
         program: OsString,
         args: Vec<OsString>,
         line: HostLine,
+    },
+    /// The control channel, for the keys `[host.control]` grants.
+    Control {
+        grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
     },
 }
 
@@ -663,6 +668,55 @@ fn tool_args(before: &[OsString], name: &str, spec: &crate::tool::ToolSpec) -> V
     args
 }
 
+/// Binds one entry's address or pipe, listing what is not the default of it in the log.
+fn bind_listen(
+    name: &str,
+    table: &str,
+    listen: &Listen,
+    origins: &[String],
+) -> Result<(Bound, String), ServeError> {
+    match listen {
+        Listen::Address(address) => {
+            let (bound, listener) = websocket::Listener::bind_plain(*address)
+                .and_then(|listener| Ok((listener.local_addr()?, listener)))
+                .map_err(|failure| ServeError::Listen {
+                    entry: name.to_owned(),
+                    failure,
+                })?;
+            if listener.plain_beyond_loopback() {
+                tracing::info!(
+                    "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
+                    table,
+                    name
+                );
+            }
+            let listener = listener
+                .with_limits(unproven_limits())
+                .with_frames(Frames::Binary)
+                .with_origins(origins.to_vec());
+            Ok((Bound::Socket(listener), url_of(bound)))
+        }
+        Listen::Pipe(pipe_name) => {
+            // Every setting is the crate's default, the access control included; a receive sets its own read timeout.
+            let listener = pipe::Listener::bind(pipe_name).map_err(|error| ServeError::Pipe {
+                entry: name.to_owned(),
+                error,
+            })?;
+            for setting in listener.non_defaults() {
+                tracing::info!(
+                    "non-default: host.{}.{}.listen has {} at {}, default {}",
+                    table,
+                    name,
+                    setting.setting,
+                    setting.value,
+                    setting.default
+                );
+            }
+            Ok((Bound::Pipe(listener), pipe_name.to_string()))
+        }
+    }
+}
+
 impl Serving {
     /// Binds every entry of `config` on its loopback address, proving peers with `identity`, by its method, against `store`.
     /// Nothing is accepted until [`Serving::run`].
@@ -682,7 +736,15 @@ impl Serving {
         } else {
             Vec::new()
         };
-        if config.entries.is_empty() && sources.is_empty() && !options.nothing_to_serve {
+        let controlled = config
+            .control
+            .as_ref()
+            .is_some_and(|control| control.listen.is_some());
+        if config.entries.is_empty()
+            && sources.is_empty()
+            && !controlled
+            && !options.nothing_to_serve
+        {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
@@ -740,47 +802,12 @@ impl Serving {
             let (listener, url) = if entry.local {
                 (None, format!("local://{}", entry.name))
             } else {
-                let (bound, url) = match &entry.listen {
-                    Listen::Address(address) => {
-                        let (bound, listener) = websocket::Listener::bind_plain(*address)
-                            .and_then(|listener| Ok((listener.local_addr()?, listener)))
-                            .map_err(|failure| ServeError::Listen {
-                                entry: entry.name.clone(),
-                                failure,
-                            })?;
-                        if listener.plain_beyond_loopback() {
-                            tracing::info!(
-                                "non-default: host.{}.{}.listen is {bound}, default loopback: any machine that reaches it may try the proof",
-                                table_of(&entry.kind),
-                                entry.name
-                            );
-                        }
-                        let listener = listener
-                            .with_limits(unproven_limits())
-                            .with_frames(Frames::Binary)
-                            .with_origins(config.origins.clone());
-                        (Bound::Socket(listener), url_of(bound))
-                    }
-                    Listen::Pipe(name) => {
-                        // Every setting is the crate's default, the access control included; a receive sets its own read timeout.
-                        let listener =
-                            pipe::Listener::bind(name).map_err(|error| ServeError::Pipe {
-                                entry: entry.name.clone(),
-                                error,
-                            })?;
-                        for setting in listener.non_defaults() {
-                            tracing::info!(
-                                "non-default: host.{}.{}.listen has {} at {}, default {}",
-                                table_of(&entry.kind),
-                                entry.name,
-                                setting.setting,
-                                setting.value,
-                                setting.default
-                            );
-                        }
-                        (Bound::Pipe(listener), name.to_string())
-                    }
-                };
+                let (bound, url) = bind_listen(
+                    &entry.name,
+                    table_of(&entry.kind),
+                    &entry.listen,
+                    &config.origins,
+                )?;
                 (Some(bound), url)
             };
             let (kind, run) = match &entry.kind {
@@ -980,6 +1007,43 @@ impl Serving {
                 None => local_only.push(served),
             }
         }
+        if let Some(settings) = &config.control
+            && let Some(listen) = &settings.listen
+        {
+            let (bound, url) = bind_listen(control::NAME, "control", listen, &config.origins)?;
+            let id = ServiceId::new(control::NAME.to_owned());
+            registry.register(
+                Service::new(id.clone(), control::NAME.to_owned(), "control", url.clone())
+                    .verified(),
+            );
+            for peer in settings.grants.keys() {
+                registry.grant(
+                    ClientId::new(peer.to_string()),
+                    id.clone(),
+                    Capability::new(ACP_CAPABILITY),
+                );
+            }
+            listening.push(Listening {
+                name: control::NAME.to_owned(),
+                kind: "control",
+                url,
+                harness: None,
+                title: None,
+                local: false,
+                missing: Vec::new(),
+            });
+            listeners.push((
+                Arc::new(Served {
+                    name: control::NAME.to_owned(),
+                    restricted: true,
+                    run: Run::Control {
+                        grants: settings.grants.clone(),
+                    },
+                    running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
+                }),
+                bound,
+            ));
+        }
         Ok(Self {
             shared: Arc::new(Shared {
                 method,
@@ -997,8 +1061,14 @@ impl Serving {
                             .as_ref()
                             .map(|dir| dir.join("control"))
                             .as_deref(),
-                        control::DEFAULT_MAX_RECORDS,
-                        control::DEFAULT_MAX_RECORD_BYTES,
+                        config
+                            .control
+                            .as_ref()
+                            .map_or(control::DEFAULT_MAX_RECORDS, |c| c.max_records),
+                        config
+                            .control
+                            .as_ref()
+                            .map_or(control::DEFAULT_MAX_RECORD_BYTES, |c| c.max_record_bytes),
                     )
                     .map_err(ServeError::Control)?,
                 ),
@@ -1272,6 +1342,18 @@ fn give_agent<C: Channel>(
             args,
             line,
         } => return give_provider(shared, served, channel, peer, (program, args), line),
+        Run::Control { grants } => {
+            let grants = grants
+                .iter()
+                .find(|(key, _)| *key == peer)
+                .map(|(_, grants)| grants.clone())
+                .unwrap_or_default();
+            let caller = control::Caller::Peer {
+                id: peer.to_string(),
+                grants,
+            };
+            return control::serve(&shared.control, &caller, channel);
+        }
     };
     let connection = match offer {
         Some(offer) => match prepare(served, channel, first, peer, offer) {

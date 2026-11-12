@@ -1,6 +1,6 @@
 //! The `[host]` table of canoa.cfg: what the host serves, and to whom. The other tables belong to the app and are not read.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -47,9 +47,26 @@ pub struct Config {
     pub accounts: IndexMap<String, AccountConfig>,
     /// Where the accounts' credentials are kept: `[host] account_store`.
     pub account_store: AccountStore,
+    /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
+    /// such table, which leaves the channel to this process.
+    pub control: Option<ControlConfig>,
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
     /// [`Entry::local`] set), in the file's order. They are served when the host serves its own sources.
     pub local_agents: Vec<Entry>,
+}
+
+/// `[host.control]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ControlConfig {
+    /// Where a paired key reaches the control channel; `None` leaves it to this process.
+    pub listen: Option<Listen>,
+    /// What each paired key may do on it, in the file's order. A key not here is turned away.
+    pub grants: IndexMap<PeerId, BTreeSet<crate::control::Grant>>,
+    /// Ledger records the host keeps.
+    pub max_records: usize,
+    /// The largest ledger record, in bytes.
+    pub max_record_bytes: usize,
 }
 
 /// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
@@ -584,6 +601,18 @@ struct RawHost {
     accounts: IndexMap<String, RawAccount>,
     account_store: Option<String>,
     web: Option<RawWeb>,
+    control: Option<RawControl>,
+}
+
+/// `[host.control]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawControl {
+    listen: Option<String>,
+    #[serde(default)]
+    grants: IndexMap<String, Vec<String>>,
+    max_records: Option<usize>,
+    max_record_bytes: Option<usize>,
 }
 
 /// `[host.accounts.NAME]`. A key it does not list is collected, so that it is refused by name and a credential written
@@ -1042,6 +1071,16 @@ impl Config {
             entries.push(entry(name, EntryKind::Tool { spec }, common)?);
         }
         check_unique(&entries)?;
+        let control = host.control.map(control_of).transpose()?;
+        if let Some(listen) = control.as_ref().and_then(|control| control.listen.as_ref())
+            && listen.is_fixed()
+            && entries.iter().any(|entry| &entry.listen == listen)
+        {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "host.control: another entry listens on the same address".to_owned(),
+            });
+        }
         let web = host
             .web
             .map(|raw| web_of(raw, &directory, &entries))
@@ -1055,6 +1094,7 @@ impl Config {
             accounts,
             account_store,
             local_agents,
+            control,
         })
     }
 
@@ -1063,6 +1103,52 @@ impl Config {
     pub fn entry(&self, name: &str) -> Option<&Entry> {
         self.entries.iter().find(|entry| entry.name == name)
     }
+}
+
+/// `[host.control]`. Errors name a key, never a value.
+fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("host.control: {what}"),
+    };
+    let listen = raw
+        .listen
+        .map(|text| Listen::parse(&text).map_err(|what| refused(&format!("listen: {what}"))))
+        .transpose()?;
+    let mut grants = IndexMap::new();
+    for (peer, names) in raw.grants {
+        let id = peer
+            .parse::<PeerId>()
+            .map_err(|_| refused("a key under grants is not a peer id"))?;
+        let mut set = BTreeSet::new();
+        for name in names {
+            set.insert(
+                crate::control::Grant::named(&name)
+                    .ok_or_else(|| refused("a grant is not one this host knows"))?,
+            );
+        }
+        grants.insert(id, set);
+    }
+    let max_records = raw
+        .max_records
+        .unwrap_or(crate::control::DEFAULT_MAX_RECORDS);
+    let max_record_bytes = raw
+        .max_record_bytes
+        .unwrap_or(crate::control::DEFAULT_MAX_RECORD_BYTES);
+    if max_records == 0 || max_record_bytes == 0 {
+        return Err(refused("max_records and max_record_bytes are at least 1"));
+    }
+    if listen.is_some() && grants.is_empty() {
+        return Err(refused(
+            "listen without a key under grants would turn every key away",
+        ));
+    }
+    Ok(ControlConfig {
+        listen,
+        grants,
+        max_records,
+        max_record_bytes,
+    })
 }
 
 fn invalid(name: &str, what: &str) -> ConfigError {

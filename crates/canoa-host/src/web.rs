@@ -333,7 +333,7 @@ impl WebServer {
         let listed: Vec<Listening> = serving
             .listening()
             .iter()
-            .filter(|listening| !listening.local)
+            .filter(|listening| !listening.local && listening.kind != "control")
             .cloned()
             .collect();
         Self::bind_listing(web, &peer, serving.method().name(), &listed)

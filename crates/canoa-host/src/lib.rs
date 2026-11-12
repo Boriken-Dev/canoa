@@ -29,9 +29,9 @@ mod worktree;
 
 pub use accounts::ACCOUNT_META;
 pub use config::{
-    AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, Entry, EntryKind,
-    HarnessOptions, Listen, Origin, Settings, UsageSource, WebConfig, cache_lifetime_name,
-    cache_lifetime_named,
+    AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig, Entry,
+    EntryKind, HarnessOptions, Listen, Origin, Settings, UsageSource, WebConfig,
+    cache_lifetime_name, cache_lifetime_named,
 };
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
