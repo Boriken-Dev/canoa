@@ -706,3 +706,56 @@ fn pre_env_fires_before_the_agent_starts_and_only_for_hooks_canoa_cfg_allows() {
     );
     setup.host.stop();
 }
+
+#[test]
+fn a_hook_and_a_delegation_tool_share_one_connection_and_each_does_its_part() {
+    let setup = start(
+        "",
+        &[("session-start", print(START))],
+        &Allow::Digest,
+        &["--system-prompt", "--mcp-http"],
+    );
+    // The client asks for the delegation tools in the same `initialize` that the hooks' report comes back on.
+    let (init, _) = linked::ask(
+        &setup.link,
+        1,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {canoa_host::DELEGATE_META: true}}),
+    )
+    .expect("initialize is answered");
+    assert_eq!(
+        item(&init["_meta"][PROFILE_META], "hooks.team.session-start")["state"],
+        "applied",
+        "{init}"
+    );
+    let opened = setup.new_session(2).expect("a session opens");
+    let session = session_id(&opened);
+    // The hook added its context to the session the host also gave the tool entry.
+    let system = setup.agent_state(&session)["system"].to_string();
+    assert!(system.contains("CTX-START"), "{system}");
+    let ask_turn = |id: u64, text: &str| {
+        let (answer, updates) = linked::ask(
+            &setup.link,
+            id,
+            "session/prompt",
+            json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]}),
+        )
+        .expect("the turn is answered");
+        assert_eq!(answer["stopReason"], "end_turn");
+        linked::said(&updates)
+    };
+    let task: Value =
+        serde_json::from_str(&ask_turn(3, "Delegate Scripted Say shared")).expect("a task id");
+    let id = task["taskId"].as_str().expect("an id");
+    let mut result = Value::Null;
+    for turn in 4..40 {
+        result =
+            serde_json::from_str(&ask_turn(turn, &format!("Status {id} 5000"))).expect("a status");
+        if result["state"] == "completed" {
+            break;
+        }
+    }
+    assert_eq!(result["state"], "completed", "{result}");
+    assert_eq!(result["result"], "shared");
+    setup.host.stop();
+}
