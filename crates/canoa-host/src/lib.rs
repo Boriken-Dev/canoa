@@ -10,6 +10,7 @@ pub mod config;
 pub mod control;
 mod delegate;
 pub mod harness;
+mod history;
 pub mod home;
 mod inproc;
 mod kind;

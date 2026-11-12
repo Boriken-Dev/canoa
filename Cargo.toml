@@ -41,8 +41,10 @@ coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1ce
 coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 # Claude Code, Codex and Pi as ACP agents, run in this process with no Node: their translators and what they share.
-coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
+coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a", features = ["history"] }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a", features = ["history"] }
+# The session-history format: the recorder, the reader and the loss report.
+coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a" }
 coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ad1cef39b068a38ed4775cbc73e3eea94283637a", features = ["antigravity", "kind"] }
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.

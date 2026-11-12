@@ -35,6 +35,7 @@ use crate::config::{
 };
 use crate::control;
 use crate::delegate::{self, Delegating, Delegation, Peek, Principal};
+use crate::history::{self, Recording};
 use crate::inproc::{self, InProcess};
 use crate::kind;
 use crate::local::{self, Link};
@@ -367,6 +368,8 @@ struct Shared {
     control: Arc<control::Control>,
     /// What lets an agent session hand a task to another source; `None` when `[host.delegate]` is off.
     delegation: Option<Delegation>,
+    /// The sessions the host serves, recorded in its home.
+    history: Arc<history::Store>,
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -878,6 +881,7 @@ impl Serving {
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
         let mut local_only = Vec::new();
+        let mut movers: BTreeMap<String, Arc<kind::Harness>> = BTreeMap::new();
         let missing_of: BTreeMap<&str, &Vec<String>> = sources
             .iter()
             .map(|source| (source.entry.name.as_str(), &source.missing))
@@ -1028,10 +1032,12 @@ impl Serving {
                         }
                         _ => provider,
                     };
+                    let provider = Arc::new(provider);
+                    movers.insert(entry.name.clone(), Arc::clone(&provider));
                     (
                         "agent",
                         Run::Agent {
-                            agent: Agent::Harness(Arc::new(provider)),
+                            agent: Agent::Harness(provider),
                             scope: Scope::new(entry.working_roots.clone())
                                 .account(entry.name.clone())
                                 .limit_phrases(config.limit_phrases.clone()),
@@ -1142,8 +1148,13 @@ impl Serving {
             ));
         }
         let delegation = Delegation::start(&config.delegate);
+        let recorded = Arc::new(history::Store::open(
+            options.state_dir.as_ref().map(|dir| dir.join("history")),
+            config.history,
+        ));
         let serving = Self {
             shared: Arc::new(Shared {
+                history: Arc::clone(&recorded),
                 method,
                 store,
                 registry,
@@ -1181,6 +1192,10 @@ impl Serving {
                             .collect(),
                     )
                     .map_err(ServeError::Control)?;
+                    let kept = kept.with_history(control::Moves {
+                        store: recorded,
+                        targets: movers,
+                    });
                     match &options.programs {
                         Some((programs, providers)) => kept.with_stores(control::Stores::new(
                             Arc::clone(programs),
@@ -1915,14 +1930,30 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner, started.keeper);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &Delegating::new(&Hosted::in_process(&gated, scope, connection), conn),
+            &Delegating::new(
+                &Recording::new(
+                    &Hosted::in_process(&gated, scope, connection),
+                    &shared.history,
+                    &served.name,
+                    harness.id(),
+                ),
+                conn,
+            ),
             &*started.harness,
             to_provider,
             MAX_LINE,
             &control,
         ),
         None => inproc::serve_kind(
-            &Delegating::new(&Scoped::new(&gated, scope), conn),
+            &Delegating::new(
+                &Recording::new(
+                    &Scoped::new(&gated, scope),
+                    &shared.history,
+                    &served.name,
+                    harness.id(),
+                ),
+                conn,
+            ),
             &*started.harness,
             to_provider,
             MAX_LINE,

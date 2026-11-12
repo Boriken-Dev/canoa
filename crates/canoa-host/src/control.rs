@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use coqui_transport::{Channel, Failure};
 
 use crate::worktree::Worktrees;
+pub(crate) use moves::Moves;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 pub(crate) use stores::Stores;
@@ -49,6 +50,7 @@ const NO_METHOD: i32 = -32601;
 const BAD_PARAMS: i32 = -32602;
 const DENIED: i32 = -32001;
 const REFUSED: i32 = -32002;
+const NOT_FOUND: i32 = -32003;
 
 /// What a paired key may be allowed to do on the control channel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -156,6 +158,8 @@ pub(crate) struct EntryRoots {
 pub(crate) struct Control {
     /// The program stores, built on the first request that needs them unless handed in.
     stores: OnceLock<Result<Stores, String>>,
+    /// The recorded histories and the harnesses a session may be moved to.
+    history: Option<Moves>,
     entries: Vec<EntryRoots>,
     path: Option<PathBuf>,
     max_records: usize,
@@ -241,6 +245,7 @@ impl Control {
         }
         Ok(Self {
             stores: OnceLock::new(),
+            history: None,
             entries,
             path,
             max_records,
@@ -253,6 +258,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_stores(self, stores: Stores) -> Self {
         let _ = self.stores.set(Ok(stores));
+        self
+    }
+
+    /// Answers `history/*` from the recorded histories, moving a session to one of the harnesses it names.
+    #[must_use]
+    pub(crate) fn with_history(mut self, history: Moves) -> Self {
+        self.history = Some(history);
         self
     }
 
@@ -321,6 +333,9 @@ impl Control {
             Some(method @ ("store/rollback" | "store/remove")) => owner_only(caller)
                 .and_then(|()| self.stores())
                 .and_then(|stores| stores.change(method, &params)),
+            Some(method @ ("history/export" | "history/move")) => {
+                owner_only_history(caller).and_then(|()| self.history_call(method, &params))
+            }
             Some("store/apply") => Err((
                 REFUSED,
                 "an apply needs a link that can carry its progress".to_owned(),
@@ -540,6 +555,17 @@ fn owner_only(caller: &Caller) -> Result<(), (i32, String)> {
     }
 }
 
+/// A recorded session is the person's: only this process reads or moves one, and no grant says otherwise.
+fn owner_only_history(caller: &Caller) -> Result<(), (i32, String)> {
+    match caller {
+        Caller::Owner => Ok(()),
+        Caller::Peer { .. } => Err((
+            DENIED,
+            "only the person running this host reads or moves a recorded session".to_owned(),
+        )),
+    }
+}
+
 fn allow(caller: &Caller, grant: Grant) -> Result<(), (i32, String)> {
     if caller.may(grant) {
         Ok(())
@@ -643,7 +669,7 @@ fn restrict(path: &Path, mode: u32) -> std::io::Result<()> {
 }
 
 /// Creates `dir` readable by this user alone where the system has such a thing.
-fn private_dir(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt as _;
@@ -670,6 +696,7 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+mod moves;
 mod stores;
 
 #[cfg(test)]

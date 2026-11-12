@@ -57,6 +57,8 @@ pub struct Config {
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
     /// such table, which leaves the channel to this process.
     pub control: Option<ControlConfig>,
+    /// `[host.history]`: whether the host records the sessions it serves, and how much it keeps.
+    pub history: HistoryConfig,
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
     /// [`Entry::local`] set), in the file's order. They are served when the host serves its own sources.
     pub local_agents: Vec<Entry>,
@@ -158,6 +160,32 @@ pub struct ControlConfig {
     pub max_records: usize,
     /// The largest ledger record, in bytes.
     pub max_record_bytes: usize,
+}
+
+/// `[host.history]`: the host records each session it serves in the session-history format, in its home beside the ledger, and
+/// the owner exports it or moves it to another source over the control channel. Every limit is a setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HistoryConfig {
+    /// `record`: whether sessions are recorded at all (on by default).
+    pub record: bool,
+    /// `max_session_bytes`: what one session's history may take on disk; a turn that would pass it is not kept.
+    pub max_session_bytes: u64,
+    /// `max_sessions`: how many sessions have a history; a new one past it is not recorded.
+    pub max_sessions: usize,
+    /// `max_total_bytes`: what every history together may take; a turn that would pass it is not kept.
+    pub max_total_bytes: u64,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            record: true,
+            max_session_bytes: crate::history::DEFAULT_MAX_SESSION_BYTES,
+            max_sessions: crate::history::DEFAULT_MAX_SESSIONS,
+            max_total_bytes: crate::history::DEFAULT_MAX_TOTAL_BYTES,
+        }
+    }
 }
 
 /// `[host.store]`: the lists, in gitignore syntax, that the host holds a program store's installs to. Each is `None` when the
@@ -848,8 +876,19 @@ struct RawHost {
     account_store: Option<String>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
+    history: Option<RawHistory>,
     store: Option<RawStore>,
     delegate: Option<RawDelegate>,
+}
+
+/// `[host.history]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHistory {
+    record: Option<bool>,
+    max_session_bytes: Option<u64>,
+    max_sessions: Option<usize>,
+    max_total_bytes: Option<u64>,
 }
 
 /// `[host.control]`.
@@ -1342,6 +1381,11 @@ impl Config {
         }
         check_unique(&entries)?;
         let control = host.control.map(control_of).transpose()?;
+        let history = host
+            .history
+            .map(history_of)
+            .transpose()?
+            .unwrap_or_default();
         if let Some(listen) = control.as_ref().and_then(|control| control.listen.as_ref())
             && listen.is_fixed()
             && entries.iter().any(|entry| &entry.listen == listen)
@@ -1367,6 +1411,7 @@ impl Config {
             local_agents,
             local_profiles,
             control,
+            history,
             store,
             delegate,
             skill_pins,
@@ -1378,6 +1423,32 @@ impl Config {
     pub fn entry(&self, name: &str) -> Option<&Entry> {
         self.entries.iter().find(|entry| entry.name == name)
     }
+}
+
+/// `[host.history]`. Errors name a key, never a value.
+fn history_of(raw: RawHistory) -> Result<HistoryConfig, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("host.history: {what}"),
+    };
+    let default = HistoryConfig::default();
+    let config = HistoryConfig {
+        record: raw.record.unwrap_or(default.record),
+        max_session_bytes: raw.max_session_bytes.unwrap_or(default.max_session_bytes),
+        max_sessions: raw.max_sessions.unwrap_or(default.max_sessions),
+        max_total_bytes: raw.max_total_bytes.unwrap_or(default.max_total_bytes),
+    };
+    if config.max_session_bytes == 0 || config.max_sessions == 0 || config.max_total_bytes == 0 {
+        return Err(refused(
+            "max_session_bytes, max_sessions and max_total_bytes are at least 1; record = false records nothing",
+        ));
+    }
+    if config.max_session_bytes > crate::history::MAX_SESSION_BYTES_CEILING {
+        return Err(refused(
+            "max_session_bytes is at most 256 MiB: a history is read whole to be moved",
+        ));
+    }
+    Ok(config)
 }
 
 /// `[host.control]`. Errors name a key, never a value.

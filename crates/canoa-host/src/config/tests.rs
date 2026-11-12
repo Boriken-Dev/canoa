@@ -1304,5 +1304,31 @@ fn an_allowance_that_is_not_a_digest_or_names_no_overlay_is_refused_naming_the_s
         let said = parse(text).expect_err(text).to_string();
         assert!(said.contains(what), "{text}: {said}");
         assert!(!said.contains("sha256:12"), "never a value: {said}");
+
+fn host_history_has_defaults_takes_each_limit_and_refuses_zero_and_the_unknown() {
+    let none = Config::from_str_in("", &base()).expect("parses");
+    assert_eq!(none.history, HistoryConfig::default());
+    assert!(none.history.record);
+    let set = Config::from_str_in(
+        "[host.history]\nrecord = false\nmax_session_bytes = 1000\nmax_sessions = 3\nmax_total_bytes = 5000\n",
+        &base(),
+    )
+    .expect("parses");
+    assert!(!set.history.record);
+    assert_eq!(
+        (set.history.max_session_bytes, set.history.max_sessions, set.history.max_total_bytes),
+        (1000, 3, 5000)
+    );
+    for bad in [
+        "max_sessions = 0",
+        "max_session_bytes = 0",
+        "max_total_bytes = 0",
+        "max_session_bytes = 999999999999",
+        "unknown = 1",
+    ] {
+        assert!(
+            Config::from_str_in(&format!("[host.history]\n{bad}\n"), &base()).is_err(),
+            "{bad}"
+        );
     }
 }

@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`) and `coqui-acp-provider` (coqui-acp `ad1cef39`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`8dad1766`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-transport` and `coqui-transport-web` (`websocket`), `coqui-builder` (the error a listener builder returns), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`), `coqui-acp-history` and `coqui-acp-provider` (coqui-acp `ad1cef39`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`8dad1766`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-transport` and `coqui-transport-web` (`websocket`), `coqui-builder` (the error a listener builder returns), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -523,6 +523,7 @@ max_record_bytes = 262144                           # one ledger record
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove` |
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
 | *(none)* | `store/apply`, `store/rollback`, `store/remove`: **owner only**; `[host.control]` refuses `store.write` as a grant |
+| *(none)* | `history/export`, `history/move`: **owner only**; no grant names them |
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
 as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
@@ -537,6 +538,38 @@ as opaque JSON objects the host never reads into: it keeps an `id`, the record, 
   `-32002` past `max_record_bytes`, or past `max_records` for a new id.
 - `ledger/remove` `{"id"}` -> `{"removed": bool}`; `ledger/clear` `{}` -> `{"removed": n}`, the caller's own records.
 - A request over 16 MiB, or not JSON, ends the connection; `-32700` first when it can be answered.
+
+**Session history.** The host records each session it serves in the session-history format (`coqui-acp-history`) in its home,
+`history/`, one `<sha256 of entry and session id>.jsonl` a session in a directory and files only this user reads (`0700`/`0600`
+on Unix). A turn is written when it ends, and a connection that ends inside one writes it as ended with an error, so a stop
+loses at most the turn in flight. It records what reaches the agent and what the agent says, after the host's own checks, and
+never a message over the limit: a session that passes a limit keeps what it had and nothing more.
+
+```toml
+[host.history]
+record = true                       # false records nothing
+max_session_bytes = 16777216        # one session's history; at most 64 MiB, since a history is read whole to be moved
+max_sessions = 1000                 # sessions with a history; a new one past it is not recorded
+max_total_bytes = 1073741824        # every history together
+```
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `history/export` | `entry`, `session`, `max_bytes`? (1 to 4 MiB, default 1 MiB), `after`? | `{"id", "text", "next"?}`: one page of whole lines of the history as it is, the first with the header; `next` is the `after` of the following page |
+| `history/move` | `entry`, `session`, `to` (an entry that runs a harness), `cwd`? (absolute; the history's own by default, and under the target's working roots) | `{"session", "entry", "cwd", "replayed", "compacted", "seededFrom"?, "recorded", "losses": [{"kind", "count", "detail"?}]}` |
+
+- `entry` and `session` are the source entry's name and the session id its client used. A session with no history, an
+  entry that is not a harness and a host that records nothing answer `-32003` or `-32002` with the reason.
+- A move imports the history into the target at a **new** UUID the host makes (never an existing session), by the provider's
+  `import_session`: Claude and Codex write their own session files; an entry whose provider replays (`replay_max_bytes` set on
+  its settings) carries the history as context in the first prompt and says so (`replayed`, and `replayed_as_prompt` among the
+  losses); any other provider refuses with its reason. The new session then has a history of its own (`recorded`), which can be
+  exported or moved again. A client opens it by `session/resume` or `session/load` of that id on the target's entry.
+- `losses` is what did not carry (`thinking`, `tool_as_note`, `attachment_by_digest`, `replayed_as_prompt`, `history_cut`,
+  `item_cut`, `non_text_omitted`, `summary_missing`), counts only, never the lost content. The history is context, never
+  commands: nothing is run again.
+- Both methods are the owner's alone, over the app's own link: a recorded session holds what the person and the agent said,
+  tool output included, which a paired key has no grant to read.
 
 **`worktree/*`** takes the params and answers the results of `_canoa/worktree/*` ("Worktrees" below), with every check of
 theirs unchanged (branch names, repositories led out by links or share paths, no hooks, `MAX_WORKTREES`). The owner (the app)

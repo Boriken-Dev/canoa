@@ -555,3 +555,48 @@ fn the_ledger_and_its_folder_are_made_private_whenever_the_host_opens_them() {
     assert_eq!(mode(&dir.join("ledger.json")), 0o600);
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_recorded_session_is_the_owners_alone_whatever_a_key_is_granted() {
+    let control = memory();
+    let everything = peer(
+        "k",
+        &[
+            Grant::LedgerRead,
+            Grant::LedgerWrite,
+            Grant::Worktree,
+            Grant::StoreRead,
+        ],
+    );
+    for method in ["history/export", "history/move"] {
+        let answer = ask(
+            &control,
+            &everything,
+            method,
+            json!({"entry": "Claude", "session": "s", "to": "Codex"}),
+        );
+        assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+    }
+}
+
+#[test]
+fn a_host_that_keeps_no_histories_refuses_the_owner_with_the_reason() {
+    let control = memory();
+    let answer = ask(
+        &control,
+        &Caller::Owner,
+        "history/export",
+        json!({"entry": "Claude", "session": "s"}),
+    );
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("no session histories"))
+    );
+}
+
+#[test]
+fn no_grant_names_history() {
+    assert!(Grant::named("history.read").is_none() && Grant::named("history.move").is_none());
+}

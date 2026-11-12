@@ -76,6 +76,8 @@ pub(crate) type Departure = (String, String, String);
 
 /// One entry's provider, configured: what each of its connections starts from.
 pub(crate) struct Harness {
+    /// The provider id the entry names, as a history's origin says it.
+    id: String,
     plain: Arc<dyn AcpHarness>,
     /// The same configuration with client plugins allowed, for a connection that has a profile; `None` when the provider
     /// has no such setting.
@@ -155,6 +157,7 @@ impl Harness {
             None
         };
         Ok(Self {
+            id: id.to_owned(),
             plain,
             profiled,
             roots,
@@ -206,6 +209,16 @@ impl Harness {
         } else {
             self.lifetime.unwrap_or(asked)
         })
+    }
+
+    /// The provider id the entry names.
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The entry's working roots; none lets any directory.
+    pub(crate) fn roots(&self) -> &[String] {
+        &self.roots
     }
 
     /// What the provider says of its accounts and sign-ins.

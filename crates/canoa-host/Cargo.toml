@@ -34,6 +34,7 @@ coqui-acp-claude.workspace = true
 coqui-acp-codex.workspace = true
 coqui-acp-pi.workspace = true
 coqui-acp-harness.workspace = true
+coqui-acp-history.workspace = true
 coqui-acp-provider.workspace = true
 coqui-aos.workspace = true
 coqui-a2a.workspace = true

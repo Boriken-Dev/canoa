@@ -520,6 +520,7 @@ dependencies = [
  "coqui-acp-claude",
  "coqui-acp-codex",
  "coqui-acp-harness",
+ "coqui-acp-history",
  "coqui-acp-pi",
  "coqui-acp-provider",
  "coqui-agentic-peer",
@@ -786,6 +787,7 @@ dependencies = [
  "clap",
  "coqui-acp-api",
  "coqui-acp-harness",
+ "coqui-acp-history",
  "serde_json",
  "uuid",
 ]
@@ -798,6 +800,7 @@ dependencies = [
  "clap",
  "coqui-acp-api",
  "coqui-acp-harness",
+ "coqui-acp-history",
  "serde_json",
 ]
 
