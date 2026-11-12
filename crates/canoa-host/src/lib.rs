@@ -7,6 +7,7 @@ mod accounts;
 mod child;
 pub mod cli;
 pub mod config;
+pub mod control;
 pub mod harness;
 pub mod home;
 mod inproc;

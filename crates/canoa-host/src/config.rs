@@ -1598,6 +1598,9 @@ fn local_agents_of(agents: &IndexMap<String, toml::Value>) -> Result<Vec<Entry>,
             entry: Some(name.clone()),
             what: format!("agents.{name}: {what}"),
         };
+        if name == crate::control::NAME {
+            return Err(bad("that name is the host's control channel"));
+        }
         let program = program
             .as_str()
             .filter(|program| !program.is_empty())

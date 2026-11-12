@@ -459,6 +459,55 @@ pub const fn ProfileError::code(&self) -> &'static str     // "parse", "name", "
 - **The report** (`OverlayReport`) is `coqui_aos::effective` over the manifest less its env files and its required references nothing shares, which the report lists as `unresolved`: `ungranted` and `non_defaults` are the specification's for what Canoa applies (`unpinned`, `env-passthrough`, `secret-read`, `env-sensitive`, `insecure-transport`; not `env-script`, `setup-network`, `deps-network` and the rest, since nothing runs). When that call refuses (a partial lock, an env-path conflict) the report lists none, since the environment would refuse too.
 - **A server over plain `http`** to another host (`insecure-transport` in that report) never gets `headers_env`.
 
+## The control channel (`canoa_host::control`)
+
+What belongs to no agent entry: the session ledger, the worktrees and, later, the overlay store. One host-level service,
+named `@control` (the `@` is not a name an entry can have), speaking JSON-RPC 2.0, one message to a line as ACP does, but not ACP:
+no `initialize`, requests and their answers only. Errors: `-32601` no such method, `-32602` bad params, `-32001` **denied** (the
+caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
+
+**Who reaches it, and as whom**
+
+- *The app*, in this process: `Local::open("@control")` (`canoa_ffi_link_open` with that entry name). The caller is the **owner**: every
+  method, every record. Nothing on a network can obtain a `Local`.
+- *A paired client*, from the outside: only when `[host.control]` names an address or pipe (`listen`, as an entry has it; default
+  none, so no network control) and lists the key under `grants`. The connection proves its key as an entry's does (same method,
+  same pairing); a paired key `grants` does not name is turned away after the proof, as an entry's `peers` turns one away. The
+  caller is that **peer**: only the methods its grants name.
+
+```toml
+[host.control]
+listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
+grants = { "sha256:…" = ["ledger.read", "ledger.write"] }   # per key; a key not here gets nothing
+max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
+max_record_bytes = 262144                           # one ledger record
+```
+
+| Grant | Methods |
+| --- | --- |
+| `ledger.read` | `ledger/list` |
+| `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
+| `worktree` | `worktree/new`, `worktree/status`, `worktree/remove` (planned) |
+| `store.read`, `store.write` | the overlay store (planned) |
+
+**The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
+as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
+
+- Every record has an **owner**: `"local"` for the app, else the peer's id. A peer sees and changes only the records it owns, and
+  `put` makes it the owner whatever the request says; the owner (the app) sees and changes all.
+- `ledger/list` `{"after"?: id, "limit"?: 1..=500, default 100}` -> `{"records": [{"id", "updated", "owner", "record"}], "next"?: id}`,
+  newest `updated` first; `next` is the `after` of the following page.
+- `ledger/put` `{"id": text of 1 to 128 characters with no control character, "record": object}` -> `{"id", "updated"}`; replaces the
+  record of that id (a peer cannot replace another owner's: `-32001`); `updated` is the host's clock, in milliseconds. Refused
+  `-32002` past `max_record_bytes`, or past `max_records` for a new id.
+- `ledger/remove` `{"id"}` -> `{"removed": bool}`; `ledger/clear` `{}` -> `{"removed": n}`, the caller's own records.
+- A request over 16 MiB, or not JSON, ends the connection; `-32700` first when it can be answered.
+
+**Planned in this area, not yet built:** `worktree/*` with the params and results of `_canoa/worktree/*` below. For the owner any
+absolute path on this computer, with every other check unchanged (branch names, repositories led out by links or share paths,
+no hooks); for a peer with the grant only under the `working_roots` of the entries it may use. The entry-level
+`_canoa/worktree/*` goes once a client uses these. The overlay store follows, as `store/*` with the grants above.
+
 ## Worktrees
 
 No public API: what `serve` answers on an agent or tool entry with `working_roots` and `worktrees` on (the default), before its agent starts. Off, or with no root, each is `-32602`.

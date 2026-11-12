@@ -26,6 +26,7 @@ use coqui_web_channel::{Channel, Failure, Limits};
 
 use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
+use crate::control;
 use crate::config::{
     BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Listen, Origin,
     Settings, UsageSource,
@@ -177,6 +178,8 @@ pub enum ServeError {
         /// Why; names a key, never a value.
         what: String,
     },
+    /// The host's ledger could not be opened.
+    Control(control::ControlError),
 }
 
 impl fmt::Display for ServeError {
@@ -199,6 +202,7 @@ impl fmt::Display for ServeError {
                 )
             }
             Self::Accounts { what } => write!(f, "[host.accounts]: {what}"),
+            Self::Control(error) => write!(f, "the control channel's ledger {error}"),
         }
     }
 }
@@ -336,6 +340,8 @@ struct Shared {
     /// Set by [`Stopper::stop`]: every listener and link ends.
     stopped: Arc<AtomicBool>,
     program_args: Vec<OsString>,
+    /// The ledger and the rest of what belongs to no entry.
+    control: Arc<control::Control>,
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -537,6 +543,9 @@ impl Local {
     ///
     /// [`LocalError`]: no such entry, the host is stopping, or no thread could be started.
     pub fn open(&self, entry: &str) -> Result<Link, LocalError> {
+        if entry == control::NAME {
+            return self.open_control();
+        }
         let served = self
             .served
             .iter()
@@ -553,6 +562,25 @@ impl Local {
             .spawn(move || {
                 let peer = shared.method.peer_id();
                 serve_proven(&shared, &served, &host, &peer);
+                host.close();
+            })
+            .map_err(|_| LocalError::Thread)?;
+        Ok(client)
+    }
+}
+
+impl Local {
+    /// The control channel, as its owner.
+    fn open_control(&self) -> Result<Link, LocalError> {
+        if self.shared.stopped.load(Ordering::SeqCst) {
+            return Err(LocalError::Stopped);
+        }
+        let (client, host) = local::pair(control::MAX_REQUEST, Arc::clone(&self.shared.stopped));
+        let control = Arc::clone(&self.shared.control);
+        thread::Builder::new()
+            .name("canoa-control".to_owned())
+            .spawn(move || {
+                control::serve(&control, &control::Caller::Owner, &host);
                 host.close();
             })
             .map_err(|_| LocalError::Thread)?;
@@ -962,6 +990,18 @@ impl Serving {
                 ending: Mutex::new(()),
                 stopped: Arc::new(AtomicBool::new(false)),
                 program_args: options.program_args.clone(),
+                control: Arc::new(
+                    control::Control::open(
+                        options
+                            .state_dir
+                            .as_ref()
+                            .map(|dir| dir.join("control"))
+                            .as_deref(),
+                        control::DEFAULT_MAX_RECORDS,
+                        control::DEFAULT_MAX_RECORD_BYTES,
+                    )
+                    .map_err(ServeError::Control)?,
+                ),
             }),
             listeners,
             local_only,
