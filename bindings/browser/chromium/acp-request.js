@@ -1,4 +1,7 @@
 // The provider's own window: what a person decides about a page and an agent, and where they add and remove agents.
+import { keyAnswer } from "./answer-keys.js";
+import { defaultBrowserName, readBrowserName, writeBrowserName } from "./browser-name.js";
+
 const main = document.querySelector("#main");
 const params = new URLSearchParams(location.search);
 const askId = params.get("ask");
@@ -30,6 +33,25 @@ function holdClicks() {
   };
   window.addEventListener("focus", hold);
   hold();
+}
+
+let keyHandler = null;
+
+/** Enter accepts and Escape declines, and each button says so. Disabled buttons ignore the click, so the first moment is held too. */
+function answerKeys(accept, decline) {
+  if (keyHandler !== null) document.removeEventListener("keydown", keyHandler);
+  keyHandler = null;
+  const mark = (button, key) => button.append(" ", element("kbd", { textContent: key }));
+  if (decline) mark(decline, "Esc");
+  if (accept) mark(accept, "↵");
+  keyHandler = (event) => {
+    const answer = keyAnswer(event);
+    const button = answer === "accept" ? accept : answer === "decline" ? decline : null;
+    if (!button) return;
+    event.preventDefault();
+    button.click();
+  };
+  document.addEventListener("keydown", keyHandler);
 }
 
 function validAgent(label, url, peer) {
@@ -70,6 +92,12 @@ function agentForm(onAdd) {
 
 /** Pairing by a PIN the agent's machine shows: the PIN proves that machine's key, under the Noise method. */
 function pairForm(onPaired) {
+  const browserName = element("input", { type: "text", maxLength: 60 });
+  readBrowserName(chrome.storage.local).then((name) => {
+    browserName.value = name ?? defaultBrowserName(navigator.userAgentData);
+  }).catch(() => {
+    browserName.value = defaultBrowserName(navigator.userAgentData);
+  });
   const label = element("input", { type: "text", placeholder: "Name" });
   const url = element("input", { type: "text", placeholder: "wss://host/path or ws://127.0.0.1:8765" });
   const pairUrl = element("input", { type: "text", placeholder: "where coqui-acp-bridge pair-accept --method noise waits" });
@@ -80,6 +108,8 @@ function pairForm(onPaired) {
     const problem = validAgent(label.value, url.value.trim(), "") ?? validAgent(label.value, pairUrl.value.trim(), "");
     status.textContent = problem ?? "";
     if (problem !== null) return;
+    // Kept on this browser: nothing in the pairing carries it to the agent's machine yet.
+    await writeBrowserName(chrome.storage.local, browserName.value).catch(() => null);
     pair.disabled = true;
     status.textContent = "Pairing…";
     const answer = await send({ acp: "pair", pairing: { label: label.value.trim(), url: url.value.trim(), pairUrl: pairUrl.value.trim(), pin: pin.value.trim() } });
@@ -97,8 +127,9 @@ function pairForm(onPaired) {
   // pair-accept refuses a browser unless it lists the browser's origin, so a page cannot spend the PIN.
   const command = element("p", {}, "On the machine: ", element("code", { textContent: `coqui-acp-bridge pair-accept --method noise --listen 127.0.0.1:PORT --origin chrome-extension://${chrome.runtime.id}` }));
   return element("fieldset", {}, element("legend", { textContent: "Pair with a code" }), command,
-    element("label", { textContent: "Name" }), label, element("label", { textContent: "Address" }), url,
-    element("label", { textContent: "Pairing address" }), pairUrl, element("label", { textContent: "PIN" }), pin, pair, status);
+    element("label", { textContent: "Agent's name" }), label, element("label", { textContent: "Address" }), url,
+    element("label", { textContent: "Pairing address" }), pairUrl, element("label", { textContent: "PIN" }), pin,
+    element("label", { textContent: "Name this browser so you can identify it later" }), browserName, pair, status);
 }
 
 /** Searching is the person's choice, each time: it starts a program and listens on the network. */
@@ -177,6 +208,7 @@ function grantView(details) {
     });
   });
   refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  answerKeys(allow, refuse);
 
   const asked = details.own
     ? [element("p", { textContent: "Canoa's chat asks to use your agents. What they ask to do is answered in the conversation." })]
@@ -217,8 +249,13 @@ function permissionView(details) {
     button.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: option.optionId }));
     return button;
   });
-  const cancel = element("button", { type: "button", className: "quiet", textContent: "Cancel" });
+  const cancel = element("button", { type: "button", className: "quiet", textContent: "Decline" });
   cancel.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  // Enter takes the agent's own "allow once", else its first allowing choice, never a standing one.
+  const choices = (Array.isArray(options) ? options : []).slice(0, 8);
+  const once = choices.findIndex((option) => option.kind === "allow_once");
+  const first = choices.findIndex((option) => String(option.kind ?? "").startsWith("allow"));
+  answerKeys(buttons[once >= 0 ? once : first] ?? null, cancel);
   main.replaceChildren(
     element("p", {}, element("strong", { textContent: details.label }), " wants to use a tool, in a conversation started by ",
       element("span", { className: "site", textContent: details.origin }), "."),
@@ -264,6 +301,7 @@ function browserView(details) {
     send({ acp: "answer", ask: askId, answer: { tabId: Number(chosen.value), minutes: Number(minutes.value) } });
   });
   refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  answerKeys(allow, refuse);
   const who = details.via === "program"
     ? [element("p", {}, element("strong", { textContent: `A program on ${details.label}` }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
       element("p", { className: "warn", textContent: "Canoa cannot tell which program. Whatever can use that machine's key, which is whatever runs as its user there, can ask here and shares what you allow." }),
@@ -304,7 +342,8 @@ async function manageView() {
     return element("li", {}, element("span", { className: "site", textContent: grant.origin }), ` may use ${label} (${grant.lifetime}${extra})`, element("br"), revoke);
   });
   const found = element("ul");
-  main.replaceChildren(element("h1", { textContent: "Canoa agents" }), element("ul", {}, ...agentRows),
+  const named = (await readBrowserName(chrome.storage.local).catch(() => null)) ?? defaultBrowserName(navigator.userAgentData);
+  main.replaceChildren(element("h1", { textContent: "Canoa agents" }), element("p", {}, "This browser: ", element("strong", { textContent: named })), element("ul", {}, ...agentRows),
     searchButton((candidates) => {
       found.replaceChildren(...candidates.map((candidate) => {
         const add = element("button", { type: "button", className: "quiet", textContent: candidate.sameKeyAs ? `Move ${candidate.sameKeyAs} here` : "Add" });
