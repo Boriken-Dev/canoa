@@ -2,6 +2,7 @@
 // as config options with their ACP categories, refuses the model `refuse-me` with -32602 as ACP says an agent refuses a
 // value, answers each prompt with one message, and records every request in order. `start` is shaped as the app's StartAgent,
 // so the app starts it in place of a process.
+import 'package:canoa/profile/report.dart' show hostProfileMeta;
 import 'dart:async';
 import 'dart:convert';
 
@@ -38,6 +39,9 @@ final class OptionsAgent {
   /// Modes as `coqui-acp-claude` offers them, and as `coqui-acp-codex` does, with no Bypass.
   static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
   static const codexModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan')];
+
+  /// What the host would report of a profile, put under `_meta` in the answer to `session/load`.
+  Map<String, Object?>? profileMeta;
 
   /// Whether it also offers `session/resume`, which a reopening then prefers to `session/load`.
   bool offersResume = false;
@@ -250,7 +254,7 @@ final class OptionsAgent {
             void answer() {
               // A reopened agent starts in its own default mode again, whatever the session was left in.
               mode = modes.isEmpty ? '' : modes.first.$1;
-              reply(id, {'configOptions': options});
+              reply(id, {'configOptions': options, if (profileMeta != null) '_meta': {hostProfileMeta: profileMeta}});
             }
             if (holdLoad) {
               _heldLoad.add(answer);

@@ -2,7 +2,6 @@
 // what the picker shows for them, and the harness their agent names itself as.
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/ledger/session_ledger.dart';
-import 'package:canoa/profile/apply.dart';
 import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/source_options.dart';
 import 'package:canoa/sources/sources.dart';
@@ -50,11 +49,9 @@ void main() {
     expect(Icons.dns_outlined, providerIcon(null));
   });
 
-  test('the translators the host runs are Claude Code and Codex, for the ledger and for profiles', () {
+  test('the translators the host runs are Claude Code and Codex, for the ledger', () {
     final names = HarnessNames();
     expect(names.label(reportedName: 'coqui-acp-claude', entry: 'Claude'), 'Claude Code');
     expect(names.label(reportedName: 'coqui-acp-codex', entry: 'Codex'), 'Codex');
-    expect(harnessIdOf(reportedName: 'coqui-acp-claude', entry: 'hosted'), 'claude-code');
-    expect(harnessIdOf(reportedName: 'coqui-acp-codex', entry: 'hosted'), 'codex');
   });
 }

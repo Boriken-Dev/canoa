@@ -48,7 +48,7 @@ import 'permissions/permission_rules.dart';
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
 import 'profile/profile_home_platform.dart';
-import 'profile/profile_start_dialog.dart';
+import 'profile/report.dart';
 import 'profile/profiles_dialog.dart';
 import 'session_store.dart';
 import 'sources/sources.dart';
@@ -432,7 +432,7 @@ class _CanoaAppState extends State<CanoaApp> {
         store.applyOpened(local, opened);
         store.attachVerifiedClient(local.id, client);
         _ownedClients.add(client);
-        if (_hasProfiles) store.noteNoProfile(local);
+        await store.applyHostProfile(local, expected: _hasProfiles);
       } catch (_) {
         await client.close();
         rethrow;
@@ -753,7 +753,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (made != null) await _unmake(worktrees!, made);
       rethrow;
     }
-    if (_hasProfiles) store.noteNoProfile(draft);
+    await store.applyHostProfile(draft, expected: _hasProfiles);
   }
 
   /// The agent behind the host's own source [name], reached through the in-process link and ready to open a session.
@@ -804,7 +804,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (made != null) await _unmake(worktrees!, made);
       rethrow;
     }
-    if (_hasProfiles) store.noteNoProfile(draft);
+    await store.applyHostProfile(draft, expected: _hasProfiles);
   }
 
   /// Opens a session from the list again: its agent is started or reached again, then asked to open it.
@@ -858,7 +858,7 @@ class _CanoaAppState extends State<CanoaApp> {
         throw StateError(why ?? 'Reopen it from Earlier conversations');
     }
     try {
-      await store.reopen(entry, client);
+      await store.reopen(entry, client, expected: _hasProfiles);
       _ownedClients.add(client);
     } catch (_) {
       await client.close();
@@ -943,7 +943,7 @@ class _CanoaAppState extends State<CanoaApp> {
       store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
-      if (_hasProfiles) store.noteNoProfile(local);
+      await store.applyHostProfile(local, expected: _hasProfiles);
     } catch (_) {
       await client.close();
       if (made != null) await _unmake(worktrees!, made);

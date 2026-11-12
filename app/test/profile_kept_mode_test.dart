@@ -1,21 +1,20 @@
 // A reopened session's kept mode and its profile's mode: the report says which one the agent took.
-import 'package:canoa/profile/apply.dart';
-import 'package:canoa/profile/profile.dart';
-import 'package:canoa/acp/client.dart' show AcpSessionSetup;
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/profile/report.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 
-const _layer = LayerId(LayerKind.user);
-
-/// A profile that asks for [mode], as the app's launch path reports it before the session exists.
-(ProfileLaunch, PreparedProfile) _profile(String mode) => (
-  const ProfileLaunch(AcpSessionSetup.none, [ProfileItem('mode', 'user', ItemState.applied, 'at start')]),
-  PreparedProfile(mode: Sourced(mode, _layer, null)),
-);
+/// What the host reports of a profile that asks for [mode].
+Map<String, Object?> _profile(String mode) => {
+  'name': 'default',
+  'harness': 'claude',
+  'items': [
+    {'key': 'mode', 'layer': 'user', 'state': 'not supported', 'how': 'the options do', 'value': mode},
+  ],
+};
 
 ProfileItem _modeItem(ChatSession session) => session.profile!.items.firstWhere((item) => item.key == 'mode');
 
@@ -24,9 +23,9 @@ Future<ChatSession> _reopened(OptionsAgent agent, {required String kept, require
   ledger.record(peerId: 'local:Scripted', sessionId: 'o1', entry: 'Scripted', place: SessionPlace.local, reopenBy: 'session/load', cwd: '/w');
   ledger.setMode('local:Scripted', 'o1', mode: kept, bypass: false);
   final store = SessionStore(includePreview: false, ledger: ledger);
+  agent.profileMeta = _profile(profile);
   final client = await agent.start(scripted);
-  final (launch, prepared) = _profile(profile);
-  return store.reopen(ledger.entries.single, client, launch: launch, prepared: prepared, harness: 'claude');
+  return store.reopen(ledger.entries.single, client);
 }
 
 void main() {

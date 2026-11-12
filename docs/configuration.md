@@ -160,13 +160,12 @@ value.
 
 ### Applying a profile
 
-The desktop app applies a profile to each agent it starts on this computer, its own way for each harness. Before the
-session starts, a dialog shows every part of the profile and what that harness takes of it, every layer left out and
-why, and each MCP server: what it runs or the URL it reaches, the variables or headers it receives by name (never their
-values), what is left out of them, and a switch. Once the session is open, the conversation says in one line what
-applied and what did not, and **Profile** in its header lists each part, its layer, what became of it and through what.
-Nothing is applied that is not listed there. An agent reached on another machine, through the host or a browser, is
-given none of it, and its conversation says so; serving profiles from `canoa` is not done yet.
+The host applies a profile to each session of its own sources (the ones in Settings → Sources), its way for each harness;
+the app only reports. Once the session is open, the conversation says in one line what applied and what did not, and
+**Profile** in its header lists each part, its layer, what became of it and through what. Nothing is applied that is not
+listed there. An MCP server of an overlay or a project is off until `[agents.NAME.mcp]` allows it. The pre-session approval
+dialog, the per-session overlay choice and project trust are not done in the host yet. An agent reached on another machine is
+given what that host's `[host.profiles]` offers; with none, its conversation says so.
 
 Claude Code and Codex are run by `canoa agent claude` and `canoa agent codex`, the host's own translators of their stdio
 protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), with no Node; the desktop app runs them from its own

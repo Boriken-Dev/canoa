@@ -16,8 +16,7 @@ import 'chat/usage.dart';
 import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
-import 'profile/apply.dart';
-import 'profile/profile_layers.dart' show LayerNote;
+import 'profile/report.dart';
 import 'sources/source_choices.dart';
 import 'sources/source_options.dart';
 import 'sources/sources.dart';
@@ -255,8 +254,11 @@ class ChatSession {
   /// The files of the changes pane the person marked viewed, each with the version of it they saw.
   final Map<String, int> viewedChanges = {};
 
-  /// What this session was given of its profile, and what it was not; null where Canoa applied none.
+  /// What this session was given of its profile, and what it was not; null where the host applied none.
   ProfileReport? profile;
+
+  /// What the host reported of the profile when the session opened, until [SessionStore.applyHostProfile] takes it.
+  Object? hostReport;
 
   /// What the session was opened with, which an earlier conversation opened from it is opened with too.
   AcpSessionSetup setup = AcpSessionSetup.none;
@@ -1428,6 +1430,7 @@ class SessionStore extends ChangeNotifier {
     _setOptions(session, opened.raw['configOptions'], opened.raw['modes']);
     session.commands = parseCommands(opened.raw['availableCommands']) ?? session.commands;
     final meta = opened.raw['_meta'];
+    session.hostReport = meta is Map ? meta[hostProfileMeta] : null;
     if (meta is Map && meta[hostNoticesKey] is List) {
       // Any agent can send these, not only the host, so each is shown as the agent's word, never as Canoa's.
       for (final notice in (meta[hostNoticesKey] as List).take(maxHostNotices)) {
@@ -1512,22 +1515,20 @@ class SessionStore extends ChangeNotifier {
     return refused;
   }
 
-  /// Finishes applying a profile to [session], just opened with [launch]'s setup: the model, effort and mode are set where
-  /// the agent offers an option with that value, and the report goes on the session and, in one line, into it. [notes]
-  /// are what the person was not shown of the layers, such as one left out, and go into it too. A reopened session's
-  /// [keptMode], the one it was left in, is put back instead of the profile's, which is applied only if the agent does not
-  /// take the kept one.
-  Future<void> applyProfile(ChatSession session, ProfileLaunch launch, PreparedProfile prepared,
-      {required String harness, List<LayerNote> notes = const [], String? keptMode}) async {
-    session.setup = launch.setup;
-    for (final note in notes) {
-      _note(session, 'Profile, ${note.layer}: ${note.text}');
-    }
-    if (launch.items.isEmpty) {
+  /// Finishes applying the profile the host prepared for [session], from what it reported when the session opened: the model,
+  /// effort and mode are set where the agent offers an option with that value, and the report goes on the session and, in one
+  /// line, into it. A reopened session's [keptMode], the one it was left in, is put back instead of the profile's, which is
+  /// applied only if the agent does not take the kept one. With [expected] and no report, the session says it was given none.
+  Future<void> applyHostProfile(ChatSession session, {bool expected = false, String? keptMode}) async {
+    final reported = hostProfileOf(session.hostReport, fallback: session.agent);
+    session.hostReport = null;
+    if (reported == null || reported.report.items.isEmpty) {
+      if (reported == null && expected) _note(session, 'The host gave this agent no profile.');
+      if (keptMode != null) await _restoreMode(session, keptMode);
       notifyListeners();
       return;
     }
-    final chosen = choicesFor(prepared, [
+    final chosen = _choicesFor(reported.values, [
       for (final option in session.options)
         (option.id, option.category, [for (final choice in option.choices) choice.value], option.isMode),
     ]);
@@ -1566,10 +1567,32 @@ class SessionStore extends ChangeNotifier {
           ? ProfileItem(item.key, item.layer, ItemState.applied, how)
           : ProfileItem(item.key, item.layer, ItemState.unsupported, 'the agent offers no ${item.key} option with this value');
     }
-    session.profile = ProfileReport(harness, [for (final item in launch.items) settled(item)]);
+    session.profile = ProfileReport(reported.report.harness, [for (final item in reported.report.items) settled(item)]);
     _note(session, session.profile!.summary);
     _keepMode(session);
     notifyListeners();
+  }
+
+  /// The session's options that take the profile's [values] for `model`, `effort` and `mode`, each by its id or category: as
+  /// (option id, value, key). [options] are the session's, as (id, category, values, isMode).
+  static List<(String id, String value, String key)> _choicesFor(
+    Map<String, String> values,
+    List<(String id, String? category, List<String> values, bool isMode)> options,
+  ) {
+    const ids = {
+      'model': ['model'],
+      'effort': ['effort', 'reasoning_effort', 'thought_level'],
+      'mode': ['mode'],
+    };
+    const categories = {'model': 'model', 'effort': 'thought_level', 'mode': 'mode'};
+    final out = <(String, String, String)>[];
+    for (final MapEntry(key: key, value: value) in values.entries) {
+      final option = options.where((option) =>
+          (option.$2 == categories[key] || ids[key]!.contains(option.$1) || (key == 'mode' && option.$4)) &&
+          option.$3.contains(value)).firstOrNull;
+      if (option != null) out.add((option.$1, value, key));
+    }
+    return out;
   }
 
   /// Sends the mode a reopened [session] was left in. Under Canoa's own Bypass it is the agent's mode that Bypass sat on.
@@ -1577,13 +1600,6 @@ class SessionStore extends ChangeNotifier {
     final id = modeOptionIn(session.options)?.id ?? OptionRole.mode.name;
     session.pending[id] = PendingChoice(id, OptionRole.mode, mode);
     await _applyPending(session);
-  }
-
-  /// Says in [session] that its agent, reached elsewhere, was given no profile.
-  void noteNoProfile(ChatSession session) {
-    _note(session, 'Canoa applies a profile only to agents it starts on this computer: this one runs elsewhere and was '
-        'given none of it.');
-    notifyListeners();
   }
 
   void _setCurrent(ChatSession session, String id, String value) {
@@ -2028,9 +2044,8 @@ class SessionStore extends ChangeNotifier {
 
   /// Opens a session from the ledger again on [client], an agent just started or connected for it, by `session/load` or
   /// `session/resume`, whichever the agent offers. One already open is selected instead, and [client] is left to the caller.
-  /// With [launch], the session is opened with its setup and [prepared]'s profile is applied as [applyProfile] does.
-  Future<ChatSession> reopen(LedgerEntry entry, VerifiedAgent client,
-      {ProfileLaunch? launch, PreparedProfile? prepared, String? harness, List<LayerNote> notes = const []}) async {
+  /// The profile the host reports for it is applied as [applyHostProfile] does; [expected] says whether one should come.
+  Future<ChatSession> reopen(LedgerEntry entry, VerifiedAgent client, {bool expected = false}) async {
     for (final session in _sessions) {
       if (session.peerId == entry.peerId && session.remoteSessionId == entry.sessionId) {
         select(session.id);
@@ -2075,17 +2090,11 @@ class SessionStore extends ChangeNotifier {
       ..opening = true;
     attachVerifiedClient(session.id, client, record: false);
     try {
-      final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: launch?.setup ?? AcpSessionSetup.none);
+      final opened = await client.reopenSession(entry.sessionId, cwd: cwd);
       applyOpened(session, opened);
       _stopLeftovers(session);
-      if (launch != null && prepared != null) {
-        await applyProfile(session, launch, prepared,
-            harness: harness ?? entry.harness, notes: notes, keptMode: entry.mode);
-      }
       // The mode the session was left in goes back, once, before anything is sent: it wins over the profile's.
-      if (launch == null || prepared == null || launch.items.isEmpty) {
-        if (entry.mode case final mode?) await _restoreMode(session, mode);
-      }
+      await applyHostProfile(session, expected: expected, keptMode: entry.mode);
       await _applyPending(session);
       session.opening = false;
       // A change made while it was being opened, such as leaving Bypass, is kept now.
