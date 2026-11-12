@@ -195,10 +195,10 @@ async function forTransport(transport) {
     const ask = (session, message) => session.run(`chrome.runtime.sendMessage(${JSON.stringify(message)})`);
     const standingView = () => fromPermissions((options) => ask(options, { type: "canoa.standing.get" }));
     const first = await standingView();
-    const browserPeer = first.browser;
+    const browserPeer = first.ids.noise;
 
     const agentKey = path.join(work, "bridge.key");
-    const bridgePeer = execFileSync(bridge, ["keygen", agentKey], { encoding: "utf8", env }).trim();
+    const bridgePeer = execFileSync(bridge, ["keygen", agentKey, "--method", "noise"], { encoding: "utf8", env }).trim();
     const port = await freeForBoth();
     const flags = transport === "webtransport" ? ["--tls-short-lived", "--webtransport-port", String(port)] : [];
     let said = "";
@@ -255,6 +255,7 @@ async function forTransport(transport) {
       label: "Test machine",
       url: record.url,
       peer: record.peer,
+      method: record.method ?? "noise",
       source: "local",
       offers: record.offers,
       webtransport: record.webtransport ? { url: `https://127.0.0.1:${record.webtransport}/`, hash: record.webtransportHash } : undefined,
