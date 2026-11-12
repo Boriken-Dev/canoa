@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 
 use crate::worktree::Worktrees;
 use serde::{Deserialize, Serialize};

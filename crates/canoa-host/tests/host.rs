@@ -49,7 +49,7 @@ fn hello(host: &Host, client: &Identity, entry: &str) -> Result<String, String> 
 }
 
 fn new_session(
-    rpc: &support::Rpc<'_, coqui_web_channel::websocket::Channel>,
+    rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>,
     cwd: &str,
 ) -> Result<Value, Value> {
     rpc.request("session/new", json!({"cwd": cwd, "mcpServers": []}))
@@ -867,7 +867,7 @@ fn asking(notify: bool) -> Value {
     json!({"protocolVersion": 1, "clientCapabilities": {"_meta": {USAGE_KEY: {"notify": notify}}}})
 }
 
-type Rpc<'a> = support::Rpc<'a, coqui_web_channel::websocket::Channel>;
+type Rpc<'a> = support::Rpc<'a, coqui_transport_web::websocket::Channel>;
 
 fn usage_updates(rpc: &Rpc<'_>) -> Vec<Value> {
     rpc.updates

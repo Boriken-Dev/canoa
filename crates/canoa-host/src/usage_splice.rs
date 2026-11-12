@@ -31,7 +31,7 @@ use coqui_acp_api::{
     USAGE_VERSION, UsageReport, infer_limit,
 };
 use coqui_acp_harness::antigravity::AcpModel;
-use coqui_web_channel::Failure;
+use coqui_transport::Failure;
 use serde_json::{Value, json};
 
 mod agy;

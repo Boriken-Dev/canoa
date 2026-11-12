@@ -17,13 +17,21 @@ use std::time::{Duration, Instant, SystemTime};
 
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
-use coqui_web_channel::Dialer as _;
-use coqui_web_channel::websocket::{self, Frames};
-use coqui_web_channel::{Channel, Kind, Limits};
+use coqui_transport::Channel;
+use coqui_transport_web::Dialer as _;
+use coqui_transport_web::websocket::{self, Frames};
+use coqui_transport_web::{Kind, Limits};
 use serde_json::{Value, json};
 
 pub const WAIT: Duration = Duration::from_secs(20);
 const MAX: usize = 16 * 1024 * 1024;
+
+/// The default limits with one message size.
+pub fn max_message(bytes: usize) -> Limits {
+    let mut limits = Limits::default();
+    limits.max_message = bytes;
+    limits
+}
 
 /// The proof method a run of these tests uses: `CANOA_TEST_METHOD`, `noise` or `webcrypto`, else the default method. The
 /// suite runs once per method.
@@ -358,7 +366,7 @@ impl<C: Channel> Rpc<'_, C> {
                     return serde_json::from_slice(&message).map_err(|error| error.to_string());
                 }
                 Ok(None) => return Err("the host closed the link".to_owned()),
-                Err(coqui_web_channel::Failure::Timeout) => {}
+                Err(coqui_transport::Failure::Timeout) => {}
                 Err(failure) => return Err(failure.to_string()),
             }
         }
@@ -418,9 +426,11 @@ pub fn with_link<R>(
     body: impl FnOnce(&Rpc<'_, websocket::Channel>) -> R,
 ) -> Result<R, String> {
     let url = url::Url::parse(url).map_err(|error| error.to_string())?;
-    let channel = websocket::Dialer::new()
-        .with_frames(Frames::Binary)
-        .with_limits(Limits::default().with_max_message(method().record_length(MAX)))
+    let channel = websocket::Dialer::builder()
+        .frames(Frames::Binary)
+        .limits(max_message(method().record_length(MAX)))
+        .build()
+        .expect("a dialer")
         .dial(Kind::WebSocket, &url, WAIT)
         .map_err(|failure| failure.to_string())?;
     let proof = Proof::builder(identity.clone())

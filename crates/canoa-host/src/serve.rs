@@ -20,9 +20,11 @@ use coqui_acp_bridge::relay::relay;
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_agentic_peer::link::Prefilled;
 use coqui_agentic_peer::mux;
+use coqui_builder::builder::BuildError;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
-use coqui_web_channel::websocket::{self, Frames};
-use coqui_web_channel::{Channel, Failure, Limits};
+use coqui_transport::{Channel, Failure};
+use coqui_transport_web::Limits;
+use coqui_transport_web::websocket::{self, Frames};
 use indexmap::IndexMap;
 
 use crate::accounts::{Accounts, Gated, Held};
@@ -692,8 +694,14 @@ fn bind_listen(
 ) -> Result<(Bound, String), ServeError> {
     match listen {
         Listen::Address(address) => {
-            let (bound, listener) = websocket::Listener::bind_plain(*address)
-                .and_then(|listener| Ok((listener.local_addr()?, listener)))
+            let listener = plain_listener(*address, unproven_limits(), origins.to_vec()).map_err(
+                |failure| ServeError::Listen {
+                    entry: name.to_owned(),
+                    failure,
+                },
+            )?;
+            let bound = listener
+                .local_addr()
                 .map_err(|failure| ServeError::Listen {
                     entry: name.to_owned(),
                     failure,
@@ -705,10 +713,6 @@ fn bind_listen(
                     name
                 );
             }
-            let listener = listener
-                .with_limits(unproven_limits())
-                .with_frames(Frames::Binary)
-                .with_origins(origins.to_vec());
             Ok((Bound::Socket(listener), url_of(bound)))
         }
         Listen::Pipe(pipe_name) => {
@@ -1194,9 +1198,32 @@ fn url_of(bound: SocketAddr) -> String {
 }
 
 fn unproven_limits() -> Limits {
-    Limits::default()
-        .with_max_message(auth::MAX_PROOF_MESSAGE)
-        .with_pending(UNPROVEN_PENDING)
+    let mut limits = Limits::default();
+    limits.max_message = auth::MAX_PROOF_MESSAGE;
+    limits.pending = UNPROVEN_PENDING;
+    limits
+}
+
+/// A plain WebSocket listener of binary frames on `address`, for peers that prove themselves in-band.
+///
+/// Where the socket sits is the person's to choose, so a non-loopback address binds; the caller reports it through
+/// [`websocket::Listener::plain_beyond_loopback`].
+pub(crate) fn plain_listener(
+    address: SocketAddr,
+    limits: Limits,
+    origins: Vec<String>,
+) -> Result<websocket::Listener, Failure> {
+    websocket::Listener::builder(address, websocket::ServerTls::Plain)
+        .limits(limits)
+        .frames(Frames::Binary)
+        .origins(origins)
+        .plain_beyond_loopback(true)
+        .build()
+        .map_err(|error| match error {
+            BuildError::Failed(failure) => failure,
+            // The address and the TLS choice are both given above; no other kind of error exists.
+            _ => Failure::Unsupported,
+        })
 }
 
 fn accept_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &websocket::Listener) {

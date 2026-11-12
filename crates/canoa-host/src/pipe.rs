@@ -1,5 +1,5 @@
-//! A pipe or Unix socket as a [`Channel`]: coqui-web-channel's stream format, a little-endian `u32` length and then the body,
-//! over a `coqui-transport-pipe` stream. It proves nobody: `auth::prove` runs on it as on any channel.
+//! A pipe or Unix socket as a [`Channel`]: coqui-transport-web's length-prefixed stream format, a little-endian `u32` length and
+//! then the body, over a `coqui-transport-pipe` stream. It proves nobody: `auth::prove` runs on it as on any channel.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -9,9 +9,9 @@ use std::io::{self, Read, Write};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
+use coqui_transport::{Channel, Failure};
 use coqui_transport_pipe::{OsIdentity, ReadTimeout};
-use coqui_web_channel::frame;
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport_web::frame;
 
 pub use coqui_transport_pipe::{Error, Listener, PipeName, Stream};
 

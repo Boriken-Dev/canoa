@@ -15,7 +15,7 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use coqui_aos::{self as aos, Limit, OverlayTree, Settings, StdFs};
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 

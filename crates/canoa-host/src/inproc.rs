@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{AccountKeeper, AcpHarness, ChannelSink, ProcessSpawner, StartRequest};
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 
 /// How often each direction looks up to see whether the other has ended.
 const POLL: Duration = Duration::from_millis(50);

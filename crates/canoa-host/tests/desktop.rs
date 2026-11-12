@@ -17,11 +17,12 @@ use coqui_agentic_peer::auth::Identity;
 use coqui_agentic_peer::{auth, pairing};
 use coqui_peer_webcrypto::TrustStore;
 use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
-use coqui_web_channel::Dialer as _;
-use coqui_web_channel::websocket::{self, Frames};
-use coqui_web_channel::{Channel as _, Kind, Limits};
+use coqui_transport::Channel as _;
+use coqui_transport_web::Dialer as _;
+use coqui_transport_web::Kind;
+use coqui_transport_web::websocket::{self, Frames};
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, example, host_binary, quoted, running, with_link};
+use support::{Host, Scratch, WAIT, example, host_binary, max_message, quoted, running, with_link};
 
 fn agent_entry() -> String {
     format!(
@@ -208,9 +209,11 @@ fn start_pairing(
 
 /// Joins a pairing at `url` with `pin`, as `coqui-acp-bridge pair-dial` does.
 fn join(url: &str, identity: &Identity, pin: &str, store: &TrustStore) -> Result<String, String> {
-    let channel = websocket::Dialer::new()
-        .with_frames(Frames::Binary)
-        .with_limits(Limits::default().with_max_message(auth::MAX_PROOF_MESSAGE))
+    let channel = websocket::Dialer::builder()
+        .frames(Frames::Binary)
+        .limits(max_message(auth::MAX_PROOF_MESSAGE))
+        .build()
+        .expect("a dialer")
         .dial(Kind::WebSocket, &url::Url::parse(url).expect("a URL"), WAIT)
         .map_err(|failure| failure.to_string())?;
     let pin = Pin::parse(&CodeAlphabet::pin(), pin).map_err(|_| "not a PIN".to_owned())?;

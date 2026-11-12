@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use coqui_agentic_peer::auth::Method;
 use coqui_agentic_peer::{auth, pairing};
-use coqui_web_channel::websocket::{self, Frames};
-use coqui_web_channel::{Channel as _, Failure, Limits};
+use coqui_transport::{Channel as _, Failure};
+use coqui_transport_web::Limits;
 
 use crate::accounts::commands::Env as AccountsEnv;
 use crate::config::ImportSearch;
@@ -822,22 +822,18 @@ fn pair(
     let store = Arc::new(store(&home)?);
     // The PIN exchange runs inside the method's own session and takes one guess, so where the socket sits is the person's to
     // choose.
-    let listener = websocket::Listener::bind_plain(listen).map_err(Failed::run)?;
+    // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake.
+    let mut limits = Limits::default();
+    limits.max_message = auth::MAX_PROOF_MESSAGE;
+    limits.pending = 8;
+    let listener = crate::serve::plain_listener(listen, limits, vec![NO_BROWSER.to_owned()])
+        .map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
     if listener.plain_beyond_loopback() {
         tracing::info!(
             "non-default: pair --listen is {bound}, default loopback: any machine that reaches it may try the PIN"
         );
     }
-    // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake.
-    let listener = listener
-        .with_frames(Frames::Binary)
-        .with_origins([NO_BROWSER.to_owned()])
-        .with_limits(
-            Limits::default()
-                .with_max_message(auth::MAX_PROOF_MESSAGE)
-                .with_pending(8),
-        );
     let cancelled = Arc::new(AtomicBool::new(false));
     if until_stdin_closes {
         let cancel = Arc::clone(&cancelled);

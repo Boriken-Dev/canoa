@@ -15,7 +15,7 @@ use std::time::Duration;
 use canoa::store::{Action, InstallPlan, StoreSettings};
 use coqui_acp_api::guatiao::{Alloc, FromValue, ToValue};
 use coqui_acp_api::{LoginAnswer, LoginForm};
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
 use super::{BAD_PARAMS, NO_METHOD, POLL, REFUSED, error_line};

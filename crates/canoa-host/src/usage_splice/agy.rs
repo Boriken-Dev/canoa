@@ -25,7 +25,7 @@ use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
 use coqui_acp_harness::UsageTracker;
 use coqui_acp_harness::antigravity::{AcpModel, AgyQuota, BUCKET_PREFIX, ReadError, ReadLimits};
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
 use super::members::members;

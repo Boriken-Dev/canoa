@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
 use super::ACCOUNT_META;

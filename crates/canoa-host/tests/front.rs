@@ -18,11 +18,12 @@ use canoa_host::cli::{self, Cli, Front, Program};
 use clap::Parser as _;
 use coqui_agentic_peer::{auth, pairing};
 use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
-use coqui_web_channel::Dialer as _;
-use coqui_web_channel::websocket::{self, Frames};
-use coqui_web_channel::{Channel as _, Kind, Limits};
+use coqui_transport::Channel as _;
+use coqui_transport_web::Dialer as _;
+use coqui_transport_web::Kind;
+use coqui_transport_web::websocket::{self, Frames};
 use serde_json::{Value, json};
-use support::{Scratch, WAIT, example, host_binary, quoted, running, with_link};
+use support::{Scratch, WAIT, example, host_binary, max_message, quoted, running, with_link};
 
 type Then = Box<dyn FnOnce() + Send>;
 
@@ -116,9 +117,11 @@ fn a_pairing_given_up_accepts_nobody_who_was_still_connecting() {
         Pin::parse(&CodeAlphabet::pin(), shown["pin"].as_str().expect("a PIN")).expect("a PIN");
 
     // Connected while the PIN is shown, and proving only once the person has given up.
-    let channel = websocket::Dialer::new()
-        .with_frames(Frames::Binary)
-        .with_limits(Limits::default().with_max_message(auth::MAX_PROOF_MESSAGE))
+    let channel = websocket::Dialer::builder()
+        .frames(Frames::Binary)
+        .limits(max_message(auth::MAX_PROOF_MESSAGE))
+        .build()
+        .expect("a dialer")
         .dial(Kind::WebSocket, &url, WAIT)
         .expect("it connects");
     let failed = pairing.close_input().expect_err("given up");

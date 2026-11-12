@@ -185,7 +185,7 @@ fn waits_for(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 fn initialize_as_work(
-    rpc: &support::Rpc<'_, coqui_web_channel::websocket::Channel>,
+    rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>,
 ) -> Result<Value, Value> {
     rpc.request(
         "initialize",

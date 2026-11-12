@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use canoa_host::pipe::{Listener, PipeChannel, PipeName, Stream};
-use coqui_web_channel::{Channel as _, Failure};
+use coqui_transport::{Channel as _, Failure};
 
 /// The directory a socket needs on Unix, removed when the test ends.
 struct Directory(Option<std::path::PathBuf>);

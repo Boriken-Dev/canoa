@@ -16,7 +16,7 @@ use std::thread;
 use std::time::Instant;
 
 use coqui_acp_api::{USAGE_CAPABILITY, USAGE_NOTIFICATION};
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;

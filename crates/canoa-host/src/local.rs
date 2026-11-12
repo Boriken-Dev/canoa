@@ -14,7 +14,7 @@ use core::time::Duration;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
-use coqui_web_channel::{Channel, Failure};
+use coqui_transport::{Channel, Failure};
 
 /// Messages one direction holds unread; past it the sender waits.
 const QUEUED: usize = 256;
