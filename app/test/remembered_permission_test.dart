@@ -2,6 +2,7 @@
 // once and nothing else, every use is said in the conversation, and Settings, Permissions lists the rules and revokes them.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/permission_card.dart';
@@ -175,6 +176,24 @@ final class _GatedBackend implements LedgerBackend {
 
   @override
   Future<void> write(String document) async => this.document = document;
+}
+
+/// A file whose writes fail while [fail] is set.
+final class _FailingWrite implements LedgerBackend {
+  bool fail = true;
+  String? document;
+
+  @override
+  String get location => 'a full disk';
+
+  @override
+  Future<String?> read() async => document;
+
+  @override
+  Future<void> write(String document) async {
+    if (fail) throw const FileSystemException('disk full');
+    this.document = document;
+  }
 }
 
 /// A file whose lock is never free.
@@ -712,6 +731,21 @@ void main() {
       await open(tester, rules);
       expect(find.textContaining('Not made in this app'), findsOneWidget);
       expect(find.byKey(const Key('rules-write-problem')), findsOneWidget);
+    });
+
+    testWidgets('says a change is not yet saved when its write failed', (tester) async {
+      final backend = _FailingWrite();
+      final rules = PermissionRules(backend);
+      rules.add(source: 'Scripted', folder: '/work/calc', kind: 'execute', type: RuleType.command, value: 'npm test');
+      await tester.runAsync(rules.settled);
+      expect(rules.unsaved, isTrue);
+      await open(tester, rules);
+      expect(find.byKey(const Key('rules-unsaved')), findsOneWidget);
+      expect(find.textContaining('a revoke is lost'), findsOneWidget);
+      backend.fail = false;
+      await tester.runAsync(rules.refresh);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('rules-unsaved')), findsNothing);
     });
 
     testWidgets('shows a rule an earlier version wrote as no longer supported, and revokes it', (tester) async {

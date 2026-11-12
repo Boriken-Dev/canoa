@@ -121,6 +121,15 @@ class SettingsDialogState extends State<SettingsDialog> {
         children: [
           if (widget.rules!.problem case final problem?)
             Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(problem, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+          if (widget.rules!.unsaved)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Not yet saved: a change could not be written. It is in effect here, and written when the file allows. If Canoa quits '
+                'first, a revoke is lost.',
+                key: Key('rules-unsaved'),
+              ),
+            ),
           if (widget.rules!.writeProblem case final problem?)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),

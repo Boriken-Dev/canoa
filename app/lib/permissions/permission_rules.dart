@@ -47,6 +47,24 @@ const List<String> _pathKeys = ['file_path', 'path', 'notebook_path'];
 /// deletes, sends or fetches (which can have effects at the other end) is never offered one.
 const Set<String> readVerbs = {'read', 'get', 'list', 'search', 'find', 'view', 'show', 'describe', 'status', 'stat', 'info'};
 
+/// Words after the first in an MCP tool's name that say it also writes, or joins another action to the first
+/// (`get_or_create_issue`, `search_replace`, `readFileAndPost`).
+const Set<String> writeOrJoinWords = {
+  'and', 'or', 'then', 'set', 'create', 'update', 'upsert', 'delete', 'del', 'remove', 'rm', 'replace', 'write', 'put', 'post', 'patch',
+  'send', 'push', 'drop', 'edit', 'insert', 'move', 'mv', 'rename', 'add', 'apply', 'commit', 'merge', 'save', 'store', 'upload',
+  'publish', 'exec', 'run', 'start', 'stop', 'kill', 'reset', 'clear', 'truncate', 'grant', 'approve', 'install',
+};
+
+/// The words of a tool name, split at `_`, `-`, spaces and camelCase, without the empty ones a double separator leaves.
+List<String> nameWords(String name) =>
+    name.split(RegExp(r'[_\-\s]|(?<=[a-z0-9])(?=[A-Z])')).where((word) => word.isNotEmpty).map((word) => word.toLowerCase()).toList();
+
+/// Whether a tool named [name] only reads: its first word is one of [readVerbs] and none after it is in [writeOrJoinWords].
+bool readsOnly(String name) {
+  final words = nameWords(name);
+  return words.isNotEmpty && readVerbs.contains(words.first) && !words.skip(1).any(writeOrJoinWords.contains);
+}
+
 /// Names that say a tool executes what it is given.
 final RegExp _executes = RegExp(r'run|exec|process|shell|terminal|eval|bash|command|cmd|spawn|script|invoke|powershell|pwsh', caseSensitive: false);
 
@@ -65,11 +83,14 @@ RuleSubject? subjectOf({String? kind, Object? rawInput, Map<String, dynamic>? to
   final structured = claude is Map && claude['toolName'] is String ? claude['toolName'] as String : '';
   if (structured.isNotEmpty) {
     final match = _mcpName.firstMatch(structured);
+    // A name that claims to be an MCP tool and is not shaped like one is nothing a rule can state, and is not read as a command.
+    if (match == null && structured.startsWith('mcp__')) return null;
     if (match != null) {
       // A tool that executes anything is a command with input no rule here can read: it is never remembered.
       if (kind == 'execute' || _executes.hasMatch('${match.group(1)} ${match.group(2)}')) return null;
-      // Any input is allowed for such a tool, so only for a verb that reads; a list of names that write cannot be complete.
-      if (!readVerbs.contains(match.group(2)!.split(RegExp(r'[_\-\s]|(?<=[a-z])(?=[A-Z])')).first.toLowerCase())) return null;
+      // Any input is allowed for such a tool, so only for one that reads and says nothing else: its first word is a verb that
+      // reads and no later word writes or joins another action. A list of names cannot be complete.
+      if (!readsOnly(match.group(2)!)) return null;
       return McpSubject(structured, match.group(1)!, match.group(2)!);
     }
   }

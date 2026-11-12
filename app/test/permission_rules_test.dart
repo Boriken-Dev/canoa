@@ -345,6 +345,31 @@ void main() {
       }
     });
 
+    test('is not offered when a later word writes or joins another action', () {
+      for (final name in [
+        'get_or_create_issue', 'search_replace', 'find-and-replace', 'read_write', 'statusSet', 'getOrCreate', 'view_update', 'describe_and_drop',
+        'infoDelete', 'readFileAndPost', 'get__write', 'list_then_delete', 'read_upsert', 'get_and', 'show_apply_patch', 'find_commit', 'status_reset',
+        'list_grant', 'read_install', 'search_save', 'view_store', 'get_clear', 'describe_truncate', 'info_publish', 'stat_mv', 'get_rm', 'read_start',
+      ]) {
+        expect(mcp('mcp__fs__$name'), isNull, reason: name);
+      }
+      for (final name in ['read_file', 'get_issue', 'list_all_issues', 'search_files_by_name', 'getIssueById', 'view_image', 'describe_table']) {
+        expect(mcp('mcp__fs__$name'), isA<McpSubject>(), reason: name);
+      }
+      expect(readsOnly('get_or_create'), isFalse);
+      expect(nameWords('readFileAndPost'), ['read', 'file', 'and', 'post']);
+      expect(nameWords('get__write'), ['get', 'write']);
+    });
+
+    test('a name that claims to be an MCP tool and is not shaped like one is nothing, never a command or a path', () {
+      for (final name in ['mcp____x', 'mcp__x__', 'mcp__', 'mcp__x', 'mcp____']) {
+        final call = {'_meta': {'claudeCode': {'toolName': name}}};
+        expect(subjectOf(kind: 'execute', rawInput: {'command': 'ls'}, toolCall: call), isNull, reason: name);
+        expect(subjectOf(kind: 'edit', rawInput: {'file_path': '/work/calc/src/a.js'}, toolCall: call), isNull, reason: name);
+      }
+      expect(subjectOf(kind: 'execute', rawInput: {'command': 'ls'}, toolCall: {'_meta': {'claudeCode': {'toolName': 'Bash'}}}), isA<CommandSubject>());
+    });
+
     test('is never made for a tool that executes, by its kind or by its name', () {
       expect(mcp('mcp__shell__list', kind: 'execute'), isNull);
       for (final name in ['mcp__marker__run', 'mcp__marker__exec_cmd', 'mcp__terminal__open', 'mcp__marker__process_file', 'mcp__marker__eval', 'mcp__sh__Shell',

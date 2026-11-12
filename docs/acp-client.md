@@ -75,7 +75,10 @@ opens the rule to read before anything is kept:
   dialog says.
 - An MCP tool is allowed as that tool of that server with any input, by the structured tool name the agent sends
   (`_meta.claudeCode.toolName`, `mcp__<server>__<tool>`); a title is never read as one. It is offered only for a tool whose name
-  begins with a verb that reads (`readVerbs`: read, get, list, search, find, view, show, describe, status, stat, info), and never
+  begins with a verb that reads (`readVerbs`: read, get, list, search, find, view, show, describe, status, stat, info) and has no
+  later word that writes or joins another action (`writeOrJoinWords`: and, or, then, set, create, update, upsert, delete, replace,
+  write, put, post, send, push, drop, edit, move, rename, add, apply, commit, merge, save, store, upload, run, start, stop, reset,
+  clear, grant, install and the like, so `get_or_create_issue` and `search_replace` get none), and never
   for one of the `execute` kind or whose server or tool name says it runs things (run, exec, process, shell, terminal, eval, bash,
   command, cmd, spawn, script, invoke, powershell, pwsh).
 - Commands and tools apply only while the session is in a mode Canoa can see asks about commands (the agent's Manual or Plan);
@@ -119,8 +122,10 @@ so another instance cannot write between; a rule another program added is kept a
 another instance revoked is dropped. A rename another process's open file refuses is tried again for up to two seconds; the read and the
 write wait for the lock for as long, and a read that gives up applies no rule (the request is asked). A file that cannot be read or
 does not parse applies no rule at all and is not written over, and is read again before the next request, so the rules come back
-when it reads again; Settings says so. A write that fails is shown in Settings, together with "not yet saved": the change, a revoke
-among them, is in effect here (a revoked rule is not matched) and is written at the next change or read. A temp file a killed
+when it reads again; Settings says so. A write that fails is shown in Settings, together with "Not yet saved": the change, a revoke
+among them, is in effect here (a revoked rule is not matched) and is written at the next change or read; if the app quits before
+it is, a revoke is lost and the rule is back at the next start. A rule added while the file cannot be read or is not parseable is not
+made, so none is kept. A temp file a killed
 writer left is taken away by the next write once it is a minute old. Stop answers a request still waiting on the file cancelled at
 once. On a desktop `permissions-log.jsonl` beside it gets one JSON line
 appended for each rule made, used and revoked: the time, the rule's id, source and folder, and for a command only its program
