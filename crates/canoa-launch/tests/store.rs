@@ -510,3 +510,26 @@ fn packing_refuses_a_link_and_a_bad_version() {
     assert!(matches!(pack(&dir, "../1"), Err(Error::Payload(_))));
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn prune_removes_a_probe_a_crashed_launch_left_but_not_a_fresh_one() {
+    let root = scratch("probe");
+    let base = root.join("base");
+    let built = Built::new(&app(&root, "1"), "1.0.0");
+    install(&base, &built.payload()).unwrap();
+    let stale = base.join(".probe-stale");
+    let fresh = base.join(".probe-fresh");
+    for path in [&stale, &fresh] {
+        fs::write(path, b"").unwrap();
+    }
+    let long_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 3600);
+    fs::File::options()
+        .write(true)
+        .open(&stale)
+        .unwrap()
+        .set_modified(long_ago)
+        .unwrap();
+    prune(&base, "1.0.0");
+    assert!(!stale.exists() && fresh.exists());
+    fs::remove_dir_all(&root).unwrap();
+}

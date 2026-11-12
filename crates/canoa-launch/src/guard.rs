@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// The name probe files start with, which a crashed launch can leave behind.
+pub const PROBE: &str = ".probe-";
+
 /// A name no other call or process shares, for a probe or a temporary sibling.
 pub fn unique(prefix: &str) -> String {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -94,42 +97,60 @@ pub fn ensure_base(base: &Path) -> Result<()> {
     check_dir(base, base).map(|_| ())
 }
 
-/// Whether the owner of `path` is the owner of a file this process creates in `parent`.
+/// Whether `path` has an owner this launch can trust: the owner of a file this process creates in `parent`, and on Windows
+/// also the owner of `parent` itself, the Administrators group and the system account.
+///
+/// A process started elevated creates files owned by Administrators rather than by the user, so a folder made by the same
+/// person's other kind of window would otherwise be refused for good. Who may make a file owned by those is already
+/// someone who can replace the launcher.
 fn owned_by_me(parent: &Path, path: &Path) -> Result<bool> {
-    let probe: PathBuf = parent.join(unique(".probe-"));
+    let probe: PathBuf = parent.join(unique(PROBE));
     File::options()
         .write(true)
         .create_new(true)
         .open(&probe)
         .map_err(|e| Error::io(format!("create a probe in {}", parent.display()), e))?;
-    let result = same_owner(&probe, path);
+    let result = trusted_owner(&probe, parent, path);
     let _ = fs::remove_file(&probe);
     result.map_err(|e| Error::io(format!("read the owner of {}", path.display()), e))
 }
 
 #[cfg(unix)]
-fn same_owner(a: &Path, b: &Path) -> io::Result<bool> {
+fn trusted_owner(probe: &Path, _parent: &Path, path: &Path) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
-    Ok(fs::symlink_metadata(a)?.uid() == fs::symlink_metadata(b)?.uid())
+    Ok(fs::symlink_metadata(probe)?.uid() == fs::symlink_metadata(path)?.uid())
 }
 
 #[cfg(windows)]
-fn same_owner(a: &Path, b: &Path) -> io::Result<bool> {
+fn trusted_owner(probe: &Path, parent: &Path, path: &Path) -> io::Result<bool> {
     use windows_permissions::constants::{SeObjectType, SecurityInformation};
-    use windows_permissions::wrappers::GetNamedSecurityInfo;
+    use windows_permissions::wrappers::{CreateWellKnownSid, GetNamedSecurityInfo};
 
-    let owner = |p: &Path| {
+    // WELL_KNOWN_SID_TYPE: WinLocalSystemSid and WinBuiltinAdministratorsSid.
+    const LOCAL_SYSTEM: u32 = 22;
+    const ADMINISTRATORS: u32 = 26;
+    let descriptor = |p: &Path| {
         GetNamedSecurityInfo(p, SeObjectType::SE_FILE_OBJECT, SecurityInformation::Owner)
     };
-    let (first, second) = (owner(a)?, owner(b)?);
-    match (first.owner(), second.owner()) {
-        (Some(x), Some(y)) => Ok(x == y),
-        _ => Ok(false),
+    let found = descriptor(path)?;
+    let Some(owner) = found.owner() else {
+        return Ok(false);
+    };
+    for known in [LOCAL_SYSTEM, ADMINISTRATORS] {
+        if CreateWellKnownSid(known, None)?.as_ref() == owner {
+            return Ok(true);
+        }
     }
+    for trusted in [probe, parent] {
+        if descriptor(trusted)?.owner() == Some(owner) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn same_owner(_: &Path, _: &Path) -> io::Result<bool> {
+fn trusted_owner(_: &Path, _: &Path, _: &Path) -> io::Result<bool> {
     Ok(true)
 }
 

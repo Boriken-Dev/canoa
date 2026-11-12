@@ -309,17 +309,19 @@ pub fn prune(base: &Path, current: &str) -> Vec<String> {
     for item in read.flatten() {
         let name = item.file_name().to_string_lossy().into_owned();
         let path = item.path();
+        if name.starts_with(guard::PROBE) {
+            if is_stale(&path) {
+                let _ = fs::remove_file(&path);
+            }
+            continue;
+        }
         if !matches!(guard::check_dir(base, &path), Ok(Some(()))) {
             continue;
         }
         if name.starts_with(OLD) || name.starts_with(GONE) {
             remove_tree(&path);
         } else if name.starts_with(UNPACK) {
-            let age = fs::metadata(&path)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.elapsed().ok());
-            if age.is_some_and(|a| a > STALE_UNPACK) {
+            if is_stale(&path) {
                 remove_tree(&path);
             }
         } else if name != current && is_version(&path, &name) {
@@ -339,6 +341,15 @@ pub fn prune(base: &Path, current: &str) -> Vec<String> {
         }
     }
     removed
+}
+
+/// Whether `path` was last written longer ago than an unpack or a probe takes.
+fn is_stale(path: &Path) -> bool {
+    let age = fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok());
+    age.is_some_and(|a| a > STALE_UNPACK)
 }
 
 /// Whether `path` holds a regular manifest copy whose version is `name`.
