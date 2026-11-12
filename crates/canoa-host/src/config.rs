@@ -1122,10 +1122,13 @@ fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
             .map_err(|_| refused("a key under grants is not a peer id"))?;
         let mut set = BTreeSet::new();
         for name in names {
-            set.insert(
-                crate::control::Grant::named(&name)
-                    .ok_or_else(|| refused("a grant is not one this host knows"))?,
-            );
+            set.insert(crate::control::Grant::named(&name).ok_or_else(|| {
+                if name == "store.write" {
+                    refused("store.write is no grant: only the person running this host installs")
+                } else {
+                    refused("a grant is not one this host knows")
+                }
+            })?);
         }
         grants.insert(id, set);
     }

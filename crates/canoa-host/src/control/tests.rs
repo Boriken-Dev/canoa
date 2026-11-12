@@ -383,3 +383,34 @@ fn a_key_reaches_only_the_roots_of_the_entries_it_may_use() {
     let outside = ask(&control, &peer(other, &granted), "worktree/status", params);
     assert_eq!(outside["error"]["code"], BAD_PARAMS, "{outside}");
 }
+
+#[test]
+fn only_the_owner_installs_updates_rolls_back_or_removes() {
+    let control = memory();
+    let reader = peer("sha256:aa", &[Grant::StoreRead]);
+    for method in ["store/rollback", "store/remove"] {
+        let answer = ask(
+            &control,
+            &reader,
+            method,
+            json!({"provider": "claude_store"}),
+        );
+        assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+    }
+    let apply = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0", "id": 1, "method": "store/apply",
+        "params": {"provider": "claude_store", "plan": {}},
+    }))
+    .expect("encodes");
+    let answer: Value =
+        serde_json::from_slice(&control.handle(&reader, &apply).expect("answered")).expect("JSON");
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+    let blind = peer("sha256:bb", &[Grant::LedgerRead]);
+    let answer = ask(&control, &blind, "store/list", json!({}));
+    assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    assert!(
+        Grant::named("store.write").is_none(),
+        "not a grant a key can hold"
+    );
+    assert_eq!(Grant::named("store.read"), Some(Grant::StoreRead));
+}

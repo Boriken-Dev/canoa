@@ -85,6 +85,9 @@ pub struct ServeOptions {
     pub state_dir: Option<PathBuf>,
     /// Whether the host's own sources (Claude, Codex, Antigravity, Grok and Pi) are served too, over [`Local`] only.
     pub local_sources: bool,
+    /// The programs the control channel's `store/*` methods keep, and the ids of the stores it offers; without it, the built-in
+    /// stores over this user's own programs folder.
+    pub programs: Option<(Arc<crate::store::programs::Programs>, Vec<String>)>,
 }
 
 impl ServeOptions {
@@ -99,6 +102,7 @@ impl ServeOptions {
             nothing_to_serve: false,
             state_dir: None,
             local_sources: false,
+            programs: None,
         }
     }
 
@@ -106,6 +110,17 @@ impl ServeOptions {
     #[must_use]
     pub const fn with_local_sources(mut self, on: bool) -> Self {
         self.local_sources = on;
+        self
+    }
+
+    /// Offers the control channel's `store/*` methods over `programs`, through the stores named `providers`.
+    #[must_use]
+    pub fn with_programs(
+        mut self,
+        programs: Arc<crate::store::programs::Programs>,
+        providers: Vec<String>,
+    ) -> Self {
+        self.programs = Some((programs, providers));
         self
     }
 
@@ -1054,8 +1069,8 @@ impl Serving {
                 ending: Mutex::new(()),
                 stopped: Arc::new(AtomicBool::new(false)),
                 program_args: options.program_args.clone(),
-                control: Arc::new(
-                    control::Control::open(
+                control: Arc::new({
+                    let kept = control::Control::open(
                         options
                             .state_dir
                             .as_ref()
@@ -1082,8 +1097,15 @@ impl Serving {
                             })
                             .collect(),
                     )
-                    .map_err(ServeError::Control)?,
-                ),
+                    .map_err(ServeError::Control)?;
+                    match &options.programs {
+                        Some((programs, providers)) => kept.with_stores(control::Stores::new(
+                            Arc::clone(programs),
+                            providers.clone(),
+                        )),
+                        None => kept,
+                    }
+                }),
             }),
             listeners,
             local_only,

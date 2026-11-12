@@ -478,7 +478,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 ```
@@ -488,8 +488,8 @@ max_record_bytes = 262144                           # one ledger record
 | `ledger.read` | `ledger/list` |
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove` |
-| `store.read` | `store/report`, `store/latest`, `store/plan` (planned) |
-| `store.write` | `store/apply`, `store/rollback`, `store/remove` (planned; **owner only**: `[host.control]` refuses it as a grant, since an install runs code as the user) |
+| `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
+| *(none)* | `store/apply`, `store/rollback`, `store/remove`: **owner only**; `[host.control]` refuses `store.write` as a grant |
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
 as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
@@ -510,16 +510,30 @@ may name any absolute path on this computer; a key with the `worktree` grant onl
 whose `peers` allow it (all paired keys when an entry has none) and that have `worktrees` on, else `-32602`. The entry-level
 `_canoa/worktree/*` stays for a client that reaches an agent over the network and holds no control grant.
 
-**The program Store** (`canoa_host::store`, `Programs`) is carried the same way, one method for each of its calls, with the
-params and results of `canoa::store`'s models: `store/report` `{"program"}` (the copies the host finds, no network),
-`store/latest` `{"program"}`, `store/plan` `{"program", "version"?, ...}` (what an apply would do, before anything is written),
-`store/apply` `{"plan"}` (carries out the plan the host itself made and is handed back; its `token` is checked, so a plan the host did
-not make is refused), `store/rollback` `{"program"}` and `store/remove` `{"program"}`. An apply takes long and says where it is: the host sends
-`store/progress` notifications `{"id": the apply's request id, "text", "fraction"?}` on the same link before the answer, and a
-question the install asks the person (`InstallPrompter::ask`) comes as the request `store/ask` `{"text", "choices"?}` to the caller, answered
-by the caller; a caller that answers none or closes the link cancels the install. Only the owner installs, updates and removes
-(`store.write` is not a grant a key can hold); a key with `store.read` sees the report and the plan of a program, and nothing it
-writes. The overlay store (AOS overlays) follows as `overlay/*` under the same two grants.
+**The program Store** (`canoa_host::store`, `Programs`) is carried the same way. `provider` names a store (`claude_store`, `codex_store`,
+`grok_store`, `agy_store`, `pi_store`; `ServeOptions::with_programs` offers others), a program kept under the user's programs folder.
+The params and results are the JSON of `canoa::store`'s models:
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `store/list` | none | `{"stores": [StoreInfo + "provider"]}` |
+| `store/report` | `provider`, `probe`? (bool), `pick`? | `ProgramReport`: the copies the host finds; no network |
+| `store/latest` | `provider`, `channel`? | `LatestReport` |
+| `store/plan` | `provider`, `action` (`install`, `update`, `uninstall`), `channel`?, `version`? | `InstallPlan`, with its `token`: what an apply would do, nothing written |
+| `store/apply` | `provider`, `plan` (as handed back) | `{"applied": bool, "version", "dir", "lines"}`; `applied` is false when an update has nothing to do |
+| `store/rollback` | `provider` | `{"provider", "version", "dir"}` |
+| `store/remove` | `provider` | `{"provider", "removed": true}` |
+
+- The host applies **its own copy** of the plan it made (found by provider and `token`, used once, good for 15 minutes), so a plan a
+  client forged or kept is refused `-32002`.
+- An apply takes long and says where it is: the host sends `store/progress` notifications `{"id": the apply's request id, "text",
+  "fraction"?}` on the same link before the answer, and a question the install asks the person comes as the request `store/ask`
+  with the install's form (`{"title", "schema"}`, `ask-N` as its id), answered with `{"values", "secrets"}` as a result. The link
+  closing, or ten minutes with no answer, cancels the install. Other requests on the link are still answered meanwhile.
+- `store/list`, `store/report`, `store/latest` and `store/plan` need `store.read`. `store/apply`, `store/rollback` and
+  `store/remove` are **the owner's alone**: there is no `store.write` grant and `[host.control]` refuses the name, since an install
+  runs code as the user. A store that is not one of the host's is `-32003`; a plan or install the host refuses `-32002`.
+- The overlay store (AOS overlays) follows as `overlay/*` under the same two grants; it is not built.
 
 ## Worktrees
 

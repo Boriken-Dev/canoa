@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use coqui_web_channel::{Channel, Failure};
@@ -17,6 +17,7 @@ use coqui_web_channel::{Channel, Failure};
 use crate::worktree::Worktrees;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+pub(crate) use stores::Stores;
 
 /// The name the service is opened by; an entry cannot have it.
 pub const NAME: &str = "@control";
@@ -50,6 +51,9 @@ pub enum Grant {
     LedgerWrite,
     /// `worktree/new`, `worktree/status` and `worktree/remove`, under the working roots of the entries the key may use.
     Worktree,
+    /// `store/list`, `store/report`, `store/latest` and `store/plan`: what the host finds and would do, and nothing it writes.
+    /// There is no grant for installing: only the owner installs, updates, rolls back and removes.
+    StoreRead,
 }
 
 impl Grant {
@@ -60,15 +64,21 @@ impl Grant {
             Self::LedgerRead => "ledger.read",
             Self::LedgerWrite => "ledger.write",
             Self::Worktree => "worktree",
+            Self::StoreRead => "store.read",
         }
     }
 
     /// The grant of that name.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        [Self::LedgerRead, Self::LedgerWrite, Self::Worktree]
-            .into_iter()
-            .find(|grant| grant.as_str() == name)
+        [
+            Self::LedgerRead,
+            Self::LedgerWrite,
+            Self::Worktree,
+            Self::StoreRead,
+        ]
+        .into_iter()
+        .find(|grant| grant.as_str() == name)
     }
 }
 
@@ -132,6 +142,8 @@ pub(crate) struct EntryRoots {
 /// The ledger and its limits.
 #[derive(Debug)]
 pub(crate) struct Control {
+    /// The program stores, built on the first request that needs them unless handed in.
+    stores: OnceLock<Result<Stores, String>>,
     entries: Vec<EntryRoots>,
     path: Option<PathBuf>,
     max_records: usize,
@@ -184,12 +196,27 @@ impl Control {
             }
         }
         Ok(Self {
+            stores: OnceLock::new(),
             entries,
             path,
             max_records,
             max_record_bytes,
             ledger: Mutex::new(ledger),
         })
+    }
+
+    /// Offers these stores instead of the built-in ones.
+    #[must_use]
+    pub(crate) fn with_stores(self, stores: Stores) -> Self {
+        let _ = self.stores.set(Ok(stores));
+        self
+    }
+
+    fn stores(&self) -> Result<&Stores, (i32, String)> {
+        self.stores
+            .get_or_init(Stores::built_in)
+            .as_ref()
+            .map_err(|why| (REFUSED, format!("this host keeps no programs: {why}")))
     }
 
     fn lock(&self) -> MutexGuard<'_, BTreeMap<String, Stored>> {
@@ -227,6 +254,18 @@ impl Control {
             Some(method @ ("worktree/new" | "worktree/status" | "worktree/remove")) => {
                 return Some(self.worktree(caller, method, &request, &id));
             }
+            Some(method @ ("store/list" | "store/report" | "store/latest" | "store/plan")) => {
+                allow(caller, Grant::StoreRead)
+                    .and_then(|()| self.stores())
+                    .and_then(|stores| stores.read(method, &params))
+            }
+            Some(method @ ("store/rollback" | "store/remove")) => owner_only(caller)
+                .and_then(|()| self.stores())
+                .and_then(|stores| stores.change(method, &params)),
+            Some("store/apply") => Err((
+                REFUSED,
+                "an apply needs a link that can carry its progress".to_owned(),
+            )),
             _ => Err((NO_METHOD, "this host has no such method".to_owned())),
         };
         Some(match outcome {
@@ -406,6 +445,17 @@ fn whole_machine() -> Vec<PathBuf> {
     }
 }
 
+/// Only the person running this host installs, updates and removes: an install runs code as the user.
+fn owner_only(caller: &Caller) -> Result<(), (i32, String)> {
+    match caller {
+        Caller::Owner => Ok(()),
+        Caller::Peer { .. } => Err((
+            DENIED,
+            "only the person running this host installs, updates or removes a program".to_owned(),
+        )),
+    }
+}
+
 fn allow(caller: &Caller, grant: Grant) -> Result<(), (i32, String)> {
     if caller.may(grant) {
         Ok(())
@@ -442,6 +492,27 @@ fn now_millis() -> u64 {
         })
 }
 
+fn is_apply(line: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(line).is_ok_and(|request| {
+        request.get("id").is_some() && request.get("method") == Some(&json!("store/apply"))
+    })
+}
+
+impl Control {
+    /// `store/apply` on `channel`, which carries its progress and questions until the answer.
+    fn apply<C: Channel>(&self, caller: &Caller, line: &[u8], channel: &C) -> Vec<u8> {
+        let request: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
+        let id = request.get("id").cloned().unwrap_or(Value::Null);
+        if let Err((code, message)) = owner_only(caller) {
+            return error_line(&id, code, &message);
+        }
+        match self.stores() {
+            Ok(stores) => stores.apply(&request, channel, &|other| self.handle(caller, other)),
+            Err((code, message)) => error_line(&id, code, &message),
+        }
+    }
+}
+
 /// Answers `channel`'s requests as `caller` until it closes or the host stops it.
 pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C) {
     loop {
@@ -450,7 +521,12 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
                 if line.len() > MAX_REQUEST {
                     return;
                 }
-                if let Some(answer) = control.handle(caller, &line)
+                let answer = if is_apply(&line) {
+                    Some(control.apply(caller, &line, channel))
+                } else {
+                    control.handle(caller, &line)
+                };
+                if let Some(answer) = answer
                     && channel.send(&answer).is_err()
                 {
                     return;
@@ -461,6 +537,8 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
         }
     }
 }
+
+mod stores;
 
 #[cfg(test)]
 mod tests;
