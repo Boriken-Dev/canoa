@@ -36,7 +36,7 @@ class SourceChooser extends StatelessWidget {
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(sourceIcon(each), size: 18),
+              leading: SourceMark.of(each, size: 18),
               title: Text(each.displayName),
               subtitle: switch (kit.checks[each]) {
                 final check? when !check.ready => Text('Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}',
@@ -54,7 +54,7 @@ class SourceChooser extends StatelessWidget {
         message: problem ?? 'Where its agent comes from',
         child: ComposerPill(
           label: source?.displayName ?? 'Choose a source',
-          icon: sourceIcon(source),
+          leading: SourceMark.of(source),
           danger: problem != null || source == null,
         ),
       ),

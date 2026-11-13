@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
-      resolved-ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      ref: "3c8c2b631b58257c16847ba8a6547c181d3d2a7b"
+      resolved-ref: "3c8c2b631b58257c16847ba8a6547c181d3d2a7b"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
-      resolved-ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      ref: "3c8c2b631b58257c16847ba8a6547c181d3d2a7b"
+      resolved-ref: "3c8c2b631b58257c16847ba8a6547c181d3d2a7b"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
-      resolved-ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      ref: "3c8c2b631b58257c16847ba8a6547c181d3d2a7b"
+      resolved-ref: "3c8c2b631b58257c16847ba8a6547c181d3d2a7b"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
