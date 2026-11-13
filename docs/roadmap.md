@@ -4,7 +4,7 @@ This page distinguishes tested code from planned integration work.
 
 | Component | Status |
 | --- | --- |
-| Delegation: a session hands a task to another source (A2A tasks, HTTP and stdio MCP tools, privilege checks); client wire and card pending | Implemented in the host and tested with scripted agents |
+| Delegation: a session hands a task to another source (A2A tasks, HTTP and stdio MCP tools, privilege checks); the app takes the wire (task list, a child's approval, Stop); the card and the child's thread are pending | Implemented in the host and tested with scripted agents |
 | Rust in-memory registry and scoped authorization model | Implemented and tested |
 | Chromium permission policy and ACP request option validation | Implemented and tested |
 | Browser tool catalogue, local dispatcher and site-adapter manifest validator | Implemented as an **unwired scaffold** |
