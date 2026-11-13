@@ -14,3 +14,11 @@ The mirror carries only what compilation needs: each hosted package without its 
 When anything is missing (no deps checkout, a hosted package whose version or hash differs or is not mirrored, a git dependency not in the pub cache, or `pub get --offline` failing), the build says why in one line and goes online. `--online` skips the deps branch; `--offline` stops with the reason instead of going online.
 
 A `.env` at the repository root sets `FLUTTER_ROOT`, `PUB_CACHE`, `CANOA_DEPS`, `CARGO_HOME` and `RUSTUP_HOME`; a variable already in the environment wins. See `.env.example`.
+
+### Crates
+
+The deps branch's `crates/` is a cargo vendor directory: every package `Cargo.lock` names, from crates.io and from each pinned git revision, as `<name>-<version>/` with a `.cargo-checksum.json`. A package's tests, examples, benchmarks and fixtures are left out, a git package has the workspace settings it inherits written into its manifest, and a binary that a build reads is written as text (an `include_bytes!` becomes an array literal, ring's prebuilt objects become hex that its `build.rs` decodes), so that no file in the branch is one a scanner would refuse.
+
+`python tools/mirror_crates.py sync DEPS_DIR` makes `DEPS_DIR/crates` equal to `Cargo.lock` (fetching what is missing or changed and checking each crate's SHA-256 against the lock); `check DEPS_DIR` re-hashes every file and names what is missing, changed or stale; `use DEPS_DIR` writes a cargo home outside the repository whose `config.toml` replaces crates.io and each git source by `crates/` and turns the network off. Commit `crates/` to the deps branch with the pub refresh.
+
+`build.py desktop` covers cargo the way it covers pub: when `crates/` covers `Cargo.lock` (package names, registry checksums and git commits; `check` does the whole comparison), the build runs with `CARGO_HOME` at that cargo home and `CARGO_NET_OFFLINE=true`; when it does not, the whole build goes online with the reason, and `--offline` stops instead. The native plugin starts cargo itself, so `--locked` is not passed; with the network off cargo cannot change the lock. The cargo home replaces `~/.cargo/config.toml` for that build.
