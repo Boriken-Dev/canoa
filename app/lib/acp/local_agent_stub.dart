@@ -16,6 +16,6 @@ Future<int?> localFileSize(String path) async => null;
 /// A file or folder inside a session's folder, as [resolveInside] answers.
 typedef InsideFile = ({String path, bool folder, int size});
 
-Future<List<String>> listFolderEntries(String folder) async => const [];
+Future<List<String>> listFolderEntries(String folder, {int maxEntries = 5000, int maxDepth = 8}) async => const [];
 
 InsideFile? resolveInside(String folder, String relative) => null;
