@@ -1077,12 +1077,20 @@ fn a_sensitive_option_never_reaches_the_context_even_when_configured() {
     let (_temp, _connection, parts) = docs_parts(
         &[
             ("overlay.cfg", OPTIONS_MANIFEST),
-            ("CONTEXT.md", "Token is ${token}.\n"),
+            (
+                "CONTEXT.md",
+                "Token is ${token}, depth ${depth}.
+",
+            ),
         ],
         "options = { token = \"tok-never-shown\" }",
     );
     let prompt = prompt_of(&parts);
-    assert!(prompt.contains("Token is ${token}."), "{prompt}");
+    assert!(
+        prompt.contains("Token is ${token}, depth normal."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("tok-never-shown"), "{prompt}");
     assert!(!parts.report.to_string().contains("tok-never-shown"));
 }
 
