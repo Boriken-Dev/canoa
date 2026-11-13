@@ -337,9 +337,55 @@ installs them with the overlay:
 
 `canoa` itself fetches nothing: it delivers a skill the app fetched, after the same checks, and reports the others.
 
+### Loadout
+
+**Loadout** in the left column (and **Loadout…** in Settings → Profiles) is where an agent's overlays, skills and MCP
+servers are found, installed and chosen. It has three sections, **Overlays**, **Skills** and **MCPs**, each with
+**Installed** and **Discover** and a count on its tab. Every card says where it comes from (the catalog's label, the
+repository, the commit and digest it is pinned to), and everything is shown before it is installed.
+
+- **Overlays.** Installed: each overlay's icon, summary, source, pin, what it applies (environment variables, skills, MCP
+  servers, context) and what Canoa does not apply yet, a switch for whether **new sessions** start with it, an update
+  check and Remove (for one the store installed). Discover: the overlays of the catalogs below, filterable by catalog,
+  tag and text. With no catalog it offers a known one and a spec to paste.
+- **The choice per session.** A new session starts with every overlay `[overlays]` names except those `[loadout] off`
+  lists; the composer's Overlays control changes that for this session alone. What a session started with is kept with
+  it in the session list and asked for again when it is opened, so turning a default off reaches new sessions only. The
+  app tells its host through `initialize`'s `_meta["dev.boriken.canoa/overlays"]`; the host applies only those of the
+  profile's overlays, and its report names each one left out ("not chosen for this session").
+- **Skills.** Installed: the skills fetched, with the overlays that name each or that you chose it, source and pin; one
+  you chose has a switch for new sessions, which adds or takes away a `[profile.skills.NAME]` entry pointing at the
+  fetched copy. Discover: the skills your catalogs list, and a spec to paste (`<repository>@<ref>#<skill directory>`). A
+  skill is an [Agent Skills](https://agentskills.io/specification) directory: a `SKILL.md` with YAML front matter whose
+  `name` is the directory's. It is fetched only on a yes, after its source and pin are shown, and checked against the
+  pin before any file is read.
+- **MCPs.** Installed: the servers `[profile.mcp]` and your overlays define. Discover: the
+  [MCP Registry](https://github.com/modelcontextprotocol/registry) (`registry.modelcontextprotocol.io`, `GET
+  /v0.1/servers`), each server a `server.json`. Installing shows the registry's claims, the digest of the `server.json`,
+  each way to run it (an npm, PyPI or OCI package, or a remote address) with the command or address Canoa would write,
+  and what it needs from your environment: a secret is a `from_env` reference, never written to canoa.cfg. A package
+  whose runtime (`npx`, `uvx`, `docker`) is not on this computer, a bundle, a package of another registry type, a
+  remote over plain `http` and anything else Canoa does not run is refused with the reason. An installed server is
+  written to `[profile.mcp.NAME]`, noted in `[loadout.mcp.NAME]` (`registry`, `server`, `version`, `digest`) and turned
+  off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
+- **Applying a change.** The host reads the profile when it starts, so a change to `[overlays]`, `[profile]` or
+  `[agents.*.mcp]` takes effect when the host starts again; with sessions open, Loadout asks first and may leave it for
+  the next start.
+
+```toml
+[loadout]
+off = ["review"]              # overlays new sessions start without
+
+[loadout.mcp.files]           # where an MCP server the store installed came from
+registry = "https://registry.modelcontextprotocol.io"
+server = "io.github.ana/files"
+version = "1.2.0"
+digest = "sha256:..."         # of the server.json that was shown
+```
+
 ### The overlay store
 
-**Store…** in Settings → Profiles lists the overlays of the catalogs `[catalogs]` names, to search, read about and
+Loadout, Overlays, Discover lists the overlays of the catalogs `[catalogs]` names, to search, read about and
 install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
 a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
 source, with a summary, an icon, tags and the like for each. Canoa fetches it as it fetches an overlay (git objects at
