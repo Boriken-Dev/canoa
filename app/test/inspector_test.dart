@@ -1,5 +1,6 @@
 // The inspector: a session's environment, its context and its changes in one place, and the git-backed views of the changes. The
 // agent here is a stand-in the test drives, and git is a fake that says what the repository holds.
+import 'dart:convert' show base64Encode, utf8;
 import 'dart:io' show Directory;
 
 import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption;
@@ -13,6 +14,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/delegation_scene.dart';
 import 'fixtures/task_agent.dart';
 
 const _desktop = Size(1280, 800);
@@ -328,6 +330,118 @@ void main() {
       await session.refresh(fake, '/f');
       expect(session.base, 'h1');
     });
+  });
+
+  group('the lineage and the running commands', () {
+    Future<void> details(WidgetTester tester) async {
+      if (find.byTooltip('Session details').evaluate().isEmpty) {
+        await tester.tap(find.byTooltip('More'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Session details'));
+      } else {
+        await tester.tap(find.byTooltip('Session details'));
+      }
+      await tester.pumpAndSettle();
+    }
+
+    Map<String, Object?> terminal(String id, {String? command, int? exit}) => {
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 's1',
+        'update': {
+          'sessionUpdate': 'terminal_update',
+          'terminalId': id,
+          'command': ?command,
+          'output': {'data': base64Encode(utf8.encode('listening\n'))},
+          if (exit != null) 'exitStatus': {'exitCode': exit},
+        },
+      },
+    };
+
+    Finder inRow(String id, String text) => find.descendant(of: find.byKey(ValueKey('lineage $id')), matching: find.text(text));
+
+    testWidgets('each child is a row with its state and elapsed time, and the heading counts those running', (tester) async {
+      final scene = await openScene(tester);
+      await scene.fourChildren();
+      await details(tester);
+      expect(find.text('Lineage · 4 running'), findsOneWidget);
+      for (final title in childTitles) {
+        expect(find.text(title), findsOneWidget);
+      }
+      expect(inRow('c0', 'Working'), findsOneWidget);
+      expect(inRow('c0', '25s'), findsOneWidget);
+      await scene.end('c0', 'COMPLETED', at: 18);
+      await scene.end('c1', 'FAILED', at: 21, note: 'No login for it.');
+      expect(find.text('Lineage · 2 running'), findsOneWidget);
+      expect(inRow('c0', 'Done'), findsOneWidget);
+      expect(inRow('c1', 'Failed'), findsOneWidget);
+      expect(inRow('c0', '18s'), findsOneWidget);
+    });
+
+    testWidgets('a session that handed nothing out has no lineage', (tester) async {
+      await openScene(tester);
+      await details(tester);
+      expect(find.textContaining('Lineage'), findsNothing);
+      expect(find.text('Environment'), findsOneWidget);
+    });
+
+    testWidgets('a child appears while the inspector is open, and a tap opens its thread', (tester) async {
+      final scene = await openScene(tester);
+      await details(tester);
+      expect(find.textContaining('Lineage'), findsNothing);
+      await scene.fourChildren();
+      expect(find.text('Lineage · 4 running'), findsOneWidget);
+      expect(scene.session.openChild, isNull);
+      await tester.tap(find.byKey(const ValueKey('lineage c2')));
+      await tester.pumpAndSettle();
+      expect(scene.session.openChild, 'c2');
+    });
+
+    testWidgets('a command still running is listed, and leaves the list when it ends', (tester) async {
+      final scene = await openScene(tester);
+      await details(tester);
+      expect(find.textContaining('Running commands'), findsNothing);
+      await scene.say(terminal('t1', command: 'npm run dev'));
+      await scene.say(terminal('t2', command: 'cargo test', exit: 0));
+      expect(find.text('Running commands · 1'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('command t1')), matching: find.text('npm run dev')), findsOneWidget);
+      expect(find.byKey(const ValueKey('command t2')), findsNothing);
+      await scene.say(terminal('t1', exit: 130));
+      expect(find.textContaining('Running commands'), findsNothing);
+    });
+
+    testWidgets('on a phone the sheet holds the lineage, a child closes it onto its thread, and the sheet opens again', (tester) async {
+      final scene = await openScene(tester, size: const Size(390, 844));
+      await scene.fourChildren();
+      await details(tester);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.text('Lineage · 4 running'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close details'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      await details(tester);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('lineage c1')));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(scene.session.openChild, 'c1');
+      expect(scene.session.tasks['c1']!.phase, TaskPhase.working);
+    });
+
+    for (final (label, size) in [('phone', const Size(390, 900)), ('desktop', const Size(1280, 800))]) {
+      testWidgets('the inspector with children and a running command, $label', (tester) async {
+        final scene = await openScene(tester, size: size);
+        await scene.fourChildren();
+        await scene.end('c0', 'COMPLETED', at: 18);
+        await scene.end('c3', 'FAILED', at: 21, note: 'No login for it.');
+        await scene.say(terminal('t1', command: 'npm run dev -- --port 5173'));
+        await details(tester);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/inspector_lineage_$label.png'));
+      });
+    }
   });
 
   group('looks', () {

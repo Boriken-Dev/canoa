@@ -1602,6 +1602,7 @@ class _ConversationState extends State<_Conversation> {
             Navigator.pop(sheet);
           },
           onClose: () => Navigator.pop(sheet),
+          onOpenChild: () => Navigator.pop(sheet),
         ),
       )),
     ));
