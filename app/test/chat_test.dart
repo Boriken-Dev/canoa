@@ -225,10 +225,10 @@ void main() {
         },
       }));
       await _settle(tester);
-      expect(find.text('Write to hello.txt'), findsOneWidget);
+      expect(find.textContaining('to write to hello.txt?'), findsOneWidget, reason: 'the question');
       expect(find.text('hello.txt'), findsOneWidget);
       expect(session.toolEntries['w1']?.tool?.title, 'Write', reason: 'the subject is applied before the prompt shows');
-      await tester.tap(find.text('No'));
+      await tester.tap(find.byKey(const Key('permission-deny')));
       await _settle(tester);
       expect(agent.sent.singleWhere((message) => message['id'] == 88)['result'], {'outcome': {'outcome': 'selected', 'optionId': 'no'}});
     });
@@ -253,7 +253,8 @@ void main() {
         },
       }));
       await _settle(tester);
-      expect(find.text('Delete everything'), findsNWidgets(2), reason: 'the question, and the tool it is about');
+      expect(find.text('Delete everything'), findsOneWidget, reason: 'the tool it is about');
+      expect(find.textContaining('to delete everything?'), findsOneWidget, reason: 'the question');
       expect(find.text('rm -rf /'), findsOneWidget, reason: 'a person sees what they would be allowing');
 
       await tester.tap(find.byTooltip('Stop'));
@@ -655,7 +656,7 @@ void main() {
           },
         }));
         await _settle(tester);
-        await tester.tap(find.text('Edit src/calc.js').first);
+        await tester.tap(find.textContaining('to edit src/calc.js?'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.byTooltip('Stop'), findsOneWidget);
