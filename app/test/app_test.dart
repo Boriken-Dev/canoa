@@ -29,8 +29,7 @@ void main() {
     final store = SessionStore();
     await tester.pumpWidget(CanoaApp(store: store));
     expect(find.text('Canoa'), findsWidgets);
-    expect(find.text('Getting started'), findsWidgets);
-    expect(find.textContaining('Preview'), findsWidgets);
+    expect(find.text('Welcome to Canoa'), findsOneWidget);
     expect(find.byIcon(Icons.add_comment_outlined), findsOneWidget);
     store.dispose();
   });
@@ -77,7 +76,7 @@ void main() {
 
   group('agents on this computer', () {
     testWidgets('a permission waits in the conversation until the person answers', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final session = store.addProviderSession(title: 'T', agent: 'Agent', peerId: 'local:a', remoteSessionId: 'r');
       final silent = StreamController<String>();
       addTearDown(silent.close);
@@ -168,7 +167,7 @@ void main() {
 
   testWidgets('quitting has something to run, and leaving takes it back', (tester) async {
     final shell = _FakeShell();
-    await tester.pumpWidget(CanoaApp(store: SessionStore(includePreview: false), shell: shell));
+    await tester.pumpWidget(CanoaApp(store: SessionStore(), shell: shell));
     expect(shell.beforeQuit, isNotNull);
     await shell.beforeQuit!();
     await tester.pumpWidget(const SizedBox());
@@ -181,7 +180,7 @@ void main() {
     final shell = _FakeShell();
     await tester.binding.setSurfaceSize(const Size(1200, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(CanoaApp(store: SessionStore(includePreview: false), shell: shell, host: host));
+    await tester.pumpWidget(CanoaApp(store: SessionStore(), shell: shell, host: host));
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
     expect(find.text('Look'), findsOneWidget);
@@ -205,7 +204,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final config = CanoaConfig.parse('[profile]\neffort = "high"\n[agents.Mine.profile]\nmodel = "m"\n');
     await tester.pumpWidget(CanoaApp(
-      store: SessionStore(includePreview: false), config: config, configPath: '${dir.path}/canoa.cfg',
+      store: SessionStore(), config: config, configPath: '${dir.path}/canoa.cfg',
       host: linkedHost((name) => throw StateError(name)),
     ));
     await tester.pump();
@@ -247,7 +246,7 @@ void _staleDialogs() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final config = const CanoaConfig().withHostAgent(name: 'old', program: 'agent', listen: '127.0.0.1:7801');
     await tester.pumpWidget(CanoaApp(
-      store: SessionStore(includePreview: false),
+      store: SessionStore(),
       config: config,
       shell: _FakeShell(),
       host: host,

@@ -24,7 +24,7 @@ FakeStoreHost _host({List<Map<String, Object?>> copies = const [], String? lates
 Future<FakeStoreHost> _app(WidgetTester tester, FakeStoreHost host, {Set<String> missing = const {}}) async {
   await pumpApp(
     tester,
-    SessionStore(includePreview: false),
+    SessionStore()..createDraft(title: 'Work'), // a session open, so the welcome page does not repeat what Settings shows
     missing: missing,
     size: const Size(1280, 1400),
     linked: (name) => name == '@control' ? host.open() : throw StateError('nothing starts in this test: $name'),
@@ -94,7 +94,7 @@ void main() {
     var opened = 0;
     await pumpApp(
       tester,
-      SessionStore(includePreview: false),
+      SessionStore(),
       size: const Size(1280, 1400),
       linked: (name) {
         if (name == '@control') opened++;

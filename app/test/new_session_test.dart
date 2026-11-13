@@ -20,7 +20,7 @@ Future<(SessionStore, Starts, CountedWorktrees, List<CanoaConfig>)> _app(
   Size size = const Size(1280, 800),
   Future<String?> Function()? pickFolder,
 }) async {
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final starts = Starts();
   final worktrees = CountedWorktrees();
   final written = await pumpApp(tester, store, config: config, missing: missing, size: size, pickFolder: pickFolder,
@@ -118,8 +118,9 @@ void main() {
     debugPrint = (message, {wrapWidth}) => logged.add(message ?? '');
     final (store, starts, _, _) = await _app(tester, missing: {'claude'}, size: const Size(1280, 1400));
     await _openSources(tester);
+    // The welcome page behind Settings says the same, so the one in the dialog is the last drawn.
     expect(find.text('Claude needs claude on PATH: claude was not found. '
-        'Install what is missing, or start Canoa where PATH finds it.'), findsOneWidget);
+        'Install what is missing, or start Canoa where PATH finds it.'), findsNWidgets(2));
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
 

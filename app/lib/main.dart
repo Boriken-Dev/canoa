@@ -56,6 +56,7 @@ import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/sources.dart';
 import 'store/programs.dart';
+import 'welcome/welcome_view.dart';
 import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
 import 'theme/look.dart';
@@ -629,6 +630,8 @@ class _CanoaAppState extends State<CanoaApp> {
 
   Future<void> _checkSources() async {
     _checked = true;
+    // A change of the Store's programs can come while a page is built, and a source-less host has nothing to wait for.
+    await null;
     final sources = _sources;
     final checks = {for (final source in sources) source: await _check(source)};
     if (mounted) setState(() => _checks = checks);
@@ -640,7 +643,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   void _noteLast() {
     final session = store.selected;
-    if (session != null && session.isDraft && !_checked) unawaited(_checkSources());
+    if ((session == null || session.isDraft) && !_checked) unawaited(_checkSources());
     if (session == null || session.source == null) return;
     _lastSource = session.source;
     if (session.isDraft && session.cwd != null) _lastFolder = session.cwd;
@@ -1045,6 +1048,8 @@ class _CanoaAppState extends State<CanoaApp> {
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
+    // The welcome page, which a window with no session shows, lists each source with what it needs.
+    scheduleMicrotask(_noteLast);
     unawaited(_claimContext());
     _tabs = TabsComposerExtension.platform(store);
     _contextTimer = Timer.periodic(
@@ -1127,6 +1132,10 @@ class _CanoaAppState extends State<CanoaApp> {
           conversation: _conversation,
           kit: _kit,
           renderers: widget.renderers,
+          welcome: WelcomeView(
+            sources: _sources, checks: _checks, programs: _programs, onNewSession: _newSession,
+            onSettings: () => unawaited(_showSettings(sources: true)),
+          ),
         ),
       ),
     );
@@ -1137,10 +1146,11 @@ class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
     this.onHosting, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
-    this.renderers = chat.ChatRenderers.none,
+    this.renderers = chat.ChatRenderers.none, required this.welcome,
   });
 
   final SessionStore store;
+  final Widget welcome;
   final Future<void> Function(ConnectTarget) onConnect;
   final UseBrowserAgents onUseBrowserAgents;
 
@@ -1272,6 +1282,7 @@ class _CanoaHome extends StatelessWidget {
                   handle: conversation,
                   kit: kit,
                   renderers: renderers,
+                  welcome: welcome,
                 ),
               ),
             ],
@@ -1302,9 +1313,10 @@ final class _ConversationHandle {
 class _Conversation extends StatefulWidget {
   const _Conversation({
     super.key, required this.store, required this.narrow, required this.handle,
-    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none,
+    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome,
   });
 
+  final Widget welcome;
   final _ConversationHandle handle;
   final ComposerKit kit;
   final chat.ChatRenderers renderers;
@@ -1537,7 +1549,10 @@ class _ConversationState extends State<_Conversation> {
                 onPressed: () => unawaited((widget.handle.close ?? widget.store.close)(session)),
               ),
             // On a phone the state is an icon whose tooltip names it, which leaves the conversation's name room to be read.
-            if (widget.narrow)
+            // The welcome page, with no session, has no state to name.
+            if (session == null)
+              const SizedBox.shrink()
+            else if (widget.narrow)
               Tooltip(
                 message: _state(session),
                 child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)),
@@ -1554,7 +1569,7 @@ class _ConversationState extends State<_Conversation> {
       if (session != null && widget.store.inBypass(session))
         chat.BypassBanner(onLeave: () => unawaited(widget.store.leaveBypass(session))),
       if (session == null)
-        const Expanded(child: Center(child: Text('Create a conversation to begin.')))
+        Expanded(child: widget.welcome)
       else if (session.isDraft)
         Expanded(
           child: _dropping(session, NewSessionView(

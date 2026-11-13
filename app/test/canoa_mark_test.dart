@@ -37,9 +37,10 @@ void main() {
     addTearDown(store.dispose);
     await tester.pumpWidget(CanoaApp(store: store, config: CanoaConfig(look: LookId.canoa)));
     await tester.pumpAndSettle();
-    final mark = tester.widget<CanoaMark>(find.byType(CanoaMark));
-    expect(mark.color, tester.element(find.byType(CanoaMark)).chatLook.accent);
-    expect(tester.getSize(find.byType(CanoaMark)), const Size(24, 24));
+    final rail = find.byWidgetPredicate((widget) => widget is CanoaMark && widget.size == 24);
+    final mark = tester.widget<CanoaMark>(rail);
+    expect(mark.color, tester.element(rail).chatLook.accent);
+    expect(tester.getSize(rail), const Size(24, 24));
     expect(find.byIcon(Icons.sailing_rounded), findsNothing);
   });
 
