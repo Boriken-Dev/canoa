@@ -2524,6 +2524,18 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return session;
   }
 
+  /// Shows a session the host brought in from another program's own folder, as what was said in it and nothing more. It is a
+  /// preview: nothing typed here reaches an agent, and the harness's own files are not touched.
+  ChatSession showImported({required String title, required String agent, required List<({MessageRole role, String text})> said}) {
+    final session = createPreviewSession(title: title, agent: agent);
+    _note(session, 'Brought in from $agent\'s own folder. Nothing typed here reaches an agent.');
+    for (final each in said) {
+      session.messages.add(ChatMessage(role: each.role, text: each.text, at: DateTime.now()));
+    }
+    notifyListeners();
+    return session;
+  }
+
   /// Takes a conversation out of the list. The agent still has it, and its connection stays with whoever else uses it.
   void forget(ChatSession session) {
     _keepText(session);

@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
+import '../history/session_import.dart';
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart';
@@ -11,15 +12,19 @@ import '../store/programs_view.dart';
 import '../theme/canoa_mark.dart';
 
 /// Earlier sessions of the person's agents that Canoa could bring in, offered on the first screen. [from] names the sources
-/// whose history it would read; nothing is read until [run] is called, which the person asks for with Import.
+/// whose history it would read; nothing is read until [list] is called, which the person asks for with Import. [list] gives
+/// each session's title and where it ran, never what was said, and [bring] brings in the ones the person chose.
 final class HistoryImport {
-  const HistoryImport({required this.from, required this.run});
+  const HistoryImport({required this.from, required this.list, required this.bring});
 
   /// The sources' names, for the offer's text.
   final List<String> from;
 
-  /// Reads the histories and brings the sessions in; how many it brought.
-  final Future<int> Function() run;
+  /// Looks in the sources' folders for sessions.
+  final Future<List<ImportChoice>> Function() list;
+
+  /// Brings [chosen] in; what came and what did not.
+  final Future<ImportOutcome> Function(List<ImportChoice> chosen) bring;
 }
 
 /// What a window with no session shows: each agent source with its readiness (what it needs when it is not ready, and the
@@ -59,19 +64,112 @@ class _WelcomeViewState extends State<WelcomeView> {
   String? _imported;
   String? _importFailed;
 
+  /// What the host found after the person said yes, and which of it they chose; null until then.
+  List<ImportChoice>? _found;
+  final Set<ImportChoice> _chosen = {};
+  List<String> _notes = const [];
+
+  /// Looks for sessions, which is the first time anything is read: the person said yes by pressing Import.
+  Future<void> _look(HistoryImport offer) async {
+    setState(() {
+      _importing = true;
+      _importFailed = null;
+    });
+    try {
+      final found = await offer.list();
+      if (!mounted) return;
+      setState(() {
+        _found = found;
+        _chosen
+          ..clear()
+          ..addAll(found.where((each) => !each.imported));
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _importFailed = 'Could not look: ${_why(error)}');
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
+  }
+
   Future<void> _import(HistoryImport offer) async {
     setState(() {
       _importing = true;
       _importFailed = null;
     });
     try {
-      final count = await offer.run();
-      if (mounted) setState(() => _imported = count == 1 ? 'Imported 1 session.' : 'Imported $count sessions.');
+      final done = await offer.bring(_chosen.toList());
+      if (!mounted) return;
+      setState(() {
+        _notes = done.notes;
+        _found = null;
+        _imported = done.imported == 1 ? 'Imported 1 session.' : 'Imported ${done.imported} sessions.';
+      });
     } on Object catch (error) {
-      if (mounted) setState(() => _importFailed = 'Could not import: ${error is ControlFailed ? error.message : error}');
+      if (mounted) setState(() => _importFailed = 'Could not import: ${_why(error)}');
     } finally {
       if (mounted) setState(() => _importing = false);
     }
+  }
+
+  static String _why(Object error) => error is ControlFailed ? error.message : '$error';
+
+  /// The sessions the host found, by source, each with a box: what Import would bring in is what is ticked.
+  Widget _choices(BuildContext context, HistoryImport offer, List<ImportChoice> found) {
+    final muted = context.chatLook.muted;
+    if (found.isEmpty) {
+      return Text('No earlier sessions were found.', key: const Key('welcome-import-none'), style: TextStyle(color: muted));
+    }
+    final sources = <String>[];
+    for (final each in found) {
+      if (!sources.contains(each.source)) sources.add(each.source);
+    }
+    final fresh = found.where((each) => !each.imported).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: ListView(shrinkWrap: true, children: [
+          for (final source in sources) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 2),
+              child: Text(
+                '$source: ${found.where((each) => each.source == source).length} sessions',
+                key: Key('welcome-import-source $source'),
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            for (final each in found.where((each) => each.source == source))
+              CheckboxListTile(
+                key: Key('welcome-import-pick ${each.id}'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: each.imported || _chosen.contains(each),
+                onChanged: each.imported || _importing
+                    ? null
+                    : (on) => setState(() => on == true ? _chosen.add(each) : _chosen.remove(each)),
+                title: Text(each.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                  [if (each.imported) 'Already imported', ?each.cwd].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: muted),
+                ),
+              ),
+          ],
+        ]),
+      ),
+      if (fresh.isEmpty)
+        Text('Everything found is already imported.', style: TextStyle(color: muted))
+      else
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: OutlinedButton(
+            key: const Key('welcome-import-run'),
+            onPressed: _importing || _chosen.isEmpty ? null : () => unawaited(_import(offer)),
+            child: Text(_importing ? 'Importing…' : 'Import ${_chosen.length}'),
+          ),
+        ),
+    ]);
   }
 
   Widget _readiness(BuildContext context, AgentSource source) {
@@ -132,20 +230,29 @@ class _WelcomeViewState extends State<WelcomeView> {
           Text('Import earlier sessions', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            _imported ?? 'Bring in your $names sessions. Nothing is read until you choose Import.',
+            _imported ??
+                (_found != null
+                    ? 'Choose the sessions to bring in. Their files are only read.'
+                    : 'Bring in your $names sessions. Nothing is read until you choose Import.'),
             key: const Key('welcome-import-text'),
             style: TextStyle(color: muted),
           ),
           if (_importFailed case final failed?)
             Text(failed, style: TextStyle(color: theme.colorScheme.error)),
-          if (_imported == null)
+          if (_imported == null && _found == null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: OutlinedButton(
                 key: const Key('welcome-import'),
-                onPressed: _importing ? null : () => unawaited(_import(offer)),
-                child: Text(_importing ? 'Importing…' : 'Import'),
+                onPressed: _importing ? null : () => unawaited(_look(offer)),
+                child: Text(_importing ? 'Looking…' : 'Import'),
               ),
+            ),
+          if (_found case final found?) Padding(padding: const EdgeInsets.only(top: 8), child: _choices(context, offer, found)),
+          for (final note in _notes)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(note, key: const Key('welcome-import-note'), style: TextStyle(color: muted)),
             ),
         ]),
       ),

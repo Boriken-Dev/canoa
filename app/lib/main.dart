@@ -46,6 +46,7 @@ import 'chat/session_views.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
+import 'history/session_import.dart';
 import 'history/session_move.dart';
 import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
@@ -705,6 +706,37 @@ class _CanoaAppState extends State<CanoaApp> {
 
   List<AgentSource> get _hostedSources => hostedSources(widget.host?.listening ?? const []);
 
+  /// The host's own Claude and Codex sources: the ones whose earlier sessions it can bring in from the programs' folders.
+  List<AgentSource> get _importable => [
+    for (final source in _hostedSources)
+      if (source.local && (source.harness == 'claude' || source.harness == 'codex')) source,
+  ];
+
+  /// The offer on the welcome page, when this app has a host that can do it. Nothing is read until the person asks.
+  HistoryImport? _historyImport() {
+    final control = _control;
+    final sources = _importable;
+    if (control == null || sources.isEmpty) return null;
+    return HistoryImport(
+      from: [for (final source in sources) source.displayName],
+      list: () async => listImportable(await control.ready(), [
+        for (final source in sources) (entry: source.label, harness: source.harness!, label: source.displayName),
+      ]),
+      bring: (chosen) async => importChosen(await control.ready(), chosen),
+    );
+  }
+
+  bool _canListImported(ChatSession session) =>
+      _control != null && session.place == SessionPlace.local && _importable.any((source) => source.label == session.agent);
+
+  Future<List<AcpSessionInfo>> _importedFor(ChatSession session) async => importedSessions(await _control!.ready(), session.agent);
+
+  /// Shows what an imported session says, read back from the host's copy.
+  Future<void> _showImported(ChatSession from, AcpSessionInfo info) async {
+    final said = historyMessages(await sessionHistory(await _control!.ready(), entry: from.agent, session: info.id));
+    store.showImported(title: info.title ?? 'Imported session', agent: from.agent, said: said);
+  }
+
   /// The sources Settings has: the host's own that it does not hide, canoa.cfg's `[agents.NAME]` commands, and the other agent
   /// entries of the canoa this app runs.
   List<AgentSource> get _sources => [
@@ -1217,7 +1249,10 @@ class _CanoaAppState extends State<CanoaApp> {
     _conversation.close = _closeSession;
     _conversation
       ..moveTargets = _moveTargets
-      ..move = _moveTo;
+      ..move = _moveTo
+      ..canListImported = _canListImported
+      ..imported = _importedFor
+      ..showImported = _showImported;
     _conversation.popout = _popout;
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
@@ -1346,7 +1381,7 @@ class _CanoaAppState extends State<CanoaApp> {
           kit: _kit,
           renderers: widget.renderers,
           welcome: _withSite(WelcomeView(
-            sources: _sources, checks: _checks, programs: _programs, onNewSession: _newSession,
+            sources: _sources, checks: _checks, programs: _programs, onNewSession: _newSession, historyImport: _historyImport(),
             onSettings: () => unawaited(_showSettings(section: 'sources')),
           )),
         ),
@@ -1528,6 +1563,12 @@ final class _ConversationHandle {
   /// The sources a session can move to, by name and as shown, and the move itself; set by the app.
   Map<String, String> Function(ChatSession)? moveTargets;
   Future<void> Function(BuildContext, ChatSession)? move;
+
+  /// The sessions the host brought in for a session's source, for Earlier conversations, whether it has any to list, and the
+  /// showing of one; set by the app.
+  bool Function(ChatSession)? canListImported;
+  Future<List<AcpSessionInfo>> Function(ChatSession)? imported;
+  Future<void> Function(ChatSession, AcpSessionInfo)? showImported;
   /// The conversations shown in a window of their own; set by the app.
   PopoutHub? popout;
 }
@@ -1640,13 +1681,26 @@ class _ConversationState extends State<_Conversation> {
 
   Future<void> _showEarlier(ChatSession session) async {
     final messenger = ScaffoldMessenger.of(context);
+    final handle = widget.handle;
+    final brought = <String>{};
     final picked = await showSelectableDialog<AcpSessionInfo>(
       context: context,
-      builder: (context) => EarlierConversations(list: (cursor) => widget.store.earlierSessions(session, cursor: cursor)),
+      builder: (context) => EarlierConversations(
+        list: (cursor) => earlierPage(
+          cursor,
+          imported: (handle.canListImported?.call(session) ?? false) ? () => handle.imported!(session) : null,
+          agent: widget.store.canListEarlier(session) ? (next) => widget.store.earlierSessions(session, cursor: next) : null,
+          onImported: brought.addAll,
+        ),
+      ),
     );
     if (picked == null) return;
     try {
-      await widget.store.openEarlier(session, picked);
+      if (brought.contains(picked.id)) {
+        await handle.showImported!(session, picked);
+      } else {
+        await widget.store.openEarlier(session, picked);
+      }
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text('That conversation could not be opened: $error')));
     }
@@ -1705,7 +1759,7 @@ class _ConversationState extends State<_Conversation> {
   /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
   List<Widget> _headerActions(ChatSession? session) {
     final actions = <(String, IconData, VoidCallback)>[
-      if (session != null && widget.store.canListEarlier(session))
+      if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
       if (session != null && !session.isDraft) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
       if (session != null && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
