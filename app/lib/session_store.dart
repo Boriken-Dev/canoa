@@ -1551,21 +1551,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     notifyListeners();
   }
 
-  /// Follows the tasks the host reports for [session], and asks for the updates of those an earlier connection had.
+  /// Follows the tasks the host reports for [session]. The tasks of an earlier connection ended with it, and the host keeps none for
+  /// the next, so a reconnect asks for nothing.
   void _watchTasks(ChatSession session, VerifiedAgent client) {
     unawaited(_taskSubscriptions.remove(session.id)?.cancel());
     _taskSubscriptions[session.id] = client.taskEvents.listen((notice) => _taskEvent(session, notice));
-    final remote = session.remoteSessionId;
-    if (remote == null || !client.takesTasks) return;
-    for (final task in session.tasks.all) {
-      unawaited(() async {
-        final updates = await client.taskHistory(remote, task.id);
-        if (updates != null && identical(_verifiedClients[session.id], client)) {
-          session.tasks.replaceUpdates(task.id, updates);
-          notifyListeners();
-        }
-      }());
-    }
   }
 
   void _taskEvent(ChatSession session, DelegateNotice notice) {
@@ -1594,8 +1584,18 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return task == null || task.phase.ended ? null : task;
   }
 
-  /// What an "allow for the session" of a task's request covers.
-  static String _allowanceKey(AcpPermissionRequest request) => '${request.kind ?? ''}\n${request.title ?? ''}';
+  /// What an "allow for the session" of a task's request covers: the kind, the title and what it would run or touch, so a task
+  /// that titles every request alike is still asked about each different command or file.
+  static String _allowanceKey(AcpPermissionRequest request) {
+    final subject = subjectOf(kind: request.kind, rawInput: request.rawInput, toolCall: request.toolCall);
+    final what = switch (subject) {
+      CommandSubject(:final toolName, :final command) => 'command\n$toolName\n$command',
+      PathSubject(:final toolName, :final path) => 'path\n$toolName\n$path',
+      McpSubject(:final name) => 'mcp\n$name',
+      null => 'input\n${jsonEncode(request.rawInput)}',
+    };
+    return '${request.kind ?? ''}\n${request.title ?? ''}\n$what';
+  }
 
   /// Follows the usage [client] reports for [session]: the account's allowances for every session on it, and the spend of the
   /// one the report names. Nothing is shown for an agent that advertised no usage.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 /// The `_meta` key of `initialize` with which a client tells the host it can show a delegated task, answer what the task's agent
 /// asks of the person and stop it. Without it the host gives its agents no delegation tool.
@@ -71,7 +72,7 @@ final class DelegateTask {
 /// The most updates a task keeps, which the host bounds in bytes as well.
 const maxTaskUpdates = 2000;
 
-/// The most tasks one session lists.
+/// The most tasks one session lists; past it the oldest that ended is forgotten.
 const maxTasks = 64;
 
 /// A session's tasks, built from the host's events in the order they came.
@@ -105,7 +106,12 @@ final class DelegateTasks {
   DelegateTask? _task(String id) {
     final held = _byId[id];
     if (held != null) return held;
-    if (_byId.length >= maxTasks) return null;
+    if (_byId.length >= maxTasks) {
+      // A task that ended is the one to forget, oldest first; a session whose every task runs lists no more.
+      final gone = [for (final task in _byId.values) if (task.phase.ended) task]..sort((a, b) => a.order - b.order);
+      if (gone.isEmpty) return null;
+      _byId.remove(gone.first.id);
+    }
     return _byId[id] = DelegateTask(id, _next++)..title = id;
   }
 
@@ -177,15 +183,6 @@ final class DelegateTasks {
     return true;
   }
 
-  /// The task's updates as the host kept them, which replace what was heard before; used after a reconnect.
-  void replaceUpdates(String id, List<Map<String, Object?>> updates) {
-    final task = _byId[id];
-    if (task == null) return;
-    task.updates
-      ..clear()
-      ..addAll(updates.length > maxTaskUpdates ? updates.sublist(updates.length - maxTaskUpdates) : updates);
-  }
-
   /// Ends every task that has not, as the connection that carried them is gone and so is each task's agent. Whether any changed.
   bool cancelLive([DateTime? at]) {
     var changed = false;
@@ -215,6 +212,7 @@ final class DelegateWire {
   final _events = StreamController<DelegateNotice>.broadcast();
   final _waiting = <String, Completer<Object?>>{};
   int _next = 0;
+  static final _random = Random.secure();
 
   /// The host's events, as their params.
   Stream<DelegateNotice> get events => _events.stream;
@@ -263,7 +261,9 @@ final class DelegateWire {
   }
 
   Future<Object?> _ask(String method, Map<String, Object?> params, Duration timeout) async {
-    final id = 'canoa-delegate-${_next++}';
+    // Unguessable, so no message of the agent's can pass for the host's answer.
+    final nonce = [for (var i = 0; i < 8; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
+    final id = 'canoa-delegate-${_next++}-$nonce';
     final waiting = Completer<Object?>();
     _waiting[id] = waiting;
     try {

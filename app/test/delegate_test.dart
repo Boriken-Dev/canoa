@@ -95,13 +95,13 @@ final class _Host {
   void say(Map<String, Object?> message) => incoming.add(jsonEncode(message));
 
   /// A permission request of the conversation's own agent (`parent`), or of the task [task] (the host's `TASK:CALL`).
-  void ask(int id, String title, {String? task, String call = 'c'}) => say({
+  void ask(int id, String title, {String? task, String call = 'c', Object? input = const {'file_path': 'a.txt'}}) => say({
     'jsonrpc': '2.0',
     'id': id,
     'method': 'session/request_permission',
     'params': {
       'sessionId': 's1',
-      'toolCall': {'toolCallId': task == null ? 'p$id' : '$task:$call$id', 'title': title, 'kind': 'edit', 'rawInput': {'file_path': 'a.txt'}},
+      'toolCall': {'toolCallId': task == null ? 'p$id' : '$task:$call$id', 'title': title, 'kind': 'edit', 'rawInput': input},
       'options': _options,
       if (task != null)
         '_meta': {
@@ -185,11 +185,20 @@ void main() {
       expect(tasks['a']!.updates.single['sessionUpdate'], 'agent_message_chunk');
     });
 
-    test('a session lists no more tasks than it holds', () {
+    test('a session lists no more tasks than it holds, and forgets the oldest that ended before it refuses one', () {
       final tasks = DelegateTasks();
       for (var i = 0; i < maxTasks + 5; i++) {
         tasks.apply(_notice('t$i', _task('t$i', 'WORKING'))['params']);
       }
+      expect(tasks.all, hasLength(maxTasks));
+      expect(tasks['t$maxTasks'], isNull, reason: 'every one runs: no room');
+
+      tasks.apply(_notice('t3', _status('COMPLETED'))['params']);
+      tasks.apply(_notice('t1', _status('FAILED'))['params']);
+      expect(tasks.apply(_notice('new', _task('new', 'WORKING'))['params']), isTrue);
+      expect(tasks['new'], isNotNull);
+      expect(tasks['t1'], isNull, reason: 'the oldest ended is forgotten');
+      expect(tasks['t3'], isNotNull);
       expect(tasks.all, hasLength(maxTasks));
     });
   });
@@ -224,7 +233,7 @@ void main() {
       expect(session.tasks['b']!.source, 'claude');
     });
 
-    test('a connection that is lost ends the live tasks as canceled, and a reconnect asks the host for each task\'s updates', () async {
+    test('a connection that is lost ends the live tasks as canceled, and a reconnect asks the host for nothing', () async {
       final store = SessionStore();
       final host = _Host();
       final session = await host.start(store);
@@ -237,10 +246,7 @@ void main() {
       expect(session.tasks['a']!.phase, TaskPhase.canceled);
       expect(session.tasks['b']!.phase, TaskPhase.completed, reason: 'an ended task stays as it ended');
 
-      final again = _Host()
-        ..histories['a'] = [
-          {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'half'}},
-        ];
+      final again = _Host();
       final client = VerifiedAgent.fromChild(
         label: 'Scripted',
         messages: again.incoming.stream,
@@ -249,22 +255,49 @@ void main() {
         send: (line) async {
           final message = jsonDecode(line) as Map<String, dynamic>;
           again.sent.add(message);
-          switch (message['method']) {
-            case 'initialize':
-              again.reply(message['id'], {'protocolVersion': 1, 'agentCapabilities': <String, Object?>{}});
-            case delegateHistoryMethod:
-              again.reply(message['id'], {'updates': again.histories[message['params']['taskId']] ?? const []});
+          if (message['method'] == 'initialize') {
+            again.reply(message['id'], {'protocolVersion': 1, 'agentCapabilities': <String, Object?>{}});
           }
         },
       );
       await client.initialize();
       store.attachVerifiedClient(session.id, client);
       await _settle();
-      final asked = again.sentOf(delegateHistoryMethod);
-      expect([for (final request in asked) request['params']['taskId']], ['a', 'b']);
-      expect(asked.first['params']['sessionId'], 's1');
-      expect(session.tasks['a']!.updates, hasLength(1));
+      expect(again.sentOf(delegateHistoryMethod), isEmpty, reason: 'the host keeps no task for another connection');
+      expect(session.tasks['a']!.phase, TaskPhase.canceled);
       await client.close();
+    });
+  });
+
+  group('the wire', () {
+    test('an answer the app did not ask for cannot resolve its history or stop request', () async {
+      final sent = <Map<String, dynamic>>[];
+      final wire = DelegateWire((line) async => sent.add(jsonDecode(line) as Map<String, dynamic>), optIn: true);
+      var stopped = true;
+      final stop = wire.stop('s1', timeout: const Duration(milliseconds: 300)).then((done) => stopped = done);
+      final history = wire.history('s1', 't1', timeout: const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final ids = [for (final message in sent) message['id'] as String];
+      expect(ids, hasLength(2));
+      expect(ids.toSet(), hasLength(2));
+      for (final id in ids) {
+        expect(id, matches(RegExp(r'^canoa-delegate-\d+-[0-9a-f]{16}$')));
+      }
+      // What an agent would guess: the numbering with no nonce.
+      for (final guess in ['canoa-delegate-0', 'canoa-delegate-1', 'canoa-delegate-0-0000000000000000']) {
+        expect(wire.takes(jsonEncode({'jsonrpc': '2.0', 'id': guess, 'result': {'updates': <Object?>[]}})), isFalse, reason: guess);
+      }
+      await stop;
+      expect(stopped, isFalse, reason: 'no answer of the host came');
+      expect(await history, isNull);
+
+      // The host's own answer, with the id the app issued, does resolve.
+      final again = wire.stop('s1');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final id = sent.last['id'];
+      expect(wire.takes(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': <String, Object?>{}})), isTrue);
+      expect(await again, isTrue);
+      wire.close();
     });
   });
 
@@ -350,6 +383,24 @@ void main() {
       expect(host.answerTo(15), isNull);
       // The conversation's own "always" was never touched.
       expect(session.alwaysAnsweredAt, isNull);
+    });
+
+    test('a task that titles every request alike is asked about each different file or command', () async {
+      final (host, session, store) = await start();
+      host.ask(10, 'Edit', task: 't1');
+      await _settle();
+      store.choosePermission(session, session.pendingPermissions.single.options.firstWhere((option) => option.kind == 'allow_always'));
+      host.ask(11, 'Edit', task: 't1', input: {'file_path': 'a.txt'});
+      await _settle();
+      expect(session.pendingPermissions, isEmpty, reason: 'the same file');
+      host.ask(12, 'Edit', task: 't1', input: {'file_path': '/home/me/.ssh/authorized_keys'});
+      await _settle();
+      expect(session.pendingPermissions, hasLength(1), reason: 'another file is asked');
+      expect(host.answerTo(12), isNull);
+      store.cancelPermission(session);
+      host.ask(13, 'Edit', task: 't1', input: {'unfamiliar': 'shape'});
+      await _settle();
+      expect(session.pendingPermissions, hasLength(1), reason: 'an input Canoa cannot read is not the one allowed');
     });
 
     test('a task that ends takes its waiting card with it', () async {

@@ -254,7 +254,7 @@ void main() {
       expect(question.task?.source, 'child');
       expect(question.task?.title, contains('edit src'));
       expect(session.needsYou, isTrue);
-      expect(session.tasks[task]?.phase, TaskPhase.inputRequired);
+      await until(() => session.tasks[task]?.phase == TaskPhase.inputRequired, 'the task to read as waiting');
       store.answerPermission(session, allow: true);
       await until(() => session.tasks[task]?.phase == TaskPhase.completed, 'the task to end');
       expect(session.tasks[task]?.result, 'Renamed everywhere.');
@@ -273,6 +273,26 @@ void main() {
       expect(session.tasks.live, isEmpty);
     } finally {
       await client.close();
+    }
+  }, skip: skip);
+
+  test('a lost connection ends the live tasks, and the host keeps none of them for the next connection', () async {
+    final (client, session, store, task) = await delegated('Delegate child Wait');
+    await until(() => session.tasks[task]?.phase == TaskPhase.working, 'the task to work');
+    final remote = session.remoteSessionId!;
+    await client.close();
+    await until(() => session.tasks[task]?.phase == TaskPhase.canceled, 'the lost connection to end the task');
+    expect(session.tasks.live, isEmpty);
+
+    // Another connection, even one that opens a session of the same id, is told nothing of the old connection's task.
+    final next = await connect('parent', decider: store.askPermission);
+    try {
+      final opened = await next.openSession(cwd: host.dir.path);
+      expect(await next.taskHistory(opened.id, task), isNull);
+      expect(await next.taskHistory(remote, task), isNull);
+      expect(await next.stopTasks(opened.id, taskId: task), isFalse);
+    } finally {
+      await next.close();
     }
   }, skip: skip);
 
