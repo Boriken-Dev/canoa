@@ -1265,6 +1265,8 @@ class _CanoaAppState extends State<CanoaApp> {
     scratchFolder: hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
+    listFolder: canRunLocalAgents ? listFolderEntries : null,
+    resolveInside: canRunLocalAgents ? resolveInside : null,
     clipboard: widget.clipboard ?? const SystemClipboard(),
     overlays: config.overlays.keys.toList(),
     defaultOverlays: config.defaultOverlays,
@@ -1272,6 +1274,7 @@ class _CanoaAppState extends State<CanoaApp> {
     pasteAsFile: config.pasteAsFile,
     warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
+    onSettings: () => unawaited(_showSettings()),
     extension: _tabs,
     onProfile: (session) {
       final above = _navigator.currentContext;

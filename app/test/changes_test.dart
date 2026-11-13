@@ -145,7 +145,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('change-comment')), 'Keep the old name as an alias.');
     await tester.tap(find.text('Add to message'));
     await tester.pumpAndSettle();
-    final composer = tester.widget<TextField>(find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.hintText == 'Message agent'));
+    final composer = tester.widget<TextField>(find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message agent')));
     expect(composer.controller!.text, 'src/calc.js:1: `export function sum(a, b) {`\nKeep the old name as an alias.\n');
   });
 

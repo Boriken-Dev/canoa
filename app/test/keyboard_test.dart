@@ -102,7 +102,7 @@ Future<void> _press(WidgetTester tester, LogicalKeyboardKey key, {bool shift = f
   await tester.pump(const Duration(milliseconds: 400));
 }
 
-Finder get _composer => find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.hintText == 'Message agent');
+Finder get _composer => find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message agent'));
 
 void main() {
   testWidgets('Ctrl+N opens a new session, which has started nothing', (tester) async {

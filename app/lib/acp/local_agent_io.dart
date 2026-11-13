@@ -96,3 +96,71 @@ Future<int?> localFileSize(String path) async {
   final file = File(path);
   return await file.exists() ? file.length() : null;
 }
+
+/// A file or folder inside a session's folder, as [resolveInside] answers.
+typedef InsideFile = ({String path, bool folder, int size});
+
+/// Characters a name must not hold to be offered: controls, and the ones that hide or reorder text.
+final _unsafeName = RegExp('[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]');
+
+/// The files and folders under [folder], as paths relative to it with `/` (a folder ends in `/`), nearest first. Links are not
+/// followed or listed, and names that start with a dot, `node_modules` and names with control or direction characters are left
+/// out. At most [maxEntries] are read and [maxDepth] levels.
+Future<List<String>> listFolderEntries(String folder, {int maxEntries = 5000, int maxDepth = 8}) async {
+  final root = Directory(folder);
+  if (!await root.exists()) return const [];
+  final found = <String>[];
+  final queue = <(Directory, String, int)>[(root, '', 0)];
+  for (var next = 0; next < queue.length && found.length < maxEntries; next++) {
+    final (dir, prefix, depth) = queue[next];
+    final here = <(String, bool)>[];
+    try {
+      await for (final entry in dir.list(followLinks: false)) {
+        if (entry is Link) continue;
+        final name = entry.path.split(RegExp(r'[\\/]')).last;
+        if (name.isEmpty || name.startsWith('.') || name == 'node_modules' || _unsafeName.hasMatch(name)) continue;
+        if (entry is Directory) {
+          here.add((name, true));
+        } else if (entry is File) {
+          here.add((name, false));
+        }
+      }
+    } on FileSystemException {
+      continue;
+    }
+    here.sort((a, b) => a.$1.compareTo(b.$1));
+    for (final (name, isFolder) in here) {
+      if (found.length >= maxEntries) break;
+      found.add(isFolder ? '$prefix$name/' : '$prefix$name');
+      if (isFolder && depth < maxDepth) queue.add((Directory('${dir.path}${Platform.pathSeparator}$name'), '$prefix$name/', depth + 1));
+    }
+  }
+  return found;
+}
+
+/// The file or folder [relative] names under [folder], or null when it names anything else: a path that climbs, is absolute or
+/// has a drive, backslash or control character, one that is not there, and one that is, or leads through, a link out of [folder].
+InsideFile? resolveInside(String folder, String relative) {
+  if (relative.isEmpty || _unsafeName.hasMatch(relative) || relative.contains(r'\') || relative.startsWith('/')) return null;
+  if (RegExp(r'^[A-Za-z]:').hasMatch(relative)) return null;
+  final parts = relative.split('/');
+  if (parts.last.isEmpty) parts.removeLast();
+  if (parts.isEmpty || parts.any((part) => part.isEmpty || part == '.' || part == '..')) return null;
+  final sep = Platform.pathSeparator;
+  final base = folder.endsWith(sep) || folder.endsWith('/') ? folder.substring(0, folder.length - 1) : folder;
+  final candidate = '$base$sep${parts.join(sep)}';
+  try {
+    final rootReal = Directory(folder).resolveSymbolicLinksSync();
+    final type = FileSystemEntity.typeSync(candidate);
+    if (type != FileSystemEntityType.file && type != FileSystemEntityType.directory) return null;
+    final isFolder = type == FileSystemEntityType.directory;
+    final real = isFolder ? Directory(candidate).resolveSymbolicLinksSync() : File(candidate).resolveSymbolicLinksSync();
+    final inside = Platform.isWindows
+        ? real.toLowerCase().startsWith('${rootReal.toLowerCase()}$sep')
+        : real.startsWith('$rootReal$sep');
+    if (!inside) return null;
+    return (path: candidate, folder: isFolder, size: isFolder ? 0 : File(candidate).lengthSync());
+  } on FileSystemException {
+    return null;
+  }
+}

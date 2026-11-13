@@ -2071,6 +2071,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// [sendText] for [session], which need not be the selected one. With [attached] false what the composer holds for the session
   /// does not go: a message written in another window of it has none of its own.
   Future<void> sendTextTo(ChatSession session, String text, {bool attached = true}) async {
+    // A file named by an @ goes only while the message still names it.
+    if (attached) session.attachments.removeWhere((item) => item.mention && !text.contains('@${item.name}'));
     final held = attached ? List.of(session.attachments) : <Attachment>[];
     if (text.trim().isEmpty && held.isEmpty) return;
     if (session.status == SessionStatus.preview) {
@@ -2247,6 +2249,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   String? addFile(ChatSession session, String name, String path, int size, {String? mimeType}) {
     if (size == 0) return '$name is empty.';
     return _add(session, Attachment.file(name, path, size, mimeType: mimeType));
+  }
+
+  /// Takes the file or folder at [path], which [label] names after an `@` in the message, to go as a link. Nothing happens, and
+  /// there is nothing to tell, when it is already there.
+  String? addMention(ChatSession session, String label, String path, int size, {bool folder = false}) {
+    if (session.attachments.any((item) => item.mention && item.name == label)) return null;
+    return _add(session, Attachment.mention(label, path, size, folder: folder));
   }
 
   /// Takes the folder at [path] on this computer, which the agent is given a link to.

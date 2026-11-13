@@ -46,7 +46,7 @@ Future<_Rig> _pump(WidgetTester tester, {String? peer, FakeTabBridge? given}) as
     input.dispose();
     store.dispose();
   });
-  await tester.binding.setSurfaceSize(const Size(420, 900));
+  await tester.binding.setSurfaceSize(const Size(420, 1000));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,

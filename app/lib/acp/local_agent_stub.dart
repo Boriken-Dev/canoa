@@ -12,3 +12,10 @@ bool folderExists(String folder) => true;
 bool inGitRepository(String folder) => false;
 
 Future<int?> localFileSize(String path) async => null;
+
+/// A file or folder inside a session's folder, as [resolveInside] answers.
+typedef InsideFile = ({String path, bool folder, int size});
+
+Future<List<String>> listFolderEntries(String folder) async => const [];
+
+InsideFile? resolveInside(String folder, String relative) => null;

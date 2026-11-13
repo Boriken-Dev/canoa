@@ -146,7 +146,8 @@ void main() {
       agent.update({'sessionUpdate': 'session_info_update', 'title': 'Calc'});
       agent.ask(5, 'Edit a.txt');
       await Future<void>.delayed(const Duration(milliseconds: 60));
-      await store.sendText('and a test');
+      // The composer's own send would refuse the waiting request; this one is a message that only queues.
+      await store.sendTextTo(session, 'and a test');
       expect(session.queue, hasLength(1));
 
       final share = ChatSessionShare(CanoaSharedChat(store, session), minInterval: Duration.zero);

@@ -5,13 +5,16 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 
+import '../acp/local_agent.dart' show InsideFile;
 import '../extension/composer_extension.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
 import 'agent_events.dart' show AgentCommandInfo, MessageRole;
 import 'attachments.dart';
 import 'composer_controls.dart';
+import 'mentions.dart';
 import 'session_options.dart';
+import 'session_views.dart' show appName;
 
 /// What the composer says while a permission card waits: a message refuses it once and goes to the agent.
 const String redirectHint = 'Send a message to decline and redirect the agent';
@@ -28,6 +31,8 @@ final class ComposerKit {
     this.scratchFolder,
     this.pickFiles,
     this.statFile,
+    this.listFolder,
+    this.resolveInside,
     this.clipboard = const TextClipboard(),
     this.overlays = const [],
     this.defaultOverlays,
@@ -35,6 +40,7 @@ final class ComposerKit {
     this.pasteAsFile = Composer.defaultPasteAsFile,
     this.warnPermille = defaultWarnPermille,
     this.onSourceSettings,
+    this.onSettings,
     this.onProfile,
     this.extension,
   });
@@ -67,6 +73,11 @@ final class ComposerKit {
   final Future<int?> Function(String path)? statFile;
   final ClipboardReader clipboard;
 
+  /// The files and folders under a folder on this computer, as paths relative to it, and the file or folder one names when it is
+  /// inside the folder: what an `@` offers. Null where files cannot be read by their path.
+  final Future<List<String>> Function(String folder)? listFolder;
+  final InsideFile? Function(String folder, String relative)? resolveInside;
+
   /// canoa.cfg's overlays, by name, in their order.
   final List<String> overlays;
   final int pasteAsFile;
@@ -76,6 +87,9 @@ final class ComposerKit {
 
   /// Opens Settings at its sources.
   final VoidCallback? onSourceSettings;
+
+  /// Opens Settings.
+  final VoidCallback? onSettings;
 
   /// Shows what a session was given of its profile.
   final void Function(ChatSession session)? onProfile;
@@ -216,6 +230,11 @@ class SessionComposer extends StatelessWidget {
     final draft = session.status == SessionStatus.draft;
     final options = store.optionsOf(session);
     final seen = store.optionsSeen(session);
+    final mentions = kit.listFolder != null && kit.resolveInside != null && store.canAttach(session) && SessionMentions.offeredFor(session)
+        ? SessionMentions(store: store, session: session, list: kit.listFolder!, resolve: kit.resolveInside!)
+        : null;
+    final inputs = [if (mentions != null) '@ files', '/ commands'].join(', ');
+    final actions = _actions(session);
     return Composer(
       controller: controller,
       focusNode: focusNode,
@@ -225,14 +244,17 @@ class SessionComposer extends StatelessWidget {
       starting: store.isStarting(session),
       onStop: onStop,
       commands: commands,
+      actions: actions,
+      actionsTitle: '$appName actions',
+      mentions: mentions,
       centred: centred,
       hint: !enabled
           ? (store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect an ACP peer to chat')
           : session.pendingPermissions.isNotEmpty
           ? redirectHint
           : session.isDraft
-          ? 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send'
-          : 'Message agent',
+          ? 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send. $inputs'
+          : 'Message agent: $inputs',
       header: kit.extension?.header(context, session, controller),
       attachments: SessionAttachments(store, session, kit),
       pickFiles: kit.pickFiles == null
@@ -244,7 +266,21 @@ class SessionComposer extends StatelessWidget {
       pickFolder: kit.pickFolder,
       clipboard: kit.clipboard,
       pasteAsFile: kit.pasteAsFile,
-      plusItems: [...?kit.extension?.menuItems(context, session)],
+      plusItems: [
+        ...?kit.extension?.menuItems(context, session),
+        MenuItemButton(
+          key: const Key('plus-slash'),
+          leadingIcon: const Icon(Icons.terminal, size: 18),
+          // Commands are read from the start of the message, so the entry is there for an empty one.
+          onPressed: controller.text.isEmpty
+              ? () {
+                  controller.value = const TextEditingValue(text: '/', selection: TextSelection.collapsed(offset: 1));
+                  focusNode?.requestFocus();
+                }
+              : null,
+          child: const Text('Slash commands'),
+        ),
+      ],
       onShiftTab: session.status == SessionStatus.preview ? null : () => unawaited(store.cycleMode(session)),
       recall: _lastSent,
       // The mode first at the bottom left, then Add; the model and effort sit beside Send, as Claude Code and Codex lay them out.
@@ -266,6 +302,17 @@ class SessionComposer extends StatelessWidget {
       ],
     );
   }
+
+  /// Canoa's own entries in the `/` list: what the person could do from the controls, by name.
+  List<ComposerAction> _actions(ChatSession session) => [
+    if (session.status != SessionStatus.preview)
+      ComposerAction(name: 'mode', description: 'Switch to the next mode', run: () => unawaited(store.cycleMode(session))),
+    if (kit.onSettings != null) ComposerAction(name: 'settings', description: 'Open Settings', run: kit.onSettings!),
+    if (kit.onSourceSettings != null) ComposerAction(name: 'sources', description: 'Open the source settings', run: kit.onSourceSettings!),
+    if (kit.onLoadout != null) ComposerAction(name: 'loadout', description: 'Open Loadout', run: kit.onLoadout!),
+    if (kit.onProfile != null && session.profile != null)
+      ComposerAction(name: 'profile', description: 'Show what this session was given', run: () => kit.onProfile!(session)),
+  ];
 
   /// The last message the person sent here, which Up in an empty message brings back.
   String? _lastSent() {
