@@ -26,15 +26,6 @@ void main() {
     }
   });
 
-  test('a folder on a share is written for the agent with forward slashes, which the client takes as absolute', () {
-    expect(folderForAgent(r'\\fileserver\projects\app'), '//fileserver/projects/app');
-    expect(folderForAgent(r'\\?\UNC\fileserver\projects\app'), '//fileserver/projects/app');
-    expect(folderForAgent(r'\\?\C:\work'), r'C:\work');
-    for (final unchanged in ['/home/ana/src', r'C:\work', 'c:/work', '//fileserver/projects', r'\\.\pipe\x', r'\\?\Volume{1}\x', 'relative']) {
-      expect(folderForAgent(unchanged), unchanged);
-    }
-  });
-
   group('on this machine\'s administrative share', () {
     late Directory made;
     late String shared;

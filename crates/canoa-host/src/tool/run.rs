@@ -963,7 +963,9 @@ impl Process {
         cwd: &Path,
         generation: u64,
     ) -> io::Result<(Self, ChildStdout, ChildStderr)> {
-        let (program, args) = share::launch_in(program, args, cwd)?;
+        // A batch file does not start in a folder on a share: the program an npm shim names starts there instead.
+        let args: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
+        let (program, args) = coqui_acp_api::batch::start_in(program.as_ref(), &args, cwd)?;
         let mut command = Command::new(program);
         command
             .args(args)

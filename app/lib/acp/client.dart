@@ -7,7 +7,6 @@ import 'package:coqui_web/coqui_web.dart';
 import '../chat/agent_events.dart';
 import 'delegate.dart';
 import 'secret_wire.dart';
-import 'share_path.dart';
 import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
@@ -275,9 +274,9 @@ final class VerifiedAgent {
   Future<void> initialize() => _client.initialize();
   Future<AcpDescription> describe() => _client.describe();
   Future<String> createSession({required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
-      _client.createSession(cwd: folderForAgent(cwd), setup: setup);
+      _client.createSession(cwd: cwd, setup: setup);
   Future<AcpOpenedSession> openSession({required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
-      _client.openSession(cwd: folderForAgent(cwd), setup: setup);
+      _client.openSession(cwd: cwd, setup: setup);
   bool takesMcp(AcpMcpTransport transport) => _client.takesMcp(transport);
   bool get takesSystemPrompt => _client.takesSystemPrompt;
   bool get takesAdditionalDirectories => _client.takesAdditionalDirectories;
@@ -285,13 +284,13 @@ final class VerifiedAgent {
       _client.setConfigOption(sessionId, configId, value);
   Future<void> setMode(String sessionId, String modeId) => _client.setMode(sessionId, modeId);
   Future<AcpOpenedSession> resumeSession(String id, {required String cwd, bool replayHistory = false}) =>
-      _client.resumeSession(id, cwd: folderForAgent(cwd), replayHistory: replayHistory);
+      _client.resumeSession(id, cwd: cwd, replayHistory: replayHistory);
   bool get takesImages => _client.takesImages;
   bool get takesFiles => _client.takesFiles;
   bool get canReopenSessions => _client.canReopenSessions;
   Future<AcpSessionPage> listSessions({String? cwd, String? cursor}) => _client.listSessions(cwd: cwd, cursor: cursor);
   Future<AcpOpenedSession> reopenSession(String id, {required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
-      _client.reopenSession(id, cwd: folderForAgent(cwd), setup: setup);
+      _client.reopenSession(id, cwd: cwd, setup: setup);
   Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) =>
       _client.prompt(sessionId, text, attachments: attachments);
   Future<void> cancel(String sessionId) => _client.cancel(sessionId);

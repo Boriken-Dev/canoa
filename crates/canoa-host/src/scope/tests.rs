@@ -598,7 +598,7 @@ mod shares {
                 "{root}"
             );
         }
-        // The app writes a share with forward slashes, which a Dart client takes as absolute.
+        // A share may be written with forward slashes, as git writes one.
         let scope = Scope::new(vec![PathBuf::from(r"\\fileserver\projects")]);
         let Verdict::Forward(bytes) = scope.check(&session(
             "//fileserver/projects/app",
