@@ -301,7 +301,7 @@ pub extern "C" fn canoa_ffi_link_close(link: u64) -> i32 {
     })
 }
 
-/// Runs this process as the host's own `provider`, `tool`, `agent` or `launch` command, from this process's command line,
+/// Runs this process as the host's own `provider`, `tool`, `agent`, `launch` or `mcp-bridge` command, from this process's command line,
 /// whose first argument is [`jobs::CHILD_FLAG`]. Returns the status to exit with; the application calls it before anything
 /// else of its own has started, and runs nothing after it.
 #[unsafe(no_mangle)]

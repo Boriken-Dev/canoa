@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::{ConnInfo, Engine, Host, META, Principal, SERVER_NAME, Source, child};
+use super::{BridgeCommand, ConnInfo, Engine, Host, META, Principal, SERVER_NAME, Source, child};
 use crate::config::{Config, DelegateConfig};
 use crate::local::Link;
 use crate::serve::LocalError;
@@ -38,6 +38,10 @@ fn engine(config: DelegateConfig) -> Arc<Engine> {
     let engine = Engine::new(config);
     let _ = engine.host.set(Arc::new(Fake));
     let _ = engine.url.set("http://127.0.0.1:1/mcp".to_owned());
+    let _ = engine.bridge.set(BridgeCommand {
+        program: "/opt/canoa/canoa".to_owned(),
+        args: vec!["mcp-bridge".to_owned()],
+    });
     engine
 }
 
@@ -67,6 +71,14 @@ fn initialized(http: bool) -> Vec<u8> {
     bytes(
         &json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1,
         "agentCapabilities": {"mcpCapabilities": {"http": http}}}}),
+    )
+}
+
+/// An agent's answer to `initialize` in protocol version 2, which says what a session takes under `capabilities`.
+fn initialized_v2(http: bool, stdio: bool) -> Vec<u8> {
+    bytes(
+        &json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 2,
+        "capabilities": {"session": {"mcp": {"http": http, "stdio": stdio}}}}}),
     )
 }
 
@@ -107,32 +119,90 @@ fn opt_in(conn: &Arc<super::Conn>, meta: bool, http: bool) {
 }
 
 #[test]
-fn a_session_is_given_the_entry_only_when_the_client_asked_and_the_agent_takes_http() {
+fn a_session_is_given_the_entry_only_when_the_client_asked_and_over_http_when_the_agent_takes_it() {
     for (meta, http, offered) in [
-        (true, true, true),
-        (false, true, false),
-        (true, false, false),
-        (false, false, false),
+        (true, true, Some("http")),
+        (false, true, None),
+        (true, false, Some("stdio")),
+        (false, false, None),
     ] {
         let conn = engine(DelegateConfig::default()).connect(info(false, 0));
         opt_in(&conn, meta, http);
         let sent = conn.client_said(new_session(2)).expect("it passes");
         let listed = servers(&sent);
-        if offered {
-            assert_eq!(
-                listed.len(),
-                1,
-                "the client's entry of that name is replaced"
-            );
-            assert_eq!(listed[0]["name"], SERVER_NAME);
-            assert_eq!(listed[0]["type"], "http");
-            assert_eq!(listed[0]["url"], "http://127.0.0.1:1/mcp");
-            assert_eq!(token_of(&listed[0]).len(), 64);
-        } else {
-            // Untouched: the client's own entry, which the scope has the say on.
-            assert_eq!(listed[0]["url"], "https://example.com/mcp", "{meta} {http}");
+        match offered {
+            Some("http") => {
+                assert_eq!(
+                    listed.len(),
+                    1,
+                    "the client's entry of that name is replaced"
+                );
+                assert_eq!(listed[0]["name"], SERVER_NAME);
+                assert_eq!(listed[0]["type"], "http");
+                assert_eq!(listed[0]["url"], "http://127.0.0.1:1/mcp");
+                assert_eq!(token_of(&listed[0]).len(), 64);
+            }
+            Some(_) => {
+                assert_eq!(listed.len(), 1);
+                assert_eq!(listed[0]["name"], SERVER_NAME);
+                // Version 1 writes a stdio server with no type; the token is in the environment, not the arguments.
+                assert!(listed[0].get("type").is_none(), "{}", listed[0]);
+                assert_eq!(listed[0]["command"], "/opt/canoa/canoa");
+                assert_eq!(listed[0]["args"], json!(["mcp-bridge"]));
+                assert_eq!(listed[0]["env"][0]["name"], "CANOA_DELEGATE_URL");
+                assert_eq!(listed[0]["env"][0]["value"], "http://127.0.0.1:1/mcp");
+                assert_eq!(listed[0]["env"][1]["name"], "CANOA_DELEGATE_TOKEN");
+                assert_eq!(
+                    listed[0]["env"][1]["value"].as_str().map(str::len),
+                    Some(64)
+                );
+                assert!(
+                    !listed[0]["args"]
+                        .to_string()
+                        .contains(listed[0]["env"][1]["value"].as_str().unwrap_or("-"))
+                );
+            }
+            None => {
+                // Untouched: the client's own entry, which the scope has the say on.
+                assert_eq!(listed[0]["url"], "https://example.com/mcp", "{meta} {http}");
+            }
         }
     }
+}
+
+#[test]
+fn a_version_two_agent_is_given_a_typed_stdio_entry_when_it_says_it_takes_stdio() {
+    let take = |http: bool, stdio: bool| {
+        let conn = engine(DelegateConfig::default()).connect(info(false, 0));
+        conn.peek(&initialize(true));
+        assert!(conn.client_said(initialize(true)).is_some());
+        conn.agent_said(&initialized_v2(http, stdio));
+        servers(&conn.client_said(new_session(2)).expect("it passes"))
+    };
+    let both = take(true, true);
+    assert_eq!(
+        both[0]["type"], "http",
+        "HTTP is preferred when the agent takes it"
+    );
+    let stdio = take(false, true);
+    assert_eq!(stdio[0]["type"], "stdio");
+    assert_eq!(stdio[0]["command"], "/opt/canoa/canoa");
+    assert_eq!(stdio[0]["env"][1]["name"], "CANOA_DELEGATE_TOKEN");
+    let neither = take(false, false);
+    assert_eq!(neither[0]["url"], "https://example.com/mcp");
+}
+
+#[test]
+fn an_agent_that_takes_no_http_is_given_no_entry_when_there_is_nothing_to_run_the_bridge() {
+    let bare = Engine::new(DelegateConfig::default());
+    let _ = bare.host.set(Arc::new(Fake));
+    let _ = bare.url.set("http://127.0.0.1:1/mcp".to_owned());
+    let conn = bare.connect(info(false, 0));
+    opt_in(&conn, true, false);
+    assert_eq!(
+        servers(&conn.client_said(new_session(2)).expect("it passes"))[0]["url"],
+        "https://example.com/mcp"
+    );
 }
 
 #[test]
@@ -418,3 +488,5 @@ fn the_settings_default_to_the_documented_values_and_refuse_what_they_do_not_kno
         "an empty list allows none"
     );
 }
+
+mod bridge;

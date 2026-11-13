@@ -72,7 +72,7 @@ pub const ACP_CAPABILITY: &str = "acp/1";
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ServeOptions {
-    /// The program that serves a provider, a tool or a profile's launch: this host's own executable, run as
+    /// The program that serves a provider, a tool, a profile's launch or the delegation's stdio bridge: this host's own executable, run as
     /// `PROGRAM [program_args] provider ...`.
     pub provider_program: PathBuf,
     /// What goes before the subcommand on `provider_program`'s command line: nothing for `canoa`, the flag that makes an
@@ -1147,7 +1147,10 @@ impl Serving {
                 bound,
             ));
         }
-        let delegation = Delegation::start(&config.delegate);
+        let delegation = Delegation::start(
+            &config.delegate,
+            delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+        );
         let recorded = Arc::new(history::Store::open(
             options.state_dir.as_ref().map(|dir| dir.join("history")),
             config.history,

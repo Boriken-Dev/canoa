@@ -4,7 +4,8 @@
 //!
 //! An agent reaches it through three MCP tools (`delegate_task`, `task_status`, `cancel`) on a loopback HTTP server behind a
 //! bearer minted for that one session. The bearer is written into the session's `mcpServers` as the host relays `session/new`,
-//! revoked when the connection ends, kept in memory only, and never logged. Every limit on what a task may be given (its source,
+//! revoked when the connection ends, kept in memory only, and never logged. An agent that takes no HTTP MCP server is given the
+//! same tools as a stdio server instead, [`bridge`], with the bearer in its environment. Every limit on what a task may be given (its source,
 //! its folder, its mode, how many) is checked in [`agent`] before a process starts, so every way in takes one path.
 #![allow(
     clippy::std_instead_of_core,
@@ -13,6 +14,7 @@
 )]
 
 mod agent;
+pub(crate) mod bridge;
 mod channel;
 mod child;
 pub(crate) mod privilege;
@@ -132,6 +134,36 @@ impl Drop for Who {
     }
 }
 
+/// The command line of the stdio bridge: this program, with what goes before its subcommand, then `mcp-bridge`. It holds no
+/// secret: the address and the bearer travel in the environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BridgeCommand {
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+}
+
+impl BridgeCommand {
+    /// `program`, run as `PROGRAM [before] mcp-bridge`.
+    pub(crate) fn new(program: &std::path::Path, before: &[std::ffi::OsString]) -> Self {
+        let mut args: Vec<String> = before
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        args.push("mcp-bridge".to_owned());
+        Self {
+            program: program.to_string_lossy().into_owned(),
+            args,
+        }
+    }
+}
+
+/// How an agent is given the tools.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Way {
+    Http,
+    Stdio,
+}
+
 /// What the host keeps for every connection and session.
 #[derive(Default)]
 struct State {
@@ -148,6 +180,8 @@ pub(crate) struct Engine {
     pub(crate) config: DelegateConfig,
     host: OnceLock<Arc<dyn Host>>,
     url: OnceLock<String>,
+    /// What runs the stdio bridge for an agent that takes no HTTP MCP server.
+    bridge: OnceLock<BridgeCommand>,
     a2a: Server,
     next: AtomicU64,
     stopped: AtomicBool,
@@ -160,6 +194,7 @@ impl Engine {
             config,
             host: OnceLock::new(),
             url: OnceLock::new(),
+            bridge: OnceLock::new(),
             a2a: Server::new(agent::DelegationAgent::new(weak.clone())),
             next: AtomicU64::new(1),
             stopped: AtomicBool::new(false),
@@ -352,6 +387,10 @@ struct ConnState {
     asked: bool,
     /// The agent takes MCP servers over HTTP.
     http: bool,
+    /// The agent takes MCP servers over stdio, which version 1 requires of every agent.
+    stdio: bool,
+    /// The ACP version the agent answered `initialize` in: it decides how a stdio server is written.
+    version: u64,
     pending: HashMap<String, Pending>,
     sessions: Vec<Arc<Session>>,
 }
@@ -433,15 +472,24 @@ impl Conn {
         }
     }
 
-    /// Whether a session opened now is given the tools.
-    fn offering(&self, state: &ConnState) -> bool {
-        state.asked
-            && state.http
+    /// How a session opened now is given the tools, or `None` when it is given none: over HTTP when the agent takes it, else
+    /// through the stdio bridge.
+    fn offering(&self, state: &ConnState) -> Option<Way> {
+        let ready = state.asked
             && self.info.depth < self.engine.config.max_depth
             && self.engine.config.enabled
             && self.engine.url.get().is_some()
             && self.engine.host().is_some()
-            && !self.is_closed()
+            && !self.is_closed();
+        if !ready {
+            None
+        } else if state.http {
+            Some(Way::Http)
+        } else if state.stdio && self.engine.bridge.get().is_some() {
+            Some(Way::Stdio)
+        } else {
+            None
+        }
     }
 
     /// What the host adds to the stream to the client.
@@ -543,8 +591,10 @@ impl Conn {
             .and_then(Value::as_str)
             .map(PathBuf::from);
         let mut state = lock(&self.state);
-        let offered = self.offering(&state) && state.sessions.len() < MAX_SESSIONS;
-        let (Some(cwd), true) = (cwd, offered) else {
+        let way = self
+            .offering(&state)
+            .filter(|_| state.sessions.len() < MAX_SESSIONS);
+        let (Some(cwd), Some(way)) = (cwd, way) else {
             if state.pending.len() < MAX_PENDING {
                 state.pending.insert(
                     id,
@@ -570,12 +620,30 @@ impl Conn {
             entry = self.info.entry,
             "a session was given the delegation tools"
         );
-        let entry = json!({
-            "type": "http",
-            "name": SERVER_NAME,
-            "url": url,
-            "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-        });
+        let entry = match (way, self.engine.bridge.get()) {
+            (Way::Stdio, Some(bridge)) => {
+                // Version 1 writes a stdio server with no `type`; version 2 names it.
+                let mut entry = json!({
+                    "name": SERVER_NAME,
+                    "command": bridge.program,
+                    "args": bridge.args,
+                    "env": [
+                        {"name": bridge::URL_VAR, "value": url},
+                        {"name": bridge::TOKEN_VAR, "value": token},
+                    ],
+                });
+                if state.version >= 2 {
+                    entry["type"] = json!("stdio");
+                }
+                entry
+            }
+            _ => json!({
+                "type": "http",
+                "name": SERVER_NAME,
+                "url": url,
+                "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
+            }),
+        };
         let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) else {
             return false;
         };
@@ -625,11 +693,23 @@ impl Conn {
         let ok = value.get("result").filter(|_| value.get("error").is_none());
         match (pending, ok) {
             (Some(Pending::Initialize), Some(result)) => {
-                let http = result
-                    .pointer("/agentCapabilities/mcpCapabilities/http")
-                    .or_else(|| result.pointer("/capabilities/session/mcp/http"))
-                    .is_some_and(|http| http == &json!(true) || http.is_object());
-                lock(&self.state).http = http;
+                let takes = |capability: Option<&Value>| {
+                    capability.is_some_and(|said| said == &json!(true) || said.is_object())
+                };
+                let version = result
+                    .get("protocolVersion")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1);
+                let mut state = lock(&self.state);
+                state.version = version;
+                state.http = takes(
+                    result
+                        .pointer("/agentCapabilities/mcpCapabilities/http")
+                        .or_else(|| result.pointer("/capabilities/session/mcp/http")),
+                );
+                // Version 1 has stdio in its baseline; version 2 says it.
+                state.stdio =
+                    version < 2 || takes(result.pointer("/capabilities/session/mcp/stdio"));
             }
             (
                 Some(Pending::Open {
@@ -890,7 +970,7 @@ pub(crate) struct Delegation {
 
 impl Delegation {
     /// Starts the tool server for `config`; `None` when delegation is off or its server could not listen.
-    pub(crate) fn start(config: &DelegateConfig) -> Option<Self> {
+    pub(crate) fn start(config: &DelegateConfig, bridge: BridgeCommand) -> Option<Self> {
         if !config.enabled {
             tracing::info!("non-default: host.delegate.enabled is false, default true");
             return None;
@@ -921,6 +1001,7 @@ impl Delegation {
             );
         }
         let engine = Engine::new(config.clone());
+        let _ = engine.bridge.set(bridge);
         match server::Listener::start(&engine) {
             Ok(listener) => {
                 let url = format!("http://127.0.0.1:{}/mcp", listener.addr().port());

@@ -52,7 +52,7 @@ pub trait Front: Send + Sync {
     /// The wait could not be set up.
     fn when_input_closes(&self, status: u8, then: Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
 
-    /// The program that runs `provider`, `tool` and `launch` for this host.
+    /// The program that runs `provider`, `tool`, `launch` and `mcp-bridge` for this host.
     ///
     /// # Errors
     ///
@@ -229,6 +229,11 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<std::ffi::OsString>,
     },
+    /// Serve the host's delegation tools as an MCP server on standard input and output, for an agent that takes no HTTP MCP
+    /// server: what the host adds to a session's MCP servers. Relays each request to the host's loopback tool server, at
+    /// CANOA_DELEGATE_URL, with the bearer in CANOA_DELEGATE_TOKEN; ends when standard input closes.
+    #[command(hide = true)]
+    McpBridge,
 }
 
 /// What `canoa options` takes.
@@ -711,6 +716,18 @@ fn web_config(
     Ok(web)
 }
 
+/// `canoa mcp-bridge`: the address and the bearer come from the environment, never from the command line.
+fn mcp_bridge() -> Result<(), Failed> {
+    let var = |name: &str| std::env::var_os(name).and_then(|value| value.into_string().ok());
+    let target = crate::delegate::bridge::Target::new(
+        var(crate::delegate::bridge::URL_VAR).as_deref(),
+        var(crate::delegate::bridge::TOKEN_VAR).as_deref(),
+    )
+    .map_err(Failed::usage)?;
+    crate::delegate::bridge::serve(target, std::io::stdin().lock(), std::io::stdout())
+        .map_err(Failed::run)
+}
+
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     let config = load_for_serving(args, front)?;
     let home = home_of(front)?;
@@ -1184,6 +1201,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             .map_err(Failed::run)
         }
         Command::Accounts { command } => accounts(command, front),
+        Command::McpBridge => mcp_bridge(),
         Command::Launch { program, args } => {
             let error = crate::profile::launch(&program, &args, crate::serve::MAX_LINE);
             Err(match error.kind() {
@@ -1196,7 +1214,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
 
 impl Cli {
     /// Whether this is one of the commands a host starts for itself, which take the process's own standard streams:
-    /// `provider`, `tool`, `agent` or `launch`. An application that runs as one when it starts itself takes nothing else
+    /// `provider`, `tool`, `agent`, `launch` or `mcp-bridge`. An application that runs as one when it starts itself takes nothing else
     /// on that command line.
     #[must_use]
     pub const fn is_a_hosts_own(&self) -> bool {
@@ -1206,6 +1224,7 @@ impl Cli {
                 | Command::Tool { .. }
                 | Command::Agent { .. }
                 | Command::Launch { .. }
+                | Command::McpBridge
         )
     }
 }
@@ -1351,6 +1370,7 @@ mod tests {
                 .is_a_hosts_own()
         };
         assert!(own(&["launch", "x"]));
+        assert!(own(&["mcp-bridge"]));
         assert!(own(&["tool", "--name", "t", "--spec", "{}"]));
         assert!(own(&["provider", "--library", "x", "--provider", "p"]));
         assert!(!own(&["serve"]));

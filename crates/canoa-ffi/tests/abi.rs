@@ -315,6 +315,7 @@ fn a_hosts_own_command_is_refused_as_a_job() {
         json!(["launch", "--", "none"]),
         json!(["tool", "--name", "t", "--spec", "{}"]),
         json!(["agent", "claude", "--executable", "none"]),
+        json!(["mcp-bridge"]),
     ] {
         let job = start(&json!({"args": args, "home": scratch.0}));
         let said = to_end(job);
@@ -630,5 +631,98 @@ fn a_link_runs_a_session_on_an_entry_with_no_proof_and_closing_it_ends_the_agent
     }
     assert_eq!(send_on(second, &json!({})), STATUS_ENDED);
     assert_eq!(canoa_ffi_link_close(second), STATUS_OK);
+    assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+}
+
+/// One prompt on `link`, and what the agent said in answer.
+fn prompt_on(link: u64, id: u64, session: &str, text: &str) -> String {
+    let request = json!({"jsonrpc": "2.0", "id": id, "method": "session/prompt",
+        "params": {"sessionId": session, "prompt": [{"type": "text", "text": text}]}});
+    assert_eq!(send_on(link, &request), STATUS_OK);
+    let deadline = Instant::now() + WAIT;
+    let mut said = String::new();
+    loop {
+        for message in read_link(link)["messages"].as_array().expect("a list") {
+            let message: Value =
+                serde_json::from_str(message.as_str().expect("text")).expect("ACP");
+            let update = &message["params"]["update"];
+            if update["sessionUpdate"] == "agent_message_chunk" {
+                said.push_str(update["content"]["text"].as_str().unwrap_or(""));
+            }
+            if message["id"] == id && message.get("method").is_none() {
+                return said;
+            }
+        }
+        assert!(Instant::now() < deadline, "no answer to {text}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The delegation tools of an agent that takes no HTTP MCP server, from the application's own library: the host in this process
+/// runs the bridge as `PROGRAM --canoa-child mcp-bridge`, which is the library's child entry, with no `canoa` program anywhere.
+#[test]
+fn the_bridge_runs_from_the_applications_own_library_entry() {
+    let agent = stdio_agent();
+    assert!(
+        agent.exists(),
+        "build the examples first: cargo build -p canoa-host --examples"
+    );
+    let scratch = Scratch::new();
+    let config = scratch.0.join("canoa.cfg");
+    let quoted = serde_json::to_string(&agent.to_string_lossy()).expect("quoted");
+    std::fs::write(
+        &config,
+        format!(
+            "[host.agents.fixture]\nprogram = {quoted}\nargs = [\"--scripted\"]\nlisten = \"127.0.0.1:0\"\n"
+        ),
+    )
+    .expect("written");
+    let entry = child_entry();
+    let job = start(&json!({
+        "args": ["serve", "--allow-empty", "--until-stdin-closes", "--config", config],
+        "home": scratch.0.join("home"),
+        "holder": "a test",
+        "program": entry,
+        "program_args": [canoa_ffi::jobs::CHILD_FLAG],
+    }));
+    until(job, "the host to be ready", |out, _, _| {
+        out.iter().any(|line| line.contains("ready"))
+    });
+    let link = open_link(job, "fixture").expect("a link");
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": 1, "clientCapabilities": {},
+            "_meta": {"dev.boriken.canoa/delegate": true}}});
+    assert_eq!(send_on(link, &initialize), STATUS_OK);
+    assert!(answer_on(link, 1).get("result").is_some());
+    let dir = scratch.0.to_string_lossy().into_owned();
+    let new = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new",
+        "params": {"cwd": dir, "mcpServers": []}});
+    assert_eq!(send_on(link, &new), STATUS_OK);
+    let session = answer_on(link, 2)["result"]["sessionId"]
+        .as_str()
+        .expect("a session")
+        .to_owned();
+
+    let bridge = prompt_on(link, 3, &session, "Bridge");
+    let expected = format!(
+        " command={} {} mcp-bridge",
+        entry.display(),
+        canoa_ffi::jobs::CHILD_FLAG
+    );
+    assert!(bridge.ends_with(&expected), "{bridge}");
+    // A call goes: stand-in, library entry, loopback server, and the host answers that the task is not there.
+    let called = prompt_on(
+        link,
+        4,
+        &session,
+        "Call task_status {\"taskId\":\"task-none\"}",
+    );
+    assert!(called.starts_with("error:"), "{called}");
+    let ended = prompt_on(link, 5, &session, "BridgeClose");
+    assert!(ended.starts_with("bridge ended: "), "{ended}");
+
+    assert_eq!(canoa_ffi_link_close(link), STATUS_OK);
+    assert_eq!(canoa_ffi_job_stop(job), STATUS_OK);
+    assert_eq!(to_end(job).exit, Some(0));
     assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
 }

@@ -20,12 +20,16 @@
 //! SOURCE TEXT`, `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
 //! session is in, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
 //! to PATH and waits for a cancel, `Bearer` says the tool server's address and the session's bearer (a stand-in may; the host never
-//! does), `Pid` says its process id and `Cwd` the working directory the session was opened in. `--marker=PATH` appends the process id
+//! does), `Pid` says its process id and `Cwd` the working directory the session was opened in. Given the entry as a stdio server
+//! (what the host writes for an agent that says no HTTP), it starts that command and calls the tools through it as an MCP client
+//! does; `Bridge` says its process id and the command line it was started with, and `BridgeClose` closes its input and says
+//! whether it ended. `--marker=PATH` appends the process id
 //! to PATH each time the agent starts, so a test can tell whether one did.
 
 use std::collections::HashMap;
-use std::io::{BufRead as _, Read as _, Write as _};
+use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::path::PathBuf;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -65,8 +69,104 @@ struct Shared {
     http: bool,
     /// Each session's address and bearer for the host's delegation tools.
     tools: Mutex<HashMap<String, (String, String)>>,
+    /// The stdio server each session was given for them, started.
+    bridges: Mutex<HashMap<String, Arc<Mutex<Bridge>>>>,
     /// The working directory each session was opened in.
     cwds: Mutex<HashMap<String, String>>,
+}
+
+/// The host's tool server as a stdio MCP server this agent started: a child process and the lines to and from it.
+struct Bridge {
+    child: Child,
+    input: Option<ChildStdin>,
+    lines: BufReader<ChildStdout>,
+    next: u64,
+    started: bool,
+    /// The command line it was started with.
+    command: String,
+}
+
+impl Bridge {
+    fn start(server: &Value) -> Option<(Self, String, String)> {
+        let command = server["command"].as_str()?;
+        let args: Vec<String> = server["args"]
+            .as_array()?
+            .iter()
+            .filter_map(|arg| arg.as_str().map(str::to_owned))
+            .collect();
+        let mut process = Command::new(command);
+        process
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let (mut url, mut token) = (String::new(), String::new());
+        for pair in server["env"].as_array().into_iter().flatten() {
+            let (Some(name), Some(value)) = (pair["name"].as_str(), pair["value"].as_str()) else {
+                continue;
+            };
+            match name {
+                "CANOA_DELEGATE_URL" => value.clone_into(&mut url),
+                "CANOA_DELEGATE_TOKEN" => value.clone_into(&mut token),
+                _ => {}
+            }
+            process.env(name, value);
+        }
+        let mut child = process.spawn().ok()?;
+        let input = child.stdin.take();
+        let lines = BufReader::new(child.stdout.take()?);
+        let shown = format!("{command} {}", args.join(" "));
+        let bridge = Self {
+            child,
+            input,
+            lines,
+            next: 0,
+            started: false,
+            command: shown,
+        };
+        Some((bridge, url, token))
+    }
+
+    fn write(&mut self, message: &Value) -> std::io::Result<()> {
+        let input = self
+            .input
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("the bridge's input is closed"))?;
+        writeln!(input, "{message}")?;
+        input.flush()
+    }
+
+    /// One request, and the answer with its id.
+    fn request(&mut self, method: &str, params: &Value) -> std::io::Result<Value> {
+        self.next += 1;
+        let id = self.next;
+        self.write(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
+        loop {
+            let mut line = String::new();
+            if self.lines.read_line(&mut line)? == 0 {
+                return Err(std::io::Error::other("the bridge ended"));
+            }
+            let message: Value = serde_json::from_str(line.trim()).unwrap_or(Value::Null);
+            if message["id"] == id {
+                return Ok(message);
+            }
+        }
+    }
+
+    /// The MCP handshake, once.
+    fn open(&mut self) -> std::io::Result<()> {
+        if self.started {
+            return Ok(());
+        }
+        self.request(
+            "initialize",
+            &json!({"protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "stand-in", "version": "0"}}),
+        )?;
+        self.write(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))?;
+        self.started = true;
+        Ok(())
+    }
 }
 
 /// What the usage extension keeps: the client's opt-in and the one window it reports.
@@ -367,6 +467,32 @@ impl Shared {
         let Some((url, token)) = lock(&self.tools).get(session).cloned() else {
             return "this session has no delegation tools".to_owned();
         };
+        let bridge = lock(&self.bridges).get(session).cloned();
+        if let Some(bridge) = bridge {
+            let mut bridge = lock(&bridge);
+            let answered = bridge.open().and_then(|()| {
+                bridge.request("tools/call", &json!({"name": name, "arguments": arguments}))
+            });
+            return match answered {
+                Ok(answer) if answer.get("error").is_some() => {
+                    format!(
+                        "rpc error: {}",
+                        answer["error"]["message"].as_str().unwrap_or("")
+                    )
+                }
+                Ok(answer) => {
+                    let said = answer["result"]["content"][0]["text"]
+                        .as_str()
+                        .unwrap_or("");
+                    if answer["result"]["isError"] == true {
+                        format!("error: {said}")
+                    } else {
+                        said.to_owned()
+                    }
+                }
+                Err(error) => format!("no answer: {error}"),
+            };
+        }
         let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": name, "arguments": arguments}});
         match post(&url, &token, &body.to_string()) {
@@ -445,6 +571,30 @@ impl Shared {
                 "cwd: {}",
                 lock(&self.cwds).get(session).cloned().unwrap_or_default()
             ),
+            "Bridge" => match lock(&self.bridges).get(session) {
+                Some(bridge) => {
+                    let bridge = lock(bridge);
+                    format!("pid={} command={}", bridge.child.id(), bridge.command)
+                }
+                None => "no bridge".to_owned(),
+            },
+            "BridgeClose" => match lock(&self.bridges).get(session).cloned() {
+                Some(bridge) => {
+                    let mut bridge = lock(&bridge);
+                    bridge.input = None;
+                    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                    loop {
+                        match bridge.child.try_wait() {
+                            Ok(Some(status)) => break format!("bridge ended: {status}"),
+                            Ok(None) if std::time::Instant::now() < until => {
+                                std::thread::sleep(std::time::Duration::from_millis(20));
+                            }
+                            _ => break "bridge still running".to_owned(),
+                        }
+                    }
+                }
+                None => "no bridge".to_owned(),
+            },
             "Bearer" => match lock(&self.tools).get(session) {
                 Some((url, token)) => format!("{url} {token}"),
                 None => "no bearer".to_owned(),
@@ -748,6 +898,11 @@ impl Shared {
                     {
                         lock(&self.tools)
                             .insert(created.clone(), (url.to_owned(), token.to_owned()));
+                    } else if server["name"] == "canoa-delegate"
+                        && let Some((bridge, url, token)) = Bridge::start(server)
+                    {
+                        lock(&self.tools).insert(created.clone(), (url, token));
+                        lock(&self.bridges).insert(created.clone(), Arc::new(Mutex::new(bridge)));
                     }
                 }
                 self.send(json!({"id": id, "result": {
@@ -888,6 +1043,7 @@ pub fn run(args: &[String]) {
         ),
         http: args.iter().any(|arg| arg == "--mcp-http"),
         tools: Mutex::new(HashMap::new()),
+        bridges: Mutex::new(HashMap::new()),
         cwds: Mutex::new(HashMap::new()),
     });
     if let Some(marker) = option_of(args, "marker")

@@ -13,12 +13,13 @@ mod support;
 use std::io::{Read as _, Write as _};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use canoa_host::{Link, LinkError};
 use linked::Hosted;
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, example, quoted, running};
+use support::{Host, Scratch, WAIT, example, host_binary, quoted, running};
 
 const META: &str = "dev.boriken.canoa/delegate";
 
@@ -333,7 +334,7 @@ fn a_parent_hands_a_task_to_a_second_source_and_reads_the_childs_reply_as_the_re
 }
 
 #[test]
-fn no_opt_in_or_a_host_that_turns_it_off_or_an_agent_without_http_is_given_no_tool() {
+fn no_opt_in_or_a_host_that_turns_it_off_is_given_no_tool() {
     let dir = Scratch::new();
     let work = directory(&dir.0, "work");
     let both = format!(
@@ -355,19 +356,6 @@ fn no_opt_in_or_a_host_that_turns_it_off_or_an_agent_without_http_is_given_no_to
 
     let off = format!("{both}[host.delegate]\nenabled = false\n");
     let host = Hosted::start(&off);
-    let link = host.local.open("parent").expect("a link");
-    let mut convo = Convo::new(&link);
-    let session = convo.open(true, &work);
-    assert_eq!(convo.prompt(&session, "Bearer"), "no bearer");
-    drop(link);
-    host.stop();
-
-    // An agent that takes no HTTP MCP server is offered none.
-    let plain = format!(
-        "[host.agents.parent]\nprogram = {}\nargs = [\"--scripted\"]\nlisten = \"127.0.0.1:0\"\n",
-        quoted(&example("stdio_agent", false).to_string_lossy())
-    );
-    let host = Hosted::start(&plain);
     let link = host.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
     let session = convo.open(true, &work);
@@ -1096,4 +1084,403 @@ fn one_session_waiting_cannot_starve_another() {
     assert!(statuses.contains(&200), "{statuses:?}");
     drop((first, second));
     host.stop();
+}
+
+/// A scripted agent entry that takes no HTTP MCP server, so the host gives it the stdio bridge.
+fn plain(name: &str, modes: &str) -> String {
+    agent(name, modes, "").replace(", \"--mcp-http\"", "")
+}
+
+/// `canoa mcp-bridge` started as an agent's harness would start it, with the environment it names.
+struct Bridge {
+    child: std::process::Child,
+    input: Option<std::process::ChildStdin>,
+    lines: std::sync::mpsc::Receiver<String>,
+    errors: std::sync::mpsc::Receiver<String>,
+}
+
+impl Bridge {
+    fn start(url: Option<&str>, token: Option<&str>) -> Self {
+        let mut command = Command::new(host_binary());
+        command
+            .arg("mcp-bridge")
+            .env_remove("CANOA_DELEGATE_URL")
+            .env_remove("CANOA_DELEGATE_TOKEN")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(url) = url {
+            command.env("CANOA_DELEGATE_URL", url);
+        }
+        if let Some(token) = token {
+            command.env("CANOA_DELEGATE_TOKEN", token);
+        }
+        let mut child = command.spawn().expect("the bridge starts");
+        let input = child.stdin.take();
+        let forward = |stream: Box<dyn std::io::Read + Send>| {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                use std::io::BufRead as _;
+                for line in std::io::BufReader::new(stream).lines() {
+                    let Ok(line) = line else { return };
+                    if sender.send(line).is_err() {
+                        return;
+                    }
+                }
+            });
+            receiver
+        };
+        let lines = forward(Box::new(child.stdout.take().expect("piped")));
+        let errors = forward(Box::new(child.stderr.take().expect("piped")));
+        Self {
+            child,
+            input,
+            lines,
+            errors,
+        }
+    }
+
+    fn send(&mut self, line: &str) {
+        let input = self.input.as_mut().expect("its input is open");
+        writeln!(input, "{line}").expect("written");
+        input.flush().expect("flushed");
+    }
+
+    /// One request line and the line that answers it.
+    fn ask(&mut self, request: &str) -> Value {
+        self.send(request);
+        let line = self.lines.recv_timeout(WAIT).expect("an answer");
+        serde_json::from_str(&line).expect("one JSON line")
+    }
+
+    /// How it ended, once it has.
+    fn ended(&mut self) -> std::process::ExitStatus {
+        let limit = Instant::now() + WAIT;
+        loop {
+            if let Some(status) = self.child.try_wait().expect("waited") {
+                return status;
+            }
+            assert!(Instant::now() < limit, "the bridge did not end");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn said(&self) -> String {
+        std::thread::sleep(Duration::from_millis(200));
+        self.errors.try_iter().collect::<Vec<_>>().join("\n")
+    }
+}
+
+impl Drop for Bridge {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// The command line a running process was started with, as the operating system lists it to any user.
+fn command_line(pid: u32) -> String {
+    if cfg!(windows) {
+        let listed = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"),
+            ])
+            .output()
+            .expect("powershell runs");
+        String::from_utf8_lossy(&listed.stdout).trim().to_owned()
+    } else {
+        std::fs::read(format!("/proc/{pid}/cmdline"))
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .replace('\0', " ")
+                    .trim()
+                    .to_owned()
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[test]
+fn through_the_bridge_an_agent_without_http_hands_a_task_on_and_its_token_is_not_on_a_command_line()
+{
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}",
+        plain("parent", "default,manual"),
+        plain("child", "default,manual")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    let said = convo.prompt(&session, "Bridge");
+    let (_, token) = bearer(&mut convo, &session);
+    let (pid, line) = said
+        .strip_prefix("pid=")
+        .and_then(|rest| rest.split_once(" command="))
+        .unwrap_or_else(|| panic!("a bridge: {said}"));
+    let pid: u32 = pid.parse().expect("a process id");
+    assert!(line.ends_with("mcp-bridge"), "{line}");
+    assert!(
+        !line.contains(&token),
+        "the entry's arguments name no token"
+    );
+    let listed = command_line(pid);
+    assert!(
+        listed.contains("mcp-bridge"),
+        "the process is the bridge: {listed}"
+    );
+    assert!(
+        !listed.contains(&token),
+        "the bearer is on a command line: {listed}"
+    );
+
+    // A task is handed on and its reply read as the result, as over HTTP.
+    let task = convo.delegate(&session, "child", "Verbatim hello  world");
+    assert!(task.starts_with("task-"), "{task}");
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    assert_eq!(status["source"], "child");
+    assert_eq!(status["result"], "blocks=1 text=Verbatim hello  world");
+
+    // The task's own session, at the depth limit, is given no tools.
+    let nested = convo.delegate(&session, "child", "Bearer");
+    let answered = convo.status(&session, &nested, 20_000);
+    assert_eq!(answered["result"], "no bearer", "{answered}");
+
+    // Closing its input ends the bridge.
+    let ended = convo.prompt(&session, "BridgeClose");
+    assert!(ended.starts_with("bridge ended: "), "{ended}");
+    until("the bridge process is gone", || !running(pid));
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn through_the_bridge_no_bearer_another_sessions_or_a_revoked_one_opens_nothing() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}",
+        plain("parent", "default"),
+        plain("child", "default")
+    );
+    let host = Hosted::start(&config);
+    let first = host.local.open("parent").expect("a link");
+    let mut one = Convo::new(&first);
+    let one_session = one.open(true, &work);
+    let second = host.local.open("parent").expect("a link");
+    let mut two = Convo::new(&second);
+    let two_session = two.open(true, &work);
+    let (url, mine) = bearer(&mut one, &one_session);
+    let (_, theirs) = bearer(&mut two, &two_session);
+    assert_ne!(mine, theirs);
+
+    // Another session's task is not found through this session's bridge.
+    let task = two.delegate(&two_session, "child", "Say there");
+    let found = one.prompt(&one_session, &format!("Status {task} 0"));
+    assert!(found.starts_with("error:"), "{found}");
+    assert!(!found.contains("there"), "{found}");
+
+    // A bearer nobody holds, and the right one.
+    let mut nobody = Bridge::start(Some(&url), Some(&"0".repeat(64)));
+    let refused = nobody.ask(LIST);
+    assert_eq!(refused["id"], 1);
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("bearer")),
+        "{refused}"
+    );
+    let mut held = Bridge::start(Some(&url), Some(&mine));
+    let listed = held.ask(LIST);
+    let names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(names, ["delegate_task", "task_status", "cancel"]);
+
+    // Ending the connection revokes the bearer, bridge or not.
+    drop(first);
+    until("the bearer was revoked", || {
+        held.ask(LIST)["error"]["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("bearer"))
+    });
+    let mut other = Bridge::start(Some(&url), Some(&theirs));
+    assert!(
+        other.ask(LIST).get("result").is_some(),
+        "another session's bearer is still good"
+    );
+    drop((second, nobody, held, other));
+    host.stop();
+}
+
+#[test]
+fn the_bridge_refuses_a_missing_token_a_missing_address_and_one_that_is_not_loopback() {
+    let token = "f".repeat(64);
+    for (url, bearer, why) in [
+        (Some("http://127.0.0.1:9/mcp"), None, "CANOA_DELEGATE_TOKEN"),
+        (None, Some(token.as_str()), "CANOA_DELEGATE_URL"),
+        (
+            Some("http://10.20.30.40:9/mcp"),
+            Some(token.as_str()),
+            "loopback",
+        ),
+        (
+            Some("http://example.com/mcp"),
+            Some(token.as_str()),
+            "loopback",
+        ),
+        (
+            Some("https://127.0.0.1:9/mcp"),
+            Some(token.as_str()),
+            "http://",
+        ),
+    ] {
+        let mut bridge = Bridge::start(url, bearer);
+        let status = bridge.ended();
+        assert_eq!(status.code(), Some(2), "{url:?} {why}");
+        let said = bridge.said();
+        assert!(said.contains(why), "{url:?}: {said}");
+        assert!(!said.contains(&token));
+        assert!(
+            bridge.lines.try_recv().is_err(),
+            "nothing is said on its output"
+        );
+    }
+}
+
+#[test]
+fn the_bridge_ends_when_its_input_closes_and_keeps_nothing_between_requests() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let host = Hosted::start(&plain("parent", "default"));
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    let (url, token) = bearer(&mut convo, &session);
+
+    let mut bridge = Bridge::start(Some(&url), Some(&token));
+    let initialized = bridge.ask(
+        r#"{"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
+    );
+    assert_eq!(initialized["id"], "a");
+    assert_eq!(
+        initialized["result"]["serverInfo"]["name"],
+        "canoa-delegate"
+    );
+    // A notification has no answer; the next request still gets its own.
+    bridge.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    assert_eq!(
+        bridge.ask(r#"{"jsonrpc":"2.0","id":9,"method":"ping"}"#)["id"],
+        9
+    );
+    // A line that is not JSON is answered, and the bridge goes on.
+    bridge.send("not json");
+    let line = bridge.lines.recv_timeout(WAIT).expect("an answer");
+    assert!(line.contains("-32700"), "{line}");
+    assert!(bridge.ask(LIST)["result"]["tools"].is_array());
+    bridge.input = None;
+    assert_eq!(bridge.ended().code(), Some(0));
+    drop(link);
+    host.stop();
+}
+
+/// A server that answers every request with `status` and `body`, and sends the head of each request it read down the channel.
+fn answering(status: &str, body: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bound");
+    let port = listener.local_addr().expect("an address").port();
+    let (seen, receiver) = std::sync::mpsc::channel();
+    let answer = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut head = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+                match stream.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => head.extend_from_slice(&chunk[..read]),
+                }
+            }
+            let _ = seen.send(String::from_utf8_lossy(&head).into_owned());
+            let _ = stream.write_all(answer.as_bytes());
+        }
+    });
+    (format!("http://127.0.0.1:{port}/mcp"), receiver)
+}
+
+#[test]
+fn the_bridge_relays_a_request_with_the_bearer_and_answers_what_the_server_cannot() {
+    let token = "a1".repeat(32);
+    let (url, seen) = answering(
+        "200 OK",
+        r#"{"jsonrpc":"2.0","id":7,"result":{"tools":[]}}"#,
+    );
+    let mut bridge = Bridge::start(Some(&url), Some(&token));
+    let answered = bridge.ask(r#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#);
+    assert_eq!(
+        answered,
+        json!({"jsonrpc": "2.0", "id": 7, "result": {"tools": []}})
+    );
+    let head = seen.recv_timeout(WAIT).expect("the server was asked");
+    assert!(head.starts_with("POST /mcp HTTP/1.1\r\n"), "{head}");
+    assert!(
+        head.contains(&format!("Authorization: Bearer {token}\r\n")),
+        "{head}"
+    );
+    let authority = url.trim_start_matches("http://").trim_end_matches("/mcp");
+    assert!(head.contains(&format!("Host: {authority}\r\n")), "{head}");
+
+    // A server that takes a notification and answers it with nothing: no line, and the next request is answered in order.
+    let (url, _seen) = answering("202 Accepted", "");
+    let mut bridge = Bridge::start(Some(&url), Some(&token));
+    bridge.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    bridge.send(r#"{"jsonrpc":"2.0","id":"a","method":"ping"}"#);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        bridge.lines.try_recv().is_err(),
+        "a 202 is no answer to give"
+    );
+
+    // A server that refuses the bearer, and one that is not listening: an error for the request, never the bearer.
+    let (url, _seen) = answering("401 Unauthorized", "");
+    let mut bridge = Bridge::start(Some(&url), Some(&token));
+    let refused = bridge.ask(r#"{"jsonrpc":"2.0","id":"b","method":"tools/list"}"#);
+    assert_eq!(refused["id"], "b");
+    assert_eq!(refused["error"]["code"], -32000);
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("bearer")),
+        "{refused}"
+    );
+    let gone = {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bound");
+        format!(
+            "http://127.0.0.1:{}/mcp",
+            listener.local_addr().expect("an address").port()
+        )
+    };
+    let mut bridge = Bridge::start(Some(&gone), Some(&token));
+    let silent = bridge.ask(r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#);
+    assert_eq!(silent["id"], 3);
+    assert!(
+        silent["error"]["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("not listening")),
+        "{silent}"
+    );
+    assert!(!refused.to_string().contains(&token) && !silent.to_string().contains(&token));
+    assert!(!bridge.said().contains(&token));
 }
