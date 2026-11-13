@@ -135,6 +135,8 @@ struct App {
     host: IdentityId,
     /// Whether it says it takes the extension in `initialize`.
     offers: bool,
+    /// The binding methods it offers, when not all but the link's.
+    bindings: Option<Vec<String>>,
     typed: VecDeque<(String, Vec<(String, String)>)>,
     /// The option id the person picks on each permission card, in order.
     decisions: VecDeque<&'static str>,
@@ -185,6 +187,7 @@ impl App {
             verifier,
             host: IdentityId::of(&host_spki),
             offers: true,
+            bindings: None,
             typed: VecDeque::new(),
             decisions: VecDeque::new(),
             cards: Vec::new(),
@@ -365,7 +368,11 @@ impl<C: coqui_transport::Channel> Wire<'_, C> {
 
     fn open(&mut self, app: &mut App, work: &str) -> String {
         let capabilities = if app.offers {
-            json!({"_meta": {CAPABILITY: Capability::all().to_value()}})
+            let mut offer = Capability::all();
+            if let Some(bindings) = &app.bindings {
+                offer.bindings.clone_from(bindings);
+            }
+            json!({"_meta": {CAPABILITY: offer.to_value()}})
         } else {
             json!({})
         };
@@ -694,6 +701,26 @@ fn a_secret_shown_reaches_only_the_app_that_asked_and_the_agent_hears_only_that_
 fn an_app_that_did_not_offer_the_extension_gets_no_tools() {
     let (_, _found) = with_app("default", |wire, app, _host, work| {
         app.offers = false;
+        let session = wire.open(app, work);
+        let said = wire.prompt(
+            app,
+            &session,
+            &format!(
+                "Secret secret_request {}",
+                json!({"message": "x", "schema": SCHEMA})
+            ),
+        );
+        assert!(said.contains("no secret tools"), "{said}");
+        assert!(app.extension.is_empty());
+    });
+}
+
+/// The method of the application in the host's own process. A client over a network, with a relay or without, that offers it is
+/// not that application, and the host serves it no tool: the host's binding with it is a signature or a Diffie-Hellman proof.
+#[test]
+fn a_client_over_the_network_that_offers_only_the_in_process_binding_gets_no_tools() {
+    let (_, _found) = with_app("default", |wire, app, _host, work| {
+        app.bindings = Some(vec![coqui_acp::secret::BINDING_LINK.to_owned()]);
         let session = wire.open(app, work);
         let said = wire.prompt(
             app,

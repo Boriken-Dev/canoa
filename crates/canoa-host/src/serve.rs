@@ -582,6 +582,14 @@ impl Local {
         self.open_with(entry, None)
     }
 
+    /// The secret this host shares with an application in its process, for the secret prompts of the connections [`Local::open`]
+    /// gives it: 32 bytes minted when the host started, kept in memory, sent over no wire and to no agent. The application derives
+    /// its half of the binding from it (`coqui_acp::secret::LinkKey`); `None` when the system has no randomness to mint one from.
+    #[must_use]
+    pub fn link_secret(&self) -> Option<zeroize::Zeroizing<[u8; 32]>> {
+        self.shared.secrets.link_secret()
+    }
+
     /// [`Local::open`], for a task of the delegation when `context` is given: what the task's connection is bounded by.
     pub(crate) fn open_with(
         &self,
@@ -606,7 +614,7 @@ impl Local {
             .name("canoa-local".to_owned())
             .spawn(move || {
                 let peer = shared.method.peer_id();
-                serve_proven(&shared, &served, &host, &peer, context.as_ref());
+                serve_proven(&shared, &served, &host, &peer, context.as_ref(), true);
                 host.close();
             })
             .map_err(|_| LocalError::Thread)?;
@@ -1476,17 +1484,19 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
     let checked = peer;
     let sealed = Sealed::new(channel, established.session)
         .with_check(move || !stopped.load(Ordering::SeqCst) && store.is_accepted(&checked));
-    serve_proven(shared, served, &sealed, &peer, None);
+    serve_proven(shared, served, &sealed, &peer, None, false);
     sealed.close();
 }
 
-/// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after.
+/// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after. `in_process` is
+/// true only for the connections [`Local`] opens, whose peer is this process.
 fn serve_proven<C: Channel>(
     shared: &Shared,
     served: &Served,
     sealed: &C,
     peer: &PeerId,
     context: Option<&delegate::ChildContext>,
+    in_process: bool,
 ) {
     let Some(_running) = served.running.enter() else {
         tracing::info!(entry = served.name, %peer, "turned away: max_peers are running");
@@ -1524,7 +1534,7 @@ fn serve_proven<C: Channel>(
                 served,
                 &Prefilled::new(sealed, first),
                 (&copy, peer),
-                context,
+                (context, in_process),
             );
         }
         Ok(None) | Err(_) => {}
@@ -1536,7 +1546,7 @@ fn give_agent<C: Channel>(
     served: &Served,
     channel: &C,
     (first, peer): (&[u8], &PeerId),
-    context: Option<&delegate::ChildContext>,
+    (context, in_process): (Option<&delegate::ChildContext>, bool),
 ) {
     let (agent, scope, offer) = match &served.run {
         Run::Agent {
@@ -1590,8 +1600,16 @@ fn give_agent<C: Channel>(
                 },
             })
         });
-    // The person's app, when it offered secret prompts and has an identity of its own to be bound to.
-    let link = shared.secrets.link(peer);
+    // The person's app, when it offered secret prompts and has an identity of its own to be bound to; the application in this
+    // process is bound by the secret it shares with the host, and a task's connection has no person at its other end.
+    let link = if in_process {
+        context
+            .is_none()
+            .then(|| shared.secrets.local_link())
+            .flatten()
+    } else {
+        shared.secrets.link(peer)
+    };
     let peeked = Peek::new(channel, conn.as_ref());
     let raw = Raw::new(&peeked, link.as_ref());
     let channel = &raw;

@@ -4,9 +4,11 @@
 //! connection the session belongs to, through the `_coqui_acp/secret_*` extension. A value travels sealed to a key only its
 //! receiver holds, bound to the identities this connection proved; the agent holds a handle.
 //!
-//! The person's app is the connection's own peer, whose key the host already knows from pairing. A connection whose peer is the
-//! host's own identity (a task's link, an application hosting the library) has no other identity to bind answers with, so its
-//! sessions are given no secret tools. Every message of the extension is the host's to send: an agent's is dropped by the scope.
+//! The person's app is the connection's own peer, whose key the host already knows from pairing. The application that hosts the
+//! library shares the host's process and identity, so neither's key proves anything to the other: that one link is bound by a secret
+//! the host mints when it starts, which no wire carries and the agent never sees (`link-hmac-sha256`). A task's connection, whose
+//! peer is also the host's own, has no person at its other end and is given no secret tools. Every message of the extension is the
+//! host's to send: an agent's is dropped by the scope.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -23,7 +25,10 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use coqui_acp::secret::{BINDING_DH, BINDING_ECDSA, IdentityId, Prover, Verifier, unprotected};
+use coqui_acp::secret::{
+    BINDING_DH, BINDING_ECDSA, BINDING_LINK, IdentityId, LinkKey, LinkRole, Prover, Verifier,
+    unprotected,
+};
 use coqui_acp_secrets::{Secrets, SessionTools};
 use coqui_agentic_peer::auth::Identity;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
@@ -70,9 +75,17 @@ impl Tokens {
     }
 }
 
+/// The secret the host shares with the application in its own process, and what both ends derive from it.
+struct ProcessLink {
+    secret: Zeroizing<[u8; 32]>,
+    key: LinkKey,
+}
+
 /// What the host holds for every connection: its identity, the keys it has paired, and the tool server.
 pub(crate) struct Hub {
     identity: Identity,
+    /// Absent when the system had no randomness to mint the secret from: the application in this process then gets no tools.
+    local: Option<ProcessLink>,
     store: Arc<TrustStore>,
     /// What runs the stdio bridge, for an agent that takes no HTTP MCP server.
     bridge: BridgeCommand,
@@ -93,8 +106,14 @@ impl Hub {
         store: &Arc<TrustStore>,
         bridge: BridgeCommand,
     ) -> Arc<Self> {
+        let mut secret = Zeroizing::new([0_u8; 32]);
+        let local = getrandom::fill(&mut *secret)
+            .ok()
+            .and_then(|()| LinkKey::derive(&*secret).ok())
+            .map(|key| ProcessLink { secret, key });
         Arc::new(Self {
             identity: identity.clone(),
+            local,
             store: Arc::clone(store),
             bridge,
             tokens: Arc::new(Tokens::default()),
@@ -121,6 +140,33 @@ impl Hub {
             .observer(link::observe)
             .build();
         Some(Link::new(Arc::clone(self), secrets, owner, keys.binding))
+    }
+
+    /// The secret of the in-process link, for the application in this process to derive its half from.
+    pub(crate) fn link_secret(&self) -> Option<Zeroizing<[u8; 32]>> {
+        self.local
+            .as_ref()
+            .map(|local| Zeroizing::new(*local.secret))
+    }
+
+    /// The secrets of the connection the application in this process holds, bound by the link's own secret. Only
+    /// [`crate::serve::Local::open`] asks, so a connection with a relay never gets this binding.
+    pub(crate) fn local_link(self: &Arc<Self>) -> Option<Arc<Link>> {
+        let local = self.local.as_ref()?;
+        let host = local.key.identity(LinkRole::Host);
+        let verifier = Verifier::builder(host)
+            .link(&local.key, LinkRole::Host)
+            .ok()?
+            .build();
+        let secrets = Secrets::builder(Prover::linked(&local.key, LinkRole::Host), verifier)
+            .observer(link::observe)
+            .build();
+        Some(Link::new(
+            Arc::clone(self),
+            secrets,
+            local.key.identity(LinkRole::App),
+            BINDING_LINK,
+        ))
     }
 
     /// The host's key as the prover and the verifier of a binding with `owner`, whose `SubjectPublicKeyInfo` is `owner_spki`.

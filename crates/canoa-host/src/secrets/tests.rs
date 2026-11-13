@@ -565,3 +565,82 @@ fn a_version_two_agent_can_be_put_in_full_access_by_the_person() {
     answer(&link, 3, &json!({"configOptions": options("bypass")}));
     assert!(link.bypass("s1"));
 }
+
+/// A host of `method`, for the in-process link and a paired client's.
+fn hub(dir: &Dir, method: Method) -> (Arc<Hub>, Identity) {
+    let store = Arc::new(TrustStore::open(&dir.0).expect("a trust store"));
+    let host = Identity::generate(method).expect("a key");
+    let hub = Hub::new(
+        &host,
+        &store,
+        BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+    );
+    (hub, host)
+}
+
+fn http_agent(link: &Arc<Link>) {
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}});
+    link.client_said(initialize.to_string().into_bytes());
+    answer(
+        link,
+        1,
+        &json!({"agentCapabilities": {"mcpCapabilities": {"http": true}}}),
+    );
+}
+
+#[test]
+fn the_in_process_link_is_given_the_tools_on_its_own_binding_and_no_other() {
+    for method in [Method::WebCrypto, Method::Noise] {
+        let dir = Dir::new("local");
+        let (hub, host) = hub(&dir, method);
+        let cwd = std::env::temp_dir();
+
+        let local = hub.local_link().expect("the in-process link");
+        offer(&local, "link-hmac-sha256");
+        http_agent(&local);
+        let given = servers(&new_session(&local, 2, &cwd));
+        assert!(
+            given[0]["url"]
+                .as_str()
+                .is_some_and(|url| url.starts_with("http://127.0.0.1:")),
+            "{method:?}: {given:?}"
+        );
+
+        // The binding of a link with a key is not this link's: that offer takes no tools here.
+        let local = hub.local_link().expect("the in-process link");
+        offer(&local, "ecdsa-p256-sha256");
+        http_agent(&local);
+        assert_eq!(
+            servers(&new_session(&local, 2, &cwd))[0]["url"],
+            "http://elsewhere"
+        );
+        // No peer, the host's own included, is given the in-process link's secret by being asked about its key.
+        assert!(hub.link(&host.peer_id()).is_none());
+    }
+}
+
+#[test]
+fn a_connection_with_a_key_never_takes_the_in_process_binding() {
+    for method in [Method::WebCrypto, Method::Noise] {
+        let dir = Dir::new("relay");
+        let link = link(&dir, method);
+        offer(&link, "link-hmac-sha256");
+        http_agent(&link);
+        assert_eq!(
+            servers(&new_session(&link, 2, &std::env::temp_dir()))[0]["url"],
+            "http://elsewhere",
+            "{method:?}"
+        );
+    }
+}
+
+#[test]
+fn each_host_mints_its_own_secret_and_keeps_it_for_its_life() {
+    let (dir_a, dir_b) = (Dir::new("secret-a"), Dir::new("secret-b"));
+    let (a, _) = hub(&dir_a, Method::WebCrypto);
+    let (b, _) = hub(&dir_b, Method::WebCrypto);
+    let (first, again) = (a.link_secret().expect("a"), a.link_secret().expect("a"));
+    assert_eq!(*first, *again);
+    assert_ne!(*first, [0_u8; 32]);
+    assert_ne!(*first, *b.link_secret().expect("b"));
+}
