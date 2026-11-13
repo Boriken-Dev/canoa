@@ -1,5 +1,6 @@
 import '../sources/sources.dart';
 import 'documents.dart';
+import 'site.dart';
 import 'workspace_template.dart';
 
 /// The `acp_harness` provider ids Canoa knows, which a source of the same name stands for.
@@ -21,8 +22,14 @@ String? scratchFolder(String template, String sessionId, {
   String? home,
   String? host,
   String? separator,
+  String? fqdn,
 }) {
-  if (!hasWorkspaceFolders) return null;
+  // A site name is taken only as [siteName] writes it: one folder name, so it cannot reach outside the scratch root.
+  if (fqdn != null && siteName(fqdn) != fqdn) {
+    throw ArgumentError.value(fqdn, 'fqdn', 'is not a host name that is safe as a folder name');
+  }
+  // A page has no folders of its own; the folder it is given is on the machine its agent runs on.
+  if (!hasWorkspaceFolders && documents == null) return null;
   final root = documents ?? documentsFolder();
   if (root == null && template.contains(r'${documents}')) return null;
   return expandWorkspace(
@@ -35,7 +42,12 @@ String? scratchFolder(String template, String sessionId, {
       handler: source == null ? '' : handlerOf(source),
       source: source?.label ?? '',
       host: host ?? localHostName() ?? '',
+      fqdn: fqdn ?? '',
     ),
-    separator: separator ?? pathSeparator,
+    separator: separator ?? (hasWorkspaceFolders ? pathSeparator : separatorOf(root ?? '')),
   );
 }
+
+/// The separator of a path written for another machine, from the folder it starts with: a drive letter or a share is Windows.
+String separatorOf(String folder) =>
+    RegExp(r'^(?:[A-Za-z]:|\\\\)').hasMatch(folder) || (folder.contains(r'\') && !folder.contains('/')) ? r'\' : '/';
