@@ -61,6 +61,8 @@ cargo build -p canoa-host --bin canoa --examples
 # the host as a library in a test process, and a standalone canoa on the same home
 cargo build -p canoa-ffi --lib
 (cd app && CANOA_TEST_LIBRARY=../target/debug/canoa_ffi.dll CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_library_test.dart)   # libcanoa_ffi.so on Linux
+# earlier Claude and Codex sessions brought in through the host library, from fixture folders the programs' own variables name (the person's are never read)
+(cd app && CANOA_TEST_LIBRARY=../target/debug/canoa_ffi.dll CANOA_TEST_HOST=../target/debug/canoa CLAUDE_CONFIG_DIR=test/fixtures/import_homes/projects_home CODEX_HOME=test/fixtures/import_homes/sessions_home flutter test test/session_import_host_test.dart)
 # the built app hosting the scripted agent from its library, with no canoa on disk; needs a runner and the examples built
 (cd app && flutter test integration_test/embedded_host_test.dart -d windows)   # or -d linux
 # main.dart's own main in the built app, one step a run on a new empty DIR: first (no canoa.cfg), flag, config, hosted
