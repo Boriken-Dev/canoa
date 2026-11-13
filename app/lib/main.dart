@@ -768,11 +768,55 @@ class _CanoaAppState extends State<CanoaApp> {
     final path = _configPath;
     final fresh = widget.writeConfig == null ? await loadConfig() : config;
     final changed = edit(fresh);
+    // The host serves what an entry offers from the moment it starts, so a change of the offers restarts it, which ends the
+    // sessions open on it: the person is asked first, and says which. Declined, it is saved and applies when the host next starts.
+    var restart = widget.host != null && path != null && jsonEncode(changed.host) != jsonEncode(fresh.host);
+    if (restart) {
+      final ending = _endedByRestart();
+      if (ending.isNotEmpty && !await _confirmAccountsRestart(ending)) restart = false;
+    }
     await _write(changed);
     if (mounted) setState(() => config = changed);
     _settingsKey.currentState?.controller.adopt(changed);
     _accounts?.changed();
-    if (widget.host != null && path != null) await widget.host!.apply(configPath: path);
+    if (restart) await widget.host!.apply(configPath: path);
+  }
+
+  /// The titles of the sessions open on this computer's own host or on an entry it serves, which restarting the host ends.
+  List<String> _endedByRestart() => [
+    for (final session in store.sessions)
+      if ((session.place == SessionPlace.local || session.place == SessionPlace.host) &&
+          session.status != SessionStatus.draft &&
+          session.status != SessionStatus.disconnected &&
+          session.status != SessionStatus.preview)
+        session.title,
+  ];
+
+  Future<bool> _confirmAccountsRestart(List<String> ending) async {
+    final above = _navigator.currentContext;
+    if (above == null || !above.mounted) return false;
+    final ok = await showSelectableDialog<bool>(
+      context: above,
+      builder: (context) => AlertDialog(
+        key: const Key('restart-accounts'),
+        title: const Text('Restart the host?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('What a source offers takes effect when the host restarts, and that ends '
+              '${ending.length == 1 ? 'this session' : 'these ${ending.length} sessions'}. '
+              'The conversations stay in the list to open again.'),
+          const SizedBox(height: 8),
+          for (final title in ending.take(8)) Text('• $title', key: const Key('restart-accounts-session')),
+          if (ending.length > 8) Text('and ${ending.length - 8} more'),
+          const SizedBox(height: 8),
+          const Text('Or leave it: it is saved, and applies the next time the host starts.'),
+        ]),
+        actions: [
+          TextButton(key: const Key('restart-accounts-later'), onPressed: () => Navigator.pop(context, false), child: const Text('Leave it for now')),
+          FilledButton(key: const Key('restart-accounts-now'), onPressed: () => Navigator.pop(context, true), child: const Text('Restart now')),
+        ],
+      ),
+    );
+    return ok ?? false;
   }
 
   /// The programs the host's Store keeps. Nothing is asked of the host until a page that shows them, or a source's readiness,
