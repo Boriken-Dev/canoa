@@ -8,7 +8,7 @@ import '../profile/profiles_dialog.dart' show visible;
 import '../profile/skill_copies.dart';
 import '../selectable.dart';
 import '../store/skills.dart';
-import '../store/store_page.dart' show SkillRows, oneLine;
+import '../store/overlay_page.dart' show SkillRows, oneLine;
 import 'loadout_controller.dart';
 import 'loadout_page.dart';
 

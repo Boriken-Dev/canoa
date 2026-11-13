@@ -14,12 +14,10 @@ import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
+import '../store/overlay_page.dart' show SaveConfig;
 import '../store/skills.dart';
 import '../store/store.dart';
 import 'mcp_registry.dart';
-
-/// Saves a changed canoa.cfg and gives the configuration saved, or null when it was not.
-typedef SaveConfig = Future<CanoaConfig?> Function(CanoaConfig changed);
 
 /// A program's absolute path as the machine's PATH finds it, or null.
 typedef FindProgram = Future<String?> Function(String program);

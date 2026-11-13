@@ -7,7 +7,7 @@ import '../config/canoa_config.dart';
 import '../store/skills.dart';
 import '../store/store_icon.dart';
 import '../store/store.dart' show installedManifests;
-import '../store/store_page.dart';
+import '../store/overlay_page.dart';
 import 'aos_support.dart';
 import 'overlay_layer.dart';
 import 'overlays.dart';

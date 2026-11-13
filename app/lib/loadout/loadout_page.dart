@@ -12,7 +12,7 @@ import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../store/store.dart';
 import '../store/store_icon.dart';
-import '../store/store_page.dart' show OverlayPage, oneLine, shownTags;
+import '../store/overlay_page.dart' show OverlayPage, SaveConfig, oneLine, shownTags;
 import 'loadout_controller.dart';
 import 'loadout_mcps.dart';
 import 'loadout_skills.dart';

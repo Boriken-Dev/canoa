@@ -18,9 +18,9 @@ import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/profile/profiles_dialog.dart';
 import 'package:canoa/profile/skill_copies.dart';
+import 'package:canoa/loadout/loadout_page.dart';
 import 'package:canoa/store/skills.dart';
 import 'package:canoa/store/store.dart';
-import 'package:canoa/store/store_page.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -352,7 +352,7 @@ skills = [{ name = "review", source = "$skillsHost/fork.git#skills/review" }]
     });
   });
 
-  group('the store page', () {
+  group('Loadout', () {
     late MemoryOverlays overlays;
 
     setUp(() {
@@ -372,7 +372,7 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       await tester.binding.setSurfaceSize(const Size(1280, 2400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
-        home: StorePage(
+        home: LoadoutPage(
           config: CanoaConfig.parse('[catalogs]\nmain = "https://example.invalid/catalog.git@main#catalog.toml"\n'),
           home: MemoryHome(overlays),
           onSave: (changed) async => changed,
@@ -387,16 +387,24 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
             widget.textSpan!.toPlainText(),
     ].join('\n');
 
-    testWidgets('the review names the skills with their sources, one yes installs them, and the Skills section shows who names each',
+    Future<void> tapKey(WidgetTester tester, String key) async {
+      await tester.ensureVisible(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the review names the skills with their sources, one yes installs them, and Skills shows who names each',
         (tester) async {
       await open(tester);
-      expect(find.byKey(const Key('store-skills')), findsOneWidget, reason: 'the catalog offers a skill');
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget);
+      await tapKey(tester, 'loadout-tab-skills');
+      await tapKey(tester, 'skills-discover');
+      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget, reason: 'the catalog offers a skill');
 
-      await tester.tap(find.byKey(const Key('store-entry-main-team')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('store-fetch')));
-      await tester.pumpAndSettle();
+      await tapKey(tester, 'loadout-tab-overlays');
+      await tapKey(tester, 'overlays-discover');
+      await tapKey(tester, 'store-entry-main-team');
+      await tapKey(tester, 'store-fetch');
       final shown = shownText(tester);
       expect(shown, contains('Skills from elsewhere'));
       expect(shown, contains('$skillsHost/tools.git#skills/review'));
@@ -404,15 +412,17 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       expect(shown, contains('Nothing has been fetched yet'));
       expect(overlays.skillFetches, isEmpty);
 
-      await tester.tap(find.byKey(const Key('store-install')));
-      await tester.pumpAndSettle();
+      await tapKey(tester, 'store-install');
       expect(overlays.skills.keys, containsAll(['pdf', 'review']));
       expect(find.byKey(const Key('store-skill-outcome-review')), findsOneWidget);
 
       await tester.pageBack();
       await tester.pumpAndSettle();
-      final tile = tester.widget<ListTile>(find.byKey(const Key('store-skill-review')));
-      expect((tile.subtitle! as Text).data, contains('named by team'));
+      await tapKey(tester, 'loadout-tab-skills');
+      await tapKey(tester, 'skills-installed');
+      final card = find.byKey(const Key('skill-installed-review'));
+      expect(find.descendant(of: card, matching: find.text('Comes with team')), findsOneWidget);
+      await tapKey(tester, 'skills-discover');
       expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'pdf is here now');
       expect(tester.takeException(), isNull);
     });
@@ -431,16 +441,16 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
 
     testWidgets('a skill the catalog offers is installed by choice after its source and pin are shown', (tester) async {
       await open(tester);
-      await tester.tap(find.byKey(const Key('store-skill-install-main-pdf')));
-      await tester.pumpAndSettle();
+      await tapKey(tester, 'loadout-tab-skills');
+      await tapKey(tester, 'skills-discover');
+      await tapKey(tester, 'store-skill-install-main-pdf');
       expect(find.byKey(const Key('store-skill-review')), findsOneWidget);
       expect(shownText(tester), contains('$skillsHost/pdf.git'));
       expect(overlays.skillFetches, isEmpty, reason: 'shown before it is fetched');
-      await tester.tap(find.byKey(const Key('store-skill-install-confirm')));
-      await tester.pumpAndSettle();
+      await tapKey(tester, 'store-skill-install-confirm');
       expect(overlays.skills['pdf']!.chosen, isTrue);
-      final tile = tester.widget<ListTile>(find.byKey(const Key('store-skill-pdf')));
-      expect((tile.subtitle! as Text).data, contains('chosen by you'));
+      final card = find.byKey(const Key('skill-installed-pdf'));
+      expect(find.descendant(of: card, matching: find.text('Chosen by you')), findsOneWidget);
     });
   });
 

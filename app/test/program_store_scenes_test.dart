@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/store/store_page.dart';
+import 'package:canoa/loadout/loadout_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -64,8 +64,11 @@ Future<FakeStoreHost> _open(WidgetTester tester, Size size) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
-    home: StorePage(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed, programs: host.programs()),
+    home: LoadoutPage(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed, programs: host.programs()),
   ));
+  await tester.pumpAndSettle();
+  // The programs are on a page of their own, reached from Loadout's menu.
+  await tester.tap(find.byKey(const Key('loadout-programs')));
   await tester.pumpAndSettle();
   return host;
 }

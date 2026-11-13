@@ -3,7 +3,7 @@
 import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/session_store.dart';
-import 'package:canoa/store/store_page.dart';
+import 'package:canoa/loadout/loadout_page.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -132,16 +132,18 @@ void main() {
   testWidgets('a page over the screen selects and copies', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Builder(builder: (context) => TextButton(
-        onPressed: () => showStore(context, config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed),
-        child: const Text('open the store'),
+        onPressed: () => showLoadout(context, config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed),
+        child: const Text('open Loadout'),
       )),
     ));
-    await tester.tap(find.text('open the store'));
+    await tester.tap(find.text('open Loadout'));
     await tester.pumpAndSettle();
-    expect(await _dragAndCopy(tester, find.text('Overlay store')), 'Overlay store');
-    expect(find.byKey(const Key('store-search')), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('store-search')), 'lint');
-    expect(find.text('lint'), findsOneWidget, reason: 'the search box still takes text');
+    expect(await _dragAndCopy(tester, find.text('Loadout')), 'Loadout');
+    await tester.tap(find.byKey(const Key('overlays-discover')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('catalogs-empty')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('store-catalog-source')), 'lint');
+    expect(find.text('lint'), findsOneWidget, reason: 'the field still takes text');
   });
 
   testWidgets('the composer takes text and sends after a selection, and a copy button still copies', (tester) async {

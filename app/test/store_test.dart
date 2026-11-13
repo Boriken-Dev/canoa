@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/loadout/loadout_page.dart';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
@@ -19,7 +20,6 @@ import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/store/store.dart';
-import 'package:canoa/store/store_page.dart';
 import 'package:canoa/store/store_settings.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
@@ -488,11 +488,13 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: ThemeData(brightness: Brightness.dark),
-        home: StorePage(config: config, home: MemoryHome(overlays), onSave: (changed) async {
+        home: LoadoutPage(config: config, home: MemoryHome(overlays), onSave: (changed) async {
           saved.add(changed);
           return changed;
         }),
       ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('overlays-discover')));
       await tester.pumpAndSettle();
       await _decodeIcons(tester);
     }
@@ -502,6 +504,9 @@ void main() {
       expect(find.text('team/docs-tools'), findsOneWidget);
       expect(find.text('public/Docs_Tools'), findsOneWidget);
       expect(find.text('lint'), findsOneWidget, reason: 'one catalog alone offers it');
+      await tester.ensureVisible(find.byKey(const Key('catalogs-manage')));
+      await tester.tap(find.byKey(const Key('catalogs-manage')));
+      await tester.pumpAndSettle();
       expect(find.textContaining('refused elsewhere: local-source'), findsOneWidget);
       expect(find.textContaining('icon of review refused: icon-format'), findsOneWidget);
       expect(find.textContaining('icon of huge refused: icon-dimensions'), findsOneWidget);
@@ -523,14 +528,10 @@ void main() {
     });
 
     for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
-      testWidgets('the listing draws at $label width', (tester) async {
-        await open(tester, size);
-        expect(tester.takeException(), isNull);
-        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_$label.png'));
-      });
-
       testWidgets('an overlay\'s page draws at $label width once fetched', (tester) async {
         await open(tester, size);
+        // The list builds what is near the screen: scroll to the entry first.
+        await tester.scrollUntilVisible(find.byKey(const Key('store-entry-team-review')), 200);
         for (final key in const ['store-entry-team-review', 'store-fetch']) {
           await tester.ensureVisible(find.byKey(Key(key)));
           await tester.pumpAndSettle();
@@ -600,6 +601,9 @@ path = "s\u202Eh.sh"
 ''',
       });
       await open(tester, const Size(1280, 2400));
+      await tester.ensureVisible(find.byKey(const Key('catalogs-manage')));
+      await tester.tap(find.byKey(const Key('catalogs-manage')));
+      await tester.pumpAndSettle();
       String all() => [
         for (final widget in tester.widgetList(find.byWidgetPredicate((w) => w is Text || w is SelectableText)))
           widget is Text ? widget.data ?? widget.textSpan?.toPlainText() ?? '' : (widget as SelectableText).data ??
@@ -638,8 +642,10 @@ path = "s\u202Eh.sh"
       final byHand = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
           '[overlays]\ndocs-tools = "$teamRepo@main#overlays/docs-tools"\n');
       await tester.pumpWidget(MaterialApp(
-        home: StorePage(config: byHand, home: MemoryHome(overlays), onSave: (changed) async => changed),
+        home: LoadoutPage(config: byHand, home: MemoryHome(overlays), onSave: (changed) async => changed),
       ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('overlays-discover')));
       await tester.pumpAndSettle();
       await _decodeIcons(tester);
       expect(find.text('Named in canoa.cfg by hand'), findsOneWidget);

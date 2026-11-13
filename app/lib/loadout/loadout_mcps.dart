@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../profile/profile.dart';
 import '../profile/profiles_dialog.dart' show visible;
 import '../selectable.dart';
-import '../store/store_page.dart' show oneLine;
+import '../store/overlay_page.dart' show oneLine;
 import 'loadout_controller.dart';
 import 'loadout_page.dart';
 import 'mcp_registry.dart';
