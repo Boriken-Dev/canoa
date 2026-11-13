@@ -531,7 +531,8 @@ void main() {
       testWidgets('an overlay\'s page draws at $label width once fetched', (tester) async {
         await open(tester, size);
         // The list builds what is near the screen: scroll to the entry first.
-        await tester.scrollUntilVisible(find.byKey(const Key('store-entry-team-review')), 200);
+        await tester.scrollUntilVisible(find.byKey(const Key('store-entry-team-review')), 200,
+            scrollable: find.descendant(of: find.byType(OverlaysSection), matching: find.byType(Scrollable)).first);
         for (final key in const ['store-entry-team-review', 'store-fetch']) {
           await tester.ensureVisible(find.byKey(Key(key)));
           await tester.pumpAndSettle();
