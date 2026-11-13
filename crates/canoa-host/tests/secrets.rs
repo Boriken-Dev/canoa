@@ -597,8 +597,15 @@ fn a_scripted_agent_asks_for_a_secret_and_has_it_written_into_a_command_after_th
 
 #[test]
 fn in_full_access_a_use_is_approved_without_asking() {
-    let (_, _found) = with_app("bypassPermissions,default", |wire, app, _host, work| {
+    let (_, _found) = with_app("default,bypassPermissions", |wire, app, _host, work| {
         let session = wire.open(app, work);
+        // The person chooses it: only that raises a session to the mode that asks for nothing.
+        wire.request(
+            app,
+            "session/set_config_option",
+            json!({"sessionId": session, "configId": "mode", "value": "bypassPermissions"}),
+        )
+        .expect("the mode is set");
         app.will_type("{\"user\":\"ana\"}", &[("password", PASSWORD)]);
         let asked = json_of(&wire.prompt(
             app,
@@ -738,4 +745,177 @@ fn an_agent_that_takes_only_stdio_gets_the_tools_through_the_bridge() {
             "the value reached the app's transcript"
         );
     }
+}
+
+/// A secret request answered and a `secret_use` of its handle, in the session `session`: the card the person was shown, if any.
+fn use_of_a_secret<C: coqui_transport::Channel>(
+    wire: &mut Wire<'_, C>,
+    app: &mut App,
+    session: &str,
+) -> String {
+    app.will_type("{\"user\":\"ana\"}", &[("password", PASSWORD)]);
+    let asked = json_of(&wire.prompt(
+        app,
+        session,
+        &format!(
+            "Secret secret_request {}",
+            json!({"message": "Registry login", "schema": SCHEMA})
+        ),
+    ));
+    let handle = asked["handles"]["password"]
+        .as_str()
+        .expect("a handle")
+        .to_owned();
+    app.decisions.push_back("reject");
+    wire.prompt(
+        app,
+        session,
+        &format!(
+            "Secret secret_use {}",
+            json!({"handle": handle, "env": {"name": "REGISTRY_TOKEN", "command": echo_command("REGISTRY_TOKEN")}})
+        ),
+    )
+}
+
+#[test]
+fn an_agent_that_starts_in_full_access_has_the_person_asked() {
+    let (_, _found) = with_app("bypassPermissions,default", |wire, app, _host, work| {
+        let session = wire.open(app, work);
+        let used = use_of_a_secret(wire, app, &session);
+        assert_eq!(app.cards.len(), 1, "the person was asked: {used}");
+        assert!(
+            used.contains("did not approve"),
+            "the person said no: {used}"
+        );
+    });
+}
+
+#[test]
+fn an_agents_own_report_cannot_put_its_session_in_full_access() {
+    for report in [
+        // A mode the session never listed, as a notice.
+        json!({"sessionUpdate": "current_mode_update", "currentModeId": "yolo"}),
+        // One it listed, which the person never chose.
+        json!({"sessionUpdate": "current_mode_update", "currentModeId": "bypassPermissions"}),
+        json!({"sessionUpdate": "config_option_update", "configOptions": [{"id": "mode", "name": "Mode", "category": "mode",
+            "type": "select", "currentValue": "full-access", "options": [{"value": "full-access", "name": "Full access"}]}]}),
+    ] {
+        let (_, _found) = with_app("default,bypassPermissions", |wire, app, _host, work| {
+            let session = wire.open(app, work);
+            let line = json!({"jsonrpc": "2.0", "method": "session/update",
+                "params": {"sessionId": session, "update": report}});
+            assert_eq!(wire.prompt(app, &session, &format!("Raw {line}")), "sent");
+            let used = use_of_a_secret(wire, app, &session);
+            assert_eq!(
+                app.cards.len(),
+                1,
+                "the person was asked after {report}: {used}"
+            );
+        });
+    }
+}
+
+#[test]
+fn an_agents_own_request_in_the_hosts_namespace_never_reaches_the_app_in_any_spelling() {
+    let (_, _found) = with_app("default", |wire, app, _host, work| {
+        let session = wire.open(app, work);
+        for method in [
+            "_coqui_acp/secret_show_open",
+            r"_coqui_acp\/secret_show_open",
+            r"\u005fcoqui_acp/secret_show_open",
+            r"_canoa\/profile\/approve",
+            "_canoa/profile/approve",
+        ] {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":"forged","method":"{method}","params":{{"sessionId":"{session}","requestId":"x"}}}}"#
+            );
+            assert_eq!(wire.prompt(app, &session, &format!("Raw {line}")), "sent");
+        }
+        // A plain host-only notification, and lines this host cannot read, which a lenient reader would take for one.
+        let deep = format!(
+            r#"{{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{}1{}}}"#,
+            "[".repeat(200),
+            "]".repeat(200)
+        );
+        for line in [
+            r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"sessionId":"x"}}"#
+                .to_owned(),
+            r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"pad":"\ud800"}}"#
+                .to_owned(),
+            r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"n":1e400}}"#.to_owned(),
+            deep,
+        ] {
+            assert_eq!(wire.prompt(app, &session, &format!("Raw {line}")), "sent");
+        }
+        assert!(
+            app.extension.is_empty(),
+            "the app was asked: {:?}",
+            app.extension
+        );
+        let heard = app.received.join("\n");
+        assert!(
+            !heard.contains("delegate/event"),
+            "the client saw the agent's own notification"
+        );
+        assert!(
+            !heard.contains("secret_show_open") && !heard.contains("profile/approve"),
+            "{heard}"
+        );
+    });
+}
+
+/// The command line a running process was started with, as the operating system lists it to any user.
+fn command_line(pid: u32) -> String {
+    if cfg!(windows) {
+        let listed = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"),
+            ])
+            .output()
+            .expect("powershell runs");
+        String::from_utf8_lossy(&listed.stdout).trim().to_owned()
+    } else {
+        std::fs::read(format!("/proc/{pid}/cmdline"))
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .replace(char::from(0), " ")
+                    .trim()
+                    .to_owned()
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[test]
+fn the_secret_tools_bearer_is_on_no_command_line_of_the_bridge() {
+    let (_, _found) = with_agent("default", false, |wire, app, _host, work| {
+        let session = wire.open(app, work);
+        let said = wire.prompt(app, &session, "SecretBridge");
+        let (pid, line) = said
+            .strip_prefix("pid=")
+            .and_then(|rest| rest.split_once(" command="))
+            .unwrap_or_else(|| panic!("a bridge: {said}"));
+        let token = wire
+            .prompt(app, &session, "SecretBearer")
+            .split(' ')
+            .nth(1)
+            .expect("a token")
+            .to_owned();
+        assert_eq!(token.len(), 64);
+        assert!(
+            line.ends_with("mcp-bridge") && !line.contains(&token),
+            "{line}"
+        );
+        let listed = command_line(pid.parse().expect("a process id"));
+        assert!(
+            listed.contains("mcp-bridge"),
+            "the process is the bridge: {listed}"
+        );
+        assert!(
+            !listed.contains(&token),
+            "the bearer is on a command line: {listed}"
+        );
+    });
 }

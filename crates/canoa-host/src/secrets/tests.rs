@@ -191,13 +191,196 @@ fn the_mode_follows_what_the_client_and_the_agent_say_and_bypass_is_asked_of_it(
     assert!(!link.bypass("s2"));
 }
 
+/// A link whose app offered the extension and whose agent takes HTTP servers, with a session `s1` open: its bearer.
+fn with_session(link: &Arc<Link>, modes: &Value) -> String {
+    offer(link, "ecdsa-p256-sha256");
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}});
+    link.client_said(initialize.to_string().into_bytes());
+    answer(
+        link,
+        1,
+        &json!({"agentCapabilities": {"mcpCapabilities": {"http": true}}}),
+    );
+    let given = servers(&new_session(link, 2, &std::env::temp_dir()));
+    let bearer = given[0]["headers"][0]["value"].as_str().expect("a bearer");
+    let token = bearer.trim_start_matches("Bearer ").to_owned();
+    let mut result = json!({"sessionId": "s1"});
+    result["modes"] = modes.clone();
+    answer(link, 2, &result);
+    token
+}
+
+fn listed() -> Value {
+    json!({"currentModeId": "default", "availableModes": [{"id": "default"}, {"id": "bypassPermissions"}]})
+}
+
 #[test]
 fn a_connection_that_ends_revokes_its_bearers_and_lets_a_waiting_prompt_go() {
     let dir = Dir::new("close");
     let link = link(&dir, Method::WebCrypto);
+    let token = with_session(&link, &listed());
+    assert!(
+        link.bearer_open(&token),
+        "the bearer opens the session while it lasts"
+    );
+    let waiting = {
+        let link = Arc::clone(&link);
+        std::thread::spawn(move || {
+            link.ask("_coqui_acp/secret_request", json!({"sessionId": "s1"}))
+        })
+    };
+    // The question is on its way to the app, and the thread waits for the person.
+    for _ in 0..200 {
+        if !link.drain().is_empty() {
+            break;
+        }
+        std::thread::sleep(core::time::Duration::from_millis(10));
+    }
     link.close();
     assert!(link.is_closed());
-    assert!(link.drain().is_empty());
+    assert!(
+        waiting.join().expect("the thread ended").is_err(),
+        "the prompt was let go"
+    );
+    assert!(!link.bearer_open(&token), "the bearer is revoked");
+}
+
+#[test]
+fn a_session_that_is_closed_loses_its_bearer() {
+    let dir = Dir::new("closed-session");
+    let link = link(&dir, Method::WebCrypto);
+    let token = with_session(&link, &listed());
+    assert!(link.bearer_open(&token));
+    let close = json!({"jsonrpc": "2.0", "id": 9, "method": "session/close", "params": {"sessionId": "s1"}});
+    link.client_said(close.to_string().into_bytes());
+    assert!(!link.bearer_open(&token));
+}
+
+#[test]
+fn a_version_two_agent_is_given_a_named_stdio_server() {
+    let dir = Dir::new("v2");
+    let link = link(&dir, Method::WebCrypto);
+    // The offer is under `capabilities._meta` in version 2.
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": 2,
+        "capabilities": {"_meta": {CAPABILITY: {
+            "version": 1, "methods": ["request"], "bindings": ["ecdsa-p256-sha256"],
+        }}},
+    }});
+    assert!(!link.taken_from_client(initialize.to_string().as_bytes()));
+    link.client_said(initialize.to_string().into_bytes());
+    answer(
+        &link,
+        1,
+        &json!({"protocolVersion": 2, "capabilities": {"session": {"mcp": {"stdio": true}}}}),
+    );
+    let given = servers(&new_session(&link, 2, &std::env::temp_dir()));
+    assert_eq!(given[0]["type"], "stdio");
+    assert_eq!(given[0]["args"], json!(["mcp-bridge"]));
+    // A version 2 agent that does not say stdio is given nothing.
+    let other = Dir::new("v2-none");
+    let none = self::link(&other, Method::WebCrypto);
+    assert!(!none.taken_from_client(initialize.to_string().as_bytes()));
+    none.client_said(initialize.to_string().into_bytes());
+    answer(
+        &none,
+        1,
+        &json!({"protocolVersion": 2, "capabilities": {"session": {}}}),
+    );
+    assert_eq!(
+        servers(&new_session(&none, 2, &std::env::temp_dir()))[0]["url"],
+        "http://elsewhere"
+    );
+}
+
+#[test]
+fn an_agents_own_report_cannot_raise_its_session_to_full_access() {
+    let dir = Dir::new("reports");
+    let link = link(&dir, Method::WebCrypto);
+    with_session(&link, &listed());
+    let update = |update: Value| {
+        link.agent_said(
+            json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": update}})
+                .to_string()
+                .as_bytes(),
+        );
+    };
+    // The three shapes: a listed mode nobody chose, a mode the session never listed, an options update.
+    update(json!({"sessionUpdate": "current_mode_update", "currentModeId": "bypassPermissions"}));
+    assert!(!link.bypass("s1"));
+    update(json!({"sessionUpdate": "current_mode_update", "currentModeId": "yolo"}));
+    assert!(!link.bypass("s1"));
+    update(
+        json!({"sessionUpdate": "config_option_update", "configOptions": [{"id": "mode", "name": "Mode",
+        "category": "mode", "type": "select", "currentValue": "full-access",
+        "options": [{"value": "full-access", "name": "Full access"}]}]}),
+    );
+    assert!(!link.bypass("s1"));
+}
+
+#[test]
+fn an_agent_that_starts_in_full_access_is_not_in_it_for_the_person() {
+    let dir = Dir::new("starts");
+    let link = link(&dir, Method::WebCrypto);
+    let modes = json!({"currentModeId": "bypassPermissions", "availableModes": [{"id": "default"}, {"id": "bypassPermissions"}]});
+    with_session(&link, &modes);
+    assert!(!link.bypass("s1"));
+}
+
+#[test]
+fn only_what_the_person_chose_and_the_agent_listed_raises_the_mode_and_a_report_lowers_it() {
+    let dir = Dir::new("chosen");
+    let link = link(&dir, Method::WebCrypto);
+    with_session(&link, &listed());
+    let set = |id: u64, mode: &str| {
+        link.client_said(
+            json!({"jsonrpc": "2.0", "id": id, "method": "session/set_mode", "params": {"sessionId": "s1", "modeId": mode}})
+                .to_string()
+                .into_bytes(),
+        );
+        answer(&link, id, &json!({}));
+    };
+    // A mode the session never listed is refused even when the person's request names it and the agent says yes.
+    set(3, "yolo");
+    assert!(!link.bypass("s1"));
+    set(4, "bypassPermissions");
+    assert!(link.bypass("s1"));
+    // A report of the agent's own that is not Bypass lowers it.
+    link.agent_said(
+        json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1",
+            "update": {"sessionUpdate": "current_mode_update", "currentModeId": "default"}}})
+        .to_string()
+        .as_bytes(),
+    );
+    assert!(!link.bypass("s1"));
+}
+
+#[test]
+fn an_answer_nobody_waits_for_never_reaches_the_agent_and_an_initialize_naming_both_is_read() {
+    let dir = Dir::new("answers");
+    let link = link(&dir, Method::WebCrypto);
+    let late = json!({"jsonrpc": "2.0", "id": "canoa-secret-7-00ff00ff00ff00ff", "result": {"action": "accept"}});
+    assert!(
+        link.taken_from_client(late.to_string().as_bytes()),
+        "an answer after the wait is still the host's"
+    );
+    let escaped = r#"{"jsonrpc":"2.0","id":"canoa-secret-8-00","result":{}}"#;
+    assert!(
+        link.taken_from_client(escaped.as_bytes()),
+        "so is one that escapes its id"
+    );
+    // The words `initialize` and the capability's name inside an answer must not keep it from being the host's.
+    let naming = json!({"jsonrpc": "2.0", "id": "canoa-secret-9-00", "result": {"text": format!("initialize {CAPABILITY}")}});
+    assert!(link.taken_from_client(naming.to_string().as_bytes()));
+    let other = json!({"jsonrpc": "2.0", "id": 3, "result": {}});
+    assert!(
+        !link.taken_from_client(other.to_string().as_bytes()),
+        "an answer to the agent goes on"
+    );
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "clientCapabilities": {"_meta": {CAPABILITY: {"version": 1, "methods": ["request"], "bindings": ["ecdsa-p256-sha256"]}}}}});
+    assert!(!link.taken_from_client(initialize.to_string().as_bytes()));
+    assert!(link.offered_for_test());
 }
 
 #[test]
@@ -277,9 +460,13 @@ fn what_the_host_asks_the_app_reaches_neither_the_agent_nor_the_history() {
             }
             panic!("the relay never read {text}");
         };
-        send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}));
+        send(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,
+            "clientCapabilities":{"_meta":{CAPABILITY:{"version":1,"methods":["request"],"bindings":["ecdsa-p256-sha256"]}}}}}),
+        );
         heard("initialize");
-        answer(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}));
+        answer(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,
+            "agentCapabilities":{"mcpCapabilities":{"http":true}}}}));
         send(
             json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/work","mcpServers":[]}}),
         );
@@ -309,6 +496,12 @@ fn what_the_host_asks_the_app_reaches_neither_the_agent_nor_the_history() {
     assert_eq!(asked_of_app.lock().expect("not poisoned").len(), 1);
     let heard = agent_heard.lock().expect("not poisoned").join("\n");
     assert!(heard.contains("session/prompt"), "{heard}");
+    // The agent was given the host's entry, so the link was offered; its bearer is nowhere in the history.
+    let bearer = heard
+        .split("Bearer ")
+        .nth(1)
+        .and_then(|rest| rest.get(..64))
+        .expect("the agent was given a bearer");
     assert!(
         !heard.contains(SEALED) && !heard.contains("canoa-secret-"),
         "{heard}"
@@ -320,6 +513,18 @@ fn what_the_host_asks_the_app_reaches_neither_the_agent_nor_the_history() {
         .to_string()
         .expect("written");
     assert!(kept.contains("secret_0a1b2c3d"), "{kept}");
+    assert!(!kept.contains(bearer), "the bearer is in the history");
+    for file in std::fs::read_dir(dir.0.join("history"))
+        .expect("a history directory")
+        .flatten()
+    {
+        let text = std::fs::read_to_string(file.path()).unwrap_or_default();
+        assert!(
+            !text.contains(bearer),
+            "the bearer is in {}",
+            file.path().display()
+        );
+    }
     for absent in [SEALED, "canoa-secret-", "secret_request", "Registry login"] {
         assert!(!kept.contains(absent), "{absent} is in the history: {kept}");
     }

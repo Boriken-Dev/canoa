@@ -20,7 +20,7 @@
 //! SOURCE TEXT`, `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
 //! session is in, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
 //! to PATH and waits for a cancel, `Bearer` says the tool server's address and the session's bearer (a stand-in may; the host never
-//! does), `Secret TOOL JSON` calls a tool of the host's secret server (`secret_request`, `secret_use`, `secret_show`) and says what it
+//! does), `Raw LINE` writes LINE to the client as it is, `SecretBearer` and `SecretBridge` say what `Bearer` and `Bridge` say for the secret tools, `Secret TOOL JSON` calls a tool of the host's secret server (`secret_request`, `secret_use`, `secret_show`) and says what it
 //! answered, `Pid` says its process id and `Cwd` the working directory the session was opened in. Given the entry as a stdio server
 //! (what the host writes for an agent that says no HTTP), it starts that command and calls the tools through it as an MCP client
 //! does; `Bridge` says its process id and the command line it was started with, and `BridgeClose` closes its input and says
@@ -635,6 +635,24 @@ impl Shared {
                             _ => break "bridge still running".to_owned(),
                         }
                     }
+                }
+                None => "no bridge".to_owned(),
+            },
+            "Raw" => {
+                // One line as the text gives it, with its escapes: what an agent that writes its own JSON can send.
+                let mut out = std::io::stdout().lock();
+                let _ = writeln!(out, "{rest}");
+                let _ = out.flush();
+                "sent".to_owned()
+            }
+            "SecretBearer" => match lock(&self.secret_tools).get(session) {
+                Some((url, token)) => format!("{url} {token}"),
+                None => "no bearer".to_owned(),
+            },
+            "SecretBridge" => match lock(&self.secret_bridges).get(session) {
+                Some(bridge) => {
+                    let bridge = lock(bridge);
+                    format!("pid={} command={}", bridge.child.id(), bridge.command)
                 }
                 None => "no bridge".to_owned(),
             },

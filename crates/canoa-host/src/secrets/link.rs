@@ -128,7 +128,24 @@ enum Pending {
 /// A session that was given the tools.
 struct Held {
     digest: [u8; 32],
-    modes: Mutex<Modes>,
+    /// The modes the agent listed when the session opened: a mode outside them is never taken.
+    modes: Modes,
+    /// Whether the person put the session in a mode that asks for nothing. Only the client's own `session/set_mode` or
+    /// `session/set_config_option`, answered OK by the agent, raises it; what the agent says of itself can only lower it.
+    bypass: AtomicBool,
+}
+
+impl Held {
+    fn lists(&self, mode: &str) -> bool {
+        self.modes.available.iter().any(|listed| listed == mode)
+    }
+
+    /// The agent says the session is in `mode`: a Bypass it was not put in by the person is not believed.
+    fn reported(&self, mode: &str) {
+        if !is_bypass(mode) {
+            self.bypass.store(false, Ordering::SeqCst);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -196,37 +213,38 @@ impl Link {
     /// A message of the client's as it came off the wire, before the scope removes its `_meta`: its offer in `initialize`, or an
     /// answer to a request of the host's. Whether it was the host's answer, which then goes no further.
     pub(super) fn taken_from_client(&self, message: &[u8]) -> bool {
-        if contains(message, b"initialize") && contains(message, CAPABILITY.as_bytes()) {
-            self.read_offer(message);
-            return false;
-        }
-        if lock(&self.waiting).is_empty() || !contains(message, ID_PREFIX.as_bytes()) {
+        // JSON may escape any character, so a message with a backslash is read whatever its bytes say.
+        let hinted = contains(message, ID_PREFIX.as_bytes())
+            || (contains(message, b"initialize") && contains(message, CAPABILITY.as_bytes()))
+            || message.contains(&b'\\');
+        if !hinted {
             return false;
         }
         let Ok(value) = serde_json::from_slice::<Value>(message) else {
             return false;
         };
-        if value.get("method").is_some() {
+        if let Some(method) = value.get("method") {
+            if method == &json!("initialize") {
+                self.read_offer(&value);
+            }
             return false;
         }
-        let Some(id) = value.get("id").and_then(Value::as_str) else {
+        // An answer to one of the host's own questions goes no further, even one nobody waits for any more.
+        let Some(id) = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| id.starts_with(ID_PREFIX))
+        else {
             return false;
         };
-        let Some(waiting) = lock(&self.waiting).remove(id) else {
-            return false;
-        };
-        *lock(&waiting.answer) = Some(value);
-        waiting.ready.notify_all();
+        if let Some(waiting) = lock(&self.waiting).remove(id) {
+            *lock(&waiting.answer) = Some(value);
+            waiting.ready.notify_all();
+        }
         true
     }
 
-    fn read_offer(&self, message: &[u8]) {
-        let Ok(value) = serde_json::from_slice::<Value>(message) else {
-            return;
-        };
-        if value.get("method") != Some(&json!("initialize")) {
-            return;
-        }
+    fn read_offer(&self, value: &Value) {
         let params = &value["params"];
         let meta = ["capabilities", "clientCapabilities"]
             .iter()
@@ -245,7 +263,10 @@ impl Link {
 
     /// A message from the client after the scope has checked it. A session request gets the host's entry added.
     pub(crate) fn client_said(self: &Arc<Self>, message: Vec<u8>) -> Vec<u8> {
-        if !(contains(&message, b"session/") || contains(&message, b"initialize")) {
+        if !(contains(&message, b"session/")
+            || contains(&message, b"initialize")
+            || message.contains(&b'\\'))
+        {
             return message;
         }
         let Ok(mut value) = serde_json::from_slice::<Value>(&message) else {
@@ -386,7 +407,7 @@ impl Link {
     pub(crate) fn agent_said(self: &Arc<Self>, message: &[u8]) {
         let marked =
             contains(message, b"current_mode_update") || contains(message, b"config_option_update");
-        if !marked && lock(&self.state).pending.is_empty() {
+        if !marked && lock(&self.state).pending.is_empty() && !message.contains(&b'\\') {
             return;
         }
         let Ok(value) = serde_json::from_slice::<Value>(message) else {
@@ -450,7 +471,8 @@ impl Link {
             ) => self.hub.tokens.remove(&digest),
             (Some(Pending::Mode { session, mode }), Some(_)) => {
                 if let Some(held) = self.held(&session) {
-                    lock(&held.modes).current = Some(mode);
+                    held.bypass
+                        .store(is_bypass(&mode) && held.lists(&mode), Ordering::SeqCst);
                 }
             }
             (
@@ -462,14 +484,16 @@ impl Link {
                 Some(result),
             ) => {
                 if let Some(held) = self.held(&session) {
-                    let mut modes = lock(&held.modes);
-                    if result.get("configOptions").is_some() {
-                        let fresh = modes_of(result);
-                        if fresh.option.is_some() {
-                            modes.current = fresh.current;
-                        }
-                    } else if modes.option.as_deref() == Some(id.as_str()) {
-                        modes.current = Some(chosen);
+                    if held.modes.option.as_deref() == Some(id.as_str()) {
+                        held.bypass
+                            .store(is_bypass(&chosen) && held.lists(&chosen), Ordering::SeqCst);
+                    }
+                    // An echo of the options can only lower it.
+                    if let Some(current) = modes_of(result)
+                        .current
+                        .filter(|_| result.get("configOptions").is_some())
+                    {
+                        held.reported(&current);
                     }
                 }
             }
@@ -485,17 +509,15 @@ impl Link {
             return;
         };
         let update = &value["params"]["update"];
-        let mut modes = lock(&held.modes);
         match update.get("sessionUpdate").and_then(Value::as_str) {
             Some("current_mode_update") => {
                 if let Some(mode) = update.get("currentModeId").and_then(Value::as_str) {
-                    modes.current = Some(mode.to_owned());
+                    held.reported(mode);
                 }
             }
             Some("config_option_update") => {
-                let fresh = modes_of(update);
-                if fresh.option.is_some() {
-                    modes.current = fresh.current;
+                if let Some(current) = modes_of(update).current {
+                    held.reported(&current);
                 }
             }
             _ => {}
@@ -529,7 +551,8 @@ impl Link {
                     session.to_owned(),
                     Arc::new(Held {
                         digest,
-                        modes: Mutex::new(modes),
+                        modes,
+                        bypass: AtomicBool::new(false),
                     }),
                 );
                 tracing::debug!("a session was given the secret tools");
@@ -624,10 +647,22 @@ impl Link {
             .ok_or(Error::Frontend("the person's app gave no answer"))
     }
 
+    /// Whether `token` still opens a session's tools.
+    #[cfg(test)]
+    pub(super) fn bearer_open(&self, token: &str) -> bool {
+        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+        self.hub.tokens.find(&digest).is_some()
+    }
+
+    #[cfg(test)]
+    pub(super) fn offered_for_test(&self) -> bool {
+        lock(&self.offered).is_some()
+    }
+
     /// Whether the session asks for nothing now.
     pub(super) fn bypass(&self, session: &str) -> bool {
         self.held(session)
-            .is_some_and(|held| lock(&held.modes).current.as_deref().is_some_and(is_bypass))
+            .is_some_and(|held| held.bypass.load(Ordering::SeqCst))
     }
 }
 
