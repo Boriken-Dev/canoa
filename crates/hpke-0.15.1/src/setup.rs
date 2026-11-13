@@ -1,0 +1,514 @@
+use crate::{
+    HpkeError,
+    aead::{Aead, AeadCtxR, AeadCtxS},
+    kdf::{DigestArray, Kdf as KdfTrait},
+    kem::Kem as KemTrait,
+    op_mode::{OpModeR, OpModeS},
+};
+
+#[cfg(feature = "getrandom")]
+use getrandom::SysRng;
+use rand_core::CryptoRng;
+#[cfg(feature = "getrandom")]
+use rand_core::UnwrapErr;
+use zeroize::Zeroize;
+
+/// Secret generated in `derive_enc_ctx` and stored in `AeadCtx`.
+/// Implements `Default` and `Zeroize`, and zeroizes on drop.
+// Needs to be public because it's re-exported in the danger module
+#[doc(hidden)]
+pub struct ExporterSecret<K: KdfTrait>(pub DigestArray<K>);
+
+// We use this to get an empty buffer we can read secret bytes into
+impl<K: KdfTrait> Default for ExporterSecret<K> {
+    fn default() -> ExporterSecret<K> {
+        ExporterSecret(DigestArray::<K>::default())
+    }
+}
+
+#[cfg(test)]
+impl<K: KdfTrait> Clone for ExporterSecret<K> {
+    fn clone(&self) -> ExporterSecret<K> {
+        ExporterSecret(self.0.clone())
+    }
+}
+
+impl<K: KdfTrait> Zeroize for ExporterSecret<K> {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+// Zero exporter secrets on drop
+impl<K: KdfTrait> Drop for ExporterSecret<K> {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+// RFC 9180 §5.1
+// def KeySchedule<ROLE>(mode, shared_secret, info, psk, psk_id):
+//   VerifyPSKInputs(mode, psk, psk_id)
+//
+//   psk_id_hash = LabeledExtract("", "psk_id_hash", psk_id)
+//   info_hash = LabeledExtract("", "info_hash", info)
+//   key_schedule_context = concat(mode, psk_id_hash, info_hash)
+//
+//   secret = LabeledExtract(shared_secret, "secret", psk)
+//
+//   key = LabeledExpand(secret, "key", key_schedule_context, Nk)
+//   base_nonce = LabeledExpand(secret, "base_nonce",
+//                              key_schedule_context, Nn)
+//   exporter_secret = LabeledExpand(secret, "exp",
+//                                   key_schedule_context, Nh)
+//
+//   return Context<ROLE>(key, base_nonce, 0, exporter_secret)
+
+// RFC 9180 §5.1.4:
+// def SetupAuthPSKS(pkR, info, psk, psk_id, skS):
+//   shared_secret, enc = AuthEncap(pkR, skS)
+//   return enc, KeyScheduleS(mode_auth_psk, shared_secret, info,
+//                            psk, psk_id)
+
+/// Initiates an encryption context to the given recipient public key. `info` is a domain separator.
+///
+/// NOTE: The post-quantum KEMs (`XWing`, `MlKem768P256`, `MlKem1024P384`, `MlKem768`, and
+/// `MlKem1024`) do not support authenticated encapsulation, so `mode` MUST be
+/// [`Base`](crate::OpModeS::Base) or [`Psk`](crate::OpModeS::Psk).
+///
+/// Return Value
+/// ============
+/// On success, returns an encapsulated public key (intended to be sent to the recipient), and an
+/// encryption context. If an error happened during key encapsulation, returns
+/// `Err(HpkeError::EncapError)`. This is the only possible error.
+///
+/// Panics
+/// ======
+/// Panics if `mode` is not [`Base`](crate::OpModeS::Base) or [`Psk`](crate::OpModeS::Psk), or if
+/// `info.len() + mode.get_psk_id().len() + 5` ≥ 2¹⁶, or if `getrandom::SysRng` fails to generate
+/// random bytes.
+#[cfg(feature = "getrandom")]
+pub fn setup_sender<A, Kdf, Kem>(
+    mode: &OpModeS<Kem>,
+    pk_recip: &Kem::PublicKey,
+    info: &[u8],
+) -> Result<(Kem::EncappedKey, AeadCtxS<A, Kdf, Kem>), HpkeError>
+where
+    A: Aead,
+    Kdf: KdfTrait,
+    Kem: KemTrait,
+{
+    setup_sender_with_rng::<A, Kdf, Kem>(mode, pk_recip, info, &mut UnwrapErr(SysRng))
+}
+
+/// Initiates an encryption context to the given recipient public key. `info` is a domain separator.
+///
+/// NOTE: The post-quantum KEMs (`XWing`, `MlKem768P256`, `MlKem1024P384`, `MlKem768`, and
+/// `MlKem1024`) do not support authenticated encapsulation, so `mode` MUST be
+/// [`Base`](crate::OpModeS::Base) or [`Psk`](crate::OpModeS::Psk).
+///
+/// Return Value
+/// ============
+/// On success, returns an encapsulated public key (intended to be sent to the recipient), and an
+/// encryption context. If an error happened during key encapsulation, returns
+/// `Err(HpkeError::EncapError)`.
+///
+/// Panics
+/// ======
+/// Panics if `mode` is not [`Base`](crate::OpModeS::Base) or [`Psk`](crate::OpModeS::Psk), or if
+/// `info.len() + mode.get_psk_id().len() + 5` ≥ 2¹⁶.
+pub fn setup_sender_with_rng<A, Kdf, Kem>(
+    mode: &OpModeS<Kem>,
+    pk_recip: &Kem::PublicKey,
+    info: &[u8],
+    csprng: &mut impl CryptoRng,
+) -> Result<(Kem::EncappedKey, AeadCtxS<A, Kdf, Kem>), HpkeError>
+where
+    A: Aead,
+    Kdf: KdfTrait,
+    Kem: KemTrait,
+{
+    // If the identity key is set, use it
+    let sender_id_keypair = mode.get_sender_id_keypair();
+    // Do the encapsulation
+    let (shared_secret, encapped_key) = Kem::encap_with_rng(pk_recip, sender_id_keypair, csprng)?;
+    // Use everything to derive an encryption context
+    let enc_ctx = Kdf::combine_secrets(mode, shared_secret, info);
+
+    Ok((encapped_key, enc_ctx.into()))
+}
+
+// RFC 9180 §5.1.4
+// def SetupAuthPSKR(enc, skR, info, psk, psk_id, pkS):
+//   shared_secret = AuthDecap(enc, skR, pkS)
+//   return KeyScheduleR(mode_auth_psk, shared_secret, info,
+//                       psk, psk_id)
+
+/// Initiates a decryption context given a private key `sk_recip` and an encapsulated key which was
+/// encapsulated to `sk_recip`'s corresponding public key.   `info` is a domain separator.
+///
+/// NOTE: The post-quantum KEMs (`XWing`, `MlKem768P256`, `MlKem1024P384`, `MlKem768`, and
+/// `MlKem1024`) do not support authenticated encapsulation, so `mode` MUST be
+/// [`Base`](crate::OpModeR::Base) or [`Psk`](crate::OpModeR::Psk).
+///
+/// Return Value
+/// ============
+/// On success, returns a decryption context. If an error happened during key decapsulation,
+/// returns `Err(HpkeError::DecapError)`. This is the only possible error.
+///
+/// Panics
+/// ======
+/// Panics if `mode` is not [`Base`](crate::OpModeR::Base) or [`Psk`](crate::OpModeR::Psk), or if
+/// `info.len() + mode.get_psk_id().len() + 5` ≥ 2¹⁶.
+pub fn setup_receiver<A, Kdf, Kem>(
+    mode: &OpModeR<Kem>,
+    sk_recip: &Kem::PrivateKey,
+    encapped_key: &Kem::EncappedKey,
+    info: &[u8],
+) -> Result<AeadCtxR<A, Kdf, Kem>, HpkeError>
+where
+    A: Aead,
+    Kdf: KdfTrait,
+    Kem: KemTrait,
+{
+    // If the identity key is set, use it
+    let pk_sender_id: Option<&Kem::PublicKey> = mode.get_pk_sender_id();
+    // Do the decapsulation
+    let shared_secret = Kem::decap(sk_recip, pk_sender_id, encapped_key)?;
+
+    // Use everything to derive an encryption context
+    let enc_ctx = Kdf::combine_secrets(mode, shared_secret, info);
+    Ok(enc_ctx.into())
+}
+
+#[cfg(test)]
+mod test {
+    use super::{setup_receiver, setup_sender_with_rng};
+    #[cfg(feature = "hkdfsha2")]
+    use crate::kdf::HkdfSha256;
+    use crate::kem::Kem as KemTrait;
+    use crate::test_util::{OpModeKind, aead_ctx_eq, gen_rand_buf, new_op_mode_pair};
+
+    #[cfg(feature = "chacha")]
+    use crate::aead::ChaCha20Poly1305;
+
+    /// This tests that `setup_sender` and `setup_receiver` derive the same context. We do this by
+    /// testing that `gen_ctx_kem_pair` returns identical encryption contexts
+    #[cfg(feature = "chacha")]
+    macro_rules! test_setup_correctness {
+        ($test_name:ident, $aead_ty:ty, $kdf_ty:ty, $kem_ty:ty, $use_auth:expr) => {
+            #[test]
+            fn $test_name() {
+                type A = $aead_ty;
+                type Kdf = $kdf_ty;
+                type Kem = $kem_ty;
+
+                let mut csprng = rand::rng();
+
+                let info = b"why would you think in a million years that that would actually work";
+
+                // Generate the receiver's long-term keypair
+                let (sk_recip, pk_recip) = Kem::gen_keypair_with_rng(&mut csprng);
+
+                // Build the list of modes to test. PQ KEMs don't support Auth/AuthPsk.
+                let op_mode_kinds: &[OpModeKind] = if $use_auth {
+                    &[
+                        OpModeKind::Base,
+                        OpModeKind::Psk,
+                        OpModeKind::Auth,
+                        OpModeKind::AuthPsk,
+                    ]
+                } else {
+                    &[OpModeKind::Base, OpModeKind::Psk]
+                };
+
+                // Try a full setup for the chosen op modes
+                for op_mode_kind in op_mode_kinds {
+                    // Generate a mutually agreeing op mode pair
+                    let (psk, psk_id) = (gen_rand_buf(), gen_rand_buf());
+                    let (sender_mode, receiver_mode) =
+                        new_op_mode_pair::<Kem>(*op_mode_kind, &psk, &psk_id);
+
+                    // Construct the sender's encryption context, and get an encapped key
+                    let (encapped_key, mut aead_ctx1) = setup_sender_with_rng::<A, Kdf, Kem>(
+                        &sender_mode,
+                        &pk_recip,
+                        &info[..],
+                        &mut csprng,
+                    )
+                    .unwrap();
+
+                    // Use the encapped key to derive the receiver's encryption context
+                    let mut aead_ctx2 = setup_receiver::<A, Kdf, Kem>(
+                        &receiver_mode,
+                        &sk_recip,
+                        &encapped_key,
+                        &info[..],
+                    )
+                    .unwrap();
+
+                    // Ensure that the two derived contexts are equivalent
+                    assert!(aead_ctx_eq(&mut aead_ctx1, &mut aead_ctx2));
+                }
+            }
+        };
+    }
+
+    /// Tests that using different input data gives you different encryption contexts
+    #[cfg(feature = "chacha")]
+    macro_rules! test_setup_soundness {
+        ($test_name:ident, $aead:ty, $kdf:ty, $kem:ty, $use_auth:expr) => {
+            #[test]
+            fn $test_name() {
+                type A = $aead;
+                type Kdf = $kdf;
+                type Kem = $kem;
+
+                let mut csprng = rand::rng();
+
+                let info = b"why would you think in a million years that that would actually work";
+
+                // Generate the receiver's long-term keypair
+                let (sk_recip, pk_recip) = Kem::gen_keypair_with_rng(&mut csprng);
+
+                // Generate a mutually agreeing op mode pair
+                let (psk, psk_id) = (gen_rand_buf(), gen_rand_buf());
+                let (sender_mode, receiver_mode) =
+                    new_op_mode_pair::<Kem>(OpModeKind::Base, &psk, &psk_id);
+
+                // Construct the sender's encryption context normally
+                let (encapped_key, sender_ctx) = setup_sender_with_rng::<A, Kdf, Kem>(
+                    &sender_mode,
+                    &pk_recip,
+                    &info[..],
+                    &mut csprng,
+                )
+                .unwrap();
+
+                // Now make a receiver with the wrong info string and ensure it doesn't match the
+                // sender
+                let bad_info = b"something else";
+                let mut receiver_ctx = setup_receiver::<_, _, Kem>(
+                    &receiver_mode,
+                    &sk_recip,
+                    &encapped_key,
+                    &bad_info[..],
+                )
+                .unwrap();
+                assert!(!aead_ctx_eq(&mut sender_ctx.clone(), &mut receiver_ctx));
+
+                // Now make a receiver with the wrong secret key and ensure it doesn't match the
+                // sender
+                let (bad_sk, _) = Kem::gen_keypair_with_rng(&mut csprng);
+                let mut aead_ctx2 =
+                    setup_receiver::<_, _, Kem>(&receiver_mode, &bad_sk, &encapped_key, &info[..])
+                        .unwrap();
+                assert!(!aead_ctx_eq(&mut sender_ctx.clone(), &mut aead_ctx2));
+
+                // Now make a receiver with the wrong encapped key and ensure it doesn't match the
+                // sender. The reason `bad_encapped_key` is bad is because its underlying key is
+                // uniformly random, and therefore different from the key that the sender sent.
+                let (bad_encapped_key, _) = setup_sender_with_rng::<A, Kdf, Kem>(
+                    &sender_mode,
+                    &pk_recip,
+                    &info[..],
+                    &mut csprng,
+                )
+                .unwrap();
+                let mut aead_ctx2 = setup_receiver::<_, _, Kem>(
+                    &receiver_mode,
+                    &sk_recip,
+                    &bad_encapped_key,
+                    &info[..],
+                )
+                .unwrap();
+                assert!(!aead_ctx_eq(&mut sender_ctx.clone(), &mut aead_ctx2));
+
+                // Now make sure that this test was a valid test by ensuring that doing everything
+                // the right way makes it pass
+                let mut aead_ctx2 = setup_receiver::<_, _, Kem>(
+                    &receiver_mode,
+                    &sk_recip,
+                    &encapped_key,
+                    &info[..],
+                )
+                .unwrap();
+                assert!(aead_ctx_eq(&mut sender_ctx.clone(), &mut aead_ctx2));
+            }
+        };
+    }
+
+    #[cfg(all(feature = "x25519", feature = "chacha"))]
+    mod x25519_tests {
+        use super::*;
+        use crate::kem::*;
+
+        test_setup_correctness!(
+            test_setup_correctness_x25519,
+            ChaCha20Poly1305,
+            HkdfSha256,
+            X25519HkdfSha256,
+            true
+        );
+        test_setup_soundness!(
+            test_setup_soundness_x25519,
+            ChaCha20Poly1305,
+            HkdfSha256,
+            X25519HkdfSha256,
+            true
+        );
+    }
+
+    #[cfg(all(feature = "nistp", feature = "chacha"))]
+    mod nistp_tests {
+        use super::*;
+        use crate::{
+            kdf::{HkdfSha384, HkdfSha512},
+            kem::*,
+        };
+
+        test_setup_correctness!(
+            test_setup_correctness_p256,
+            ChaCha20Poly1305,
+            HkdfSha256,
+            DhP256HkdfSha256,
+            true
+        );
+        test_setup_soundness!(
+            test_setup_soundness_p256,
+            ChaCha20Poly1305,
+            HkdfSha256,
+            DhP256HkdfSha256,
+            true
+        );
+
+        test_setup_correctness!(
+            test_setup_correctness_p384,
+            ChaCha20Poly1305,
+            HkdfSha384,
+            DhP384HkdfSha384,
+            true
+        );
+        test_setup_soundness!(
+            test_setup_soundness_p384,
+            ChaCha20Poly1305,
+            HkdfSha384,
+            DhP384HkdfSha384,
+            true
+        );
+
+        test_setup_correctness!(
+            test_setup_correctness_p521,
+            ChaCha20Poly1305,
+            HkdfSha512,
+            DhP521HkdfSha512,
+            true
+        );
+        test_setup_soundness!(
+            test_setup_soundness_p521,
+            ChaCha20Poly1305,
+            HkdfSha512,
+            DhP521HkdfSha512,
+            true
+        );
+    }
+
+    #[cfg(all(feature = "mlkem", feature = "chacha"))]
+    mod mlkem_tests {
+        use super::*;
+        use crate::{
+            kdf::{KdfShake128, KdfShake256},
+            kem::*,
+        };
+
+        test_setup_correctness!(
+            test_setup_correctness_mlkem768,
+            ChaCha20Poly1305,
+            KdfShake128,
+            MlKem768,
+            false
+        );
+        test_setup_soundness!(
+            test_setup_soundness_mlkem768,
+            ChaCha20Poly1305,
+            KdfShake128,
+            MlKem768,
+            false
+        );
+
+        test_setup_correctness!(
+            test_setup_correctness_mlkem1024,
+            ChaCha20Poly1305,
+            KdfShake256,
+            MlKem1024,
+            false
+        );
+        test_setup_soundness!(
+            test_setup_soundness_mlkem1024,
+            ChaCha20Poly1305,
+            KdfShake256,
+            MlKem1024,
+            false
+        );
+    }
+
+    #[cfg(all(feature = "mlkem", feature = "nistp", feature = "chacha"))]
+    mod mlkem_nistp_tests {
+        use super::*;
+        use crate::{
+            kdf::{KdfShake128, KdfShake256},
+            kem::*,
+        };
+
+        test_setup_correctness!(
+            test_setup_correctness_mlkem768p256,
+            ChaCha20Poly1305,
+            KdfShake128,
+            MlKem768P256,
+            false
+        );
+        test_setup_soundness!(
+            test_setup_soundness_mlkem768p256,
+            ChaCha20Poly1305,
+            KdfShake128,
+            MlKem768P256,
+            false
+        );
+
+        test_setup_correctness!(
+            test_setup_correctness_mlkem1024p384,
+            ChaCha20Poly1305,
+            KdfShake256,
+            MlKem1024P384,
+            false
+        );
+        test_setup_soundness!(
+            test_setup_soundness_mlkem1024p384,
+            ChaCha20Poly1305,
+            KdfShake256,
+            MlKem1024P384,
+            false
+        );
+    }
+
+    #[cfg(all(feature = "mlkem", feature = "x25519", feature = "chacha"))]
+    mod xwing_tests {
+        use super::*;
+        use crate::{kdf::KdfTurboShake128, kem::*};
+
+        test_setup_correctness!(
+            test_setup_correctness_xwing,
+            ChaCha20Poly1305,
+            KdfTurboShake128,
+            XWing,
+            false
+        );
+        test_setup_soundness!(
+            test_setup_soundness_xwing,
+            ChaCha20Poly1305,
+            KdfTurboShake128,
+            XWing,
+            false
+        );
+    }
+}

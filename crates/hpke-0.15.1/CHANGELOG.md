@@ -1,0 +1,97 @@
+# Changelog
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.15.1] — 2026-10-27
+
+* Fixed typo in docs
+
+## [0.15.0] — 2026-10-25
+
+* Bumped MSRV to 1.87.0 (2025-05-15), in order to pull in security fixes for [`crypto-bigint`](https://rustsec.org/advisories/RUSTSEC-2026-0387) and [`ctutils`](https://rustsec.org/advisories/RUSTSEC-2026-0385) ([#122](https://github.com/rozbb/rust-hpke/pull/122))
+* Made X25519 private keys clamped on serialization ([#122](https://github.com/rozbb/rust-hpke/pull/122)). Consequences:
+  * Re-serializing private keys generated in `hpke` prior to `0.15` will yield a different bytestring. This new private key is equivalent to the old one, i.e., it behaves identically for all HPKE operations.
+  * X25519's constant-time equality check `PrivateKey::ct_eq` now returns `true` for any two private keys which are equal _after clamping_. This means that now two private keys can be `ct_eq` without being equal as bytestrings.
+
+## [0.14.1] — 2026-09-05
+
+* Improve zeroization in KEMs ([#111](https://github.com/rozbb/rust-hpke/pull/111), [#112](https://github.com/rozbb/rust-hpke/pull/112))
+
+## [0.14.0] — 2026-07-09
+
+### Breaking Changes
+
+* Bumped Rust edition to 2024
+* Bumped MSRV to 1.85.0 (2025-02-20)
+* Updated `rand` and `rand_core`
+* Renamed every function that took an RNG to `*_with_rng`, and removed the `rng` parameter from the function with the original name (gated by `getrandom`) ([#97](https://github.com/rozbb/rust-hpke/pull/97))
+* Feature-gated AES-GCM and ChaCha20Poly1305 behind `aes` and `chacha` features, respectively ([#91](https://github.com/rozbb/rust-hpke/pull/91))
+* Consolidated feature flags ([#106](https://github.com/rozbb/rust-hpke/pull/106))
+* Replaced `generic-array` with `hybrid-array` ([#82](https://github.com/rozbb/rust-hpke/pull/82))
+* Switched all `_in_place` algorithms to `_inout`, and replaced `&mut [u8]` with `inout::InOut<'_, '_, u8>` ([#82](https://github.com/rozbb/rust-hpke/pull/82))
+* Updated RustCrypto crates `aead`, `aes-gcm`, `chacha20poly1305`, `digest`, `hkdf`, `hmac`
+
+### Other Changes
+
+* Added XWing KEM and SHAKE KDFs ([#81](https://github.com/rozbb/rust-hpke/pull/81))
+* Added MLKEM-NISP KEMs ([#105](https://github.com/rozbb/rust-hpke/pull/105))
+* Added pure-MLKEM KEMs and TurboSHAKE KDF ([#105](https://github.com/rozbb/rust-hpke/pull/105))
+* Added `danger::streaming_enc` module for creating streaming encryption contexts
+([#87](https://github.com/rozbb/rust-hpke/pull/87), [#107](https://github.com/rozbb/rust-hpke/pull/107))
+* Added zeroizing for more intermediate secrets ([#92](https://github.com/rozbb/rust-hpke/pull/92))
+* Fixed `no_std` support([#96](https://github.com/rozbb/rust-hpke/pull/96))
+
+## [0.13.0] - 2025-02-19
+
+### Changes
+
+* Made `PskBundle` require an explicit constructor that performs validation on inputs
+* Updated `rand` and `rand_core` to 0.9
+
+## [0.12.0] - 2024-07-03
+
+### Additions
+
+* Added `Serializable::write_exact` so serialization requires less stack space
+* Added support for the P-521 curve
+
+### Changes
+
+* Constrained `Aead::AeadImpl` to be `Send + Sync`
+* Bumped `subtle` dependency and removed `byteorder` dependency
+
+### Removals
+
+* Removed all impls of `serde::{Serialize, Deserialize}` from crate. See [wiki](https://github.com/rozbb/rust-hpke/wiki/Migrating-away-from-the-serde_impls-feature) for migration instructions.
+
+## [0.11.0] - 2023-10-11
+
+### Removals
+
+* Removed the redundant re-export of the first encapsulated key type as `kem::EncappedKey`
+
+### Changes
+
+* Updated `x25519-dalek` to 2.0
+* Updated `subtle` to 2.5
+
+## [0.10.0] - 2022-10-01
+
+### Additions
+* Added `alloc` feature and feature-gated the `open()` and `seal()` methods behind it
+
+### Changes
+* Bumped MSRV from 1.56.1 (`59eed8a2a` 2021-11-01) to 1.57.0 (`f1edd0429` 2021-11-29)
+* Updated dependencies and weakened `zeroize` dependency from `>=1.3` to just `^1`
+* Improved documentation for the AEAD `export()` method and the KDF `labeled_expand()` method
+
+## [0.9.0] - 2022-05-04
+
+### Additions
+* Refactored some internals so end users can theoretically define their own KEMs. See PR [#27](https://github.com/rozbb/rust-hpke/pull/27).
+
+### Changes
+* Bumped MSRV from 1.51.0 (`2fd73fabe` 2021-03-23) to 1.56.1 (`59eed8a2a` 2021-11-01)
+* Updated dependencies

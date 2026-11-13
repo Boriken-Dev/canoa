@@ -1,0 +1,72 @@
+# coqui-peer-noise/. at 3a5b30689780a6e6291af565ff6abbaae515973c, with what it inherits written out.
+test = [{ name = "pair", required-features = ["pin"] }, { name = "pair_vectors", required-features = ["pin"] }]
+example = [{ name = "pair", required-features = ["pin"] }]
+[package]
+name = "coqui-peer-noise"
+version = "0.0.0-alpha.0"
+description = "The Noise method of coqui-peer: Noise_XX_25519_AESGCM_SHA256 between two X25519 keys, in a browser or natively, ending in an encrypted session"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-peer-noise"
+homepage = "https://boriken-dev.github.io/coqui-peer-noise/"
+keywords = ["noise", "peer", "x25519", "handshake", "browser"]
+categories = ["cryptography", "authentication", "network-programming"]
+exclude = [".*", "*.local.*", "/bindings/", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+pin = ["coqui-peer/pin"]
+[dependencies]
+[dependencies.coqui-peer]
+git = "https://github.com/Boriken-Dev/coqui-peer"
+rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
+[dependencies.x25519-dalek]
+version = "2.0.1"
+default-features = false
+features = ["static_secrets", "zeroize"]
+[dependencies.aes-gcm]
+version = "0.11"
+default-features = false
+features = ["aes", "alloc", "zeroize"]
+[dependencies.hkdf]
+version = "0.13"
+default-features = false
+[dependencies.sha2]
+version = "0.11.1"
+default-features = false
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+[dependencies.getrandom]
+version = "0.4"
+default-features = false
+[dependencies.zeroize]
+version = "1"
+default-features = false
+features = ["alloc"]
+[dev-dependencies]
+tempfile = "3"
+toml = "=1.1.8"
+serde_json = "1"
+[dev-dependencies.curve25519-dalek]
+version = "4.1"
+default-features = false
+[dev-dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive", "serde"]
+[dev-dependencies.snow]
+version = "0.10"
+default-features = false
+features = ["use-aes-gcm", "use-chacha20poly1305", "use-sha2", "use-curve25519", "use-getrandom"]

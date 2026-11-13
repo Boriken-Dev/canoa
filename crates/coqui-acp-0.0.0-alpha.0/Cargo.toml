@@ -1,0 +1,88 @@
+# coqui-acp/crates/coqui-acp at 34de3e94dfe5f8a99e8da0b73884984ac538503a, with what it inherits written out.
+[package]
+name = "coqui-acp"
+description = "Drive any Agent Client Protocol agent: the connect, resume and turn state machine, permission deciding and line transports above the protocol's own SDK"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-acp"
+homepage = "https://boriken-dev.github.io/coqui-acp/"
+readme = "README.md"
+keywords = ["acp", "agent", "client", "json-rpc"]
+categories = ["network-programming"]
+exclude = [".*", "*.local.*"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+secret = ["dep:base64", "dep:data-encoding", "dep:hmac", "dep:hpke", "dep:p256", "dep:serde", "dep:sha2", "dep:x25519-dalek", "dep:zeroize"]
+[dependencies]
+[dependencies.agent-client-protocol]
+version = "3.6"
+default-features = false
+[dependencies.futures]
+version = "0.3"
+[dependencies.serde_json]
+version = "1"
+features = ["preserve_order"]
+[dependencies.base64]
+version = "0.22"
+default-features = false
+features = ["alloc"]
+optional = true
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+optional = true
+[dependencies.hmac]
+version = "0.13"
+default-features = false
+features = ["zeroize"]
+optional = true
+[dependencies.hpke]
+version = "0.15.1"
+default-features = false
+features = ["alloc", "getrandom", "x25519", "aes"]
+optional = true
+[dependencies.p256]
+version = "0.14"
+default-features = false
+features = ["ecdsa", "pkcs8"]
+optional = true
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+optional = true
+[dependencies.sha2]
+version = "0.11"
+default-features = false
+optional = true
+[dependencies.x25519-dalek]
+version = "3"
+default-features = false
+features = ["static_secrets", "zeroize"]
+optional = true
+[dependencies.zeroize]
+version = "1"
+default-features = false
+features = ["alloc"]
+optional = true
+[dev-dependencies]
+[dev-dependencies.proptest]
+version = "1"
+default-features = false
+features = ["std"]
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

@@ -4,3 +4,4 @@
 *.wasm binary
 *.zip binary
 *.tar.gz binary
+crates/** -text

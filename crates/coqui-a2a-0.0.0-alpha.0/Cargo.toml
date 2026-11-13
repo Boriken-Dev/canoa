@@ -1,0 +1,118 @@
+# coqui-a2a/crates/coqui-a2a at a11a466c12b8c07ea8864e4159939a48b1fa457a, with what it inherits written out.
+bin = [{ name = "coqui-a2a", path = "src/main.rs", required-features = ["cli"] }]
+[package]
+name = "coqui-a2a"
+description = "A2A over a proven coqui-agentic-peer link, as a custom protocol binding, with a loopback HTTP command for unmodified A2A software"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-a2a"
+homepage = "https://boriken-dev.github.io/coqui-a2a/"
+readme = "README.md"
+keywords = ["a2a", "agent", "peer", "protocol-binding"]
+categories = ["network-programming"]
+exclude = [".*", "*.local.*"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+tasks = []
+loopback = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:hyper", "dep:hyper-util", "dep:subtle", "serde_json/raw_value"]
+cli = ["loopback", "dep:clap", "dep:coqui-peer", "dep:coqui-peer-webcrypto", "dep:coqui-peer-tls", "dep:rustls", "dep:url", "dep:coqui-transport-web"]
+[dependencies]
+serde_json = "1"
+[dependencies.coqui-agentic-peer]
+git = "https://github.com/Boriken-Dev/coqui-agentic-peer"
+rev = "8dad1766ba1b925f2bee9ebd403805e42e6afc47"
+[dependencies.coqui-transport]
+git = "https://github.com/Boriken-Dev/coqui-transport"
+rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+default-features = false
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+[dependencies.time]
+version = "0.3"
+default-features = false
+features = ["std", "formatting", "parsing"]
+[dependencies.axum]
+version = "0.8"
+default-features = false
+features = ["tokio", "json"]
+optional = true
+[dependencies.tokio]
+version = "1"
+default-features = false
+features = ["rt-multi-thread", "net", "sync", "time"]
+optional = true
+[dependencies.futures-util]
+version = "0.3"
+default-features = false
+optional = true
+[dependencies.hyper]
+version = "1"
+default-features = false
+features = ["http1", "server"]
+optional = true
+[dependencies.hyper-util]
+version = "0.1"
+default-features = false
+features = ["tokio", "service"]
+optional = true
+[dependencies.subtle]
+version = "2.6"
+default-features = false
+optional = true
+[dependencies.clap]
+version = "4"
+features = ["derive", "env"]
+optional = true
+[dependencies.coqui-peer-webcrypto]
+git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
+rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681"
+optional = true
+[dependencies.coqui-transport-web]
+git = "https://github.com/Boriken-Dev/coqui-transport-web"
+rev = "c8df84264ff8e60907f5cedf269104e91d5add22"
+features = ["websocket"]
+optional = true
+[dependencies.coqui-peer]
+version = "=0.0.0-alpha.1"
+optional = true
+[dependencies.coqui-peer-tls]
+version = "=0.0.0-alpha.1"
+optional = true
+[dependencies.rustls]
+version = "0.23"
+default-features = false
+features = ["ring", "std", "tls12"]
+optional = true
+[dependencies.url]
+version = "2.5"
+optional = true
+[dev-dependencies]
+proptest = "1"
+url = "2.5"
+[dev-dependencies.coqui-acp]
+git = "https://github.com/Boriken-Dev/coqui-acp"
+rev = "c15c0ff96d4bf8b8f56aae671a6ab73f8319825a"
+[dev-dependencies.coqui-peer-webcrypto]
+git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
+rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681"
+features = ["pin"]
+[dev-dependencies.coqui-transport-web]
+git = "https://github.com/Boriken-Dev/coqui-transport-web"
+rev = "c8df84264ff8e60907f5cedf269104e91d5add22"
+features = ["websocket"]
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
