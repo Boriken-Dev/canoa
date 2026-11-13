@@ -69,6 +69,23 @@ pub(crate) fn default_child_signal() {
 #[cfg(not(unix))]
 pub(crate) const fn default_child_signal() {}
 
+/// Has the process starter start with `SIGCHLD` at the system's default, whatever this process has made of it: an ignored
+/// disposition outlives `exec`, and a starter that inherited it would have its children collected as they end.
+#[cfg(unix)]
+pub(crate) fn reset_child_signal(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: the closure runs between `fork` and `exec` and calls only `signal`, which may be called there.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) const fn reset_child_signal(_command: &mut std::process::Command) {}
+
 /// Gives this process a console with no window when it has none, by attaching to the one a helper is started with. The
 /// console outlives the helper, since this process stays attached.
 #[cfg(windows)]

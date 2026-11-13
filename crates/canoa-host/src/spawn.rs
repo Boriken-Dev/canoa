@@ -574,6 +574,15 @@ pub fn install(program: Program) {
     let _ = program;
 }
 
+/// Has `prepare` change the command that starts the process starter, before it runs. For an application that has to do to it what
+/// std cannot, such as putting a signal's disposition back to the default (an ignored one outlives `exec`). Nothing on Windows.
+pub fn prepare_starter(prepare: fn(&mut std::process::Command)) {
+    #[cfg(unix)]
+    apart::prepare_with(prepare);
+    #[cfg(windows)]
+    let _ = prepare;
+}
+
 /// As [`install`], for a program the host chose for itself rather than one it was told to use: it is the starter's program
 /// unless one has been named, and a later [`install`] replaces it.
 pub fn install_default(program: Program) {
@@ -614,6 +623,112 @@ mod tests {
     /// Every process the host starts for itself goes through [`Command`], so that none is a child of an application that
     /// collects its own children. A use of std's is one that was left behind, unless it is one of these, which are the host's
     /// own commands (they run as a process of their own, whose children are its own) or Windows-only.
+    /// The coqui-acp crates this host runs in its own process start processes too, and each has a seam for a host's own starter. A
+    /// use of std's `Command` in one of them is allowed where it is the fallback behind that seam, or Windows' own: a new one is
+    /// a process left to start as a child of the application.
+    #[test]
+    #[cfg(unix)]
+    fn the_crates_run_in_process_start_no_process_by_std_but_behind_their_seam() {
+        // (file, what shows it is behind the seam or Windows-only)
+        const BEHIND: [(&str, &str); 6] = [
+            ("coqui-acp-secrets/src/run.rs", "STARTER"),
+            ("coqui-acp-harness/src/process.rs", "STARTER"),
+            ("coqui-acp-bridge/src/agent.rs", "Spawner"),
+            ("coqui-acp-bridge/src/standing.rs", "icacls"),
+            ("coqui-acp-pi/src/gate.rs", "icacls"),
+            ("coqui-acp-harness/src/antigravity/ports.rs", "netstat"),
+        ];
+        const CRATES: [&str; 9] = [
+            "coqui-acp",
+            "coqui-acp-secrets",
+            "coqui-acp-harness",
+            "coqui-acp-bridge",
+            "coqui-acp-claude",
+            "coqui-acp-codex",
+            "coqui-acp-pi",
+            "coqui-acp-provider",
+            "coqui-acp-history",
+        ];
+        fn scan(
+            dir: &Path,
+            root: &Path,
+            name: &str,
+            found: &mut Vec<String>,
+            seen: &mut Vec<(String, String)>,
+        ) {
+            for entry in std::fs::read_dir(dir).expect("a directory") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    scan(&path, root, name, found, seen);
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("below the root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let text = std::fs::read_to_string(&path).expect("a source file");
+                let uses_std = text.lines().any(|line| {
+                    !line.trim_start().starts_with("//")
+                        && (line.contains("std::process::Command")
+                            || (line.contains("use std::process::") && line.contains("Command")))
+                });
+                if uses_std {
+                    seen.push((format!("{name}/{relative}"), text));
+                    found.push(format!("{name}/{relative}"));
+                }
+            }
+        }
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let listed = std::process::Command::new(cargo)
+            .args(["metadata", "--format-version", "1", "--offline"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("cargo runs");
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let metadata: serde_json::Value = serde_json::from_slice(&listed.stdout).expect("JSON");
+        let mut found = Vec::new();
+        let mut seen = Vec::new();
+        for name in CRATES {
+            let manifest = metadata["packages"]
+                .as_array()
+                .expect("packages")
+                .iter()
+                .find(|package| package["name"] == name)
+                .and_then(|package| package["manifest_path"].as_str())
+                .unwrap_or_else(|| panic!("{name} is in the dependency graph"));
+            let src = Path::new(manifest)
+                .parent()
+                .expect("a crate directory")
+                .join("src");
+            scan(&src, &src, name, &mut found, &mut seen);
+        }
+        for (file, text) in &seen {
+            let Some((_, shows)) = BEHIND.iter().find(|(allowed, _)| allowed == file) else {
+                continue;
+            };
+            assert!(
+                text.contains(shows),
+                "{file} uses std's Command, and nothing in it is the seam ({shows})"
+            );
+        }
+        let stray: Vec<&String> = found
+            .iter()
+            .filter(|file| !BEHIND.iter().any(|(allowed, _)| allowed == file))
+            .collect();
+        assert!(
+            stray.is_empty(),
+            "std starts a process in a crate this host runs in process: {stray:#?}"
+        );
+    }
+
     #[test]
     fn no_process_is_started_by_std_outside_this_module() {
         const OWN: [&str; 2] = ["profile/launch.rs", "accounts/private.rs"];

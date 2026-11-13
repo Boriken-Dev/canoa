@@ -19,6 +19,7 @@ use super::{Child, Command, Stdio};
 /// Has `coqui-acp-harness` start what it starts through the process starter [`super::install`] names.
 pub(super) fn use_starter() {
     coqui_acp_harness::set_starter(Arc::new(Harness));
+    coqui_acp_secrets::set_starter(Arc::new(Secrets));
 }
 
 struct Harness;
@@ -130,5 +131,56 @@ impl Drop for Held {
     /// A process nobody kept ends with everything it started.
     fn drop(&mut self) {
         let _ = self.kill();
+    }
+}
+
+/// `coqui-acp-secrets`' commands, which hold a secret in their environment: started by the process starter too, in a group of
+/// their own, so that ending one never signals a group whose leader someone else collected.
+struct Secrets;
+
+impl coqui_acp_secrets::Starter for Secrets {
+    fn start(&self, launch: &coqui_acp_secrets::Launch) -> io::Result<coqui_acp_secrets::Started> {
+        let mut command = Command::new(&launch.program);
+        command
+            .args(&launch.args)
+            .current_dir(&launch.cwd)
+            .env_clear()
+            .envs(launch.env.iter().map(|(name, value)| (name, value)))
+            .stdin(Stdio::Null)
+            .stdout(Stdio::Piped)
+            .stderr(Stdio::Piped)
+            .own_group();
+        let mut child = command.spawn()?;
+        // Its environment held the secret: nothing of it stays here.
+        drop(command);
+        let missing = || io::Error::other("the command's pipes were not opened");
+        let stdout = child.stdout.take().ok_or_else(missing)?;
+        let stderr = child.stderr.take().ok_or_else(missing)?;
+        Ok(coqui_acp_secrets::Started {
+            process: Box::new(Running(child)),
+            stdout: Box::new(stdout),
+            stderr: Box::new(stderr),
+        })
+    }
+}
+
+/// A command the starter holds: uncollected until it is ended.
+struct Running(Child);
+
+impl coqui_acp_secrets::Process for Running {
+    fn try_wait(&mut self) -> io::Result<Option<Option<i32>>> {
+        Ok(self.0.peek()?.map(|status| status.code()))
+    }
+
+    fn end_group_after_exit(&mut self) {
+        // Still uncollected, so its group's id is its own; then it is collected.
+        self.0.end_group_after_exit();
+        let _ = self.0.try_wait();
+    }
+
+    fn end(&mut self) {
+        self.0.end_group();
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }

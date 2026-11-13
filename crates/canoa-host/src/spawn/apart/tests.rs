@@ -427,3 +427,91 @@ fn a_stream_closed_on_exec_is_a_closed_one_and_the_child_gets_nothing_behind_it(
         .write_all(b"dropped")
         .expect("a descriptor with nothing behind it takes a write");
 }
+
+#[test]
+fn a_spawn_that_gets_no_answer_fails_alone_and_a_child_started_late_for_it_is_ended() {
+    let (host, starter) = UnixStream::pair().expect("a socket pair");
+    let link = Link::over_waiting(host, None, Duration::from_millis(300)).expect("a link");
+    let file = std::env::temp_dir().join(format!("canoa-abandon-{}", std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    let mut command = shell(&format!("echo $$ > '{}'; exec sleep 300", file.display()));
+    command.own_group();
+    // The starter is slow, not gone: nothing reads the socket yet.
+    let error = link.spawn(&command).expect_err("no answer in time");
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
+    assert!(
+        !link.has_ended(),
+        "one request failed, and the link goes on"
+    );
+    // It reads what waited: the spawn and then the word that the host gave up on it.
+    thread::spawn(move || run(&starter));
+    let mut after = link.spawn(&shell("exit 4")).expect("the link goes on");
+    assert_eq!(after.wait().expect("it ends").code(), Some(4));
+    thread::sleep(Duration::from_millis(1000));
+    // However the two met, nothing of the first is left running.
+    if let Ok(text) = std::fs::read_to_string(&file) {
+        let pid: u32 = text.trim().parse().expect("a process id");
+        assert!(
+            gone_soon(pid),
+            "a child started late for an abandoned request is ended"
+        );
+    }
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn when_the_host_goes_every_child_the_starter_holds_ends_with_it() {
+    let (link, end) = started();
+    let mut leads = shell("sleep 300");
+    leads.own_group();
+    let one = link.spawn(&leads).expect("it starts");
+    let two = link.spawn(&shell("sleep 300")).expect("it starts");
+    let (first, second) = (one.id(), two.id());
+    assert!(alive(first) && alive(second));
+    end.shutdown(Shutdown::Both).expect("the host is gone");
+    assert!(
+        gone_soon(first),
+        "a child that leads a group ends with the host"
+    );
+    assert!(gone_soon(second), "so does one that does not");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn ending_a_group_reaches_what_left_it_by_a_session_of_its_own() {
+    let (link, _end) = started();
+    let mut command = shell("setsid sleep 300 & echo $!; wait");
+    command.stdout(Stdio::Piped).own_group();
+    let mut child = link.spawn(&command).expect("it starts");
+    let escaped = first_id(&mut child);
+    assert!(alive(escaped));
+    child.end_group();
+    child.wait().expect("it ends");
+    assert!(
+        gone_soon(escaped),
+        "what left the group is found by its parents and ended with it"
+    );
+}
+
+#[test]
+fn a_child_whose_watcher_cannot_start_is_ended_and_not_announced() {
+    let (host, starter) = UnixStream::pair().expect("a socket pair");
+    thread::spawn(move || run_with(&starter, Options { fail_watcher: true }));
+    let link = Link::over(host, None).expect("a link");
+    let mut command = shell("exec sleep 31337");
+    command.own_group();
+    let error = link.spawn(&command).expect_err("nothing would collect it");
+    assert!(error.to_string().contains("thread"), "{error}");
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        let listed = std::process::Command::new("ps")
+            .args(["-A", "-o", "args="])
+            .output()
+            .expect("ps runs");
+        if !String::from_utf8_lossy(&listed.stdout).contains("sleep 31337") {
+            break;
+        }
+        assert!(Instant::now() < until, "the child was left running");
+        thread::sleep(Duration::from_millis(50));
+    }
+}

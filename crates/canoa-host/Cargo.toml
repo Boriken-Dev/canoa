@@ -84,7 +84,7 @@ tracing-subscriber.workspace = true
 # Ends a provider's process group, through a safe call; and passes the descriptors of a child's standard streams to the host's own
 # process starter, over a socket (`spawn`).
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "process", "net"] }
+rustix = { version = "1.1", default-features = false, features = ["std", "process", "net", "event"] }
 
 # The operating system's credential store: Secret Service on a Linux or other Unix desktop.
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]

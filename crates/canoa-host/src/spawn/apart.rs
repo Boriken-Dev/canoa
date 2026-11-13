@@ -13,8 +13,11 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
-use std::collections::HashMap;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IoSlice, IoSliceMut, Read as _};
@@ -25,7 +28,7 @@ use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
 use std::path::Path;
 use std::process::{ChildStderr, ChildStdin, ChildStdout, ExitStatus};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError, RwLock};
 use std::thread;
 
 use rustix::net::{
@@ -47,6 +50,8 @@ const SPAWN: u8 = 1;
 const KILL: u8 = 2;
 const KILL_GROUP: u8 = 3;
 const COLLECT: u8 = 4;
+/// The host gave up waiting for the answer to a spawn: a child started for it is ended, whenever it starts.
+const ABANDON: u8 = 5;
 const SPAWNED: u8 = 11;
 const FAILED: u8 = 12;
 const EXITED: u8 = 13;
@@ -132,11 +137,52 @@ fn send_raw(
     Ok(())
 }
 
-/// Descriptors that arrive closed on exec where the system can say so on receipt; elsewhere they are set so just after.
+/// Held for writing while a frame's descriptors are received and made close-on-exec, and for reading while a process is
+/// started: where the system cannot say a descriptor arrives closed on exec, a process started in between would inherit
+/// another request's pipe.
+static FORK_GATE: RwLock<()> = RwLock::new(());
+
+/// The gate for receiving descriptors, where they are made close-on-exec after they arrive.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn receiving() -> Option<std::sync::RwLockWriteGuard<'static, ()>> {
+    Some(FORK_GATE.write().unwrap_or_else(PoisonError::into_inner))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const fn receiving() -> Option<std::sync::RwLockWriteGuard<'static, ()>> {
+    None
+}
+
+/// Waits until the socket has something to read, holding nothing: the gate is taken only once there is, so a starter waiting
+/// for its next request does not hold up a spawn.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn wait_readable(socket: &UnixStream) -> io::Result<()> {
+    use rustix::event::{PollFd, PollFlags, poll};
+    loop {
+        let mut watching = [PollFd::new(socket, PollFlags::IN)];
+        match poll(&mut watching, None) {
+            Ok(_) => return Ok(()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "the same call as the other systems', which can fail"
+)]
+const fn wait_readable(_socket: &UnixStream) -> io::Result<()> {
+    Ok(())
+}
+
+/// Descriptors that arrive closed on exec where the system can say so on receipt, with a receive that waits; elsewhere a
+/// receive that does not, after [`wait_readable`].
 #[cfg(any(target_os = "linux", target_os = "android"))]
 const RECV_FLAGS: RecvFlags = RecvFlags::CMSG_CLOEXEC;
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-const RECV_FLAGS: RecvFlags = RecvFlags::empty();
+const RECV_FLAGS: RecvFlags = RecvFlags::DONTWAIT;
 
 /// The next frame, or `None` when the other side has closed the socket between frames.
 fn receive(socket: &UnixStream) -> io::Result<Option<Frame>> {
@@ -144,25 +190,29 @@ fn receive(socket: &UnixStream) -> io::Result<Option<Frame>> {
     let mut have = 0;
     let mut fds: Vec<OwnedFd> = Vec::new();
     while have < HEADER {
+        wait_readable(socket)?;
+        let _gate = receiving();
         let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(3))];
         let mut control = RecvAncillaryBuffer::new(&mut space);
-        let got = loop {
-            match recvmsg(
-                socket,
-                &mut [IoSliceMut::new(&mut header[have..])],
-                &mut control,
-                RECV_FLAGS,
-            ) {
-                Err(rustix::io::Errno::INTR) => {}
-                other => break other.map_err(io::Error::from)?,
-            }
+        let got = match recvmsg(
+            socket,
+            &mut [IoSliceMut::new(&mut header[have..])],
+            &mut control,
+            RECV_FLAGS,
+        ) {
+            Err(rustix::io::Errno::INTR | rustix::io::Errno::AGAIN) => continue,
+            other => other.map_err(io::Error::from)?,
         };
         if got.flags.contains(ReturnFlags::CTRUNC) {
             return Err(wrong("more descriptors than a frame carries"));
         }
         for message in control.drain() {
             if let RecvAncillaryMessage::ScmRights(received) = message {
-                fds.extend(received);
+                for fd in received {
+                    // Before the gate is let go: a process started now would inherit it.
+                    rustix::io::fcntl_setfd(&fd, rustix::io::FdFlags::CLOEXEC)?;
+                    fds.push(fd);
+                }
             }
         }
         if got.bytes == 0 {
@@ -176,9 +226,6 @@ fn receive(socket: &UnixStream) -> io::Result<Option<Frame>> {
     }
     if fds.len() > MAX_FDS {
         return Err(wrong("more descriptors than a frame carries"));
-    }
-    for fd in &fds {
-        rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
     }
     let length = usize::try_from(u32::from_le_bytes([
         header[4], header[5], header[6], header[7],
@@ -243,6 +290,8 @@ impl<'a> Fields<'a> {
 struct Entry {
     life: Mutex<Life>,
     changed: Condvar,
+    /// Whether it leads a process group of its own.
+    group: bool,
 }
 
 struct Life {
@@ -250,10 +299,26 @@ struct Life {
     reaped: bool,
 }
 
-type Table = Arc<Mutex<HashMap<u32, Arc<Entry>>>>;
+/// What a starter is told besides its frames: only what a test needs to bring about.
+#[derive(Clone, Copy, Default)]
+struct Options {
+    /// The thread that watches a child does not start.
+    fail_watcher: bool,
+}
 
-/// Runs the starter on standard input, which is the socket the host started it with: until the host closes it. Children it
-/// started are left as they are then.
+/// One host's starter.
+struct Server {
+    writer: Mutex<UnixStream>,
+    table: Mutex<HashMap<u32, Arc<Entry>>>,
+    /// The spawn requests the host stopped waiting for.
+    abandoned: Mutex<HashSet<u32>>,
+    /// Set once the host is gone: a child that starts after it is ended as it starts.
+    closing: AtomicBool,
+    options: Options,
+}
+
+/// Runs the starter on standard input, which is the socket the host started it with: until the host closes it, when every
+/// child it still holds is ended, since each is uncollected and its group's id still its own.
 ///
 /// # Errors
 ///
@@ -264,35 +329,51 @@ pub fn serve() -> io::Result<()> {
 }
 
 fn run(socket: &UnixStream) -> io::Result<()> {
+    run_with(socket, Options::default())
+}
+
+fn run_with(socket: &UnixStream, options: Options) -> io::Result<()> {
     quiet_pipe(socket);
-    let result = serve_frames(socket);
+    let server = Arc::new(Server {
+        writer: Mutex::new(socket.try_clone()?),
+        table: Mutex::new(HashMap::new()),
+        abandoned: Mutex::new(HashSet::new()),
+        closing: AtomicBool::new(false),
+        options,
+    });
+    let result = serve_frames(socket, &server);
+    server.close();
     // However it ended, the host is told by the socket ending: children that hold the writer open do not hold it up.
     let _ = socket.shutdown(std::net::Shutdown::Both);
     result
 }
 
-fn serve_frames(socket: &UnixStream) -> io::Result<()> {
-    let writer = Arc::new(Mutex::new(socket.try_clone()?));
-    let table: Table = Arc::default();
+fn serve_frames(socket: &UnixStream, server: &Arc<Server>) -> io::Result<()> {
     while let Some(frame) = receive(socket)? {
         match frame.kind {
             // Apart from the requests that follow: a spawn can take as long as a program takes to start.
             SPAWN => {
-                let (writer, table) = (Arc::clone(&writer), Arc::clone(&table));
+                let server = Arc::clone(server);
                 let worker = thread::Builder::new()
                     .name("canoa-spawner-spawn".to_owned())
                     .spawn(move || {
-                        if spawn(frame, &writer, &table).is_err() {
-                            let _ = lock(&writer).shutdown(std::net::Shutdown::Both);
+                        if server.spawn(frame).is_err() {
+                            let _ = lock(&server.writer).shutdown(std::net::Shutdown::Both);
                         }
                     });
                 worker?;
+            }
+            ABANDON => {
+                let request = Fields(&frame.body)
+                    .number()
+                    .ok_or_else(|| wrong("an abandon with no request"))?;
+                lock(&server.abandoned).insert(request);
             }
             KILL | KILL_GROUP | COLLECT => {
                 let pid = Fields(&frame.body)
                     .number()
                     .ok_or_else(|| wrong("a request with no process"))?;
-                let entry = lock(&table).get(&pid).cloned();
+                let entry = lock(&server.table).get(&pid).cloned();
                 if let Some(entry) = entry {
                     signal(&entry, pid, frame.kind);
                 }
@@ -303,6 +384,83 @@ fn serve_frames(socket: &UnixStream) -> io::Result<()> {
     Ok(())
 }
 
+fn valid(pid: u32) -> Option<rustix::process::Pid> {
+    i32::try_from(pid)
+        .ok()
+        .filter(|pid| *pid > 1)
+        .and_then(rustix::process::Pid::from_raw)
+}
+
+/// Ends a child that is not collected: its group when it leads one, with what it started that left the group, and the child
+/// itself otherwise.
+fn terminate(pid: u32, group: bool) {
+    use rustix::process::{Signal, kill_process, kill_process_group};
+    let Some(pid) = valid(pid) else {
+        return;
+    };
+    if group {
+        let escaped = descendants(pid);
+        let _ = kill_process_group(pid, Signal::KILL);
+        for other in escaped {
+            let _ = kill_process(other, Signal::KILL);
+        }
+    } else {
+        let _ = kill_process(pid, Signal::KILL);
+    }
+}
+
+/// Every process descended from `root`, each stopped so it starts no more, found again until no new one appears: what left the
+/// group (`setsid`) is found by its parents. Only where there is a `/proc` to read.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn descendants(root: rustix::process::Pid) -> Vec<rustix::process::Pid> {
+    use rustix::process::{Pid, Signal, kill_process};
+    let mut found = BTreeSet::new();
+    for _ in 0..16 {
+        let parents = parents();
+        let mut grown = false;
+        let mut queue = Vec::from([root.as_raw_nonzero().get()]);
+        while let Some(parent) = queue.pop() {
+            for (child, _) in parents.iter().filter(|(_, of)| *of == parent) {
+                if found.insert(*child) {
+                    grown = true;
+                    if let Some(pid) = Pid::from_raw(*child) {
+                        let _ = kill_process(pid, Signal::STOP);
+                    }
+                    queue.push(*child);
+                }
+            }
+        }
+        if !grown {
+            break;
+        }
+    }
+    found.into_iter().filter_map(Pid::from_raw).collect()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn descendants(_root: rustix::process::Pid) -> Vec<rustix::process::Pid> {
+    Vec::new()
+}
+
+/// `(process, its parent)` for every process `/proc` lists.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parents() -> Vec<(i32, i32)> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid: i32 = entry.file_name().to_str()?.parse().ok()?;
+            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            // `pid (name) state ppid ...`: the name may hold anything, so the fields are those after its last `)`.
+            let rest = stat.get(stat.rfind(')')? + 1..)?;
+            let parent: i32 = rest.split_whitespace().nth(1)?.parse().ok()?;
+            Some((pid, parent))
+        })
+        .collect()
+}
+
 /// What a request does to a child it names, while it is the starter's.
 fn signal(entry: &Entry, pid: u32, kind: u8) {
     let mut life = lock(&entry.life);
@@ -311,67 +469,109 @@ fn signal(entry: &Entry, pid: u32, kind: u8) {
         entry.changed.notify_all();
         return;
     }
-    let Some(pid) = i32::try_from(pid)
-        .ok()
-        .filter(|pid| *pid > 1)
-        .and_then(rustix::process::Pid::from_raw)
-    else {
-        return;
-    };
     // Not once it is collected: its id, and its group's, may be anyone's.
     if life.reaped {
         return;
     }
-    let _ = if kind == KILL {
-        rustix::process::kill_process(pid, rustix::process::Signal::KILL)
+    if kind == KILL {
+        terminate(pid, false);
     } else {
-        rustix::process::kill_process_group(pid, rustix::process::Signal::KILL)
-    };
+        terminate(pid, entry.group);
+    }
 }
 
-/// Starts the child a `SPAWN` frame describes and says so, or why not.
-fn spawn(frame: Frame, writer: &Arc<Mutex<UnixStream>>, table: &Table) -> io::Result<()> {
-    let mut fields = Fields(&frame.body);
-    let request = fields
-        .number()
-        .ok_or_else(|| wrong("a spawn with no number"))?;
-    let started = start(&mut fields, frame.fds);
-    let mut said = Vec::new();
-    said.extend_from_slice(&request.to_le_bytes());
-    match started {
-        Ok(pid) => {
-            let entry = Arc::new(Entry {
-                life: Mutex::new(Life {
-                    collect: false,
-                    reaped: false,
-                }),
-                changed: Condvar::new(),
-            });
-            // Before the host hears of it, so that nothing it then asks of it finds none.
-            lock(table).insert(pid, Arc::clone(&entry));
-            said.extend_from_slice(&pid.to_le_bytes());
-            let watching = {
-                let (writer, table) = (Arc::clone(writer), Arc::clone(table));
-                thread::Builder::new()
-                    .name("canoa-spawner-child".to_owned())
-                    .spawn(move || watch(pid, &entry, &writer, &table))
-            };
-            if let Err(error) = watching {
-                lock(table).remove(&pid);
-                tracing::warn!("a child of the process starter cannot be watched: {error}");
+/// Collects a child that has been ended.
+fn reap(pid: u32) {
+    if let Some(pid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
+    }
+}
+
+impl Server {
+    /// The host is gone: every child still held is ended, and any that starts later is ended as it starts.
+    fn close(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+        let held: Vec<(u32, Arc<Entry>)> = lock(&self.table)
+            .iter()
+            .map(|(pid, entry)| (*pid, Arc::clone(entry)))
+            .collect();
+        for (pid, entry) in held {
+            let life = lock(&entry.life);
+            if !life.reaped {
+                terminate(pid, entry.group);
             }
-            send(&lock(writer), SPAWNED, &said, &[])
         }
-        Err(error) => {
-            said.extend_from_slice(&error.raw_os_error().unwrap_or(0).to_le_bytes());
-            put(&mut said, error.to_string().as_bytes())?;
-            send(&lock(writer), FAILED, &said, &[])
+    }
+
+    /// Starts the child a `SPAWN` frame describes and says so, or why not.
+    fn spawn(self: &Arc<Self>, frame: Frame) -> io::Result<()> {
+        let mut fields = Fields(&frame.body);
+        let request = fields
+            .number()
+            .ok_or_else(|| wrong("a spawn with no number"))?;
+        // The host stopped waiting before it started: nothing is started.
+        if lock(&self.abandoned).remove(&request) {
+            return Ok(());
+        }
+        let started = start(&mut fields, frame.fds);
+        let mut said = Vec::new();
+        said.extend_from_slice(&request.to_le_bytes());
+        match started {
+            Ok((pid, group)) => {
+                // Or while it started.
+                if lock(&self.abandoned).remove(&request) {
+                    terminate(pid, group);
+                    reap(pid);
+                    return Ok(());
+                }
+                let entry = Arc::new(Entry {
+                    life: Mutex::new(Life {
+                        collect: false,
+                        reaped: false,
+                    }),
+                    changed: Condvar::new(),
+                    group,
+                });
+                // Before the host hears of it, so that nothing it then asks of it finds none.
+                lock(&self.table).insert(pid, Arc::clone(&entry));
+                if self.closing.load(Ordering::SeqCst) {
+                    terminate(pid, group);
+                }
+                let watching = if self.options.fail_watcher {
+                    Err(io::Error::other("a thread could not be started"))
+                } else {
+                    let server = Arc::clone(self);
+                    let watched = Arc::clone(&entry);
+                    thread::Builder::new()
+                        .name("canoa-spawner-child".to_owned())
+                        .spawn(move || watch(pid, &watched, &server))
+                };
+                if let Err(error) = watching {
+                    // Nothing would collect it, or tell the host it ended: it is ended and collected here, and not announced.
+                    lock(&self.table).remove(&pid);
+                    terminate(pid, group);
+                    reap(pid);
+                    said.extend_from_slice(&error.raw_os_error().unwrap_or(0).to_le_bytes());
+                    put(&mut said, error.to_string().as_bytes())?;
+                    return send(&lock(&self.writer), FAILED, &said, &[]);
+                }
+                said.extend_from_slice(&pid.to_le_bytes());
+                send(&lock(&self.writer), SPAWNED, &said, &[])
+            }
+            Err(error) => {
+                said.extend_from_slice(&error.raw_os_error().unwrap_or(0).to_le_bytes());
+                put(&mut said, error.to_string().as_bytes())?;
+                send(&lock(&self.writer), FAILED, &said, &[])
+            }
         }
     }
 }
 
-/// Starts the command in `fields` with `fds` for its standard streams and gives its id.
-fn start(fields: &mut Fields<'_>, mut fds: Vec<OwnedFd>) -> io::Result<u32> {
+/// Starts the command in `fields` with `fds` for its standard streams and gives its id, and whether it leads a group.
+fn start(fields: &mut Fields<'_>, mut fds: Vec<OwnedFd>) -> io::Result<(u32, bool)> {
     let malformed = || wrong("a spawn that is not one");
     let flags = fields.byte().ok_or_else(malformed)?;
     let program = fields.bytes().ok_or_else(malformed)?;
@@ -389,7 +589,8 @@ fn start(fields: &mut Fields<'_>, mut fds: Vec<OwnedFd>) -> io::Result<u32> {
     if flags & HAS_DIR != 0 {
         command.current_dir(OsStr::from_bytes(dir));
     }
-    if flags & OWN_GROUP != 0 {
+    let group = flags & OWN_GROUP != 0;
+    if group {
         command.process_group(0);
     }
     let [stdin, stdout, stderr] = <[OwnedFd; 3]>::try_from(core::mem::take(&mut fds))
@@ -398,20 +599,24 @@ fn start(fields: &mut Fields<'_>, mut fds: Vec<OwnedFd>) -> io::Result<u32> {
         .stdin(std::process::Stdio::from(stdin))
         .stdout(std::process::Stdio::from(stdout))
         .stderr(std::process::Stdio::from(stderr));
-    let child = command.spawn()?;
+    let child = {
+        // No frame's descriptors are being made close-on-exec while this process starts.
+        let _gate = FORK_GATE.read().unwrap_or_else(PoisonError::into_inner);
+        command.spawn()?
+    };
     let pid = child.id();
     // The command holds the child's ends of its pipes: let go of them, or the host never sees them end.
     drop(command);
     // Its end is the starter's to wait on, below, and std's handle does nothing when it goes.
     drop(child);
-    Ok(pid)
+    Ok((pid, group))
 }
 
 const OWN_GROUP: u8 = 1;
 const HAS_DIR: u8 = 2;
 
 /// Waits for the child to end, says so, and collects it once the host asks.
-fn watch(pid: u32, entry: &Entry, writer: &Mutex<UnixStream>, table: &Table) {
+fn watch(pid: u32, entry: &Entry, server: &Server) {
     let status = ended(pid);
     if status.is_none() {
         // Not the starter's to wait for (its handling of `SIGCHLD` collects its children): its id may be anyone's.
@@ -420,7 +625,7 @@ fn watch(pid: u32, entry: &Entry, writer: &Mutex<UnixStream>, table: &Table) {
     let mut said = Vec::new();
     said.extend_from_slice(&pid.to_le_bytes());
     said.extend_from_slice(&status.unwrap_or(STATUS_LOST).to_le_bytes());
-    let told = send(&lock(writer), EXITED, &said, &[]);
+    let told = send(&lock(&server.writer), EXITED, &said, &[]);
     let mut life = lock(&entry.life);
     while status.is_some() && !life.collect && told.is_ok() {
         life = entry
@@ -429,13 +634,9 @@ fn watch(pid: u32, entry: &Entry, writer: &Mutex<UnixStream>, table: &Table) {
             .unwrap_or_else(PoisonError::into_inner);
     }
     // Out of the table before it is collected: once it is, the id may be a new child's.
-    lock(table).remove(&pid);
-    if status.is_some()
-        && let Some(pid) = i32::try_from(pid)
-            .ok()
-            .and_then(rustix::process::Pid::from_raw)
-    {
-        let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
+    lock(&server.table).remove(&pid);
+    if status.is_some() {
+        reap(pid);
     }
     life.reaped = true;
 }
@@ -496,12 +697,23 @@ struct Book {
 pub(super) struct Link {
     writer: Mutex<UnixStream>,
     book: Mutex<Book>,
+    /// How long a spawn waits for the starter's answer.
+    wait: Duration,
 }
 
 impl Link {
     /// Runs on `socket`, whose other end the starter has, and listens for what it says on a thread of its own. `process` is
     /// the starter's, which that thread collects when the socket ends.
     fn over(socket: UnixStream, process: Option<std::process::Child>) -> io::Result<Arc<Self>> {
+        Self::over_waiting(socket, process, SPAWN_WAIT)
+    }
+
+    /// As [`Link::over`], with `wait` for how long a spawn waits for its answer.
+    fn over_waiting(
+        socket: UnixStream,
+        process: Option<std::process::Child>,
+        wait: Duration,
+    ) -> io::Result<Arc<Self>> {
         quiet_pipe(&socket);
         let listening = socket.try_clone()?;
         let link = Arc::new(Self {
@@ -512,6 +724,7 @@ impl Link {
                 children: HashMap::new(),
                 ended: false,
             }),
+            wait,
         });
         let mine = Arc::clone(&link);
         thread::Builder::new()
@@ -542,6 +755,13 @@ impl Link {
             .stdin(std::process::Stdio::from(OwnedFd::from(starter)))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::inherit());
+        if let Some(prepare) = PREPARE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            prepare(&mut command);
+        }
         let process = command.spawn()?;
         // The command holds the starter's end: with it open here, the host would never see the starter end.
         drop(command);
@@ -557,6 +777,14 @@ impl Link {
                 };
                 let reply = lock(&self.book).pending.remove(&request);
                 let Some(reply) = reply else {
+                    // The host stopped waiting for it, and the starter started it before it heard so: it is ended, not held.
+                    if frame.kind == SPAWNED
+                        && let Some(pid) = fields.number()
+                    {
+                        for kind in [KILL_GROUP, KILL, COLLECT] {
+                            let _ = self.ask(kind, pid);
+                        }
+                    }
                     return;
                 };
                 let answer = if frame.kind == SPAWNED {
@@ -669,13 +897,17 @@ impl Link {
             lock(&self.book).pending.remove(&request);
             return Err(error);
         }
-        let (pid, fate) = match answer.recv_timeout(SPAWN_WAIT) {
+        let (pid, fate) = match answer.recv_timeout(self.wait) {
             Ok(answer) => answer?,
             Err(_) => {
-                // A starter that answers nothing is as good as gone: ending the socket ends every wait on it.
+                // Only this request fails: what the starter holds of other children is still reachable. A child it starts for
+                // it late is ended, by the starter if it hears so first and by this side when it hears of the child.
                 lock(&self.book).pending.remove(&request);
-                let _ = lock(&self.writer).shutdown(std::net::Shutdown::Both);
-                return Err(lost());
+                let _ = send(&lock(&self.writer), ABANDON, &request.to_le_bytes(), &[]);
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the host's process starter did not answer in time",
+                ));
             }
         };
         Ok(Child {
@@ -887,6 +1119,14 @@ impl Drop for Handle {
     fn drop(&mut self) {
         self.collect();
     }
+}
+
+/// What changes the command that starts the starter before it runs, set by an application that needs more of it than std
+/// says: `canoa-ffi` puts `SIGCHLD` back to the default in it, which an ignoring application passes on through `exec`.
+static PREPARE: Mutex<Option<fn(&mut std::process::Command)>> = Mutex::new(None);
+
+pub(super) fn prepare_with(prepare: fn(&mut std::process::Command)) {
+    *PREPARE.lock().unwrap_or_else(PoisonError::into_inner) = Some(prepare);
 }
 
 /// What runs the starter, and the connection to the one running.

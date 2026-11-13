@@ -243,6 +243,7 @@ pub(crate) fn start(request: &[u8]) -> Result<u64, i32> {
     };
     // What the host starts from now on is a child of a process of its own, not of this one: the application's process handling
     // collects any child of this process that ends, and the host could not read how its children ended.
+    canoa_host::spawn::prepare_starter(platform::reset_child_signal);
     match &program {
         Some(program) => canoa_host::spawn::install(program.clone()),
         None => match default_program() {
