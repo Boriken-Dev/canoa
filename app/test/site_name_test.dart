@@ -35,7 +35,7 @@ void main() {
 
     test('is none for an address that is not http or https', () {
       for (final address in [
-        'file:///C:/Users/ana/a.html', 'chrome://extensions/', 'chrome-extension://abc/page.html', 'about:blank', 'data:text/html,hi',
+        'file:///C:/Work/a.html', 'chrome://extensions/', 'chrome-extension://abc/page.html', 'about:blank', 'data:text/html,hi',
         'javascript:alert(1)', 'ftp://example.com/', 'example.com', '//example.com/', '', 'https:///a', 'https://',
       ]) {
         expect(siteFqdn(address), isNull, reason: address);
@@ -115,7 +115,7 @@ void main() {
 
     test('is written with the separator of the machine its folder comes from', () {
       expect(separatorOf('/home/ana/Documents'), '/');
-      expect(separatorOf(r'C:\Users\ana\Documents'), r'\');
+      expect(separatorOf(r'C:\Work\Documents'), r'\');
       expect(separatorOf(r'\\server\share\Documents'), r'\');
       expect(separatorOf('D:/Docs'), r'\');
     });

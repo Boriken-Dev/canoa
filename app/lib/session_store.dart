@@ -212,6 +212,9 @@ class ChatSession {
   /// ledger keeps it beside the id the agent later reports. Null for a session not made here.
   String? workspaceId;
 
+  /// The site a session started from a webpage belongs to (the page's host name, as `siteFqdn` writes it); null for any other.
+  String? site;
+
   /// The source a restored draft was kept with, by kind and label, while no source of that name is here.
   String? keptSource;
 
@@ -1361,6 +1364,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     required String remoteSessionId,
     String? cwd,
     SessionWorktree? worktree,
+    String? site,
+    String? workspaceId,
   }) {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
@@ -1375,7 +1380,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       cwd: cwd,
       place: peerId.startsWith('local:') ? SessionPlace.local : SessionPlace.browser,
       worktree: worktree,
-    ));
+    )..site = site
+      ..workspaceId = workspaceId);
   }
 
   ChatSession _insert(ChatSession session) {
@@ -1555,6 +1561,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       method: session.method,
       worktree: session.worktree,
       canoaId: session.workspaceId,
+      site: session.site,
       cacheLifetime: session.cacheLifetime?.id,
     );
   }
@@ -2294,6 +2301,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       method: entry.method,
       worktree: entry.worktree,
     ))
+      ..site = entry.site
+      ..workspaceId = entry.canoaId
       ..bypass = entry.bypass
       ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
       ..pinned = entry.pinned

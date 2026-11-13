@@ -89,6 +89,7 @@ final class LedgerEntry {
     this.bypass = false,
     this.cacheLifetime,
     this.canoaId,
+    this.site,
     this.pinned = false,
     this.archived = false,
     this.messages = const [],
@@ -105,6 +106,9 @@ final class LedgerEntry {
 
   /// Canoa's own id for the session, which named its scratch folder; null for a session not made here.
   String? canoaId;
+
+  /// The site (a page's host name) a session started from a webpage belongs to; null for any other.
+  final String? site;
 
   /// The agent entry or preset it was started from, or what the person named a peer.
   final String entry;
@@ -183,6 +187,7 @@ final class LedgerEntry {
     if (bypass) 'bypass': true,
     'cacheLifetime': ?cacheLifetime,
     'canoaId': ?canoaId,
+    'site': ?site,
     if (pinned) 'pinned': true,
     if (archived) 'archived': true,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
@@ -219,6 +224,7 @@ final class LedgerEntry {
       bypass: json['bypass'] == true,
       cacheLifetime: text('cacheLifetime'),
       canoaId: text('canoaId'),
+      site: text('site'),
       pinned: json['pinned'] == true,
       archived: json['archived'] == true,
       messages: [
@@ -366,6 +372,10 @@ class SessionLedger extends ChangeNotifier {
   /// The harnesses present, most recently used first.
   List<String> get harnesses => {for (final entry in _entries) entry.harness}.toList();
 
+  /// The sessions of one site, most recently used first: only those recorded with exactly that host name, so another site's
+  /// are never in it.
+  List<LedgerEntry> forSite(String site) => [for (final entry in _entries) if (entry.site == site) entry];
+
   LedgerEntry? find(String peerId, String sessionId) {
     final key = LedgerEntry.keyOf(peerId, sessionId);
     return _entries.where((entry) => entry.key == key).firstOrNull;
@@ -440,6 +450,7 @@ class SessionLedger extends ChangeNotifier {
     String? method,
     SessionWorktree? worktree,
     String? canoaId,
+    String? site,
     String? cacheLifetime,
   }) {
     if (_settings.keep <= 0) return null;
@@ -458,6 +469,7 @@ class SessionLedger extends ChangeNotifier {
         endpoint: endpoint,
         fallback: fallback,
         method: method,
+        site: site,
       );
       _entries.add(found);
     }

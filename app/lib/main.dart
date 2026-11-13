@@ -11,6 +11,10 @@ import 'desktop/host_tool.dart';
 import 'desktop/hosting_dialog.dart';
 import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
+import 'extension/site_documents.dart';
+import 'extension/site_sessions.dart';
+import 'extension/tab_bridge.dart' show TabBridge;
+import 'extension/tab_shares.dart' show TabShares;
 import 'extension_context.dart';
 import 'acp/agent_commands.dart' show AgentCommand;
 import 'acp/browser_connect.dart';
@@ -140,10 +144,17 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
+    this.tabBridge, this.browserProvider,
   });
 
   /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
   final PopoutWindows? popoutWindows;
+
+  /// The extension's tabs and the browser's provider of agents, by default the platform's; a test gives its own.
+  @visibleForTesting
+  final TabBridge? tabBridge;
+  @visibleForTesting
+  final Future<AcpPage?>? browserProvider;
 
   /// What the conversation draws beyond the package's own: Canoa's content kinds (a delegation card, a chart), a card for a kind of
   /// tool, the lines a burst or a turn folds into. Registered here, never in the transcript.
@@ -436,6 +447,12 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The tabs the extension's panel shares with a session; null outside the extension.
   TabsComposerExtension? _tabs;
 
+  /// The Documents folder of the machine the agents of a webpage's sessions run on, which the panel cannot read and the person gives.
+  final _siteDocuments = ValueNotifier<String?>(null);
+  void _keepSiteDocuments() => saveSiteDocuments(_siteDocuments.value);
+
+  Future<AcpPage?> get _provider => widget.browserProvider ?? findAcp(timeout: const Duration(milliseconds: 300));
+
   Future<void> _claimContext() async {
     if (_claimingContext) return;
     _claimingContext = true;
@@ -451,25 +468,66 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _useBrowserAgents(AcpPage acp, {required String cwd, required String title}) async {
     final agents = await acp.request(purpose: 'Chat with it in Canoa');
     for (final agent in agents) {
-      final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
-      try {
-        final opened = await client.openSession(cwd: cwd);
-        if (!mounted) throw StateError('Canoa UI closed');
-        final local = store.addProviderSession(
-          title: title.isEmpty ? agent.label : title,
-          agent: agent.label,
-          peerId: client.peerId,
-          remoteSessionId: opened.id,
-        );
-        local.agentNames = title.isEmpty;
-        store.applyOpened(local, opened);
-        store.attachVerifiedClient(local.id, client);
-        _ownedClients.add(client);
-        await store.applyHostProfile(local, expected: _hasProfiles);
-      } catch (_) {
-        await client.close();
-        rethrow;
-      }
+      await _openProviderSession(acp, agent, cwd: cwd, title: title);
+    }
+  }
+
+  Future<void> _openProviderSession(
+    AcpPage acp, AcpPageAgent agent, {required String cwd, required String title, String? site, String? workspaceId}) async {
+    final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
+    try {
+      final opened = await client.openSession(cwd: cwd);
+      if (!mounted) throw StateError('Canoa UI closed');
+      final local = store.addProviderSession(
+        title: title.isEmpty ? agent.label : title,
+        agent: agent.label,
+        peerId: client.peerId,
+        remoteSessionId: opened.id,
+        cwd: cwd,
+        site: site,
+        workspaceId: workspaceId,
+      );
+      local.agentNames = title.isEmpty;
+      store.applyOpened(local, opened);
+      store.attachVerifiedClient(local.id, client);
+      _ownedClients.add(client);
+      await store.applyHostProfile(local, expected: _hasProfiles);
+    } catch (_) {
+      await client.close();
+      rethrow;
+    }
+  }
+
+  /// A new session for [site], from the page in front: each agent the person grants works in a folder of its own, under the
+  /// site's folder in the Documents of its machine, and the ledger notes the site.
+  Future<void> _newSiteSession(String site) async {
+    final documents = _siteDocuments.value;
+    if (documents == null) throw StateError('Say where the Documents folder is first');
+    final acp = await _provider;
+    if (acp == null) throw StateError('This browser has no provider of agents');
+    final agents = await acp.request(purpose: 'Chat with it in Canoa about $site');
+    for (final agent in agents) {
+      final plan = siteScratch(site, template: config.sessions.workspace, documents: documents);
+      await _openProviderSession(acp, agent, cwd: plan.folder, title: '', site: site, workspaceId: plan.id);
+    }
+  }
+
+  /// Opens a session of the site again, in its own folder, through the browser's provider: the agent it ran on must still be
+  /// granted to this browser, or the person is asked again.
+  Future<void> _resumeSiteSession(LedgerEntry entry) async {
+    if (entry.place != SessionPlace.browser) return _reopen(entry);
+    final acp = await _provider;
+    if (acp == null) throw StateError('This browser has no provider of agents');
+    var agent = (await acp.agents()).where((each) => each.peer == entry.peerId).firstOrNull;
+    agent ??= (await acp.request(purpose: 'Resume ${entry.title ?? 'a conversation'}')).where((each) => each.peer == entry.peerId).firstOrNull;
+    if (agent == null) throw StateError('${entry.entry} is not granted to this browser now');
+    final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
+    try {
+      await store.reopen(entry, client, expected: _hasProfiles);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client.close();
+      rethrow;
     }
   }
 
@@ -1098,7 +1156,12 @@ class _CanoaAppState extends State<CanoaApp> {
     // The welcome page, which a window with no session shows, lists each source with what it needs.
     scheduleMicrotask(_noteLast);
     unawaited(_claimContext());
-    _tabs = TabsComposerExtension.platform(store);
+    final bridge = widget.tabBridge;
+    _tabs = bridge == null ? TabsComposerExtension.platform(store) : TabsComposerExtension(TabShares(bridge), store: store);
+    if (_tabs != null) {
+      _siteDocuments.value = loadSiteDocuments() ?? widget.documents;
+      _siteDocuments.addListener(_keepSiteDocuments);
+    }
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
@@ -1113,6 +1176,8 @@ class _CanoaAppState extends State<CanoaApp> {
   @override
   void dispose() {
     _popout.dispose();
+    _siteDocuments.removeListener(_keepSiteDocuments);
+    _siteDocuments.dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
     unawaited(_attention?.cancel());
@@ -1162,6 +1227,24 @@ class _CanoaAppState extends State<CanoaApp> {
     },
   );
 
+  /// In the extension's panel, the sessions of the page in front above the welcome page.
+  Widget _withSite(Widget welcome) {
+    final tabs = _tabs?.tabs, ledger = store.ledger;
+    if (tabs == null || ledger == null) return welcome;
+    return Column(children: [
+      // At most half the panel: a site with many sessions scrolls inside it.
+      Flexible(
+        child: SingleChildScrollView(
+          child: SiteSessions(
+            tabs: tabs, ledger: ledger, store: store, documents: _siteDocuments, template: config.sessions.workspace,
+            onNew: _newSiteSession, onResume: _resumeSiteSession,
+          ),
+        ),
+      ),
+      Expanded(child: welcome),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     _popout
@@ -1183,10 +1266,10 @@ class _CanoaAppState extends State<CanoaApp> {
           conversation: _conversation,
           kit: _kit,
           renderers: widget.renderers,
-          welcome: WelcomeView(
+          welcome: _withSite(WelcomeView(
             sources: _sources, checks: _checks, programs: _programs, onNewSession: _newSession,
             onSettings: () => unawaited(_showSettings(sources: true)),
-          ),
+          )),
         ),
       ),
     );
