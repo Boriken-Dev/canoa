@@ -11,9 +11,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 use std::io::Read as _;
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Instant;
+
+use crate::spawn::{Command, Stdio};
 
 /// The longest the table's tool may run.
 const LIMIT: Duration = Duration::from_secs(5);
@@ -90,7 +91,6 @@ struct Row {
 
 #[cfg(windows)]
 fn snapshot() -> Option<String> {
-    use std::os::windows::process::CommandExt as _;
     /// `CREATE_NO_WINDOW`: no console window flashes up for a program started from a GUI.
     const NO_WINDOW: u32 = 0x0800_0000;
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -120,9 +120,9 @@ fn snapshot() -> Option<String> {
 /// What `command` writes to its standard output, if it ended well within [`LIMIT`].
 fn run(command: &mut Command) -> Option<String> {
     let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Piped)
+        .stderr(Stdio::Null)
         .spawn()
         .ok()?;
     let output = child.stdout.take()?;
@@ -197,7 +197,7 @@ mod tests {
             command
         };
         let mut child = command
-            .stdout(Stdio::null())
+            .stdout(Stdio::Null)
             .spawn()
             .expect("a child that waits");
         let found = members(std::process::id());

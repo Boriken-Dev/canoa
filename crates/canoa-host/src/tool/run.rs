@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{ChildStderr, ChildStdout, ExitStatus};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -27,6 +27,7 @@ use super::{
 use crate::child::OUTPUT_LIMIT;
 use crate::serve::MAX_LINE;
 use crate::share;
+use crate::spawn::{Child, Command, Stdio};
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -970,9 +971,9 @@ impl Process {
         command
             .args(args)
             .current_dir(cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdin(Stdio::Piped)
+            .stdout(Stdio::Piped)
+            .stderr(Stdio::Piped);
         // The session's directory is the client's choice: cmd.exe, which runs a .cmd tool such as npm's shims, would
         // otherwise look there first for every program the script names bare.
         #[cfg(windows)]

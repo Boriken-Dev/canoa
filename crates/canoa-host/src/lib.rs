@@ -27,6 +27,7 @@ pub mod serve;
 mod share;
 mod site;
 mod sources;
+pub mod spawn;
 pub mod store;
 pub mod tool;
 mod usage_splice;

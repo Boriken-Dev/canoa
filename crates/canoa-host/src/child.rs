@@ -11,7 +11,7 @@ use core::time::Duration;
 use std::ffi::OsString;
 use std::io::{self, BufRead as _, BufReader, ErrorKind, Read, Write as _};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{ChildStderr, ChildStdin, ChildStdout};
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Instant;
@@ -20,6 +20,7 @@ use coqui_transport::{Channel, Failure};
 
 use crate::provider::HostLine;
 use crate::serve::MAX_LINE;
+use crate::spawn::{Child, Command, Stdio};
 
 /// What a provider's process may write to its standard output and error, together, for one connection; the rest is
 /// dropped after a note in the log.
@@ -58,14 +59,7 @@ impl Running {
                     .take(),
             );
             // Before it is collected: until then its id, and its group's, cannot be anyone else's.
-            #[cfg(unix)]
-            if let Some(group) = i32::try_from(child.id())
-                .ok()
-                .filter(|pid| *pid > 1)
-                .and_then(rustix::process::Pid::from_raw)
-            {
-                let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
-            }
+            child.end_group();
         }
         let _ = child.kill();
         let _ = child.wait();
@@ -106,12 +100,11 @@ pub(crate) fn prepare(program: &OsString, args: &[OsString]) -> io::Result<Prepa
         .args(args)
         .arg("--connect")
         .arg(address.to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(Stdio::Piped)
+        .stdout(Stdio::Piped)
+        .stderr(Stdio::Piped);
     // Its own group, so that stopping it reaches what it starts.
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command.own_group();
     Ok(Prepared {
         listener,
         token,

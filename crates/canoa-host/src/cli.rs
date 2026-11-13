@@ -236,6 +236,11 @@ enum Command {
     /// CANOA_DELEGATE_URL, with the bearer in CANOA_DELEGATE_TOKEN; ends when standard input closes.
     #[command(hide = true)]
     McpBridge,
+    /// Start the processes this host asks for, over a socket on standard input, until it closes: the host's own process
+    /// starter, for a host that runs inside an application whose process handling collects every child that ends.
+    #[cfg(unix)]
+    #[command(hide = true)]
+    Spawner,
 }
 
 /// What `canoa options` takes.
@@ -1213,6 +1218,8 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         }
         Command::Accounts { command } => accounts(command, front),
         Command::McpBridge => mcp_bridge(),
+        #[cfg(unix)]
+        Command::Spawner => crate::spawn::serve().map_err(Failed::run),
         Command::Launch { program, args } => {
             let error = crate::profile::launch(&program, &args, crate::serve::MAX_LINE);
             Err(match error.kind() {
@@ -1225,10 +1232,14 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
 
 impl Cli {
     /// Whether this is one of the commands a host starts for itself, which take the process's own standard streams:
-    /// `provider`, `tool`, `agent`, `launch` or `mcp-bridge`. An application that runs as one when it starts itself takes nothing else
-    /// on that command line.
+    /// `provider`, `tool`, `agent`, `launch`, `mcp-bridge` or, on Unix, `spawner`. An application that runs as one when it starts
+    /// itself takes nothing else on that command line.
     #[must_use]
     pub const fn is_a_hosts_own(&self) -> bool {
+        #[cfg(unix)]
+        if matches!(self.command, Command::Spawner) {
+            return true;
+        }
         matches!(
             self.command,
             Command::Provider { .. }
@@ -1382,6 +1393,8 @@ mod tests {
         };
         assert!(own(&["launch", "x"]));
         assert!(own(&["mcp-bridge"]));
+        #[cfg(unix)]
+        assert!(own(&[crate::spawn::SPAWNER_COMMAND]));
         assert!(own(&["tool", "--name", "t", "--spec", "{}"]));
         assert!(own(&["provider", "--library", "x", "--provider", "p"]));
         assert!(!own(&["serve"]));

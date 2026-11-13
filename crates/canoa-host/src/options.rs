@@ -11,7 +11,6 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::time::Duration;
 use std::ffi::OsStr;
-use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
 use coqui_acp_api::{
@@ -20,6 +19,8 @@ use coqui_acp_api::{
 };
 use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
+
+use crate::spawn::{Command, Stdio};
 
 use crate::accounts::NoAccounts;
 use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
@@ -223,8 +224,8 @@ fn version_of(program: &str) -> Option<String> {
         let _ = send.send(
             Command::new(program)
                 .arg("--version")
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
+                .stdin(Stdio::Null)
+                .stderr(Stdio::Null)
                 .output(),
         );
     });

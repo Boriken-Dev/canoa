@@ -421,7 +421,12 @@ impl Shared {
         args: &[OsString],
     ) -> std::io::Result<Option<(u64, Arc<BridgeAgent>)>> {
         self.record(|| {
-            let agent = Arc::new(BridgeAgent::spawn(program, args, MAX_LINE)?);
+            let agent = Arc::new(BridgeAgent::spawn_with(
+                &crate::spawn::Agents,
+                program,
+                args,
+                MAX_LINE,
+            )?);
             Ok((Process::Agent(Arc::clone(&agent)), agent))
         })
     }
@@ -460,7 +465,12 @@ fn private_starter(agents: &Arc<Mutex<Agents>>) -> Starter {
         if held.stopping {
             return Ok(None);
         }
-        let agent = Arc::new(BridgeAgent::spawn(program, args, MAX_LINE)?);
+        let agent = Arc::new(BridgeAgent::spawn_with(
+            &crate::spawn::Agents,
+            program,
+            args,
+            MAX_LINE,
+        )?);
         held.next += 1;
         let key = held.next;
         held.running.insert(key, Process::Agent(Arc::clone(&agent)));

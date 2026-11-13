@@ -12,7 +12,6 @@ use core::time::Duration;
 use std::ffi::{OsStr, OsString};
 use std::io::{ErrorKind, Read as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use serde_json::{Map, Value, json};
@@ -20,6 +19,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::config::plain_absolute;
 use crate::share;
+use crate::spawn::{Command, Stdio};
 
 /// Makes a worktree: `{"cwd", "branch"}` to `{"path", "branch", "repo"}`.
 pub(crate) const NEW: &str = "_canoa/worktree/new";
@@ -701,9 +701,9 @@ fn run_git(dir: &Path, args: &[&OsStr], ceilings: &OsString) -> Result<(bool, St
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_CEILING_DIRECTORIES", ceilings)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Piped)
+        .stderr(Stdio::Piped)
         .spawn()
         .map_err(|_| failed("git could not be started"))?;
     let readers = [
