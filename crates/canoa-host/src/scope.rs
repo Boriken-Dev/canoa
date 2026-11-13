@@ -363,30 +363,198 @@ pub(crate) fn host_own<T>(send: impl FnOnce() -> T) -> T {
 /// Why an agent's line is not passed to the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Dropped {
-    /// This host's JSON reader cannot read it, though a more lenient one in the client might (a lone surrogate, nesting past the
-    /// reader's depth, a number out of range): what cannot be checked is not passed on.
+    /// This host's JSON reader cannot read it even after a lone surrogate escape is repaired (nesting past the reader's depth, a
+    /// number out of range, bytes that are no text), though a more lenient one in the client might: what cannot be checked is not
+    /// passed on.
     Unreadable,
     /// Its method is one of the host's own.
     HostOnly,
 }
 
-/// Whether an agent's `message` is dropped, and why. Dropped: a line that cannot be read, and a request or notification of the
-/// host's own, whose method starts with `_canoa/` or is one of the secret extension's (`_coqui_acp/secret_`): the host asks its
-/// client those, so one an agent sends is never passed on, or the client could be made to show the host's questions, or a value
-/// in the host's name, for it. The method is the parsed one, so an escape (`\/`, `_`) spells nothing the bytes do not.
-pub(crate) fn dropped(message: &[u8]) -> Option<Dropped> {
+/// What becomes of an agent's line.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Screened {
+    /// It passes: as it is, or as this, the host's own serialization of what it read after repairing and stripping.
+    Pass(Option<Vec<u8>>),
+    /// It is dropped; when it was an answer to the client's request, this answers that request with an error so the client does
+    /// not wait for ever.
+    Drop(Dropped, Option<Vec<u8>>),
+}
+
+/// The `_meta` key whose value only the host writes in an agent's answers: the report of the profile it applied. An agent that
+/// reports a profile itself would have the app act on it as the host's, so the agent's own is removed wherever it sits.
+const REPORT_META: &str = crate::profile::hosted::PROFILE_META;
+
+/// Rewrites every lone surrogate escape (`\uD800` to `\uDFFF` not paired with its other half) to U+FFFD, as a lenient reader of text
+/// does, and says whether it changed any. An escaped backslash is not the start of an escape.
+fn repair_surrogates(message: &[u8]) -> Option<Vec<u8>> {
+    let hex = |at: usize| -> Option<u32> {
+        let digits = message.get(at..at + 4)?;
+        u32::from_str_radix(core::str::from_utf8(digits).ok()?, 16).ok()
+    };
+    let mut out = Vec::with_capacity(message.len());
+    let mut changed = false;
+    let mut at = 0;
+    while at < message.len() {
+        if message[at] != b'\\' {
+            out.push(message[at]);
+            at += 1;
+            continue;
+        }
+        match message.get(at + 1) {
+            Some(b'u') => {
+                let unit = hex(at + 2);
+                let low = |from: usize| {
+                    message.get(from..from + 2) == Some(b"\\u".as_slice())
+                        && hex(from + 2).is_some_and(|next| (0xDC00..0xE000).contains(&next))
+                };
+                match unit {
+                    Some(0xD800..=0xDBFF) if low(at + 6) => {
+                        out.extend_from_slice(&message[at..at + 12]);
+                        at += 12;
+                    }
+                    Some(0xD800..=0xDFFF) => {
+                        out.extend_from_slice(b"\\ufffd");
+                        changed = true;
+                        at += 6;
+                    }
+                    _ => {
+                        out.extend_from_slice(&message[at..(at + 2).min(message.len())]);
+                        at += 2;
+                    }
+                }
+            }
+            Some(_) => {
+                out.extend_from_slice(&message[at..at + 2]);
+                at += 2;
+            }
+            None => {
+                out.push(b'\\');
+                at += 1;
+            }
+        }
+    }
+    changed.then_some(out)
+}
+
+/// The `id` of a top-level answer (a line with no `method`) that cannot be parsed, found by reading its top level alone: a number or
+/// a plain string. `None` for anything else, for a request or notification, and for a line whose top level cannot be told.
+fn answered_id(message: &[u8]) -> Option<Value> {
+    let (mut depth, mut at, mut found) = (0_usize, 0_usize, None);
+    while at < message.len() {
+        match message[at] {
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            b'"' => {
+                let start = at + 1;
+                at += 1;
+                while at < message.len() && message[at] != b'"' {
+                    at += if message[at] == b'\\' { 2 } else { 1 };
+                }
+                let key = message.get(start..at.min(message.len()))?;
+                let after = message.get(at + 1..)?;
+                let after = after.iter().position(|byte| !byte.is_ascii_whitespace())?;
+                if depth == 1 && message.get(at + 1 + after) == Some(&b':') {
+                    if key == b"method" {
+                        return None;
+                    }
+                    if key == b"id" {
+                        let value = message.get(at + 2 + after..)?;
+                        let value = value
+                            .iter()
+                            .position(|byte| !byte.is_ascii_whitespace())
+                            .map(|n| &value[n..])?;
+                        let end = if value.first() == Some(&b'"') {
+                            1 + value[1..].iter().position(|byte| *byte == b'"')? + 1
+                        } else {
+                            value
+                                .iter()
+                                .position(|byte| !(byte.is_ascii_digit() || *byte == b'-'))
+                                .unwrap_or(value.len())
+                        };
+                        found = serde_json::from_slice::<Value>(&value[..end])
+                            .ok()
+                            .filter(|id| id.is_string() || id.is_number());
+                    }
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    found
+}
+
+fn strip_report(value: &mut Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            let mut changed = false;
+            if let Some(Value::Object(meta)) = map.get_mut("_meta") {
+                changed |= meta.remove(REPORT_META).is_some();
+            }
+            for child in map.values_mut() {
+                changed |= strip_report(child);
+            }
+            changed
+        }
+        Value::Array(items) => items
+            .iter_mut()
+            .fold(false, |changed, item| strip_report(item) | changed),
+        _ => false,
+    }
+}
+
+/// Screens an agent's `message` before it goes to the client.
+///
+/// A lone surrogate escape is repaired to U+FFFD, as an agent that cuts a string in the middle of a pair writes it. What this host's
+/// reader still cannot read is dropped, and a request or notification of the host's own is too: its method, whose method starts with
+/// `_canoa/` or is one of the secret extension's (`_coqui_acp/secret_`), is the parsed one after the repair, so an escape (`\/`,
+/// `\u005f`) spells nothing the bytes do not. The host asks its client those, so one an agent sends is never passed on, or the
+/// client could be made to show the host's questions, or a value in the host's name, for it. The agent's own report of a profile
+/// (`REPORT_META`) is removed wherever it sits, since the app acts on that report as the host's.
+pub(crate) fn screen(message: &[u8]) -> Screened {
     // What the host itself is sending is its own to say.
     if HOST_OWN.with(core::cell::Cell::get) {
-        return None;
+        return Screened::Pass(None);
     }
-    let Ok(value) = serde_json::from_slice::<Value>(message) else {
-        return Some(Dropped::Unreadable);
+    let mut repaired = None;
+    let parsed = serde_json::from_slice::<Value>(message).or_else(|_| {
+        let fixed = repair_surrogates(message).ok_or(())?;
+        let value = serde_json::from_slice::<Value>(&fixed).map_err(|_| ())?;
+        repaired = Some(fixed);
+        Ok::<Value, ()>(value)
+    });
+    let Ok(mut value) = parsed else {
+        let answer = answered_id(message).map(|id| {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603,
+                "message": "the agent's answer could not be read by the host"}})
+            .to_string()
+            .into_bytes()
+        });
+        return Screened::Drop(Dropped::Unreadable, answer);
     };
-    value
+    if value
         .get("method")
         .and_then(Value::as_str)
-        .filter(|method| method.starts_with("_canoa/") || method.starts_with("_coqui_acp/secret_"))
-        .map(|_| Dropped::HostOnly)
+        .is_some_and(|method| {
+            method.starts_with("_canoa/") || method.starts_with("_coqui_acp/secret_")
+        })
+    {
+        return Screened::Drop(Dropped::HostOnly, None);
+    }
+    let hinted = contains(message, REPORT_META.as_bytes()) || message.contains(&b'\\');
+    if hinted && strip_report(&mut value) {
+        return Screened::Pass(serde_json::to_vec(&value).ok());
+    }
+    Screened::Pass(repaired)
+}
+
+/// Whether an agent's `message` is dropped, and why.
+pub(crate) fn dropped(message: &[u8]) -> Option<Dropped> {
+    match screen(message) {
+        Screened::Drop(why, _) => Some(why),
+        Screened::Pass(_) => None,
+    }
 }
 
 /// Whether an agent's `message` is dropped.
@@ -409,12 +577,62 @@ pub(crate) fn note_dropped(why: Dropped, noted: &AtomicBool) {
     }
 }
 
+/// A channel whose outgoing messages, the agent's, are screened and nothing else changed: for an entry with no scope of its own (a
+/// provider), whose process speaks the same lines to the client as any agent does.
+pub(crate) struct Screening<'a, C: Channel + ?Sized> {
+    inner: &'a C,
+    noted: AtomicBool,
+}
+
+impl<'a, C: Channel + ?Sized> Screening<'a, C> {
+    pub(crate) fn new(inner: &'a C) -> Self {
+        Self {
+            inner,
+            noted: AtomicBool::new(false),
+        }
+    }
+}
+
+impl<C: Channel + ?Sized> Channel for Screening<'_, C> {
+    fn send(&self, message: &[u8]) -> Result<(), Failure> {
+        match screen(message) {
+            Screened::Drop(why, answer) => {
+                note_dropped(why, &self.noted);
+                answer.map_or(Ok(()), |answer| self.inner.send(&answer))
+            }
+            Screened::Pass(Some(changed)) => self.inner.send(&changed),
+            Screened::Pass(None) => self.inner.send(message),
+        }
+    }
+
+    fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        self.inner.receive(timeout)
+    }
+
+    fn close(&self) {
+        self.inner.close();
+    }
+
+    fn set_max_message(&self, bytes: usize) {
+        self.inner.set_max_message(bytes);
+    }
+}
+
 impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
-        if let Some(why) = dropped(message) {
-            note_dropped(why, &self.noted);
-            return Ok(());
-        }
+        let screened;
+        let message = match screen(message) {
+            Screened::Drop(why, answer) => {
+                note_dropped(why, &self.noted);
+                // A client waiting for this answer is told it will not come.
+                return answer.map_or(Ok(()), |answer| self.inner.send(&answer));
+            }
+            Screened::Pass(Some(changed)) => {
+                screened = changed;
+                &screened[..]
+            }
+            Screened::Pass(None) => message,
+        };
         self.splice
             .relay(message, |sent| self.inner.send(&self.scope.stamp(sent)))
     }

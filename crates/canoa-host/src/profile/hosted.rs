@@ -1956,10 +1956,19 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
     fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
         // `_canoa/` and the secret extension are the host's own to ask of its client: an agent's request of that name is never
         // passed on, or the client could be made to show the host's questions, or to answer the host's real ones, for the agent.
-        if let Some(why) = crate::scope::dropped(message) {
-            crate::scope::note_dropped(why, &self.noted);
-            return Ok(());
-        }
+        let screened;
+        let message = match crate::scope::screen(message) {
+            crate::scope::Screened::Drop(why, answer) => {
+                crate::scope::note_dropped(why, &self.noted);
+                // A client waiting for this answer is told it will not come.
+                return answer.map_or(Ok(()), |answer| self.inner.send(&answer));
+            }
+            crate::scope::Screened::Pass(Some(changed)) => {
+                screened = changed;
+                &screened[..]
+            }
+            crate::scope::Screened::Pass(None) => message,
+        };
         let stamped = self.scope.stamp(message);
         let message = &*stamped;
         let mut hold = self.hold();

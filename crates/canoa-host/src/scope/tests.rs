@@ -386,13 +386,17 @@ fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
     ] {
         assert!(is_host_only(dropped.to_string().as_bytes()), "{dropped}");
     }
-    // JSON may spell the same method with escapes, which the bytes do not show.
+    // JSON may spell the same method with escapes, which the bytes do not show. `@` stands for a backslash, so what is on disk is what
+    // is tested.
+    let esc = |text: &str| text.replace('@', "\\");
     for escaped in [
-        r#"{"jsonrpc":"2.0","id":1,"method":"_coqui_acp\/secret_request","params":{}}"#,
-        r#"{"jsonrpc":"2.0","method":"_coqui_acp/secret_show_open"}"#,
-        r#"{"jsonrpc":"2.0","id":1,"method":"_canoa\/profile\/approve","params":{}}"#,
-        r#"{"jsonrpc":"2.0","id":1,"method":"_canoa/anything"}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"_coqui_acp@/secret_request","params":{}}"#,
+        r#"{"jsonrpc":"2.0","method":"@u005fcoqui_acp/secret_show_open"}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"_canoa@/profile@/approve","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"@u005fcanoa/anything"}"#,
     ] {
+        let escaped = esc(escaped);
+        assert!(escaped.contains('\\'), "{escaped}");
         assert!(is_host_only(escaped.as_bytes()), "{escaped}");
     }
     // A line this reader cannot read is dropped, since a more lenient reader in the client might take it for a request of the host's.
@@ -402,8 +406,6 @@ fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
         "]".repeat(200)
     );
     for unreadable in [
-        r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"pad":"\ud800"}}"#
-            .to_owned(),
         deep,
         r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"n":1e400}}"#.to_owned(),
         r#"{"jsonrpc":"2.0","id":1,"method":"_canoa/profile/approve","params":{"n":1e400}}"#
@@ -416,16 +418,63 @@ fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
             "{unreadable}"
         );
     }
+    // A lone surrogate escape is repaired, not dropped; a host-only method that carries one is dropped after the repair.
+    let lone = esc(r#"{"jsonrpc":"2.0","method":"session/update","params":{"text":"cut @ud83d"}}"#);
+    let Screened::Pass(Some(fixed)) = screen(lone.as_bytes()) else {
+        panic!("a lone surrogate is repaired");
+    };
+    let fixed: Value = serde_json::from_slice(&fixed).expect("JSON");
+    assert_eq!(fixed["params"]["text"], "cut \u{fffd}");
+    // A pair is whole; an escaped backslash before `u` is not an escape.
+    let kept = esc(r#"{"method":"session/update","params":{"text":"@ud83d@ude00 @@ud800"}}"#);
+    assert_eq!(screen(kept.as_bytes()), Screened::Pass(None), "{kept}");
+    let hostile =
+        esc(r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"pad":"@ud800"}}"#);
+    assert_eq!(dropped(hostile.as_bytes()), Some(Dropped::HostOnly));
     assert_eq!(
         dropped(br#"{"jsonrpc":"2.0","method":"_canoa/delegate/event"}"#),
         Some(Dropped::HostOnly)
     );
+    // An answer the host cannot read is answered with an error for its id, so the client is not left waiting; a request is not.
+    let deep_answer = format!(
+        r#"{{"jsonrpc":"2.0","id":7,"result":{}1{}}}"#,
+        "[".repeat(200),
+        "]".repeat(200)
+    );
+    let Screened::Drop(Dropped::Unreadable, Some(answer)) = screen(deep_answer.as_bytes()) else {
+        panic!("an unreadable answer is answered");
+    };
+    let answer: Value = serde_json::from_slice(&answer).expect("JSON");
+    assert_eq!(
+        (&answer["id"], answer["error"]["code"].as_i64()),
+        (&json!(7), Some(-32603))
+    );
+    let string_id = br#"{"jsonrpc":"2.0","id":"a-1","result":{"n":1e400}}"#;
+    assert!(matches!(screen(string_id), Screened::Drop(_, Some(_))));
+    let request = br#"{"jsonrpc":"2.0","id":8,"method":"session/update","params":{"n":1e400}}"#;
+    assert!(matches!(
+        screen(request),
+        Screened::Drop(Dropped::Unreadable, None)
+    ));
+    // The agent's own report of a profile is removed wherever it sits, the rest of the line left as it is.
+    let forged = br#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s","_meta":{"dev.boriken.canoa/profile":{"mode":{"value":"bypass"}},"keep":1}}}"#;
+    let Screened::Pass(Some(clean)) = screen(forged) else {
+        panic!("the report is removed");
+    };
+    let clean: Value = serde_json::from_slice(&clean).expect("JSON");
+    assert_eq!(clean["result"]["_meta"], json!({"keep": 1}));
+    let spelled = esc(r#"{"result":{"_meta":{"dev.boriken.canoa@/profile":{"mode":"bypass"}}}}"#);
+    // An escaped slash is the same key once read, so the key is not found by its bytes: the reader finds it.
+    let Screened::Pass(Some(clean)) = screen(spelled.as_bytes()) else {
+        panic!("an escaped key is removed too");
+    };
+    assert!(!String::from_utf8_lossy(&clean).contains("bypass"));
     // An escape that spells another method, or sits in text, is not one.
     for passed in [
-        r#"{"jsonrpc":"2.0","id":1,"method":"session\/update"}"#,
-        r#"{"jsonrpc":"2.0","method":"session/update","params":{"text":"_canoa/x"}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"session@/update"}"#,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"text":"@u005fcanoa/x"}}"#,
     ] {
-        assert!(!is_host_only(passed.as_bytes()), "{passed}");
+        assert!(!is_host_only(esc(passed).as_bytes()), "{passed}");
     }
     for passed in [
         json!({"jsonrpc": "2.0", "id": 1, "method": "session/request_permission"}),
@@ -451,4 +500,38 @@ fn what_the_host_itself_sends_in_its_namespace_passes_and_only_while_it_is_sendi
     let unwound = std::panic::catch_unwind(|| super::host_own(|| panic!("a send that panics")));
     assert!(unwound.is_err());
     assert!(is_host_only(event.as_bytes()), "nor does a panic keep it");
+}
+
+#[test]
+fn a_provider_entrys_channel_screens_what_the_agent_sends_and_changes_nothing_else() {
+    use core::sync::atomic::AtomicBool;
+
+    let (client, host) = crate::local::pair(1 << 20, Arc::new(AtomicBool::new(false)));
+    let screening = Screening::new(&host);
+    let line = |value: &str| screening.send(value.as_bytes()).expect("sent");
+    line(r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{}}"#);
+    line(r#"{"jsonrpc":"2.0","id":4,"result":{"n":1e400}}"#);
+    line(
+        &r#"{"jsonrpc":"2.0","method":"session/update","params":{"text":"cut @ud83d"}}"#
+            .replace('@', "\\"),
+    );
+    line(r#"{"jsonrpc":"2.0","method":"session/update","params":{"text":"whole"}}"#);
+    let mut heard = Vec::new();
+    while let Ok(Some(message)) = client.receive(Some(Duration::from_millis(100))) {
+        heard.push(String::from_utf8(message).expect("text"));
+    }
+    assert_eq!(heard.len(), 3, "{heard:?}");
+    assert!(
+        heard[0].contains(r#""id":4"#) && heard[0].contains("-32603"),
+        "{}",
+        heard[0]
+    );
+    let repaired: Value = serde_json::from_str(&heard[1]).expect("JSON");
+    assert_eq!(repaired["params"]["text"], "cut \u{fffd}");
+    assert!(heard[2].contains("whole"));
+    assert!(
+        heard
+            .iter()
+            .all(|message| !message.contains("delegate/event"))
+    );
 }

@@ -2039,7 +2039,14 @@ fn give_provider<C: Channel>(
             return tracing::warn!(entry = served.name, "the provider could not start: {error}");
         }
     };
-    let end = child::serve(&served.name, prepared, &running, streams, line, channel);
+    let end = child::serve(
+        &served.name,
+        prepared,
+        &running,
+        streams,
+        line,
+        &crate::scope::Screening::new(channel),
+    );
     tracing::info!(entry = served.name, %peer, "left: {end}");
     shared.forget(key);
     running.stop();
