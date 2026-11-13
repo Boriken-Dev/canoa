@@ -682,9 +682,25 @@ mod tests {
                 }
             }
         }
+        // Only what this system builds is on disk, so only it is asked for.
+        let rustc = std::process::Command::new("rustc")
+            .arg("-vV")
+            .output()
+            .expect("rustc runs");
+        let host = String::from_utf8_lossy(&rustc.stdout)
+            .lines()
+            .find_map(|line| line.strip_prefix("host: ").map(str::to_owned))
+            .expect("rustc names its host");
         let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
         let listed = std::process::Command::new(cargo)
-            .args(["metadata", "--format-version", "1", "--offline"])
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--offline",
+                "--filter-platform",
+            ])
+            .arg(host)
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .expect("cargo runs");
