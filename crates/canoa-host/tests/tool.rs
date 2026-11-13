@@ -187,6 +187,24 @@ fn pis_entry_serves_a_turn_says_what_runs_unasked_and_keeps_the_conversation() {
 }
 
 #[test]
+fn a_tool_entry_is_given_no_delegation_server_though_the_client_asks_for_one() {
+    let (host, client) = paired(&pi_config(&["--mode", "rpc"], ""));
+    let dir = cwd(&host.scratch);
+    with_link(host.url("pi"), &client, host.peer, |rpc| {
+        rpc.request(
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {},
+                "_meta": {"dev.boriken.canoa/delegate": true}}),
+        )
+        .expect("initialized");
+        // A tool takes no MCP server, so one added to its session would refuse it.
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session");
+    })
+    .expect("linked");
+}
+
+#[test]
 fn a_question_pi_asks_reaches_the_person_and_their_answer_reaches_pi() {
     let (host, client) = paired(&pi_config(&["--mode", "rpc"], ""));
     let dir = cwd(&host.scratch);

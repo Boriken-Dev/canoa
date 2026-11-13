@@ -348,6 +348,8 @@ enum Run {
 struct Served {
     name: String,
     restricted: bool,
+    /// Whether its sessions can be given an MCP server, which the delegation tools are: a tool of the host's takes none.
+    delegable: bool,
     run: Run,
     running: Gate,
 }
@@ -1102,6 +1104,7 @@ impl Serving {
             let served = Arc::new(Served {
                 name: entry.name.clone(),
                 restricted: entry.peers.is_some(),
+                delegable: kind == "agent",
                 run,
                 running: Gate::new(entry.max_peers),
             });
@@ -1139,6 +1142,7 @@ impl Serving {
                 Arc::new(Served {
                     name: control::NAME.to_owned(),
                     restricted: true,
+                    delegable: false,
                     run: Run::Control {
                         grants: settings.grants.clone(),
                     },
@@ -1551,28 +1555,32 @@ fn give_agent<C: Channel>(
         }
     };
     // What lets this connection's sessions hand tasks to other sources: for a task's own connection, what the host bounded it by.
-    let conn = shared.delegation.as_ref().map(|delegation| {
-        delegation.connection(match context {
-            Some(context) => delegate::ConnInfo {
-                principal: context.principal.clone(),
-                entry: served.name.clone(),
-                roots: context.roots.clone(),
-                depth: context.depth,
-                child: true,
-            },
-            None => delegate::ConnInfo {
-                principal: if *peer == shared.method.peer_id() {
-                    Principal::Owner
-                } else {
-                    Principal::Key(*peer)
+    let conn = shared
+        .delegation
+        .as_ref()
+        .filter(|_| served.delegable)
+        .map(|delegation| {
+            delegation.connection(match context {
+                Some(context) => delegate::ConnInfo {
+                    principal: context.principal.clone(),
+                    entry: served.name.clone(),
+                    roots: context.roots.clone(),
+                    depth: context.depth,
+                    child: true,
                 },
-                entry: served.name.clone(),
-                roots: scope.roots().to_vec(),
-                depth: 0,
-                child: false,
-            },
-        })
-    });
+                None => delegate::ConnInfo {
+                    principal: if *peer == shared.method.peer_id() {
+                        Principal::Owner
+                    } else {
+                        Principal::Key(*peer)
+                    },
+                    entry: served.name.clone(),
+                    roots: scope.roots().to_vec(),
+                    depth: 0,
+                    child: false,
+                },
+            })
+        });
     let peeked = Peek::new(channel, conn.as_ref());
     let channel = &peeked;
     let connection = match offer {
