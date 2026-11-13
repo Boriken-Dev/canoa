@@ -49,7 +49,7 @@ Future<void> _openSources(WidgetTester tester) async {
 void main() {
   testWidgets('starting the app asks the host only for the copies: no publisher, no plan, no install', (tester) async {
     final host = await _app(tester, _host(latest: '1.0.0'));
-    expect(host.calls.toSet().difference({'store/list', 'store/report claude_like_store'}), isEmpty, reason: '${host.calls}');
+    expect(host.calls.toSet().difference({'store/list', 'store/report claude_like_store', 'accounts/list'}), isEmpty, reason: '${host.calls}');
     expect((host.params['store/report'] ?? []).every((each) => !each.containsKey('probe')), isTrue);
   });
 

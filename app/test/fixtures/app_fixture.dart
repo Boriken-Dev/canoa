@@ -3,6 +3,7 @@
 import 'dart:io' show Directory;
 import 'dart:typed_data';
 
+import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, ClipboardReader;
 import 'package:canoa/config/canoa_config.dart';
@@ -90,6 +91,7 @@ Future<List<CanoaConfig>> pumpApp(
   String? documents,
   ChoicesLoader? askChoices,
   PopoutWindows? popoutWindows,
+  AccountsHost? accountsHost,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -127,6 +129,7 @@ Future<List<CanoaConfig>> pumpApp(
         }),
     askChoices: askChoices ?? FakeHost().call,
     popoutWindows: popoutWindows,
+    accountsHost: accountsHost,
   ));
   await tester.pumpAndSettle();
   return written;

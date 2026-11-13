@@ -1,3 +1,4 @@
+import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/hosting_panel.dart' show SaveHosting;
@@ -39,6 +40,7 @@ Future<SettingsHarness> openSettings(
   SaveHosting? saveHosting,
   ThemeData? theme,
   String version = '',
+  AccountsController? accounts,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -67,6 +69,7 @@ Future<SettingsHarness> openSettings(
       supervisor: supervisor,
       saveHosting: saveHosting,
       version: version,
+      accounts: accounts,
     ),
   ));
   await tester.pumpAndSettle();
