@@ -37,6 +37,21 @@ final String? _method = switch (Platform.environment['CANOA_TEST_METHOD']) {
   _ => null,
 };
 
+/// An agent entry whose working root is [dir]'s `src`, named through this machine's administrative share
+/// (`\\localhost\C$\...`), as a project on a file server is.
+String _sharedEntry(Directory dir) {
+  final path = File('${dir.path}/src').absolute.path;
+  return '''
+[host.agents.shared]
+program = ${jsonEncode(HostUnderTest._example('stdio_agent', library: false))}
+args = ["--scripted"]
+working_roots = [${jsonEncode(onShare(path))}]
+''';
+}
+
+/// [path], a drive path, as the same place named through the administrative share.
+String onShare(String path) => '\\\\localhost\\${path[0]}\$${path.substring(2).replaceAll('/', '\\')}';
+
 /// `canoa serve` on a canoa.cfg in a directory of its own.
 final class HostUnderTest {
   HostUnderTest._(this.process, this.dir, this.urls, this.peer, this.method);
@@ -86,6 +101,7 @@ args = ["--scripted", "--mcp-http", "--modes=default"]
 [host.agents.trees]
 program = ${jsonEncode(_example('stdio_agent', library: false))}
 working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
+${Platform.isWindows ? _sharedEntry(dir) : ''}
 ''');
     final process = await Process.start(
       _hostBinary!,
@@ -97,7 +113,7 @@ working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
     final urls = <String, String>{};
     String? peer;
     String? method;
-    await for (final line in lines.take(6).timeout(const Duration(seconds: 30))) {
+    await for (final line in lines.take(Platform.isWindows ? 7 : 6).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry['url'] as String;
       peer = entry['peer'] as String;
@@ -306,6 +322,21 @@ void main() {
       await client.close();
     }
   }, skip: skip);
+
+  test('a session starts in a folder on a share under the entry\'s working root, and the agent is told that folder', () async {
+    final folder = onShare('${host.dir.path}/src/project');
+    await Directory(folder).create(recursive: true);
+    final client = await connect('shared');
+    try {
+      final opened = await client.openSession(cwd: folder);
+      expect(await turn(client, opened.id, 'Cwd'), 'cwd: $folder');
+      await expectLater(client.openSession(cwd: onShare(host.dir.path)), throwsA(anything),
+          reason: 'the host directory is outside the root');
+      await expectLater(client.openSession(cwd: '$folder\\..\\..'), throwsA(anything), reason: 'a .. segment is refused');
+    } finally {
+      await client.close();
+    }
+  }, skip: skip ?? (Platform.isWindows ? null : 'a share is a Windows thing'));
 
   test('two sessions on one repository each work in a worktree the host makes inside its working root', () async {
     Future<ProcessResult> git(String dir, List<String> args) => Process.run('git',

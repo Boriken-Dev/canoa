@@ -136,6 +136,28 @@ void main() {
     expect(find.text('mine'), findsOneWidget);
   });
 
+  testWidgets('an agent may be kept to a folder on a share, but not to a device or a bare server', (tester) async {
+    final host = _Harness();
+    await host.show(tester);
+    await tester.tap(find.text('Add an agent'));
+    await tester.pumpAndSettle();
+    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
+    await tester.enterText(fields.at(0), 'mine');
+    await tester.enterText(fields.at(1), 'node agent.mjs');
+    for (final refused in [r'\\.\pipe\x', r'\\fileserver']) {
+      await tester.enterText(fields.at(2), refused);
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      expect(find.text('The folder must be a whole path.'), findsOneWidget, reason: refused);
+      expect(host.saved, isEmpty);
+    }
+    await tester.enterText(fields.at(2), r'\\fileserver\projects\app');
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    final entry = (host.saved.single.host!['agents'] as Map)['mine'] as Map;
+    expect(entry['working_roots'], [r'\\fileserver\projects\app']);
+  });
+
   testWidgets('what canoa finds wrong with a change is shown, and nothing is listed as hosted', (tester) async {
     final host = _Harness()..refuseWith = 'host entry mine: program not found';
     await host.show(tester);

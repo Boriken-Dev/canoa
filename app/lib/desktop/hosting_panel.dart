@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../acp/agent_commands.dart';
+import '../acp/share_path.dart';
 import '../config/canoa_config.dart';
 import '../theme/look.dart';
 import 'host_supervisor.dart';
@@ -455,7 +456,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
         ? 'A name is 1 to 64 letters, digits, - or _.'
         : parsed == null
         ? 'That is not a command: check its quotes.'
-        : folder.isNotEmpty && !(folder.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(folder))
+        : folder.isNotEmpty && !isWholeFolderPath(folder)
         ? 'The folder must be a whole path.'
         : null;
     if (problem != null) return setState(() => error = problem);
