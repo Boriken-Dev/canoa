@@ -136,6 +136,7 @@ What each harness takes of it, and how, is [below](#applying-a-profile).
 team = "https://github.com/example/canoa-profiles.git@main#team"   # an AOS source string, <repository>@<ref>#<path>
 mine = { dir = "profiles/mine" }                                   # a directory, relative to canoa.cfg's
 # pinned = { source = "...", pin = "sha256:..." }                 # what installing writes: the tree digest it checks
+# tuned = { dir = "profiles/tuned", options = { depth = "deep" } } # values for the options the overlay's manifest declares
 
 [profile]
 model = "claude-sonnet-4-5"
@@ -279,6 +280,15 @@ problem in `[about]`, store metadata, never does. Canoa applies:
 - skills, MCP servers (`env_passthrough` and `headers_env` only for variables you share; no header over plain `http` to
   another host), rules, routing lines and context as initial context, and the `model` and `effort` hints of
   `[harness.<id>]` for the agent's harness (`claude-code`, `codex`, `gemini-cli`, `pi` for the presets);
+- `${NAME}` in the overlay's context files (and the body of `OVERLAY.md`) and in the body of each bundled skill, replaced
+  when Canoa hands the text to the agent, never in the installed files: `AOS_OVERLAY_ROOT` (a private copy of the
+  overlay's verified files, the one its hooks run from), `AOS_OVERLAY_NAME`, `AOS_PROJECT_ROOT` (the folder the session is
+  opened in; a skill's body is written once for the connection, so it keeps this name as written) and the overlay's
+  options. Canoa gives an overlay no state directory and its scopes no label, so `AOS_OVERLAY_STATE` and
+  `AOS_OVERLAY_SCOPE` stay as written. Anything else, `$${` aside, is left as written, and nothing is replaced in `rules`,
+  `routing` or a skill fetched from elsewhere. An option's value is the one in `[overlays.NAME] options`, else the
+  manifest's `default`; a **sensitive** option is never put in text, and a value of another type than the option declares
+  refuses the text that reads it (the report names the option, never the value);
 - `requires`, among the overlays `[overlays]` names: a missing one is noted and the overlay applies without it, and
   overlays in a cycle are left out.
 
