@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/secret.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UpdateRecorder;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,8 +95,63 @@ void main() {
     await settle(tester);
     expect(session.pendingSecrets, isEmpty);
     expect(find.byType(SecretRequestCard), findsNothing);
-    // The binding covers the session, so the host's answer is cancel and no form was drawn.
+    // The store finds no conversation of this connection under that session id, so the host's answer is cancel and no form was drawn.
     expect(host.answerTo(11)?['result'], {'action': 'cancel'});
+  });
+
+  testWidgets('a second connection asking under the first one\'s remote session id is cancelled: the conversation is not its', (tester) async {
+    final (_, session, store) = await shown(tester);
+    final other = SecretHost();
+    await tester.runAsync(() => other.open(store));
+    other.ask(12, acpSecretRequestMethod, (await tester.runAsync(() => requestParams('r6')))!);
+    final open = AcpSecretShowOpen(context: AcpSecretContext(sessionId: 's1', requestId: 'w6', message: 'A key', schema: showSchema, values: '{"label":"ci"}'));
+    other.ask(13, acpSecretShowOpenMethod, open.toJson());
+    await settle(tester);
+    expect(session.pendingSecrets, isEmpty);
+    expect(find.byType(SecretRequestCard), findsNothing);
+    expect(find.byType(SecretShowCard), findsNothing);
+    expect(other.answerTo(12)?['result'], {'action': 'cancel'});
+    expect(other.answerTo(13)?['result'], {'action': 'cancel'});
+  });
+
+  testWidgets('the update recorder and debugPrint, through a request and a show, never see the password or the token', (tester) async {
+    final printed = <String>[];
+    final saved = debugPrint;
+    debugPrint = (message, {wrapWidth}) => printed.add(message ?? '');
+    final recorded = <String>[];
+    final (host, _, _) = await shown(tester, recorder: UpdateRecorder(write: recorded.add));
+    // An update the recorder does see, so that it is not silent for want of traffic.
+    host.input.add(jsonEncode({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': 's1', 'update': {
+      'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'I need a login for the registry.'}}}}));
+    host.ask(40, acpSecretRequestMethod, (await tester.runAsync(() => requestParams('r7')))!);
+    await until(tester, find.byKey(const ValueKey('question-user')));
+    await tester.enterText(find.byKey(const ValueKey('question-user')), 'ana');
+    await tester.enterText(find.byKey(const ValueKey('secret-password')), password);
+    await tester.pump();
+    await tester.tap(find.text('Send sealed'));
+    await settle(tester);
+    final open = AcpSecretShowOpen(context: AcpSecretContext(sessionId: 's1', requestId: 'w7', message: 'Your new API key', schema: showSchema, values: '{"label":"ci"}'));
+    host.ask(41, acpSecretShowOpenMethod, open.toJson());
+    await settle(tester);
+    await tester.tap(find.text('Show'));
+    await settle(tester);
+    final ready = AcpSecretShowOpened.fromJson(host.answerTo(41)!['result']);
+    final collector = await tester.runAsync(() => AcpSecretVerifier(own: hostProver.id, known: [appProver.id])
+        .collector(appProver.id, AcpSecretMethod.show, open.context, ready.recipient!, now)) as AcpSecretCollector;
+    final sealed = {'key': await tester.runAsync(() => collector.seal('key', token)) as AcpSealed};
+    final auth = await tester.runAsync(() => collector.authenticate(hostProver, open.context.values!, sealed, now)) as AcpSecretBinding;
+    host.ask(42, acpSecretShowDeliverMethod, AcpSecretShowDeliver(sessionId: 's1', requestId: 'w7', sealed: sealed, auth: auth).toJson());
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('reveal-key')));
+    await tester.pump();
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+    expect(recorded, isNotEmpty);
+    debugPrint = saved;
+    for (final text in [...recorded, ...printed]) {
+      expect(text, isNot(contains(password)));
+      expect(text, isNot(contains(token)));
+    }
   });
 
   testWidgets('a show: opened after the person agrees, delivered sealed, masked until revealed, and closed with shown', (tester) async {

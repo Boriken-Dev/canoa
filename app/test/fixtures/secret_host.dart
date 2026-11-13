@@ -6,6 +6,7 @@ import 'package:canoa/acp/client.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/secret.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UpdateRecorder;
 import 'package:coqui_acp/secret_unprotected.dart';
 import 'package:coqui_web/coqui_web.dart';
 import 'package:flutter/material.dart';
@@ -58,7 +59,8 @@ final class SecretHost implements WebChannel {
   Map<String, dynamic>? answerTo(Object id) => sent.where((message) => message['id'] == id && message['method'] == null).firstOrNull;
   Map<String, dynamic>? get initialize => sent.where((message) => message['method'] == 'initialize').firstOrNull;
 
-  Future<(ChatSession, VerifiedAgent)> connect(SessionStore store) async {
+  /// A connection to this host that no conversation is attached to.
+  Future<VerifiedAgent> open(SessionStore store) async {
     final client = await VerifiedAgent.open(
       this,
       expectedPeerId: hostProver.id.toString(),
@@ -69,6 +71,11 @@ final class SecretHost implements WebChannel {
     );
     await client.initialize();
     await client.openSession(cwd: '/work');
+    return client;
+  }
+
+  Future<(ChatSession, VerifiedAgent)> connect(SessionStore store) async {
+    final client = await open(store);
     final session = store.addProviderSession(title: 'Deploy', agent: 'Claude', peerId: client.peerId, remoteSessionId: 's1');
     store.attachVerifiedClient(session.id, client, record: false);
     store.select(session.id);
@@ -81,11 +88,11 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pump();
 }
 
-Future<(SecretHost, ChatSession, SessionStore)> shown(WidgetTester tester, {bool withIdentity = true, Size size = const Size(1100, 1800)}) async {
+Future<(SecretHost, ChatSession, SessionStore)> shown(WidgetTester tester, {bool withIdentity = true, Size size = const Size(1100, 1800), UpdateRecorder? recorder}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore(recorder: recorder);
   if (withIdentity) store.secretIdentity = identity();
   final host = SecretHost();
   final (session, _) = await tester.runAsync(() => host.connect(store)) as (ChatSession, VerifiedAgent);

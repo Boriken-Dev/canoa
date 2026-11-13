@@ -98,7 +98,7 @@ class SessionSecretCard extends StatelessWidget {
     final environment = store.secretEnvironment(prompt);
     return switch (prompt) {
       SecretRequestPrompt() => SecretRequestCard(
-        key: ValueKey('secret-${prompt.request.context.requestId}'),
+        key: ValueKey('secret-${prompt.request.context.sessionId}-${prompt.request.context.requestId}'),
         request: prompt.request,
         environment: environment,
         agent: session.agent,
@@ -106,7 +106,7 @@ class SessionSecretCard extends StatelessWidget {
         onReply: (reply) => store.answerSecret(session, prompt, reply),
       ),
       SecretShowPrompt() => SecretShowCard(
-        key: ValueKey('secret-${prompt.open.context.requestId}'),
+        key: ValueKey('secret-${prompt.open.context.sessionId}-${prompt.open.context.requestId}'),
         open: prompt.open,
         environment: environment,
         deliver: prompt.deliver,
