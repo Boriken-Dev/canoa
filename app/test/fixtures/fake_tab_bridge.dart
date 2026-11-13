@@ -5,11 +5,16 @@ import 'package:canoa/extension/tab_bridge.dart';
 /// The worker's side of the tab bridge, in memory, with its rules: a share needs a paired agent's key and a tab, ends when the tab
 /// changes page or closes, and a detach ends a session's shares.
 final class FakeTabBridge implements TabBridge {
-  FakeTabBridge({List<OpenTab> tabs = const [], this.front});
+  FakeTabBridge({List<OpenTab> tabs = const [], this.front, this.client = panelClient});
+
+  /// Who this view is: the panel, or `window:<link>`.
+  @override
+  final String client;
 
   final tabs = <int, OpenTab>{};
   int? front;
   final bound = <String, int>{};
+  final owners = <String, String>{};
   final shares = <String, Set<int>>{};
   final calls = <String>[];
   final _changes = StreamController<void>.broadcast();
@@ -45,7 +50,10 @@ final class FakeTabBridge implements TabBridge {
   }
 
   /// Bound already, as if from another window's panel.
-  void bind(String key, int tabId) => bound[key] = tabId;
+  void bind(String key, int tabId, {String owner = panelClient}) {
+    bound[key] = tabId;
+    owners[key] = owner;
+  }
 
   /// What a click on a site the browser has not been given would answer.
   String? refuse;
@@ -56,7 +64,7 @@ final class FakeTabBridge implements TabBridge {
         activeId: front,
         bindings: [
           for (final entry in bound.entries)
-            TabBinding(sessionKey: entry.key, tabId: entry.value, origin: tabs[entry.value]?.url ?? '', shared: {...?shares[entry.key]}),
+            TabBinding(sessionKey: entry.key, tabId: entry.value, origin: tabs[entry.value]?.url ?? '', shared: {...?shares[entry.key]}, owner: owners[entry.key] ?? panelClient),
         ],
       );
 
@@ -64,12 +72,24 @@ final class FakeTabBridge implements TabBridge {
   Future<void> attach(String sessionKey, int tabId) async {
     calls.add('attach $sessionKey $tabId');
     bound[sessionKey] = tabId;
+    owners[sessionKey] = client;
+  }
+
+  @override
+  Future<void> move(String sessionKey, int tabId) async {
+    calls.add('move $sessionKey $tabId');
+    // The worker's rule: the tab changing ends what the old tab shared; the same tab changing hands keeps it.
+    if (bound[sessionKey] != tabId) shares.remove(sessionKey);
+    bound[sessionKey] = tabId;
+    owners[sessionKey] = client;
+    _changes.add(null);
   }
 
   @override
   Future<void> detach(String sessionKey) async {
     calls.add('detach $sessionKey');
     bound.remove(sessionKey);
+    owners.remove(sessionKey);
     shares.remove(sessionKey);
   }
 

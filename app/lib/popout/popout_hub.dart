@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat/experimental.dart' show ChatSessionShare;
 import 'package:flutter/foundation.dart';
 
+import '../extension/tab_shares.dart' show sessionKeyOf;
 import '../session_store.dart';
 import 'popout_window.dart';
 import 'shared_chat.dart';
@@ -48,7 +49,7 @@ class PopoutHub extends ChangeNotifier {
     final held = _popped[session.id];
     if (held != null) return held.window.focus();
     if (!available || session.isDraft) throw StateError('This conversation cannot be shown in a window of its own yet');
-    final window = await windows.open(title: session.title, look: look, density: density);
+    final window = await windows.open(title: session.title, look: look, density: density, session: sessionKeyOf(session));
     // Two requests for the same window can pass the check above; the second window goes.
     if (_popped.containsKey(session.id)) {
       unawaited(window.close());

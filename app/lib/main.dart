@@ -1636,7 +1636,7 @@ class _ConversationState extends State<_Conversation> {
       if (session != null && sessionChanges(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
       if (session != null && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
-      if (session != null && !widget.narrow && !session.isDraft && (widget.handle.popout?.available ?? false))
+      if (session != null && (!widget.narrow || Uri.base.queryParameters['view'] == 'panel') && !session.isDraft && (widget.handle.popout?.available ?? false))
         if (widget.handle.popout!.isPoppedOut(session))
           ('Bring back from its own window', Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
         else

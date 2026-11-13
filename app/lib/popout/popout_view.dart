@@ -12,7 +12,10 @@ import '../theme/look.dart';
 /// [ChatSessionView] of the conversation the main window holds. It keeps nothing of the conversation itself; what the person does
 /// here is asked of the main window, and what comes of it, or of an answer given there, arrives as the next state.
 class PopoutChat extends StatefulWidget {
-  const PopoutChat({super.key, required this.view, this.onDock, this.renderers = chat.ChatRenderers.none});
+  const PopoutChat({super.key, required this.view, this.onDock, this.banner, this.renderers = chat.ChatRenderers.none});
+
+  /// A line under the header, from the platform the window runs in; null for none.
+  final Widget? banner;
 
   final ChatSessionView view;
 
@@ -115,6 +118,7 @@ class _PopoutChatState extends State<PopoutChat> {
             ]),
           ),
         ),
+        if (widget.banner != null) widget.banner!,
         if (!view.isOpen)
           MaterialBanner(
             content: const Text('The main window no longer holds this conversation.'),

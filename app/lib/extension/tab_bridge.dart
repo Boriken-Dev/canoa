@@ -19,14 +19,23 @@ final class OpenTab {
   String get label => title.trim().isEmpty ? url : title.trim();
 }
 
+/// The client that holds a session's tab binding when nothing else does.
+const panelClient = 'panel';
+
+/// What the person calls a client: the side panel, or the window a session was popped out to.
+String clientName(String client) => client == panelClient ? 'the side panel' : 'its own window';
+
 /// A session attached to a tab, and the tabs it shares with its agent's machine.
 final class TabBinding {
-  const TabBinding({required this.sessionKey, required this.tabId, required this.origin, this.shared = const {}});
+  const TabBinding({required this.sessionKey, required this.tabId, required this.origin, this.shared = const {}, this.owner = panelClient});
 
   final String sessionKey;
   final int tabId;
   final String origin;
   final Set<int> shared;
+
+  /// The client that holds the binding: `panel`, or `window:<link>` for a popped-out window.
+  final String owner;
 }
 
 /// What the worker holds, at one moment.
@@ -55,6 +64,7 @@ final class TabSnapshot {
             tabId: item['tabId'] as int,
             origin: '${item['origin'] ?? ''}',
             shared: {for (final id in (item['shared'] as List? ?? const [])) id as int},
+            owner: item['owner'] is String ? item['owner'] as String : panelClient,
           ),
       ],
     );
@@ -63,9 +73,16 @@ final class TabSnapshot {
 
 /// The calls the panel makes of the worker. A refusal is an exception whose message says why.
 abstract interface class TabBridge {
+  /// Who this view is to the worker: `panel`, or `window:<link>` in a popped-out window.
+  String get client;
+
   Future<TabSnapshot> snapshot();
   Future<void> attach(String sessionKey, int tabId);
   Future<void> detach(String sessionKey);
+
+  /// Gives this client the session's tab binding, on [tabId]: the session is not resumed and nothing is granted. What the old tab
+  /// shared ends when the tab changes.
+  Future<void> move(String sessionKey, int tabId);
 
   /// Shares the tab with the session's agent machine, as a read that lasts until it is [unshare]d, the tab goes or it changes page.
   /// Must run from the person's click: the browser asks for the site there.

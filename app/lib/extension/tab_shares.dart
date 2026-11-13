@@ -66,6 +66,17 @@ final class TabShares extends ChangeNotifier {
     return _snapshot.tab(binding.tabId);
   }
 
+  /// What `Move here` offers for [key], or null when there is nothing to move: the session's tab is held by another client (the
+  /// panel or a window of its own), or it was started in a tab that is not the one in front.
+  String? moveOffer(String key) {
+    final binding = bindingOf(key);
+    if (binding == null) return null;
+    final tab = _snapshot.tab(binding.tabId);
+    if (binding.owner != bridge.client) return '${tab == null ? 'The tab' : '"${tab.label}"'} is with ${clientName(binding.owner)}';
+    final elsewhere = startedElsewhere(key);
+    return elsewhere == null ? null : 'Started in "${elsewhere.label}"';
+  }
+
   Future<void> refresh() async {
     final TabSnapshot next;
     try {
@@ -128,16 +139,13 @@ final class TabShares extends ChangeNotifier {
     await refresh();
   }
 
-  /// Takes the session to the tab in front: what it shared in the old tab stops, and it is attached here.
-  Future<void> moveHere(ChatSession session) async {
-    final key = sessionKeyOf(session);
+  /// Takes the session's tab binding to this client, on the tab in front: one call, no resume. What it shared in another tab stops.
+  Future<void> moveHere(String key) async {
     final front = _snapshot.activeId;
     if (front == null) return;
-    for (final id in bindingOf(key)?.shared ?? const <int>{}) {
-      _expected.putIfAbsent(key, () => {}).add(id);
-      await bridge.unshare(key, id);
-    }
-    await bridge.attach(key, front);
+    final binding = bindingOf(key);
+    if (binding != null && binding.tabId != front) _expected.putIfAbsent(key, () => {}).addAll(binding.shared);
+    await bridge.move(key, front);
     _mine.add(key);
     await refresh();
   }

@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:math' show Random;
 
 import 'package:coqui_acp_chat/experimental.dart' show ChatViewLink;
 import 'package:web/web.dart' as web;
 
+import 'extension_windows.dart';
 import 'link_stream.dart';
 import 'popout_window.dart';
 import 'popout_launch.dart';
@@ -80,7 +82,7 @@ final class _WebWindows implements PopoutWindows {
   bool get available => web.window.location.protocol == 'http:' || web.window.location.protocol == 'https:';
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density}) async {
+  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) async {
     final id = _newLinkId();
     final link = BroadcastViewLink(_channelOf(id));
     final here = Uri.base;
@@ -102,7 +104,55 @@ final class _WebWindows implements PopoutWindows {
   }
 }
 
-PopoutWindows createPopoutWindows() => _WebWindows();
+@JS('canoaBridge.client')
+external JSString? get _extensionClient;
+
+@JS('canoaBridge.popout.call')
+external JSPromise<JSString> _popoutCall(JSString name, JSString args);
+
+@JS('canoaBridge.popout.watch')
+external void _popoutWatch(JSFunction callback);
+
+@JS('canoaBridge.popout')
+external JSObject? get _popoutBridge;
+
+/// The extension's worker, as the panel reaches it (bindings/browser/chromium/bridge.js).
+final class _WebPopoutBridge implements PopoutBridge {
+  _WebPopoutBridge() {
+    _popoutWatch(((JSNumber id) => _closed.add(id.toDartInt)).toJS);
+  }
+
+  final _closed = StreamController<int>.broadcast();
+
+  @override
+  String get client => _extensionClient?.toDart ?? 'panel';
+
+  Future<String> _run(String name, List<Object?> args) async {
+    try {
+      return (await _popoutCall(name.toJS, jsonEncode(args).toJS).toDart).toDart;
+    } on Object catch (error) {
+      throw StateError('$error'.replaceFirst(RegExp(r'^.*?Error: '), ''));
+    }
+  }
+
+  @override
+  Future<int> open({required String session, required String link, required String title, required String look, required String density}) async =>
+      (jsonDecode(await _run('open', [session, link, title, look, density])) as Map)['windowId'] as int;
+
+  @override
+  Future<void> focus(String session) => _run('focus', [session]);
+
+  @override
+  Future<void> close(String session) => _run('close', [session]);
+
+  @override
+  Stream<int> get closed => _closed.stream;
+}
+
+// In the browser extension a window is the worker's to open, at the extension's own page; elsewhere the page opens one itself.
+PopoutWindows createPopoutWindows() => _popoutBridge == null
+    ? _WebWindows()
+    : ExtensionPopoutWindows(_WebPopoutBridge(), linkFor: (id) => BroadcastViewLink(_channelOf(id)), newLinkId: _newLinkId);
 
 PopoutLaunch? popoutLaunch(List<String> args) {
   final query = Uri.base.queryParameters;
@@ -110,6 +160,7 @@ PopoutLaunch? popoutLaunch(List<String> args) {
   if (link == null || link.isEmpty) return null;
   return PopoutLaunch(
     link: link,
+    session: query['session'],
     title: query['title'] ?? 'Canoa',
     look: query['look'] ?? 'canoa',
     density: query['density'] ?? 'normal',

@@ -114,7 +114,7 @@ final class _DesktopWindows implements PopoutWindows {
   bool get available => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density}) async {
+  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) async {
     final id = _newLinkId();
     final link = WindowChannelLink(receiveOn: _channelOf(id, 'owner'), sendOn: _channelOf(id, 'view'));
     await link.ready;

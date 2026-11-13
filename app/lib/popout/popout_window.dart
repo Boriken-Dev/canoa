@@ -23,8 +23,9 @@ abstract interface class PopoutWindows {
   bool get available;
 
   /// Opens a window that attaches to the conversation on the other end of the returned window's link, titled [title], drawn with
-  /// [look] and [density] (the names of the app's own settings).
-  Future<PopoutWindow> open({required String title, required String look, required String density});
+  /// [look] and [density] (the names of the app's own settings). [session] names the conversation for a platform that needs it (the
+  /// browser extension's worker keeps the tab it works with by it).
+  Future<PopoutWindow> open({required String title, required String look, required String density, String? session});
 }
 
 /// A platform with no way to open one.
@@ -35,6 +36,6 @@ final class NoPopoutWindows implements PopoutWindows {
   bool get available => false;
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density}) =>
+  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) =>
       throw UnsupportedError('This platform has no windows of its own for a conversation');
 }

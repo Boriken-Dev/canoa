@@ -222,9 +222,26 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(bridge.bound[key], 1);
-    expect(bridge.shares[key], isEmpty, reason: 'what it shared in the old tab stops');
+    expect(bridge.calls.where((call) => call.startsWith('move')), ['move $key 1'], reason: 'one move, not a resume');
+    expect(bridge.owners[key], panelClient);
+    expect(bridge.shares[key] ?? <int>{}, isEmpty, reason: 'what it shared in the old tab stops');
     expect(find.byKey(const Key('move-here')), findsNothing);
     expect(find.textContaining('Stopped sharing'), findsNothing, reason: 'the person did that');
+  });
+
+  testWidgets('a session whose tab a popped-out window holds offers Move here in the panel, which takes it back', (tester) async {
+    final bridge = FakeTabBridge(front: 1)..open(_tab(1, 'Docs'));
+    final rig = await _pump(tester, given: bridge);
+    final key = sessionKeyOf(rig.session);
+    bridge.bind(key, 1, owner: 'window:${'ab' * 16}');
+    await rig.shares.refresh();
+    await tester.pump();
+    expect(find.text('"Docs" is with its own window'), findsOneWidget);
+    await tester.tap(find.text('Move here'));
+    await tester.pump();
+    await tester.pump();
+    expect(bridge.owners[key], panelClient);
+    expect(find.byKey(const Key('move-here')), findsNothing);
   });
 
   testWidgets('a session with no tab is attached to the one in front the first time it is seen', (tester) async {

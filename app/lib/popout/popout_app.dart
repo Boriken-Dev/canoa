@@ -4,6 +4,9 @@ import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView, ChatView
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'package:flutter/material.dart';
 
+import '../extension/tab_bridge.dart';
+import '../extension/tab_owner_banner.dart';
+import '../extension/tab_shares.dart';
 import '../theme/look.dart';
 import 'platform.dart' as platform;
 import 'popout_launch.dart';
@@ -23,7 +26,9 @@ Future<void> runPopout(PopoutLaunch launch, {ChatViewLink? link}) async {
   WidgetsFlutterBinding.ensureInitialized();
   await platform.preparePopoutWindow(launch);
   try {
-    runApp(PopoutApp(launch: launch, view: await attachPopout(launch, link: link)));
+    final bridge = launch.session == null ? null : platformTabBridge();
+    final banner = bridge == null ? null : TabOwnerBanner(tabs: TabShares(bridge), sessionKey: launch.session!);
+    runApp(PopoutApp(launch: launch, view: await attachPopout(launch, link: link), banner: banner));
   } on Object catch (error) {
     runApp(PopoutApp(launch: launch, problem: error is StateError ? error.message : '$error'));
   }
@@ -31,7 +36,7 @@ Future<void> runPopout(PopoutLaunch launch, {ChatViewLink? link}) async {
 
 /// The app of a pop-out window: Canoa's look around one conversation.
 class PopoutApp extends StatelessWidget {
-  const PopoutApp({super.key, required this.launch, this.view, this.problem, this.onClose, this.renderers = chat.ChatRenderers.none});
+  const PopoutApp({super.key, required this.launch, this.view, this.problem, this.onClose, this.banner, this.renderers = chat.ChatRenderers.none});
 
   final PopoutLaunch launch;
 
@@ -42,6 +47,9 @@ class PopoutApp extends StatelessWidget {
   /// Closes the window; by default through the platform.
   final VoidCallback? onClose;
   final chat.ChatRenderers renderers;
+
+  /// A line under the conversation's header; the extension's window says who holds the tab there.
+  final Widget? banner;
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +71,7 @@ class PopoutApp extends StatelessWidget {
                 ]),
               ),
             )
-          : PopoutChat(view: view!, onDock: close, renderers: renderers),
+          : PopoutChat(view: view!, onDock: close, banner: banner, renderers: renderers),
     );
   }
 }

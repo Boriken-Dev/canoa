@@ -10,6 +10,9 @@ external JSObject? get _tabs;
 @JS('canoaBridge.tabs.call')
 external JSPromise<JSString> _call(JSString name, JSString args);
 
+@JS('canoaBridge.client')
+external JSString? get _client;
+
 @JS('canoaBridge.tabs.watch')
 external void _watch(JSFunction callback);
 
@@ -21,6 +24,9 @@ final class _WebTabBridge implements TabBridge {
   }
 
   final _changes = StreamController<void>.broadcast();
+
+  @override
+  String get client => _client?.toDart ?? panelClient;
 
   Future<String> _run(String name, List<Object?> args) async {
     try {
@@ -38,6 +44,9 @@ final class _WebTabBridge implements TabBridge {
 
   @override
   Future<void> attach(String sessionKey, int tabId) => _run('attach', [sessionKey, tabId]);
+
+  @override
+  Future<void> move(String sessionKey, int tabId) => _run('move', [sessionKey, tabId]);
 
   @override
   Future<void> detach(String sessionKey) => _run('detach', [sessionKey]);

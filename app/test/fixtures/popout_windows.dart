@@ -50,7 +50,7 @@ final class FakeWindows implements PopoutWindows {
   final opened = <FakeWindow>[];
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density}) async {
+  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) async {
     final (owner, far) = MemoryViewLink.pair();
     final window = FakeWindow(owner, far, title);
     opened.add(window);

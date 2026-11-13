@@ -47,7 +47,7 @@ class _TabHeaderState extends State<TabHeader> {
         final tabs = widget.tabs;
         final key = sessionKeyOf(widget.session);
         final machine = widget.session.agent;
-        final elsewhere = tabs.startedElsewhere(key);
+        final offer = tabs.moveOffer(key);
         final shared = tabs.sharedTabs(key);
         final typed = _at.firstMatch(widget.controller.text);
         final matches = typed == null
@@ -57,15 +57,15 @@ class _TabHeaderState extends State<TabHeader> {
                   if (tab.label.toLowerCase().contains(typed.group(2)!.toLowerCase()) || tab.url.toLowerCase().contains(typed.group(2)!.toLowerCase())) tab,
               ];
         final children = <Widget>[
-          if (elsewhere != null)
-            _Banner(
+          if (offer != null)
+            TabBanner(
               key: const Key('move-here'),
-              text: 'Started in "${elsewhere.label}"',
+              text: offer,
               action: 'Move here',
-              onAction: () => unawaited(widget.tabs.moveHere(widget.session)),
+              onAction: () => unawaited(widget.tabs.moveHere(key)),
             ),
           for (final drop in tabs.dropsFor(key))
-            _Banner(
+            TabBanner(
               key: Key('share-dropped-${drop.tabTitle}'),
               text: 'Stopped sharing "${drop.tabTitle}": the tab changed page or closed.',
               onDismiss: () => tabs.dismiss(drop),
@@ -136,8 +136,9 @@ class _Chip extends StatelessWidget {
   }
 }
 
-class _Banner extends StatelessWidget {
-  const _Banner({super.key, required this.text, this.action, this.onAction, this.onDismiss});
+/// A line over the composer, or over a window's conversation, with an action or a dismissal.
+class TabBanner extends StatelessWidget {
+  const TabBanner({super.key, required this.text, this.action, this.onAction, this.onDismiss});
 
   final String text;
   final String? action;
