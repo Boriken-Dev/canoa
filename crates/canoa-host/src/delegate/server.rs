@@ -80,7 +80,10 @@ fn accept(listener: &TcpListener, engine: &Arc<Engine>, stop: &AtomicBool, port:
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, peer)) => {
-                if !peer.ip().is_loopback() || live.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+                if !peer.ip().is_loopback()
+                    || live.load(Ordering::SeqCst) >= MAX_CONNECTIONS
+                    || !ours(peer, SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
+                {
                     continue;
                 }
                 live.fetch_add(1, Ordering::SeqCst);
@@ -99,6 +102,56 @@ fn accept(listener: &TcpListener, engine: &Arc<Engine>, stop: &AtomicBool, port:
             Err(_) => std::thread::sleep(POLL),
         }
     }
+}
+
+/// Whether the process at `peer`, which connected to `local`, runs as the user this host does. A bearer an agent's command line
+/// shows to other users would otherwise be good for any of them. Only Linux can say: elsewhere every user is taken as this one,
+/// and a connection it cannot place there is refused.
+fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let table = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();
+        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        owned_by(&table, peer, local) == own_uid(&status) && owned_by(&table, peer, local).is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (peer, local);
+        true
+    }
+}
+
+/// The user id in a `/proc/PID/status`: its real one.
+#[cfg(any(target_os = "linux", test))]
+fn own_uid(status: &str) -> Option<u32> {
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))
+        .and_then(|ids| ids.split_whitespace().next())
+        .and_then(|uid| uid.parse().ok())
+}
+
+/// The user that owns the socket in `/proc/net/tcp` whose local end is `peer` and remote end `local`: the connecting side.
+#[cfg(any(target_os = "linux", test))]
+fn owned_by(table: &str, peer: SocketAddr, local: SocketAddr) -> Option<u32> {
+    let (SocketAddr::V4(peer), SocketAddr::V4(local)) = (peer, local) else {
+        return None;
+    };
+    // The kernel writes an address as its four bytes in memory order, as one hex number.
+    let hex = |addr: std::net::SocketAddrV4| {
+        format!(
+            "{:08X}:{:04X}",
+            u32::from_le_bytes(addr.ip().octets()),
+            addr.port()
+        )
+    };
+    let (near, far) = (hex(peer), hex(local));
+    table.lines().skip(1).find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        (fields.get(1) == Some(&near.as_str()) && fields.get(2) == Some(&far.as_str()))
+            .then(|| fields.get(7)?.parse().ok())
+            .flatten()
+    })
 }
 
 /// A place among the connections that have shown no bearer yet, given back when dropped or [`Slot::release`]d.
@@ -377,4 +430,44 @@ fn reply(code: u16, reason: &str, headers: &[&str], body: &str) -> String {
         body.len()
     ));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TABLE: &str = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+            0: 0100007F:C350 0100007F:1F90 01 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0
+            1: 0100007F:C351 0100007F:1F90 01 00000000:00000000 00:00000000 00000000     0        0 22222 1 0
+";
+
+    #[test]
+    fn the_owner_of_the_connecting_socket_is_read_from_the_kernels_table() {
+        let local: SocketAddr = "127.0.0.1:8080".parse().expect("an address");
+        let at = |port: u16| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        assert_eq!(owned_by(TABLE, at(0xC350), local), Some(1000));
+        assert_eq!(owned_by(TABLE, at(0xC351), local), Some(0));
+        assert_eq!(
+            owned_by(TABLE, at(1), local),
+            None,
+            "a socket it cannot place"
+        );
+        assert_eq!(
+            own_uid(
+                "Name:	x
+Uid:	1000	1000	1000	1000
+"
+            ),
+            Some(1000)
+        );
+        // A different user is not this one; one that cannot be told is refused as well.
+        assert_ne!(
+            owned_by(TABLE, at(0xC351), local),
+            own_uid(
+                "Uid:	1000	1000
+"
+            )
+        );
+        assert_eq!(own_uid("nothing"), None);
+    }
 }
