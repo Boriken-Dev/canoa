@@ -135,4 +135,24 @@ void main() {
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/agent_marks_picker_${look.name}.png'));
     });
   }
+
+  testWidgets('each session row in the rail carries the mark of its source', (tester) async {
+    final store = SessionStore(includePreview: false);
+    addTearDown(store.dispose);
+    const sources = [
+      AgentSource.hosted('Claude', harness: 'claude', local: true),
+      AgentSource.hosted('Codex', harness: 'codex', local: true),
+      AgentSource.hosted('Antigravity', local: true),
+      AgentSource.hosted('Pi', local: true),
+      AgentSource.hosted('Grok', local: true),
+    ];
+    for (final (index, source) in sources.indexed) {
+      store.createDraft(source: source, title: 'Session ${index + 1}');
+    }
+    await pumpApp(tester, store, size: const Size(900, 640));
+    await frames(tester);
+    expect(find.byType(SourceMark), findsAtLeastNWidgets(sources.length));
+    expect(tester.takeException(), isNull);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/agent_marks_rail.png'));
+  });
 }
