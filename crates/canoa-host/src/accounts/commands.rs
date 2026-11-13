@@ -33,20 +33,45 @@ pub(crate) struct Env<'a> {
     pub(crate) home: Home,
 }
 
+/// What a command works on, without a front: where canoa.cfg is written, what it says and the host's home.
+#[derive(Clone, Copy)]
+pub(crate) struct Cfg<'a> {
+    pub(crate) config_path: &'a Path,
+    pub(crate) config: &'a Config,
+    pub(crate) home: &'a Home,
+}
+
+impl Env<'_> {
+    pub(crate) fn cfg(&self) -> Cfg<'_> {
+        Cfg {
+            config_path: &self.config_path,
+            config: &self.config,
+            home: &self.home,
+        }
+    }
+}
+
 /// What a sign-in asks of its front, passed to the thread that owns it.
-enum Event {
+pub(crate) enum Event {
     Say(String),
     Open(OpenUrl),
     Ask(LoginForm, mpsc::Sender<Result<LoginAnswer, String>>),
 }
 
 /// The sign-in's side of the conversation: it queues what the provider says and waits for the answer to a question.
-struct Relay {
+pub(crate) struct Relay {
     events: Mutex<mpsc::Sender<Event>>,
     cancelled: Arc<AtomicBool>,
 }
 
 impl Relay {
+    pub(crate) const fn new(events: mpsc::Sender<Event>, cancelled: Arc<AtomicBool>) -> Self {
+        Self {
+            events: Mutex::new(events),
+            cancelled,
+        }
+    }
+
     fn send(&self, event: Event) -> bool {
         self.events
             .lock()
@@ -90,7 +115,7 @@ impl Interaction for Relay {
 }
 
 /// Why a typed answer cannot be taken, when the front has no way to take one.
-const NO_TYPING: &str = "this way of running canoa cannot take a typed secret: sealed prompts are not available to it yet, so run `canoa accounts add` in a terminal";
+const NO_TYPING: &str = "this way of running canoa cannot take a typed secret: sealed prompts are not available to it yet, so run `canoa accounts add` in a terminal, or add the account in the app";
 
 /// Runs the sign-in `method` of `harness` and answers what it made, showing its prompts through `env.front`. `cancel` is set
 /// when the person gives up.
@@ -104,10 +129,7 @@ fn sign_in(
     cancel: &Cancel,
 ) -> Result<coqui_acp_api::LoginOutcome, Failed> {
     let (events, incoming) = mpsc::channel();
-    let relay = Arc::new(Relay {
-        events: Mutex::new(events),
-        cancelled: Arc::clone(&cancel.flag),
-    });
+    let relay = Arc::new(Relay::new(events, Arc::clone(&cancel.flag)));
     let front = env.front;
     thread::scope(|scope| {
         let pump = scope.spawn(move || {
@@ -313,8 +335,8 @@ pub(crate) fn inputs_of(
     Ok(map)
 }
 
-fn accounts_of(env: &Env<'_>) -> Result<Arc<Accounts>, Failed> {
-    Accounts::open(env.config.account_store, env.home.dir())
+fn accounts_of(cfg: Cfg<'_>) -> Result<Arc<Accounts>, Failed> {
+    Accounts::open(cfg.config.account_store, cfg.home.dir())
         .map_err(|error| Failed::run(error.to_string()))
 }
 
@@ -338,18 +360,54 @@ fn state_of(accounts: &Accounts, account: &AccountConfig) -> (String, u64, Optio
     }
 }
 
+/// One account as `list` shows it.
+pub(crate) struct Row {
+    pub(crate) name: String,
+    pub(crate) harness: String,
+    pub(crate) kind: String,
+    pub(crate) id: String,
+    pub(crate) state: String,
+    pub(crate) revision: u64,
+    pub(crate) expires_at: Option<String>,
+}
+
+impl Row {
+    pub(crate) fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
+            "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
+        })
+    }
+}
+
+/// Every account canoa.cfg names, with its state.
+pub(crate) fn rows(cfg: Cfg<'_>) -> Result<Vec<Row>, Failed> {
+    let accounts = accounts_of(cfg)?;
+    Ok(cfg
+        .config
+        .accounts
+        .iter()
+        .map(|(name, account)| {
+            let (state, revision, expires_at) = state_of(&accounts, account);
+            Row {
+                name: name.clone(),
+                harness: account.harness.clone(),
+                kind: account.kind.clone(),
+                id: account.id.clone(),
+                state,
+                revision,
+                expires_at,
+            }
+        })
+        .collect())
+}
+
 /// `canoa accounts list`.
 pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
-    let accounts = accounts_of(env)?;
-    for (name, account) in &env.config.accounts {
-        let (state, revision, expires_at) = state_of(&accounts, account);
+    for row in rows(env.cfg())? {
         let line = match format {
-            Format::Json => serde_json::json!({
-                "name": name, "harness": account.harness, "kind": account.kind, "id": account.id,
-                "state": state, "revision": revision, "expires_at": expires_at,
-            })
-            .to_string(),
-            Format::Text => format!("{name} {} {} {state}", account.harness, account.kind),
+            Format::Json => row.json().to_string(),
+            Format::Text => format!("{} {} {} {}", row.name, row.harness, row.kind, row.state),
         };
         env.front.print(&line).map_err(Failed::run)?;
     }
@@ -383,6 +441,28 @@ fn settings_of(
     .map_err(|_| Failed::run("the sign-in's settings are not a table"))
 }
 
+/// What a sign-in made or renewed, for the line that tells it.
+pub(crate) struct Added {
+    pub(crate) name: String,
+    pub(crate) harness: String,
+    pub(crate) kind: String,
+    pub(crate) id: String,
+    pub(crate) label: Option<String>,
+    pub(crate) checked: bool,
+}
+
+impl Added {
+    pub(crate) fn json(&self) -> serde_json::Value {
+        serde_json::json!({"account": {
+            "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
+            "label": self.label, "checked": self.checked}})
+    }
+}
+
+/// What runs a sign-in: the stored accounts, the provider and the method's id, and what it made.
+pub(crate) type Signer<'a> =
+    dyn FnMut(&Accounts, &kind::Harness, &str) -> Result<coqui_acp_api::LoginOutcome, Failed> + 'a;
+
 /// `canoa accounts add NAME`.
 pub(crate) fn add(
     env: &Env<'_>,
@@ -392,11 +472,38 @@ pub(crate) fn add(
     inputs: &serde_json::Map<String, serde_json::Value>,
     (format, until_stdin_closes): (Format, bool),
 ) -> Result<(), Failed> {
+    let added = add_with(
+        env.cfg(),
+        name,
+        harness,
+        method,
+        inputs,
+        &mut |accounts, provider, method| {
+            let cancel = cancel_on_input_closing(env.front, until_stdin_closes)?;
+            sign_in(env, accounts, provider, method, inputs, format, &cancel)
+        },
+    )?;
+    let line = match format {
+        Format::Json => added.json().to_string(),
+        Format::Text => format!("added {name} ({})", added.kind),
+    };
+    env.front.print(&line).map_err(Failed::run)
+}
+
+/// Adds the account `name` of `harness` by the method `method`, signing in through `signer`.
+pub(crate) fn add_with(
+    cfg: Cfg<'_>,
+    name: &str,
+    harness: &str,
+    method: Option<&str>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    signer: &mut Signer<'_>,
+) -> Result<Added, Failed> {
     check_name(name).map_err(Failed::usage)?;
-    if env.config.accounts.contains_key(name) {
+    if cfg.config.accounts.contains_key(name) {
         return Err(Failed::usage(format!("an account called {name} exists")));
     }
-    let provider = provider_for(&env.config, harness)?;
+    let provider = provider_for(cfg.config, harness)?;
     let methods = methods_of(&provider)?;
     let Some(method) = method.and_then(|id| methods.iter().find(|method| method.id == id)) else {
         return Err(Failed::usage(format!(
@@ -405,11 +512,8 @@ pub(crate) fn add(
         )));
     };
     check_inputs(method, inputs)?;
-    let accounts = accounts_of(env)?;
-    let cancel = cancel_on_input_closing(env.front, until_stdin_closes)?;
-    let outcome = sign_in(
-        env, &accounts, &provider, &method.id, inputs, format, &cancel,
-    )?;
+    let accounts = accounts_of(cfg)?;
+    let outcome = signer(&accounts, &provider, &method.id)?;
     let catalog = provider
         .catalog()
         .ok_or_else(|| Failed::run("the provider did not list its account kinds"))?;
@@ -432,19 +536,19 @@ pub(crate) fn add(
         id: id.clone(),
         settings: (!settings.is_empty()).then(|| Settings::new(settings)),
     };
-    if let Err(failed) = append_account(&env.config_path, name, &account) {
+    if let Err(failed) = append_account(cfg.config_path, name, &account) {
         let _ = accounts.forget_credentials(&id);
         let _ = accounts.forget_directory(&id);
         return Err(failed);
     }
-    let line = match format {
-        Format::Json => serde_json::json!({"account": {
-            "name": name, "harness": harness, "kind": outcome.kind, "id": id,
-            "label": outcome.label, "checked": outcome.checked}})
-        .to_string(),
-        Format::Text => format!("added {name} ({})", outcome.kind),
-    };
-    env.front.print(&line).map_err(Failed::run)
+    Ok(Added {
+        name: name.to_owned(),
+        harness: harness.to_owned(),
+        kind: outcome.kind.clone(),
+        id,
+        label: outcome.label.clone(),
+        checked: outcome.checked,
+    })
 }
 
 fn check_account_settings(
@@ -463,12 +567,37 @@ pub(crate) fn login(
     inputs: &serde_json::Map<String, serde_json::Value>,
     (format, until_stdin_closes): (Format, bool),
 ) -> Result<(), Failed> {
-    let account = env
+    let added = login_with(
+        env.cfg(),
+        name,
+        method,
+        inputs,
+        &mut |accounts, provider, method| {
+            let cancel = cancel_on_input_closing(env.front, until_stdin_closes)?;
+            sign_in(env, accounts, provider, method, inputs, format, &cancel)
+        },
+    )?;
+    let line = match format {
+        Format::Json => serde_json::json!({"account": {"name": name, "id": added.id}}).to_string(),
+        Format::Text => format!("signed in {name}"),
+    };
+    env.front.print(&line).map_err(Failed::run)
+}
+
+/// Signs in again to the account `name`, through `signer`, holding the account while it does.
+pub(crate) fn login_with(
+    cfg: Cfg<'_>,
+    name: &str,
+    method: Option<&str>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    signer: &mut Signer<'_>,
+) -> Result<Added, Failed> {
+    let account = cfg
         .config
         .accounts
         .get(name)
         .ok_or_else(|| Failed::usage(format!("no account called {name}")))?;
-    let provider = provider_for(&env.config, &account.harness)?;
+    let provider = provider_for(cfg.config, &account.harness)?;
     let methods = methods_of(&provider)?;
     let making: Vec<&LoginMethodInfo> = methods
         .iter()
@@ -491,12 +620,9 @@ pub(crate) fn login(
         )));
     };
     check_inputs(method, inputs)?;
-    let accounts = accounts_of(env)?;
+    let accounts = accounts_of(cfg)?;
     let _lease = accounts.exclusive(&account.id).map_err(refused)?;
-    let cancel = cancel_on_input_closing(env.front, until_stdin_closes)?;
-    let outcome = sign_in(
-        env, &accounts, &provider, &method.id, inputs, format, &cancel,
-    )?;
+    let outcome = signer(&accounts, &provider, &method.id)?;
     if outcome.kind != account.kind {
         return Err(Failed::run(format!(
             "the sign-in made a {} account, and {name} is a {} one",
@@ -510,13 +636,14 @@ pub(crate) fn login(
             outcome.expires_at.clone(),
         )
         .map_err(|error| Failed::run(error.to_string()))?;
-    let line = match format {
-        Format::Json => {
-            serde_json::json!({"account": {"name": name, "id": account.id}}).to_string()
-        }
-        Format::Text => format!("signed in {name}"),
-    };
-    env.front.print(&line).map_err(Failed::run)
+    Ok(Added {
+        name: name.to_owned(),
+        harness: account.harness.clone(),
+        kind: account.kind.clone(),
+        id: account.id.clone(),
+        label: outcome.label.clone(),
+        checked: outcome.checked,
+    })
 }
 
 fn refused(refusal: Refusal) -> Failed {
@@ -526,12 +653,20 @@ fn refused(refusal: Refusal) -> Failed {
 /// `canoa accounts remove NAME`: forgets the credential and the account's state, and the account from canoa.cfg. Nothing is
 /// signed out at the provider.
 pub(crate) fn remove(env: &Env<'_>, name: &str) -> Result<(), Failed> {
-    let account = env
+    remove_with(env.cfg(), name)?;
+    env.front
+        .print(&format!("removed {name}"))
+        .map_err(Failed::run)
+}
+
+/// Removes the account `name`, which no entry may offer and no connection may hold.
+pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
+    let account = cfg
         .config
         .accounts
         .get(name)
         .ok_or_else(|| Failed::usage(format!("no account called {name}")))?;
-    if let Some(entry) = env.config.entries.iter().find(|entry| {
+    if let Some(entry) = cfg.config.entries.iter().find(|entry| {
         matches!(&entry.kind, EntryKind::Harness { accounts, .. } if accounts.iter().any(|offered| offered == name))
     }) {
         return Err(Failed::usage(format!(
@@ -539,22 +674,51 @@ pub(crate) fn remove(env: &Env<'_>, name: &str) -> Result<(), Failed> {
             entry.name
         )));
     }
-    let accounts = accounts_of(env)?;
+    let accounts = accounts_of(cfg)?;
     let lease = accounts.exclusive(&account.id).map_err(refused)?;
-    let before = read_cfg(&env.config_path)?;
-    remove_account(&env.config_path, name)?;
+    let before = read_cfg(cfg.config_path)?;
+    remove_account(cfg.config_path, name)?;
     // The stored credential goes with the account; were it to stay, nothing would name it any more.
     if let Err(error) = accounts.forget_credentials(&account.id) {
-        let _ = write_cfg(&env.config_path, &before);
+        let _ = write_cfg(cfg.config_path, &before);
         return Err(Failed::run(error.to_string()));
     }
     if let Err(error) = accounts.forget_directory(&account.id) {
         tracing::warn!("the directory of the removed account {name} could not be removed: {error}");
     }
     drop(lease);
-    env.front
-        .print(&format!("removed {name}"))
-        .map_err(Failed::run)
+    Ok(())
+}
+
+/// The kinds and the sign-in methods the provider of `harness` lists.
+pub(crate) fn catalog_of(
+    config: &Config,
+    harness: &str,
+) -> Result<(Vec<AccountKindInfo>, Vec<LoginMethodInfo>), Failed> {
+    let provider = provider_for(config, harness)?;
+    let catalog = provider
+        .catalog()
+        .ok_or_else(|| Failed::run("the provider did not list its account kinds"))?;
+    Ok((catalog.kinds.clone(), catalog.logins.clone()))
+}
+
+/// Runs a sign-in whose prompts a [`Relay`] carries, for a caller that shows them itself.
+pub(crate) fn sign_in_relayed(
+    accounts: &Accounts,
+    provider: &kind::Harness,
+    method: &str,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    relay: Arc<Relay>,
+) -> Result<coqui_acp_api::LoginOutcome, Failed> {
+    login::sign_in(
+        accounts,
+        &**provider.provider(),
+        method,
+        inputs,
+        relay,
+        None,
+    )
+    .map_err(|error| Failed::run(error.to_string()))
 }
 
 /// A TOML basic string.
