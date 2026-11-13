@@ -194,3 +194,128 @@ fn a_connection_that_ends_revokes_its_bearers_and_lets_a_waiting_prompt_go() {
     assert!(link.is_closed());
     assert!(link.drain().is_empty());
 }
+
+#[test]
+fn what_the_host_asks_the_app_reaches_neither_the_agent_nor_the_history() {
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use core::time::Duration;
+    use std::sync::Mutex;
+
+    use coqui_transport::Channel as _;
+
+    use super::{Layer, Raw};
+    use crate::config::HistoryConfig;
+    use crate::history::{Recording, Store};
+
+    const ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    const SEALED: &str = "sealed-ciphertext-stand-in";
+    let dir = Dir::new("history");
+    let link = link(&dir, Method::WebCrypto);
+    let store = Arc::new(Store::open(
+        Some(dir.0.join("history")),
+        HistoryConfig::default(),
+    ));
+    let (client, host) = crate::local::pair(1 << 20, Arc::new(AtomicBool::new(false)));
+    // The chain a harness entry has: the wire, the host's own questions, the history, then the relay.
+    let raw = Raw::new(&host, Some(&link));
+    let recording = Recording::new(&raw, &store, "Claude", "claude");
+    let layer = Layer::new(&recording, Some(&link));
+
+    let agent_heard = Mutex::new(Vec::<String>::new());
+    let stop = AtomicBool::new(false);
+    let asked_of_app = Mutex::new(Vec::<String>::new());
+    std::thread::scope(|scope| {
+        // The relay's side that reads the client.
+        scope.spawn(|| {
+            while !stop.load(Ordering::SeqCst) {
+                if let Ok(Some(message)) = layer.receive(Some(Duration::from_millis(20))) {
+                    agent_heard
+                        .lock()
+                        .expect("not poisoned")
+                        .push(String::from_utf8_lossy(&message).into_owned());
+                }
+            }
+        });
+        // The person's app: answers what the host asks it, with a sealed value.
+        scope.spawn(|| {
+            while !stop.load(Ordering::SeqCst) {
+                let Ok(Some(message)) = client.receive(Some(Duration::from_millis(20))) else {
+                    continue;
+                };
+                let Ok(value) = serde_json::from_slice::<Value>(&message) else {
+                    continue;
+                };
+                if value["method"] == "_coqui_acp/secret_request" {
+                    asked_of_app
+                        .lock()
+                        .expect("not poisoned")
+                        .push(value.to_string());
+                    let answer = json!({"jsonrpc": "2.0", "id": value["id"], "result": {"action": "accept", "values": {"password": SEALED}}});
+                    client.send(answer.to_string().as_bytes()).expect("sent");
+                }
+            }
+        });
+        let send = |value: Value| client.send(value.to_string().as_bytes()).expect("sent");
+        let answer = |value: Value| layer.send(value.to_string().as_bytes()).expect("sent");
+        // The relay has read a request before the agent answers it, as it does.
+        let heard = |text: &str| {
+            for _ in 0..200 {
+                if agent_heard
+                    .lock()
+                    .expect("not poisoned")
+                    .iter()
+                    .any(|m| m.contains(text))
+                {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the relay never read {text}");
+        };
+        send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}));
+        heard("initialize");
+        answer(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}));
+        send(
+            json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/work","mcpServers":[]}}),
+        );
+        heard("session/new");
+        answer(json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":ID}}));
+        send(
+            json!({"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":ID,"prompt":[{"type":"text","text":"log in"}]}}),
+        );
+        heard("log in");
+        // The agent's tool is waiting for the person while its turn goes on.
+        let reply = link
+            .ask(
+                "_coqui_acp/secret_request",
+                json!({"sessionId": ID, "requestId": "r1", "message": "Registry login"}),
+            )
+            .expect("the app answered");
+        assert_eq!(reply["values"]["password"], SEALED);
+        answer(
+            json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":ID,"update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"kept as secret_0a1b2c3d"}}}}),
+        );
+        answer(json!({"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}));
+        std::thread::sleep(Duration::from_millis(200));
+        stop.store(true, Ordering::SeqCst);
+    });
+    // The question reached the app, and the answer was kept from the agent, which heard only the client's own messages.
+    assert_eq!(asked_of_app.lock().expect("not poisoned").len(), 1);
+    let heard = agent_heard.lock().expect("not poisoned").join("\n");
+    assert!(heard.contains("session/prompt"), "{heard}");
+    assert!(
+        !heard.contains(SEALED) && !heard.contains("canoa-secret-"),
+        "{heard}"
+    );
+    // The history holds the handle the agent said and nothing of the extension.
+    let kept = store
+        .load("Claude", ID)
+        .expect("kept")
+        .to_string()
+        .expect("written");
+    assert!(kept.contains("secret_0a1b2c3d"), "{kept}");
+    for absent in [SEALED, "canoa-secret-", "secret_request", "Registry login"] {
+        assert!(!kept.contains(absent), "{absent} is in the history: {kept}");
+    }
+}

@@ -543,7 +543,7 @@ impl Link {
     }
 
     /// Asks the app and waits for the person: the `result` of its answer.
-    fn ask(&self, method: &str, params: Value) -> Result<Value, Error> {
+    pub(super) fn ask(&self, method: &str, params: Value) -> Result<Value, Error> {
         if self.is_closed() {
             return Err(Error::Frontend("the person's app is gone"));
         }
