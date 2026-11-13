@@ -186,24 +186,56 @@ Future<void> send(WidgetTester tester, String text) async {
   await settle(tester);
 }
 
-/// Picks [label] from the composer's control [key].
-Future<void> pick(WidgetTester tester, String key, String label) async {
-  await tester.tap(find.byKey(Key(key)));
+/// The items of the model pill's menu ('model-choice') or of its effort submenu ('effort-choice').
+Finder choiceItems(String kind) =>
+    find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key as ValueKey<String>).value.startsWith('$kind='));
+
+/// Opens the model pill, and for the effort its submenu.
+Future<void> _openModelMenu(WidgetTester tester, {required bool effort}) async {
+  await tester.tap(find.byKey(const Key('option-model')));
   await frames(tester);
+  if (effort) {
+    await tester.tap(find.byKey(const Key('option-effort')));
+    await frames(tester);
+  }
+}
+
+/// Picks [label] from the composer's control [key]. The model and effort are one pill: `option-effort` is its submenu.
+Future<void> pick(WidgetTester tester, String key, String label) async {
+  if (key == 'option-effort') {
+    await _openModelMenu(tester, effort: true);
+  } else {
+    await tester.tap(find.byKey(Key(key)));
+    await frames(tester);
+  }
   await tester.tap(find.text(label).last);
   await settle(tester);
 }
 
-/// The labels a control's menu offers, closing it again.
+/// The labels a control's menu offers, closing it again. For `option-model` the models, for `option-effort` the efforts in its
+/// submenu; a mode's menu without its header or the descriptions under each mode.
 Future<List<String>> menuOf(WidgetTester tester, String key) async {
-  await tester.tap(find.byKey(Key(key)));
-  await frames(tester);
-  final items = find.byWidgetPredicate((widget) => widget is PopupMenuItem || widget is CheckedPopupMenuItem);
-  final labels = [
-    for (final item in items.evaluate())
-      for (final text in find.descendant(of: find.byWidget(item.widget), matching: find.byType(Text)).evaluate())
-        (text.widget as Text).data ?? '',
-  ];
+  List<String> firstTexts(Finder items) {
+    final out = <String>[];
+    for (final item in items.evaluate()) {
+      final texts = find.descendant(of: find.byWidget(item.widget), matching: find.byType(Text)).evaluate();
+      if (texts.isNotEmpty) out.add((texts.first.widget as Text).data ?? '');
+    }
+    return out;
+  }
+  final List<String> labels;
+  if (key == 'option-model' || key == 'option-effort') {
+    await _openModelMenu(tester, effort: key == 'option-effort');
+    final kind = key == 'option-model' ? 'model-choice' : 'effort-choice';
+    labels = firstTexts(choiceItems(kind));
+  } else {
+    await tester.tap(find.byKey(Key(key)));
+    await frames(tester);
+    final items = find.byWidgetPredicate(
+      (widget) => (widget is PopupMenuItem || widget is CheckedPopupMenuItem) && widget.key != const Key('mode-header'),
+    );
+    labels = firstTexts(items);
+  }
   await tester.tapAt(const Offset(2, 2));
   await frames(tester);
   return labels;

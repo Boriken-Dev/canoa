@@ -304,8 +304,7 @@ class SessionComposer extends StatelessWidget {
         if (draft) PlaceToggle(store: store, session: session, kit: kit),
       ],
       trailing: [
-        for (final role in const [OptionRole.model, OptionRole.effort])
-          OptionChooser(store: store, session: session, role: role, options: options, seen: seen),
+        ModelEffortChooser(store: store, session: session, options: options, seen: seen),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),
         if (draft) CacheChooser(store: store, session: session),
         if (kit.overlays.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),

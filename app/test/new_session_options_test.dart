@@ -39,7 +39,7 @@ void main() {
     expect(await menuOf(tester, 'option-mode'), modes);
     expect(await menuOf(tester, 'option-model'), ['Default (Opus 5.5)', 'Opus 5.5', 'Fable 5.1', 'Sonnet 5.5', 'Haiku 5.5']);
     expect(await menuOf(tester, 'option-effort'), ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max']);
-    expect(_pill(tester, 'option-model'), 'Default (Opus 5.5)');
+    expect(_pill(tester, 'option-model'), 'Opus 5.5', reason: 'what Default is, once, not Default twice');
     expect(agent.starts, isEmpty, reason: 'looking at the choices starts nothing');
     await finish(tester);
   });
@@ -50,9 +50,9 @@ void main() {
     await _draft(tester, 'Codex');
     expect(await menuOf(tester, 'option-mode'), modes);
     expect(await menuOf(tester, 'option-model'), ['Default', 'GPT-6 Luna', 'GPT-6 Sol']);
-    expect(await menuOf(tester, 'option-effort'), ['Default', 'Low', 'Medium', 'High'], reason: 'the default model, Luna');
+    expect(await menuOf(tester, 'option-effort'), ['Default (Medium)', 'Low', 'Medium', 'High'], reason: 'the default model, Luna');
     await pick(tester, 'option-model', 'GPT-6 Sol');
-    expect(await menuOf(tester, 'option-effort'), ['Default', 'Low', 'High', 'Extra high']);
+    expect(await menuOf(tester, 'option-effort'), ['Default (High)', 'Low', 'High', 'Extra high']);
     await finish(tester);
   });
 
@@ -62,9 +62,9 @@ void main() {
     await _draft(tester, 'Codex');
     await pick(tester, 'option-model', 'GPT-6 Sol');
     await pick(tester, 'option-effort', 'Extra high');
-    expect(_pill(tester, 'option-effort'), 'Extra high');
+    expect(_pill(tester, 'option-model'), 'GPT-6 Sol · Extra high');
     await pick(tester, 'option-model', 'GPT-6 Luna');
-    expect(_pill(tester, 'option-effort'), 'Default');
+    expect(_pill(tester, 'option-model'), 'GPT-6 Luna · Medium', reason: 'back to the default model and its default effort');
     await finish(tester);
   });
 
@@ -83,7 +83,6 @@ void main() {
     await _draft(tester, 'Antigravity');
     expect(await menuOf(tester, 'option-mode'), ['Default', 'Manual', 'Accept edits', 'Plan', 'Bypass']);
     expect(_pill(tester, 'option-model'), 'Model: after start');
-    expect(_pill(tester, 'option-effort'), 'Effort: after start');
     await finish(tester);
   });
 
@@ -91,7 +90,6 @@ void main() {
     await pumpApp(tester, _store());
     await _draft(tester, 'Grok');
     expect(_pill(tester, 'option-model'), 'Model: after start');
-    expect(_pill(tester, 'option-effort'), 'Effort: after start');
     expect(await menuOf(tester, 'option-mode'), ['Default', 'Its other modes: after it has started', 'Bypass']);
     await finish(tester);
   });
@@ -113,7 +111,6 @@ void main() {
     await pumpApp(tester, _store());
     await _draft(tester, 'Scripted');
     expect(_pill(tester, 'option-model'), 'Model: after start');
-    expect(_pill(tester, 'option-effort'), 'Effort: after start');
     final menu = await menuOf(tester, 'option-mode');
     expect(menu, ['Default', 'Its other modes: after it has started', 'Bypass'], reason: "Canoa's own Bypass works with any agent");
     await finish(tester);

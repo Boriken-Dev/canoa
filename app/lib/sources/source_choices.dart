@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import '../chat/agent_events.dart';
 import '../chat/cache_lifetime.dart';
+import '../chat/modes.dart' show choiceLabel;
+import '../chat/session_options.dart' show OptionRole;
 import 'sources.dart';
 
 /// One model a source's provider offers before a session starts, as `canoa options` prints it.
@@ -128,14 +130,21 @@ final class SourceChoices {
     final efforts = chosen?.efforts ?? const <String>[];
     // The provider's own Default entry is what a draft's Default stands for, so it is that and not a second choice.
     final standsFor = models.where((each) => each.id == 'default').firstOrNull;
+    final used = standsFor ?? defaultModel;
+    final shortName = used == null
+        ? null
+        : (used.version ?? used.name.replaceFirstMapped(RegExp(r'^Default \((.*)\)$'), (match) => match[1]!));
+    final defaultEffort = chosen?.defaultEffort;
+    final effortName = defaultEffort == null ? null : choiceLabel(OptionRole.effort, Choice(defaultEffort, defaultEffort));
     return [
       ConfigOption(
-        id: 'model', label: 'Model', current: '', category: 'model', defaultLabel: standsFor?.name,
+        id: 'model', label: 'Model', current: '', category: 'model', defaultLabel: standsFor?.name, defaultName: shortName,
         choices: [for (final each in models) if (each != standsFor) Choice(each.id, each.name)],
       ),
       if (efforts.isNotEmpty)
         ConfigOption(
           id: 'effort', label: 'Effort', current: '', category: 'thought_level',
+          defaultLabel: effortName == null ? null : 'Default ($effortName)', defaultName: effortName,
           choices: [for (final each in efforts) Choice(each, each)],
         ),
     ];

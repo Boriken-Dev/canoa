@@ -112,56 +112,102 @@ String _seenLabel(DateTime? seen, String label) {
   return '$label, as its agent offered on ${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }
 
-/// One of the agent's choices in a role, as a menu: before the agent starts, what its source offered last time and Default;
-/// after, what it offers. A choice waiting for the next turn says so.
-class OptionChooser extends StatelessWidget {
-  const OptionChooser({super.key, required this.store, required this.session, required this.role, required this.options, this.seen});
+/// The agent's model and effort as one pill ("Opus · High"), whose menu lists the models and has the efforts in a submenu. Before
+/// the agent starts it lists what its source offered last time and says what Default is where the source knows it; after, what the
+/// agent offers. A choice waiting for the next turn says so.
+class ModelEffortChooser extends StatelessWidget {
+  const ModelEffortChooser({super.key, required this.store, required this.session, required this.options, this.seen});
 
   final SessionStore store;
   final ChatSession session;
-  final OptionRole role;
   final List<ConfigOption> options;
   final DateTime? seen;
 
+  PendingChoice? _pending(OptionRole role) => session.pending.values.where((choice) => choice.role == role).firstOrNull;
+
+  /// What [role] reads in the pill: its choice, else, before the agent starts, what Default is; null when nothing is known.
+  String? _part(ConfigOption? option, OptionRole role, {required bool always}) {
+    final pending = _pending(role);
+    final current = pending?.value ?? (session.isDraft ? null : option?.current);
+    if (current != null && current.isNotEmpty) return _labelOf(option, current, role);
+    if (!session.isDraft) return null;
+    return option?.defaultName ?? (always && (option != null || pending != null) ? 'Default' : null);
+  }
+
+  void _choose(OptionRole role, ConfigOption? option, String? value) {
+    final pending = _pending(role);
+    if (value == null) {
+      // Default takes back the choice waiting, and sets nothing.
+      if (pending != null) {
+        unawaited(store.choose(session, ConfigOption(id: pending.id, label: option?.label ?? 'Choice', current: '', choices: const []), null));
+      }
+    } else if (option != null) {
+      unawaited(store.choose(session, option, value));
+    }
+  }
+
+  Widget _item(ConfigOption? option, OptionRole role, String? value, String label, String? current, String kind) => MenuItemButton(
+    key: ValueKey('$kind=${value ?? ''}'),
+    leadingIcon: Icon(Icons.check, size: 18, color: value == current ? null : Colors.transparent),
+    onPressed: () => _choose(role, option, value),
+    child: Text(label),
+  );
+
   @override
   Widget build(BuildContext context) {
-    final option = optionIn(options, role);
-    final name = role == OptionRole.model ? 'Model' : 'Effort';
-    final pending = session.pending.values.where((choice) => choice.role == role).firstOrNull;
+    final model = optionIn(options, OptionRole.model), effort = optionIn(options, OptionRole.effort);
+    final pendingModel = _pending(OptionRole.model), pendingEffort = _pending(OptionRole.effort);
     final draft = session.isDraft;
-    if (option == null && pending == null && !draft) return const SizedBox.shrink();
+    final known = model != null || effort != null || pendingModel != null || pendingEffort != null;
+    if (!known && !draft) return const SizedBox.shrink();
     // Nothing is known of this agent's list until it runs: say so, rather than offer a lone Default.
-    if (option == null && pending == null) {
-      return Tooltip(
-        key: Key('option-${role.name}'),
-        message: 'Its ${name.toLowerCase()} choices are listed once the agent has started',
-        child: ComposerPill(label: '$name: after start', icon: role == OptionRole.model ? Icons.memory : Icons.speed, enabled: false),
+    if (!known) {
+      return const Tooltip(
+        key: Key('option-model'),
+        message: 'Its model and effort choices are listed once the agent has started',
+        child: ComposerPill(label: 'Model: after start', icon: Icons.memory, enabled: false),
       );
     }
-    final current = pending?.value ?? (draft ? null : option?.current);
-    final label = current == null ? (draft ? option?.defaultLabel ?? 'Default' : name) : _labelOf(option, current, role);
-    return PopupMenuButton<String?>(
-      key: Key('option-${role.name}'),
-      tooltip: _seenLabel(draft ? seen : null, name),
-      enabled: session.status != SessionStatus.connecting,
-      onSelected: (value) {
-        if (value == null) {
-          // Default takes back the choice waiting, and sets nothing.
-          if (pending != null) {
-            unawaited(store.choose(session, ConfigOption(id: pending.id, label: name, current: '', choices: const []), null));
-          }
-        } else if (option != null) {
-          unawaited(store.choose(session, option, value));
-        }
-      },
-      itemBuilder: (context) => [
-        if (draft) PopupMenuItem<String?>(value: null, child: Text(option?.defaultLabel ?? 'Default')),
-        for (final choice in option?.choices ?? const [])
-          CheckedPopupMenuItem<String?>(value: choice.value, checked: choice.value == current, child: Text(choiceLabel(role, choice))),
+    final parts = [
+      _part(model, OptionRole.model, always: true),
+      _part(effort, OptionRole.effort, always: false),
+    ].whereType<String>().toList();
+    final waiting = (pendingModel != null || pendingEffort != null) && session.status == SessionStatus.working;
+    final label = '${parts.isEmpty ? (draft ? 'Default' : 'Model') : parts.join(' · ')}${waiting ? ' (next turn)' : ''}';
+    final currentModel = pendingModel?.value ?? (draft ? null : model?.current);
+    final currentEffort = pendingEffort?.value ?? (draft ? null : effort?.current);
+    final connecting = session.status == SessionStatus.connecting;
+    return MenuAnchor(
+      menuChildren: [
+        if (draft && (model != null || pendingModel != null))
+          _item(model, OptionRole.model, null, model?.defaultLabel ?? 'Default', currentModel, 'model-choice'),
+        for (final choice in model?.choices ?? const <Choice>[])
+          _item(model, OptionRole.model, choice.value, choiceLabel(OptionRole.model, choice), currentModel, 'model-choice'),
+        if (effort != null || pendingEffort != null) ...[
+          const Divider(height: 1),
+          SubmenuButton(
+            key: const Key('option-effort'),
+            menuChildren: [
+              if (draft) _item(effort, OptionRole.effort, null, effort?.defaultLabel ?? 'Default', currentEffort, 'effort-choice'),
+              for (final choice in effort?.choices ?? const <Choice>[])
+                _item(effort, OptionRole.effort, choice.value, choiceLabel(OptionRole.effort, choice), currentEffort, 'effort-choice'),
+            ],
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Effort'),
+              const SizedBox(width: 24),
+              Text(_part(effort, OptionRole.effort, always: true) ?? '', style: TextStyle(color: Theme.of(context).hintColor)),
+            ]),
+          ),
+        ],
       ],
-      child: ComposerPill(
-        label: pending != null && session.status == SessionStatus.working ? '$label (next turn)' : label,
-        icon: role == OptionRole.model ? Icons.memory : Icons.speed,
+      builder: (context, controller, _) => InkWell(
+        key: const Key('option-model'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: connecting ? null : () => controller.isOpen ? controller.close() : controller.open(),
+        child: Tooltip(
+          message: _seenLabel(draft ? seen : null, 'Model and effort'),
+          child: ComposerPill(label: label, icon: Icons.memory),
+        ),
       ),
     );
   }
@@ -202,6 +248,12 @@ class ModeChooser extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
+        PopupMenuItem<Object?>(
+          key: const Key('mode-header'),
+          enabled: false,
+          height: 28,
+          child: Text('Permissions \u00b7 this session', style: Theme.of(context).textTheme.labelMedium),
+        ),
         if (session.isDraft) const PopupMenuItem<Object?>(value: null, child: Text('Default')),
         // An agent the app knows nothing of lists its modes once it runs; Canoa's own Bypass works with any.
         if (session.isDraft && option == null)
@@ -211,7 +263,16 @@ class ModeChooser extends StatelessWidget {
             value: entry,
             enabled: entry.selectable,
             checked: entry.value == current,
-            child: Text(entry.label),
+            child: entry.description == null
+                ? Text(entry.label)
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(entry.label),
+                      Text(entry.description!, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
+                    ],
+                  ),
           ),
       ],
       child: ComposerPill(

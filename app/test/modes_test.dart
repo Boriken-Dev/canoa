@@ -85,9 +85,9 @@ void main() {
       inOneRow([centre('option-mode'), centre('composer-plus'), tester.getCenter(find.byTooltip('Send'))]);
       expect(centre('option-mode').dx, lessThan(centre('composer-plus').dx));
       await send(tester, 'Say hello');
-      inOneRow([centre('option-mode'), centre('composer-plus'), centre('option-model'), centre('option-effort'), tester.getCenter(find.byTooltip('Send'))]);
+      inOneRow([centre('option-mode'), centre('composer-plus'), centre('option-model'), tester.getCenter(find.byTooltip('Send'))]);
       expect(centre('composer-plus').dx, lessThan(centre('option-model').dx));
-      expect(centre('option-effort').dx, lessThan(tester.getCenter(find.byTooltip('Send')).dx));
+      expect(centre('option-model').dx, lessThan(tester.getCenter(find.byTooltip('Send')).dx));
       expect(centre('option-model').dx, greaterThan(tester.getCenter(find.byKey(const Key('composer'))).dx), reason: 'on the right');
       await finish(tester);
     });

@@ -82,7 +82,20 @@ final class ModeEntry {
   final bool own;
 
   bool get bypass => isBypassMode(value, label);
+
+  /// One line on what the mode does, where its name is one Canoa knows; null for a mode an agent worded itself.
+  String? get description => modeDescriptions[bypass ? 'Bypass' : label];
 }
+
+/// What each mode does, by the name it is shown under.
+const Map<String, String> modeDescriptions = {
+  'Manual': 'Asks before each change or command',
+  'Accept edits': 'Changes files without asking; commands still ask',
+  'Auto': 'Lets the agent decide what needs asking',
+  'Plan': 'Reads and plans; makes no changes',
+  'Bypass': 'Asks for nothing',
+  "Don't ask": 'Refuses what is not already allowed, rather than ask',
+};
 
 /// The modes [option] offers, and Bypass beside them when none of them asks for nothing.
 List<ModeEntry> modeEntries(ConfigOption? option) {
