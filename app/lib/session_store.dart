@@ -2,6 +2,7 @@ import 'dart:async';
 import 'acp/client.dart';
 import 'acp/local_agent.dart' show readLocalFile;
 import 'acp/usage_wire.dart' show UsageNotice;
+import 'package:coqui_acp/secret.dart';
 import 'package:coqui_web/coqui_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -11,7 +12,7 @@ import 'chat/attachments.dart';
 import 'chat/cache_lifetime.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatEntryData, shortLine;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatEntryData, SecretCardEnvironment, shortLine;
 import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
@@ -93,6 +94,46 @@ final class AgentQuestion {
   final AcpElicitation request;
   final Completer<AcpElicitationAnswer> _answer = Completer();
 }
+
+/// A secret prompt of the host, waiting on the person: a request for values or a show of them. [host] is the host's proven identity,
+/// which the answer's binding names. Nothing the person types or is shown passes through the agent's conversation.
+sealed class SecretPrompt {
+  SecretPrompt(this.host);
+  final AcpIdentityId host;
+
+  /// Ends the prompt as cancelled.
+  void cancel();
+}
+
+final class SecretRequestPrompt extends SecretPrompt {
+  SecretRequestPrompt(this.request, super.host);
+  final AcpSecretRequestParams request;
+  final Completer<AcpSecretRequestReply> reply = Completer();
+
+  @override
+  void cancel() {
+    if (!reply.isCompleted) reply.complete(const AcpSecretCancelled());
+  }
+}
+
+final class SecretShowPrompt extends SecretPrompt {
+  SecretShowPrompt(this.open, super.host);
+  final AcpSecretShowOpen open;
+
+  /// The host's second step, once it arrives.
+  final ValueNotifier<AcpSecretShowDeliver?> deliver = ValueNotifier(null);
+  final Completer<AcpSecretShowOpened> ready = Completer();
+  final Completer<bool> done = Completer();
+
+  @override
+  void cancel() {
+    if (!ready.isCompleted) ready.complete(const AcpSecretShowOpened.cancelled());
+    if (!done.isCompleted) done.complete(false);
+  }
+}
+
+/// This app's identity for secret prompts: what binds its answers, what it knows of other identities, and what it offers a host.
+typedef SecretIdentity = ({AcpSecretProver prover, AcpSecretVerifier verifier, AcpSecretsCapability offer});
 
 /// The most messages one conversation holds waiting for its turn to end.
 const int maxQueued = 20;
@@ -185,6 +226,9 @@ class ChatSession {
 
   /// The agent's questions waiting for the person, oldest first.
   final List<AgentQuestion> pendingQuestions = [];
+
+  /// The host's requests for secrets, and shows of them, waiting for the person, oldest first.
+  final List<SecretPrompt> pendingSecrets = [];
 
   /// What the agent lets a person choose, its plan, its commands and what it has used, each as it last said.
   List<ConfigOption> options = const [];
@@ -283,7 +327,7 @@ class ChatSession {
   String? queueHeld;
 
   /// Whether something here waits for the person's answer.
-  bool get needsYou => pendingPermissions.isNotEmpty || pendingQuestions.isNotEmpty;
+  bool get needsYou => pendingPermissions.isNotEmpty || pendingQuestions.isNotEmpty || pendingSecrets.isNotEmpty;
 
   final String id;
   String title;
@@ -320,7 +364,7 @@ String titleFrom(String text) {
 
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
-class SessionStore extends ChangeNotifier {
+class SessionStore extends ChangeNotifier implements AgentSecrets {
   SessionStore({this.recorder, this.ledger, this.rules, this.defaultMode, this.bypassOnceOnly = false,
       this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
       : readFile = readFile ?? readLocalFile;
@@ -1054,6 +1098,105 @@ class SessionStore extends ChangeNotifier {
     return question._answer.future;
   }
 
+  /// This app's identity for secret prompts. Without one the host is offered nothing and every prompt is cancelled.
+  SecretIdentity? secretIdentity;
+
+  @override
+  AcpSecretsCapability? get secretsCapability => secretIdentity?.offer;
+
+  /// The conversation the client [from] serves under the session id [remote], and the host's identity, which the proven peer id of
+  /// [from] is: a program this app started has none, so it can ask for no secret.
+  (ChatSession, AcpIdentityId)? _secretTarget(String remote, VerifiedAgent from) {
+    final identity = secretIdentity;
+    if (identity == null) return null;
+    final AcpIdentityId host;
+    try {
+      host = AcpIdentityId.parse(from.peerId);
+    } on AcpSecretException {
+      return null;
+    }
+    for (final session in _sessions) {
+      if (session.remoteSessionId == remote && identical(_verifiedClients[session.id], from)) {
+        if (session.pendingSecrets.length >= maxPendingQuestions) return null;
+        identity.verifier.trust(host);
+        return (session, host);
+      }
+    }
+    return null;
+  }
+
+  /// What the secret cards of [prompt] check with and bind to.
+  SecretCardEnvironment secretEnvironment(SecretPrompt prompt) {
+    final identity = secretIdentity!;
+    return SecretCardEnvironment(prover: identity.prover, verifier: identity.verifier, expected: prompt.host, host: 'Canoa');
+  }
+
+  @override
+  Future<AcpSecretRequestReply> askSecret(AcpSecretRequestParams request, VerifiedAgent from) {
+    final target = _secretTarget(request.context.sessionId, from);
+    if (target == null) return Future.value(const AcpSecretCancelled());
+    final prompt = SecretRequestPrompt(request, target.$2);
+    target.$1.pendingSecrets.add(prompt);
+    _needs(target.$1, AttentionKind.question);
+    notifyListeners();
+    return prompt.reply.future;
+  }
+
+  @override
+  Future<AcpSecretShowOpened> openSecretShow(AcpSecretShowOpen open, VerifiedAgent from) {
+    final target = _secretTarget(open.context.sessionId, from);
+    if (target == null) return Future.value(const AcpSecretShowOpened.cancelled());
+    final prompt = SecretShowPrompt(open, target.$2);
+    target.$1.pendingSecrets.add(prompt);
+    _needs(target.$1, AttentionKind.question);
+    notifyListeners();
+    return prompt.ready.future;
+  }
+
+  @override
+  Future<bool> deliverSecretShow(AcpSecretShowDeliver deliver, VerifiedAgent from) {
+    final target = _secretTarget(deliver.sessionId, from);
+    // A delivery nobody is waiting for, from another connection, or for a show the person has not agreed to look at, is refused.
+    if (target != null) {
+      for (final prompt in target.$1.pendingSecrets) {
+        if (prompt is SecretShowPrompt &&
+            prompt.ready.isCompleted &&
+            prompt.deliver.value == null &&
+            prompt.host == target.$2 &&
+            prompt.open.context.requestId == deliver.requestId) {
+          prompt.deliver.value = deliver;
+          return prompt.done.future;
+        }
+      }
+    }
+    throw const AcpSecretException(AcpSecretFailure.malformed, 'no show is waiting for this');
+  }
+
+  /// The person's answer to [prompt], a request of [session]'s.
+  void answerSecret(ChatSession session, SecretRequestPrompt prompt, AcpSecretRequestReply reply) {
+    if (!session.pendingSecrets.remove(prompt)) return;
+    if (!prompt.reply.isCompleted) prompt.reply.complete(reply);
+    notifyListeners();
+  }
+
+  /// The person's answer to the open step of [prompt], a show of [session]'s. A show that is not going ahead ends here.
+  void readySecretShow(ChatSession session, SecretShowPrompt prompt, AcpSecretShowOpened reply) {
+    if (!session.pendingSecrets.contains(prompt)) return;
+    if (!prompt.ready.isCompleted) prompt.ready.complete(reply);
+    if (reply.recipient == null) {
+      session.pendingSecrets.remove(prompt);
+      if (!prompt.done.isCompleted) prompt.done.complete(false);
+    }
+    notifyListeners();
+  }
+
+  /// The person closed [prompt], a show of [session]'s, having seen the values or not.
+  void finishSecretShow(ChatSession session, SecretShowPrompt prompt, bool shown) {
+    if (!session.pendingSecrets.remove(prompt)) return;
+    if (!prompt.done.isCompleted) prompt.done.complete(shown);
+    notifyListeners();
+  }
+
   /// The person's answer to the oldest of [session]'s questions.
   void answerQuestion(ChatSession session, AcpElicitationAnswer answer) {
     if (session.pendingQuestions.isEmpty) return;
@@ -1168,6 +1311,14 @@ class SessionStore extends ChangeNotifier {
     }
     session.pendingPermissions.clear();
     session.pendingQuestions.clear();
+    _cancelSecrets(session);
+  }
+
+  void _cancelSecrets(ChatSession session) {
+    for (final prompt in session.pendingSecrets) {
+      prompt.cancel();
+    }
+    session.pendingSecrets.clear();
   }
 
   /// Marks every tool line still waiting or running as stopped, for a session opened again, whose earlier run ended with the
@@ -1193,6 +1344,7 @@ class SessionStore extends ChangeNotifier {
       question._answer.complete(const AcpElicitCancel());
     }
     session.pendingQuestions.clear();
+    _cancelSecrets(session);
   }
 
   /// A session over a browser provider's connection, which has no endpoint of Canoa's own.

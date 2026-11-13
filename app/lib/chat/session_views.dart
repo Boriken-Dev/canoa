@@ -83,6 +83,42 @@ class SessionQuestionCard extends StatelessWidget {
   );
 }
 
+/// The oldest secret prompt the host has for [session]: a form whose secret fields are sealed to the host's key, or values it
+/// shows. What is typed or shown stays in the card and the answer goes to the host's connection, never into the conversation.
+class SessionSecretCard extends StatelessWidget {
+  const SessionSecretCard({super.key, required this.store, required this.session});
+
+  final SessionStore store;
+  final ChatSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final prompt = session.pendingSecrets.first;
+    final more = session.pendingSecrets.length - 1;
+    final environment = store.secretEnvironment(prompt);
+    return switch (prompt) {
+      SecretRequestPrompt() => SecretRequestCard(
+        key: ValueKey('secret-${prompt.request.context.requestId}'),
+        request: prompt.request,
+        environment: environment,
+        agent: session.agent,
+        more: more,
+        onReply: (reply) => store.answerSecret(session, prompt, reply),
+      ),
+      SecretShowPrompt() => SecretShowCard(
+        key: ValueKey('secret-${prompt.open.context.requestId}'),
+        open: prompt.open,
+        environment: environment,
+        deliver: prompt.deliver,
+        agent: session.agent,
+        more: more,
+        onReady: (reply) => store.readySecretShow(session, prompt, reply),
+        onDone: (shown) => store.finishSecretShow(session, prompt, shown),
+      ),
+    };
+  }
+}
+
 /// The messages [session] holds for when its turn ends.
 class SessionQueuePanel extends StatelessWidget {
   const SessionQueuePanel({super.key, required this.store, required this.session});

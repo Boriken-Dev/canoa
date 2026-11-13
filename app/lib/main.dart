@@ -804,14 +804,14 @@ class _CanoaAppState extends State<CanoaApp> {
           ? await connectBrowserAcpOverPipe(
               listening.url, pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
-              decider: store.askPermission, elicitor: store.askQuestion,
+              decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
               initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
             )
           : await connectBrowserAcp(
               chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
               pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
-              decider: store.askPermission, elicitor: store.askQuestion,
+              decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
               initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
             );
       starting.client = client;
@@ -946,7 +946,7 @@ class _CanoaAppState extends State<CanoaApp> {
             ? await connectBrowserAcpOverPipe(
                 endpoint.toString(), pinnedPeerId: entry.peerId, method: method,
                 timeout: Duration(seconds: config.connectTimeout),
-                decider: store.askPermission, elicitor: store.askQuestion,
+                decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
                 initializeMeta: cacheMeta,
               )
             : await connectBrowserAcp(
@@ -957,7 +957,7 @@ class _CanoaAppState extends State<CanoaApp> {
                 ),
                 pinnedPeerId: entry.peerId, method: method,
                 timeout: Duration(seconds: config.connectTimeout),
-                decider: store.askPermission, elicitor: store.askQuestion,
+                decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
                 initializeMeta: cacheMeta,
               );
       case SessionPlace.browser:
@@ -1023,7 +1023,7 @@ class _CanoaAppState extends State<CanoaApp> {
       client = await connectBrowserAcp(
         endpoints, pinnedPeerId: pinnedPeerId, method: target.method,
         timeout: Duration(seconds: config.connectTimeout),
-        decider: store.askPermission, elicitor: store.askQuestion,
+        decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
       );
     } catch (_) {
       if (made != null) await _unmake(worktrees!, made);
@@ -1634,6 +1634,7 @@ class _ConversationState extends State<_Conversation> {
         if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session),
         if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),
+        if (session.pendingSecrets.isNotEmpty) SessionSecretCard(store: widget.store, session: session),
         chat.UsageFooter(text: chat.describeUsage(session.usage, spend: session.spend)),
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),

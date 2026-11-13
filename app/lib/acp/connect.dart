@@ -28,6 +28,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
   WebDialer? webSocketDialer,
   AgentDecider? decider,
   AgentElicitor? elicitor,
+  AgentSecrets? secrets,
   Map<String, Object?> initializeMeta = const {},
 }) async {
   return _verifiedAcp(
@@ -42,6 +43,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
     timeout: timeout,
     decider: decider,
     elicitor: elicitor,
+    secrets: secrets,
     initializeMeta: initializeMeta,
   );
 }
@@ -56,6 +58,7 @@ Future<VerifiedAgent> connectVerifiedAcpOverPipe(
   Duration timeout = const Duration(seconds: 10),
   AgentDecider? decider,
   AgentElicitor? elicitor,
+  AgentSecrets? secrets,
   Map<String, Object?> initializeMeta = const {},
 }) async => _verifiedAcp(
   await openPipeChannel(pipe, timeout: timeout),
@@ -64,6 +67,7 @@ Future<VerifiedAgent> connectVerifiedAcpOverPipe(
   timeout: timeout,
   decider: decider,
   elicitor: elicitor,
+  secrets: secrets,
   initializeMeta: initializeMeta,
 );
 
@@ -74,6 +78,7 @@ Future<VerifiedAgent> _verifiedAcp(
   required Duration timeout,
   AgentDecider? decider,
   AgentElicitor? elicitor,
+  AgentSecrets? secrets,
   Map<String, Object?> initializeMeta = const {},
 }) async {
   final connection = StagedChannel(source);
@@ -84,6 +89,7 @@ Future<VerifiedAgent> _verifiedAcp(
     verificationTimeout: timeout,
     decider: decider,
     elicitor: elicitor,
+    secrets: secrets,
     initializeMeta: initializeMeta,
   );
   try {

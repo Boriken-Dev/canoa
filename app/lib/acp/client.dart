@@ -5,9 +5,11 @@ import 'package:coqui_acp/page.dart';
 import 'package:coqui_web/coqui_web.dart';
 
 import '../chat/agent_events.dart';
+import 'secret_wire.dart';
 import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
+export 'secret_wire.dart' show AgentSecrets;
 
 /// A proven peer, and the channel that keeps everything after the proof with that peer.
 final class VerifiedPeer {
@@ -135,6 +137,7 @@ final class VerifiedAgent {
     AgentElicitor? elicitor,
     Map<String, Object?> initializeMeta = const {},
     ProfileApprover? approver,
+    AgentSecrets? secrets,
   }) async {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
@@ -146,10 +149,16 @@ final class VerifiedAgent {
       final proven = actual.channel;
       final identity = AgentIdentity();
       final usage = UsageWire(proven.send, initializeMeta: initializeMeta, approver: approver);
-      return VerifiedAgent._(
+      // Only a host whose peer id was proven can ask for a secret: the answer is bound to that identity, and a program this app
+      // started, or a provider, has none.
+      final secretWire = secrets == null ? null : SecretWire(proven.send, secrets);
+      final client = VerifiedAgent._(
         (decider, elicitor) => AcpClient(
-          incoming: proven.messages.where((message) => !usage.answersApproval(message)).map(identity._inspect).map(usage.incoming),
-          send: (message) => proven.send(usage.outgoing(message)),
+          incoming: proven.messages
+              .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false))
+              .map(identity._inspect)
+              .map(usage.incoming),
+          send: (message) => proven.send(_withOffer(secretWire, usage.outgoing(message))),
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,
@@ -162,11 +171,15 @@ final class VerifiedAgent {
         decider,
         elicitor: elicitor,
       );
+      secretWire?.agent = client;
+      return client;
     } catch (_) {
       await channel.close();
       rethrow;
     }
   }
+
+  static String _withOffer(SecretWire? wire, String message) => wire == null ? message : wire.outgoing(message);
 
   /// A child of this app, speaking ACP on its standard streams. It is the person's own program, so nothing needs proving.
   factory VerifiedAgent.fromChild({

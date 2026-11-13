@@ -12,6 +12,7 @@ Future<VerifiedAgent> connectBrowserAcp(
   Duration timeout = const Duration(seconds: 10),
   AgentDecider? decider,
   AgentElicitor? elicitor,
+  AgentSecrets? secrets,
   Map<String, Object?> initializeMeta = const {},
 }) async {
   final why = await browserMethodUnavailable(method);
@@ -19,7 +20,7 @@ Future<VerifiedAgent> connectBrowserAcp(
   return connectVerifiedAcp(
     endpoints, expectedPeerId: pinnedPeerId,
     verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, method),
-    timeout: timeout, decider: decider, elicitor: elicitor, initializeMeta: initializeMeta,
+    timeout: timeout, decider: decider, elicitor: elicitor, secrets: secrets, initializeMeta: initializeMeta,
   );
 }
 
@@ -31,6 +32,7 @@ Future<VerifiedAgent> connectBrowserAcpOverPipe(
   Duration timeout = const Duration(seconds: 10),
   AgentDecider? decider,
   AgentElicitor? elicitor,
+  AgentSecrets? secrets,
   Map<String, Object?> initializeMeta = const {},
 }) async {
   final why = await browserMethodUnavailable(method);
@@ -38,7 +40,7 @@ Future<VerifiedAgent> connectBrowserAcpOverPipe(
   return connectVerifiedAcpOverPipe(
     pipe, expectedPeerId: pinnedPeerId,
     verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, method),
-    timeout: timeout, decider: decider, elicitor: elicitor, initializeMeta: initializeMeta,
+    timeout: timeout, decider: decider, elicitor: elicitor, secrets: secrets, initializeMeta: initializeMeta,
   );
 }
 
