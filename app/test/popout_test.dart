@@ -5,7 +5,7 @@ import 'dart:async';
 import 'package:canoa/popout/popout_hub.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show Settlement;
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PermissionCard, PermissionChoice;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PermissionCard;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -23,7 +23,6 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 300));
 }
 
-Finder _choice(String name) => find.descendant(of: find.byType(PermissionCard), matching: find.widgetWithText(PermissionChoice, name));
 
 /// A conversation with a turn running and the agent waiting on an edit, in a store whose pop-outs are the test's.
 Future<(ScriptedAgent, ChatSession, SessionStore, PopoutHub, FakeWindows)> _running(WidgetTester tester) async {
@@ -83,7 +82,7 @@ void main() {
     expect(windows.opened, hasLength(2));
     await showWindow(tester, windows.opened.last);
     expect(find.byType(PermissionCard), findsOneWidget);
-    await tester.tap(_choice('Yes'));
+    await tester.tap(find.byKey(const Key('permission-primary')));
     await _settle(tester);
     expect(agent.answers().map((m) => m['id']), [5]);
     expect(agent.answerTo(5)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
@@ -114,7 +113,7 @@ void main() {
 
     // The main window answers; before the window has been told, its person answers too.
     store.choosePermission(session, session.pendingPermissions.first.options.first);
-    await tester.tap(_choice('No'));
+    await tester.tap(find.byKey(const Key('permission-deny')));
     await _settle(tester);
     expect(agent.answers(), hasLength(1));
     expect(agent.answerTo(5)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
@@ -130,7 +129,7 @@ void main() {
     await showWindow(tester, windows.opened.single);
     expect(find.textContaining('1 more'), findsOneWidget);
 
-    await tester.tap(_choice('Yes'));
+    await tester.tap(find.byKey(const Key('permission-primary')));
     await _settle(tester);
     expect(agent.answerTo(5)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
     expect(agent.answerTo(6), isNull);

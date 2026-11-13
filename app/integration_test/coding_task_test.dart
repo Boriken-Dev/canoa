@@ -34,6 +34,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 import '../test/fixtures/examples.dart';
+import '../test/fixtures/permission_answers.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:canoa/chat/session_views.dart';
 
@@ -199,10 +200,7 @@ void main() {
 
     bool showing(Finder finder) => finder.evaluate().isNotEmpty;
     final composer = find.descendant(of: find.byKey(const Key('composer')), matching: find.byType(TextField));
-    final question = find.byType(PermissionCard);
-    // The agent's own option of that kind, under whatever name it gave it.
-    Finder answer(String kind) =>
-        find.descendant(of: question, matching: find.byWidgetPredicate((widget) => widget is PermissionChoice && widget.option.kind == kind));
+    final question = find.byKey(const Key('permission-card'));
     final working = find.byTooltip('Stop');
 
     /// Picks [choice] from the composer's control [key].
@@ -282,7 +280,7 @@ void main() {
           } else if (refusing) {
             refused++;
           }
-          await tester.tap(answer(refusing ? 'reject_once' : 'allow_once').first);
+          await answerKind(tester, refusing ? 'reject_once' : 'allow_once');
           await tester.pump(const Duration(milliseconds: 300));
           continue;
         }

@@ -20,6 +20,29 @@ Future<void> answerWith(WidgetTester tester, String name) async {
   await tester.pump();
 }
 
+/// Taps the answer of [kind] by what it is, whatever the agent named it: Deny for `reject_once`; the one-time answer is the primary
+/// where the agent offered no "always", else in the menu.
+Future<void> answerKind(WidgetTester tester, String kind) async {
+  if (kind == 'reject_once') {
+    await tester.tap(find.byKey(const Key('permission-deny')));
+    await tester.pump();
+    return;
+  }
+  if (find.byKey(const Key('permission-more')).evaluate().isNotEmpty) {
+    await _openMenu(tester);
+    final entry = find.byKey(Key('answer-$kind'));
+    if (entry.evaluate().isNotEmpty) {
+      await tester.tap(entry);
+      await tester.pump();
+      return;
+    }
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pump();
+  }
+  await tester.tap(find.byKey(const Key('permission-primary')));
+  await tester.pump();
+}
+
 /// Every answer the card offers, in the order it shows them: Deny, the primary, then the menu's.
 Future<List<String>> offered(WidgetTester tester) async {
   String first(Finder from) => (find.descendant(of: from, matching: find.byType(Text)).evaluate().first.widget as Text).data ?? '';

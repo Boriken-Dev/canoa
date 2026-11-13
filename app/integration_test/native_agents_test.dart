@@ -21,7 +21,7 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
+import '../test/fixtures/permission_answers.dart';
 
 final String? _bin = Platform.environment['CANOA_TEST_STANDIN_BIN'];
 final String? _record = Platform.environment['STANDIN_RECORD'];
@@ -87,11 +87,8 @@ void main() {
       await tester.enterText(composer, text);
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
-      final allow = find.descendant(
-          of: find.byType(PermissionCard),
-          matching: find.byWidgetPredicate((widget) => widget is PermissionChoice && widget.option.kind == 'allow_once'));
-      await until(() => showing(allow), 'the $label question');
-      await tester.tap(allow.first);
+      await until(() => showing(find.byKey(const Key('permission-card'))), 'the $label question');
+      await answerKind(tester, 'allow_once');
       await until(() => store.selected?.messages.any((message) => message.text.contains('Done: $text')) ?? false,
           'the $label answer');
       await tester.pumpAndSettle();

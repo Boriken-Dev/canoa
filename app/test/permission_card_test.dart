@@ -1,6 +1,6 @@
-// The permission card's layout: a chip saying it needs the person, a title that asks the question with a reason under it, the diff
-// or the command inline at full width, Deny beside a split primary button (the agent's "always", the one-time answer in its menu,
-// key hints on both), and a sentence saying what "always" does.
+// What reaches the permission card from the store and what comes back: the question and the reason a request carries, the edit's
+// diff or the command inline, the keys Canoa binds, and each answer reaching the agent. The card's own layout is tested in
+// coqui_acp_chat_ui.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -135,12 +135,6 @@ void main() {
     expect(tester.getTopLeft(reason).dy, greaterThan(tester.getBottomLeft(find.text('Allow Claude to edit calc.js?')).dy - 1));
   });
 
-  testWidgets('without a reason there is no line for one', (tester) async {
-    await _waiting(tester, description: null);
-    expect(find.text('Allow Claude to edit calc.js?'), findsOneWidget);
-    expect(find.text('Path is outside allowed working directories'), findsNothing);
-  });
-
   testWidgets('an edit shows its diff inline, across the card\'s width', (tester) async {
     await _waiting(tester);
     final diff = find.byType(DiffView);
@@ -157,16 +151,6 @@ void main() {
     final command = find.byKey(const Key('permission-detail'));
     expect(find.descendant(of: command, matching: find.textContaining('npm test -- --run src/calc.test.js')), findsOneWidget);
     expect(tester.getSize(command).width, greaterThan(tester.getSize(find.byKey(const Key('permission-card'))).width - 40));
-  });
-
-  testWidgets('Deny and a split primary: the agent\'s always, with the one-time answer in its menu', (tester) async {
-    await _waiting(tester);
-    expect(find.byKey(const Key('permission-deny')), findsOneWidget);
-    expect(find.descendant(of: find.byKey(const Key('permission-primary')), matching: find.text('Always allow')), findsOneWidget);
-    expect(find.byKey(const Key('permission-more')), findsOneWidget);
-    expect(find.text('Allow once'), findsNothing, reason: 'it is in the menu until that is open');
-    await _openMore(tester);
-    expect(find.text('Allow once'), findsOneWidget);
   });
 
   testWidgets('the primary answers always, Deny refuses, the menu\'s entry allows once', (tester) async {
@@ -197,20 +181,6 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('permission-deny')), matching: find.text('Ctrl+Shift+R')), findsOneWidget);
     await _openMore(tester);
     expect(find.descendant(of: find.byKey(const Key('answer-allow_once')), matching: find.text('Ctrl+Shift+A')), findsOneWidget);
-  });
-
-  testWidgets('a sentence says what always does for this agent', (tester) async {
-    await _waiting(tester);
-    expect(find.textContaining('An "always" answer is remembered by Claude, not by Canoa'), findsOneWidget);
-  });
-
-  testWidgets('with no always on offer the primary allows once, and there is no menu', (tester) async {
-    final (agent, _) = await _waiting(tester, options: [_options[1], _options[2]]);
-    expect(find.byKey(const Key('permission-more')), findsNothing);
-    expect(find.textContaining('An "always" answer'), findsNothing);
-    await tester.tap(find.descendant(of: find.byKey(const Key('permission-primary')), matching: find.text('Allow once')));
-    await _settle(tester);
-    expect(agent.answerTo(7)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
   });
 
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {

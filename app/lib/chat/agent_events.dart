@@ -35,6 +35,7 @@ export 'package:coqui_acp_chat/coqui_acp_chat.dart'
         UsageSpend,
         UsageSupport,
         UsageUnit,
+        describeToolDiff,
         parseCommands,
         parsePlan,
         planItems,

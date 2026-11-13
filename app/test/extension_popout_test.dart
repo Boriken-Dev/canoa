@@ -11,7 +11,7 @@ import 'package:canoa/popout/popout_hub.dart';
 import 'package:canoa/popout/popout_launch.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView, MemoryViewLink;
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PermissionCard, PermissionChoice;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PermissionCard;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -161,7 +161,7 @@ void main() {
     expect(view.session.pendingPermissions, hasLength(1), reason: 'the request that waited is shown in the window');
     expect(session.status, SessionStatus.working, reason: 'popping out does not end the turn');
 
-    await tester.tap(find.widgetWithText(PermissionChoice, 'Yes'));
+    await tester.tap(find.byKey(const Key('permission-primary')));
     await _settle(tester);
     expect(agent.answers().map((m) => m['id']), [5], reason: 'the agent hears one answer');
     expect(session.pendingPermissions, isEmpty);

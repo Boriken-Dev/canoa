@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:coqui_acp/coqui_acp.dart' show AcpSessionInfo, AcpSessionPage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../selectable.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
-import 'permission_card.dart';
 import 'remember_dialog.dart';
 
 /// What Canoa calls itself in the sentences of the package's cards.
@@ -16,6 +16,12 @@ const String appName = 'Canoa';
 /// A session's entries as the transcript reads them.
 extension SessionEntries on ChatSession {
   List<ChatEntryData> get entries => messages;
+}
+
+/// The keys that answer a card from anywhere in the window (`chord` in main.dart binds them), as this platform writes them.
+Map<String, String> get answerKeys {
+  final mac = defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.iOS;
+  return mac ? const {'reject_once': '\u2318\u21E7R', 'allow_once': '\u2318\u21E7A'} : const {'reject_once': 'Ctrl+Shift+R', 'allow_once': 'Ctrl+Shift+A'};
 }
 
 /// What an agent is waiting on in [session], with the answers it offers and, where a folder is known, Canoa's own "Always allow
@@ -34,7 +40,7 @@ class SessionPermissionCard extends StatelessWidget {
     final folder = session.cwd ?? '';
     final canRemember = question.subject != null && folder.isNotEmpty;
     final task = question.task;
-    return SessionRequestCard(
+    return PermissionCard(
       agent: task == null ? session.agent : (shortLine(task.source) ?? session.agent),
       title: question.title,
       reason: question.reason,
@@ -45,6 +51,7 @@ class SessionPermissionCard extends StatelessWidget {
       forPerson: question.forPerson,
       more: session.pendingPermissions.length - 1,
       host: appName,
+      answerHints: answerKeys,
       onChoose: (option) => store.choosePermission(session, option),
       onCancel: () => store.cancelPermission(session),
       notes: [
