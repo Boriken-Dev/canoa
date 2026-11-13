@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
@@ -16,3 +18,5 @@ Future<String> pairBrowserByPin(WebChannel channel, String pin) async {
   await channel.close();
   throw const MethodUnavailable(PeerMethod.noise, _native);
 }
+
+Future<({Uint8List spki, Future<Uint8List> Function(Uint8List message) sign})?> browserSecretSigner() async => null;

@@ -20,6 +20,14 @@ final class WebCryptoIdentity {
   final String publicKey;
   final web.CryptoKey privateKey;
 
+  /// The key's SubjectPublicKeyInfo.
+  Uint8List get spki => un64(publicKey, spkiLength);
+
+  /// The ECDSA (P-256, SHA-256) signature of [message], 64 bytes as IEEE P1363, made inside WebCrypto: the private key is used and
+  /// never read. It signs what a caller gives it, so only code that is told what it signs may hold it.
+  Future<Uint8List> sign(Uint8List message) async =>
+      bytesOfBuffer(await subtle().sign(Algorithm(name: 'ECDSA', hash: 'SHA-256'), privateKey, js(message)).toDart);
+
   /// The stored object, which holds the same four members the key's first home did.
   JSObject toStored() => JSObject()
     ..['method'] = 'webcrypto'.toJS

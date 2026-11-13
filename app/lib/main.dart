@@ -21,6 +21,7 @@ import 'acp/pipe_channel.dart' show isPipeUrl;
 import 'acp/provider_connect.dart';
 import 'acp/client.dart';
 import 'acp/local_agent.dart';
+import 'acp/secret_identity.dart';
 import 'desktop/child_flag.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -1178,6 +1179,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.choicesLoader = _askChoices;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
+    if (store.secretIdentity == null) unawaited(_loadSecretIdentity());
     unawaited(store.restoreDrafts((label) =>
         _sources.where((source) => source.label == label).firstOrNull));
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
@@ -1202,6 +1204,16 @@ class _CanoaAppState extends State<CanoaApp> {
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
+  }
+
+  /// The identity secret prompts are bound with, once this page's own key can be used: until then a host is offered nothing.
+  Future<void> _loadSecretIdentity() async {
+    try {
+      final identity = await browserSecretIdentity();
+      if (mounted && store.secretIdentity == null) store.secretIdentity = identity;
+    } catch (_) {
+      // No key, no secret prompts: the connection itself reports a key that cannot be used.
+    }
   }
 
   @override

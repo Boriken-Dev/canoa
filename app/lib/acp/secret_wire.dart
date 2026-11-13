@@ -5,6 +5,9 @@ import 'package:coqui_acp/secret.dart';
 
 import 'client.dart' show VerifiedAgent;
 
+/// This app's identity for secret prompts: what binds its answers, what it knows of other identities, and what it offers a host.
+typedef SecretIdentity = ({AcpSecretProver prover, AcpSecretVerifier verifier, AcpSecretsCapability offer});
+
 /// What the host's secret prompts reach: a request for values, a show of values and the show's delivery, answered from the person's
 /// own screen. The answers go back to the host on the connection that carried the question, never into the agent's conversation.
 abstract interface class AgentSecrets {

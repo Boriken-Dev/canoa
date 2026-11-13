@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
@@ -20,3 +22,7 @@ Future<String> localBrowserPeerId(PeerMethod method) => platform.localBrowserPee
 
 /// Pairs this browser's Noise key by a typed PIN on [channel], and answers the id the other machine proved.
 Future<String> pairBrowserByPin(WebChannel channel, String pin) => platform.pairBrowserByPin(channel, pin);
+
+/// What signs secret bindings for this page's own WebCrypto identity, or null where this build has no peer key of its own to sign with
+/// (a native build) or no WebCrypto. Secret prompts are then not offered to a host.
+Future<({Uint8List spki, Future<Uint8List> Function(Uint8List message) sign})?> browserSecretSigner() => platform.browserSecretSigner();

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'acp/client.dart';
 import 'acp/delegate.dart';
 import 'acp/local_agent.dart' show readLocalFile;
+import 'acp/secret_wire.dart' show SecretIdentity;
 import 'acp/usage_wire.dart' show UsageNotice;
 import 'package:coqui_acp/secret.dart';
 import 'package:coqui_web/coqui_web.dart';
@@ -25,6 +26,7 @@ import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
 
 export 'acp/delegate.dart' show DelegateTask, DelegateTasks, TaskPhase;
+export 'acp/secret_wire.dart' show SecretIdentity;
 export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
 export 'ledger/session_ledger.dart' show SessionPlace;
@@ -148,9 +150,6 @@ final class SecretShowPrompt extends SecretPrompt {
     if (!done.isCompleted) done.complete(false);
   }
 }
-
-/// This app's identity for secret prompts: what binds its answers, what it knows of other identities, and what it offers a host.
-typedef SecretIdentity = ({AcpSecretProver prover, AcpSecretVerifier verifier, AcpSecretsCapability offer});
 
 /// The most messages one conversation holds waiting for its turn to end.
 const int maxQueued = 20;
