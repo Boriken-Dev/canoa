@@ -70,6 +70,12 @@ Bypass is on, the mode control shows in the accent colour and a banner and a mar
 **Leave Bypass** ends it in one action. It is the chat's answer to the agent's requests and nothing else: it never reaches the
 browser extension's grants for pages, tabs or tools, which stay [their own](acp-permissions.md#independent-browser-grants).
 
+**The card.** A request waiting is a card in the conversation under a "Needs your input" chip. Its title asks the question
+("Allow Claude to edit calc.js?") with the reason the agent gave under it, and what it would do sits below at the card's full
+width: an edit as a diff, a command or other input as text. **Deny** and a split primary button end it: the primary is the
+agent's "always" answer where it offers one (else its allow-once), and its menu holds the allow-once answer and anything else
+the agent offers. Ctrl+Shift+A allows once and Ctrl+Shift+R denies from anywhere in the window; the hints show on a wide card.
+
 **Always allow here.** A card for a command, a change to one file or an MCP tool also offers a button that names its scope,
 `Always allow here: <folder>`, beside the agent's own answers (and only when the agent offers an answer that allows once). It
 opens the rule to read before anything is kept:
