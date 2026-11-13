@@ -230,7 +230,10 @@ fn an_overlay_md_applies_as_the_overlay_cfg_and_context_md_form_does() {
         skill,
     ])
     .expect("overlay.cfg");
-    assert_eq!(md.profile.contexts, [Context::TemplateBody(body.to_owned())]);
+    assert_eq!(
+        md.profile.contexts,
+        [Context::TemplateBody(body.to_owned())]
+    );
     assert_eq!(
         cfg.profile.contexts,
         [Context::Template("CONTEXT.md".to_owned())]
