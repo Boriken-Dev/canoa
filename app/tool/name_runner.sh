@@ -2,7 +2,7 @@
 # Names the desktop executable CanoaUI, and what people see of it Canoa, in the runners `flutter create` generated in app/.
 # The command-line program is `canoa`, which can sit beside the executable: on Windows and macOS names ignore case, so the
 # executable cannot be `Canoa`. Run it after `flutter create` and before the first build, in app/ or with its directory
-# as the argument; it is safe to run again.
+# as the argument; it is safe to run again. It also lets the desktop runners open a pop-out window (a second engine).
 set -eu
 cd "${1:-$(dirname "$0")/..}"
 
@@ -28,3 +28,35 @@ if [ -f macos/Runner/Configs/AppInfo.xcconfig ]; then
   grep -q '^EXECUTABLE_NAME = CanoaUI' macos/Runner/Configs/AppInfo.xcconfig ||
     echo 'EXECUTABLE_NAME = CanoaUI' >> macos/Runner/Configs/AppInfo.xcconfig
 fi
+
+# A window popped out of a conversation is a second Flutter engine of the same program (desktop_multi_window), which needs the
+# plugins registered for it too. `once FILE SED-SCRIPT PATTERN` is `edit` for a change that must not be made twice.
+once() {
+  [ -f "$1" ] || return 0
+  grep -q "$3" "$1" || edit "$1" "$2" "$3"
+}
+once windows/runner/flutter_window.cpp \
+  's|#include "flutter/generated_plugin_registrant.h"|#include "flutter/generated_plugin_registrant.h"\
+#include "desktop_multi_window/desktop_multi_window_plugin.h"|' 'desktop_multi_window_plugin.h'
+once windows/runner/flutter_window.cpp \
+  '/RegisterPlugins(flutter_controller_->engine());/a\
+  DesktopMultiWindowSetWindowCreatedCallback([](void *controller) {\
+    auto *window = reinterpret_cast<flutter::FlutterViewController *>(controller);\
+    RegisterPlugins(window->engine());\
+  });' 'DesktopMultiWindowSetWindowCreatedCallback'
+once linux/runner/my_application.cc \
+  's|#include "flutter/generated_plugin_registrant.h"|#include "flutter/generated_plugin_registrant.h"\
+#include "desktop_multi_window/desktop_multi_window_plugin.h"|' 'desktop_multi_window_plugin.h'
+once linux/runner/my_application.cc \
+  '/fl_register_plugins(FL_PLUGIN_REGISTRY(view));/a\
+  desktop_multi_window_plugin_set_window_created_callback([](FlPluginRegistry* registry) {\
+    fl_register_plugins(registry);\
+  });' 'desktop_multi_window_plugin_set_window_created_callback'
+once macos/Runner/MainFlutterWindow.swift \
+  's|^import FlutterMacOS$|import FlutterMacOS\
+import desktop_multi_window|' 'import desktop_multi_window'
+once macos/Runner/MainFlutterWindow.swift \
+  '/RegisterGeneratedPlugins(registry: flutterViewController)/a\
+    FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in\
+      RegisterGeneratedPlugins(registry: controller)\
+    }' 'FlutterMultiWindowPlugin.setOnWindowCreatedCallback'
