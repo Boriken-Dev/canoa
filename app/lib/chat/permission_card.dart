@@ -92,11 +92,11 @@ class SessionRequestCard extends StatelessWidget {
             child: Container(
               key: const Key('needs-input'),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-              decoration: BoxDecoration(color: look.warning.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(99)),
+              decoration: BoxDecoration(color: look.accent.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(99)),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.circle, size: 8, color: look.warning),
+                Icon(Icons.circle, size: 8, color: look.accent),
                 const SizedBox(width: 6),
-                Text('Needs your input', style: theme.textTheme.labelMedium?.copyWith(color: look.warning, fontWeight: FontWeight.w600)),
+                Text('Needs your input', style: theme.textTheme.labelMedium?.copyWith(color: look.accent, fontWeight: FontWeight.w600)),
               ]),
             ),
           ),
