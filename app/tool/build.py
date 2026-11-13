@@ -9,9 +9,20 @@ import shutil
 import subprocess
 import sys
 
+import offline_pub
+
 # Not resolve(): a drive made with `subst` (how a long checkout path stays under MSBuild's limit) must stay as typed.
 APP = Path(os.path.abspath(__file__)).parents[1]
 ROOT = APP.parent
+
+
+# The repo's .env and the process environment (which wins): the SDK, the pub cache and the deps checkout.
+SETTINGS: dict[str, str] = {}
+
+
+def configure_environment() -> None:
+    SETTINGS.update(offline_pub.load_settings(ROOT, os.environ))
+    offline_pub.apply_settings(SETTINGS, os.environ)
 
 
 def flutter_program() -> str:
@@ -59,14 +70,14 @@ def sh_program() -> str:
     return sh
 
 
-def ensure_runner(platform: str, app: Path = APP) -> None:
+def ensure_runner(platform: str, app: Path = APP, pub: bool = True) -> None:
     """Generate the platform's runner when missing, then name it as tool/name_runner.sh does (safe to repeat)."""
     if runner_missing(platform, app):
         widget_test = app / "test" / "widget_test.dart"
         had_widget_test = widget_test.exists()
         subprocess.run(
             [flutter_program(), "create", "--org", "dev.boriken", f"--platforms={platform}",
-             "--project-name", "canoa", "."],
+             "--project-name", "canoa", *([] if pub else ["--no-pub"]), "."],
             check=True, cwd=app,
         )
         if not had_widget_test:
@@ -126,12 +137,38 @@ def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None
     return found[0] if found else None
 
 
-def build_web_for_host() -> Path:
+def choose_pub(mode: str) -> Path | None:
+    """The seeded pub cache of an offline build, or None for an online one (`mode` is auto, offline or online)."""
+    if mode == "online":
+        return None
+    result = offline_pub.plan(ROOT, SETTINGS, os.environ, ROOT / LOCK)
+    if result.reason is not None:
+        if mode == "offline":
+            raise RuntimeError(f"an offline build is not possible: {result.reason}")
+        print(f"Building online: {result.reason}")
+    return result.cache
+
+
+def pub_get_offline(cache: Path, mode: str) -> bool:
+    """Resolve from `cache` with the network off; False means go online (auto), an error means --offline failed."""
+    try:
+        subprocess.run([flutter_program(), "pub", "get", "--offline"], check=True, cwd=APP)
+    except subprocess.CalledProcessError as error:
+        if mode == "offline":
+            raise RuntimeError(f"pub get --offline failed in {cache}") from error
+        print(f"Building online: pub get --offline failed in {cache}")
+        return False
+    return True
+
+
+def build_web_for_host(offline: bool = False) -> Path:
     """The web app the host serves, built with a CSP (without it the host's policy refuses the page's code)."""
     subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
-    subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
+    if not offline:
+        subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(
-        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn"],
+        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn",
+         *(["--no-pub"] if offline else [])],
         check=True, cwd=APP,
     )
     dist = APP / "build" / "web"
@@ -152,26 +189,42 @@ def package_portable(platform: str, exe: Path) -> Path:
     raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
 
 
-def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False) -> None:
+def restore_env(key: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(key, None)
+    else:
+        os.environ[key] = value
+
+
+def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False, mode: str = "online") -> None:
     require_tools()
     if portable and platform == "macos":
         raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
     env = None
     lock = ROOT / LOCK
     before = lock.read_bytes() if lock.is_file() else None
-    mode = "--debug" if debug else "--release"
+    flag = "--debug" if debug else "--release"
+    user_cache = os.environ.get("PUB_CACHE")
     try:
+        cache = choose_pub(mode)
+        if cache is not None:
+            os.environ["PUB_CACHE"] = str(cache)
+            if not pub_get_offline(cache, mode):
+                cache = None
+                restore_env("PUB_CACHE", user_cache)
+        no_pub = ["--no-pub"] if cache is not None else []
         if portable:
             # The built library carries the web app, which the plugin builds in when CANOA_WEB_DIST names it.
-            env = dict(os.environ, CANOA_WEB_DIST=str(build_web_for_host()))
-        ensure_runner(platform)
+            env = dict(os.environ, CANOA_WEB_DIST=str(build_web_for_host(cache is not None)))
+        ensure_runner(platform, pub=cache is None)
         if platform != "macos" and clear_stale_build(platform):
             print(f"Removed app/build/{platform}, configured before the runner was named")
         if run:
-            subprocess.run([flutter_program(), "run", "-d", platform, mode], check=True, cwd=APP)
+            subprocess.run([flutter_program(), "run", "-d", platform, flag, *no_pub], check=True, cwd=APP)
             return
-        subprocess.run([flutter_program(), "build", platform, mode], check=True, cwd=APP, env=env)
+        subprocess.run([flutter_program(), "build", platform, flag, *no_pub], check=True, cwd=APP, env=env)
     finally:
+        restore_env("PUB_CACHE", user_cache)
         if restore_lock(before):
             print("Restored app/pubspec.lock")
     exe = built_executable(platform, debug)
@@ -240,13 +293,20 @@ def main() -> None:
     parser.add_argument("--portable", action="store_true",
         help="desktop: also make the one-file form of a release build (Windows: the CanoaUI.exe launcher in "
              "target/canoa-windows; Linux: an AppImage in target/canoa-linux)")
+    pub = parser.add_mutually_exclusive_group()
+    pub.add_argument("--online", action="store_true",
+        help="desktop: resolve packages from the network, without looking at the deps branch")
+    pub.add_argument("--offline", action="store_true",
+        help="desktop: resolve from the deps branch, and fail instead of going online (the default is offline, "
+             "falling back to online with the reason when a dependency is missing)")
     parser.add_argument("--platform", choices=tuple(RUNNER_MARKERS),
         help="desktop: the platform (default: this machine's; Flutter cannot cross-build)")
     opts = parser.parse_args()
+    configure_environment()
     if opts.debug and opts.kind not in ("chromium", "desktop"):
         parser.error("--debug is only valid for chromium and desktop")
-    if (opts.run or opts.platform or opts.portable) and opts.kind != "desktop":
-        parser.error("--run, --platform and --portable are only valid for desktop")
+    if (opts.run or opts.platform or opts.portable or opts.online or opts.offline) and opts.kind != "desktop":
+        parser.error("--run, --platform, --portable, --online and --offline are only valid for desktop")
     if opts.portable and (opts.debug or opts.run):
         parser.error("--portable packages a release build: not with --debug or --run")
     if opts.kind == "desktop":
@@ -254,7 +314,8 @@ def main() -> None:
         if platform != host_platform():
             parser.error(f"a {platform} build needs a {platform} machine")
         try:
-            build_desktop(platform, opts.debug, opts.run, opts.portable)
+            build_desktop(platform, opts.debug, opts.run, opts.portable,
+                          "online" if opts.online else "offline" if opts.offline else "auto")
         except (RuntimeError, subprocess.CalledProcessError) as error:
             sys.exit(f"build.py: {error}")
         return
