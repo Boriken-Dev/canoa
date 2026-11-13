@@ -2,10 +2,10 @@
 // What each change means is in tab-sessions.js; this puts it on Chrome's storage, tabs and permissions.
 import { readGrants, updateGrants } from "./browser-grants.js";
 import { isPairedPeer } from "./agent-choices.js";
-import { addShare, attach, detachSession, detachTab, endSession, fromUiPage, sessionsFor, shareGrant, sharedTabs, unshare } from "./tab-sessions.js";
+import { addShare, attach, clientOf, detachSession, detachTab, endSession, mayAsk, move, sessionsFor, shareGrant, sharedTabs, unshare } from "./tab-sessions.js";
 
 const KEY = "canoa_tab_sessions";
-const TYPES = new Set(["canoa.tabs.attach", "canoa.tabs.detach", "canoa.tabs.list", "canoa.tabs.share", "canoa.tabs.unshare", "canoa.tabs.sessionsFor"]);
+const TYPES = new Set(["canoa.tabs.attach", "canoa.tabs.detach", "canoa.tabs.list", "canoa.tabs.share", "canoa.tabs.unshare", "canoa.tabs.sessionsFor", "canoa.tabs.move"]);
 
 async function readBindings() {
   const value = (await chrome.storage.session.get(KEY))[KEY];
@@ -13,7 +13,7 @@ async function readBindings() {
 }
 
 let changes = Promise.resolve();
-function updateBindings(change) {
+export function updateBindings(change) {
   const done = changes.then(async () => {
     const updated = await change(await readBindings());
     await chrome.storage.session.set({ [KEY]: updated });
@@ -30,10 +30,22 @@ async function webTab(tabId) {
   return { tab, origin: new URL(tab.url).origin };
 }
 
-async function handle(message, pairedPeers) {
+async function handle(message, pairedPeers, client) {
   if (message.type === "canoa.tabs.attach") {
     const { origin } = await webTab(message.tabId);
-    await updateBindings((bindings) => attach(bindings, { sessionId: message.sessionId, tabId: message.tabId, origin }));
+    await updateBindings((bindings) => attach(bindings, { sessionId: message.sessionId, tabId: message.tabId, origin, owner: client }));
+    return {};
+  }
+  if (message.type === "canoa.tabs.move") {
+    // The same session on another tab or in another client's hands: no resume, and no grant. What the old tab shared ends with it.
+    const { origin } = await webTab(message.tabId);
+    let moved = false;
+    await updateBindings((bindings) => {
+      const next = move(bindings, { sessionId: message.sessionId, tabId: message.tabId, origin, owner: client });
+      moved = next.moved;
+      return next.bindings;
+    });
+    if (moved) await updateGrants((grants) => endSession(grants, message.sessionId));
     return {};
   }
   if (message.type === "canoa.tabs.detach") {
@@ -64,8 +76,10 @@ async function handle(message, pairedPeers) {
 
 export function installTabBindings({ pairedPeers }) {
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
-    if (!TYPES.has(message?.type) || !fromUiPage(sender, chrome.runtime)) return false;
-    handle(message, pairedPeers).then(reply, (error) => reply({ error: String(error.message ?? error) }));
+    if (!TYPES.has(message?.type)) return false;
+    const client = clientOf(sender, chrome.runtime);
+    if (!mayAsk(client, message.type)) return false;
+    handle(message, pairedPeers, client).then(reply, (error) => reply({ error: String(error.message ?? error) }));
     return true;
   });
   chrome.tabs.onRemoved.addListener((tabId) => {

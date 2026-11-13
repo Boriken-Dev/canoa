@@ -5,6 +5,10 @@ const send = (type, message = {}) => chrome.runtime.sendMessage({ type, ...messa
   return reply ?? {};
 });
 
+// Who this page is to the worker, which works it out from the address itself: the side panel, or a window a session was popped out to.
+const query = new URLSearchParams(globalThis.location?.search ?? "");
+const CLIENT = query.get("view") === "window" ? `window:${query.get("popout")}` : "panel";
+
 const web = (tab) => Number.isSafeInteger(tab.id) && /^https?:\/\//.test(tab.url || "");
 
 // Which session is in which tab, and which tabs it shares with its agent (see tab-bindings.js). The panel calls `call` with a
@@ -12,7 +16,10 @@ const web = (tab) => Number.isSafeInteger(tab.id) && /^https?:\/\//.test(tab.url
 const TABS = {
   async snapshot() {
     const all = (await chrome.tabs.query({})).filter(web);
-    const [front] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    // A window of its own is no browser window's front: the tab it works with is the web tab the person used last.
+    const front = CLIENT === "panel"
+      ? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
+      : (await chrome.tabs.query({ active: true })).filter(web).sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
     const { sessions } = await send("canoa.tabs.list");
     return {
       tabs: all.map((tab) => ({ id: tab.id, title: tab.title ?? "", url: tab.url, active: tab.id === front?.id })),
@@ -21,6 +28,10 @@ const TABS = {
     };
   },
   attach: (sessionId, tabId) => send("canoa.tabs.attach", { sessionId, tabId }),
+  // The session stays as it is and this client takes the tab binding, on the tab in front: nothing is resumed or granted.
+  async move(sessionId, tabId) {
+    return send("canoa.tabs.move", { sessionId, tabId });
+  },
   detach: (sessionId) => send("canoa.tabs.detach", { sessionId }),
   // From the person's click: the browser asks for the site here if it has not been given it, and the worker checks it was.
   async share(sessionId, tabId, peerId) {
@@ -30,6 +41,13 @@ const TABS = {
     return send("canoa.tabs.share", { sessionId, tabId, peerId });
   },
   unshare: (sessionId, tabId) => send("canoa.tabs.unshare", { sessionId, tabId })
+};
+
+// Sessions shown in windows of their own (see popout-windows.js). Only the panel may ask; the worker refuses a window.
+const POPOUT = {
+  open: (sessionId, link, title, look, density) => send("canoa.popout.open", { sessionId, link, title, look, density }),
+  focus: (sessionId) => send("canoa.popout.focus", { sessionId }),
+  close: (sessionId) => send("canoa.popout.close", { sessionId })
 };
 
 function watch(callback) {
@@ -50,6 +68,15 @@ function watch(callback) {
 }
 
 window.canoaBridge = Object.freeze({
+  client: CLIENT,
+  popout: Object.freeze({
+    call: async (name, args) => {
+      if (!Object.hasOwn(POPOUT, name)) throw new Error("Unknown call");
+      return JSON.stringify((await POPOUT[name](...JSON.parse(args))) ?? {});
+    },
+    // The window that went, by id, so the panel can tell which of its windows closed.
+    watch: (callback) => chrome.windows.onRemoved.addListener(callback)
+  }),
   tabs: Object.freeze({
     call: async (name, args) => {
       if (!Object.hasOwn(TABS, name)) throw new Error("Unknown call");

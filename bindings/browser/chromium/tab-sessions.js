@@ -14,13 +14,30 @@ export const GROUP_COLOR = "cyan";
 const validId = (value) => typeof value === "string" && value.length > 0 && value.length <= 128;
 const validTab = (value) => Number.isSafeInteger(value) && value >= 0;
 
+/** The client that holds a session's tab: the side panel, or one popped-out window, named by its link. */
+export const PANEL = "panel";
+const validOwner = (value) => value === PANEL || (typeof value === "string" && /^window:[0-9a-f]{8,64}$/.test(value));
+
 /** Binds a session to one tab (a session is in one place at a time): the old binding of that session is replaced. */
-export function attach(bindings, { sessionId, tabId, origin }) {
-  if (!validId(sessionId) || !validTab(tabId)) throw new TypeError("Invalid attach");
+export function attach(bindings, { sessionId, tabId, origin, owner = PANEL }) {
+  if (!validId(sessionId) || !validTab(tabId) || !validOwner(owner)) throw new TypeError("Invalid attach");
   const site = new URL(origin).origin;
   if (!/^https?:/.test(site)) throw new TypeError("Invalid attach");
-  return [...bindings.filter((binding) => binding.sessionId !== sessionId), { sessionId, tabId, origin: site }];
+  return [...bindings.filter((binding) => binding.sessionId !== sessionId), { sessionId, tabId, origin: site, owner }];
 }
+
+/**
+ * Hands a session's tab binding to `owner`, on `tabId` (the same tab, or another). The session stays what it is: nothing is
+ * resumed and nothing is granted. Returns the bindings and whether the tab changed, which ends what the old tab shared.
+ */
+export function move(bindings, { sessionId, tabId, origin, owner }) {
+  const held = bindings.find((binding) => binding.sessionId === sessionId);
+  const moved = held === undefined || held.tabId !== tabId;
+  return { bindings: attach(bindings, { sessionId, tabId, origin, owner }), moved };
+}
+
+/** A window that is gone gives its bindings back to the panel. */
+export const releaseOwner = (bindings, owner) => bindings.map((binding) => (binding.owner === owner ? { ...binding, owner: PANEL } : binding));
 
 export const detachSession = (bindings, sessionId) => bindings.filter((binding) => binding.sessionId !== sessionId);
 export const detachTab = (bindings, tabId) => bindings.filter((binding) => binding.tabId !== tabId);
@@ -35,6 +52,24 @@ export function sessionsFor(bindings, origin) {
   }
   return bindings.filter((binding) => binding.origin === site).map((binding) => binding.sessionId);
 }
+
+/** Who a message is from: a popped-out window (its link is in its address), else the panel or the full-page view. */
+export function clientOf(sender, runtime) {
+  if (!fromUiPage(sender, runtime)) return null;
+  let url;
+  try {
+    url = new URL(sender.url);
+  } catch {
+    return null;
+  }
+  if (url.searchParams.get("view") !== "window") return PANEL;
+  const owner = `window:${url.searchParams.get("popout")}`;
+  return validOwner(owner) ? owner : null;
+}
+
+/** What each kind of client may ask of the worker. A window reads and takes the tab binding; it never shares, attaches, detaches or opens windows. */
+const WINDOW_MAY = new Set(["canoa.tabs.list", "canoa.tabs.move"]);
+export const mayAsk = (client, type) => client === PANEL || (client !== null && WINDOW_MAY.has(type));
 
 export const tabOf = (bindings, sessionId) => bindings.find((binding) => binding.sessionId === sessionId)?.tabId;
 

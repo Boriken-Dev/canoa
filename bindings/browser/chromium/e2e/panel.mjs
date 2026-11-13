@@ -1,5 +1,6 @@
 // Sessions attached to tabs and tabs shared with them, in a real browser: what the panel's messages do to the extension's grants,
-// the tab group around a tab an agent acts on, the toolbar badge, and who may send those messages. The tool call itself is
+// the tab group around a tab an agent acts on, the toolbar badge, who may send those messages, and a session popped out to a browser
+// window of its own: the window the worker opens, who holds the tab binding, and what a window may not ask. The tool call itself is
 // `dispatchBrowserTool` as the worker runs it, called from an extension page with the grants the worker holds.
 //
 //   CANOA_E2E_BROWSER=path/to/edge [CANOA_E2E_SHOTS=dir] [CANOA_E2E_PANEL_UI=app/build/web] node e2e/panel.mjs
@@ -283,6 +284,106 @@ try {
     assert.ok((await call("claimEverything")).error);
     await call("detach", "s6");
   });
+  // A session popped out: the worker opens the browser window, a window holds or takes the tab binding, and asks for nothing that grants.
+  const LINK = "5f".repeat(16);
+  const OWNER = `window:${LINK}`;
+  const bound = async (sessionId) => (await send({ type: "canoa.tabs.list" })).sessions.find((item) => item.sessionId === sessionId);
+  const asWindow = async (sessionId, link = LINK) => {
+    const page = await open(`chrome-extension://${id}/ui/own.html?view=window&session=${sessionId}&popout=${link}`);
+    await waitFor("the window page", () => page.run("document.readyState === 'complete' && typeof window.canoaBridge?.client === 'string'"));
+    return page;
+  };
+  const refused = (answer) => answer === "null" || answer === "rejected" || /error/i.test(answer);
+  const ask = (page, message) => page.run(`chrome.runtime.sendMessage(${JSON.stringify(message)}).then((reply) => JSON.stringify(reply ?? null), () => "rejected")`);
+  let windowId;
+  await check("popping a session out opens a browser window at the UI as a window, once, and the window is recorded", async () => {
+    await send({ type: "canoa.tabs.attach", sessionId: "s7", tabId: a.tabId });
+    await send({ type: "canoa.tabs.share", sessionId: "s7", tabId: a.tabId, peerId: PEER });
+    const opened = await send({ type: "canoa.popout.open", sessionId: "s7", link: LINK, title: "Fix the build", look: "canoa", density: "normal" });
+    assert.ok(Number.isSafeInteger(opened.windowId), JSON.stringify(opened));
+    windowId = opened.windowId;
+    const made = await sw.run(`chrome.windows.get(${windowId}, { populate: true }).then((win) => ({ type: win.type, urls: win.tabs.map((tab) => tab.pendingUrl || tab.url) }))`);
+    assert.equal(made.type, "popup");
+    const url = new URL(made.urls[0]);
+    assert.equal(url.pathname, "/ui/index.html");
+    assert.deepEqual([url.searchParams.get("view"), url.searchParams.get("session"), url.searchParams.get("popout")], ["window", "s7", LINK]);
+    assert.equal((await send({ type: "canoa.popout.open", sessionId: "s7", link: LINK, title: "x", look: "canoa", density: "normal" })).windowId, windowId, "one window per session");
+    assert.equal((await bound("s7")).owner, "panel", "popping out does not move the tab binding");
+  });
+  await check("a window sees who holds the tab and cannot share, attach, detach, open or close anything", async () => {
+    const win = await asWindow("s7");
+    try {
+      assert.equal(await win.run("window.canoaBridge.client"), OWNER);
+      const listed = await ask(win, { type: "canoa.tabs.list" });
+      assert.equal(JSON.parse(listed).sessions.find((item) => item.sessionId === "s7").owner, "panel");
+      for (const message of [
+        { type: "canoa.tabs.share", sessionId: "s7", tabId: b.tabId, peerId: PEER },
+        { type: "canoa.tabs.unshare", sessionId: "s7", tabId: a.tabId },
+        { type: "canoa.tabs.attach", sessionId: "s8", tabId: b.tabId },
+        { type: "canoa.tabs.detach", sessionId: "s7" },
+        { type: "canoa.popout.open", sessionId: "s8", link: "6e".repeat(16), title: "x", look: "canoa", density: "normal" },
+        { type: "canoa.popout.close", sessionId: "s7" }
+      ]) assert.ok(refused(await ask(win, message)), JSON.stringify(message));
+      assert.deepEqual(await shared("s7"), [a.tabId], "nothing it asked changed a share");
+      assert.equal(await bound("s8"), undefined);
+      assert.ok(await sw.run(`chrome.windows.get(${windowId}).then(() => true, () => false)`), "its window is still open");
+    } finally {
+      await win.call("Page.close").catch(() => {});
+    }
+  });
+  await check("a window's Move here takes the tab binding with no resume: the same tab keeps its share, another tab ends it and grants nothing", async () => {
+    const win = await asWindow("s7");
+    try {
+      assert.deepEqual(JSON.parse(await ask(win, { type: "canoa.tabs.move", sessionId: "s7", tabId: a.tabId })), {});
+      const same = await bound("s7");
+      assert.deepEqual([same.owner, same.tabId, same.shared], [OWNER, a.tabId, [a.tabId]]);
+      assert.equal((await act(a.tabId)).ok, true, "the agent still reads what the panel shared");
+      assert.deepEqual(JSON.parse(await ask(win, { type: "canoa.tabs.move", sessionId: "s7", tabId: b.tabId })), {});
+      const moved = await bound("s7");
+      assert.deepEqual([moved.owner, moved.tabId, moved.shared], [OWNER, b.tabId, []]);
+      assert.equal((await act(b.tabId)).ok, false, "the window's move gave the agent nothing on the new tab");
+      assert.equal((await act(a.tabId)).ok, false, "and ended what the old tab shared");
+      await sw.run(`chrome.tabs.update(${b.tabId}, { active: true }).then(() => true)`);
+      const front = JSON.parse(await win.run(`window.canoaBridge.tabs.call("snapshot", "[]")`)).active;
+      assert.equal(front, b.tabId, "a window's front tab is the web tab used last");
+    } finally {
+      await win.call("Page.close").catch(() => {});
+    }
+  });
+  await check("the panel takes the binding back, and a window that is closed hands back what it held", async () => {
+    assert.deepEqual(await send({ type: "canoa.tabs.move", sessionId: "s7", tabId: a.tabId }), {});
+    assert.equal((await bound("s7")).owner, "panel");
+    const win = await asWindow("s7");
+    try {
+      await ask(win, { type: "canoa.tabs.move", sessionId: "s7", tabId: a.tabId });
+      assert.equal((await bound("s7")).owner, OWNER);
+    } finally {
+      await win.call("Page.close").catch(() => {});
+    }
+    // The person closing the browser window, as the worker hears it.
+    await sw.run(`chrome.windows.remove(${windowId}).then(() => true)`);
+    await waitFor("the binding to return to the panel", async () => (await bound("s7")).owner === "panel");
+    assert.equal((await sw.run("chrome.storage.session.get('canoa_popouts').then((held) => held.canoa_popouts ?? [])")).length, 0);
+  });
+  await check("docking back closes the window by its session and returns the binding; a bad request opens nothing", async () => {
+    const opened = await send({ type: "canoa.popout.open", sessionId: "s7", link: LINK, title: "Again", look: "canoa", density: "normal" });
+    assert.notEqual(opened.windowId, windowId, "a window opened again is a new window");
+    const win = await asWindow("s7");
+    try {
+      await ask(win, { type: "canoa.tabs.move", sessionId: "s7", tabId: a.tabId });
+      assert.equal((await bound("s7")).owner, OWNER);
+      assert.deepEqual(await send({ type: "canoa.popout.close", sessionId: "s7" }), {});
+      await waitFor("the window to go", async () => !(await sw.run(`chrome.windows.get(${opened.windowId}).then(() => true, () => false)`)));
+      await waitFor("the binding to return to the panel", async () => (await bound("s7")).owner === "panel");
+    } finally {
+      await win.call("Page.close").catch(() => {});
+    }
+    assert.deepEqual(await send({ type: "canoa.popout.close", sessionId: "never-opened" }), {});
+    for (const bad of [{ link: "short" }, { look: "a&view=panel" }, { sessionId: "" }]) {
+      assert.ok((await send({ type: "canoa.popout.open", sessionId: "s7", link: LINK, title: "x", look: "canoa", density: "normal", ...bad })).error, JSON.stringify(bad));
+    }
+    await send({ type: "canoa.tabs.detach", sessionId: "s7" });
+  });
   if (builtUi) {
     await check("the built panel starts in the extension, beside the worker's tab bridge", async () => {
       const ui = await open(`chrome-extension://${id}/ui/index.html?view=panel`);
@@ -291,6 +392,20 @@ try {
         assert.equal(await ui.run("typeof window.canoaBridge?.tabs?.call"), "function");
         await sleep(3000);
         await shoot(ui, "panel_built");
+      } finally {
+        await ui.call("Page.close").catch(() => {});
+      }
+    });
+    await check("the built window page starts in the extension as a window, naming itself to the worker", async () => {
+      const link = "7a".repeat(16);
+      const ui = await open(`chrome-extension://${id}/ui/index.html?view=window&session=s9&popout=${link}&title=Probe`);
+      try {
+        await waitFor("Flutter", () => ui.run("!!document.querySelector('flt-glass-pane, flutter-view')"), 60_000);
+        assert.equal(await ui.run("window.canoaBridge.client"), `window:${link}`);
+        // Nothing holds that conversation, so the window says it cannot attach rather than showing another one.
+        await waitFor("the window's title", () => ui.run("document.title.includes('Probe')"));
+        await sleep(3000);
+        await shoot(ui, "popout_window_unattached");
       } finally {
         await ui.call("Page.close").catch(() => {});
       }

@@ -7,11 +7,13 @@ import { installProvider, pairedPeers } from "./acp-provider.js";
 import { isPairedPeer } from "./agent-choices.js";
 import { installTabBindings } from "./tab-bindings.js";
 import { installMarks } from "./tab-marks.js";
+import { installPopouts } from "./popout-windows.js";
 import { readGrants, updateGrants } from "./browser-grants.js";
 
 installProvider();
 installTabBindings({ pairedPeers });
 installMarks();
+installPopouts();
 
 // Browser-owned, deny-by-default policy. A page reaches this extension only through the provider, which checks its sender.
 const CONTEXT_KEY = "canoa_pending_contexts";
