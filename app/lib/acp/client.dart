@@ -5,10 +5,12 @@ import 'package:coqui_acp/page.dart';
 import 'package:coqui_web/coqui_web.dart';
 
 import '../chat/agent_events.dart';
+import 'delegate.dart';
 import 'secret_wire.dart';
 import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
+export 'delegate.dart' show DelegateNotice;
 export 'secret_wire.dart' show AgentSecrets;
 
 /// A proven peer, and the channel that keeps everything after the proof with that peer.
@@ -101,7 +103,8 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false}) {
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate})
+      : _delegate = delegate {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
       elicitor == null ? null : (request) => elicitor(request, this),
@@ -118,6 +121,19 @@ final class VerifiedAgent {
   final AgentIdentity identity;
 
   final UsageWire _usage;
+  final DelegateWire? _delegate;
+
+  /// The host's events about the tasks a session handed on, as their params; empty when this connection takes none.
+  Stream<DelegateNotice> get taskEvents => _delegate?.events ?? Stream<DelegateNotice>.empty();
+
+  /// Whether this connection told the host it can show tasks, answer for them and stop them.
+  bool get takesTasks => _delegate?.optIn ?? false;
+
+  /// Asks the host to stop [sessionId]'s tasks, or only [taskId]. Whether the host said it did.
+  Future<bool> stopTasks(String sessionId, {String? taskId}) async => await _delegate?.stop(sessionId, taskId: taskId) ?? false;
+
+  /// The updates the host kept of [taskId]; null when it has none to give.
+  Future<List<Map<String, Object?>>?> taskHistory(String sessionId, String taskId) async => _delegate?.history(sessionId, taskId);
 
   /// Whether the agent advertised the usage extension.
   bool get reportsUsage => identity.usage != null;
@@ -149,16 +165,18 @@ final class VerifiedAgent {
       final proven = actual.channel;
       final identity = AgentIdentity();
       final usage = UsageWire(proven.send, initializeMeta: initializeMeta, approver: approver);
+      // A person who can answer permission requests can answer a task's, which come the same way.
+      final delegate = DelegateWire(proven.send, optIn: decider != null);
       // Only a host whose peer id was proven can ask for a secret: the answer is bound to that identity, and a program this app
       // started, or a provider, has none.
       final secretWire = secrets == null ? null : SecretWire(proven.send, secrets);
       final client = VerifiedAgent._(
         (decider, elicitor) => AcpClient(
           incoming: proven.messages
-              .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false))
+              .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message))
               .map(identity._inspect)
               .map(usage.incoming),
-          send: (message) => proven.send(_withOffer(secretWire, usage.outgoing(message))),
+          send: (message) => proven.send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(message)))),
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,
@@ -170,6 +188,7 @@ final class VerifiedAgent {
         usage,
         decider,
         elicitor: elicitor,
+        delegate: delegate,
       );
       secretWire?.agent = client;
       return client;
@@ -194,10 +213,14 @@ final class VerifiedAgent {
   }) {
     final identity = AgentIdentity();
     final usage = UsageWire(send, initializeMeta: initializeMeta, approver: approver);
+    final delegate = DelegateWire(send, optIn: decider != null);
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
-        incoming: messages.where((message) => !usage.answersApproval(message)).map(identity._inspect).map(usage.incoming),
-        send: (message) => send(usage.outgoing(message)),
+        incoming: messages
+            .where((message) => !usage.answersApproval(message) && !delegate.takes(message))
+            .map(identity._inspect)
+            .map(usage.incoming),
+        send: (message) => send(delegate.outgoing(usage.outgoing(message))),
         closeSource: close,
         decider: decider,
         elicitor: elicitor,
@@ -212,6 +235,7 @@ final class VerifiedAgent {
       decider,
       elicitor: elicitor,
       isChild: true,
+      delegate: delegate,
     );
   }
 
@@ -281,6 +305,7 @@ final class VerifiedAgent {
       await _client.close();
     } finally {
       _usage.close();
+      _delegate?.close();
       final actions = [..._afterClose];
       _afterClose.clear();
       for (final action in actions) {

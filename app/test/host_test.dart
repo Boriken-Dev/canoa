@@ -18,6 +18,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
+import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/worktree/host.dart';
@@ -74,6 +75,14 @@ provider = "echo_provider"
 program = ${jsonEncode(_example('stdio_agent', library: false))}
 args = ["--scripted", "--usage", "--usage-claims=the-agents-own"]
 
+[host.agents.parent]
+program = ${jsonEncode(_example('stdio_agent', library: false))}
+args = ["--scripted", "--mcp-http", "--modes=default"]
+
+[host.agents.child]
+program = ${jsonEncode(_example('stdio_agent', library: false))}
+args = ["--scripted", "--mcp-http", "--modes=default"]
+
 [host.agents.trees]
 program = ${jsonEncode(_example('stdio_agent', library: false))}
 working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
@@ -88,7 +97,7 @@ working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
     final urls = <String, String>{};
     String? peer;
     String? method;
-    await for (final line in lines.take(4).timeout(const Duration(seconds: 30))) {
+    await for (final line in lines.take(6).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry['url'] as String;
       peer = entry['peer'] as String;
@@ -204,6 +213,64 @@ void main() {
       final asked = await client.fetchUsage();
       expect(asked?.account, 'usage');
       expect(asked?.buckets.single.used, 620);
+    } finally {
+      await client.close();
+    }
+  }, skip: skip);
+
+  /// A parent that hands a task to `child` through the host's delegation tool, as an app's conversation with the host's events and
+  /// permission requests going to its store.
+  Future<(VerifiedAgent, ChatSession, SessionStore, String)> delegated(String prompt) async {
+    final store = SessionStore();
+    final client = await connect('parent', decider: store.askPermission);
+    final opened = await client.openSession(cwd: host.dir.path);
+    final session = store.addProviderSession(
+      title: 'Parent',
+      agent: 'parent',
+      peerId: client.peerId,
+      remoteSessionId: opened.id,
+      cwd: host.dir.path,
+    );
+    store.attachVerifiedClient(session.id, client);
+    final said = await turn(client, opened.id, prompt);
+    final task = (jsonDecode(said) as Map<String, dynamic>)['taskId'] as String;
+    return (client, session, store, task);
+  }
+
+  Future<void> until(bool Function() done, String what) async {
+    final limit = DateTime.now().add(const Duration(seconds: 30));
+    while (!done()) {
+      if (DateTime.now().isAfter(limit)) fail('timed out waiting for $what');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
+  test('a delegation reaches the task list, and a child\'s permission is answered from the app', () async {
+    final (client, session, store, task) = await delegated('Delegate child Please edit src/report.js');
+    try {
+      await until(() => session.pendingPermissions.isNotEmpty, "the child's permission request");
+      final question = session.pendingPermissions.single;
+      expect(question.task?.id, task);
+      expect(question.task?.source, 'child');
+      expect(question.task?.title, contains('edit src'));
+      expect(session.needsYou, isTrue);
+      expect(session.tasks[task]?.phase, TaskPhase.inputRequired);
+      store.answerPermission(session, allow: true);
+      await until(() => session.tasks[task]?.phase == TaskPhase.completed, 'the task to end');
+      expect(session.tasks[task]?.result, 'Renamed everywhere.');
+      expect(session.tasks[task]?.updates, isNotEmpty, reason: "the child's own updates reach the list");
+    } finally {
+      await client.close();
+    }
+  }, skip: skip);
+
+  test('Stop sends one request to the host, and the task ends canceled', () async {
+    final (client, session, store, task) = await delegated('Delegate child Wait');
+    try {
+      await until(() => session.tasks[task]?.phase == TaskPhase.working, 'the task to work');
+      await store.cancelSession(session);
+      expect(session.tasks[task]?.phase, TaskPhase.canceled);
+      expect(session.tasks.live, isEmpty);
     } finally {
       await client.close();
     }

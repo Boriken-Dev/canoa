@@ -32,8 +32,9 @@ class SessionPermissionCard extends StatelessWidget {
     final agent = shortLine(session.agent) ?? 'The agent';
     final folder = session.cwd ?? '';
     final canRemember = question.subject != null && folder.isNotEmpty;
+    final task = question.task;
     return PermissionCard(
-      agent: session.agent,
+      agent: task == null ? session.agent : (shortLine(task.source) ?? session.agent),
       title: question.title,
       detail: question.detail,
       options: question.options,
@@ -44,6 +45,12 @@ class SessionPermissionCard extends StatelessWidget {
       onChoose: (option) => store.choosePermission(session, option),
       onCancel: () => store.cancelPermission(session),
       notes: [
+        if (task != null)
+          Text(
+            'Asked by a subagent: ${task.title} (${task.source}). Allow for the session covers this subagent only.',
+            key: const Key('task-asks'),
+            style: small,
+          ),
         if (canRemember)
           Text(
             'Always allow here: Canoa itself answers allow once to what you confirm, for $agent in $folder, until you revoke '

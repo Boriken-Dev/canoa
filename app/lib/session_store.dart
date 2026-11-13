@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'acp/client.dart';
+import 'acp/delegate.dart';
 import 'acp/local_agent.dart' show readLocalFile;
 import 'acp/usage_wire.dart' show UsageNotice;
 import 'package:coqui_acp/secret.dart';
@@ -23,6 +24,7 @@ import 'sources/sources.dart';
 import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
 
+export 'acp/delegate.dart' show DelegateTask, DelegateTasks, TaskPhase;
 export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
 export 'ledger/session_ledger.dart' show SessionPlace;
@@ -61,7 +63,7 @@ class ChatMessage implements ChatEntryData {
 /// offers an allow before it would wait here.
 final class PermissionQuestion {
   PermissionQuestion(this.title, this.kind,
-      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId, this.subject});
+      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId, this.subject, this.task, this.allowanceKey});
   final String title;
   final String? kind;
 
@@ -82,6 +84,12 @@ final class PermissionQuestion {
 
   /// What it would do, in the terms a remembered rule states; null when no rule could cover it, or the card offers none.
   final RuleSubject? subject;
+
+  /// The task whose agent asks, when it is not the conversation's own agent that does.
+  final DelegateTask? task;
+
+  /// What an "allow for the session" given to this request covers: the same kind of request from the same task, nothing else.
+  final String? allowanceKey;
   final Completer<AcpDecision> _answer = Completer();
 
   /// What the agent is told once this is answered, which another view of the session reads to show how it ended.
@@ -90,6 +98,9 @@ final class PermissionQuestion {
 
 /// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
 const int maxPendingQuestions = 16;
+
+/// The most kinds of request an "allow for the session" covers in one task.
+const int maxTaskAllowances = 64;
 
 /// An agent's question, waiting on the person. Nothing answers it for them; Bypass is for permission requests only.
 final class AgentQuestion {
@@ -232,6 +243,13 @@ class ChatSession {
 
   /// What the agent is waiting for the person to answer, oldest first.
   final List<PermissionQuestion> pendingPermissions = [];
+
+  /// The tasks this conversation handed to other sources, as the host reported them.
+  final DelegateTasks tasks = DelegateTasks();
+
+  /// What the person allowed for the rest of a task, by task id and then request: it ends with the task and is never the
+  /// conversation's own or another task's.
+  final Map<String, Set<String>> taskAllowances = {};
 
   /// The agent's questions waiting for the person, oldest first.
   final List<AgentQuestion> pendingQuestions = [];
@@ -637,6 +655,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   final Map<String, StreamSubscription<AcpSessionUpdate>> _subscriptions = {};
   final Map<String, StreamSubscription<AcpEvent>> _turnSubscriptions = {};
   final Map<String, StreamSubscription<UsageNotice>> _usageSubscriptions = {};
+  final Map<String, StreamSubscription<DelegateNotice>> _taskSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -1038,16 +1057,28 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       notifyListeners();
       return Future.value(const AcpCancel());
     }
-    // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about.
-    if (request.toolCall != null) _applyTool(target, request.toolCall!);
+    final task = _taskOf(target, request);
+    // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about. A task's tool
+    // call is its own thread's, not this conversation's.
+    if (request.toolCall != null && task == null) _applyTool(target, request.toolCall!);
     final title = shortLine(request.title) ?? shortLine(request.kind) ?? 'A tool';
+    final byTask = task == null ? '' : ' for ${task.title}';
     final forPerson = _isForPerson(request);
     if (target.bypass && !forPerson) {
       final allow = bypassAnswer(request.options, onceOnly: bypassOnceOnly);
       if (allow != null) {
-        _note(target, 'Bypass allowed: $title (${shortLine(allow.name) ?? allow.kind}).');
+        _note(target, 'Bypass allowed: $title$byTask (${shortLine(allow.name) ?? allow.kind}).');
         notifyListeners();
         return Future.value(AcpSelect(allow.optionId));
+      }
+    }
+    final allowanceKey = task == null || forPerson ? null : _allowanceKey(request);
+    if (task != null && allowanceKey != null && (target.taskAllowances[task.id]?.contains(allowanceKey) ?? false)) {
+      final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
+      if (once != null) {
+        _note(target, 'Allowed for the session of ${task.title}: $title.');
+        notifyListeners();
+        return Future.value(AcpSelect(once.optionId));
       }
     }
     final subject = forPerson ? null : _ruleSubject(target, request);
@@ -1079,6 +1110,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       forPerson: forPerson,
       toolCallId: request.toolCall?['toolCallId'] as String?,
       subject: keepable ? subject : null,
+      task: task,
+      allowanceKey: allowanceKey,
     );
     target.pendingPermissions.add(question);
     _needs(target, AttentionKind.permission);
@@ -1238,7 +1271,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final question = session.pendingPermissions.first;
     if (!question.options.contains(option)) return;
     session.pendingPermissions.removeAt(0);
-    if (option.kind == 'allow_always') session.alwaysAnsweredAt = DateTime.now();
+    if (option.kind == 'allow_always') {
+      final task = question.task, key = question.allowanceKey;
+      if (task != null && key != null) {
+        // A task's "always" is the task's: the conversation's own mode and the other tasks are not changed by it.
+        final allowed = session.taskAllowances.putIfAbsent(task.id, () => {});
+        if (allowed.length < maxTaskAllowances) allowed.add(key);
+      } else {
+        session.alwaysAnsweredAt = DateTime.now();
+      }
+    }
     question._answer.complete(AcpSelect(option.optionId));
     notifyListeners();
   }
@@ -1315,6 +1357,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// is gone or is no longer the one this conversation is with.
   void _strand(ChatSession session) {
     _cancelWaiters(session);
+    // Its tasks' agents ended with the connection, which asked for them.
+    session.tasks.cancelLive(DateTime.now());
+    session.taskAllowances.clear();
     for (final question in session.pendingPermissions) {
       if (question.toolCallId case final id?) _stop(session.toolEntries[id]?.tool);
     }
@@ -1501,9 +1546,56 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       }
     });
     _watchUsage(session, client);
+    _watchTasks(session, client);
     if (record) _record(session, client);
     notifyListeners();
   }
+
+  /// Follows the tasks the host reports for [session], and asks for the updates of those an earlier connection had.
+  void _watchTasks(ChatSession session, VerifiedAgent client) {
+    unawaited(_taskSubscriptions.remove(session.id)?.cancel());
+    _taskSubscriptions[session.id] = client.taskEvents.listen((notice) => _taskEvent(session, notice));
+    final remote = session.remoteSessionId;
+    if (remote == null || !client.takesTasks) return;
+    for (final task in session.tasks.all) {
+      unawaited(() async {
+        final updates = await client.taskHistory(remote, task.id);
+        if (updates != null && identical(_verifiedClients[session.id], client)) {
+          session.tasks.replaceUpdates(task.id, updates);
+          notifyListeners();
+        }
+      }());
+    }
+  }
+
+  void _taskEvent(ChatSession session, DelegateNotice notice) {
+    if (notice['sessionId'] != session.remoteSessionId || !session.tasks.apply(notice)) return;
+    final ended = [for (final task in session.tasks.all) if (task.phase.ended) task.id];
+    for (final id in ended) {
+      session.taskAllowances.remove(id);
+      // The host gave the task's question up with the task, so a card still waiting for it has nothing to answer.
+      for (final question in [...session.pendingPermissions]) {
+        if (question.task?.id == id) {
+          session.pendingPermissions.remove(question);
+          question._answer.complete(const AcpCancel());
+        }
+      }
+    }
+    notifyListeners();
+  }
+
+  /// The task of [session] that [request] comes from, while it runs: the host puts the task's id and a colon before the tool call
+  /// id of a task's request. Null for the conversation's own agent's.
+  static DelegateTask? _taskOf(ChatSession session, AcpPermissionRequest request) {
+    final id = request.toolCallId;
+    final colon = id.indexOf(':');
+    if (colon <= 0) return null;
+    final task = session.tasks[id.substring(0, colon)];
+    return task == null || task.phase.ended ? null : task;
+  }
+
+  /// What an "allow for the session" of a task's request covers.
+  static String _allowanceKey(AcpPermissionRequest request) => '${request.kind ?? ''}\n${request.title ?? ''}';
 
   /// Follows the usage [client] reports for [session]: the account's allowances for every session on it, and the spend of the
   /// one the report names. Nothing is shown for an agent that advertised no usage.
@@ -2366,6 +2458,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     unawaited(_subscriptions.remove(session.id)?.cancel());
     unawaited(_usageSubscriptions.remove(session.id)?.cancel());
     unawaited(_turnSubscriptions.remove(session.id)?.cancel());
+    unawaited(_taskSubscriptions.remove(session.id)?.cancel());
     _verifiedClients.remove(session.id);
     _sessions.remove(session);
     if (_selectedId == session.id) _selectedId = _sessions.isEmpty ? null : _sessions.first.id;
@@ -2395,8 +2488,37 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }
     // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is.
     _endWaiting(session, const AcpCancel());
+    final tasks = session.tasks.live;
     notifyListeners();
     await client.cancel(session.remoteSessionId!);
+    // One request ends all of the conversation's tasks, and the host's answer is that they ended.
+    if (tasks.isNotEmpty && await client.stopTasks(session.remoteSessionId!)) _tasksStopped(session);
+  }
+
+  /// Ends one of [session]'s tasks, which need not be running its turn.
+  Future<void> stopTask(ChatSession session, String taskId) async {
+    final client = _verifiedClients[session.id];
+    final remote = session.remoteSessionId;
+    final task = session.tasks[taskId];
+    if (client == null || remote == null || task == null || task.phase.ended) return;
+    if (await client.stopTasks(remote, taskId: taskId)) _tasksStopped(session, only: taskId);
+  }
+
+  void _tasksStopped(ChatSession session, {String? only}) {
+    if (only == null) {
+      session.tasks.cancelLive(DateTime.now());
+      session.taskAllowances.clear();
+    } else {
+      session.tasks.cancelOne(only, DateTime.now());
+      session.taskAllowances.remove(only);
+    }
+    for (final question in [...session.pendingPermissions]) {
+      if (question.task != null && (only == null || question.task!.id == only)) {
+        session.pendingPermissions.remove(question);
+        question._answer.complete(const AcpCancel());
+      }
+    }
+    notifyListeners();
   }
 
   /// Attach explicit user-selected page context to the visible local session.
@@ -2512,6 +2634,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       unawaited(subscription.cancel());
     }
     _usageSubscriptions.clear();
+    for (final subscription in _taskSubscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _taskSubscriptions.clear();
     _verifiedClients.clear();
     unawaited(_attention.close());
     super.dispose();
