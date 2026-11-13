@@ -1,4 +1,5 @@
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/profile/profile.dart' show GitOverlay;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -45,7 +46,7 @@ cdn = "local"
     }
     final changed = config.withOverlayOptions('plain', {'depth': 'quick'});
     expect(CanoaConfig.parse(changed.encode()).overlayOptions('plain'), {'depth': 'quick'});
-    expect(CanoaConfig.parse(changed.encode()).overlays['plain'], config.overlays['plain']);
+    expect((CanoaConfig.parse(changed.encode()).overlays['plain'] as GitOverlay).spec, (config.overlays['plain'] as GitOverlay).spec);
     expect(CanoaConfig.parse(config.withOverlayOptions('mine', {}).encode()).overlayOptions('mine'), isEmpty);
     expect(() => CanoaConfig.parse('[overlays]\nmine = { dir = "mine", options = "deep" }\n'), throwsFormatException);
   });
