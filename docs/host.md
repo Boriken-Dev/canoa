@@ -198,7 +198,7 @@ host as the `pi` harness, so it needs only `pi` (no Node, no `npx`, no adapter) 
 it too, with `settings` for `executable`, or `node` with `script`, and `protected`. The tool entry is for a tool like Pi with
 no translator.
 
-`canoa serve` reads the same canoa.cfg as the app (`--config`, then `CANOA_CONFIG`, then the platform's place) and
+`canoa serve` reads the same canoa.cfg as the app, from the same layers (the installed copy, the system's file and yours, or the files `--config` or `CANOA_CONFIG` list; see [the configuration](configuration.md#where-it-is-found)), and
 prints one JSON line per entry: its name, kind, address, its provider id (a `harness` entry) and `title` when it has them, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
 saves its own settings.
 

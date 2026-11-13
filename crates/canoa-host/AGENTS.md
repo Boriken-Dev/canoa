@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`), `coqui-acp-history` and `coqui-acp-provider` and `coqui-acp-secrets` (coqui-acp `34de3e9`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`8dad1766`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-transport` and `coqui-transport-web` (`websocket`), `coqui-builder` (the error a listener builder returns), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `anycfg` (`bf71f70`, from its repository), `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `coqui-acp-claude`, `coqui-acp-codex`, `coqui-acp-harness` (`kind`), `coqui-acp-history` and `coqui-acp-provider` and `coqui-acp-secrets` (coqui-acp `34de3e9`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`8dad1766`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-transport` and `coqui-transport-web` (`websocket`), `coqui-builder` (the error a listener builder returns), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `serde-saphyr` (feature `yaml`), `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -15,6 +15,8 @@ The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
 ## canoa.cfg (`canoa_host::config`)
+
+canoa.cfg is one file in TOML, YAML (`#!yaml` first line) or JSON (`#!json`), read through anycfg (revision `bf71f70`) into `toml::Value` by `Config::load`, `Config::load_layers(&Layers)` and `Config::from_str_in`; the examples below are TOML. The Cargo features `yaml` and `json`, on by default, register the other two; without them `#!yaml` or `#!json` is refused naming the formats read. A null in YAML or JSON leaves its key unset; a TOML date or time is refused. `ConfigError::Parse` has `file`, `line` and `column` where known, and for a setting of the wrong shape the key's path (`host.agents.a.max_peers: expected usize, found a string`), never a value.
 
 The host reads `[host]`, `[usage] limit_phrases` (`Config::limit_phrases`: `None` when unset, which means coqui-acp-api's `DEFAULT_LIMIT_PHRASES`; a list replaces them, `[]` infers nothing, an empty or blank phrase is refused) and `[permissions] protected` (`Config::protected_paths`: a string with a pattern a line, or a list of strings; `None` when unset; it is handed to the built-in Pi source and to nothing else); the app's tables (`desktop`, `network`, `assets`, `appearance`, `agents`, `overlays`, `profile`, and `[usage] warn_permille`) are not read. Every table the host reads refuses a key it does not know.
 
@@ -869,7 +871,7 @@ canoa accounts remove NAME [--config FILE]
 - `tool` serves one tool entry on standard input and output, `JSON` being the entry as `ToolSpec` serializes it (without `listen`, `working_roots`, `peers`, `max_peers`): what `serve` runs per connection. A `JSON` that is not one, or that `check` refuses, is status 2.
 - `check` prints `NAME KIND LISTEN` per entry, or `{"name", "kind", "listen"}` with `--format json`, and serves nothing.
 - `peers` prints `accepted ID` and `waiting ID [from ADDRESS]`, or `{"peer", "state", "source"}`.
-- canoa.cfg is `--config`, else `CANOA_CONFIG`, else `%APPDATA%\Canoa\canoa.cfg` on Windows, `~/Library/Application Support/Canoa/canoa.cfg` on macOS, `$XDG_CONFIG_HOME/Canoa/canoa.cfg` (else `~/.config/…`) elsewhere: where the app keeps it.
+- canoa.cfg is read as layers, lowest first: `canoa.cfg` beside the program (or in `CANOA_INSTALLED_DIR`), the system's (`%PROGRAMDATA%\Canoa\canoa.cfg`, else `/etc/Canoa/canoa.cfg`) and the user's (`%APPDATA%\Canoa\canoa.cfg`, else `$XDG_CONFIG_HOME/Canoa/canoa.cfg`, else `~/.config/Canoa/canoa.cfg`, macOS included), each in the format its first line names, merged by `canoa_host::merge_into` (tables key by key; arrays and the `ENTRIES` named entries whole). `--config`, else `CANOA_CONFIG`, is a list of files split at `;` on Windows and `:` elsewhere, the last highest and the one `accounts` writes: without a leading `+` it replaces the three layers, with one it goes over them; an empty entry or a missing file is refused naming the entry. The app reads and writes the same files.
 - `provider` takes `--library` and `--source` from where it was started, then runs in `--directory`; with `--settings-on-stdin` it reads a `HostLine` first, as `serve` writes it; with `--connect` it serves on that loopback socket after sending the line's token, rather than on standard input and output.
 - Exit status: 0 success; 1 the operation failed; 2 the invocation or canoa.cfg was wrong, `serve` with nothing to serve, or a text that is not a peer id; 3 another host holds this home.
 
@@ -881,7 +883,8 @@ A client that is a webpage has no file system and names no path. Its `session/ne
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `CANOA_CONFIG` | canoa.cfg to read, below `--config` | the platform's place, above |
+| `CANOA_CONFIG` | the canoa.cfg files to read (a list, a leading `+` layering it over the installed, system and user files), used when `--config` is not given | the three layers, above |
+| `CANOA_INSTALLED_DIR` | the folder whose `canoa.cfg` is the installed copy | the executable's folder (the portable launcher sets its own) |
 | `CANOA_LOG` | what to log, a `tracing` filter | `info` |
 | `CANOA_WEB_DIST` | at build time, with feature `web`: the absolute directory of the site built in | none; the build stops without it |
 | `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `coqui-agentic-peer` under `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME` or `~/.config` |

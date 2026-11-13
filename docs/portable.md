@@ -24,7 +24,7 @@ archive and its SHA-256 compiled in. Copy the one file anywhere and start it:
    every file again, so a second start unpacks nothing and a file changed since is put back.
 3. It removes the folders it made earlier beyond the current version and the newest other one.
 4. It starts `CanoaUI.exe` from that folder with its own arguments, with that folder as the working folder (the app reads no
-   file by a path relative to it; a relative `CANOA_CONFIG` is made absolute first), waits, and exits with the app's status.
+   file by a path relative to it; each relative entry of `CANOA_CONFIG` is made absolute first, and `CANOA_INSTALLED_DIR` names the launcher's own folder, where an installed `canoa.cfg` is read from), waits, and exits with the app's status.
 
 The launcher links the C runtime in and loads what it still imports from System32 alone, so a runtime or system DLL dropped
 beside it (a download folder) is not picked up before it can check anything.

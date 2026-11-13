@@ -1,16 +1,49 @@
 # Desktop and canoa.cfg
 
-Canoa reads its settings from canoa.cfg, a user-level TOML file, with the environment override taking priority.
+canoa.cfg is one file in TOML, YAML or JSON, chosen by its first line and read through [anycfg](https://github.com/jose-pr/anycfg-rs). The app and the `canoa` host read it the same way and find it in the same places.
 
-The default template is [examples/config/canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa.cfg).
+The default template is [examples/config/canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa.cfg). [canoa-yaml.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa-yaml.cfg) and [canoa-json.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa-json.cfg) hold the same settings in the other two formats.
 
-| Platform | Config location |
+## The format
+
+The first line names the format: `#!toml`, `#!yaml` or `#!json` (`#!yml` is YAML too, and a path such as `#!/usr/bin/env yaml` counts by its last word). A file with no such line is TOML. A file whose name ends in `.toml`, `.yaml`, `.yml` or `.json` is read as that format and its first line is not looked at; any other extension but `.cfg` is refused. A first line naming another format is refused, saying which formats are read.
+
+Everything this page shows in TOML is the same in the other two: tables are maps, `[host.agents.claude]` is `host: {agents: {claude: {...}}}`. YAML and JSON have a null where TOML has none: a key holding one is the same as not being there, and one inside a list is refused. A TOML date or time is refused in every format; write it as text. The top level is always a table. A file that is malformed is refused naming the key (`host.agents.a.max_peers: expected usize, found a string`) or the line, and never quoting a value from the file.
+
+The app writes the file back in the format and with the first line it was read with, keeping the tables Settings does not edit. A YAML or JSON file is written again as a whole, so its comments and layout are not kept; a TOML file keeps its own text.
+
+## Where it is found
+
+canoa.cfg is read from up to three files, lowest layer first, and merged:
+
+| Layer | File |
 | --- | --- |
-| Windows | %APPDATA%\Canoa\canoa.cfg |
-| macOS | ~/Library/Application Support/Canoa/canoa.cfg |
-| Linux | $XDG_CONFIG_HOME/Canoa/canoa.cfg or ~/.config/Canoa/canoa.cfg |
-| Override | CANOA_CONFIG |
+| the installed copy | `canoa.cfg` beside the program (the folder of the `canoa` or app executable; for the portable `CanoaUI.exe`, the folder holding that file) |
+| the system's | Windows `%PROGRAMDATA%\Canoa\canoa.cfg` (`C:\ProgramData` without it), elsewhere `/etc/Canoa/canoa.cfg` |
+| your own | Windows `%APPDATA%\Canoa\canoa.cfg`, elsewhere `$XDG_CONFIG_HOME/Canoa/canoa.cfg` (an absolute path) or `~/.config/Canoa/canoa.cfg`; macOS uses `~/.config/Canoa/canoa.cfg` too |
 | PWA / extension | canoa.cfg alongside the deployed index.html, read-only |
+
+A layer that does not exist is skipped, and each layer may be in any of the three formats. A layer that is malformed is refused, naming its file. The installed copy is where an application ships its defaults, the system's file is for a machine's administrator, and the last is yours.
+
+`--config` (a `canoa` option) or `CANOA_CONFIG` (used when `--config` is not given) replaces the third layer, or all three. Its value is a list of files, split at `;` on Windows and `:` elsewhere (no quoting), the last one highest:
+
+- Without a leading `+`, only the listed files are read: no installed, system or user file.
+- With a leading `+` (`+extra.cfg:more.cfg`), the listed files go on top of the installed, system and user files.
+- An empty entry is refused, and so is a listed file that does not exist, saying which entry.
+
+The portable `CanoaUI.exe` runs the app from an unpacked copy, so it sets `CANOA_INSTALLED_DIR` to its own folder; the installed copy is `canoa.cfg` there. The variable can name that folder for any program.
+
+### How layers merge
+
+A higher layer is merged over the lower ones, key by key:
+
+- A key in a higher layer replaces the same key below it, and tables merge by key.
+- Arrays replace whole, never element by element.
+- Named entries replace whole, by name, never key by key: `[host.agents.NAME]`, `[host.providers.NAME]`, `[host.tools.NAME]`, `[host.profiles.NAME]`, `[host.accounts.NAME]`, `[agents.NAME]`, `[profile.mcp.NAME]`, `[profile.skills.NAME]`, `[profile.env.NAME]`, `[overlays]` and `[catalogs]` entries. A higher `[agents.Claude]` therefore drops a lower one's `[agents.Claude.profile]`.
+- A layer cannot remove a key a lower one sets: a null in YAML or JSON is the same as leaving the key out.
+- Relative `library` and `source` paths, and the `overlays/` folder, are taken from the directory of your own file.
+
+Settings shows the merged values, says on a row which come from a lower layer ("From the system file") and which of yours override one ("Overrides the system file", with **Reset**, which takes the value out of your file so the lower one shows). The app writes your own file only, and only the keys you changed or already had there; a value from the installed or the system's file is never copied into it. If your file does not exist yet, the first change creates it.
 
 Configuration tables:
 
