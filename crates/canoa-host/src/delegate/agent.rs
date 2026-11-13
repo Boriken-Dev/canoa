@@ -13,13 +13,14 @@ use std::time::Duration;
 use coqui_a2a::error::{A2aError, ErrorKind};
 use coqui_a2a::model::{
     AgentCapabilities, AgentCard, AgentSkill, CancelTaskRequest, GetTaskRequest, ListTasksRequest,
-    ListTasksResponse, Role, SendMessageRequest, SendMessageResponse, SubscribeToTaskRequest, Task,
+    ListTasksResponse, Role, SendMessageRequest, SendMessageResponse, StreamResponse,
+    SubscribeToTaskRequest, Task,
 };
 use coqui_a2a::{Agent, Caller, Events};
 use serde_json::{Map, Value, json};
 
 use super::child::{self, Child, Job};
-use super::{Engine, Session, Who, privilege};
+use super::{Engine, Session, Who, lock, privilege};
 
 /// The longest title a task is shown by, in characters.
 const TITLE_CHARS: usize = 80;
@@ -34,21 +35,20 @@ impl DelegationAgent {
         Self { engine }
     }
 
-    /// The engine and the session a caller is, or why it is neither.
+    /// The engine and the session a caller is, or why it is neither: a session of this host's own, or a key granted `a2a`
+    /// that a link proved.
     fn of(&self, caller: &Caller<'_>) -> Result<(Arc<Engine>, Arc<Session>), A2aError> {
         let engine = self
             .engine
             .upgrade()
             .ok_or_else(|| A2aError::new(ErrorKind::Internal, "the host is stopping"))?;
-        if !caller.is_local() {
-            return Err(A2aError::new(
-                ErrorKind::PermissionDenied,
-                "this host delegates to the sessions it runs only",
-            ));
-        }
-        let session = engine
-            .session_of_peer(caller.peer)
-            .ok_or_else(|| A2aError::new(ErrorKind::Unauthenticated, "no such session"))?;
+        let session = if caller.is_local() {
+            engine
+                .session_of_peer(caller.peer)
+                .ok_or_else(|| A2aError::new(ErrorKind::Unauthenticated, "no such session"))?
+        } else {
+            engine.remote_session(caller.peer)?
+        };
         Ok((engine, session))
     }
 
@@ -61,11 +61,56 @@ impl DelegationAgent {
             .into_iter()
             .map(|source| AgentSkill {
                 name: source.title.clone().unwrap_or_else(|| source.name.clone()),
-                description: format!("A session of {}", source.name),
+                description: if source.remote.is_some() {
+                    format!(
+                        "An agent on another machine, {}: the task's text is sent there",
+                        source.name
+                    )
+                } else {
+                    format!("A session of {}", source.name)
+                },
                 id: source.name,
                 ..AgentSkill::default()
             })
             .collect()
+    }
+
+    /// A key's answer to what one of its own tasks asked of it (`INPUT_REQUIRED`): the data of its message goes to the task's
+    /// agent as the person's answer. Only a key from another machine has such a task: a session of this host's own is asked
+    /// on its own connection.
+    fn answer(&self, caller: &Caller<'_>, request: SendMessageRequest) -> Result<Task, A2aError> {
+        let (_, session) = self.of(caller)?;
+        if !session.is_remote() {
+            return Err(A2aError::new(
+                ErrorKind::UnsupportedOperation,
+                "a task takes no further message: it is watched and stopped, not answered",
+            ));
+        }
+        request.validate()?;
+        let id = request.message.task_id.clone().unwrap_or_default();
+        // The caller's own task only: another's is `TaskNotFound`, as it is to every other call.
+        let task = session.store.get(
+            caller,
+            &GetTaskRequest {
+                id: id.clone(),
+                ..GetTaskRequest::default()
+            },
+        )?;
+        let answer = request
+            .message
+            .parts
+            .iter()
+            .find_map(|part| part.data.clone())
+            .ok_or_else(|| A2aError::new(ErrorKind::InvalidParams, "an answer is a data part"))?;
+        let child = lock(&session.children).get(&id).cloned();
+        if child.is_some_and(|child| child.answer(answer)) {
+            Ok(task)
+        } else {
+            Err(A2aError::new(
+                ErrorKind::InvalidRequest,
+                "the task asks nothing now",
+            ))
+        }
     }
 
     /// Checks a request against everything the session allows and starts its task; the task as it was made.
@@ -116,12 +161,38 @@ impl DelegationAgent {
                     .ok_or_else(|| A2aError::new(ErrorKind::InvalidParams, "folder is not text"))
             })
             .transpose()?;
-        let roots = session
-            .conn()
-            .map(|conn| conn.roots().to_vec())
-            .unwrap_or_default();
-        let folder = privilege::folder(&session.cwd, asked, &roots)
-            .map_err(|why| A2aError::new(ErrorKind::PermissionDenied, why))?;
+        let listed = engine.source(&source);
+        let to_remote = listed
+            .as_ref()
+            .is_some_and(|listed| listed.remote.is_some());
+        // Neither a caller from another machine nor a task for one has a folder to name: the first is run where this host
+        // puts it, and nothing of the second's leaves the machine.
+        let folder = if session.is_remote() || to_remote {
+            if asked.is_some() {
+                return Err(A2aError::new(
+                    ErrorKind::InvalidParams,
+                    "a task that crosses machines takes no folder",
+                ));
+            }
+            if session.is_remote() {
+                let roots = listed.map(|listed| listed.roots).unwrap_or_default();
+                Some(
+                    privilege::remote_folder(&roots)
+                        .map_err(|why| A2aError::new(ErrorKind::PermissionDenied, why))?,
+                )
+            } else {
+                None
+            }
+        } else {
+            let roots = session
+                .conn()
+                .map(|conn| conn.roots().to_vec())
+                .unwrap_or_default();
+            Some(
+                privilege::folder(&session.cwd, asked, &roots)
+                    .map_err(|why| A2aError::new(ErrorKind::PermissionDenied, why))?,
+            )
+        };
         let title = title_of(
             request
                 .metadata
@@ -131,14 +202,19 @@ impl DelegationAgent {
             &text,
         );
         let reservation = engine.reserve(&session)?;
-        let context = session.session_id().ok_or_else(|| {
-            A2aError::new(ErrorKind::Unauthenticated, "the session is not open yet")
-        })?;
+        let context = session
+            .session_id()
+            .or_else(|| session.peer())
+            .ok_or_else(|| {
+                A2aError::new(ErrorKind::Unauthenticated, "the session is not open yet")
+            })?;
         // The host's words, not the caller's: where the task runs and what it is called are what the host settled.
         let mut metadata = Map::new();
         metadata.insert("title".to_owned(), json!(title));
         metadata.insert("source".to_owned(), json!(source));
-        metadata.insert("folder".to_owned(), json!(folder.to_string_lossy()));
+        if let Some(folder) = &folder {
+            metadata.insert("folder".to_owned(), json!(folder.to_string_lossy()));
+        }
         request.metadata = Some(metadata);
         request.tenant = Some(source.clone());
         request.message.context_id = Some(context);
@@ -162,7 +238,7 @@ impl DelegationAgent {
             engine: Arc::clone(&engine),
             session: Arc::clone(&session),
             child,
-            folder,
+            folder: folder.unwrap_or_else(|| session.cwd.clone()),
             text,
             reservation,
         };
@@ -182,6 +258,51 @@ impl DelegationAgent {
             ));
         }
         Ok((task, events))
+    }
+}
+
+/// The events of a task that a key from another machine started, which cancels the task when the key's stream ends before the
+/// task does: with its link gone, nobody is left to answer what the task asks or to read what it makes.
+struct Following {
+    events: Events,
+    session: Arc<Session>,
+    task: String,
+}
+
+impl Iterator for Following {
+    type Item = Result<StreamResponse, A2aError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.events.next()
+    }
+}
+
+impl Drop for Following {
+    fn drop(&mut self) {
+        let (Some(peer), Some(running)) =
+            (self.session.peer(), self.session.store.snapshot(&self.task))
+        else {
+            return;
+        };
+        if running.status.state.is_terminal() {
+            return;
+        }
+        let (session, task) = (Arc::clone(&self.session), self.task.clone());
+        let spawned = std::thread::Builder::new()
+            .name("canoa-delegate-orphan".to_owned())
+            .spawn(move || {
+                let who = Who::new(peer);
+                let _ = session.store.cancel(
+                    &who.caller(),
+                    &CancelTaskRequest {
+                        id: task,
+                        ..CancelTaskRequest::default()
+                    },
+                );
+            });
+        if let Err(error) = spawned {
+            tracing::warn!("delegation: an orphaned task could not be stopped: {error}");
+        }
     }
 }
 
@@ -267,6 +388,9 @@ impl Agent for DelegationAgent {
         caller: &Caller<'_>,
         request: SendMessageRequest,
     ) -> Result<SendMessageResponse, A2aError> {
+        if request.message.task_id.is_some() {
+            return self.answer(caller, request).map(SendMessageResponse::Task);
+        }
         let immediately = request
             .configuration
             .as_ref()
@@ -296,8 +420,18 @@ impl Agent for DelegationAgent {
         caller: &Caller<'_>,
         request: SendMessageRequest,
     ) -> Result<Events, A2aError> {
-        let (_, events) = self.start(caller, request, true)?;
-        events.ok_or_else(|| A2aError::new(ErrorKind::Internal, "no stream"))
+        let (task, events) = self.start(caller, request, true)?;
+        let events = events.ok_or_else(|| A2aError::new(ErrorKind::Internal, "no stream"))?;
+        let (_, session) = self.of(caller)?;
+        Ok(if session.is_remote() {
+            Box::new(Following {
+                events,
+                session,
+                task: task.id,
+            })
+        } else {
+            events
+        })
     }
 
     fn get_task(&self, caller: &Caller<'_>, request: GetTaskRequest) -> Result<Task, A2aError> {

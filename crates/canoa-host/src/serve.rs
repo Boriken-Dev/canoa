@@ -656,6 +656,7 @@ struct DelegationHost {
     shared: alloc::sync::Weak<Shared>,
     served: Vec<Arc<Served>>,
     agents: Vec<delegate::Source>,
+    identity: Identity,
 }
 
 impl delegate::Host for DelegationHost {
@@ -664,6 +665,14 @@ impl delegate::Host for DelegationHost {
     }
 
     fn may_use(&self, who: &Principal, source: &str) -> bool {
+        // Another machine's agent takes the task's text off this one: only the person's own sessions may send it there.
+        let listed = &self.agents;
+        if listed
+            .iter()
+            .any(|agent| agent.name == source && agent.remote.is_some())
+        {
+            return matches!(who, Principal::Owner);
+        }
         let Some(shared) = self.shared.upgrade() else {
             return false;
         };
@@ -694,6 +703,13 @@ impl delegate::Host for DelegationHost {
             } => Some(format!("program:{}", program.to_string_lossy())),
             _ => None,
         }
+    }
+
+    fn prover(&self, peer: &PeerId) -> Result<Proof, String> {
+        Proof::builder(self.identity.clone())
+            .responders(Trust::pinned([*peer]))
+            .build()
+            .map_err(|error| error.to_string())
     }
 
     fn open(&self, source: &str, context: delegate::ChildContext) -> Result<Link, LocalError> {
@@ -863,6 +879,8 @@ impl Serving {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
+        // What proves this host to an agent on another machine it hands a task to.
+        let dialer = identity.clone();
         let secrets = secrets::Hub::new(
             &identity,
             &store,
@@ -1246,16 +1264,17 @@ impl Serving {
             local_only,
             listening,
         };
-        serving.attach_delegation();
+        serving.attach_delegation(&config.remote_agents, dialer);
         Ok(serving)
     }
 
     /// Gives the delegation the agents this host serves and the way to open one for a task.
-    fn attach_delegation(&self) {
+    fn attach_delegation(&self, remote: &[crate::config::RemoteAgent], identity: Identity) {
         let Some(delegation) = &self.shared.delegation else {
             return;
         };
-        let agents = self
+        let served = self.local().served;
+        let mut agents: Vec<delegate::Source> = self
             .listening
             .iter()
             .filter(|listening| listening.kind == "agent")
@@ -1263,12 +1282,33 @@ impl Serving {
                 name: listening.name.clone(),
                 title: listening.title.clone(),
                 harness: listening.harness.clone(),
+                roots: served
+                    .iter()
+                    .find(|served| served.name == listening.name)
+                    .and_then(|served| match &served.run {
+                        Run::Agent { scope, .. } => Some(scope.roots().to_vec()),
+                        _ => None,
+                    })
+                    .unwrap_or_default(),
+                remote: None,
             })
             .collect();
+        agents.extend(remote.iter().map(|agent| delegate::Source {
+            name: agent.name.clone(),
+            title: agent.title.clone(),
+            harness: None,
+            roots: Vec::new(),
+            remote: Some(delegate::Remote {
+                url: agent.url.clone(),
+                peer: agent.peer,
+                source: agent.source.clone(),
+            }),
+        }));
         delegation.attach(Arc::new(DelegationHost {
             shared: Arc::downgrade(&self.shared),
-            served: self.local().served,
+            served,
             agents,
+            identity,
         }));
     }
 
@@ -1535,8 +1575,22 @@ fn serve_proven<C: Channel>(
         }
     }
     match first {
+        // A link of streams carries A2A and nothing else, over an agent entry's address, and only the delegation decides who
+        // may open it (`[host.delegate] a2a`).
         Ok(Some(first)) if mux::starts_mux(&first) => {
-            tracing::info!(entry = served.name, %peer, "a link of streams was refused: this host serves plain ACP");
+            match shared
+                .delegation
+                .as_ref()
+                .filter(|_| matches!(served.run, Run::Agent { .. }))
+            {
+                Some(delegation) => {
+                    tracing::info!(entry = served.name, %peer, "a link of streams");
+                    delegation.serve_link(sealed, first, &peer.to_string(), MAX_LINE);
+                }
+                None => {
+                    tracing::info!(entry = served.name, %peer, "a link of streams was refused: this entry serves plain ACP");
+                }
+            }
         }
         Ok(Some(first)) => {
             tracing::info!(entry = served.name, %peer, "proven");

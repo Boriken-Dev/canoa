@@ -54,6 +54,8 @@ getrandom = "0.4"
 guatiao.workspace = true
 guatiao-serde.workspace = true
 httparse.workspace = true
+# The address a remote source is dialed at; already in the graph through coqui-transport-web.
+url = "2.5"
 indexmap.workspace = true
 percent-encoding.workspace = true
 rustls.workspace = true
@@ -105,8 +107,6 @@ windows-registry = "0.6"
 is_elevated = "0.1"
 
 [dev-dependencies]
-# The address a test client dials; already in the graph through coqui-transport-web.
-url = "2.5"
 # A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 # The peers the web_peer example plays the page of, and its base64; already in the graph through coqui-acp-bridge.

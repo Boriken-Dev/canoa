@@ -18,6 +18,8 @@ impl Host for Fake {
             name: "a".to_owned(),
             title: None,
             harness: None,
+            roots: Vec::new(),
+            remote: None,
         }]
     }
 
@@ -31,6 +33,13 @@ impl Host for Fake {
 
     fn open(&self, _source: &str, _context: super::ChildContext) -> Result<Link, LocalError> {
         Err(LocalError::NoEntry)
+    }
+
+    fn prover(
+        &self,
+        _peer: &coqui_peer_webcrypto::PeerId,
+    ) -> Result<coqui_agentic_peer::auth::Proof, String> {
+        Err("a test host dials no one".to_owned())
     }
 }
 
@@ -449,6 +458,7 @@ fn the_settings_default_to_the_documented_values_and_refuse_what_they_do_not_kno
             max_children: 2,
             max_running: 3,
             max_depth: 0,
+            a2a: Vec::new(),
             task_bytes: 10,
             result_bytes: 20,
             history_bytes: 30,

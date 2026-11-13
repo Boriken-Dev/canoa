@@ -18,6 +18,7 @@ pub(crate) mod bridge;
 mod channel;
 mod child;
 pub(crate) mod privilege;
+mod remote;
 mod server;
 mod tools;
 
@@ -31,6 +32,10 @@ use coqui_a2a::error::{A2aError, ErrorKind};
 use coqui_a2a::tasks::TaskStore;
 use coqui_a2a::wire::ServiceParameters;
 use coqui_a2a::{Caller, Server, Watch};
+use coqui_agentic_peer::auth::Proof;
+use coqui_agentic_peer::link::{self, Host as LinkHost, Options, Services};
+use coqui_agentic_peer::mux::{Heartbeat, Side};
+use coqui_agentic_peer::peers::{NoEvents, PeerRecord, PeerStore};
 use coqui_peer_webcrypto::PeerId;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -75,6 +80,20 @@ pub(crate) struct Source {
     pub(crate) title: Option<String>,
     /// The provider id of a `harness` entry.
     pub(crate) harness: Option<String>,
+    /// The working roots of its entry. A task from another machine runs in the first, since it names no folder.
+    pub(crate) roots: Vec<PathBuf>,
+    /// Where it runs, when it is another machine's agent.
+    pub(crate) remote: Option<Remote>,
+}
+
+/// An agent on another machine that a task may be handed to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Remote {
+    pub(crate) url: String,
+    /// The only key it may prove.
+    pub(crate) peer: PeerId,
+    /// The source on its card the task names, when the card has several.
+    pub(crate) source: Option<String>,
 }
 
 /// What a task's connection is given when the host opens it, which a client's messages cannot set.
@@ -96,6 +115,8 @@ pub(crate) trait Host: Send + Sync {
     fn kind(&self, source: &str) -> Option<String>;
     /// A connection to `source` for a task.
     fn open(&self, source: &str, context: ChildContext) -> Result<Link, LocalError>;
+    /// This host's own identity, set to prove itself to `peer` and to accept no other key from it.
+    fn prover(&self, peer: &PeerId) -> Result<Proof, String>;
 }
 
 /// What a connection that may delegate is.
@@ -181,6 +202,8 @@ struct State {
     sessions: HashMap<String, Arc<Session>>,
     /// Tasks running, across the host.
     running: usize,
+    /// The connection each remote caller's session answers to, kept for as long as the session.
+    remote_conns: Vec<Arc<Conn>>,
 }
 
 /// The delegation of one host.
@@ -228,6 +251,46 @@ impl Engine {
         lock(&self.state).sessions.get(peer).cloned()
     }
 
+    /// The source called `name`, as the host lists it.
+    fn source(&self, name: &str) -> Option<Source> {
+        self.host()?
+            .sources()
+            .into_iter()
+            .find(|source| source.name == name)
+    }
+
+    /// The session of a key that came over a link and is granted `a2a`: all its tasks, made when it first asks. A key not in
+    /// `[host.delegate] a2a` has none, whatever else it may do on this host.
+    fn remote_session(self: &Arc<Self>, peer: &str) -> Result<Arc<Session>, A2aError> {
+        let denied = || A2aError::new(ErrorKind::PermissionDenied, "this key is not granted A2A");
+        let key: PeerId = peer.parse().map_err(|_| denied())?;
+        if !self.config.a2a.contains(&key) {
+            return Err(denied());
+        }
+        if let Some(session) = self.session_of_peer(peer) {
+            return Ok(session);
+        }
+        let conn = self.connect(ConnInfo {
+            principal: Principal::Key(key),
+            entry: String::new(),
+            roots: Vec::new(),
+            depth: 0,
+            child: false,
+        });
+        let session = self.make_session(&conn, PathBuf::new(), [0; 32], Some(peer.to_owned()));
+        let mut state = lock(&self.state);
+        if self.stopped() {
+            return Err(A2aError::new(ErrorKind::Internal, "the host is stopping"));
+        }
+        // Two streams of one key may ask at once: the first session stands.
+        if let Some(held) = state.sessions.get(peer) {
+            return Ok(Arc::clone(held));
+        }
+        state.sessions.insert(peer.to_owned(), Arc::clone(&session));
+        state.remote_conns.push(conn);
+        Ok(session)
+    }
+
     /// Takes the host's place for a task: one more of the session's and of the host's, or the limit it would pass.
     fn reserve(self: &Arc<Self>, session: &Arc<Session>) -> Result<Reservation, A2aError> {
         let mut state = lock(&self.state);
@@ -263,6 +326,7 @@ impl Engine {
         let sessions: Vec<Arc<Session>> = {
             let mut state = lock(&self.state);
             state.tokens.clear();
+            state.remote_conns.clear();
             state.sessions.drain().map(|(_, session)| session).collect()
         };
         for session in sessions {
@@ -326,6 +390,8 @@ impl Drop for Reservation {
 
 /// One agent session that was given the tools.
 pub(crate) struct Session {
+    /// The key of a caller that came over a link, whose tasks these are; `None` for a session of this host's own.
+    remote: Option<String>,
     conn: Weak<Conn>,
     conn_id: u64,
     pub(crate) cwd: PathBuf,
@@ -344,9 +410,17 @@ pub(crate) struct Session {
 impl Session {
     /// The A2A caller of this session, once the agent has named it.
     pub(crate) fn peer(&self) -> Option<String> {
+        if let Some(peer) = &self.remote {
+            return Some(peer.clone());
+        }
         lock(&self.id)
             .as_ref()
             .map(|id| format!("local:{}:{id}", self.conn_id))
+    }
+
+    /// Whether its tasks are a key's that came over a link: nobody is at a client of this host to ask, so the key is.
+    pub(crate) fn is_remote(&self) -> bool {
+        self.remote.is_some()
     }
 
     pub(crate) fn session_id(&self) -> Option<String> {
@@ -392,6 +466,40 @@ impl Session {
 struct Waiting {
     answer: Mutex<Option<Value>>,
     ready: Condvar,
+}
+
+impl Waiting {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            answer: Mutex::new(None),
+            ready: Condvar::new(),
+        })
+    }
+
+    /// Hands over the answer and wakes whoever waits for it.
+    fn give(&self, answer: Value) {
+        *lock(&self.answer) = Some(answer);
+        self.ready.notify_all();
+    }
+
+    /// The answer, or `None` when `stop` says to give up or `limit` passes first.
+    fn wait(&self, stop: &dyn Fn() -> bool, limit: Duration) -> Option<Value> {
+        let until = std::time::Instant::now() + limit;
+        let mut held = lock(&self.answer);
+        loop {
+            if let Some(answer) = held.take() {
+                return Some(answer);
+            }
+            if stop() || std::time::Instant::now() >= until {
+                return None;
+            }
+            held = self
+                .ready
+                .wait_timeout(held, Duration::from_millis(100))
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
 }
 
 /// A request the host remembers until the agent answers it.
@@ -925,10 +1033,7 @@ impl Conn {
         let request = json!({
             "jsonrpc": "2.0", "id": request_id, "method": "session/request_permission", "params": params,
         });
-        let waiting = Arc::new(Waiting {
-            answer: Mutex::new(None),
-            ready: Condvar::new(),
-        });
+        let waiting = Waiting::new();
         lock(&self.answers).insert(request_id.clone(), Arc::clone(&waiting));
         if self.is_closed() {
             lock(&self.answers).remove(&request_id);
@@ -960,8 +1065,7 @@ impl Conn {
             return false;
         };
         let result = value.get("result").filter(|_| value.get("error").is_none());
-        *lock(&waiting.answer) = result.cloned().or_else(|| Some(Value::Null));
-        waiting.ready.notify_all();
+        waiting.give(result.cloned().unwrap_or(Value::Null));
         true
     }
 
@@ -983,10 +1087,25 @@ impl Conn {
 
 impl Engine {
     fn new_session(&self, conn: &Arc<Conn>, cwd: PathBuf, digest: [u8; 32]) -> Arc<Session> {
+        let session = self.make_session(conn, cwd, digest, None);
+        lock(&self.state)
+            .tokens
+            .insert(digest, Arc::clone(&session));
+        session
+    }
+
+    fn make_session(
+        &self,
+        conn: &Arc<Conn>,
+        cwd: PathBuf,
+        digest: [u8; 32],
+        remote: Option<String>,
+    ) -> Arc<Session> {
         let per_session = self.config.max_children.saturating_mul(4).max(1);
-        let session = Arc::new_cyclic(|weak: &Weak<Session>| {
+        Arc::new_cyclic(|weak: &Weak<Session>| {
             let hook = weak.clone();
             Session {
+                remote,
                 conn: Arc::downgrade(conn),
                 conn_id: conn.id,
                 cwd,
@@ -1019,11 +1138,7 @@ impl Engine {
                 live: AtomicUsize::new(0),
                 calls: AtomicUsize::new(0),
             }
-        });
-        lock(&self.state)
-            .tokens
-            .insert(digest, Arc::clone(&session));
-        session
+        })
     }
 
     /// Names a session, which is what makes its bearer able to delegate.
@@ -1118,6 +1233,36 @@ impl Delegation {
         let _ = self.engine.host.set(host);
     }
 
+    /// Serves a link of streams a key proved, from its first message (`first`) to its end: `a2a/1` to a key `[host.delegate]
+    /// a2a` lists, and nothing to any other, however it is paired. Every stream is opened against that list, and again while
+    /// it runs, so taking a key off it ends what it has open.
+    pub(crate) fn serve_link<C: coqui_transport::Channel>(
+        &self,
+        channel: &C,
+        first: Vec<u8>,
+        peer: &str,
+        max_message: usize,
+    ) {
+        let services = self.engine.a2a.clone().serving(Services::default());
+        let grants = Grants(
+            self.engine
+                .config
+                .a2a
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        );
+        let mut options = Options::default();
+        options.limits.max_message = max_message;
+        options.limits.heartbeat = Some(Heartbeat::new(Duration::from_secs(15), 3));
+        let host = LinkHost {
+            store: &grants,
+            services: &services,
+            events: &NoEvents,
+        };
+        link::serve(channel, Side::Answered, options, Some(first), peer, &host);
+    }
+
     /// A connection that may delegate.
     pub(crate) fn connection(&self, info: ConnInfo) -> Arc<Conn> {
         self.engine.connect(info)
@@ -1133,6 +1278,31 @@ impl Delegation {
 impl Drop for Delegation {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// The keys granted `a2a/1`, as the link asks for them: read from the configuration, which nothing at run time writes.
+struct Grants(Vec<String>);
+
+impl PeerStore for Grants {
+    fn get(&self, peer: &str) -> Result<Option<PeerRecord>, coqui_agentic_peer::Error> {
+        Ok(self
+            .0
+            .iter()
+            .any(|granted| granted == peer)
+            .then(|| PeerRecord::new(peer).granting(coqui_a2a::PROTOCOL)))
+    }
+
+    fn put(&self, _record: &PeerRecord) -> Result<(), coqui_agentic_peer::Error> {
+        Err(coqui_agentic_peer::Error::Identity(
+            "the grants are canoa.cfg's".to_owned(),
+        ))
+    }
+
+    fn remove(&self, _peer: &str) -> Result<(), coqui_agentic_peer::Error> {
+        Err(coqui_agentic_peer::Error::Identity(
+            "the grants are canoa.cfg's".to_owned(),
+        ))
     }
 }
 

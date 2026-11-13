@@ -16,15 +16,17 @@ use crate::config::DelegateConfig;
 /// The modes that ask for everything, nearest first: what a task gets when its agent has not the delegating session's own.
 pub(crate) const ASKING: [&str; 2] = ["manual", "default"];
 
-/// The sources `who` may name in a task: the host's agents the connection may use, narrowed by `[host.delegate] sources`.
+/// The sources `who` may name in a task: the host's agents the connection may use, narrowed by `[host.delegate] sources`. A
+/// task's text leaves the machine for an agent on another one, so that is a source only when `sources` names it.
 pub(crate) fn sources(host: &dyn Host, config: &DelegateConfig, who: &Principal) -> Vec<Source> {
     host.sources()
         .into_iter()
         .filter(|source| {
-            config
+            let named = config
                 .sources
                 .as_ref()
-                .is_none_or(|named| named.contains(&source.name))
+                .map(|named| named.contains(&source.name));
+            named.unwrap_or(source.remote.is_none())
         })
         .filter(|source| host.may_use(who, &source.name))
         .collect()
@@ -99,6 +101,25 @@ pub(crate) fn folder(
         ));
     }
     Ok(wanted)
+}
+
+/// The folder a task from another machine runs in: the first working root of its source, settled. That machine names none, so
+/// where it runs is the host's; a source with no working root has none to give.
+///
+/// # Errors
+///
+/// The reason it is refused.
+pub(crate) fn remote_folder(roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let root = roots.first().ok_or_else(|| {
+        "this source has no working root to run a task from another machine in: name one in working_roots".to_owned()
+    })?;
+    let settled = canonical(root)
+        .map_err(|error| format!("the source's working root cannot be read: {error}"))?;
+    if settled.is_dir() {
+        Ok(settled)
+    } else {
+        Err("the source's working root is not a directory".to_owned())
+    }
 }
 
 /// The modes an agent's session lists, read from a `session/new` or `session/set_config_option` answer.
@@ -213,6 +234,78 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    use super::super::{Remote, Source};
+
+    struct Listed(Vec<Source>);
+
+    impl Host for Listed {
+        fn sources(&self) -> Vec<Source> {
+            self.0.clone()
+        }
+        fn may_use(&self, _who: &Principal, _source: &str) -> bool {
+            true
+        }
+        fn kind(&self, _source: &str) -> Option<String> {
+            None
+        }
+        fn open(
+            &self,
+            _source: &str,
+            _context: super::super::ChildContext,
+        ) -> Result<crate::local::Link, crate::serve::LocalError> {
+            Err(crate::serve::LocalError::NoEntry)
+        }
+        fn prover(
+            &self,
+            _peer: &coqui_peer_webcrypto::PeerId,
+        ) -> Result<coqui_agentic_peer::auth::Proof, String> {
+            Err(String::new())
+        }
+    }
+
+    fn source(name: &str, remote: bool) -> Source {
+        Source {
+            name: name.to_owned(),
+            title: None,
+            harness: None,
+            roots: Vec::new(),
+            remote: remote.then(|| Remote {
+                url: "ws://127.0.0.1:1".to_owned(),
+                peer: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .parse()
+                    .expect("a peer id"),
+                source: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn another_machines_agent_is_a_source_only_when_sources_names_it() {
+        let host = Listed(vec![source("here", false), source("far", true)]);
+        let names = |config: &DelegateConfig| -> Vec<String> {
+            sources(&host, config, &Principal::Owner)
+                .into_iter()
+                .map(|source| source.name)
+                .collect()
+        };
+        let mut config = DelegateConfig::default();
+        assert_eq!(names(&config), ["here"], "unset is every local source");
+        config.sources = Some(vec!["here".to_owned()]);
+        assert_eq!(names(&config), ["here"]);
+        config.sources = Some(vec!["far".to_owned(), "here".to_owned()]);
+        assert_eq!(names(&config), ["here", "far"]);
+        config.sources = Some(Vec::new());
+        assert!(names(&config).is_empty());
+    }
+
+    #[test]
+    fn a_task_from_another_machine_runs_in_the_first_working_root_or_is_refused() {
+        let dir = std::env::temp_dir();
+        assert!(remote_folder(std::slice::from_ref(&dir)).is_ok());
+        assert!(remote_folder(&[]).unwrap_err().contains("working root"));
+        assert!(remote_folder(&[dir.join("canoa-no-such-root")]).is_err());
+    }
 
     fn strings(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()

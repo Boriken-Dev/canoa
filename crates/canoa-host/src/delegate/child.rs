@@ -18,13 +18,15 @@ use coqui_a2a::model::{Artifact, Message, Part, Role, TaskState};
 use serde_json::{Value, json};
 
 use super::privilege::{self, Modes};
-use super::{ChildContext, Engine, Reservation, Session, lock};
+use super::{ChildContext, Engine, Reservation, Session, Waiting, lock};
 use crate::local::{Link, LinkError};
 
 /// How long a task's agent has to end its turn after it was told to cancel, before its process is ended.
 pub(crate) const GRACE: Duration = Duration::from_secs(3);
 /// How long a read waits before it looks up to see whether the task was cancelled.
 const POLL: Duration = Duration::from_millis(100);
+/// How long a key from another machine has to answer what a task of its own asks, before the question is cancelled.
+const QUESTION_WAIT: Duration = Duration::from_secs(900);
 
 /// What a task's work came to.
 pub(crate) enum Outcome {
@@ -69,6 +71,10 @@ pub(crate) struct Child {
     pub(crate) source: String,
     cancelling: AtomicBool,
     link: Mutex<Option<Arc<Link>>>,
+    /// Ends the task's work when it runs on another machine, where there is no process of ours to end.
+    closer: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    /// What the task's agent has asked a key from another machine, until the key answers.
+    question: Mutex<Option<Arc<Waiting>>>,
     session: Mutex<Option<String>>,
     done: Mutex<bool>,
     ended: Condvar,
@@ -83,6 +89,8 @@ impl Child {
             source,
             cancelling: AtomicBool::new(false),
             link: Mutex::new(None),
+            closer: Mutex::new(None),
+            question: Mutex::new(None),
             session: Mutex::new(None),
             done: Mutex::new(false),
             ended: Condvar::new(),
@@ -90,8 +98,28 @@ impl Child {
         })
     }
 
-    fn cancelled(&self) -> bool {
+    pub(super) fn cancelled(&self) -> bool {
         self.cancelling.load(Ordering::SeqCst)
+    }
+
+    /// Gives the question the task's agent is waiting on its answer. Whether it was waiting on one.
+    pub(super) fn answer(&self, answer: Value) -> bool {
+        let Some(waiting) = lock(&self.question).take() else {
+            return false;
+        };
+        waiting.give(answer);
+        true
+    }
+
+    /// What ends the task's work when it is stopped at once.
+    pub(super) fn on_stop(&self, close: impl Fn() + Send + Sync + 'static) {
+        *lock(&self.closer) = Some(Box::new(close));
+        // A stop that came before the work did has nothing to wait for.
+        if self.cancelled()
+            && let Some(close) = lock(&self.closer).as_ref()
+        {
+            close();
+        }
     }
 
     /// The updates the task's agent has sent, oldest first, as far as `history_bytes` holds them.
@@ -148,6 +176,9 @@ impl Child {
         self.cancelling.store(true, Ordering::SeqCst);
         if let Some(link) = lock(&self.link).as_ref() {
             link.close();
+        }
+        if let Some(close) = lock(&self.closer).as_ref() {
+            close();
         }
     }
 }
@@ -221,6 +252,23 @@ fn run(job: Job) {
     child.finish();
 }
 
+/// What the agent is told of a key's answer to its question: the option the key chose when the agent offered it, else a cancel.
+fn chosen(params: &Value, answer: Option<Value>) -> Value {
+    let outcome = answer.as_ref().map(|answer| &answer["outcome"]);
+    let option = outcome
+        .filter(|outcome| outcome["outcome"] == "selected")
+        .map(|outcome| &outcome["optionId"])
+        .filter(|option| {
+            params["options"]
+                .as_array()
+                .is_some_and(|offered| offered.iter().any(|offer| &offer["optionId"] == *option))
+        });
+    match option {
+        Some(option) => json!({"outcome": {"outcome": "selected", "optionId": option}}),
+        None => json!({"outcome": {"outcome": "cancelled"}}),
+    }
+}
+
 fn note(text: &str) -> Message {
     Message::text(Role::Agent, format!("note-{}", text.len()), text)
 }
@@ -278,6 +326,12 @@ fn drive(
     let (Some(conn), Some(host)) = (session.conn(), engine.host()) else {
         return Outcome::Failed("the delegating connection has ended".to_owned());
     };
+    if engine
+        .source(&child.source)
+        .is_some_and(|source| source.remote.is_some())
+    {
+        return super::remote::drive(engine, session, child, text);
+    }
     let context = ChildContext {
         principal: conn.principal().clone(),
         roots: conn.roots().to_vec(),
@@ -498,9 +552,38 @@ impl Work<'_> {
         }
     }
 
+    /// Passes a question of the task's agent to the key that handed the task over: no person of this host's is at the other end
+    /// of it, so the task waits as `INPUT_REQUIRED` and the key answers with a message of its own. Only an option the agent
+    /// offered, or a cancel, reaches the agent.
+    fn key_permission(&mut self, id: &Value, params: &Value) {
+        let waiting = Waiting::new();
+        *lock(&self.child.question) = Some(Arc::clone(&waiting));
+        let mut asked = Message::text(
+            Role::Agent,
+            format!("question-{}", self.next),
+            format!("waiting for the caller: {}", self.child.title),
+        );
+        asked.parts.push(Part::data(
+            json!({"toolCall": params["toolCall"], "options": params["options"]}),
+        ));
+        let store = &self.session.store;
+        let _ = store.update_status(&self.child.task, TaskState::InputRequired, Some(asked));
+        let (child, engine) = (self.child, self.engine);
+        let answer = waiting.wait(&|| child.cancelled() || engine.stopped(), QUESTION_WAIT);
+        *lock(&self.child.question) = None;
+        let _ = store.update_status(&self.child.task, TaskState::Working, None);
+        send(
+            &self.link,
+            &json!({"jsonrpc": "2.0", "id": id, "result": chosen(params, answer)}),
+        );
+    }
+
     /// Passes a question of the task's agent to the person on the delegating session's connection. The task reads as waiting on
     /// the person until they answer; no answer, or a connection that ends first, cancels the question.
     fn permission(&mut self, id: &Value, params: &Value) {
+        if self.session.is_remote() {
+            return self.key_permission(id, params);
+        }
         let task = json!({"taskId": self.child.task, "title": self.child.title, "source": self.child.source});
         let store = &self.session.store;
         let _ = store.update_status(
@@ -529,5 +612,29 @@ impl Work<'_> {
             &self.link,
             &json!({"jsonrpc": "2.0", "id": id, "result": result}),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chosen;
+    use serde_json::json;
+
+    #[test]
+    fn a_key_answers_with_an_option_the_agent_offered_or_it_is_a_cancel() {
+        let asked = json!({"options": [{"optionId": "yes"}, {"optionId": "no"}]});
+        let picked = |id: &str| Some(json!({"outcome": {"outcome": "selected", "optionId": id}}));
+        let cancelled = json!({"outcome": {"outcome": "cancelled"}});
+        assert_eq!(
+            chosen(&asked, picked("yes")),
+            json!({"outcome": {"outcome": "selected", "optionId": "yes"}})
+        );
+        assert_eq!(chosen(&asked, picked("everything")), cancelled);
+        assert_eq!(chosen(&asked, None), cancelled);
+        assert_eq!(
+            chosen(&asked, Some(json!({"outcome": "selected"}))),
+            cancelled
+        );
+        assert_eq!(chosen(&json!({}), picked("yes")), cancelled);
     }
 }
