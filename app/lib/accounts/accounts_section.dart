@@ -30,7 +30,8 @@ class _AccountsSectionState extends State<AccountsSection> {
   void initState() {
     super.initState();
     _accounts.addListener(_changed);
-    unawaited(_accounts.refresh());
+    // Asking notifies, which a build in progress cannot take: ask once this frame is done.
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_accounts.refresh()));
   }
 
   @override
