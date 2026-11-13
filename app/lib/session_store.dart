@@ -83,6 +83,9 @@ final class PermissionQuestion {
   /// What it would do, in the terms a remembered rule states; null when no rule could cover it, or the card offers none.
   final RuleSubject? subject;
   final Completer<AcpDecision> _answer = Completer();
+
+  /// What the agent is told once this is answered, which another view of the session reads to show how it ended.
+  Future<AcpDecision> get answer => _answer.future;
 }
 
 /// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
@@ -93,6 +96,9 @@ final class AgentQuestion {
   AgentQuestion(this.request);
   final AcpElicitation request;
   final Completer<AcpElicitationAnswer> _answer = Completer();
+
+  /// What the agent is told once this is answered.
+  Future<AcpElicitationAnswer> get answer => _answer.future;
 }
 
 /// A secret prompt of the host, waiting on the person: a request for values or a show of them. [host] is the host's proven identity,
@@ -1937,7 +1943,15 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// with what goes with it, and sent when the turn ends.
   Future<void> sendText(String text) async {
     final session = selected;
-    if (session == null || (text.trim().isEmpty && session.attachments.isEmpty)) return;
+    if (session == null) return;
+    await sendTextTo(session, text);
+  }
+
+  /// [sendText] for [session], which need not be the selected one. With [attached] false what the composer holds for the session
+  /// does not go: a message written in another window of it has none of its own.
+  Future<void> sendTextTo(ChatSession session, String text, {bool attached = true}) async {
+    final held = attached ? List.of(session.attachments) : <Attachment>[];
+    if (text.trim().isEmpty && held.isEmpty) return;
     if (session.status == SessionStatus.preview) {
       sendPreviewText(text);
       return;
@@ -1949,14 +1963,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }
     if (session.status == SessionStatus.working || session.queue.isNotEmpty) {
       if (session.queue.length >= maxQueued) throw StateError('$maxQueued messages already wait for this turn to end');
-      session.queue.add(QueuedMessage(text, List.of(session.attachments)));
-      session.attachments.clear();
+      session.queue.add(QueuedMessage(text, held));
+      if (attached) session.attachments.clear();
       notifyListeners();
       // A queue waiting on nothing, after a turn that ended as it should, goes on at once.
       if (session.status != SessionStatus.working && session.queueHeld == null) await sendQueued(session);
       return;
     }
-    await _deliver(session, text, List.of(session.attachments));
+    await _deliver(session, text, held);
   }
 
   /// A turn of [session] ended, stopped or failed when [held] says why. The next queued message goes, unless the turn did not
@@ -2358,8 +2372,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   Future<void> cancelActiveSession() async {
     final session = selected;
-    final client = session == null ? null : _verifiedClients[session.id];
-    if (session == null || session.remoteSessionId == null || client == null) {
+    if (session == null) throw StateError('No active verified ACP session');
+    await cancelSession(session);
+  }
+
+  /// Ends the turn of [session], which need not be the selected one.
+  Future<void> cancelSession(ChatSession session) async {
+    final client = _verifiedClients[session.id];
+    if (session.remoteSessionId == null || client == null) {
       throw StateError('No active verified ACP session');
     }
     // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is.
