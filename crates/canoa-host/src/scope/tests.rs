@@ -598,6 +598,22 @@ mod shares {
                 "{root}"
             );
         }
+        // The app writes a share with forward slashes, which a Dart client takes as absolute.
+        let scope = Scope::new(vec![PathBuf::from(r"\\fileserver\projects")]);
+        let Verdict::Forward(bytes) = scope.check(&session(
+            "//fileserver/projects/app",
+            &["//fileserver/projects/lib"],
+        )) else {
+            panic!("a share written with forward slashes was refused");
+        };
+        let params = serde_json::from_slice::<Value>(&bytes).expect("JSON")["params"].clone();
+        assert_eq!(params["cwd"], r"\\fileserver\projects\app");
+        assert_eq!(
+            params["additionalDirectories"],
+            json!([r"\\fileserver\projects\lib"])
+        );
+        assert!(refused(&scope, &session("//fileserver/projects/../other", &[])).is_some());
+        assert!(refused(&scope, &session("//./pipe/projects", &[])).is_some());
         let scope = Scope::new(vec![PathBuf::from(r"C:\work")]);
         let Verdict::Forward(bytes) = scope.check(&session(r"\\?\C:\work\app", &[])) else {
             panic!("a verbatim drive folder was refused");
