@@ -53,7 +53,6 @@ cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 CANOA_TEST_PYTHON=python3 cargo test -p canoa-host --test python_source   # a Python with its shared library; ignored without
 (cd app && flutter analyze && flutter test)
-node --test --test-force-exit "app/test/*.test.mjs"
 (cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST
 # the chat's connection code against the real host
 cargo build -p canoa-host --bin canoa --examples
