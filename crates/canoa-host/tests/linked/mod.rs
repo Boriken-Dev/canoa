@@ -230,6 +230,7 @@ pub fn open_session(link: &Link, dir: &str) -> String {
 pub fn said(updates: &[Value]) -> String {
     updates
         .iter()
+        .filter(|update| update["method"] == "session/update")
         .filter(|update| update["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
         .filter_map(|update| update["params"]["update"]["content"]["text"].as_str())
         .collect()

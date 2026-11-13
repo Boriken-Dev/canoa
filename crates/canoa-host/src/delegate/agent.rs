@@ -19,7 +19,7 @@ use coqui_a2a::{Agent, Caller, Events};
 use serde_json::{Map, Value, json};
 
 use super::child::{self, Child, Job};
-use super::{Engine, Session, privilege};
+use super::{Engine, Session, Who, privilege};
 
 /// The longest title a task is shown by, in characters.
 const TITLE_CHARS: usize = 80;
@@ -155,6 +155,8 @@ impl DelegationAgent {
         } else {
             None
         };
+        // The person's client is told of the task from its first state, before any work starts.
+        relay_events(&session, &task.id);
         let child = Child::new(task.id.clone(), title, source);
         let job = Job {
             engine: Arc::clone(&engine),
@@ -180,6 +182,39 @@ impl DelegationAgent {
             ));
         }
         Ok((task, events))
+    }
+}
+
+/// Sends each state of the task `task` of `session` to the client of its connection, ending with the task's last.
+fn relay_events(session: &Arc<Session>, task: &str) {
+    let (Some(peer), Some(context)) = (session.peer(), session.session_id()) else {
+        return;
+    };
+    let who = Who::new(peer);
+    let request = SubscribeToTaskRequest {
+        id: task.to_owned(),
+        ..SubscribeToTaskRequest::default()
+    };
+    let Ok(events) = session.store.subscribe(&who.caller(), &request) else {
+        return;
+    };
+    let (session, task) = (Arc::clone(session), task.to_owned());
+    let spawned = std::thread::Builder::new()
+        .name(format!("canoa-delegate-events-{task}"))
+        .spawn(move || {
+            let _who = who;
+            for event in events.map_while(Result::ok) {
+                let (Some(conn), Ok(event)) = (session.conn(), serde_json::to_value(&event)) else {
+                    break;
+                };
+                conn.notify(
+                    json!({"sessionId": context, "taskId": task, "event": event}),
+                    false,
+                );
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!("delegation: a task's events could not start their thread: {error}");
     }
 }
 

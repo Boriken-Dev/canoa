@@ -44,6 +44,14 @@ use privilege::Modes;
 
 /// The `_meta` key of `initialize` that asks for the delegation tools, and of a child's permission request that names its task.
 pub(crate) const META: &str = "dev.boriken.canoa/delegate";
+/// The notification that tells a client what became of a task, and of what a task's agent said.
+pub(crate) const DELEGATE_EVENT: &str = "_canoa/delegate/event";
+/// The client's request for the updates the host kept of a task.
+const DELEGATE_HISTORY: &str = "_canoa/delegate/history";
+/// The client's request to stop the tasks of a session, or one of them.
+const DELEGATE_STOP: &str = "_canoa/delegate/stop";
+/// Notifications of a task's updates the outbox holds before the host drops the next ones (the history keeps them).
+const MAX_QUEUED_UPDATES: usize = 1024;
 /// The name of the MCP server the host adds to a session.
 pub(crate) const SERVER_NAME: &str = "canoa-delegate";
 /// Sessions of one connection that hold a bearer at once.
@@ -262,10 +270,14 @@ impl Engine {
         }
     }
 
-    /// Ends the tasks of `session` the way the person's Stop does.
-    pub(crate) fn cancel_session(self: &Arc<Self>, session: &Arc<Session>) {
+    /// Ends the tasks of `session`, or only `only`, the way the person's Stop does.
+    pub(crate) fn cancel_tasks(self: &Arc<Self>, session: &Arc<Session>, only: Option<&str>) {
         let Some(peer) = session.peer() else { return };
-        let tasks: Vec<String> = lock(&session.children).keys().cloned().collect();
+        let tasks: Vec<String> = lock(&session.children)
+            .keys()
+            .filter(|id| only.is_none_or(|only| only == id.as_str()))
+            .cloned()
+            .collect();
         if tasks.is_empty() {
             return;
         }
@@ -322,6 +334,8 @@ pub(crate) struct Session {
     modes: Mutex<Modes>,
     pub(crate) store: TaskStore,
     pub(crate) children: Mutex<HashMap<String, Arc<child::Child>>>,
+    /// The tasks that ended, newest last, so their updates can still be asked for.
+    pub(crate) ended: Mutex<VecDeque<Arc<child::Child>>>,
     live: AtomicUsize,
     /// Calls of the tool server this session's bearer has under way.
     pub(crate) calls: AtomicUsize,
@@ -346,6 +360,23 @@ impl Session {
 
     pub(crate) fn conn(&self) -> Option<Arc<Conn>> {
         self.conn.upgrade()
+    }
+
+    /// The updates a task's agent sent, oldest first, as the agent sent them; `None` when the session has no such task.
+    fn history_of(&self, task: &str) -> Option<Vec<Value>> {
+        let child = lock(&self.children).get(task).cloned().or_else(|| {
+            lock(&self.ended)
+                .iter()
+                .find(|child| child.task == task)
+                .cloned()
+        })?;
+        Some(
+            child
+                .history()
+                .iter()
+                .filter_map(|update| serde_json::from_str(update).ok())
+                .collect(),
+        )
     }
 
     /// Ends every task of the session now, with no grace.
@@ -492,6 +523,52 @@ impl Conn {
         }
     }
 
+    /// Tells the client something about a task, when it asked for the delegation and a person is there to read it. An `update`
+    /// is dropped when too many wait: the client can ask for them again.
+    pub(crate) fn notify(&self, params: Value, update: bool) {
+        if self.info.child || !lock(&self.state).asked || self.is_closed() {
+            return;
+        }
+        let mut outbox = lock(&self.outbox);
+        if update && outbox.len() >= MAX_QUEUED_UPDATES {
+            return;
+        }
+        let message = json!({"jsonrpc": "2.0", "method": DELEGATE_EVENT, "params": params});
+        if let Ok(bytes) = serde_json::to_vec(&message) {
+            outbox.push_back(bytes);
+        }
+    }
+
+    /// Answers the client's `history` and `stop`; a notification gets no answer.
+    fn client_request(self: &Arc<Self>, method: &str, id: Option<Value>, params: &Value) {
+        let session = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(|id| self.session(id));
+        let task = params.get("taskId").and_then(Value::as_str);
+        let answer = match (method, session) {
+            (_, None) => Err("no such session"),
+            (DELEGATE_STOP, Some(session)) => {
+                self.engine.cancel_tasks(&session, task);
+                Ok(json!({}))
+            }
+            (_, Some(session)) => match task.and_then(|task| session.history_of(task)) {
+                Some(updates) => Ok(json!({"taskId": task, "updates": updates})),
+                None => Err("no such task"),
+            },
+        };
+        let Some(id) = id else { return };
+        let reply = match answer {
+            Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+            Err(why) => {
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": why}})
+            }
+        };
+        if let Ok(bytes) = serde_json::to_vec(&reply) {
+            lock(&self.outbox).push_back(bytes);
+        }
+    }
+
     /// What the host adds to the stream to the client.
     pub(crate) fn drain(&self) -> Vec<Vec<u8>> {
         lock(&self.outbox).drain(..).collect()
@@ -500,7 +577,11 @@ impl Conn {
     /// A message from the client, as the scope passed it. `None` when it was an answer to the host's own question.
     pub(crate) fn client_said(self: &Arc<Self>, message: Vec<u8>) -> Option<Vec<u8>> {
         let waiting = !lock(&self.answers).is_empty();
-        if !(waiting || contains(&message, b"session/") || contains(&message, b"initialize")) {
+        if !(waiting
+            || contains(&message, b"session/")
+            || contains(&message, b"initialize")
+            || contains(&message, b"_canoa/delegate"))
+        {
             return Some(message);
         }
         let Ok(mut value) = serde_json::from_slice::<Value>(&message) else {
@@ -557,8 +638,13 @@ impl Conn {
                 if let Some(id) = value.pointer("/params/sessionId").and_then(Value::as_str)
                     && let Some(session) = self.session(id)
                 {
-                    self.engine.cancel_session(&session);
+                    self.engine.cancel_tasks(&session, None);
                 }
+            }
+            (DELEGATE_STOP | DELEGATE_HISTORY, request) => {
+                let id = request.map(|_| value["id"].clone());
+                self.client_request(&method, id, &value["params"]);
+                return None;
             }
             _ => {}
         }
@@ -921,6 +1007,7 @@ impl Engine {
                     })
                     .build(),
                 children: Mutex::new(HashMap::new()),
+                ended: Mutex::new(VecDeque::new()),
                 live: AtomicUsize::new(0),
                 calls: AtomicUsize::new(0),
             }

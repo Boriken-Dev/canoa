@@ -412,6 +412,7 @@ impl<C: Channel> Rpc<'_, C> {
             .updates
             .borrow()
             .iter()
+            .filter(|update| update["method"] == "session/update")
             .filter(|update| update["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
             .filter_map(|update| update["params"]["update"]["content"]["text"].as_str())
             .collect())

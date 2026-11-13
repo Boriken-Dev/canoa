@@ -74,7 +74,7 @@ impl<'a, C: Channel + ?Sized> Delegating<'a, C> {
     fn flush(&self) -> Result<(), Failure> {
         if let Some(conn) = &self.conn {
             for message in conn.drain() {
-                self.inner.send(&message)?;
+                crate::scope::host_own(|| self.inner.send(&message))?;
             }
         }
         Ok(())

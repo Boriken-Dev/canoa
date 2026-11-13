@@ -59,6 +59,8 @@ struct Convo<'a> {
     /// Every request of the host's own the client has seen: permission requests of a task.
     requests: Vec<Value>,
     updates: Vec<Value>,
+    /// The host's `_canoa/delegate/event` notifications, in the order they came.
+    events: Vec<Value>,
 }
 
 impl<'a> Convo<'a> {
@@ -68,6 +70,7 @@ impl<'a> Convo<'a> {
             next: 0,
             requests: Vec::new(),
             updates: Vec::new(),
+            events: Vec::new(),
         }
     }
 
@@ -119,6 +122,8 @@ impl<'a> Convo<'a> {
                             &json!({"jsonrpc": "2.0", "id": message["id"], "result": result}),
                         );
                     }
+                } else if message["method"] == "_canoa/delegate/event" {
+                    self.events.push(message["params"].clone());
                 } else {
                     self.updates.push(message);
                 }
@@ -734,6 +739,113 @@ fn a_childs_permission_request_reaches_the_parents_person_with_its_task() {
     assert!(running(pid));
     drop(link);
     gone(pid);
+    host.stop();
+}
+
+/// The states a task's events named, in order, without the `TASK_STATE_` prefix.
+fn states(events: &[Value], task: &str) -> Vec<String> {
+    events
+        .iter()
+        .filter(|event| event["taskId"] == task)
+        .filter_map(|event| {
+            let event = event.get("event")?;
+            let status = event
+                .pointer("/task/status/state")
+                .or_else(|| event.pointer("/statusUpdate/status/state"))?;
+            Some(
+                status
+                    .as_str()?
+                    .trim_start_matches("TASK_STATE_")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_client_that_opted_in_is_told_each_state_of_a_task_and_what_its_agent_said_and_can_ask_and_stop()
+ {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let marker = dir.0.join("child.pids");
+    let config = format!(
+        "{}{}",
+        agent("parent", "default", ""),
+        marked("child", "default", &marker)
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    let task = convo.delegate(&session, "child", "Verbatim hello");
+    assert_eq!(convo.status(&session, &task, 20_000)["state"], "completed");
+    until("the last event came", || {
+        convo.status(&session, &task, 0);
+        states(&convo.events, &task).last().map(String::as_str) == Some("COMPLETED")
+    });
+    let seen = states(&convo.events, &task);
+    assert_eq!(
+        seen.first().map(String::as_str),
+        Some("SUBMITTED"),
+        "{seen:?}"
+    );
+    assert!(seen.contains(&"WORKING".to_owned()), "{seen:?}");
+    let first = convo
+        .events
+        .iter()
+        .find(|event| event["taskId"] == task.as_str())
+        .unwrap();
+    assert_eq!(first["sessionId"], session);
+    assert_eq!(first["event"]["task"]["metadata"]["source"], "child");
+    assert!(
+        convo
+            .events
+            .iter()
+            .any(|event| event["update"]["sessionUpdate"] == "agent_message_chunk"),
+        "the child's own updates reach the client"
+    );
+
+    // What the host kept of the task is asked for by its id, ended or not; another id is refused.
+    let kept = convo
+        .request(
+            "_canoa/delegate/history",
+            json!({"sessionId": session, "taskId": task}),
+            &|_| None,
+        )
+        .expect("a history");
+    assert!(
+        kept["updates"]
+            .as_array()
+            .is_some_and(|updates| !updates.is_empty()),
+        "{kept}"
+    );
+    let refused = convo
+        .request(
+            "_canoa/delegate/history",
+            json!({"sessionId": session, "taskId": "task-nope"}),
+            &|_| None,
+        )
+        .expect_err("no such task");
+    assert_eq!(refused["code"], -32602);
+
+    // Stop ends a task's process and its last event says so.
+    let waiting = convo.delegate(&session, "child", "Wait");
+    until("the child started", || pids(&marker).len() == 2);
+    let pid = pids(&marker)[1];
+    convo
+        .request(
+            "_canoa/delegate/stop",
+            json!({"sessionId": session}),
+            &|_| None,
+        )
+        .expect("stopped");
+    gone(pid);
+    until("the canceled event came", || {
+        convo.status(&session, &waiting, 0);
+        states(&convo.events, &waiting).last().map(String::as_str) == Some("CANCELED")
+    });
+    drop(link);
     host.stop();
 }
 

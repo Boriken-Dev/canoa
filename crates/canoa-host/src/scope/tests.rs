@@ -392,3 +392,15 @@ fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
         assert!(!is_host_only(passed.to_string().as_bytes()), "{passed}");
     }
 }
+
+#[test]
+fn what_the_host_itself_sends_in_its_namespace_passes_and_only_while_it_is_sending() {
+    let event =
+        json!({"jsonrpc": "2.0", "method": "_canoa/delegate/event", "params": {}}).to_string();
+    assert!(is_host_only(event.as_bytes()));
+    assert!(!super::host_own(|| is_host_only(event.as_bytes())));
+    assert!(
+        is_host_only(event.as_bytes()),
+        "the exemption ends with the send"
+    );
+}

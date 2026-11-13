@@ -95,10 +95,6 @@ impl Child {
     }
 
     /// The updates the task's agent has sent, oldest first, as far as `history_bytes` holds them.
-    #[allow(
-        dead_code,
-        reason = "read by whatever shows a task's thread to its client"
-    )]
     pub(crate) fn history(&self) -> Vec<String> {
         lock(&self.history).items.iter().cloned().collect()
     }
@@ -214,6 +210,13 @@ fn run(job: Job) {
     }
     settle(&session, &child, outcome);
     lock(&session.children).remove(&child.task);
+    {
+        let mut ended = lock(&session.ended);
+        ended.push_back(Arc::clone(&child));
+        while ended.len() > engine.config.max_children.max(1) {
+            ended.pop_front();
+        }
+    }
     drop(reservation);
     child.finish();
 }
@@ -469,6 +472,12 @@ impl Work<'_> {
     fn record(&mut self, update: &Value) {
         let limit = self.engine.config.history_bytes;
         self.child.keep(update.to_string(), limit);
+        if let (Some(conn), Some(session)) = (self.session.conn(), self.session.session_id()) {
+            conn.notify(
+                json!({"sessionId": session, "taskId": self.child.task, "update": update}),
+                true,
+            );
+        }
         if update.get("sessionUpdate").and_then(Value::as_str) == Some("agent_message_chunk")
             && let Some(text) = update
                 .pointer("/content/text")

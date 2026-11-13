@@ -337,10 +337,25 @@ impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
     }
 }
 
+thread_local! {
+    /// Whether this thread is sending what the host itself says to its client.
+    static HOST_OWN: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Runs `send`, which puts a message of the host's own on the client's stream: the one filter below lets it pass, which no
+/// message of an agent's can ask for.
+pub(crate) fn host_own<T>(send: impl FnOnce() -> T) -> T {
+    let before = HOST_OWN.with(|own| own.replace(true));
+    let done = send();
+    HOST_OWN.with(|own| own.set(before));
+    done
+}
+
 /// Whether an agent's `message` is a request or notification of the host's own, whose method starts with `_canoa/`: the host asks
 /// its client those, so one an agent sends is never passed on, or the client could be made to show the host's questions for it.
 pub(crate) fn is_host_only(message: &[u8]) -> bool {
-    contains(message, b"_canoa/")
+    !HOST_OWN.with(core::cell::Cell::get)
+        && contains(message, b"_canoa/")
         && serde_json::from_slice::<Value>(message).is_ok_and(|value| {
             value
                 .get("method")
