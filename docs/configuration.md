@@ -31,6 +31,8 @@ A layer that does not exist is skipped, and each layer may be in any of the thre
 - With a leading `+` (`+extra.cfg:more.cfg`), the listed files go on top of the installed, system and user files.
 - An empty entry is refused, and so is a listed file that does not exist, saying which entry.
 
+`canoa layers` prints the files in the order they are read, lowest first, and the one that is written; the app finds the same ones.
+
 The portable `CanoaUI.exe` runs the app from an unpacked copy, so it sets `CANOA_INSTALLED_DIR` to its own folder; the installed copy is `canoa.cfg` there. The variable can name that folder for any program.
 
 ### How layers merge
