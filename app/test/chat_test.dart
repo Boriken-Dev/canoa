@@ -522,6 +522,34 @@ void main() {
       expect(find.text('Run it'), findsOneWidget);
     });
 
+    testWidgets('a finished turn at Normal density draws as one line and its answer, with the plan under it', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final (agent, _, store) = await _fed(tester);
+      await tester.pumpWidget(CanoaApp(store: store));
+      agent.update({'sessionUpdate': 'user_message_chunk', 'content': {'type': 'text', 'text': 'Fix the addNumbers bug in src/calc.js'}});
+      agent.update({'sessionUpdate': 'agent_thought_chunk', 'content': {'type': 'text', 'text': 'The function subtracts.'}});
+      agent.update({
+        'sessionUpdate': 'tool_call', 'toolCallId': 'e', 'title': 'Edit src/calc.js', 'kind': 'edit', 'status': 'completed',
+        'content': [{'type': 'diff', 'path': 'src/calc.js', 'oldText': 'return a - b;\n', 'newText': 'return a + b;\n'}],
+      });
+      agent.update({'sessionUpdate': 'tool_call', 'toolCallId': 'r', 'title': 'node -e "addNumbers(2, 3)"', 'kind': 'execute', 'status': 'completed'});
+      agent.update({'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'I fixed `addNumbers` in `src/calc.js`: it now returns `a + b`. Running `addNumbers(2, 3)` gives 5.'}});
+      agent.update({
+        'sessionUpdate': 'plan',
+        'entries': [
+          {'content': 'Read addNumbers in src/calc.js', 'priority': 'medium', 'status': 'completed'},
+          {'content': 'Change subtraction to addition', 'priority': 'medium', 'status': 'completed'},
+          {'content': 'Check the result', 'priority': 'medium', 'status': 'in_progress'},
+        ],
+      });
+      await _settle(tester);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Worked for'), findsOneWidget);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/canoa_normal_desktop.png'));
+    });
+
     testWidgets('the settings dialog chooses them', (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
