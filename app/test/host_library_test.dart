@@ -288,6 +288,71 @@ void main() {
       await supervisor.stop();
     });
 
+    // Dart's own process handling collects any child of this process that ends, the host's among them, while a Dart Process is
+    // running; a host that waits on its own children then cannot read how they ended.
+    test('worktrees are made, read and removed again and again while a Dart process runs beside the host', () async {
+      if (Process.runSync('git', ['--version']).exitCode != 0) return;
+      final repo = Directory('${dir.path}/proj')..createSync();
+      void run(List<String> args) {
+        final done = Process.runSync('git', ['-C', repo.path, '-c', 'user.name=Canoa Test', '-c', 'user.email=test@canoa.invalid', ...args]);
+        expect(done.exitCode, 0, reason: '${done.stderr}');
+      }
+
+      run(['init', '-q']);
+      run(['commit', '-q', '--allow-empty', '-m', 'first']);
+      final idle = Platform.isWindows
+          ? await Process.start('ping', ['-n', '120', '127.0.0.1'])
+          : await Process.start('sleep', ['120']);
+      idle.stdout.drain<void>();
+      addTearDown(() async {
+        idle.kill();
+        await idle.exitCode;
+      });
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.idle, 'the host to be up');
+      final worktrees = controlWorktrees(HostControl(supervisor));
+      for (var round = 0; round < 6; round++) {
+        final made = await worktrees.create(repo.path, 'canoa/control-$round');
+        expect(Directory(made.path).existsSync(), isTrue, reason: 'round $round');
+        final state = await worktrees.status(made);
+        expect((state.exists, state.changed, state.commits), (true, 0, 0));
+        await worktrees.remove(made);
+        expect(Directory(made.path).existsSync(), isFalse, reason: 'round $round');
+        // A process of this app's own ends in between, as a session's git or a notifier's does.
+        await Process.run(Platform.isWindows ? 'cmd' : 'true', Platform.isWindows ? ['/c', 'exit'] : []);
+      }
+      await supervisor.stop();
+    });
+
+    test('stopping a link ends its agent and what the agent started, and no other process, with a Dart process running', () async {
+      final script = '${dir.path}/agent.sh';
+      final started = '${dir.path}/started';
+      await File(script).writeAsString('#!/bin/sh\nsleep 300 &\necho \$! > "$started"\nwait\n');
+      expect(Process.runSync('chmod', ['+x', script]).exitCode, 0);
+      await File(cfg).writeAsString('[host.agents.group]\nprogram = ${jsonEncode(script)}\nlisten = "127.0.0.1:0"\n');
+      final bystander = await Process.start('sleep', ['300']);
+      bystander.stdout.drain<void>();
+      addTearDown(() async {
+        bystander.kill();
+        await bystander.exitCode;
+      });
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      final link = supervisor.openLink('group');
+      link.messages.drain<void>();
+      await link.send('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}');
+      await _until(() => File(started).existsSync() && File(started).readAsStringSync().trim().isNotEmpty, 'the agent to start its child');
+      final child = int.parse(File(started).readAsStringSync().trim());
+      bool alive(int pid) => Process.runSync('kill', ['-0', '$pid']).exitCode == 0;
+      expect(alive(child), isTrue);
+      await link.close();
+      await _until(() => !alive(child), 'the agent\'s child to end with its group');
+      expect(alive(bystander.pid), isTrue, reason: 'a process of this app\'s own is none of the host\'s to end');
+      await supervisor.stop();
+    }, skip: Platform.isWindows ? 'process groups are Unix\'s' : null);
+
     test('its other commands run too: keys, check, and pairing given up', () async {
       final supervisor = HostSupervisor(tool);
       expect(await supervisor.keys(), isEmpty);
