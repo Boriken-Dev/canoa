@@ -133,6 +133,26 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(mc.sha256((target / rel).read_bytes()), digest)
             self.assertEqual(mc.read_dir(target.parent).binaries, {})
 
+    def test_a_windows_import_library_becomes_hex_that_build_rs_writes_out_and_links(self):
+        library = b"!<arch>\n" + bytes(range(256)) * 4
+        files = {
+            "Cargo.toml": b"[package]\nname = \"windows_x86_64_msvc\"\n",
+            "build.rs": mc.WINDOWS_BUILD.encode(),
+            "src/lib.rs": b"",
+            "lib/windows.0.52.0.lib": library,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "windows_x86_64_msvc-0.52.6"
+            mc.write_package(target, files, "f" * 64)
+            self.assertFalse((target / "lib" / "windows.0.52.0.lib").exists())
+            digits = "".join((target / "lib" / "windows.0.52.0.lib.hex").read_text().split())
+            self.assertEqual(bytes.fromhex(digits), library)
+            self.assertIn("OUT_DIR", (target / "build.rs").read_text())
+            self.assertEqual(mc.read_dir(target.parent).binaries, {})
+            changed = dict(files, **{"build.rs": b"fn main() {}\n"})
+            with self.assertRaisesRegex(mc.Problem, "no longer links"):
+                mc.write_package(Path(tmp) / "windows_x86_64_msvc-0.52.7", changed, "f" * 64)
+
     def test_a_crate_is_unpacked_from_its_archive_and_checked_against_the_lock(self):
         body = crate_archive("dep-1.2.3", {"Cargo.toml": b"[package]\n", "src/lib.rs": b""})
         crate = mc.Crate("dep", "1.2.3", mc.sha256(body))

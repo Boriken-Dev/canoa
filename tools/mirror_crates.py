@@ -385,6 +385,55 @@ def patch_ring(name: str, kept: dict[str, bytes], refused: dict[str, bytes]) -> 
     kept["build.rs"] = (fixed.rstrip("\n") + "\n" + RING_FN).encode("utf-8")
 
 
+WINDOWS_BUILD = """fn main() {
+    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
+    println!(
+        "cargo:rustc-link-search=native={}",
+        std::path::Path::new(&dir).join("lib").display()
+    );
+}
+"""
+WINDOWS_BUILD_FROM_TEXT = """use std::fs;
+use std::path::Path;
+
+// The import libraries this crate carries are `lib/<name>.hex`; link against them as bytes written below OUT_DIR.
+fn main() {
+    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let out = std::env::var("OUT_DIR").unwrap();
+    for entry in fs::read_dir(Path::new(&dir).join("lib")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if let Some(library) = name.strip_suffix(".hex") {
+            let text = fs::read_to_string(&path).unwrap();
+            let digits: Vec<u8> = text.bytes().filter(|b| b.is_ascii_hexdigit()).collect();
+            let bytes: Vec<u8> = digits
+                .chunks(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect();
+            fs::write(Path::new(&out).join(library), bytes).unwrap();
+        }
+    }
+    println!("cargo:rustc-link-search=native={}", out);
+}
+"""
+WINDOWS_CRATE = re.compile(r"^windows_[a-z0-9_]+$")
+
+
+def patch_windows_libraries(name: str, kept: dict[str, bytes], refused: dict[str, bytes]) -> None:
+    """Keeps the import libraries of a windows_<arch>_<abi> crate as hex, which its build.rs writes out and links."""
+    libraries = sorted(p for p in refused if p.startswith("lib/"))
+    if not libraries:
+        return
+    build = kept["build.rs"].decode("utf-8").replace("\r\n", "\n")
+    if build != WINDOWS_BUILD:
+        raise Problem(f"{name}: build.rs no longer links its libraries as mirror_crates.py expects")
+    for path in libraries:
+        digits = refused.pop(path).hex()
+        kept[f"{path}.hex"] = ("\n".join(digits[i : i + 128] for i in range(0, len(digits), 128)) + "\n").encode("ascii")
+    kept["build.rs"] = WINDOWS_BUILD_FROM_TEXT.encode("utf-8")
+
+
 # Crates whose build links binary files that cannot be inlined, by crate name.
 PATCHES = {"ring": patch_ring}
 
@@ -428,7 +477,8 @@ def write_package(target: Path, everything: dict[str, bytes], checksum: str | No
         (refused if flagged_kind(body, name) else kept)[path] = body
     if refused:
         inline_bytes(kept, files, set(refused))
-        patch = PATCHES.get(target.name.rsplit("-", 1)[0])
+        crate = target.name.rsplit("-", 1)[0]
+        patch = patch_windows_libraries if WINDOWS_CRATE.match(crate) else PATCHES.get(crate)
         if patch:
             patch(target.name, kept, refused)
     if "Cargo.toml" in kept:
