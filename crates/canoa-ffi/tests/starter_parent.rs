@@ -103,7 +103,7 @@ fn every_process_the_host_starts_is_a_child_of_its_process_starter_and_never_of_
     let agent = example("stdio_agent");
     assert!(
         agent.exists(),
-        "build the examples first: cargo build -p canoa-ffi --examples"
+        "build the examples first: cargo build -p canoa-host -p canoa-ffi --examples"
     );
     let config = scratch.join("canoa.cfg");
     std::fs::write(
