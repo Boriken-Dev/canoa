@@ -66,10 +66,30 @@ pub struct Config {
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
     /// [`Entry::local`] set), in the file's order. They are served when the host serves its own sources.
     pub local_agents: Vec<Entry>,
+    /// `[agents.NAME]` with an `a2a` table: another machine's A2A agents, which a task may name as a source when
+    /// `[host.delegate] sources` lists them. Served to no one, and not offered as a session.
+    pub remote_agents: Vec<RemoteAgent>,
     /// The top-level `[profile]`, `[overlays]` and `[agents.NAME.profile|mcp]`: what the host's own sources are launched with.
     pub local_profiles: LocalProfiles,
     /// `[skill_pins]`, by lower-case skill name: the tree digest each skill from elsewhere must have.
     pub skill_pins: BTreeMap<String, String>,
+}
+
+/// One `[agents.NAME] a2a = { url, peer, source, title }`: an agent on another machine that a task may be handed to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RemoteAgent {
+    /// The source's name, which a task names.
+    pub name: String,
+    /// What is shown for the name; `None` shows the name.
+    pub title: Option<String>,
+    /// Where the other host listens: a `ws://` address. The link is sealed by the proof, so the socket needs no TLS.
+    pub url: String,
+    /// The key the other host must prove. A task is sent to no other.
+    pub peer: PeerId,
+    /// The source on the other host's card that the task names; `None` leaves the choice to it, which it makes only when
+    /// it offers one.
+    pub source: Option<String>,
 }
 
 /// What canoa.cfg's top level says a session of the host's own sources is launched with. Nothing here is served to a network
@@ -223,6 +243,9 @@ pub struct DelegateConfig {
     pub max_running: usize,
     /// `max_depth`: how many levels of tasks may delegate in turn; 1 lets a session hand tasks out and no task hand any on.
     pub max_depth: usize,
+    /// `a2a`: the paired keys this host serves A2A to, over any entry's address those keys may use. A key not listed is
+    /// refused the protocol; being paired gives it none.
+    pub a2a: Vec<PeerId>,
     /// `task_bytes`: the longest task text.
     pub task_bytes: usize,
     /// `result_bytes`: the most of a task's reply that one `task_status` answer carries.
@@ -254,6 +277,7 @@ impl Default for DelegateConfig {
             max_children: Self::DEFAULT_MAX_CHILDREN,
             max_running: Self::DEFAULT_MAX_RUNNING,
             max_depth: Self::DEFAULT_MAX_DEPTH,
+            a2a: Vec::new(),
             task_bytes: Self::DEFAULT_TASK_BYTES,
             result_bytes: Self::DEFAULT_RESULT_BYTES,
             history_bytes: Self::DEFAULT_HISTORY_BYTES,
@@ -269,6 +293,7 @@ struct RawDelegate {
     max_children: Option<usize>,
     max_running: Option<usize>,
     max_depth: Option<usize>,
+    a2a: Option<Vec<String>>,
     task_bytes: Option<usize>,
     result_bytes: Option<usize>,
     history_bytes: Option<usize>,
@@ -285,12 +310,23 @@ impl RawDelegate {
                 what: "host.delegate: sources holds an empty name".to_owned(),
             });
         }
+        let a2a = self
+            .a2a
+            .unwrap_or_default()
+            .iter()
+            .map(|peer| peer.parse::<PeerId>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ConfigError::Invalid {
+                entry: None,
+                what: "host.delegate: a2a holds something that is not a peer id".to_owned(),
+            })?;
         Ok(DelegateConfig {
             enabled: self.enabled.unwrap_or(defaults.enabled),
             sources: self.sources,
             max_children: self.max_children.unwrap_or(defaults.max_children),
             max_running: self.max_running.unwrap_or(defaults.max_running),
             max_depth: self.max_depth.unwrap_or(defaults.max_depth),
+            a2a,
             task_bytes: self.task_bytes.unwrap_or(defaults.task_bytes),
             result_bytes: self.result_bytes.unwrap_or(defaults.result_bytes),
             history_bytes: self.history_bytes.unwrap_or(defaults.history_bytes),
@@ -1102,6 +1138,7 @@ impl Config {
             .and_then(|permissions| permissions.protected)
             .map(RawLines::lines);
         let local_agents = local_agents_of(&raw.agents)?;
+        let remote_agents = remote_agents_of(&raw.agents, &local_agents)?;
         let mut local_profiles = local_profiles_of(raw.profile, &raw.overlays, &raw.agents, base)?;
         if limit_phrases
             .iter()
@@ -1122,6 +1159,7 @@ impl Config {
                 limit_phrases,
                 protected_paths,
                 local_agents,
+                remote_agents,
                 local_profiles,
                 skill_pins,
                 ..Self::default()
@@ -1443,6 +1481,15 @@ impl Config {
             entries.push(entry(name, EntryKind::Tool { spec }, common)?);
         }
         check_unique(&entries)?;
+        if let Some(remote) = remote_agents
+            .iter()
+            .find(|remote| entries.iter().any(|entry| entry.name == remote.name))
+        {
+            return Err(invalid(
+                &remote.name,
+                "an entry and an agent on another machine share this name",
+            ));
+        }
         let control = host.control.map(control_of).transpose()?;
         let history = host
             .history
@@ -1472,6 +1519,7 @@ impl Config {
             accounts,
             account_store,
             local_agents,
+            remote_agents,
             local_profiles,
             control,
             history,
@@ -2298,6 +2346,72 @@ fn local_agents_of(agents: &IndexMap<String, toml::Value>) -> Result<Vec<Entry>,
         )?;
         entry.local = true;
         out.push(entry);
+    }
+    Ok(out)
+}
+
+/// `[agents.NAME]` tables that carry an `a2a` table: agents on another machine. A name a program has is not reused, and one
+/// table is not both.
+fn remote_agents_of(
+    agents: &IndexMap<String, toml::Value>,
+    local: &[Entry],
+) -> Result<Vec<RemoteAgent>, ConfigError> {
+    let mut out = Vec::new();
+    for (name, table) in agents {
+        let Some(table) = table.as_table() else {
+            continue;
+        };
+        let Some(remote) = table.get("a2a") else {
+            continue;
+        };
+        let bad = |what: &str| ConfigError::Invalid {
+            entry: Some(name.clone()),
+            what: format!("agents.{name}.a2a: {what}"),
+        };
+        if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(char::is_control)
+        {
+            return Err(bad(
+                "the name is empty, too long or holds a control character",
+            ));
+        }
+        if table.contains_key("program") || local.iter().any(|entry| &entry.name == name) {
+            return Err(bad("an agent is a program or another machine's, not both"));
+        }
+        let remote = remote
+            .as_table()
+            .ok_or_else(|| bad("is not a table of url and peer"))?;
+        if let Some(key) = remote
+            .keys()
+            .find(|key| !["url", "peer", "source", "title"].contains(&key.as_str()))
+        {
+            return Err(bad(&format!("{key} is not a key of it")));
+        }
+        let text = |key: &str| -> Result<Option<&str>, ConfigError> {
+            match remote.get(key) {
+                None => Ok(None),
+                Some(toml::Value::String(text)) if !text.is_empty() => Ok(Some(text)),
+                Some(_) => Err(bad(&format!("{key} is not text"))),
+            }
+        };
+        let url = text("url")?.ok_or_else(|| bad("url is needed"))?;
+        if !url.starts_with("ws://") {
+            return Err(bad("url is a ws:// address"));
+        }
+        let peer = text("peer")?
+            .ok_or_else(|| bad("peer is needed: the key the other host proves"))?
+            .parse::<PeerId>()
+            .map_err(|_| bad("peer is not a peer id"))?;
+        let title = text("title")?.map(str::to_owned);
+        if let Some(title) = &title {
+            check_title(name, title)?;
+        }
+        out.push(RemoteAgent {
+            name: name.clone(),
+            title,
+            url: url.to_owned(),
+            peer,
+            source: text("source")?.map(str::to_owned),
+        });
     }
     Ok(out)
 }

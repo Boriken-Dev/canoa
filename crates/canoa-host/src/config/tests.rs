@@ -1602,3 +1602,28 @@ fn options_that_are_not_a_table_refuse_the_file_naming_the_overlay_and_no_value(
     assert!(words.contains("overlays.docs.options"), "{words}");
     assert!(!words.contains("secret-value"), "{words}");
 }
+
+#[test]
+fn a2a_keys_and_agents_on_another_machine_are_read_and_a_wrong_one_is_refused() {
+    let text = format!(
+        "[host.delegate]\na2a = [\"{PEER}\"]\nsources = [\"far\"]\n[agents.far]\na2a = {{ url = \"ws://10.0.0.2:7000\", peer = \"{PEER}\", source = \"shared\", title = \"Far\" }}\n"
+    );
+    let config = parse(&text).expect("parses");
+    assert_eq!(config.delegate.a2a.len(), 1);
+    let far = &config.remote_agents[0];
+    assert_eq!(
+        (far.name.as_str(), far.url.as_str()),
+        ("far", "ws://10.0.0.2:7000")
+    );
+    assert_eq!(far.source.as_deref(), Some("shared"));
+    assert!(config.local_agents.is_empty(), "it is no program");
+    assert!(parse("[host.delegate]\na2a = [\"nobody\"]\n").is_err());
+    for bad in [
+        format!("a2a = {{ url = \"http://x\", peer = \"{PEER}\" }}"),
+        "a2a = { url = \"ws://x:1\" }".to_owned(),
+        format!("a2a = {{ url = \"ws://x:1\", peer = \"{PEER}\", extra = 1 }}"),
+        format!("program = \"x\"\na2a = {{ url = \"ws://x:1\", peer = \"{PEER}\" }}"),
+    ] {
+        assert!(parse(&format!("[agents.far]\n{bad}\n")).is_err(), "{bad}");
+    }
+}
