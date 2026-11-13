@@ -515,3 +515,38 @@ fn a_child_whose_watcher_cannot_start_is_ended_and_not_announced() {
         thread::sleep(Duration::from_millis(50));
     }
 }
+
+/// A child that ends at once must be heard of however fast it ends: its `EXITED` can follow its `SPAWNED` on the socket and never
+/// pass it, or the host would take it for running for ever. Many such children from many threads, with a bound on the whole.
+#[test]
+fn children_that_end_at_once_are_always_heard_of_in_bounded_time() {
+    const WORKERS: usize = 12;
+    const ROUNDS: usize = 80;
+    let (link, _end) = started();
+    let (done, finished) = std::sync::mpsc::channel();
+    for worker in 0..WORKERS {
+        let (link, done) = (Arc::clone(&link), done.clone());
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                for round in 0..ROUNDS {
+                    let code = i32::try_from((worker * ROUNDS + round) % 200).expect("a code");
+                    let mut command = shell(&format!("exit {code}"));
+                    command
+                        .stdin(Stdio::Null)
+                        .stdout(Stdio::Null)
+                        .stderr(Stdio::Null);
+                    let mut child = link.spawn(&command).expect("it starts");
+                    let status = child.wait().expect("it is heard of");
+                    assert_eq!(status.code(), Some(code), "worker {worker} round {round}");
+                }
+            }));
+            let _ = done.send(result.is_ok());
+        });
+    }
+    for _ in 0..WORKERS {
+        let ended = finished
+            .recv_timeout(Duration::from_secs(120))
+            .expect("every child that ended at once was heard of, in time");
+        assert!(ended, "a worker saw a wrong status");
+    }
+}

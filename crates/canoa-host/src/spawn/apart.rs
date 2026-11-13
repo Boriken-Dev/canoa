@@ -540,6 +540,9 @@ impl Server {
                 if self.closing.load(Ordering::SeqCst) {
                     terminate(pid, group);
                 }
+                // The writer is held from before the watcher starts until the answer is sent: a child that ends at once has its
+                // `EXITED` sent after the `SPAWNED` that tells the host of it, never before.
+                let writer = lock(&self.writer);
                 let watching = if self.options.fail_watcher {
                     Err(io::Error::other("a thread could not be started"))
                 } else {
@@ -556,10 +559,10 @@ impl Server {
                     reap(pid);
                     said.extend_from_slice(&error.raw_os_error().unwrap_or(0).to_le_bytes());
                     put(&mut said, error.to_string().as_bytes())?;
-                    return send(&lock(&self.writer), FAILED, &said, &[]);
+                    return send(&writer, FAILED, &said, &[]);
                 }
                 said.extend_from_slice(&pid.to_le_bytes());
-                send(&lock(&self.writer), SPAWNED, &said, &[])
+                send(&writer, SPAWNED, &said, &[])
             }
             Err(error) => {
                 said.extend_from_slice(&error.raw_os_error().unwrap_or(0).to_le_bytes());
@@ -690,6 +693,9 @@ struct Book {
     next: u32,
     pending: HashMap<u32, Reply>,
     children: HashMap<u32, Arc<Fate>>,
+    /// An end heard of a child the host has not heard started, while a spawn is waiting: applied when it is. The starter sends
+    /// the start first, so this is a second guard, and it never holds an end for a child nobody is waiting to hear of.
+    early: HashMap<u32, State>,
     ended: bool,
 }
 
@@ -722,6 +728,7 @@ impl Link {
                 next: 0,
                 pending: HashMap::new(),
                 children: HashMap::new(),
+                early: HashMap::new(),
                 ended: false,
             }),
             wait,
@@ -794,7 +801,11 @@ impl Link {
                             changed: Condvar::new(),
                         });
                         // Before the caller has the id, so that an end heard at once is not lost.
-                        lock(&self.book).children.insert(pid, Arc::clone(&fate));
+                        let mut book = lock(&self.book);
+                        book.children.insert(pid, Arc::clone(&fate));
+                        if let Some(state) = book.early.remove(&pid) {
+                            *lock(&fate.state) = state;
+                        }
                         (pid, fate)
                     })
                 } else {
@@ -809,16 +820,26 @@ impl Link {
                         io::Error::from_raw_os_error(code)
                     }
                 }));
+                let mut book = lock(&self.book);
+                if book.pending.is_empty() {
+                    // Nobody waits to hear of a child: no end held for one is anyone's.
+                    book.early.clear();
+                }
             }
             EXITED => {
                 if let (Some(pid), Some(status)) = (fields.number(), fields.signed()) {
-                    let fate = lock(&self.book).children.get(&pid).cloned();
+                    let state = if status < 0 {
+                        State::StatusLost
+                    } else {
+                        State::Exited(status)
+                    };
+                    let mut book = lock(&self.book);
+                    let fate = book.children.get(&pid).cloned();
                     if let Some(fate) = fate {
-                        fate.set(if status < 0 {
-                            State::StatusLost
-                        } else {
-                            State::Exited(status)
-                        });
+                        drop(book);
+                        fate.set(state);
+                    } else if !book.pending.is_empty() {
+                        book.early.insert(pid, state);
                     }
                 }
             }
