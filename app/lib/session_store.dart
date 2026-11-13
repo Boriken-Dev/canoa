@@ -125,15 +125,18 @@ final class AgentQuestion {
 /// A secret prompt of the host, waiting on the person: a request for values or a show of them. [host] is the host's proven identity,
 /// which the answer's binding names. Nothing the person types or is shown passes through the agent's conversation.
 sealed class SecretPrompt {
-  SecretPrompt(this.host);
+  SecretPrompt(this.host, {this.identity});
   final AcpIdentityId host;
+
+  /// What binds this prompt's answer when it is not the store's own [SessionStore.secretIdentity]: the in-process link's.
+  final SecretIdentity? identity;
 
   /// Ends the prompt as cancelled.
   void cancel();
 }
 
 final class SecretRequestPrompt extends SecretPrompt {
-  SecretRequestPrompt(this.request, super.host);
+  SecretRequestPrompt(this.request, super.host, {super.identity});
   final AcpSecretRequestParams request;
   final Completer<AcpSecretRequestReply> reply = Completer();
 
@@ -144,7 +147,7 @@ final class SecretRequestPrompt extends SecretPrompt {
 }
 
 final class SecretShowPrompt extends SecretPrompt {
-  SecretShowPrompt(this.open, super.host);
+  SecretShowPrompt(this.open, super.host, {super.identity});
   final AcpSecretShowOpen open;
 
   /// The host's second step, once it arrives.
@@ -1181,14 +1184,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   @override
   AcpSecretsCapability? get secretsCapability => secretIdentity?.offer;
 
-  /// The conversation the client [from] serves under the session id [remote], and the host's identity, which the proven peer id of
-  /// [from] is: a program this app started has none, so it can ask for no secret.
-  (ChatSession, AcpIdentityId)? _secretTarget(String remote, VerifiedAgent from) {
-    final identity = secretIdentity;
+  /// The conversation the client [from] serves under the session id [remote], the host's identity, which the proven peer id of [from]
+  /// is, and what binds the answer. The link to the host in this process has the secret they share and the host identity derived from
+  /// it; any other program this app started has no identity, so it can ask for no secret.
+  (ChatSession, AcpIdentityId, SecretIdentity)? _secretTarget(String remote, VerifiedAgent from) {
+    final linked = from.linkSecrets;
+    final identity = linked?.identity ?? secretIdentity;
     if (identity == null) return null;
     final AcpIdentityId host;
     try {
-      host = AcpIdentityId.parse(from.peerId);
+      host = linked?.host ?? AcpIdentityId.parse(from.peerId);
     } on AcpSecretException {
       return null;
     }
@@ -1196,7 +1201,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       if (session.remoteSessionId == remote && identical(_verifiedClients[session.id], from)) {
         if (session.pendingSecrets.length >= maxPendingQuestions) return null;
         identity.verifier.trust(host);
-        return (session, host);
+        return (session, host, identity);
       }
     }
     return null;
@@ -1204,7 +1209,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// What the secret cards of [prompt] check with and bind to.
   SecretCardEnvironment secretEnvironment(SecretPrompt prompt) {
-    final identity = secretIdentity!;
+    final identity = prompt.identity ?? secretIdentity!;
     return SecretCardEnvironment(prover: identity.prover, verifier: identity.verifier, expected: prompt.host, host: 'Canoa');
   }
 
@@ -1212,7 +1217,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   Future<AcpSecretRequestReply> askSecret(AcpSecretRequestParams request, VerifiedAgent from) {
     final target = _secretTarget(request.context.sessionId, from);
     if (target == null) return Future.value(const AcpSecretCancelled());
-    final prompt = SecretRequestPrompt(request, target.$2);
+    final prompt = SecretRequestPrompt(request, target.$2, identity: target.$3);
     target.$1.pendingSecrets.add(prompt);
     _needs(target.$1, AttentionKind.question);
     notifyListeners();
@@ -1223,7 +1228,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   Future<AcpSecretShowOpened> openSecretShow(AcpSecretShowOpen open, VerifiedAgent from) {
     final target = _secretTarget(open.context.sessionId, from);
     if (target == null) return Future.value(const AcpSecretShowOpened.cancelled());
-    final prompt = SecretShowPrompt(open, target.$2);
+    final prompt = SecretShowPrompt(open, target.$2, identity: target.$3);
     target.$1.pendingSecrets.add(prompt);
     _needs(target.$1, AttentionKind.question);
     notifyListeners();

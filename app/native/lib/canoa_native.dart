@@ -2,11 +2,12 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 /// The ABI this code was written for; a library of another is refused.
-const int canoaAbiVersion = 2;
+const int canoaAbiVersion = 3;
 
 // One table with crates/canoa-ffi/src/exports.rs; app/test/host_library_test.dart compares them.
 const int statusOk = 0;
@@ -72,6 +73,10 @@ final class CanoaNative {
         Int32 Function(Uint64, Pointer<Uint8>, Size, Pointer<Uint64>),
         int Function(int, Pointer<Uint8>, int, Pointer<Uint64>)
       >('canoa_ffi_link_open'),
+      _linkSecret = library.lookupFunction<
+        Int32 Function(Uint64, Pointer<Uint8>, Size),
+        int Function(int, Pointer<Uint8>, int)
+      >('canoa_ffi_link_secret'),
       _linkSend = library.lookupFunction<
         Int32 Function(Uint64, Pointer<Uint8>, Size),
         int Function(int, Pointer<Uint8>, int)
@@ -91,6 +96,7 @@ final class CanoaNative {
   final int Function(int) _stop;
   final int Function(int) _free;
   final int Function(int, Pointer<Uint8>, int, Pointer<Uint64>) _linkOpen;
+  final int Function(int, Pointer<Uint8>, int) _linkSecret;
   final int Function(int, Pointer<Uint8>, int) _linkSend;
   final int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>) _linkRead;
   final int Function(int) _linkClose;
@@ -185,6 +191,20 @@ final class CanoaNative {
     } finally {
       malloc.free(text);
       malloc.free(link);
+    }
+  }
+
+  /// The 32-byte secret the host of job [job] shares with this process for its links' secret prompts. Throws [CanoaNativeError] with
+  /// [statusNoEntry] when the job serves nothing yet or its host has none. Keep it in memory only.
+  Uint8List linkSecret(int job) {
+    final out = malloc<Uint8>(32);
+    try {
+      final status = _linkSecret(job, out, 32);
+      if (status != statusOk) throw CanoaNativeError('link_secret', status);
+      return Uint8List.fromList(out.asTypedList(32));
+    } finally {
+      out.asTypedList(32).fillRange(0, 32, 0);
+      malloc.free(out);
     }
   }
 

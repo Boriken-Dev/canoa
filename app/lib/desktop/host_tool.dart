@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'host_tool_stub.dart' if (dart.library.io) 'host_tool_io.dart' as platform;
 
@@ -127,6 +128,13 @@ abstract interface class HostLink {
   /// Sends one message, waiting while the host has taken too many. Throws [StateError] once the link has ended.
   Future<void> send(String message);
   Future<void> close();
+}
+
+/// A link that holds the secret its host shares with this process for the secret prompts of the links it opens: minted by the host,
+/// kept in memory, and never sent anywhere. Only a link to a host in this process has one.
+abstract interface class HostLinkSecret {
+  /// The 32 bytes, or null when the host has none to give.
+  Uint8List? get linkSecret;
 }
 
 /// A [HostChild] that is a `serve` in this process, which can be connected to without a socket.

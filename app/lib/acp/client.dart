@@ -6,11 +6,13 @@ import 'package:coqui_web/coqui_web.dart';
 
 import '../chat/agent_events.dart';
 import 'delegate.dart';
+import 'link_secret.dart';
 import 'secret_wire.dart';
 import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
 export 'delegate.dart' show DelegateNotice;
+export 'link_secret.dart' show LinkSecretIdentity, linkSecretIdentity;
 export 'secret_wire.dart' show AgentSecrets;
 
 /// A proven peer, and the channel that keeps everything after the proof with that peer.
@@ -103,7 +105,7 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate})
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets})
       : _delegate = delegate {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
@@ -116,6 +118,10 @@ final class VerifiedAgent {
 
   /// Whether this is a program this app started, named in [peerId] as `local:<label>`.
   final bool isChild;
+
+  /// What binds this app's secret answers on the in-process link, and the host's identity on it: set only for a link to the host in
+  /// this process, which the host binds by a secret it minted. Null for any other connection.
+  final LinkSecretIdentity? linkSecrets;
 
   /// What the agent said about itself when it was initialized.
   final AgentIdentity identity;
@@ -210,17 +216,21 @@ final class VerifiedAgent {
     AgentElicitor? elicitor,
     Map<String, Object?> initializeMeta = const {},
     ProfileApprover? approver,
+    AgentSecrets? secrets,
+    LinkSecretIdentity? linkSecrets,
   }) {
     final identity = AgentIdentity();
     final usage = UsageWire(send, initializeMeta: initializeMeta, approver: approver);
     final delegate = DelegateWire(send, optIn: decider != null);
-    return VerifiedAgent._(
+    // Only the link to the host in this process, which has the secret it shares with it, can be asked for one.
+    final secretWire = secrets == null || linkSecrets == null ? null : SecretWire(send, secrets, offer: linkSecrets.identity.offer);
+    final client = VerifiedAgent._(
       (decider, elicitor) => AcpClient(
         incoming: messages
-            .where((message) => !usage.answersApproval(message) && !delegate.takes(message))
+            .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message))
             .map(identity._inspect)
             .map(usage.incoming),
-        send: (message) => send(delegate.outgoing(usage.outgoing(message))),
+        send: (message) => send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(message)))),
         closeSource: close,
         decider: decider,
         elicitor: elicitor,
@@ -236,7 +246,10 @@ final class VerifiedAgent {
       elicitor: elicitor,
       isChild: true,
       delegate: delegate,
+      linkSecrets: secretWire == null ? null : linkSecrets,
     );
+    secretWire?.agent = client;
+    return client;
   }
 
   /// Over a connection a browser's provider holds. The proof is the provider's, and without one there is no client.

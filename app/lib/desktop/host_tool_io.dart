@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:canoa_native/canoa_native.dart';
 
@@ -110,14 +111,16 @@ const Duration _linkPollEvery = Duration(milliseconds: 15);
 const Duration _linkBusyPause = Duration(milliseconds: 10);
 
 /// A link the library holds, read on a timer like a command.
-final class _LibraryLink implements HostLink {
-  _LibraryLink(this._native, this._link) {
+final class _LibraryLink implements HostLink, HostLinkSecret {
+  _LibraryLink(this._native, this._link, this.linkSecret) {
     _timer = Timer.periodic(_linkPollEvery, (_) => _read());
     scheduleMicrotask(_read);
   }
 
   final CanoaNative _native;
   final int _link;
+  @override
+  final Uint8List? linkSecret;
   final _messages = StreamController<String>();
   late final Timer _timer;
   bool _closed = false;
@@ -239,7 +242,14 @@ final class _LibraryChild implements HostChild, HostLinks {
   @override
   HostLink openLink(String entry) {
     if (_exit.isCompleted) throw StateError('the host has ended');
-    return _LibraryLink(_native, _native.openLink(_job, entry));
+    final link = _native.openLink(_job, entry);
+    Uint8List? secret;
+    try {
+      secret = _native.linkSecret(_job);
+    } on CanoaNativeError {
+      // This host has none to give: its secret prompts are off on the link.
+    }
+    return _LibraryLink(_native, link, secret);
   }
 
   @override

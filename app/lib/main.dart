@@ -985,10 +985,20 @@ class _CanoaAppState extends State<CanoaApp> {
     } on HostCommandFailed catch (error) {
       throw StateError('$error');
     }
+    // The host in this process binds a secret prompt by the secret it shares with this app, which only this link has.
+    LinkSecretIdentity? linkSecrets;
+    final secret = link is HostLinkSecret ? (link as HostLinkSecret).linkSecret : null;
+    if (secret != null) {
+      try {
+        linkSecrets = await linkSecretIdentity(secret);
+      } on Object {
+        // No secret prompts on this link: the host is offered nothing.
+      }
+    }
     final client = VerifiedAgent.fromChild(
       label: name, messages: link.messages, send: link.send, close: link.close,
       decider: store.askPermission, elicitor: store.askQuestion, initializeMeta: initializeMeta,
-      approver: _approver(name),
+      approver: _approver(name), secrets: store, linkSecrets: linkSecrets,
     );
     try {
       await client.initialize();

@@ -27,17 +27,22 @@ abstract interface class AgentSecrets {
 /// An answer holds only what the extension's types allow: the plain answers as text and each secret sealed to a key only the host
 /// holds, so the agent, which the shared client serves, is handed none of it.
 final class SecretWire {
-  SecretWire(this._send, this._secrets);
+  /// [offer], when given, is what this connection offers the host in place of the one [_secrets] has: the link in this process offers
+  /// its own binding only.
+  SecretWire(this._send, this._secrets, {AcpSecretsCapability? offer}) : _offer = offer;
 
   final Future<void> Function(String) _send;
   final AgentSecrets _secrets;
+  final AcpSecretsCapability? _offer;
+
+  AcpSecretsCapability? get _capability => _offer ?? _secrets.secretsCapability;
 
   /// The client this wire serves, set when it is made; a question that comes before is refused.
   VerifiedAgent? agent;
 
   /// [message] on its way to the host, with the offer added when it is `initialize` and the app has an identity to offer it with.
   String outgoing(String message) {
-    final offer = _secrets.secretsCapability;
+    final offer = _capability;
     if (offer == null || !message.contains('"initialize"')) return message;
     final Object? decoded;
     try {
@@ -90,7 +95,7 @@ final class SecretWire {
   }
 
   Future<Map<String, Object?>> _run(String method, Object? params) async {
-    final offer = _secrets.secretsCapability;
+    final offer = _capability;
     final from = agent;
     if (offer == null || from == null) throw const AcpSecretException(AcpSecretFailure.unsupported, 'no secrets offered');
     switch (method) {

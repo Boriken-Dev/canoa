@@ -7,6 +7,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
+import 'package:canoa/session_store.dart';
+import 'package:coqui_acp/secret.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/host_ledger_backend.dart';
 import 'package:canoa/desktop/child_flag.dart';
@@ -166,6 +168,65 @@ void main() {
       await supervisor.stop();
       await ended.timeout(const Duration(seconds: 30));
       await expectLater(second.send('{}'), throwsStateError);
+    });
+
+    test('the scripted secret flow runs over the link to the library host: sealed by the link\'s secret, used once in an env, only the handle in the transcript', () async {
+      final agent = exampleBinary('stdio_agent');
+      if (agent == null) fail(exampleMissing('stdio_agent')!);
+      await File(cfg).writeAsString('[host.agents.Scripted]\nprogram = ${jsonEncode(agent)}\nargs = ["--scripted", "--mcp-http", "--modes=default,bypassPermissions"]\nlisten = "127.0.0.1:0"\n');
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      final link = supervisor.openLink('Scripted');
+      final secret = (link as HostLinkSecret).linkSecret;
+      expect(secret, isNotNull, reason: 'the library gives the secret its host minted');
+      expect(secret!.length, 32);
+      expect(secret.any((byte) => byte != 0), isTrue);
+      final store = SessionStore();
+      final client = VerifiedAgent.fromChild(
+        label: 'Scripted', messages: link.messages, send: link.send, close: link.close,
+        decider: store.askPermission, elicitor: store.askQuestion, secrets: store, linkSecrets: await linkSecretIdentity(secret),
+      );
+      await client.initialize();
+      final opened = await client.openSession(cwd: dir.path);
+      final session = store.addProviderSession(title: 'Deploy', agent: 'Scripted', peerId: client.peerId, remoteSessionId: opened.id);
+      store.attachVerifiedClient(session.id, client, record: false);
+      final said = StringBuffer();
+      final listening = client.updates.listen((update) => said.write(update.text ?? ''));
+      const password = 'Tr0ub4dor.3/x+y=?qZ_9';
+      const schema = '{"type":"object","properties":{"user":{"type":"string"},"password":{"type":"string","writeOnly":true}},"required":["user","password"]}';
+
+      final asking = client.prompt(opened.id, 'Secret secret_request ${jsonEncode({'message': 'Registry login', 'schema': schema})}');
+      await _until(() => session.pendingSecrets.isNotEmpty, 'the host to ask the app');
+      final prompt = session.pendingSecrets.single as SecretRequestPrompt;
+      final environment = store.secretEnvironment(prompt);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final collector = await environment.verifier.collector(prompt.host, AcpSecretMethod.request, prompt.request.context, prompt.request.recipient, now);
+      final sealed = {'password': await collector.seal('password', password)};
+      const plain = '{"user":"ana"}';
+      final auth = await collector.authenticate(environment.prover, plain, sealed, now);
+      store.answerSecret(session, prompt, AcpSecretAccepted(plain, sealed, auth));
+      await asking;
+      final answer = jsonDecode(said.toString()) as Map<String, Object?>;
+      expect(answer['status'], 'accepted', reason: said.toString());
+      final handle = (answer['handles']! as Map)['password']! as String;
+      expect(handle, startsWith('secret_'));
+      expect(said.toString(), isNot(contains(password)));
+
+      said.clear();
+      final command = Platform.isWindows ? 'echo %REGISTRY_TOKEN%' : 'echo "\$REGISTRY_TOKEN"';
+      final using = client.prompt(opened.id, 'Secret secret_use ${jsonEncode({'handle': handle, 'env': {'name': 'REGISTRY_TOKEN', 'command': command}})}');
+      await _until(() => session.pendingPermissions.isNotEmpty, 'the host to put the use to the person');
+      store.answerPermission(session, allow: true);
+      await using;
+      final ran = jsonDecode(said.toString()) as Map<String, Object?>;
+      expect(ran['status'], 'exited', reason: said.toString());
+      expect((ran['stdout']! as String), contains(handle), reason: 'what the command printed came back as the handle');
+      expect(said.toString(), isNot(contains(password)));
+      expect(session.messages.map((message) => message.text).join('\n'), isNot(contains(password)));
+      await listening.cancel();
+      await client.close();
+      await supervisor.stop();
     });
 
     test('the session list is kept by the host over its control channel, and is there when the host starts again', () async {
