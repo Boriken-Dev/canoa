@@ -39,10 +39,9 @@ void main() {
     const claude = AgentSource.hosted('Claude', harness: 'claude', local: true);
     const grok = AgentSource.hosted('Grok', local: true);
     const other = AgentSource.hosted('mine');
-    expect(sourceIcon(claude), providerIcon('claude'));
-    expect(sourceIcon(grok), providerIcon('grok'));
-    expect(sourceIcon(other), providerIcon(null));
-    expect(sourceIcon(grok), isNot(providerIcon(null)));
+    expect(sourceProvider(claude), 'claude');
+    expect(sourceProvider(grok), 'grok');
+    expect(sourceProvider(other), isNull);
     expect(knownModes(claude), isNotEmpty);
     expect(knownModes(grok), isEmpty);
     expect(knownModes(other), isEmpty);

@@ -162,11 +162,11 @@ void main() {
 
   test("a source of the host's own has its provider's icon, as a hosted entry of the same provider does", () {
     AgentSource preset(String label, [String? harness]) => AgentSource.hosted(label, harness: harness, local: true);
-    expect(sourceIcon(preset('Claude', 'claude')), providerIcon('claude'));
-    expect(sourceIcon(preset('Codex', 'codex')), providerIcon('codex'));
-    expect(sourceIcon(preset('Grok')), providerIcon('grok'));
-    expect(sourceIcon(preset('Antigravity')), providerIcon('antigravity'));
-    expect(sourceIcon(AgentSource.hosted('review', harness: 'claude')), sourceIcon(preset('Claude', 'claude')));
+    expect(sourceProvider(preset('Claude', 'claude')), 'claude');
+    expect(sourceProvider(preset('Codex', 'codex')), 'codex');
+    expect(sourceProvider(preset('Grok')), 'grok');
+    expect(sourceProvider(preset('Antigravity')), 'antigravity');
+    expect(sourceProvider(AgentSource.hosted('review', harness: 'claude')), sourceProvider(preset('Claude', 'claude')));
     expect(sourceIcon(const AgentSource.hosted('Scripted', local: true)), providerIcon(null), reason: 'a command a person wrote');
   });
 
