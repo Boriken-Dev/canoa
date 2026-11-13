@@ -631,12 +631,12 @@ mod tests {
     fn the_crates_run_in_process_start_no_process_by_std_but_behind_their_seam() {
         // (file, what shows it is behind the seam or Windows-only)
         const BEHIND: [(&str, &str); 6] = [
-            ("coqui-acp-secrets/src/run.rs", "STARTER"),
-            ("coqui-acp-harness/src/process.rs", "STARTER"),
-            ("coqui-acp-bridge/src/agent.rs", "Spawner"),
-            ("coqui-acp-bridge/src/standing.rs", "icacls"),
-            ("coqui-acp-pi/src/gate.rs", "icacls"),
-            ("coqui-acp-harness/src/antigravity/ports.rs", "netstat"),
+            ("coqui-acp-secrets/run.rs", "STARTER"),
+            ("coqui-acp-harness/process.rs", "STARTER"),
+            ("coqui-acp-bridge/agent.rs", "Spawner"),
+            ("coqui-acp-bridge/standing.rs", "icacls"),
+            ("coqui-acp-pi/gate.rs", "icacls"),
+            ("coqui-acp-harness/antigravity/ports.rs", "netstat"),
         ];
         const CRATES: [&str; 9] = [
             "coqui-acp",
