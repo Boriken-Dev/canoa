@@ -28,6 +28,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import 'accounts/account_models.dart' show accountMeta;
+import 'accounts/accounts_controller.dart';
+import 'accounts/accounts_host.dart';
 import 'chat/cache_lifetime.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
@@ -151,11 +154,15 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.browserProvider, this.gitReader,
+    this.tabBridge, this.browserProvider, this.gitReader, this.accountsHost,
   });
 
   /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
   final PopoutWindows? popoutWindows;
+
+  /// What the app asks of the host about accounts; by default the host this app runs, over its control channel.
+  @visibleForTesting
+  final AccountsHost? accountsHost;
 
   /// The extension's tabs and the browser's provider of agents, by default the platform's; a test gives its own.
   @visibleForTesting
@@ -305,6 +312,7 @@ class _CanoaAppState extends State<CanoaApp> {
           },
           onLoadout: _showLoadout,
           supervisor: widget.host,
+          accounts: _accounts,
           saveHosting: _saveHosting,
           version: const String.fromEnvironment('CANOA_VERSION'),
         ),
@@ -727,6 +735,46 @@ class _CanoaAppState extends State<CanoaApp> {
     return SourceCheck(missing: listening.missing);
   }
 
+  /// The accounts of this computer's host, for Settings and the composer's chip; none where the app runs no host.
+  late final AccountsController? _accounts = _buildAccounts();
+
+  AccountsController? _buildAccounts() {
+    final control = _control;
+    final host = widget.accountsHost ?? (control == null ? null : ControlAccountsHost(control));
+    if (host == null) return null;
+    return AccountsController(
+      host: host,
+      config: () => config,
+      change: _changeAccounts,
+      holder: _accountHolder,
+      usage: (id) => store.accountUsage[id],
+    );
+  }
+
+  /// `initialize`'s `_meta` for the account a session runs on: its name, never a credential. Absent runs the entry's first.
+  Map<String, Object?> _accountMeta(String? account) => account == null ? const {} : {accountMeta: account};
+
+  /// The open session that runs on [account], which a login that rotates its credential allows only one of.
+  String? _accountHolder(String account) {
+    for (final session in store.sessions) {
+      if (!session.isDraft && session.status != SessionStatus.disconnected && session.account == account) return session.title;
+    }
+    return null;
+  }
+
+  /// Writes what changes which entries offer which accounts and has the host serve it. The host wrote the account's own table in
+  /// the person's file, so it is read again first: saving the copy this app held would take it out.
+  Future<void> _changeAccounts(CanoaConfig Function(CanoaConfig config) edit) async {
+    final path = _configPath;
+    final fresh = widget.writeConfig == null ? await loadConfig() : config;
+    final changed = edit(fresh);
+    await _write(changed);
+    if (mounted) setState(() => config = changed);
+    _settingsKey.currentState?.controller.adopt(changed);
+    _accounts?.changed();
+    if (widget.host != null && path != null) await widget.host!.apply(configPath: path);
+  }
+
   /// The programs the host's Store keeps. Nothing is asked of the host until a page that shows them, or a source's readiness,
   /// needs it; an install runs only when the person confirms its plan.
   late final ProgramStores? _programs = _control == null
@@ -896,6 +944,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
     if (listening.local) return _startViaLink(draft, name, folder, worktree, starting);
+    draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
     final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
     if (method == null) throw StateError('canoa did not say which method it proves by');
     final endpoint = Uri.parse(listening.url);
@@ -916,14 +965,14 @@ class _CanoaAppState extends State<CanoaApp> {
               listening.url, pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-              initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
+              initializeMeta: {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)},
             )
           : await connectBrowserAcp(
               chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
               pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-              initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
+              initializeMeta: {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)},
             );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
@@ -1027,6 +1076,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (config.overlays.isNotEmpty) draft.overlays = chosen;
       client = await _linkAgent(name, {
         ..._cacheMeta(store.cacheLifetimeOf(draft)),
+        ..._accountMeta(draft.account),
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
       });
       starting.client = client;
@@ -1080,7 +1130,7 @@ class _CanoaAppState extends State<CanoaApp> {
                 endpoint.toString(), pinnedPeerId: entry.peerId, method: method,
                 timeout: Duration(seconds: config.connectTimeout),
                 decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-                initializeMeta: cacheMeta,
+                initializeMeta: {...cacheMeta, ..._accountMeta(entry.account)},
               )
             : await connectBrowserAcp(
                 chatEndpoints(
@@ -1091,7 +1141,7 @@ class _CanoaAppState extends State<CanoaApp> {
                 pinnedPeerId: entry.peerId, method: method,
                 timeout: Duration(seconds: config.connectTimeout),
                 decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-                initializeMeta: cacheMeta,
+                initializeMeta: {...cacheMeta, ..._accountMeta(entry.account)},
               );
       case SessionPlace.browser:
         throw StateError(why ?? 'Reopen it from Earlier conversations');
@@ -1108,6 +1158,8 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The host's entries come and go as it starts and ends, and a hosted source can run only while it serves one.
   List<AgentSource>? _serving;
   void _hostChanged() {
+    // The host was started anew: which accounts it has is asked again.
+    if (widget.host?.listening.isNotEmpty ?? false) unawaited(_accounts?.refresh());
     final serving = _hostedSources;
     if (_serving != null && _serving!.length == serving.length && _serving!.every(serving.contains)) return;
     _serving = serving;
@@ -1205,6 +1257,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.gitReader = _gitReaderFor;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
+    scheduleMicrotask(() => _accounts?.refresh());
     if (store.secretIdentity == null) unawaited(_loadSecretIdentity());
     unawaited(store.restoreDrafts((label) =>
         _sources.where((source) => source.label == label).firstOrNull));
@@ -1296,6 +1349,8 @@ class _CanoaAppState extends State<CanoaApp> {
     warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
     onSettings: () => unawaited(_showSettings()),
+    accounts: _accounts,
+    onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
     extension: _tabs,
     onProfile: (session) {
       final above = _navigator.currentContext;

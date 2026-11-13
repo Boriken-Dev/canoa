@@ -5,6 +5,8 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 
+import '../accounts/account_chooser.dart';
+import '../accounts/accounts_controller.dart';
 import '../acp/local_agent.dart' show InsideFile;
 import '../extension/composer_extension.dart';
 import '../session_store.dart';
@@ -45,6 +47,8 @@ final class ComposerKit {
     this.onSourceSettings,
     this.onSettings,
     this.onProfile,
+    this.accounts,
+    this.onAccountSettings,
     this.extension,
   });
 
@@ -93,6 +97,12 @@ final class ComposerKit {
 
   /// Opens Settings.
   final VoidCallback? onSettings;
+
+  /// The accounts the host knows, for the chip that names the one a session runs on; null where the app has none.
+  final AccountsController? accounts;
+
+  /// Opens Settings at Accounts.
+  final VoidCallback? onAccountSettings;
 
   /// Shows what a session was given of its profile.
   final void Function(ChatSession session)? onProfile;
@@ -301,6 +311,7 @@ class SessionComposer extends StatelessWidget {
       ],
       after: [
         if (draft) SourceChooser(store: store, session: session, kit: kit),
+        AccountChooser(store: store, session: session, kit: kit),
         if (draft) PlaceToggle(store: store, session: session, kit: kit),
       ],
       trailing: [

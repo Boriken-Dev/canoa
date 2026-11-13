@@ -217,6 +217,10 @@ class ChatSession {
   /// in canoa.cfg decides, else the chat's default. Kept with the draft and with the session in the ledger.
   CacheLifetime? cacheLifetime;
 
+  /// The account (the host's `[host.accounts]` name) the person chose for a session whose source offers some; null runs the source's first.
+  /// Kept with the draft and, as a name, with the session in the ledger: no credential is ever held here.
+  String? account;
+
   /// What is written in a draft's composer, kept with it.
   String draftText = '';
 
@@ -732,7 +736,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
       String? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
-      CacheLifetime? cacheLifetime}) {
+      CacheLifetime? cacheLifetime, String? account}) {
     final session = ChatSession(
       id: 'local-${++_nextId}',
       title: title ?? draftTitle,
@@ -744,6 +748,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     )
       ..wantsWorktree = worktree
       ..cacheLifetime = cacheLifetime
+      ..account = account
       ..overlays = overlays
       ..draftId = id ?? newDraftId()
       ..workspaceId = workspaceId ?? newSessionUuid()
@@ -778,6 +783,18 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     notifyListeners();
   }
 
+  /// Sets the account [session] will run on, by its name in the host's `[host.accounts]`; null takes the choice back, which runs
+  /// the source's first. A session that has started keeps its own.
+  void setAccount(ChatSession session, String? account) {
+    if (!session.isDraft) return;
+    session.account = account;
+    _keepDraft(session);
+    notifyListeners();
+  }
+
+  /// What the sessions on each account last heard of its allowances, by the account's id as the host names it in a report.
+  final Map<String, UsageReport> accountUsage = {};
+
   /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
   void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool clearFolder = false, bool? worktree,
       Set<String>? overlays, bool allOverlays = false, String? text}) {
@@ -790,6 +807,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           ..agent = source.label;
         // Choices for another source's options mean nothing to this one's.
         session.pending.clear();
+        session.account = null;
         session.bypass = false;
         _askChoices(source);
       }
@@ -816,6 +834,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         cwd: record['cwd'] is String ? record['cwd'] as String : null,
         worktree: record['worktree'] == true,
         cacheLifetime: CacheLifetime.named(record['cacheLifetime']),
+        account: record['account'] is String ? record['account'] as String : null,
         overlays: record['overlays'] is List ? {for (final name in record['overlays'] as List) if (name is String) name} : null,
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
@@ -865,6 +884,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       'workspaceId': ?session.workspaceId,
       'worktree': session.wantsWorktree,
       'cacheLifetime': ?session.cacheLifetime?.id,
+      'account': ?session.account,
       'overlays': ?session.overlays?.toList(),
       'text': session.draftText,
       if (!session.agentNames) 'title': session.title,
@@ -1692,6 +1712,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       notifyListeners();
       return;
     }
+    final account = report.account;
+    if (report.supported && account != null && (accountUsage[account]?.revision ?? -1) <= report.revision) {
+      accountUsage[account] = report.withSpend(null);
+    }
     session.usageReport = report.supported ? report.withSpend(null) : null;
     if (!report.supported) session.reportsUsage = false;
     notifyListeners();
@@ -1721,6 +1745,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       canoaId: session.workspaceId,
       site: session.site,
       cacheLifetime: session.cacheLifetime?.id,
+      account: session.account,
       overlays: session.overlays?.toList(),
     );
   }
@@ -2477,6 +2502,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..workspaceId = entry.canoaId
       ..bypass = entry.bypass
       ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
+      ..account = entry.account
       ..overlays = entry.overlays?.toSet()
       ..pinned = entry.pinned
       ..archived = entry.archived
@@ -2723,6 +2749,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     title: 'Fork of ${session.title}',
     keptSource: session.keptSource,
     cacheLifetime: session.cacheLifetime,
+    account: session.account,
   );
 
   /// This does not send data to an agent. Only the clearly labeled preview

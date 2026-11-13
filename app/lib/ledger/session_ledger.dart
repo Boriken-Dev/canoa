@@ -88,6 +88,7 @@ final class LedgerEntry {
     this.mode,
     this.bypass = false,
     this.cacheLifetime,
+    this.account,
     this.overlays,
     this.canoaId,
     this.site,
@@ -145,6 +146,9 @@ final class LedgerEntry {
   /// The prompt-cache lifetime the person chose for the session (`short`, `long` or `default`), asked again when it is opened.
   String? cacheLifetime;
 
+  /// The name of the account the session runs on (the host's `[host.accounts]`), asked for again when it is opened; never a credential.
+  String? account;
+
   /// The overlays the session started with, by name, asked for again when it is opened; null for one that took what the
   /// host's profile gave it.
   List<String>? overlays;
@@ -191,6 +195,7 @@ final class LedgerEntry {
     'mode': ?mode,
     if (bypass) 'bypass': true,
     'cacheLifetime': ?cacheLifetime,
+    'account': ?account,
     'overlays': ?overlays,
     'canoaId': ?canoaId,
     'site': ?site,
@@ -229,6 +234,7 @@ final class LedgerEntry {
       mode: text('mode'),
       bypass: json['bypass'] == true,
       cacheLifetime: text('cacheLifetime'),
+      account: text('account'),
       overlays: json['overlays'] is List ? [for (final name in json['overlays'] as List) if (name is String) name] : null,
       canoaId: text('canoaId'),
       site: text('site'),
@@ -459,6 +465,7 @@ class SessionLedger extends ChangeNotifier {
     String? canoaId,
     String? site,
     String? cacheLifetime,
+    String? account,
     List<String>? overlays,
   }) {
     if (_settings.keep <= 0) return null;
@@ -491,6 +498,7 @@ class SessionLedger extends ChangeNotifier {
       ..title = title ?? found.title
       ..worktree = worktree ?? found.worktree
       ..cacheLifetime = cacheLifetime ?? found.cacheLifetime
+      ..account = account ?? found.account
       ..overlays = overlays ?? found.overlays
       ..canoaId = canoaId ?? found.canoaId;
     _apply();
