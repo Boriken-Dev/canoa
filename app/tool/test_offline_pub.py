@@ -142,5 +142,67 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(packages["flutter"].source, "sdk")
 
 
+CARGO_LOCK = f"""version = 4
+
+[[package]]
+name = "app"
+version = "0.1.0"
+
+[[package]]
+name = "dep"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "{'a' * 64}"
+"""
+
+
+class CratesTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.deps = self.tmp / "deps"
+        self.lock = self.tmp / "Cargo.lock"
+        self.lock.write_text(CARGO_LOCK)
+
+    def vendor(self, checksum="a" * 64):
+        folder = self.deps / "crates" / "dep-1.2.3"
+        folder.mkdir(parents=True)
+        (folder / ".cargo-checksum.json").write_text('{"files":{},"package":"%s"}' % checksum)
+
+    def test_deps_that_covers_cargo_lock_gives_a_cargo_home_with_the_config(self):
+        self.vendor()
+        home, reason = offline_pub.crates_plan(self.lock, self.deps, self.tmp / "home")
+        self.assertIsNone(reason)
+        self.assertEqual(home, self.tmp / "home")
+        self.assertIn("replace-with", (home / "config.toml").read_text())
+
+    def test_a_missing_crate_falls_back_and_names_it(self):
+        (self.deps / "crates").mkdir(parents=True)
+        home, reason = offline_pub.crates_plan(self.lock, self.deps, self.tmp / "home")
+        self.assertIsNone(home)
+        self.assertIn("Cargo.lock", reason)
+        self.assertIn("dep-1.2.3", reason)
+        self.assertFalse((self.tmp / "home").exists())
+
+    def test_a_changed_crate_and_a_deps_without_crates_fall_back(self):
+        self.vendor(checksum="b" * 64)
+        self.assertIn("package checksum", offline_pub.crates_plan(self.lock, self.deps, self.tmp / "home")[1])
+        home, reason = offline_pub.crates_plan(self.lock, self.tmp / "nowhere", self.tmp / "home")
+        self.assertIsNone(home)
+        self.assertIn("crates", reason)
+
+    def test_the_whole_plan_falls_back_when_only_the_crates_are_missing(self):
+        deps = self.tmp / "d"
+        (deps / "pub" / "hosted" / "pub.dev" / "args-2.7.0").mkdir(parents=True)
+        (deps / "pubspec.lock").write_text(lock())
+        (deps / "crates").mkdir()
+        user = self.tmp / "user"
+        (user / "git" / f"coqui-acp-{REV}").mkdir(parents=True)
+        plan = offline_pub.plan_from(lock(), deps, user, self.tmp / "cache", cargo_lock=self.lock, cargo_home=self.tmp / "home")
+        self.assertIsNone(plan.cache)
+        self.assertIn("crates", plan.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

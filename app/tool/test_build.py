@@ -220,6 +220,26 @@ class PubModeTests(unittest.TestCase):
         self.assertEqual(build.os.environ["PUB_CACHE"], "/user/cache", "the cache is put back")
         self.assertEqual(ensure.call_args.kwargs, {"offline": True})
 
+    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None, Path("/cargo_home")))
+    def test_offline_points_cargo_at_deps_crates_with_the_network_off(self, plan, run, *_):
+        seen = []
+        run.side_effect = lambda *a, **k: seen.append(
+            (build.os.environ.get("CARGO_HOME"), build.os.environ.get("CARGO_NET_OFFLINE")))
+        with patch.dict("build.os.environ", {"CARGO_HOME": "/mine"}):
+            build.build_desktop("windows", False, False, mode="auto")
+            self.assertEqual(build.os.environ["CARGO_HOME"], "/mine")
+        self.assertEqual(seen, [(str(Path("/cargo_home")), "true")] * 2)
+        self.assertNotIn("CARGO_NET_OFFLINE", build.os.environ)
+
+    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "the deps branch's crates/ does not cover Cargo.lock: crates/x-1.0.0: missing"))
+    def test_crates_deps_does_not_cover_falls_back_online_with_cargo_untouched(self, plan, run, *_):
+        seen = []
+        run.side_effect = lambda *a, **k: seen.append(build.os.environ.get("CARGO_NET_OFFLINE"))
+        with patch("builtins.print") as out:
+            build.build_desktop("windows", False, False, mode="auto")
+        self.assertEqual(seen, [None])
+        self.assertIn("crates/x-1.0.0", str(out.call_args_list))
+
     @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "git dependencies are not in the pub cache"))
     def test_a_missing_dependency_falls_back_online_and_says_why(self, plan, run, *_):
         with patch("builtins.print") as out:

@@ -1,7 +1,7 @@
 """Where build.py finds the SDK and the pub cache, and whether pub can resolve from the deps branch.
 
-The deps branch mirrors the hosted packages only. Git dependencies are not on it, so an offline build also needs each
-one, at its locked revision, in a pub cache already.
+The deps branch mirrors the hosted packages and, under crates/, every crate Cargo.lock names. Git dependencies of
+the app are not on it, so an offline build also needs each one, at its locked revision, in a pub cache already.
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, MutableMapping
@@ -119,6 +120,31 @@ def parse_lock(text: str) -> list[Package]:
 class Plan:
     cache: Path | None  # the seeded pub cache to build with, or None when the build goes online
     reason: str | None  # why it cannot go offline
+    cargo_home: Path | None = None  # the cargo home whose config builds from deps' crates/, when Cargo.lock is covered
+
+
+def _mirror_crates():
+    """tools/mirror_crates.py, the one place that knows what a crates/ must hold (tools/ is not a package)."""
+    tools = str(Path(__file__).resolve().parents[2] / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import mirror_crates
+
+    return mirror_crates
+
+
+def crates_plan(cargo_lock: Path, deps: Path, out: Path | None = None) -> tuple[Path | None, str | None]:
+    """A cargo home that builds from deps/crates, or the reason deps/crates does not cover Cargo.lock."""
+    crates = _mirror_crates()
+    try:
+        lock = crates.read_lock(cargo_lock)
+        found = crates.problems(lock, crates.read_dir(deps / "crates", deep=False), deep=False)
+        if found:
+            more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
+            return None, f"the deps branch's crates/ does not cover Cargo.lock: {found[0]}{more}"
+        return crates.use(deps, lock, cargo_lock.read_bytes(), out), None
+    except crates.Problem as problem:
+        return None, f"the deps branch's crates/ does not cover Cargo.lock: {problem}"
 
 
 def default_pub_cache(environ: Mapping[str, str]) -> Path:
@@ -158,8 +184,14 @@ def _copy_missing(source: Path, target: Path) -> None:
         shutil.copyfile(source, target)
 
 
-def plan_from(app_lock: str, deps: Path | None, user_cache: Path, target: Path) -> Plan:
-    """Check the deps checkout against the app's lock and seed `target` with what pub needs; the user's cache is read only."""
+def plan_from(
+    app_lock: str, deps: Path | None, user_cache: Path, target: Path,
+    cargo_lock: Path | None = None, cargo_home: Path | None = None,
+) -> Plan:
+    """Check the deps checkout against the app's lock (and Cargo.lock) and seed `target` with what pub needs.
+
+    The user's pub cache is only read.
+    """
     if deps is None:
         return Plan(None, "no deps checkout (set CANOA_DEPS, or fetch the deps branch)")
     deps_lock = deps / "pubspec.lock"
@@ -180,6 +212,11 @@ def plan_from(app_lock: str, deps: Path | None, user_cache: Path, target: Path) 
     if missing:
         listing = ", ".join(f"{p.name} {p.resolved_ref[:12]}" for p in missing)
         return Plan(None, f"git dependencies are not in the pub cache {user_cache}: {listing}")
+    home = None
+    if cargo_lock is not None:
+        home, reason = crates_plan(cargo_lock, deps, cargo_home)
+        if reason:
+            return Plan(None, reason)
     for p in hosted:
         _copy_missing(mirror / f"{p.name}-{p.version}", target / "hosted" / HOSTED_DIR / f"{p.name}-{p.version}")
         _copy_missing(mirror / ".cache" / f"{p.name}-versions.json",
@@ -190,10 +227,12 @@ def plan_from(app_lock: str, deps: Path | None, user_cache: Path, target: Path) 
         _copy_missing(user_cache / "git" / f"{p.repo}-{p.resolved_ref}", target / "git" / f"{p.repo}-{p.resolved_ref}")
         for bare in (user_cache / "git" / "cache").glob(f"{p.repo}-*"):
             _copy_missing(bare, target / "git" / "cache" / bare.name)
-    return Plan(target, None)
+    return Plan(target, None, home)
 
 
 def plan(root: Path, settings: Mapping[str, str], environ: Mapping[str, str], lock: Path) -> Plan:
+    """The offline plan for the app's pub packages and the workspace's crates (the repository's Cargo.lock)."""
     deps = find_deps(root, settings)
     cache = default_pub_cache(settings) if "PUB_CACHE" in settings else default_pub_cache(environ)
-    return plan_from(lock.read_text(encoding="utf-8"), deps, cache, root / "target" / "offline-pub-cache")
+    return plan_from(lock.read_text(encoding="utf-8"), deps, cache, root / "target" / "offline-pub-cache",
+                     cargo_lock=root / "Cargo.lock")

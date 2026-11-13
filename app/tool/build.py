@@ -137,8 +137,11 @@ def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None
     return found[0] if found else None
 
 
-def choose_pub(mode: str) -> Path | None:
-    """The seeded pub cache of an offline build, or None for an online one (`mode` is auto, offline or online)."""
+def choose_pub(mode: str) -> offline_pub.Plan | None:
+    """The plan of an offline build (a seeded pub cache, a cargo home), or None for an online one.
+
+    `mode` is auto, offline or online.
+    """
     if mode == "online":
         return None
     result = offline_pub.plan(ROOT, SETTINGS, os.environ, ROOT / LOCK)
@@ -146,7 +149,7 @@ def choose_pub(mode: str) -> Path | None:
         if mode == "offline":
             raise RuntimeError(f"an offline build is not possible: {result.reason}")
         print(f"Building online: {result.reason}")
-    return result.cache
+    return result if result.cache is not None else None
 
 
 def pub_get_offline(cache: Path, mode: str) -> bool:
@@ -189,6 +192,10 @@ def package_portable(platform: str, exe: Path) -> Path:
     raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
 
 
+# What an offline build sets for the tools it starts: pub's cache, and cargo's home and network switch.
+OFFLINE_ENV = ("PUB_CACHE", "CARGO_HOME", "CARGO_NET_OFFLINE")
+
+
 def restore_env(key: str, value: str | None) -> None:
     if value is None:
         os.environ.pop(key, None)
@@ -204,16 +211,21 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
     lock = ROOT / LOCK
     before = lock.read_bytes() if lock.is_file() else None
     flag = "--debug" if debug else "--release"
-    user_cache = os.environ.get("PUB_CACHE")
+    saved = {key: os.environ.get(key) for key in OFFLINE_ENV}
     try:
-        cache = choose_pub(mode)
-        if cache is not None:
+        offline = choose_pub(mode)
+        cache = offline.cache if offline else None
+        if offline is not None:
             os.environ["PUB_CACHE"] = str(cache)
+            if offline.cargo_home is not None:
+                os.environ["CARGO_HOME"] = str(offline.cargo_home)
+                os.environ["CARGO_NET_OFFLINE"] = "true"
         # The runner first: pub get is what writes a platform's plugin files, so it must run once the runner exists.
         ensure_runner(platform, offline=cache is not None)
         if cache is not None and not pub_get_offline(cache, mode):
             cache = None
-            restore_env("PUB_CACHE", user_cache)
+            for key, value in saved.items():
+                restore_env(key, value)
         no_pub = ["--no-pub"] if cache is not None else []
         if portable:
             # The built library carries the web app, which the plugin builds in when CANOA_WEB_DIST names it.
@@ -225,7 +237,8 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
             return
         subprocess.run([flutter_program(), "build", platform, flag, *no_pub], check=True, cwd=APP, env=env)
     finally:
-        restore_env("PUB_CACHE", user_cache)
+        for key, value in saved.items():
+            restore_env(key, value)
         if restore_lock(before):
             print("Restored app/pubspec.lock")
     exe = built_executable(platform, debug)
