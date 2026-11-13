@@ -23,6 +23,7 @@ import 'profile/report.dart';
 import 'sources/source_choices.dart';
 import 'sources/source_options.dart';
 import 'sources/sources.dart';
+import 'workspace/site_meta.dart' show siteSetup;
 import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
 
@@ -2462,7 +2463,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..opening = true;
     attachVerifiedClient(session.id, client, record: false);
     try {
-      final opened = await client.reopenSession(entry.sessionId, cwd: cwd);
+      // A webpage's session is reopened in the folder its host made for it, which the host checks is that site's own.
+      final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: entry.site == null ? AcpSessionSetup.none : siteSetup(entry.site!));
       applyOpened(session, opened);
       _stopLeftovers(session);
       // The mode the session was left in goes back, once, before anything is sent: it wins over the profile's.

@@ -23,6 +23,7 @@ import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
+import 'package:canoa/workspace/site_meta.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/web_peer_bridge.dart';
@@ -98,6 +99,10 @@ args = ["--scripted", "--mcp-http", "--modes=default"]
 program = ${jsonEncode(_example('stdio_agent', library: false))}
 args = ["--scripted", "--mcp-http", "--modes=default"]
 
+[host.agents.site]
+program = ${jsonEncode(_example('stdio_agent', library: false))}
+args = ["--scripted"]
+
 [host.agents.trees]
 program = ${jsonEncode(_example('stdio_agent', library: false))}
 working_roots = [${jsonEncode(File('${dir.path}/src').absolute.path)}]
@@ -106,14 +111,15 @@ ${Platform.isWindows ? _sharedEntry(dir) : ''}
     final process = await Process.start(
       _hostBinary!,
       ['serve', '--config', config.path, if (_method case final method?) ...['--method', method]],
-      environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'},
+      // The Documents folder a webpage's sessions get their folders in, as this test's own.
+      environment: {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home', 'XDG_DOCUMENTS_DIR': '${dir.path}/documents'},
     );
     process.stderr.transform(utf8.decoder).listen(stderr.write);
     final lines = process.stdout.transform(utf8.decoder).transform(const LineSplitter());
     final urls = <String, String>{};
     String? peer;
     String? method;
-    await for (final line in lines.take(Platform.isWindows ? 7 : 6).timeout(const Duration(seconds: 30))) {
+    await for (final line in lines.take(Platform.isWindows ? 8 : 7).timeout(const Duration(seconds: 30))) {
       final entry = jsonDecode(line) as Map<String, dynamic>;
       urls[entry['name'] as String] = entry['url'] as String;
       peer = entry['peer'] as String;
@@ -337,6 +343,30 @@ void main() {
       await client.close();
     }
   }, skip: skip ?? (Platform.isWindows ? null : 'a share is a Windows thing'));
+
+  test('a session for a site starts in a folder the host made, is reopened there, and a refused name makes nothing', () async {
+    final client = await connect('site');
+    try {
+      await client.initialize();
+      final opened = await client.openSession(cwd: siteStandInFolder, setup: siteSetup('example.com'));
+      final made = madeFolder(opened.raw);
+      expect(made, isNotNull, reason: 'the answer says which folder');
+      expect(made!.folder.replaceAll(r'\', '/'), startsWith('${host.dir.path.replaceAll(r'\', '/')}/documents/Canoa/scratch/example.com/'));
+      expect(Directory(made.folder).existsSync(), isTrue);
+      expect(made.folder.endsWith(made.id), isTrue);
+      expect(await turn(client, opened.id, 'Cwd'), 'cwd: ${made.folder}');
+      await Directory(made.folder).delete();
+      await client.reopenSession(opened.id, cwd: made.folder, setup: siteSetup('example.com'));
+      expect(Directory(made.folder).existsSync(), isTrue, reason: 'reopened where it was made');
+      await expectLater(client.reopenSession(opened.id, cwd: host.dir.path, setup: siteSetup('example.com')), throwsA(anything),
+          reason: 'a folder outside the scratch root');
+      await expectLater(client.openSession(cwd: siteStandInFolder, setup: siteSetup('..')), throwsA(anything));
+      expect(Directory('${host.dir.path}/documents/Canoa/scratch').listSync().map((each) => each.uri.pathSegments.where((s) => s.isNotEmpty).last),
+          ['example.com']);
+    } finally {
+      await client.close();
+    }
+  }, skip: skip);
 
   test('two sessions on one repository each work in a worktree the host makes inside its working root', () async {
     Future<ProcessResult> git(String dir, List<String> args) => Process.run('git',

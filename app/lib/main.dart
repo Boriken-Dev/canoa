@@ -9,7 +9,6 @@ import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
-import 'extension/site_documents.dart';
 import 'extension/site_sessions.dart';
 import 'extension/tab_bridge.dart' show TabBridge;
 import 'extension/tab_shares.dart' show TabShares;
@@ -78,6 +77,7 @@ import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
 import 'workspace/scratch.dart';
+import 'workspace/site_meta.dart';
 import 'workspace/workspace_template.dart' show exampleSessionId;
 import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
@@ -483,10 +483,6 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The tabs the extension's panel shares with a session; null outside the extension.
   TabsComposerExtension? _tabs;
 
-  /// The Documents folder of the machine the agents of a webpage's sessions run on, which the panel cannot read and the person gives.
-  final _siteDocuments = ValueNotifier<String?>(null);
-  void _keepSiteDocuments() => saveSiteDocuments(_siteDocuments.value);
-
   Future<AcpPage?> get _provider => widget.browserProvider ?? findAcp(timeout: const Duration(milliseconds: 300));
 
   Future<void> _claimContext() async {
@@ -509,19 +505,22 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   Future<void> _openProviderSession(
-    AcpPage acp, AcpPageAgent agent, {required String cwd, required String title, String? site, String? workspaceId}) async {
+    AcpPage acp, AcpPageAgent agent, {required String cwd, required String title, String? site}) async {
     final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
     try {
-      final opened = await client.openSession(cwd: cwd);
+      // A site's session works in a folder the agent's host makes and names in its answer; the page names none.
+      final opened = await client.openSession(cwd: cwd, setup: site == null ? AcpSessionSetup.none : siteSetup(site));
+      final made = site == null ? null : madeFolder(opened.raw);
+      if (site != null && made == null) throw StateError('The host did not say which folder it made for this session');
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? agent.label : title,
         agent: agent.label,
         peerId: client.peerId,
         remoteSessionId: opened.id,
-        cwd: cwd,
+        cwd: made?.folder ?? cwd,
         site: site,
-        workspaceId: workspaceId,
+        workspaceId: made?.id,
       );
       local.agentNames = title.isEmpty;
       store.applyOpened(local, opened);
@@ -534,17 +533,14 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// A new session for [site], from the page in front: each agent the person grants works in a folder of its own, under the
-  /// site's folder in the Documents of its machine, and the ledger notes the site.
+  /// A new session for [site], from the page in front: each agent the person grants works in a folder of its own that its host
+  /// makes under the site's folder in its Documents, and the ledger notes the site and the folder.
   Future<void> _newSiteSession(String site) async {
-    final documents = _siteDocuments.value;
-    if (documents == null) throw StateError('Say where the Documents folder is first');
     final acp = await _provider;
     if (acp == null) throw StateError('This browser has no provider of agents');
     final agents = await acp.request(purpose: 'Chat with it in Canoa about $site');
     for (final agent in agents) {
-      final plan = siteScratch(site, template: config.sessions.workspace, documents: documents);
-      await _openProviderSession(acp, agent, cwd: plan.folder, title: '', site: site, workspaceId: plan.id);
+      await _openProviderSession(acp, agent, cwd: siteStandInFolder, title: '', site: site);
     }
   }
 
@@ -1217,10 +1213,6 @@ class _CanoaAppState extends State<CanoaApp> {
     unawaited(_claimContext());
     final bridge = widget.tabBridge;
     _tabs = bridge == null ? TabsComposerExtension.platform(store) : TabsComposerExtension(TabShares(bridge), store: store);
-    if (_tabs != null) {
-      _siteDocuments.value = loadSiteDocuments() ?? widget.documents;
-      _siteDocuments.addListener(_keepSiteDocuments);
-    }
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
@@ -1245,8 +1237,6 @@ class _CanoaAppState extends State<CanoaApp> {
   @override
   void dispose() {
     _popout.dispose();
-    _siteDocuments.removeListener(_keepSiteDocuments);
-    _siteDocuments.dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
     unawaited(_attention?.cancel());
@@ -1311,7 +1301,7 @@ class _CanoaAppState extends State<CanoaApp> {
       Flexible(
         child: SingleChildScrollView(
           child: SiteSessions(
-            tabs: tabs, ledger: ledger, store: store, documents: _siteDocuments, template: config.sessions.workspace,
+            tabs: tabs, ledger: ledger, store: store,
             onNew: _newSiteSession, onResume: _resumeSiteSession,
           ),
         ),

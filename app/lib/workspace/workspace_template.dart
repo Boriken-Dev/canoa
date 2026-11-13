@@ -3,9 +3,6 @@ import 'dart:math';
 /// canoa.cfg's `[sessions] workspace` when it is absent.
 const defaultWorkspace = r'${documents}/Canoa/scratch/${session}';
 
-/// The template a session started from a webpage uses when canoa.cfg's has no `${fqdn}`: one folder per site, one per session.
-const defaultBrowserWorkspace = r'${documents}/Canoa/scratch/${fqdn}/${session}';
-
 /// A session id to show what a template makes, in Settings, before any session has one.
 const exampleSessionId = '3f2a9c1e-7b4d-4e58-9a16-0d5c2b8e6f40';
 

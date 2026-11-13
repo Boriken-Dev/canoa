@@ -4,11 +4,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/extension/site_documents.dart';
 import 'package:canoa/extension/tab_bridge.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/workspace/site_meta.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +18,7 @@ import 'fixtures/fake_tab_bridge.dart';
 import 'fixtures/sample_render.dart' show samplesDir;
 
 final _peer = 'sha256:${'ab' * 32}';
+// What the agent's host puts the folders under; the panel does not know it.
 const _documents = '/home/ana/Documents';
 final _id = RegExp(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}');
 
@@ -32,12 +33,21 @@ final class _Agent implements AcpPageAgent {
   bool get verified => true;
 }
 
-/// A browser provider with one granted agent, which opens a session of its own for each `session/new` and notes the folders it
-/// was asked for.
+/// A browser provider with one granted agent, which opens a session of its own for each `session/new` and notes what it was
+/// asked. It stands for the host: a request that names a site gets a folder under its Documents, named in the answer, as the
+/// real host does.
 final class _Provider implements AcpPage {
   final agent = _Agent();
+
+  /// The `cwd` and the site of each `session/new`, as the panel sent them.
+  final asked = <({String cwd, String? site})>[];
+
+  /// The folders the host made.
   final newFolders = <String>[];
-  final loads = <({String id, String cwd})>[];
+  final loads = <({String id, String cwd, String? site})>[];
+
+  /// Whether the host leaves its folder out of its answer, as one that does not know the extension would.
+  var forgets = false;
   var requests = 0;
   var _next = 0;
 
@@ -86,10 +96,20 @@ final class _Connection implements AcpPageConnection {
       case 'initialize':
         result = {'protocolVersion': 1, 'agentCapabilities': {'loadSession': true}, 'agentInfo': {'name': 'site-agent', 'version': '1.0.0'}};
       case 'session/new':
-        owner.newFolders.add(params['cwd'] as String);
-        result = {'sessionId': 'p${++owner._next}'};
+        final site = ((params['_meta'] as Map<String, dynamic>?)?[siteMeta] as Map<String, dynamic>?)?['site'] as String?;
+        owner.asked.add((cwd: params['cwd'] as String, site: site));
+        final number = ++owner._next;
+        final session = 'p$number';
+        result = {'sessionId': session};
+        if (site != null && !owner.forgets) {
+          final made = '00000000-0000-4000-8000-${number.toString().padLeft(12, '0')}';
+          final folder = '$_documents/Canoa/scratch/$site/$made';
+          owner.newFolders.add(folder);
+          result = {'sessionId': session, '_meta': {siteMeta: {'site': site, 'id': made, 'folder': folder}}};
+        }
       case 'session/load':
-        owner.loads.add((id: params['sessionId'] as String, cwd: params['cwd'] as String));
+        final site = ((params['_meta'] as Map<String, dynamic>?)?[siteMeta] as Map<String, dynamic>?)?['site'] as String?;
+        owner.loads.add((id: params['sessionId'] as String, cwd: params['cwd'] as String, site: site));
     }
     _incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': result}));
   }
@@ -102,10 +122,9 @@ Future<SessionStore> _panel(
   required SessionLedger ledger,
   required FakeTabBridge bridge,
   required _Provider provider,
-  String? documents = _documents,
+  String? documents,
   String? workspace,
 }) async {
-  saveSiteDocuments(null);
   final store = SessionStore(ledger: ledger);
   addTearDown(store.dispose);
   await tester.binding.setSurfaceSize(const Size(380, 800));
@@ -135,22 +154,19 @@ void main() {
     final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/a'), provider: provider);
     expect(find.byKey(const Key('site-name')), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const Key('site-name'))).data, 'example.com');
-    expect(
-      tester.widget<Text>(find.byKey(const Key('site-folder'))).data,
-      'Each works in a folder of its own under $_documents/Canoa/scratch/example.com',
-    );
 
     await _tap(tester, const Key('site-new'));
     await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
     final folder = provider.newFolders.single;
+    expect(provider.asked.single, (cwd: siteStandInFolder, site: 'example.com'), reason: 'the page names the site, not a path');
     expect(folder, matches(RegExp('^$_documents/Canoa/scratch/example\\.com/${_id.pattern}\$')));
     final session = store.sessions.single;
-    expect(session.cwd, folder);
+    expect(session.cwd, folder, reason: 'the folder the host said it made');
     expect(session.site, 'example.com');
     final entry = ledger.entries.single;
     expect(entry.site, 'example.com');
     expect(entry.cwd, folder);
-    expect(entry.canoaId, folder.split('/').last, reason: 'the folder is named by Canoa\'s own id for the session');
+    expect(entry.canoaId, folder.split('/').last, reason: 'the host\'s id for the session, which names its folder');
     expect(LedgerEntry.fromJson(entry.toJson())!.site, 'example.com');
   });
 
@@ -173,8 +189,8 @@ void main() {
 
     await _tap(tester, ValueKey('site-resume $key'));
     await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.status == SessionStatus.connected, 'the session to open again');
-    expect(provider.loads, [(id: 'p1', cwd: folder)], reason: 'reopened in the folder it was made in');
-    expect(provider.newFolders, isEmpty);
+    expect(provider.loads, [(id: 'p1', cwd: folder, site: 'example.com')], reason: 'reopened in the folder it was made in, naming the site');
+    expect(provider.asked, isEmpty);
     final session = store.sessions.single;
     expect(session.cwd, folder);
     expect(session.site, 'example.com');
@@ -233,31 +249,30 @@ void main() {
     }
   });
 
-  testWidgets('without the Documents folder of the agent\'s machine, it is asked for and refused unless it is an absolute path', (tester) async {
-    final provider = _Provider();
-    await _panel(tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/'), provider: provider, documents: null);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('site-new'))).onPressed, isNull);
-    await tester.enterText(find.byKey(const Key('site-documents')), 'Documents/../x');
-    await _tap(tester, const Key('site-documents-save'));
-    expect(find.byKey(const Key('site-failed')), findsOneWidget);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('site-new'))).onPressed, isNull);
-    await tester.enterText(find.byKey(const Key('site-documents')), r'C:\Work\Documents\');
-    await _tap(tester, const Key('site-documents-save'));
-    expect(find.byKey(const Key('site-documents')), findsNothing);
-    expect(tester.widget<Text>(find.byKey(const Key('site-folder'))).data, r'Each works in a folder of its own under C:\Work\Documents\Canoa\scratch\example.com');
-    expect(loadSiteDocuments(), r'C:\Work\Documents');
-    saveSiteDocuments(null);
-  });
-
-  testWidgets('the folder follows canoa.cfg\'s workspace template when it has a fqdn variable', (tester) async {
+  testWidgets('the panel never asks for the Documents folder, and passes no path whatever canoa.cfg says', (tester) async {
     final provider = _Provider();
     final store = await _panel(
       tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://Example.COM/a'), provider: provider,
       workspace: r'${documents}/Work/${fqdn}/chat-${session}',
     );
+    expect(find.byKey(const Key('site-documents')), findsNothing);
+    expect(find.textContaining('Documents'), findsNothing);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('site-new'))).onPressed, isNotNull);
     await _tap(tester, const Key('site-new'));
     await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
-    expect(provider.newFolders.single, matches(RegExp('^$_documents/Work/example\\.com/chat-${_id.pattern}\$')));
+    expect(provider.asked.single, (cwd: siteStandInFolder, site: 'example.com'));
+    expect(provider.newFolders.single, startsWith('$_documents/Canoa/scratch/example.com/'), reason: 'the host places it');
+  });
+
+  testWidgets('a host that does not say which folder it made fails the session, and nothing is kept', (tester) async {
+    final ledger = SessionLedger(MemoryLedgerBackend());
+    final provider = _Provider()..forgets = true;
+    final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/'), provider: provider);
+    await _tap(tester, const Key('site-new'));
+    await until(tester, () => find.byKey(const Key('site-failed')).evaluate().isNotEmpty, 'the failure');
+    expect(find.textContaining('did not say which folder'), findsOneWidget);
+    expect(store.sessions, isEmpty);
+    expect(ledger.entries, isEmpty);
   });
 
   testWidgets('sample: the side panel for a site lists its earlier sessions', (tester) async {
