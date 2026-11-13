@@ -59,7 +59,8 @@ final class SecretWire {
   /// Whether [message] is one of the host's secret requests, which this wire answers itself so the shared client never sees it.
   /// Without an offer made to the host, a request is refused all the same, and still not passed on.
   bool answers(String message) {
-    if (!message.contains('_coqui_acp/secret_')) return false;
+    // JSON may escape any character, so a message with a backslash is read whatever its text says.
+    if (!message.contains('_coqui_acp/secret_') && !message.contains(r'\')) return false;
     final Object? decoded;
     try {
       decoded = jsonDecode(message);

@@ -8,6 +8,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:canoa/acp/secret_identity.dart';
+import 'package:canoa/auth/web/peer_session.dart' show PeerFailure;
 import 'package:canoa/auth/web/web_peer_bridge.dart';
 import 'package:canoa/auth/web/webcrypto_method.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,10 +16,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/secret_binding.dart';
 
 void main() {
+  test('the key signs no handshake: the real signature input of each role is refused, and nothing is signed', () async {
+    final key = await WebCryptoIdentity.generate();
+    for (final role in ['server', 'client', 'accept']) {
+      await expectLater(key.signSecretStatement(handshakeSignatureInput(role)), throwsA(isA<PeerFailure>()));
+    }
+    await expectLater(key.signSecretStatement(Uint8List(0)), throwsA(isA<PeerFailure>()));
+  });
+
   test('a non-extractable key binds an answer that opens for the host, under the id the host paired', () async {
     final key = await WebCryptoIdentity.generate();
     expect(key.privateKey.extractable, isFalse);
-    final identity = secretIdentityFor((spki: key.spki, sign: key.sign));
+    final identity = secretIdentityFor((spki: key.spki, sign: key.signSecretStatement));
     expect(identity.prover.id.toString(), key.peerId);
     // WebCrypto's signature is randomized and may have a high s: the binding takes the low form.
     for (var i = 0; i < 3; i++) {

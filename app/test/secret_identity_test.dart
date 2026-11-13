@@ -48,10 +48,10 @@ void main() {
     final key = keyed();
     final sign = secretStatementSigner((spki: key.spki, sign: key.sign));
     // The proof's own bytes, a statement of another label, and the label with no length in front.
-    final handshake = Uint8List.fromList(utf8.encode('{"type":"proof","role":"client"}'));
+    final handshakes = [for (final role in ['server', 'client', 'accept']) handshakeSignatureInput(role)];
     final other = Uint8List.fromList([0, 0, 0, 5, ...utf8.encode('other'), 1, 2, 3]);
     final bare = Uint8List.fromList(utf8.encode('dev.boriken.coqui.acp/secret/v1 binding'));
-    for (final message in [handshake, other, bare, Uint8List(0)]) {
+    for (final message in [...handshakes, other, bare, Uint8List(0)]) {
       await expectLater(sign(message), throwsA(isA<AcpSecretException>()));
     }
     expect(key.signed, isEmpty);

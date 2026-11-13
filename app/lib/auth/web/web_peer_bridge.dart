@@ -123,12 +123,12 @@ final class WebPeerBridge implements PeerBridge {
     if (why != null) throw PeerFailure('unreachable from this browser: $why');
   }
 
-  /// This page's WebCrypto key as a signer for secret bindings: its SubjectPublicKeyInfo and the function that signs with it. The key
-  /// is not handed over.
+  /// This page's WebCrypto key as a signer for secret bindings: its SubjectPublicKeyInfo and a function that signs only a secret
+  /// binding's statement. The key is not handed over.
   Future<({Uint8List spki, Future<Uint8List> Function(Uint8List message) sign})> webcryptoSigner() async {
     await _reachable(PeerMethod.webcrypto);
     final identity = await _webcryptoIdentity;
-    return (spki: identity.spki, sign: identity.sign);
+    return (spki: identity.spki, sign: identity.signSecretStatement);
   }
 
   @override

@@ -1,33 +1,19 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:coqui_acp/secret.dart';
 
 import '../auth/browser_peer.dart';
+import '../auth/secret_statement.dart';
 import 'secret_wire.dart' show SecretIdentity;
 
 /// What signs for an identity whose private key cannot be read: its SubjectPublicKeyInfo, and the function that makes the 64-byte
 /// IEEE P1363 ECDSA signature of a message with it.
 typedef SecretSigner = ({List<int> spki, Future<Uint8List> Function(Uint8List message) sign});
 
-/// The two labels a secret binding's statement begins with, each with its 4-byte length.
-final List<Uint8List> _statementLabels = [
-  for (final label in const ['dev.boriken.coqui.acp/secret/v1 binding', 'dev.boriken.coqui.acp/secret/v1 values'])
-    Uint8List.fromList([0, 0, 0, label.length, ...ascii.encode(label)]),
-];
-
-bool _isStatement(Uint8List message) => _statementLabels.any((prefix) {
-  if (message.length < prefix.length) return false;
-  for (var i = 0; i < prefix.length; i++) {
-    if (message[i] != prefix[i]) return false;
-  }
-  return true;
-});
-
 /// [signer]'s function, which signs only what a secret binding's statement looks like. The identity's key also proves this app to a
 /// host, so a handshake's bytes can never be signed through it.
 Future<Uint8List> Function(Uint8List message) secretStatementSigner(SecretSigner signer) => (message) async {
-  if (!_isStatement(message)) {
+  if (!isSecretStatement(message)) {
     throw const AcpSecretException(AcpSecretFailure.seal, 'only a secret binding is signed');
   }
   return await signer.sign(message);

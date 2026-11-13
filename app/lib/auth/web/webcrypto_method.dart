@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
+import '../secret_statement.dart';
 import 'peer_session.dart';
 import 'subtle.dart';
 import 'webcrypto_wire.dart';
@@ -23,10 +24,13 @@ final class WebCryptoIdentity {
   /// The key's SubjectPublicKeyInfo.
   Uint8List get spki => un64(publicKey, spkiLength);
 
-  /// The ECDSA (P-256, SHA-256) signature of [message], 64 bytes as IEEE P1363, made inside WebCrypto: the private key is used and
-  /// never read. It signs what a caller gives it, so only code that is told what it signs may hold it.
-  Future<Uint8List> sign(Uint8List message) async =>
-      bytesOfBuffer(await subtle().sign(Algorithm(name: 'ECDSA', hash: 'SHA-256'), privateKey, js(message)).toDart);
+  /// The ECDSA (P-256, SHA-256) signature, 64 bytes as IEEE P1363, of a secret binding's [statement], made inside WebCrypto: the
+  /// private key is used and never read. Anything that is not such a statement is refused, so this key signs nothing a handshake
+  /// could be made of through here.
+  Future<Uint8List> signSecretStatement(Uint8List statement) async {
+    if (!isSecretStatement(statement)) throw const PeerFailure('only a secret binding is signed');
+    return bytesOfBuffer(await subtle().sign(Algorithm(name: 'ECDSA', hash: 'SHA-256'), privateKey, js(statement)).toDart);
+  }
 
   /// The stored object, which holds the same four members the key's first home did.
   JSObject toStored() => JSObject()

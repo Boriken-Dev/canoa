@@ -118,7 +118,8 @@ final class UsageWire {
   /// Whether [message] is the host's approval request, which this wire answers itself so the shared client never sees it.
   bool answersApproval(String message) {
     final answer = approver;
-    if (answer == null || !message.contains(approveMethod)) return false;
+    // JSON may escape any character, so a message with a backslash is read whatever its text says.
+    if (answer == null || !(message.contains(approveMethod) || message.contains(r'\'))) return false;
     final Object? decoded;
     try {
       decoded = jsonDecode(message);
