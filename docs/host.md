@@ -656,10 +656,11 @@ and belong to those two ids; another id takes `settings` alone. Loading runs the
 in the host's process, so a provider that crashes takes the host with it. Canoa passes no account, so the provider runs on
 the harness's own sign-in, and the prompt cache lifetime is the harness's default.
 
-**What the host no longer hears.** The provider kind has no route for a harness's notices (a version it was not tested
-with, a program that exited) or for why a program ended, so the host's log no longer carries them for a harness entry,
-as it did when the translator ran in the host. A provider that ends a connection with a failure still has its status and
-reason logged at `info`. Each connection works on at most 64 requests at once, as before; the entry's `settings` can say
+**What the host hears.** A provider tells the host what is no message of the client's through the spawner the host hands
+it: a version it was not tested with, a program that exited mid-session (how, never what the program last wrote), a part of
+its own plumbing that failed. The host logs each at `info`, with the entry's name and the notice's kind (`notice`, `exited`,
+`fault`). A notice holds no client text and no secret value. A provider that ends a connection with a failure has its status
+and reason logged at `info` too. Each connection works on at most 64 requests at once, as before; the entry's `settings` can say
 `max_requests` for another number. Each entry loads its provider into a registry of its own, so an id is resolved from that
 entry's file and no other, and `claude` and `codex` cannot be replaced by a `library` or `source`. How an instance
 departs from its provider's defaults (`settings = { allow_bypass = true }`, `max_requests`, the mode keys) is logged at
