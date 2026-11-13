@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: ddf7161eb991b44534df45238650776f841b7c4b
-      resolved-ref: ddf7161eb991b44534df45238650776f841b7c4b
+      ref: "1b64a1c6e487374c40dcef8018cfc72ca4c1003e"
+      resolved-ref: "1b64a1c6e487374c40dcef8018cfc72ca4c1003e"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: ddf7161eb991b44534df45238650776f841b7c4b
-      resolved-ref: ddf7161eb991b44534df45238650776f841b7c4b
+      ref: "1b64a1c6e487374c40dcef8018cfc72ca4c1003e"
+      resolved-ref: "1b64a1c6e487374c40dcef8018cfc72ca4c1003e"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: ddf7161eb991b44534df45238650776f841b7c4b
-      resolved-ref: ddf7161eb991b44534df45238650776f841b7c4b
+      ref: "1b64a1c6e487374c40dcef8018cfc72ca4c1003e"
+      resolved-ref: "1b64a1c6e487374c40dcef8018cfc72ca4c1003e"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -95,8 +95,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "6c476c4553c9b195502cb505a89d50e27cb85afd"
-      resolved-ref: "6c476c4553c9b195502cb505a89d50e27cb85afd"
+      ref: "7cb512857d44f9c2c03440b21ec3678f323ed7f0"
+      resolved-ref: "7cb512857d44f9c2c03440b21ec3678f323ed7f0"
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -737,7 +737,7 @@ packages:
     source: hosted
     version: "7.0.1"
   yaml:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: yaml
       sha256: f67cdd8e07d3c6329146aaef1ba043542b3134c12489f553ca9a7435d1068aea

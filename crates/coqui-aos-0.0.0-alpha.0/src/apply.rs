@@ -12,7 +12,7 @@ use crate::defaults::{
     dependencies_of, entry_on, env_files_of, first_variant, named,
 };
 use crate::error::{Class, Error};
-use crate::hooks::{Decision, HookEvent, HookReport, HookRun, fire_event};
+use crate::hooks::{Decision, HookEvent, HookReport, HookRun, fire_event, same_digest};
 use crate::kinds::{FailStep, NonDefaultId, Runtime, Step};
 use crate::limits::Settings;
 use crate::names::{
@@ -42,6 +42,19 @@ impl NonDefaultSetting {
     }
 }
 
+/// A path addition made to a variable: the separator, what it put first and last, and every
+/// component it covers.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Join {
+    separator: char,
+    prepend: Vec<String>,
+    seen: BTreeSet<String>,
+    append: Vec<String>,
+}
+
+/// One `set` of an environment, with the path addition it made, if it was one.
+pub(crate) type Write = (String, String, bool, Option<Join>);
+
 /// An environment being built: names compare without regard to ASCII case on Windows, and a
 /// variable whose value came from a secret reference is never read by a placeholder. Its
 /// `Debug` shows names only.
@@ -54,6 +67,8 @@ pub struct Environment {
     secret: BTreeSet<String>,
     extra: Vec<(String, String)>,
     settings: Settings,
+    // Every set since `record`, so one overlay's writes can be made onto another environment.
+    log: Option<Vec<Write>>,
 }
 
 impl fmt::Debug for Environment {
@@ -122,6 +137,50 @@ impl Environment {
 
     /// Sets `name`, keeping the name already there under another case on Windows.
     pub fn set(&mut self, name: &str, value: String, secret: bool) {
+        self.put(name, value, secret, None);
+    }
+
+    pub(crate) fn windows(&self) -> bool {
+        self.windows
+    }
+
+    /// Starts keeping what is set, from here.
+    pub(crate) fn record(&mut self) {
+        self.log = Some(Vec::new());
+    }
+
+    /// What was set since `record`, which stops.
+    pub(crate) fn recorded(&mut self) -> Vec<Write> {
+        self.log.take().unwrap_or_default()
+    }
+
+    /// Makes what another environment recorded: a plain set as it was, a path addition onto this
+    /// environment's own value.
+    pub(crate) fn replay(&mut self, writes: Vec<Write>) {
+        for (name, value, secret, join) in writes {
+            let Some(join) = join else {
+                self.set(&name, value, secret);
+                continue;
+            };
+            let current = self.get(&name).unwrap_or_default().to_owned();
+            let kept = current
+                .split(join.separator)
+                .filter(|part| !part.is_empty() && !join.seen.contains(*part))
+                .map(str::to_owned);
+            let joined: Vec<String> = join
+                .prepend
+                .into_iter()
+                .chain(kept)
+                .chain(join.append)
+                .collect();
+            self.set(&name, joined.join(&join.separator.to_string()), false);
+        }
+    }
+
+    fn put(&mut self, name: &str, value: String, secret: bool, join: Option<Join>) {
+        if let Some(log) = &mut self.log {
+            log.push((name.to_owned(), value.clone(), secret, join));
+        }
         let key = match self.key(name) {
             Some(index) => {
                 self.values[index].1 = value;
@@ -206,6 +265,13 @@ pub struct Facts {
     pub enforces_network: Option<bool>,
     /// Whether env scripts run; `None` is yes.
     pub env_scripts_enabled: Option<bool>,
+    /// Whether env scripts run only while `digest` is the `allowed` one, the allowance of the
+    /// overlay's hooks; off, none is held back.
+    pub gate_env_scripts: bool,
+    /// The overlay's tree digest, when the consumer has computed it.
+    pub digest: Option<String>,
+    /// The one digest at which the user allowed this overlay's hooks and env scripts.
+    pub allowed: Option<String>,
     /// The interpreters the consumer can run; `None` is every one AOS names.
     pub interpreters: Option<Vec<String>>,
     /// Each runtime's installed packages directory, by runtime.
@@ -466,13 +532,30 @@ fn apply_paths(
             }
         }
         let current = env.get(variable).unwrap_or_default().to_owned();
-        let kept = current
+        let kept: Vec<String> = current
             .split(separator)
             .filter(|component| !component.is_empty() && !seen.contains(*component))
-            .map(str::to_owned);
-        let joined: Vec<String> = prepend.into_iter().chain(kept).chain(append).collect();
+            .map(str::to_owned)
+            .collect();
+        let joined: Vec<String> = prepend
+            .iter()
+            .cloned()
+            .chain(kept)
+            .chain(append.iter().cloned())
+            .collect();
         let secret = env.is_secret(variable);
-        env.set(variable, joined.join(&separator.to_string()), secret);
+        let join = Join {
+            separator,
+            prepend,
+            seen,
+            append,
+        };
+        env.put(
+            variable,
+            joined.join(&separator.to_string()),
+            secret,
+            Some(join),
+        );
     }
 }
 
@@ -583,11 +666,12 @@ fn require_applicable(manifest: &Document) -> Result<(), Error> {
 
 /// Steps 2.1 to 2.4 of the order of application for one overlay; returns the env scripts
 /// that run.
-fn apply_overlay(
+pub(crate) fn apply_overlay(
     env: &mut Environment,
     manifest: &Document,
     facts: &Facts,
     non_defaults: &mut Vec<NonDefaultSetting>,
+    reports: &mut Vec<(String, String)>,
 ) -> Result<Vec<ScriptRun>, Error> {
     require_applicable(manifest)?;
     env.extra = vec![
@@ -601,7 +685,7 @@ fn apply_overlay(
         env.extra
             .push(("AOS_OVERLAY_STATE".to_owned(), state.clone()));
     }
-    let result = apply_overlay_inner(env, manifest, facts, non_defaults);
+    let result = apply_overlay_inner(env, manifest, facts, non_defaults, reports);
     env.extra.clear();
     result
 }
@@ -611,6 +695,7 @@ fn apply_overlay_inner(
     manifest: &Document,
     facts: &Facts,
     non_defaults: &mut Vec<NonDefaultSetting>,
+    reports: &mut Vec<(String, String)>,
 ) -> Result<Vec<ScriptRun>, Error> {
     let (os, root, tree) = (facts.os.as_str(), facts.root.as_str(), &facts.tree);
     let mut paths = default_paths(manifest, tree);
@@ -706,6 +791,22 @@ fn apply_overlay_inner(
             os,
             &facts.interpreters(),
         );
+        let allowed = !facts.gate_env_scripts
+            || facts
+                .digest
+                .as_deref()
+                .zip(facts.allowed.as_deref())
+                .is_some_and(|(digest, allowed)| same_digest(digest, allowed));
+        if !allowed {
+            // Off until the user allows the digest: the overlay is otherwise applied.
+            if choice.chosen.is_some()
+                || !choice.present.is_empty()
+                || choice.others.iter().any(|script| entry_on(script, os))
+            {
+                reports.push(("env-script-not-allowed".to_owned(), facts.identity.clone()));
+            }
+            return Ok(scripts);
+        }
         if choice.chosen.is_none() {
             non_defaults.extend(
                 choice
@@ -790,6 +891,8 @@ pub struct Effective {
     pub needs: Needs,
     /// What is reported, sorted, each once.
     pub non_defaults: Vec<NonDefaultSetting>,
+    /// `(id, subject)` reports, sorted: `env-script-not-allowed`.
+    pub reports: Vec<(String, String)>,
 }
 
 /// What a consumer applies for one overlay: its environment, setup, runtime, needs and
@@ -812,7 +915,8 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
     if let Some(state) = &facts.state {
         env.set(&state_variable(&facts.identity), state.clone(), false);
     }
-    let scripts = apply_overlay(&mut env, manifest, facts, &mut non_defaults)?;
+    let mut reports = Vec::new();
+    let scripts = apply_overlay(&mut env, manifest, facts, &mut non_defaults, &mut reports)?;
     let choice = default_script(
         manifest,
         "setup",
@@ -1039,6 +1143,11 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
             commands: commands.into_iter().collect(),
         },
         non_defaults: non_defaults.into_iter().collect(),
+        reports: reports
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
     })
 }
 
@@ -1278,7 +1387,8 @@ pub fn composed_environment(
         }
     }
     for (manifest, facts) in active {
-        if let Err(error) = apply_overlay(&mut env, manifest, facts, non_defaults) {
+        if let Err(error) = apply_overlay(&mut env, manifest, facts, non_defaults, &mut Vec::new())
+        {
             composed.env = Err(error);
             return composed;
         }

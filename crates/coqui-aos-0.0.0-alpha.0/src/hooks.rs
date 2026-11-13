@@ -357,6 +357,14 @@ pub struct HookPlan {
     pub non_defaults: Vec<(String, String)>,
 }
 
+/// Whether two digests in text are the same digest; one that does not parse is no digest.
+pub(crate) fn same_digest(a: &str, b: &str) -> bool {
+    Digest::parse(a)
+        .ok()
+        .zip(Digest::parse(b).ok())
+        .is_some_and(|(a, b)| a == b)
+}
+
 /// What a consumer would do with an overlay's hooks, or a scope's own, on one harness.
 ///
 /// # Errors
@@ -399,17 +407,11 @@ pub fn hook_plan(
                 .to_string(),
         );
     }
-    let same = |a: &str, b: &str| {
-        Digest::parse(a)
-            .ok()
-            .zip(Digest::parse(b).ok())
-            .is_some_and(|(a, b)| a == b)
-    };
     let on = facts.scope == HookScope::User
         || digest
             .as_deref()
             .zip(facts.allowed.as_deref())
-            .is_some_and(|(digest, allowed)| same(digest, allowed));
+            .is_some_and(|(digest, allowed)| same_digest(digest, allowed));
     let fires: Vec<HookEvent> = facts
         .fires
         .clone()
@@ -750,6 +752,25 @@ pub fn fire_event(
     settings: &Settings,
     windows: bool,
 ) -> FiredEvent {
+    fire_event_after(event, runs, applies, settings, windows, 0)
+}
+
+/// [`fire_event`] for a session whose context already holds `context_used` bytes.
+///
+/// A part of a hook's context is checked in run order, in the bytes of its UTF-8 text, together
+/// with what the session holds: one that would take the total past `settings.context_bytes` is not
+/// added, whole and never cut, and is reported as `hook-not-applied`; a later part that fits still
+/// is added, and a part that reaches the bound exactly fits.
+#[must_use]
+pub fn fire_event_after(
+    event: HookEvent,
+    runs: &[HookRun],
+    applies: Option<&[&str]>,
+    settings: &Settings,
+    windows: bool,
+    context_used: usize,
+) -> FiredEvent {
+    let mut context_used = context_used;
     let can = |output: &str| {
         applies.map_or_else(
             || output == "refuse" || event.outputs().contains(&output),
@@ -828,7 +849,9 @@ pub fn fire_event(
             break;
         }
         if let Some(context) = out.context.filter(|context| !context.is_empty()) {
-            if can("context") {
+            let total = context_used.saturating_add(context.len());
+            if can("context") && settings.context_bytes.allows(total) {
+                context_used = total;
                 fired.context.push((source.clone(), context));
             } else {
                 fired.reports.push(HookReport {

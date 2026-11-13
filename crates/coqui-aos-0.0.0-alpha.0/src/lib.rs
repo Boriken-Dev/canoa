@@ -17,6 +17,7 @@ mod digest;
 mod error;
 mod front_matter;
 mod fs;
+mod hook_env;
 mod hooks;
 mod kinds;
 mod limits;
@@ -56,10 +57,11 @@ pub use front_matter::{
 #[cfg(feature = "fs")]
 pub use fs::StdFs;
 pub use fs::{FileKind, FileSystem, Metadata};
+pub use hook_env::{hook_environment, hook_order};
 pub use hooks::{
     Decision, FiredEvent, Hook, HookEvent, HookFacts, HookFailure, HookOutput, HookPlan,
-    HookReport, HookRun, HookScope, OnFailure, fire_event, hook_matches, hook_payload, hook_plan,
-    hook_result, hooks_of, read_hook_output,
+    HookReport, HookRun, HookScope, OnFailure, fire_event, fire_event_after, hook_matches,
+    hook_payload, hook_plan, hook_result, hooks_of, read_hook_output,
 };
 pub use kinds::{FailStep, Format, LeftState, ManifestFile, NonDefaultId, Runtime, Step};
 pub use limits::{Limit, NonDefault, Settings};
