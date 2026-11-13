@@ -9,6 +9,7 @@ This page distinguishes tested code from planned integration work.
 | Chromium permission policy and ACP request option validation | Implemented and tested |
 | Browser tool catalogue, local dispatcher and site-adapter manifest validator | Implemented as an **unwired scaffold** |
 | Flutter multi-session standalone UI | Offline preview by default; tested verified ACP client binding and streaming transcript support |
+| The chat's widgets as a shared package | Implemented: the transcript, cards, queue, composer, changes pane and diff are `coqui_acp_chat_ui` in coqui-acp, over its `coqui_acp_chat` content types, with a renderer registry and `ChatLook` (the theme extension each of Canoa's looks is a preset of); Canoa keeps the shell, the sessions list, Settings and the controls of its composer. A conversation shows its work at `normal`, `thinking` or `verbose` density (`[appearance] density`), folding a finished burst of tool calls and a finished turn into one line each. Canoa's session state is still its own: it has not moved onto `coqui_acp_chat`'s `ChatSession`. Run on Windows; web builds of the package's example in JavaScript and WebAssembly |
 | Packaged Flutter extension side panel and full page | Build script and manifest, not browser integration tested |
 | Browser-to-chat user-selected page or text handoff | Implemented as local-only context attachment; no remote send |
 | WebTransport-preferred / WSS fallback agent message transport | Implemented in Dart; wired to ACP v2 through an injected peer-verification callback |
