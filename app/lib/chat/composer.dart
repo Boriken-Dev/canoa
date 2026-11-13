@@ -13,6 +13,9 @@ import 'attachments.dart';
 import 'composer_controls.dart';
 import 'session_options.dart';
 
+/// What the composer says while a permission card waits: a message refuses it once and goes to the agent.
+const String redirectHint = 'Send a message to decline and redirect the agent';
+
 /// What the composer offers beyond the session itself, from the app: where an agent can come from, folders, files and the
 /// clipboard, and the overlays a session can start with.
 final class ComposerKit {
@@ -225,6 +228,8 @@ class SessionComposer extends StatelessWidget {
       centred: centred,
       hint: !enabled
           ? (store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect an ACP peer to chat')
+          : session.pendingPermissions.isNotEmpty
+          ? redirectHint
           : session.isDraft
           ? 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send'
           : 'Message agent',

@@ -1269,6 +1269,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     notifyListeners();
   }
 
+  /// Answers the oldest question in [session] with the agent's own refusal of this one request (else a plain refusal), and
+  /// leaves the turn running.
+  void _refuseOnce(ChatSession session) {
+    final question = session.pendingPermissions.removeAt(0);
+    final refusal = question.options.where((option) => option.kind == 'reject_once').firstOrNull ??
+        question.options.where((option) => option.rejects).firstOrNull;
+    question._answer.complete(refusal == null ? const AcpDeny('the person declined and said what to do instead') : AcpSelect(refusal.optionId));
+    notifyListeners();
+  }
+
   /// The person's choice of one of the agent's own answers to the oldest question in [session]. What an "always" answer
   /// remembers is the agent's to keep.
   void choosePermission(ChatSession session, AcpPermissionOption option) {
@@ -1288,6 +1298,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }
     question._answer.complete(AcpSelect(option.optionId));
     notifyListeners();
+    // A plain Deny stops the turn, as it does in Claude; a subagent's request is that subagent's to lose.
+    if (option.rejects && question.task == null && session.status == SessionStatus.working) {
+      unawaited(cancelSession(session).catchError((Object _) {}));
+    }
   }
 
   /// Whether [session] is in a mode Canoa can see asks about commands: the agent's own Manual or Plan. In Accept edits, in
@@ -2049,6 +2063,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   Future<void> sendText(String text) async {
     final session = selected;
     if (session == null) return;
+    // A message written while a card waits declines it once and says what to do instead; the turn is not stopped.
+    if (session.pendingPermissions.isNotEmpty && (text.trim().isNotEmpty || session.attachments.isNotEmpty)) _refuseOnce(session);
     await sendTextTo(session, text);
   }
 
