@@ -69,7 +69,7 @@ void main() {
     final (_, session) = await _scripted(store);
     unawaited(store.sendText('The test fails. Fix it.'));
     await _until(() => session.pendingPermissions.isNotEmpty, 'the agent to ask');
-    await store.sendText('Say queued one');
+    await store.sendTextTo(session, 'Say queued one');
     expect(session.queue.single.text, 'Say queued one');
     expect(_said(session, 'queued one'), isFalse, reason: 'nothing is sent while the turn runs');
     _allowAll(store, session);
@@ -85,8 +85,8 @@ void main() {
     final (_, session) = await _scripted(store);
     unawaited(store.sendText('Rename addNumbers to sum'));
     await _until(() => session.pendingPermissions.isNotEmpty, 'the agent to ask');
-    await store.sendText('Say after the stop');
-    await store.sendText('Say later still');
+    await store.sendTextTo(session, 'Say after the stop');
+    await store.sendTextTo(session, 'Say later still');
     await store.cancelActiveSession();
     await _until(() => session.status == SessionStatus.connected, 'the turn to stop');
     await Future<void>.delayed(const Duration(milliseconds: 300));
