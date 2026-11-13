@@ -350,6 +350,7 @@ class _SessionRowState extends State<_SessionRow> {
         message: state.word,
         child: const SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 2)),
       ),
+      RowState.waiting => Tooltip(message: 'Waiting on subagents', child: Icon(Icons.hourglass_top, size: 14, color: muted)),
       RowState.failed => Tooltip(message: 'The last turn failed', child: Icon(Icons.error_outline, size: 14, color: scheme.error)),
       RowState.done => Tooltip(message: 'New since you looked', child: Icon(Icons.circle, size: 10, color: scheme.primary)),
       RowState.offline => Icon(Icons.cloud_off_outlined, size: 14, color: muted),

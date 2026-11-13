@@ -246,6 +246,9 @@ class ChatSession {
   /// The tasks this conversation handed to other sources, as the host reported them.
   final DelegateTasks tasks = DelegateTasks();
 
+  /// The task whose thread the conversation shows in place of its own, by id; null while it shows its own.
+  String? openChild;
+
   /// What the person allowed for the rest of a task, by task id and then request: it ends with the task and is never the
   /// conversation's own or another task's.
   final Map<String, Set<String>> taskAllowances = {};
@@ -397,6 +400,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Told the kind and shape of each update this store applies, for a test or the `CANOA_EVENT_LOG` setting.
   final UpdateRecorder? recorder;
+
+  /// What the time is, for the lengths the conversation shows; a test gives its own.
+  DateTime Function() clock = DateTime.now;
 
   /// Where every session opened or resumed here is noted, to be listed and opened again after the app ends.
   final SessionLedger? ledger;
@@ -2487,11 +2493,41 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }
     // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is.
     _endWaiting(session, const AcpCancel());
-    final tasks = session.tasks.live;
     notifyListeners();
     await client.cancel(session.remoteSessionId!);
-    // One request ends all of the conversation's tasks, and the host's answer is that they ended.
-    if (tasks.isNotEmpty && await client.stopTasks(session.remoteSessionId!)) _tasksStopped(session);
+    await stopTasks(session);
+  }
+
+  /// Ends every task of [session] that has not ended, and nothing else: the conversation's own turn goes on. The host's answer is
+  /// that they ended.
+  Future<void> stopTasks(ChatSession session) async {
+    final client = _verifiedClients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || remote == null || session.tasks.live.isEmpty) return;
+    if (await client.stopTasks(remote)) _tasksStopped(session);
+  }
+
+  /// Shows the thread of [session]'s task [taskId] in place of the conversation's own, which [closeChild] brings back. When the app heard
+  /// nothing of the task, the host is asked for what it kept.
+  void openChild(ChatSession session, String taskId) {
+    final task = session.tasks[taskId];
+    if (task == null) return;
+    session.openChild = taskId;
+    notifyListeners();
+    final client = _verifiedClients[session.id];
+    final remote = session.remoteSessionId;
+    if (task.updates.isEmpty && client != null && remote != null) {
+      unawaited(client.taskHistory(remote, taskId).then((kept) {
+        if (kept != null && session.tasks.backfill(taskId, kept)) notifyListeners();
+      }, onError: (Object _) {}));
+    }
+  }
+
+  /// Brings the conversation's own thread back from a task's.
+  void closeChild(ChatSession session) {
+    if (session.openChild == null) return;
+    session.openChild = null;
+    notifyListeners();
   }
 
   /// Ends one of [session]'s tasks, which need not be running its turn.

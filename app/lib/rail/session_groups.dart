@@ -4,6 +4,7 @@ import '../session_store.dart';
 enum RowState {
   needsYou('Needs you'),
   working('Working'),
+  waiting('Waiting'),
   failed('Failed'),
   done('Done'),
   starting('Starting'),
@@ -16,7 +17,7 @@ enum RowState {
   final String word;
 
   /// Whether the session is doing or waiting for something now, which keeps it in view whatever else is chosen for it.
-  bool get active => this == needsYou || this == working;
+  bool get active => this == needsYou || this == working || this == waiting;
 
   /// Whether the session has nothing to say and may be folded away.
   bool get settled => this == idle;
@@ -25,6 +26,8 @@ enum RowState {
 /// The state [session] shows in the list.
 RowState rowStateOf(ChatSession session) {
   if (session.needsYou) return RowState.needsYou;
+  // A turn that runs while a subagent works is waiting on it.
+  if (session.status == SessionStatus.working && session.tasks.live.isNotEmpty) return RowState.waiting;
   if (session.status == SessionStatus.working) return RowState.working;
   if (session.failed) return RowState.failed;
   if (session.unread) return RowState.done;

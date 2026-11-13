@@ -32,8 +32,11 @@ import 'package:flutter/material.dart';
 
 import 'chat/cache_lifetime.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
+import 'chat/child_thread.dart';
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
+import 'chat/delegation_row.dart';
+import 'chat/delegation_view.dart';
 import 'chat/new_session_view.dart';
 import 'chat/palette.dart';
 import 'chat/agent_events.dart' show AgentCommandInfo;
@@ -1789,18 +1792,30 @@ class _ConversationState extends State<_Conversation> {
             composer: _composerFor(session, centred: true),
           )),
         )
+      else if (session.openChild != null && session.tasks[session.openChild!] != null)
+        Expanded(
+          child: ChildThreadView(
+            store: widget.store, session: session, task: session.tasks[session.openChild!]!,
+            renderers: delegationRenderers.merge(widget.renderers), narrow: widget.narrow,
+          ),
+        )
       else ...[
         Expanded(
           child: _dropping(session, chat.ChatTranscript(
             key: _transcript,
-            entries: session.entries,
+            entries: delegationEntries(session, onOpen: (id) => widget.store.openChild(session, id), now: widget.store.clock),
             terminals: session.terminals,
             plan: session.plan,
             working: session.status == SessionStatus.working,
-            renderers: widget.renderers,
+            renderers: delegationRenderers.merge(widget.renderers),
             narrow: widget.narrow,
           )),
         ),
+        if (session.status == SessionStatus.working && session.tasks.live.isNotEmpty)
+          DelegationWaiting(
+            children: [for (final task in session.tasks.live) ChildView.of(task)],
+            onStop: () => unawaited(widget.store.stopTasks(session)),
+          ),
         if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session),
         if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),

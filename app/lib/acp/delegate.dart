@@ -67,6 +67,9 @@ final class DelegateTask {
 
   /// What the task's agent sent as session updates, oldest first, as far as the host kept them.
   final List<Map<String, Object?>> updates = [];
+
+  /// How many updates the task has had, those forgotten for the bound included, so a reader that applied some knows how many are new.
+  int updatesSeen = 0;
 }
 
 /// The most updates a task keeps, which the host bounds in bytes as well.
@@ -139,6 +142,7 @@ final class DelegateTasks {
       final task = _task(id);
       if (task == null) return false;
       task.updates.add(Map<String, Object?>.from(update));
+      task.updatesSeen++;
       if (task.updates.length > maxTaskUpdates) task.updates.removeAt(0);
       return true;
     }
@@ -172,6 +176,16 @@ final class DelegateTasks {
     if (artifact is! Map || artifact['artifactId'] != 'result' || artifact['parts'] is! List) return;
     final texts = [for (final part in artifact['parts'] as List) if (part is Map && part['text'] is String) part['text'] as String];
     task.result = _text(texts.join(), 65536);
+  }
+
+  /// Gives [id] the [updates] the host kept of it when it has heard none itself. Whether it took them.
+  bool backfill(String id, List<Map<String, Object?>> updates) {
+    final task = _byId[id];
+    if (task == null || task.updates.isNotEmpty || updates.isEmpty) return false;
+    final kept = updates.length > maxTaskUpdates ? updates.sublist(updates.length - maxTaskUpdates) : updates;
+    task.updates.addAll(kept);
+    task.updatesSeen += kept.length;
+    return true;
   }
 
   /// Ends [id] as the host stopped it, when it had not ended. Whether it changed.
