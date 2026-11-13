@@ -411,7 +411,7 @@ Future<List<String>> removeOrphans(OverlayManager overlays, Iterable<String> nam
 
 /// What installing the skill [name] that the catalog [label] offers as [entry] would do, by the person's own choice.
 /// [pins] are canoa.cfg's `[skill_pins]`.
-SkillItem reviewChosenSkill(OverlayManager overlays, Map<String, SkillCopy> copies, String label, String name,
+SkillItem reviewChosenSkill(OverlayManager overlays, Map<String, SkillCopy> copies, String? label, String name,
     aos.CatalogEntry entry, {Map<String, String> pins = const {}}) {
   final from = entry.source;
   final copy = copies[skillKey(name)];

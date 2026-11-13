@@ -4,7 +4,6 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
-import '../store/programs.dart';
 import '../store/skills.dart';
 import '../store/store_icon.dart';
 import '../store/store.dart' show installedManifests;
@@ -22,7 +21,7 @@ import '../selectable.dart';
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
 class ProfilesDialog extends StatefulWidget {
   const ProfilesDialog({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
-      this.onPin, this.onSave, this.programs});
+      this.onPin, this.onLoadout});
 
   final CanoaConfig config;
 
@@ -38,11 +37,8 @@ class ProfilesDialog extends StatefulWidget {
   /// Pins the overlay [name] in canoa.cfg to the tree digest just installed, and gives the configuration saved.
   final Future<CanoaConfig?> Function(String name, String digest)? onPin;
 
-  /// Saves canoa.cfg as the overlay store changed it, and gives the configuration saved; without it there is no store.
-  final SaveConfig? onSave;
-
-  /// The programs the host's Store keeps, which the Store page shows with the overlays.
-  final ProgramStores? programs;
+  /// Opens Loadout, where overlays are found, installed and chosen; without it there is nowhere to.
+  final VoidCallback? onLoadout;
 
   @override
   State<ProfilesDialog> createState() => ProfilesDialogState();
@@ -194,20 +190,19 @@ class ProfilesDialogState extends State<ProfilesDialog> {
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: Text('Overlays', style: Theme.of(context).textTheme.titleMedium)),
-            if (widget.onSave case final save?)
+            if (widget.onLoadout case final open?)
               TextButton(
                 key: const Key('profile-store'),
                 onPressed: busy != null
                     ? null
-                    : () async {
-                        final left = await showStore(context, config: config, home: home, onSave: save, programs: widget.programs);
-                        if (left != null && mounted) setState(() => config = left);
-                        await _load();
+                    : () {
+                        Navigator.pop(context);
+                        open();
                       },
-                child: const Text('Store…'),
+                child: const Text('Loadout…'),
               ),
           ]),
-          if (config.overlays.isEmpty) const Text('None: add one to [overlays] in canoa.cfg.'),
+          if (config.overlays.isEmpty) const Text('None yet: find some in Loadout.'),
           for (final MapEntry(key: name, value: source) in config.overlays.entries) _overlayRow(name, source),
           for (final report in found?.effective.overlays ?? const <OverlayReport>[]) OverlayReportView(report: report),
           if (home != null && home.trust.projects.isNotEmpty) ...[

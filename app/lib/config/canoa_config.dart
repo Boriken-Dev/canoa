@@ -323,6 +323,93 @@ final class CanoaConfig {
     return out;
   }
 
+  /// `[loadout] off`: the overlays by name that new sessions do not start with. An overlay named here stays installed and
+  /// applies to no new session until it is turned on again; sessions already started keep what they started with.
+  Set<String> get loadoutOff => _loadout(tables['loadout']).off;
+
+  /// `[loadout.mcp.NAME]`: where each MCP server the store installed came from: the registry's address, the server's name
+  /// and version there, and the digest of the `server.json` that was shown and accepted.
+  Map<String, McpOrigin> get loadoutMcp => _loadout(tables['loadout']).mcp;
+
+  static ({Set<String> off, Map<String, McpOrigin> mcp}) _loadout(Object? raw) {
+    if (raw == null) return (off: const {}, mcp: const {});
+    if (raw is! Map || raw.keys.any((key) => key != 'off' && key != 'mcp')) {
+      throw const FormatException('canoa.cfg: loadout is a table with the keys off and mcp');
+    }
+    final off = raw['off'];
+    if (off != null && (off is! List || off.any((name) => name is! String || !isEntryName(name)))) {
+      throw const FormatException('canoa.cfg: loadout.off is a list of overlay names');
+    }
+    final mcp = <String, McpOrigin>{};
+    final rawMcp = raw['mcp'];
+    if (rawMcp != null && rawMcp is! Map) throw const FormatException('canoa.cfg: loadout.mcp must be a table');
+    for (final MapEntry(:key, :value) in ((rawMcp as Map?) ?? const {}).entries) {
+      final origin = value is Map ? McpOrigin.fromMap(value) : null;
+      if (!isEntryName('$key') || origin == null) {
+        throw FormatException('canoa.cfg: loadout.mcp.$key is a table of registry, server, version and digest');
+      }
+      mcp['$key'] = origin;
+    }
+    return (off: {for (final name in (off as List?) ?? const []) name as String}, mcp: mcp);
+  }
+
+  CanoaConfig _withLoadout({Set<String>? off, Map<String, McpOrigin>? mcp}) {
+    final now = _loadout(tables['loadout']);
+    final offNow = off ?? now.off, mcpNow = mcp ?? now.mcp;
+    return _withTable('loadout', {
+      if (offNow.isNotEmpty) 'off': offNow.toList()..sort(),
+      if (mcpNow.isNotEmpty) 'mcp': {for (final MapEntry(:key, :value) in mcpNow.entries) key: value.toMap()},
+    });
+  }
+
+  /// This configuration with [off] as `[loadout] off`, sorted so the file does not churn.
+  CanoaConfig withLoadoutOff(Set<String> off) => _withLoadout(off: off);
+
+  /// This configuration with the MCP server [name] defined as [definition] in `[profile.mcp]` and [origin] noted in
+  /// `[loadout.mcp]`; with it off for each of [agents], so that no agent starts it until the person allows it.
+  CanoaConfig withInstalledMcp(String name, Map<String, dynamic> definition, McpOrigin origin, {required List<String> agents}) {
+    if (!isEntryName(name)) throw ArgumentError.value(name, 'name', 'An MCP server name has 1 to 64 letters, digits, - or _');
+    var out = _withProfileEntry('mcp', name, definition)._withLoadout(mcp: {...loadoutMcp, name: origin});
+    for (final agent in agents) {
+      out = out.withAgentMcp(agent, {...?out.agentMcp[agent], name: false});
+    }
+    return out;
+  }
+
+  /// This configuration without the MCP server [name]: its definition, its note and every agent's choice for it.
+  CanoaConfig withoutMcp(String name) {
+    var out = _withProfileEntry('mcp', name, null)._withLoadout(mcp: {...loadoutMcp}..remove(name));
+    for (final MapEntry(key: agent, value: choices) in agentMcp.entries) {
+      if (choices.containsKey(name)) out = out.withAgentMcp(agent, {...choices}..remove(name));
+    }
+    return out;
+  }
+
+  /// This configuration with the skill [name] taken from [path] (relative to canoa.cfg's directory) in `[profile.skills]`,
+  /// or without it when [path] is null.
+  CanoaConfig withProfileSkill(String name, String? path) =>
+      _withProfileEntry('skills', name, path == null ? null : <String, dynamic>{'path': path});
+
+  CanoaConfig _withProfileEntry(String section, String name, Map<String, dynamic>? entry) {
+    final raw = _deepCopy((tables['profile'] as Map?) ?? const {});
+    final table = (raw[section] as Map<String, dynamic>?) ?? <String, dynamic>{};
+    if (entry == null) {
+      table.remove(name);
+    } else {
+      table[name] = entry;
+    }
+    if (table.isEmpty) {
+      raw.remove(section);
+    } else {
+      raw[section] = table;
+    }
+    return withProfileTables(overlays: overlays, tables: {...tables, 'profile': raw},
+        profile: _profile('profile', raw, LayerKind.user), agentProfiles: agentProfiles);
+  }
+
+  /// The overlays a new session starts with: every one `[overlays]` names except those `[loadout] off` turns off.
+  List<String> get defaultOverlays => [for (final name in overlays.keys) if (!loadoutOff.contains(name)) name];
+
   /// `[store]`: the store's limits.
   StoreSettings get store => StoreSettings.parse((tables['store'] as Map?) ?? const {});
 
@@ -476,9 +563,12 @@ final class CanoaConfig {
   }
 
   /// This configuration without the overlay [name] in `[overlays]`.
-  CanoaConfig withoutOverlay(String name) => _withTable('overlays',
-      _deepCopy((tables['overlays'] as Map?) ?? const {})..remove(name),
-      overlays: {for (final MapEntry(:key, :value) in overlays.entries) if (key != name) key: value});
+  CanoaConfig withoutOverlay(String name) {
+    final removed = _withTable('overlays', _deepCopy((tables['overlays'] as Map?) ?? const {})..remove(name),
+        overlays: {for (final MapEntry(:key, :value) in overlays.entries) if (key != name) key: value});
+    // An overlay put back later starts on, not off because an earlier one of its name was.
+    return loadoutOff.contains(name) ? removed.withLoadoutOff({...loadoutOff}..remove(name)) : removed;
+  }
 
   /// This configuration with another's `[overlays]`, `[profile]` and agent profiles, as they are now.
   CanoaConfig withProfilesOf(CanoaConfig other) =>
@@ -530,7 +620,7 @@ final class CanoaConfig {
     final data = TomlDocument.parse(content).toMap();
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'sources', 'attachments', 'usage'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadout', 'sources', 'attachments', 'usage'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -684,6 +774,7 @@ final class CanoaConfig {
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
     _catalogs(data['catalogs']);
     _skillPins(data['skill_pins']);
+    _loadout(data['loadout']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
@@ -703,6 +794,7 @@ final class CanoaConfig {
         if (agentTables.isNotEmpty) 'agents': agentTables,
         'catalogs': ?data['catalogs'],
         'skill_pins': ?data['skill_pins'],
+        'loadout': ?data['loadout'],
         'store': ?rawStore,
       },
       agents: agents,
@@ -784,4 +876,27 @@ args = ${jsonEncode(agent.args)}
       throw FormatException('canoa.cfg: $where: $error');
     }
   }
+}
+
+/// Where an MCP server the store installed came from: a registry, the server's name and version there, and the digest of the
+/// `server.json` that was shown before it was installed.
+final class McpOrigin {
+  const McpOrigin({required this.registry, required this.server, required this.version, required this.digest});
+
+  /// The registry's address, as the person added it.
+  final String registry;
+  final String server, version;
+
+  /// `sha256:` and 64 hex digits of the canonical `server.json`.
+  final String digest;
+
+  static McpOrigin? fromMap(Map<dynamic, dynamic> map) {
+    if (map.keys.any((key) => !const {'registry', 'server', 'version', 'digest'}.contains(key))) return null;
+    final registry = map['registry'], server = map['server'], version = map['version'], digest = map['digest'];
+    if (registry is! String || server is! String || version is! String || digest is! String) return null;
+    if (!RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(digest)) return null;
+    return McpOrigin(registry: registry, server: server, version: version, digest: digest);
+  }
+
+  Map<String, dynamic> toMap() => {'registry': registry, 'server': server, 'version': version, 'digest': digest};
 }

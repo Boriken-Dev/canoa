@@ -63,6 +63,8 @@ import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/sources.dart';
+import 'loadout/loadout_page.dart';
+import 'loadout/registry_fetch.dart';
 import 'store/programs.dart';
 import 'welcome/welcome_view.dart';
 import 'drafts/draft_backend.dart';
@@ -377,6 +379,62 @@ class _CanoaAppState extends State<CanoaApp> {
     return ok ?? false;
   }
 
+  /// The agents the app offers a profile for: the host's own sources, the commands in canoa.cfg and any agent with a profile.
+  List<String> get _profileAgents => {
+    for (final source in _hostedSources) if (source.local) source.label,
+    for (final agent in config.agents) agent.label,
+    ...config.agentProfiles.keys,
+  }.toList();
+
+  /// Loadout: overlays, skills and MCP servers, installed and to discover.
+  Future<void> _showLoadout() async {
+    final above = _navigator.currentContext;
+    if (above == null) return;
+    final left = await showLoadout(
+      above,
+      config: config,
+      home: platformProfileHome(configPath: _configPath),
+      onSave: _saveLoadout,
+      agents: _profileAgents,
+      programs: _programs,
+      fetchRegistry: kIsWeb ? null : fetchRegistry,
+      findProgram: findProgram,
+    );
+    if (left != null && mounted) setState(() => config = left);
+  }
+
+  /// Saves what Loadout changed. The host reads the profile when it starts, so a change to it is applied by starting the host
+  /// again, which ends the sessions open on it: with some open, the person is asked, and may leave it for the next start.
+  Future<CanoaConfig?> _saveLoadout(CanoaConfig changed) async {
+    var restart = widget.host != null && _configPath != null && !_sameProfiles(changed, config);
+    if (restart && _openOnHost() > 0 && !await _confirmApplyProfile()) restart = false;
+    await _write(changed);
+    if (mounted) setState(() => config = changed);
+    if (restart) await widget.host!.apply(configPath: _configPath);
+    return changed;
+  }
+
+  Future<bool> _confirmApplyProfile() async {
+    final above = _navigator.currentContext;
+    if (above == null || !above.mounted) return false;
+    final count = _openOnHost();
+    final ok = await showSelectableDialog<bool>(
+      context: above,
+      builder: (context) => AlertDialog(
+        key: const Key('apply-profile'),
+        title: const Text('Apply it now?'),
+        content: Text('A new session starts with the change once the host starts again, and that ends the '
+            '${count == 1 ? 'session' : '$count sessions'} open on this computer. Their conversations stay in the list to open '
+            'again. Or leave it: it is saved, and applies the next time the host starts.'),
+        actions: [
+          TextButton(key: const Key('apply-profile-later'), onPressed: () => Navigator.pop(context, false), child: const Text('Leave it for now')),
+          FilledButton(key: const Key('apply-profile-now'), onPressed: () => Navigator.pop(context, true), child: const Text('Apply now')),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
   /// The profiles as canoa.cfg has them now, for every agent the app offers or the file gives a profile.
   Future<void> _showProfiles() async {
     final above = _navigator.currentContext;
@@ -384,21 +442,12 @@ class _CanoaAppState extends State<CanoaApp> {
     await showSelectableDialog<void>(
       context: above,
       builder: (_) => ProfilesDialog(
-        programs: _programs,
         config: config,
-        agents: {
-          for (final source in _hostedSources) if (source.local) source.label,
-          for (final agent in config.agents) agent.label,
-          ...config.agentProfiles.keys,
-        }.toList(),
+        agents: _profileAgents,
+        onLoadout: _showLoadout,
         home: platformProfileHome(configPath: _configPath),
         onPin: (name, digest) async {
           final changed = config.withOverlayPin(name, digest);
-          await _write(changed);
-          if (mounted) setState(() => config = changed);
-          return changed;
-        },
-        onSave: (changed) async {
           await _write(changed);
           if (mounted) setState(() => config = changed);
           return changed;
@@ -846,6 +895,9 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// [chosen] in canoa.cfg's order, without any that is no longer installed.
+  List<String> _overlaysNamed(Set<String> chosen) => [for (final name in config.overlays.keys) if (chosen.contains(name)) name];
+
   /// What `initialize` carries to a host to say how long this session's prompt cache should live.
   Map<String, Object?> _cacheMeta(({CacheLifetime lifetime, bool chosen}) asked) =>
       {cacheLifetimeMeta: cacheLifetimeRequest(asked.lifetime, chosen: asked.chosen)};
@@ -968,7 +1020,13 @@ class _CanoaAppState extends State<CanoaApp> {
     final where = made?.path ?? folder;
     VerifiedAgent? client;
     try {
-      client = await _linkAgent(name, _cacheMeta(store.cacheLifetimeOf(draft)));
+      // The overlays it starts with are Loadout's defaults unless the person chose; what it starts with is kept with it.
+      final chosen = draft.overlays?.where(config.overlays.containsKey).toSet() ?? config.defaultOverlays.toSet();
+      if (config.overlays.isNotEmpty) draft.overlays = chosen;
+      client = await _linkAgent(name, {
+        ..._cacheMeta(store.cacheLifetimeOf(draft)),
+        if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
+      });
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
       final opened = await client.openSession(cwd: where);
@@ -997,10 +1055,13 @@ class _CanoaAppState extends State<CanoaApp> {
     final VerifiedAgent client;
     switch (entry.place) {
       case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entry.entry):
-        client = await _linkAgent(entry.entry, _cacheMeta((
-          lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
-          chosen: entry.cacheLifetime != null,
-        )));
+        client = await _linkAgent(entry.entry, {
+          ..._cacheMeta((
+            lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
+            chosen: entry.cacheLifetime != null,
+          )),
+          if (entry.overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
+        });
       case SessionPlace.local:
         throw StateError('${entry.entry} is not one of the sources of this computer now');
       case SessionPlace.host || SessionPlace.peer:
@@ -1215,6 +1276,8 @@ class _CanoaAppState extends State<CanoaApp> {
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     clipboard: widget.clipboard ?? const SystemClipboard(),
     overlays: config.overlays.keys.toList(),
+    defaultOverlays: config.defaultOverlays,
+    onLoadout: _showLoadout,
     pasteAsFile: config.pasteAsFile,
     warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(sources: true)),
@@ -1262,7 +1325,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
-          onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
+          onHosting: widget.host == null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
           conversation: _conversation,
           kit: _kit,
           renderers: widget.renderers,
@@ -1279,7 +1342,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
-    this.onHosting, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
+    this.onHosting, this.onLoadout, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome,
   });
 
@@ -1294,6 +1357,7 @@ class _CanoaHome extends StatelessWidget {
   final chat.ChatRenderers renderers;
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
+  final VoidCallback? onLoadout;
   final Future<void> Function(LedgerEntry)? onReopen;
   final _ConversationHandle conversation;
 
@@ -1329,7 +1393,7 @@ class _CanoaHome extends StatelessWidget {
   /// The rail as the window shows it: beside the conversation, or in the drawer.
   Widget _rail(BuildContext context) => SessionRail(
     store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession,
-    onSettings: onSettings, onHosting: onHosting, onReopen: onReopen,
+    onSettings: onSettings, onHosting: onHosting, onLoadout: onLoadout, onReopen: onReopen,
     onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
     onClose: conversation.close ?? store.close,
   );
@@ -1348,6 +1412,7 @@ class _CanoaHome extends StatelessWidget {
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
+        if (onLoadout != null) PaletteItem('Loadout', onLoadout!, icon: Icons.tune),
         if (onHosting != null) PaletteItem('Hosting', onHosting!, icon: Icons.dns_outlined),
         PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
         for (final other in store.sessions)

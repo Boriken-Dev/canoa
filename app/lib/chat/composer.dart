@@ -27,6 +27,8 @@ final class ComposerKit {
     this.statFile,
     this.clipboard = const TextClipboard(),
     this.overlays = const [],
+    this.defaultOverlays,
+    this.onLoadout,
     this.pasteAsFile = Composer.defaultPasteAsFile,
     this.warnPermille = defaultWarnPermille,
     this.onSourceSettings,
@@ -36,6 +38,12 @@ final class ComposerKit {
 
   /// What the extension adds above the message and to `+`; null outside it.
   final ComposerExtension? extension;
+
+  /// The overlays a new session starts with: Loadout's defaults, which are `overlays` when null.
+  final List<String>? defaultOverlays;
+
+  /// Opens Loadout, where an overlay is installed and turned on or off by default; null where there is none.
+  final VoidCallback? onLoadout;
 
   /// The sources Settings has, in its order.
   final List<AgentSource> sources;

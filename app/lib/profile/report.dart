@@ -9,6 +9,9 @@ import 'profiles_dialog.dart' show visible;
 /// Where the host puts its report in an answer's `_meta`.
 const hostProfileMeta = 'dev.boriken.canoa/profile';
 
+/// Where `initialize` names the overlays a session starts with: a list of names, which only narrows what the host's profile lists.
+const overlaysMeta = 'dev.boriken.canoa/overlays';
+
 /// Each harness's name, by its AOS harness id.
 const harnessLabels = {
   'claude-code': 'Claude Code',

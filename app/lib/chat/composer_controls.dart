@@ -301,7 +301,7 @@ class OverlaysChooser extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final on = session.overlays ?? kit.overlays.toSet();
+    final on = session.overlays ?? (kit.defaultOverlays ?? kit.overlays).toSet();
     final count = kit.overlays.where(on.contains).length;
     if (!session.isDraft) {
       return InkWell(
@@ -330,6 +330,15 @@ class OverlaysChooser extends StatelessWidget {
                   },
             child: Text(name),
           ),
+        if (kit.onLoadout != null) ...[
+          const Divider(height: 1),
+          MenuItemButton(
+            key: const Key('overlays-loadout'),
+            leadingIcon: const Icon(Icons.tune, size: 18),
+            onPressed: kit.onLoadout,
+            child: const Text('Manage in Loadout'),
+          ),
+        ],
       ],
       builder: (context, controller, _) => InkWell(
         key: const Key('overlays'),

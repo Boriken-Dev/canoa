@@ -88,6 +88,7 @@ final class LedgerEntry {
     this.mode,
     this.bypass = false,
     this.cacheLifetime,
+    this.overlays,
     this.canoaId,
     this.site,
     this.pinned = false,
@@ -144,6 +145,10 @@ final class LedgerEntry {
   /// The prompt-cache lifetime the person chose for the session (`short`, `long` or `default`), asked again when it is opened.
   String? cacheLifetime;
 
+  /// The overlays the session started with, by name, asked for again when it is opened; null for one that took what the
+  /// host's profile gave it.
+  List<String>? overlays;
+
   String get key => keyOf(peerId, sessionId);
   static String keyOf(String peerId, String sessionId) => '$peerId\n$sessionId';
 
@@ -186,6 +191,7 @@ final class LedgerEntry {
     'mode': ?mode,
     if (bypass) 'bypass': true,
     'cacheLifetime': ?cacheLifetime,
+    'overlays': ?overlays,
     'canoaId': ?canoaId,
     'site': ?site,
     if (pinned) 'pinned': true,
@@ -223,6 +229,7 @@ final class LedgerEntry {
       mode: text('mode'),
       bypass: json['bypass'] == true,
       cacheLifetime: text('cacheLifetime'),
+      overlays: json['overlays'] is List ? [for (final name in json['overlays'] as List) if (name is String) name] : null,
       canoaId: text('canoaId'),
       site: text('site'),
       pinned: json['pinned'] == true,
@@ -452,6 +459,7 @@ class SessionLedger extends ChangeNotifier {
     String? canoaId,
     String? site,
     String? cacheLifetime,
+    List<String>? overlays,
   }) {
     if (_settings.keep <= 0) return null;
     final now = _clock();
@@ -483,6 +491,7 @@ class SessionLedger extends ChangeNotifier {
       ..title = title ?? found.title
       ..worktree = worktree ?? found.worktree
       ..cacheLifetime = cacheLifetime ?? found.cacheLifetime
+      ..overlays = overlays ?? found.overlays
       ..canoaId = canoaId ?? found.canoaId;
     _apply();
     _changed();

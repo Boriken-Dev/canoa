@@ -30,6 +30,7 @@ class SessionRail extends StatefulWidget {
     required this.onSearch,
     required this.onClose,
     this.onHosting,
+    this.onLoadout,
     this.onReopen,
     this.now = DateTime.now,
     this.touch,
@@ -47,6 +48,9 @@ class SessionRail extends StatefulWidget {
   /// Ends a conversation here, asking first about anything it made.
   final Future<void> Function(ChatSession) onClose;
   final VoidCallback? onHosting;
+
+  /// Opens Loadout: overlays, skills and MCP servers.
+  final VoidCallback? onLoadout;
   final Future<void> Function(LedgerEntry)? onReopen;
 
   /// The time ages are counted from.
@@ -132,6 +136,7 @@ class _SessionRailState extends State<SessionRail> {
                 onUseBrowserAgents: widget.onUseBrowserAgents,
               ),
             ),
+            if (widget.onLoadout != null) _NavEntry(icon: Icons.tune, label: 'Loadout', tooltip: 'Overlays, skills and MCP servers', onTap: widget.onLoadout!),
             if (widget.onHosting != null) _NavEntry(icon: Icons.dns_outlined, label: 'Hosting', onTap: widget.onHosting!),
             _NavEntry(icon: Icons.settings_outlined, label: 'Settings', tooltip: 'Canoa settings', onTap: widget.onSettings),
           ]),

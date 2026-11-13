@@ -1563,6 +1563,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       canoaId: session.workspaceId,
       site: session.site,
       cacheLifetime: session.cacheLifetime?.id,
+      overlays: session.overlays?.toList(),
     );
   }
 
@@ -2305,6 +2306,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..workspaceId = entry.canoaId
       ..bypass = entry.bypass
       ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
+      ..overlays = entry.overlays?.toSet()
       ..pinned = entry.pinned
       ..archived = entry.archived
       ..chosenMode = entry.mode
