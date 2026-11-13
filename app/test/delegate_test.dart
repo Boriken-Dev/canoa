@@ -1,6 +1,5 @@
 // The client side of delegation: the tasks a session handed to other sources, built from the host's events; what a task's agent asks
 // of the person, which no mode of the conversation's own answers for it; and Stop.
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
@@ -12,108 +11,7 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Map<String, Object?> _notice(String task, Map<String, Object?> event) => {
-  'jsonrpc': '2.0',
-  'method': delegateEventMethod,
-  'params': {'sessionId': 's1', 'taskId': task, 'event': event},
-};
-
-Map<String, Object?> _task(String id, String state, {String title = 'Fix the tests', String source = 'codex', String? at}) => {
-  'task': {
-    'id': id,
-    'status': {'state': 'TASK_STATE_$state', 'timestamp': ?at},
-    'metadata': {'title': title, 'source': source, 'folder': '/work'},
-  },
-};
-
-Map<String, Object?> _status(String state, {String? at, String? note}) => {
-  'statusUpdate': {
-    'status': {
-      'state': 'TASK_STATE_$state',
-      'timestamp': ?at,
-      if (note != null)
-        'message': {
-          'parts': [
-            {'text': note},
-          ],
-        },
-    },
-  },
-};
-
-const _options = [
-  {'optionId': 'allow-once', 'name': 'Yes', 'kind': 'allow_once'},
-  {'optionId': 'allow-always', 'name': 'Yes, for the session', 'kind': 'allow_always'},
-  {'optionId': 'reject', 'name': 'No', 'kind': 'reject_once'},
-];
-
-/// An agent in memory, speaking v1, that answers the app's own requests to the host the way the host does.
-final class _Host {
-  final incoming = StreamController<String>();
-  final sent = <Map<String, dynamic>>[];
-  late VerifiedAgent client;
-
-  /// What the host answers a `history` request with, by task.
-  final histories = <String, List<Object?>>{};
-
-  Future<ChatSession> start(SessionStore store, {String label = 'Scripted', bool decide = true}) async {
-    client = VerifiedAgent.fromChild(
-      label: label,
-      messages: incoming.stream,
-      decider: decide ? store.askPermission : null,
-      close: () async {},
-      send: (line) async {
-        final message = jsonDecode(line) as Map<String, dynamic>;
-        sent.add(message);
-        final id = message['id'];
-        switch (message['method']) {
-          case 'initialize':
-            reply(id, {'protocolVersion': 1, 'agentCapabilities': <String, Object?>{}});
-          case 'session/new':
-            reply(id, {'sessionId': 's1'});
-          case delegateStopMethod:
-            reply(id, <String, Object?>{});
-          case delegateHistoryMethod:
-            reply(id, {'updates': histories[message['params']['taskId']] ?? const []});
-          case 'session/prompt' || 'session/cancel' || null:
-            break;
-          default:
-            if (id != null) reply(id, <String, Object?>{});
-        }
-      },
-    );
-    await client.initialize();
-    final opened = await client.openSession(cwd: '/work');
-    final session = store.addProviderSession(title: label, agent: label, peerId: client.peerId, remoteSessionId: opened.id, cwd: '/work');
-    store.attachVerifiedClient(session.id, client);
-    store.select(session.id);
-    return session;
-  }
-
-  void reply(Object? id, Object? result) => incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': result}));
-
-  void say(Map<String, Object?> message) => incoming.add(jsonEncode(message));
-
-  /// A permission request of the conversation's own agent (`parent`), or of the task [task] (the host's `TASK:CALL`).
-  void ask(int id, String title, {String? task, String call = 'c', Object? input = const {'file_path': 'a.txt'}}) => say({
-    'jsonrpc': '2.0',
-    'id': id,
-    'method': 'session/request_permission',
-    'params': {
-      'sessionId': 's1',
-      'toolCall': {'toolCallId': task == null ? 'p$id' : '$task:$call$id', 'title': title, 'kind': 'edit', 'rawInput': input},
-      'options': _options,
-      if (task != null)
-        '_meta': {
-          delegateMeta: {'taskId': task, 'title': 'Fix the tests', 'source': 'codex'},
-        },
-    },
-  });
-
-  Map<String, dynamic>? answerTo(int id) => sent.where((message) => message['id'] == id && message['method'] == null).firstOrNull;
-
-  List<Map<String, dynamic>> sentOf(String method) => [for (final message in sent) if (message['method'] == method) message];
-}
+import 'fixtures/delegate_host.dart';
 
 Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 20));
 
@@ -121,10 +19,10 @@ void main() {
   group('the task list', () {
     test('events build it in the order tasks were first heard of, and a task keeps its place', () {
       final tasks = DelegateTasks();
-      tasks.apply(_notice('b', _task('b', 'SUBMITTED', title: 'Second', source: 'claude'))['params']);
-      tasks.apply(_notice('a', _task('a', 'SUBMITTED', title: 'First', at: '2026-11-13T10:00:00Z'))['params']);
-      tasks.apply(_notice('b', _status('WORKING', at: '2026-11-13T10:00:01Z'))['params']);
-      tasks.apply(_notice('a', _status('INPUT_REQUIRED', note: 'waiting for the person: First'))['params']);
+      tasks.apply(taskNotice('b', taskEvent('b', 'SUBMITTED', title: 'Second', source: 'claude'))['params']);
+      tasks.apply(taskNotice('a', taskEvent('a', 'SUBMITTED', title: 'First', at: '2026-11-13T10:00:00Z'))['params']);
+      tasks.apply(taskNotice('b', statusEvent('WORKING', at: '2026-11-13T10:00:01Z'))['params']);
+      tasks.apply(taskNotice('a', statusEvent('INPUT_REQUIRED', note: 'waiting for the person: First'))['params']);
       expect([for (final task in tasks.all) task.id], ['b', 'a']);
       expect([for (final task in tasks.all) task.title], ['Second', 'First']);
       expect(tasks['b']!.source, 'claude');
@@ -137,15 +35,15 @@ void main() {
 
     test('a duplicate changes nothing, a late state cannot reopen an ended task, and a missing end time is no end time', () {
       final tasks = DelegateTasks();
-      final first = _notice('a', _task('a', 'SUBMITTED'))['params'];
+      final first = taskNotice('a', taskEvent('a', 'SUBMITTED'))['params'];
       tasks.apply(first);
       tasks.apply(first);
       expect(tasks.all, hasLength(1));
-      tasks.apply(_notice('a', _status('COMPLETED'))['params']);
+      tasks.apply(taskNotice('a', statusEvent('COMPLETED'))['params']);
       expect(tasks['a']!.phase, TaskPhase.completed);
       expect(tasks['a']!.ended, isNull, reason: 'the host sent no time, and none is made up');
-      tasks.apply(_notice('a', _status('WORKING', at: '2026-11-13T10:00:05Z'))['params']);
-      tasks.apply(_notice('a', _status('FAILED', at: '2026-11-13T10:00:06Z'))['params']);
+      tasks.apply(taskNotice('a', statusEvent('WORKING', at: '2026-11-13T10:00:05Z'))['params']);
+      tasks.apply(taskNotice('a', statusEvent('FAILED', at: '2026-11-13T10:00:06Z'))['params']);
       expect(tasks['a']!.phase, TaskPhase.completed);
       expect(tasks['a']!.ended, isNull);
       expect(tasks.live, isEmpty);
@@ -153,25 +51,25 @@ void main() {
 
     test('a state for a task never announced lists it by its id, and what is not an event is ignored', () {
       final tasks = DelegateTasks();
-      expect(tasks.apply(_notice('lone', _status('WORKING'))['params']), isTrue);
+      expect(tasks.apply(taskNotice('lone', statusEvent('WORKING'))['params']), isTrue);
       expect(tasks['lone']!.title, 'lone');
       expect(tasks.apply(null), isFalse);
       expect(tasks.apply({'taskId': 5}), isFalse);
       expect(tasks.apply({'taskId': 'x', 'event': 'nope'}), isFalse);
       expect(tasks.apply({'taskId': 'x'}), isFalse);
-      expect(tasks.apply(_notice('lone', _status('SOMETHING_NEW'))['params']), isTrue);
+      expect(tasks.apply(taskNotice('lone', statusEvent('SOMETHING_NEW'))['params']), isTrue);
       expect(tasks['lone']!.phase, TaskPhase.working, reason: 'a state this client does not know changes nothing');
     });
 
     test('the reply is the result artifact, and the agent\'s updates are kept as it sent them', () {
       final tasks = DelegateTasks();
-      tasks.apply(_notice('a', _task('a', 'WORKING'))['params']);
+      tasks.apply(taskNotice('a', taskEvent('a', 'WORKING'))['params']);
       tasks.apply({
         'sessionId': 's1',
         'taskId': 'a',
         'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'Hi'}},
       });
-      tasks.apply(_notice('a', {
+      tasks.apply(taskNotice('a', {
         'artifactUpdate': {
           'artifact': {
             'artifactId': 'result',
@@ -188,14 +86,14 @@ void main() {
     test('a session lists no more tasks than it holds, and forgets the oldest that ended before it refuses one', () {
       final tasks = DelegateTasks();
       for (var i = 0; i < maxTasks + 5; i++) {
-        tasks.apply(_notice('t$i', _task('t$i', 'WORKING'))['params']);
+        tasks.apply(taskNotice('t$i', taskEvent('t$i', 'WORKING'))['params']);
       }
       expect(tasks.all, hasLength(maxTasks));
       expect(tasks['t$maxTasks'], isNull, reason: 'every one runs: no room');
 
-      tasks.apply(_notice('t3', _status('COMPLETED'))['params']);
-      tasks.apply(_notice('t1', _status('FAILED'))['params']);
-      expect(tasks.apply(_notice('new', _task('new', 'WORKING'))['params']), isTrue);
+      tasks.apply(taskNotice('t3', statusEvent('COMPLETED'))['params']);
+      tasks.apply(taskNotice('t1', statusEvent('FAILED'))['params']);
+      expect(tasks.apply(taskNotice('new', taskEvent('new', 'WORKING'))['params']), isTrue);
       expect(tasks['new'], isNotNull);
       expect(tasks['t1'], isNull, reason: 'the oldest ended is forgotten');
       expect(tasks['t3'], isNotNull);
@@ -206,10 +104,10 @@ void main() {
   group('on a connection', () {
     test('a client that answers permission requests says so in initialize, and one that cannot does not', () async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       await host.start(store);
       expect(host.sentOf('initialize').single['params']['_meta'], {delegateMeta: true});
-      final silent = _Host();
+      final silent = DelegateHost();
       await silent.start(SessionStore(), decide: false);
       expect(silent.sentOf('initialize').single['params']['_meta'], isNull);
       expect(silent.client.takesTasks, isFalse);
@@ -217,16 +115,16 @@ void main() {
 
     test('the host\'s events reach the conversation they name and no other', () async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       final session = await host.start(store);
-      host.say(_notice('a', _task('a', 'SUBMITTED')));
+      host.say(taskNotice('a', taskEvent('a', 'SUBMITTED')));
       host.say({
         'jsonrpc': '2.0',
         'method': delegateEventMethod,
-        'params': {'sessionId': 'other', 'taskId': 'z', 'event': _task('z', 'WORKING')},
+        'params': {'sessionId': 'other', 'taskId': 'z', 'event': taskEvent('z', 'WORKING')},
       });
-      host.say(_notice('a', _status('WORKING')));
-      host.say(_notice('b', _task('b', 'WORKING', title: 'Lint', source: 'claude')));
+      host.say(taskNotice('a', statusEvent('WORKING')));
+      host.say(taskNotice('b', taskEvent('b', 'WORKING', title: 'Lint', source: 'claude')));
       await _settle();
       expect([for (final task in session.tasks.all) task.id], ['a', 'b']);
       expect(session.tasks['a']!.phase, TaskPhase.working);
@@ -235,18 +133,18 @@ void main() {
 
     test('a connection that is lost ends the live tasks as canceled, and a reconnect asks the host for nothing', () async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       final session = await host.start(store);
-      host.say(_notice('a', _task('a', 'WORKING')));
-      host.say(_notice('b', _task('b', 'WORKING', title: 'Lint')));
-      host.say(_notice('b', _status('COMPLETED')));
+      host.say(taskNotice('a', taskEvent('a', 'WORKING')));
+      host.say(taskNotice('b', taskEvent('b', 'WORKING', title: 'Lint')));
+      host.say(taskNotice('b', statusEvent('COMPLETED')));
       await _settle();
       await host.incoming.close();
       await _settle();
       expect(session.tasks['a']!.phase, TaskPhase.canceled);
       expect(session.tasks['b']!.phase, TaskPhase.completed, reason: 'an ended task stays as it ended');
 
-      final again = _Host();
+      final again = DelegateHost();
       final client = VerifiedAgent.fromChild(
         label: 'Scripted',
         messages: again.incoming.stream,
@@ -302,12 +200,12 @@ void main() {
   });
 
   group('what a task asks of the person', () {
-    Future<(_Host, ChatSession, SessionStore)> start() async {
+    Future<(DelegateHost, ChatSession, SessionStore)> start() async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       final session = await host.start(store);
-      host.say(_notice('t1', _task('t1', 'WORKING')));
-      host.say(_notice('t2', _task('t2', 'WORKING', title: 'Lint', source: 'claude')));
+      host.say(taskNotice('t1', taskEvent('t1', 'WORKING')));
+      host.say(taskNotice('t2', taskEvent('t2', 'WORKING', title: 'Lint', source: 'claude')));
       await _settle();
       return (host, session, store);
     }
@@ -332,10 +230,10 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1100, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       await tester.runAsync(() => host.start(store));
       await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));
-      host.say(_notice('t1', _task('t1', 'WORKING')));
+      host.say(taskNotice('t1', taskEvent('t1', 'WORKING')));
       host.ask(10, 'Edit a.txt', task: 't1');
       await tester.runAsync(_settle);
       await tester.pump();
@@ -374,7 +272,7 @@ void main() {
       store.cancelPermission(session);
 
       // It ends with the task: a request that names it afterwards is no task's.
-      host.say(_notice('t1', _status('COMPLETED')));
+      host.say(taskNotice('t1', statusEvent('COMPLETED')));
       await _settle();
       expect(session.taskAllowances, isEmpty);
       host.ask(15, 'Edit a.txt', task: 't1');
@@ -409,7 +307,7 @@ void main() {
       host.ask(11, 'Edit b.txt', task: 't2');
       await _settle();
       expect(session.pendingPermissions, hasLength(2));
-      host.say(_notice('t1', _status('FAILED')));
+      host.say(taskNotice('t1', statusEvent('FAILED')));
       await _settle();
       expect(session.pendingPermissions.single.task!.id, 't2');
     });
@@ -448,7 +346,7 @@ void main() {
         'params': {
           'sessionId': 's1',
           'toolCall': {'toolCallId': 't1:q', 'title': 'Which one?', 'kind': 'other', 'rawInput': {'questions': <Object?>[]}},
-          'options': _options,
+          'options': permissionOptions,
         },
       });
       await _settle();
@@ -460,12 +358,12 @@ void main() {
   group('Stop', () {
     test('sends one stop, and every task ends canceled, those waiting on the person included', () async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       final session = await host.start(store);
-      host.say(_notice('a', _task('a', 'WORKING')));
-      host.say(_notice('b', _task('b', 'WORKING', title: 'Lint')));
-      host.say(_notice('c', _task('c', 'WORKING', title: 'Docs')));
-      host.say(_notice('c', _status('COMPLETED')));
+      host.say(taskNotice('a', taskEvent('a', 'WORKING')));
+      host.say(taskNotice('b', taskEvent('b', 'WORKING', title: 'Lint')));
+      host.say(taskNotice('c', taskEvent('c', 'WORKING', title: 'Docs')));
+      host.say(taskNotice('c', statusEvent('COMPLETED')));
       await _settle();
       host.ask(10, 'Edit a.txt', task: 'a');
       await _settle();
@@ -488,7 +386,7 @@ void main() {
 
     test('a conversation with no tasks sends no stop', () async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       final session = await host.start(store);
       await store.cancelSession(session);
       expect(host.sentOf(delegateStopMethod), isEmpty);
@@ -497,10 +395,10 @@ void main() {
 
     test('one task can be stopped by itself', () async {
       final store = SessionStore();
-      final host = _Host();
+      final host = DelegateHost();
       final session = await host.start(store);
-      host.say(_notice('a', _task('a', 'WORKING')));
-      host.say(_notice('b', _task('b', 'WORKING', title: 'Lint')));
+      host.say(taskNotice('a', taskEvent('a', 'WORKING')));
+      host.say(taskNotice('b', taskEvent('b', 'WORKING', title: 'Lint')));
       await _settle();
       await store.stopTask(session, 'b');
       expect(host.sentOf(delegateStopMethod).single['params'], {'sessionId': 's1', 'taskId': 'b'});
