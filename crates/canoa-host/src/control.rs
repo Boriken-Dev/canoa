@@ -202,6 +202,8 @@ pub(crate) struct Control {
     stores: OnceLock<Result<Stores, String>>,
     /// The recorded histories and the harnesses a session may be moved to.
     history: Option<Moves>,
+    /// The owner's accounts, once the host knows where canoa.cfg is.
+    accounts: Option<accounts::Accounts>,
     entries: Vec<EntryRoots>,
     /// What a page may do with this computer's files.
     files: Files,
@@ -294,6 +296,7 @@ impl Control {
         Ok(Self {
             stores: OnceLock::new(),
             history: None,
+            accounts: None,
             entries,
             files: Files::default(),
             overlays: Overlays::default(),
@@ -344,6 +347,19 @@ impl Control {
     pub(crate) fn with_history(mut self, history: Moves) -> Self {
         self.history = Some(history);
         self
+    }
+
+    /// Answers `accounts/*` for the owner.
+    #[must_use]
+    pub(crate) fn with_accounts(mut self, accounts: accounts::Accounts) -> Self {
+        self.accounts = Some(accounts);
+        self
+    }
+
+    fn accounts(&self) -> Result<&accounts::Accounts, (i32, String)> {
+        self.accounts
+            .as_ref()
+            .ok_or((REFUSED, "this host does not manage accounts".to_owned()))
     }
 
     fn stores(&self) -> Result<&Stores, (i32, String)> {
@@ -462,9 +478,14 @@ impl Control {
                 Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
                     owner_only_history(caller).and_then(|()| self.import_call(method, &params))
                 }
-                Some("store/apply") => Err((
+                Some(method @ ("accounts/catalog" | "accounts/list" | "accounts/remove")) => {
+                    owner_only_accounts(caller)
+                        .and_then(|()| self.accounts())
+                        .and_then(|accounts| accounts.call(method, &params))
+                }
+                Some("store/apply" | "accounts/add" | "accounts/login") => Err((
                     REFUSED,
-                    "an apply needs a link that can carry its progress".to_owned(),
+                    "this needs a link that can carry its progress".to_owned(),
                 )),
                 _ => Err((NO_METHOD, "this host has no such method".to_owned())),
             };
@@ -681,6 +702,17 @@ fn owner_only(caller: &Caller) -> Result<(), (i32, String)> {
     }
 }
 
+/// Accounts are the person's: signing in runs a program of theirs and stores a credential.
+fn owner_only_accounts(caller: &Caller) -> Result<(), (i32, String)> {
+    match caller {
+        Caller::Owner => Ok(()),
+        Caller::Peer { .. } => Err((
+            DENIED,
+            "only the person running this host manages its accounts".to_owned(),
+        )),
+    }
+}
+
 /// A recorded session is the person's: only this process reads or moves one, and no grant says otherwise.
 fn owner_only_history(caller: &Caller) -> Result<(), (i32, String)> {
     match caller {
@@ -730,7 +762,13 @@ fn now_millis() -> u64 {
 
 fn is_apply(line: &[u8]) -> bool {
     serde_json::from_slice::<Value>(line).is_ok_and(|request| {
-        request.get("id").is_some() && request.get("method") == Some(&json!("store/apply"))
+        request.get("id").is_some()
+            && request
+                .get("method")
+                .and_then(Value::as_str)
+                .is_some_and(|method| {
+                    method == "store/apply" || accounts::Long::of(method).is_some()
+                })
     })
 }
 
@@ -741,6 +779,18 @@ impl Control {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         if let Err((code, message)) = owner_only(caller) {
             return error_line(&id, code, &message);
+        }
+        if let Some(long) = request
+            .get("method")
+            .and_then(Value::as_str)
+            .and_then(accounts::Long::of)
+        {
+            return match self.accounts() {
+                Ok(accounts) => {
+                    accounts.sign_in(long, &request, channel, &|other| self.handle(caller, other))
+                }
+                Err((code, message)) => error_line(&id, code, &message),
+            };
         }
         match self.stores() {
             Ok(stores) => stores.apply(&request, channel, &|other| self.handle(caller, other)),
@@ -828,6 +878,7 @@ mod files_tests;
 mod import;
 #[cfg(test)]
 mod import_tests;
+pub(crate) mod accounts;
 mod moves;
 mod overlays;
 #[cfg(test)]

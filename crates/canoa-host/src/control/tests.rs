@@ -600,3 +600,28 @@ fn a_host_that_keeps_no_histories_refuses_the_owner_with_the_reason() {
 fn no_grant_names_history() {
     assert!(Grant::named("history.read").is_none() && Grant::named("history.move").is_none());
 }
+
+#[test]
+fn a_key_manages_no_account_whatever_it_is_granted() {
+    let control = memory();
+    let key = peer(
+        "sha256:abc",
+        &[
+            Grant::LedgerRead,
+            Grant::LedgerWrite,
+            Grant::Worktree,
+            Grant::StoreRead,
+        ],
+    );
+    for (method, params) in [
+        ("accounts/catalog", json!({"harness": "claude"})),
+        ("accounts/list", json!({})),
+        ("accounts/remove", json!({"name": "work"})),
+    ] {
+        let answer = ask(&control, &key, method, params);
+        assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+    }
+    // The owner of a host that was told where canoa.cfg is not gets a reason, not a missing method.
+    let owner = ask(&control, &Caller::Owner, "accounts/list", json!({}));
+    assert_eq!(owner["error"]["code"], REFUSED, "{owner}");
+}

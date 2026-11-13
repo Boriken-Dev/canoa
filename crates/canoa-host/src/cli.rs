@@ -779,6 +779,9 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);
     }
+    if let Ok(layers) = layers_of(&args.config, front, false) {
+        options = options.with_account_layers(layers);
+    }
     let serving =
         Serving::bind(&config, identity, store(&home)?, &options).map_err(|error| match error {
             crate::ServeError::NothingToServe => Failed::usage(error),

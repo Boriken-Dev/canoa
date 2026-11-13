@@ -103,6 +103,9 @@ pub struct ServeOptions {
     pub home_dir: Option<PathBuf>,
     /// Whether a supervisor starts the host again when it ends with `cli::STATUS_RESTART`; only then is `host/restart` offered.
     pub supervised: bool,
+    /// The canoa.cfg files the control channel's `accounts/*` methods read and write; with the state directory, which is the
+    /// home they keep accounts in. Without it the host manages no accounts over the control channel.
+    pub account_layers: Option<crate::config::Layers>,
 }
 
 impl ServeOptions {
@@ -122,6 +125,7 @@ impl ServeOptions {
             config_file: None,
             home_dir: None,
             supervised: false,
+            account_layers: None,
         }
     }
 
@@ -129,6 +133,13 @@ impl ServeOptions {
     #[must_use]
     pub fn with_layers(mut self, layers: Layers) -> Self {
         self.layers = Some(layers);
+        self
+    }
+
+    /// Lets the control channel's owner manage accounts in these canoa.cfg files, in the state directory's home.
+    #[must_use]
+    pub fn with_account_layers(mut self, layers: crate::config::Layers) -> Self {
+        self.account_layers = Some(layers);
         self
     }
 
@@ -1329,7 +1340,7 @@ impl Serving {
         let serving = Self {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
-                secrets,
+                secrets: Arc::clone(&secrets),
                 method,
                 store,
                 registry,
@@ -1423,6 +1434,12 @@ impl Serving {
                         targets: movers,
                         homes: control::Homes::of_this_computer(),
                     });
+                    let kept = match (&options.account_layers, &options.state_dir) {
+                        (Some(layers), Some(home)) => kept.with_accounts(
+                            control::accounts::Accounts::new(layers.clone(), home.clone(), secrets),
+                        ),
+                        _ => kept,
+                    };
                     match &options.programs {
                         Some((programs, providers)) => kept.with_stores(control::Stores::new(
                             Arc::clone(programs),

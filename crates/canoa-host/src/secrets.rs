@@ -15,6 +15,7 @@
     reason = "locks, sockets and the clock are std's"
 )]
 
+pub(crate) mod ask;
 mod http;
 mod layers;
 mod link;
@@ -162,6 +163,12 @@ impl Hub {
         self.local
             .as_ref()
             .map(|local| Zeroizing::new(*local.secret))
+    }
+
+    /// What puts a form of the host's own to the application in this process, sealed under the link's secret; `None` when the
+    /// host has no such secret.
+    pub(crate) fn asker(&self) -> Option<ask::Asker> {
+        ask::Asker::new(&self.local.as_ref()?.key)
     }
 
     /// The secrets of the connection the application in this process holds, bound by the link's own secret. Only
