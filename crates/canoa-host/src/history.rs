@@ -80,6 +80,14 @@ struct Counts {
     refused: BTreeSet<String>,
 }
 
+/// A session the host brought in from a harness's own folder.
+pub(crate) struct ImportedSession {
+    pub(crate) session: String,
+    pub(crate) title: Option<String>,
+    pub(crate) cwd: Option<String>,
+    pub(crate) at: Option<String>,
+}
+
 /// The directory of histories and the limits it is held to.
 pub(crate) struct Store {
     dir: Option<PathBuf>,
@@ -221,6 +229,60 @@ impl Store {
         Ok(())
     }
 
+    /// Whether the session already has a history.
+    pub(crate) fn has(&self, entry: &str, session: &str) -> bool {
+        self.path(&file_name(entry, session))
+            .is_ok_and(|path| fs::symlink_metadata(path).is_ok())
+    }
+
+    /// The sessions brought in from a harness's own folder under `entry`, newest first; nothing but a header is read.
+    pub(crate) fn imported(&self, entry: &str) -> Vec<ImportedSession> {
+        let Some(dir) = &self.dir else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        for each in fs::read_dir(dir).into_iter().flatten().flatten() {
+            if !each.file_name().to_string_lossy().ends_with(".jsonl")
+                || !each.file_type().is_ok_and(|kind| kind.is_file())
+            {
+                continue;
+            }
+            let Ok(file) = fs::File::open(each.path()) else {
+                continue;
+            };
+            let mut settings = ReaderSettings::default();
+            settings.bounds.max_total_bytes =
+                self.config.max_session_bytes.saturating_add(HEADER_ROOM);
+            let Ok(reader) = Reader::builder(BufReader::new(file))
+                .settings(settings)
+                .open()
+            else {
+                continue;
+            };
+            let header = reader.header();
+            let Some(mark) = header
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.get(crate::control::IMPORT_KEY))
+            else {
+                continue;
+            };
+            if mark.get("entry").and_then(Value::as_str) != Some(entry) {
+                continue;
+            }
+            let Some(session) = mark.get("session").and_then(Value::as_str) else {
+                continue;
+            };
+            found.push(ImportedSession {
+                session: session.to_owned(),
+                title: mark.get("title").and_then(Value::as_str).map(str::to_owned),
+                cwd: header.cwd.clone(),
+                at: header.created_at.clone(),
+            });
+        }
+        found.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.session.cmp(&b.session)));
+        found
+    }
     /// Keeps nothing more of the session: a turn of it did not fit.
     pub(crate) fn refuse(&self, entry: &str, session: &str) {
         self.counts().refused.insert(file_name(entry, session));

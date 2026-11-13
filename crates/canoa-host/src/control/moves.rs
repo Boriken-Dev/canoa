@@ -26,6 +26,8 @@ const DEFAULT_PAGE_BYTES: u64 = 1024 * 1024;
 pub(crate) struct Moves {
     pub(crate) store: Arc<Store>,
     pub(crate) targets: BTreeMap<String, Arc<kind::Harness>>,
+    /// Where the harnesses keep the sessions the person may bring in.
+    pub(crate) homes: super::import::Homes,
 }
 
 impl core::fmt::Debug for Moves {

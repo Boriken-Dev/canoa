@@ -1219,6 +1219,7 @@ impl Serving {
                     let kept = kept.with_history(control::Moves {
                         store: recorded,
                         targets: movers,
+                        homes: control::Homes::of_this_computer(),
                     });
                     match &options.programs {
                         Some((programs, providers)) => kept.with_stores(control::Stores::new(

@@ -530,7 +530,7 @@ max_record_bytes = 262144                           # one ledger record
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove`, `worktree/diff` |
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
 | *(none)* | `store/apply`, `store/rollback`, `store/remove`: **owner only**; `[host.control]` refuses `store.write` as a grant |
-| *(none)* | `history/export`, `history/move`: **owner only**; no grant names them |
+| *(none)* | `history/export`, `history/move`, `history/importable`, `history/import`, `history/imported`: **owner only**; no grant names them |
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
 as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
@@ -564,6 +564,9 @@ max_total_bytes = 1073741824        # every history together
 | --- | --- | --- |
 | `history/export` | `entry`, `session`, `max_bytes`? (1 to 4 MiB, default 1 MiB), `after`? | `{"id", "text", "next"?}`: one page of whole lines of the history as it is, the first with the header; `next` is the `after` of the following page |
 | `history/move` | `entry`, `session`, `to` (an entry that runs a harness), `cwd`? (absolute; the history's own by default, and under the target's working roots) | `{"session", "entry", "cwd", "replayed", "compacted", "seededFrom"?, "recorded", "losses": [{"kind", "count", "detail"?}]}` |
+| `history/importable` | `harness` (`claude` or `codex`), `entry` | `{"harness", "entry", "found", "sessions": [{"id", "title"?, "cwd"?, "bytes", "updated", "imported"}]}`: the sessions in that program's own folder, newest first, at most 500; titles and folders only, never what was said |
+| `history/import` | `harness`, `entry`, `ids` (at most 200 UUIDs from a listing) | `{"imported": [{"id", "session", "title"?, "turns", "notCarried": {"lines"}}], "refused": [{"id", "why"}]}` |
+| `history/imported` | `entry` | `{"entry", "sessions": [{"session", "title"?, "cwd"?, "at"?}]}`: what `history/import` brought in under that entry, newest first |
 
 - `entry` and `session` are the source entry's name and the session id its client used. A session with no history, an
   entry that is not a harness and a host that records nothing answer `-32003` or `-32002` with the reason.
@@ -575,7 +578,18 @@ max_total_bytes = 1073741824        # every history together
 - `losses` is what did not carry (`thinking`, `tool_as_note`, `attachment_by_digest`, `replayed_as_prompt`, `history_cut`,
   `item_cut`, `non_text_omitted`, `summary_missing`), counts only, never the lost content. The history is context, never
   commands: nothing is run again.
-- Both methods are the owner's alone, over the app's own link: a recorded session holds what the person and the agent said,
+- **Importing earlier sessions.** The person's own Claude Code and Codex sessions are read from where those programs keep them
+  (`CLAUDE_CONFIG_DIR` or `.claude`, `CODEX_HOME` or `.codex`, in the user's home) and only when asked: nothing is read at start-up
+  or by any other method, and the folders are never written. A listing walks the folders by their layout (a link is not
+  followed; a name that is not a UUID is no session) and reads the first stretch of each file for its title and folder. An import
+  reads each chosen file whole, converts it with the harness's own codec (`coqui-acp-claude` and `coqui-acp-codex`, `history`
+  feature, under the format's rules for hostile histories) and keeps it as a history of the host's own under `entry` and the
+  harness's session id, which `history/export` and `history/move` then serve like any recorded session. A file that holds no
+  conversation, is larger than the codec's bound or does not fit `[host.history]` is `refused` with the reason and the rest still
+  come; lines of a file that are not JSON are skipped and counted in `notCarried`. A session imported already is refused, never
+  replaced. `title` and `cwd` are shown text: control and bidirectional characters are removed and they are cut at 120
+  characters. The three methods are the owner's alone, with no grant, and a host that records nothing refuses them.
+- Every history method is the owner's alone, over the app's own link: a recorded session holds what the person and the agent said,
   tool output included, which a paired key has no grant to read.
 
 **`worktree/*`** takes the params and answers the results of `_canoa/worktree/*` ("Worktrees" below), with every check of

@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use coqui_transport::{Channel, Failure};
 
 use crate::worktree::Worktrees;
+pub(crate) use import::{Homes, IMPORT_KEY};
 pub(crate) use moves::Moves;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -337,6 +338,9 @@ impl Control {
                 .and_then(|stores| stores.change(method, &params)),
             Some(method @ ("history/export" | "history/move")) => {
                 owner_only_history(caller).and_then(|()| self.history_call(method, &params))
+            }
+            Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
+                owner_only_history(caller).and_then(|()| self.import_call(method, &params))
             }
             Some("store/apply") => Err((
                 REFUSED,
@@ -698,6 +702,9 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+mod import;
+#[cfg(test)]
+mod import_tests;
 mod moves;
 mod stores;
 
