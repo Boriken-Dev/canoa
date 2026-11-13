@@ -142,16 +142,61 @@ fn what_a_client_names_is_checked_before_git_runs() {
 
 #[cfg(windows)]
 #[test]
-fn a_share_is_never_looked_at() {
-    let worktrees = Worktrees::new(vec![PathBuf::from(r"\\server\share")], true);
+fn a_device_or_a_share_outside_the_roots_is_never_looked_at() {
+    let worktrees = Worktrees::new(
+        vec![PathBuf::from(r"C:\work"), PathBuf::from(r"\\server\share")],
+        true,
+    );
     for path in [
-        r"\\server\share\repo",
-        r"\\?\UNC\server\share\repo",
         r"\\.\pipe\x",
+        r"\\?\Volume{00000000-0000-0000-0000-000000000000}\x",
+        r"\\other\share\repo",
+        r"\\server\other\repo",
+        r"\\server\share\..\other",
     ] {
         let reply = ask(&worktrees, STATUS, &json!({"path": path}));
         assert_eq!(reply["error"]["code"], INVALID_PARAMS, "{path}: {reply}");
+        let reply = ask(&worktrees, NEW, &json!({"cwd": path, "branch": "canoa/x"}));
+        assert_eq!(reply["error"]["code"], INVALID_PARAMS, "{path}: {reply}");
     }
+}
+
+/// A repository on a share under a root passes this host's checks like any other. Git itself still asks for
+/// `safe.directory` on a share it does not take as local, and says so; where that is set, a worktree is made there and
+/// every path answered is written plain.
+#[cfg(windows)]
+#[test]
+fn a_repository_on_a_share_under_a_root_passes_the_hosts_checks() {
+    let Some(fixture) = Fixture::new("on-share") else {
+        return;
+    };
+    let on_share = |path: &Path| {
+        let text = path.to_string_lossy();
+        let (drive, rest) = text.split_at(2);
+        PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]))
+    };
+    let repo = on_share(&fixture.repo);
+    let worktrees = Worktrees::new(vec![on_share(&fixture.scratch.join("src"))], true);
+    let made = match worktrees.make(&repo.to_string_lossy(), "canoa/share-a1b2c3") {
+        Ok(made) => made,
+        Err(refusal) => {
+            assert_eq!(refusal.code, INTERNAL_ERROR, "{refusal:?}");
+            assert!(refusal.message.starts_with("git failed: "), "{refusal:?}");
+            return;
+        }
+    };
+    let path = PathBuf::from(made["path"].as_str().expect("a path"));
+    assert!(
+        path.to_string_lossy().starts_with(r"\\localhost\"),
+        "the worktree is written plain, on the share: {}",
+        path.display()
+    );
+    assert!(path.join("README").exists());
+    let removed = worktrees
+        .remove(&path.to_string_lossy(), false)
+        .expect("removed");
+    assert_eq!(removed["branchKept"], false, "{removed}");
+    assert!(!path.exists());
 }
 
 /// `git -C dir args` for a test, which must succeed.

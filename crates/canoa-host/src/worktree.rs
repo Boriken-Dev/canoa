@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use core::time::Duration;
 use std::ffi::{OsStr, OsString};
 use std::io::{ErrorKind, Read as _};
-use std::path::{Component, Path, PathBuf, Prefix};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
@@ -19,6 +19,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
 use crate::config::plain_absolute;
+use crate::share;
 
 /// Makes a worktree: `{"cwd", "branch"}` to `{"path", "branch", "repo"}`.
 pub(crate) const NEW: &str = "_canoa/worktree/new";
@@ -185,17 +186,21 @@ impl Worktrees {
     /// `path` as a client wrote it, checked as the scope checks a `cwd` and then resolved: its target must still be under a
     /// root's target. `Ok(None)` when nothing is there.
     fn checked(&self, text: &str) -> Result<Option<PathBuf>, Refusal> {
-        let path = Path::new(text);
-        // Looking at a share would reach that machine with this user's credentials, before any check.
-        if !plain_absolute(path)
-            || !local(path)
-            || !self.roots.iter().any(|root| path.starts_with(root))
+        // Written plain, and held to the roots as written before anything is looked at: a share is looked at only when a root
+        // names it.
+        let path = share::plain(Path::new(text));
+        if !plain_absolute(&path)
+            || share::is_device(&path)
+            || !self
+                .roots
+                .iter()
+                .any(|root| path.starts_with(share::plain(root)))
         {
             return Err(refused(
                 "this host makes worktrees only under its working roots",
             ));
         }
-        let resolved = match resolve(path) {
+        let resolved = match resolve(&path) {
             Ok(resolved) => resolved,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
             Err(_) => return Err(refused("that directory cannot be read")),
@@ -245,8 +250,8 @@ impl Worktrees {
         for ancestor in dir.ancestors().take_while(|ancestor| self.inside(ancestor)) {
             let dot_git = ancestor.join(".git");
             if std::fs::symlink_metadata(&dot_git).is_ok_and(|meta| meta.is_file()) {
-                let gitdir = pointed(&dot_git, "gitdir:", ancestor)?;
-                pointed(&gitdir.join("commondir"), "", &gitdir)?;
+                let gitdir = pointed(&dot_git, "gitdir:", ancestor, &self.roots)?;
+                pointed(&gitdir.join("commondir"), "", &gitdir, &self.roots)?;
             }
         }
         let ceilings: Vec<PathBuf> = self
@@ -623,8 +628,8 @@ impl Worktrees {
 }
 
 /// What the file `file` points at (`gitdir: X` for a `.git` file, the whole text for `commondir`), made absolute from
-/// `base`; refused when it names a share or a device. A missing file points at `base` itself.
-fn pointed(file: &Path, prefix: &str, base: &Path) -> Result<PathBuf, Refusal> {
+/// `base`; refused when it names a device, or a share that no root holds. A missing file points at `base` itself.
+fn pointed(file: &Path, prefix: &str, base: &Path, roots: &[PathBuf]) -> Result<PathBuf, Refusal> {
     let mut text = String::new();
     match std::fs::File::open(file) {
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(base.to_path_buf()),
@@ -643,8 +648,15 @@ fn pointed(file: &Path, prefix: &str, base: &Path) -> Result<PathBuf, Refusal> {
         .strip_prefix(prefix)
         .unwrap_or("")
         .trim();
-    let named = Path::new(target);
-    if target.starts_with("//") || target.starts_with(r"\\") || !local(named) {
+    let named = share::plain(Path::new(target));
+    let on_share = target.starts_with("//") || target.starts_with(r"\\") || share::is_share(&named);
+    let held = || {
+        plain_absolute(&named)
+            && roots
+                .iter()
+                .any(|root| named.starts_with(share::plain(root)))
+    };
+    if share::is_device(&named) || (on_share && !held()) {
         return Err(refused(
             "the repository's git directory is named on a share or device, which this host does not reach",
         ));
@@ -726,35 +738,16 @@ fn run_git(dir: &Path, args: &[&OsStr], ceilings: &OsString) -> Result<(bool, St
     Ok((false, said.trim().to_owned()))
 }
 
-/// `path` with every link resolved. On Windows the result is written as a drive path, not `\\?\`, as git and the roots
-/// are; a share is refused.
+/// `path` with every link resolved, written plain (not `\\?\`), as git and the roots are. A device is refused.
 fn resolve(path: &Path) -> std::io::Result<PathBuf> {
-    let resolved = std::fs::canonicalize(path)?;
-    if !local(&resolved) {
+    let resolved = share::plain(&std::fs::canonicalize(path)?).into_owned();
+    if share::is_device(&resolved) {
         return Err(std::io::Error::new(
             ErrorKind::InvalidInput,
-            "not a local directory",
+            "not a directory",
         ));
     }
-    Ok(
-        match resolved
-            .to_str()
-            .and_then(|text| text.strip_prefix(r"\\?\"))
-        {
-            Some(drive) if cfg!(windows) => PathBuf::from(drive),
-            _ => resolved,
-        },
-    )
-}
-
-/// Whether `path` names this machine's file system: on Windows a drive, not a share or a device namespace.
-fn local(path: &Path) -> bool {
-    match path.components().next() {
-        Some(Component::Prefix(prefix)) => {
-            matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
-        }
-        _ => true,
-    }
+    Ok(resolved)
 }
 
 #[cfg(test)]
