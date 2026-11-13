@@ -7,6 +7,8 @@
 # Agent config and personal overrides, at any depth.
 .agents
 CLAUDE*
+# On a case-insensitive filesystem CLAUDE* also matches this asset, which is not agent config.
+!app/assets/icons/agents/claude.svg
 .claude
 *.local.*
 
