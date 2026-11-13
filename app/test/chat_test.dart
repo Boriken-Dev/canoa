@@ -146,7 +146,7 @@ void main() {
       expect(find.text('Run a command'), findsOneWidget);
       expect(find.text('Edit hello.txt'), findsOneWidget);
       expect(find.text('Plan: 1 of 2'), findsOneWidget);
-      expect(find.text('50% of context · 0.25 USD'), findsOneWidget);
+      expect(find.text('0.25 USD'), findsOneWidget);
       expect(find.text('Model A'), findsOneWidget);
       // A failure opens by itself: its command, output and exit status are what a person came to see.
       expect(find.text(r'$ echo hi'), findsOneWidget);

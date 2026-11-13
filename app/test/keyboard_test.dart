@@ -182,12 +182,15 @@ void main() {
     expect(agents.last.answerTo(8)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'no'}});
   });
 
-  testWidgets('Ctrl+Shift+D opens the changes pane', (tester) async {
+  testWidgets('Ctrl+Shift+D opens the inspector, whose changes open the changes pane', (tester) async {
     final (agents, _, _) = await _three(tester);
     agents.last.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'e', 'title': 'Edit', 'status': 'completed',
       'content': [{'type': 'diff', 'path': 'a.txt', 'oldText': 'a\n', 'newText': 'b\n'}]});
     await _settle(tester);
     await _press(tester, LogicalKeyboardKey.keyD, shift: true);
+    expect(find.text('Environment'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('open diff')));
+    await tester.pumpAndSettle();
     expect(find.byType(ChangesPane), findsOneWidget);
   });
 

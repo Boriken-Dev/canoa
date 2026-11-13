@@ -1,107 +1,36 @@
 // Every file the session's tools changed, by file, from what the agent sent: the shapes are the coding task's, Claude's v2 diff
 // as test/fixtures/coding_task_updates.jsonl records it and the scripted stand-in's v1 diffs.
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io' show Directory, File;
 
-import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
-import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:canoa/chat/session_views.dart';
+import 'fixtures/task_agent.dart';
 
-final class _Tolerant extends LocalFileComparator {
-  _Tolerant(super.testFile);
+Future<void> _settle(WidgetTester tester) => settle(tester);
 
-  @override
-  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
-    final result = await GoldenFileComparator.compareLists(imageBytes, await getGoldenBytes(golden));
-    if (!result.passed && result.diffPercent > 0.015) fail(await generateFailureOutput(result, golden, basedir));
-    result.dispose();
-    return true;
-  }
+Future<(TaskAgent, ChatSession, SessionStore)> _shown(WidgetTester tester, Size size) async {
+  final shown = await showTask(tester, size);
+  shown.$1.task();
+  await settle(tester);
+  return shown;
 }
 
-final class _Agent {
-  final incoming = StreamController<String>();
-
-  Future<ChatSession> start(SessionStore store) async {
-    final client = VerifiedAgent.fromChild(
-      label: 'Coder',
-      messages: incoming.stream,
-      decider: store.askPermission,
-      close: () async {},
-      send: (line) async {
-        final message = jsonDecode(line) as Map<String, dynamic>;
-        final id = message['id'];
-        if (id == null || message['method'] == null) return;
-        incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': switch (message['method']) {
-          'initialize' => {'protocolVersion': 1, 'agentCapabilities': <String, Object?>{}},
-          'session/new' => {'sessionId': 's1'},
-          _ => <String, Object?>{},
-        }}));
-      },
-    );
-    await client.initialize();
-    await client.openSession(cwd: '/work');
-    final session = store.addProviderSession(title: 'Fix the failing test', agent: 'Coder', peerId: client.peerId, remoteSessionId: 's1');
-    store.attachVerifiedClient(session.id, client, record: false);
-    store.select(session.id);
-    return session;
-  }
-
-  void update(Map<String, Object?> body) => incoming.add(jsonEncode({
-    'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': 's1', 'update': body},
-  }));
-
-  void tool(String id, String status, List<Object> content) =>
-      update({'sessionUpdate': 'tool_call_update', 'toolCallId': id, 'title': 'Edit', 'kind': 'edit', 'status': status, 'content': content});
-
-  /// The coding task's edits: calc.js twice, a new README line, an edit refused, and a v2 patch of report.js.
-  void task() {
-    tool('fix', 'completed', [
-      {'type': 'diff', 'path': 'src/calc.js', 'oldText': 'export function addNumbers(a, b) {\n  return a - b;\n}\n',
-        'newText': 'export function addNumbers(a, b) {\n  return a + b;\n}\n'},
-    ]);
-    tool('readme', 'completed', [{'type': 'diff', 'path': 'README.md', 'newText': '# tiny\nMaintainer: Ana Rivera\n'}]);
-    tool('refused', 'failed', [{'type': 'diff', 'path': 'obsolete.txt', 'oldText': 'kept\n', 'newText': ''}]);
-    tool('rename', 'completed', [
-      {'type': 'diff', 'path': 'src/calc.js', 'oldText': 'export function addNumbers(a, b) {\n  return a + b;\n}\n',
-        'newText': 'export function sum(a, b) {\n  return a + b;\n}\n'},
-    ]);
-    // Claude's v2 shape, as the fixture records it.
-    tool('report', 'completed', [
-      {'type': 'diff', 'changes': [{'operation': 'update', 'path': 'src/report.js', 'fileType': 'file'}],
-        'patch': {'format': 'unified', 'text': '@@ -1,4 +4,4 @@\n export function total(values) {\n-  return values.reduce((s, v) => addNumbers(s, v), 0);\n+  return values.reduce((s, v) => sum(s, v), 0);\n }'}},
-    ]);
-  }
-}
-
-Future<void> _settle(WidgetTester tester) async {
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
-  await tester.pump();
-}
-
-Future<(_Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, Size size) async {
-  await tester.binding.setSurfaceSize(size);
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  final store = SessionStore();
-  final agent = _Agent();
-  final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
-  await tester.pumpWidget(CanoaApp(store: store));
-  agent.task();
-  await _settle(tester);
-  return (agent, session, store);
+/// The changes pane the inspector opens from the header's chip.
+Future<void> _openChanges(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Changes'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('open diff')));
+  await tester.pumpAndSettle();
 }
 
 bool isViewed(ChatSession session, FileChange file) => session.viewedChanges[file.path] == file.version;
 
 void main() {
-  setUpAll(() => goldenFileComparator = _Tolerant(Uri.file('${Directory.current.path}/test/changes_test.dart')));
+  setUpAll(() => goldenFileComparator = TolerantComparator(Uri.file('${Directory.current.path}/test/changes_test.dart')));
 
   test('the fixture records the v2 diff shape these tests send', () {
     final shapes = File('test/fixtures/coding_task_updates.jsonl').readAsLinesSync().where((line) => line.contains('"patch"'));
@@ -123,8 +52,7 @@ void main() {
 
   testWidgets('a file marked viewed stays so until it changes again', (tester) async {
     final (agent, session, store) = await _shown(tester, const Size(1280, 800));
-    await tester.tap(find.byTooltip('Changes'));
-    await tester.pumpAndSettle();
+    await _openChanges(tester);
     expect(find.byType(ChangesPane), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('viewed README.md')));
     await tester.pump();
@@ -138,8 +66,7 @@ void main() {
 
   testWidgets('a comment on a line goes to the composer with the file and the line', (tester) async {
     await _shown(tester, const Size(1280, 800));
-    await tester.tap(find.byTooltip('Changes'));
-    await tester.pumpAndSettle();
+    await _openChanges(tester);
     await tester.tap(find.byKey(const ValueKey('line src/calc.js new 1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('change-comment')), 'Keep the old name as an alias.');
@@ -154,16 +81,14 @@ void main() {
     agent.tool('big', 'completed', [{'type': 'diff', 'path': 'big.txt', 'newText': 'x' * (chatLimits.toolText + 10)}]);
     await _settle(tester);
     expect(sessionChanges(session).last.cut, isTrue);
-    await tester.tap(find.byTooltip('Changes'));
-    await tester.pumpAndSettle();
+    await _openChanges(tester);
     expect(find.textContaining('cut short'), findsOneWidget);
   });
 
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
     testWidgets('the pane draws at $label width with nothing overflowing', (tester) async {
       await _shown(tester, size);
-      await tester.tap(find.byTooltip('Changes'));
-      await tester.pumpAndSettle();
+      await _openChanges(tester);
       expect(tester.takeException(), isNull);
       expect(find.byType(ChangesPane), findsOneWidget);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/changes_$label.png'));

@@ -31,6 +31,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'chat/cache_lifetime.dart';
+import 'chat/git_changes.dart' show GitReader;
+import 'chat/inspector.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/child_thread.dart';
 import 'chat/clipboard.dart';
@@ -148,7 +151,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.browserProvider,
+    this.tabBridge, this.browserProvider, this.gitReader,
   });
 
   /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
@@ -192,6 +195,10 @@ class CanoaApp extends StatefulWidget {
   /// Asks for a source's models and efforts before its agent runs; by default the host this app carries is asked.
   @visibleForTesting
   final ChoicesLoader? askChoices;
+
+  /// Reads the repository in a session's folder; by default through the host the session's agent runs on.
+  @visibleForTesting
+  final GitReader? Function(ChatSession session)? gitReader;
 
   final SessionStore? store;
 
@@ -566,6 +573,15 @@ class _CanoaAppState extends State<CanoaApp> {
   late final HostControl? _control = widget.host == null ? null : HostControl(widget.host!);
 
   Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
+
+  /// Reads the repository in [session]'s folder through the host its agent runs on; null where none can.
+  GitReader? _gitReaderFor(ChatSession session) {
+    if (widget.gitReader != null) return widget.gitReader!(session);
+    if (session.place == SessionPlace.local) return _control == null ? null : HostGit(controlWorktreeCall(_control));
+    final worktrees = _worktrees(session.place, endpoint: session.endpoint?.toString(), fallback: session.websocketFallback?.toString(),
+        peerId: session.peerId, method: session.method);
+    return worktrees is HostWorktrees ? HostGit(worktrees.call) : null;
+  }
 
   /// Makes, reads and removes worktrees where a session's agent runs: by this app's host for one it runs, through the host for
   /// one it reached at [endpoint]; null where neither can.
@@ -1180,6 +1196,7 @@ class _CanoaAppState extends State<CanoaApp> {
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.starter = _startDraft;
     store.choicesLoader = _askChoices;
+    store.gitReader = _gitReaderFor;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
     if (store.secretIdentity == null) unawaited(_loadSecretIdentity());
@@ -1237,6 +1254,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.removeListener(_noteLast);
     if (identical(store.starter, _startDraft)) store.starter = null;
     if (identical(store.choicesLoader, _askChoices)) store.choicesLoader = null;
+    if (identical(store.gitReader, _gitReaderFor)) store.gitReader = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
@@ -1402,7 +1420,7 @@ class _CanoaHome extends StatelessWidget {
       ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
         PaletteItem('Connect to an agent', () => _connect(context), icon: Icons.link_rounded),
-        if (session != null && conversation.showChanges != null && sessionChanges(session).isNotEmpty)
+        if (session != null && conversation.showChanges != null && (changeTotals(session) != null))
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
@@ -1556,7 +1574,7 @@ class _ConversationState extends State<_Conversation> {
       ..focusComposer = _composerFocus.requestFocus
       ..showChanges = () {
         final session = widget.store.selected;
-        if (session != null && sessionChanges(session).isNotEmpty) _showChanges(session);
+        if (session != null && !session.isDraft) _showInspector(session);
       }
       ..insert = (text) {
         _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
@@ -1564,8 +1582,8 @@ class _ConversationState extends State<_Conversation> {
       };
   }
 
-  /// Whether the changes pane is beside the conversation, on a wide window.
-  bool _changesOpen = false;
+  /// Whether the inspector is beside the conversation, on a wide window.
+  bool _inspectorOpen = false;
 
   /// Adds [text] to the message being written, on a line of its own.
   void _addToComposer(String text) {
@@ -1574,10 +1592,10 @@ class _ConversationState extends State<_Conversation> {
     _input.value = TextEditingValue(text: joined, selection: TextSelection.collapsed(offset: joined.length));
   }
 
-  /// The changes pane: beside the conversation on a wide window, a sheet over it on a narrow one.
-  void _showChanges(ChatSession session) {
+  /// The inspector: beside the conversation on a wide window, a sheet over it on a narrow one.
+  void _showInspector(ChatSession session) {
     if (!widget.narrow) {
-      setState(() => _changesOpen = !_changesOpen);
+      setState(() => _inspectorOpen = !_inspectorOpen);
       return;
     }
     unawaited(showModalBottomSheet<void>(
@@ -1586,17 +1604,14 @@ class _ConversationState extends State<_Conversation> {
       useSafeArea: true,
       builder: (sheet) => Selectable(child: FractionallySizedBox(
         heightFactor: 0.9,
-        child: ListenableBuilder(
-          listenable: widget.store,
-          builder: (context, _) => SessionChangesPane(
-            store: widget.store,
-            session: session,
-            onComment: (text) {
-              _addToComposer(text);
-              Navigator.pop(sheet);
-            },
-            onClose: () => Navigator.pop(sheet),
-          ),
+        child: SessionInspectorPanel(
+          store: widget.store,
+          session: session,
+          onComment: (text) {
+            _addToComposer(text);
+            Navigator.pop(sheet);
+          },
+          onClose: () => Navigator.pop(sheet),
         ),
       )),
     ));
@@ -1661,14 +1676,8 @@ class _ConversationState extends State<_Conversation> {
     _transcript.currentState?.jumpToLatest();
   }
 
-  /// Under the title: the agent, and once a session made here has started, its folder and worktree, which stay as they are.
-  static String _subtitle(ChatSession? session) => session == null
-      ? 'Multi-session agent chat'
-      : [
-          session.agent,
-          if (!session.isDraft && session.source != null) ?session.cwd,
-          if (session.worktree case final worktree?) 'worktree ${worktree.branch}',
-        ].join(' · ');
+  /// Under the title: the agent. Its folder, branch and worktree are in the inspector.
+  static String _subtitle(ChatSession? session) => session == null ? 'Multi-session agent chat' : session.agent;
 
   /// The state a session's header names.
   static String _state(ChatSession? session) => switch (session?.status) {
@@ -1693,7 +1702,7 @@ class _ConversationState extends State<_Conversation> {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && widget.store.canListEarlier(session))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && sessionChanges(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
+      if (session != null && !session.isDraft) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
       if (session != null && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
       if (session != null && (!widget.narrow || Uri.base.queryParameters['view'] == 'panel') && !session.isDraft && (widget.handle.popout?.available ?? false))
@@ -1757,6 +1766,8 @@ class _ConversationState extends State<_Conversation> {
                   style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             )),
+            if (session != null && !session.isDraft)
+              if (changeTotals(session) case (final added, final removed)) _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
             ..._headerActions(session),
             if (session != null)
               IconButton(
@@ -1823,7 +1834,8 @@ class _ConversationState extends State<_Conversation> {
         if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),
         if (session.pendingSecrets.isNotEmpty) SessionSecretCard(store: widget.store, session: session),
-        chat.UsageFooter(text: chat.describeUsage(session.usage, spend: session.spend)),
+        // The context's fraction is in the inspector.
+        chat.UsageFooter(text: chat.describeUsage(SessionUsage(cost: session.usage.cost, currency: session.usage.currency), spend: session.spend)),
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
           child: Center(
@@ -1843,18 +1855,19 @@ class _ConversationState extends State<_Conversation> {
         ),
       ],
     ]);
-    if (widget.narrow || !_changesOpen || session == null || sessionChanges(session).isEmpty) return conversation;
+    if (widget.narrow || !_inspectorOpen || session == null || session.isDraft) return conversation;
     return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Expanded(child: conversation),
       const VerticalDivider(width: 1),
       SizedBox(
         width: 420,
         child: SelectionArea(
-          child: SessionChangesPane(
+          child: SessionInspectorPanel(
+            key: ValueKey('inspector ${session.id}'),
             store: widget.store,
             session: session,
             onComment: _addToComposer,
-            onClose: () => setState(() => _changesOpen = false),
+            onClose: () => setState(() => _inspectorOpen = false),
           ),
         ),
       ),
@@ -1897,6 +1910,36 @@ class _ConversationState extends State<_Conversation> {
         if (problems.isNotEmpty) messenger.showSnackBar(SnackBar(content: Text(problems.join('\n'))));
       },
       child: child,
+    );
+  }
+}
+
+/// The lines a session's changes add and remove, in the header: it opens the inspector at the changes.
+class _ChangesChip extends StatelessWidget {
+  const _ChangesChip({required this.added, required this.removed, required this.onPressed});
+
+  final int added, removed;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.chatLook;
+    final mono = TextStyle(fontFamily: look.codeFont, fontSize: 12, fontWeight: FontWeight.w600);
+    return Tooltip(
+      message: 'Changes',
+      child: InkWell(
+        key: const ValueKey('changes chip'),
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('+$added', style: mono.copyWith(color: look.success)),
+            const SizedBox(width: 4),
+            Text('−$removed', style: mono.copyWith(color: look.danger)),
+          ]),
+        ),
+      ),
     );
   }
 }
