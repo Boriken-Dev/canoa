@@ -102,6 +102,7 @@ text = "{assistantMessageEvent.delta}"
 # Any of the three tables, each optional:
 listen = "127.0.0.1:7801"             # default 127.0.0.1:0, any free port; another address is configuration, logged; or "pipe:NAME" (Windows) or "unix:PATH" (Unix) for a native client on this machine, see "A pipe or Unix socket"
 working_roots = ["/home/me/src"]      # absolute, no . or ..; a session's cwd must be under one; default any
+                                      # a Windows share (\\server\share\src) is a root and a cwd like any path; \\?\UNC\ is compared and forwarded plain; a device path is refused
 worktrees = true                      # agents and tools: a git worktree per session inside working_roots; see "Worktrees"
 peers = ["sha256:…"]                  # paired keys that may use it; default every paired key
 max_peers = 4                         # connections at once
