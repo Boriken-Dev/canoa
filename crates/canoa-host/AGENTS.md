@@ -10,7 +10,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -153,6 +153,7 @@ pub const fn Listen::address(&self) -> Option<SocketAddr>    // None for a pipe
 #[non_exhaustive] pub struct StoreConfig { pub protected: Option<Vec<String>>, pub credential_variables: Option<Vec<String>> }   // Default, Clone, Eq: `[host.store]`; None is the recommended list
 #[non_exhaustive] pub enum AccountStore { Os, File }   // Copy, Default (Os), Eq: `[host] account_store`
 pub const CACHE_META: &str = "dev.boriken.canoa/cache_lifetime";   // the `_meta` key of `initialize`: {"lifetime": "default"|"short"|"long", "chosen"?: bool}; `chosen` (true when absent) says the person chose it for this session and it beats the entry's `cache_lifetime`; false is the client's default for its kind of session, which the entry's setting replaces; no key leaves the entry's, else the provider's default; any other value turns the client away (-32602)
+pub const SITE_META: &str = "dev.boriken.canoa/site";   // the `_meta` key of a webpage's `session/new`, `session/load` and `session/resume`, in the request ({"site": "<host name>"}) and in the answer to `session/new` ({"site", "id", "folder"}); see "A webpage's session folder"
 pub const ACCOUNT_META: &str = "dev.boriken.canoa/account";   // the `_meta` key of `initialize`, in the request (the account's name) and in the answer ({"name", "kind"})
 #[non_exhaustive] pub enum UsageSource { Antigravity }   // Copy; `usage = "antigravity"` on an agent entry
 pub fn UsageSource::named(name: &str) -> Option<UsageSource>
@@ -871,6 +872,10 @@ canoa accounts remove NAME [--config FILE]
 - `provider` takes `--library` and `--source` from where it was started, then runs in `--directory`; with `--settings-on-stdin` it reads a `HostLine` first, as `serve` writes it; with `--connect` it serves on that loopback socket after sending the line's token, rather than on standard input and output.
 - Exit status: 0 success; 1 the operation failed; 2 the invocation or canoa.cfg was wrong, `serve` with nothing to serve, or a text that is not a peer id; 3 another host holds this home.
 
+### A webpage's session folder
+
+A client that is a webpage has no file system and names no path. Its `session/new` carries `_meta["dev.boriken.canoa/site"] = {"site": "<host name>"}`; the host ignores any `cwd` it sent and gives the agent `<Documents>/Canoa/scratch/<site>/<new UUID>` instead, made (`create_dir_all`, mode 0700 on Unix) only after the scope has passed the request, so a request that is refused makes nothing. The answer to `session/new` carries `_meta["dev.boriken.canoa/site"] = {"site", "id", "folder"}` (the host removes the key from any other answer, an agent's own included). The site is taken only as written, in the form a browser gives it: lower-case ASCII labels (an international name as `xn--` punycode), no trailing dot, port, separator, colon or IPv6, a label of 1 to 63 letters, digits and inner hyphens, 253 characters at most, a first label that is not a Windows device name (`con`, `prn`, `aux`, `nul`, `com1`..`com9`, `lpt1`..`lpt9`), and a name made of numbers only an IPv4 address; anything else fails the request with `-32602`. `session/load` and `session/resume` with the same key must carry the recorded folder as `cwd`: it is taken only when it is `<Documents>/Canoa/scratch/<site>/<id>` with `<id>` one segment of letters, digits and hyphens, and is made again when gone; anything else is `-32602`. An entry with `working_roots` refuses a folder outside them. The Documents folder is `XDG_DOCUMENTS_DIR`, else the system's; a host with none fails the request. The host makes no other folder for a client.
+
 ## Environment variables
 
 | Variable | Effect | Default |
@@ -879,6 +884,7 @@ canoa accounts remove NAME [--config FILE]
 | `CANOA_LOG` | what to log, a `tracing` filter | `info` |
 | `CANOA_WEB_DIST` | at build time, with feature `web`: the absolute directory of the site built in | none; the build stops without it |
 | `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `coqui-agentic-peer` under `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME` or `~/.config` |
+| `XDG_DOCUMENTS_DIR` | the Documents folder a webpage session's scratch folder is made in (absolute, or from `$HOME`), on any system | the system's: the Documents known folder on Windows, `user-dirs.dirs` then `~/Documents` on Linux, `~/Documents` on macOS |
 | `NO_COLOR` | no colour in the log | colour on a terminal |
 
 ## Gotchas
