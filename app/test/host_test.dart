@@ -345,8 +345,8 @@ executable = ${jsonEncode(standin)}
       expect(sources, [const AgentSource.hosted('fixture'), const AgentSource.hosted('reviewer')]);
       final reviewer = sources.last;
       expect((reviewer.harness, reviewer.title, reviewer.displayName), ('claude', 'Claude for review', 'Claude for review'));
-      expect(providerIcon(reviewer.harness), providerIcon('claude'));
-      expect(providerIcon(reviewer.harness), isNot(providerIcon(sources.first.harness)), reason: 'a program entry has the generic icon');
+      expect(sourceProvider(reviewer), 'claude', reason: 'a harness entry draws its provider mark');
+      expect(sourceProvider(sources.first), isNull, reason: 'a program entry has the generic icon');
       expect((sources.first.harness, sources.first.title, sources.first.displayName), (null, null, 'fixture'));
     }, skip: skip);
 

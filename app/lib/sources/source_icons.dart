@@ -4,12 +4,9 @@ import 'agent_marks.dart';
 import 'sources.dart';
 import 'svg_path.dart';
 
-/// The generic icon for a provider with no vendor mark here: Grok (its vendor publishes none this app may use), any other
-/// id, and an entry with no provider (a program on standard streams).
-IconData providerIcon(String? harness) => switch (harness) {
-  'grok' => Icons.bolt_outlined,
-  _ => Icons.dns_outlined,
-};
+/// The generic icon for a provider with no vendor mark here: any other id, and an entry with no provider (a program on
+/// standard streams).
+IconData providerIcon(String? harness) => Icons.dns_outlined;
 
 /// The provider id of [source]: a hosted entry's own, else the one a source of the host's names (Grok, Pi, Antigravity).
 String? sourceProvider(AgentSource? source) =>

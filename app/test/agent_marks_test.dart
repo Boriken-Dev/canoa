@@ -16,7 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
-const _known = ['claude', 'codex', 'antigravity', 'pi'];
+const _known = ['claude', 'codex', 'antigravity', 'grok', 'pi'];
 
 Widget _host(Widget child, {Color? ink}) => MaterialApp(
   home: Scaffold(body: Center(child: IconTheme(data: IconThemeData(color: ink), child: child))),
@@ -72,11 +72,10 @@ void main() {
     });
   }
 
-  testWidgets('an unknown provider, none, Grok and a written command keep the generic icons', (tester) async {
+  testWidgets('an unknown provider, none and a written command keep the generic icons', (tester) async {
     for (final (widget, icon) in [
       (const SourceMark.provider('something-else'), Icons.dns_outlined),
       (const SourceMark.provider(null), Icons.dns_outlined),
-      (const SourceMark.provider('grok'), Icons.bolt_outlined),
       (const SourceMark.of(null), Icons.terminal),
       (const SourceMark.of(AgentSource.hosted('mine')), Icons.dns_outlined),
       (const SourceMark.of(AgentSource.hosted('Scripted', local: true)), Icons.dns_outlined),
@@ -92,6 +91,7 @@ void main() {
       AgentSource.hosted('review', harness: 'codex'),
       AgentSource.hosted('Antigravity', local: true),
       AgentSource.hosted('Pi', local: true),
+      AgentSource.hosted('Grok', local: true),
     ]) {
       await tester.pumpWidget(_host(SourceMark.of(source)));
       expect(find.byType(Icon), findsNothing, reason: source.label);
@@ -128,7 +128,7 @@ void main() {
       await tester.tap(find.byKey(const Key('new-session-source')));
       await frames(tester);
       expect(find.byKey(const Key('source Claude')), findsOneWidget);
-      for (final label in ['Claude', 'Codex', 'Antigravity', 'Pi']) {
+      for (final label in ['Claude', 'Codex', 'Antigravity', 'Grok', 'Pi']) {
         expect(find.descendant(of: find.byKey(Key('source $label')), matching: find.byType(CustomPaint)), findsWidgets, reason: label);
       }
       expect(tester.takeException(), isNull);
