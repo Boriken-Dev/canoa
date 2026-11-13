@@ -363,7 +363,7 @@ final class CanoaConfig {
         ? <String, dynamic>{...entry}
         : switch (source) {
             GitOverlay() => <String, dynamic>{'source': source.spec, if (source.pin != null) 'pin': source.pin},
-            DirOverlay(:final dir, :final pin) => <String, dynamic>{'dir': dir, if (pin != null) 'pin': pin},
+            DirOverlay(:final dir, :final pin) => <String, dynamic>{'dir': dir, 'pin': ?pin},
           };
     if (options.isEmpty) {
       fields.remove('options');
