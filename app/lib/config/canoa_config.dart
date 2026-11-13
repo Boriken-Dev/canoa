@@ -5,6 +5,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
+import 'config_layers.dart';
 import '../chat/modes.dart' show modeOrder;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
@@ -58,8 +59,35 @@ final class NotificationSettings {
   );
 }
 
-/// Deployment config uses TOML in canoa.cfg, consistent with AI6's OO.cfg.
-/// This file must never contain secrets or private keys.
+/// Where a [CanoaConfig] was read from: the format and first-line marker of the person's own file, the layers below it (the
+/// installed copy and the system's file, lowest first), and the person's file as it was read. A save writes the person's
+/// file only, in its own format.
+final class ConfigSource {
+  const ConfigSource({this.format = ConfigFormat.toml, this.marked = false, this.layers = const [], this.own = const {}});
+
+  final ConfigFormat format;
+
+  /// Whether the file's first line names its format, so that it is written back with it.
+  final bool marked;
+
+  /// The layers below the person's file, lowest first.
+  final List<ConfigLayer> layers;
+
+  /// The person's file as read.
+  final Map<String, dynamic> own;
+
+  /// The layers below the person's file, merged.
+  Map<String, dynamic> get lower {
+    var merged = <String, dynamic>{};
+    for (final layer in layers) {
+      merged = mergeConfig(merged, layer.data);
+    }
+    return merged;
+  }
+}
+
+/// canoa.cfg is one file in TOML, YAML or JSON, named by its first line, found and merged by layers (see
+/// `config_layers.dart`). This file must never contain secrets or private keys.
 final class CanoaConfig {
   const CanoaConfig({
     this.startHidden = false,
@@ -88,7 +116,11 @@ final class CanoaConfig {
     this.embedLimit = defaultEmbedLimit,
     this.warnPermille = defaultWarnPermille,
     this.limitPhrases,
+    this.source = const ConfigSource(),
   });
+
+  /// Where this configuration was read from, which a save writes back to.
+  final ConfigSource source;
 
   /// `[usage] warn_permille`: from this many thousandths used, the usage control shows a status (800 is 80%).
   final int warnPermille;
@@ -195,6 +227,7 @@ final class CanoaConfig {
         embedLimit: embedLimit,
         warnPermille: warnPermille ?? this.warnPermille,
         limitPhrases: limitPhrases,
+        source: source,
       );
 
   /// This configuration with [host] as its `[host]` table.
@@ -225,6 +258,7 @@ final class CanoaConfig {
     embedLimit: embedLimit,
     warnPermille: warnPermille,
     limitPhrases: limitPhrases,
+    source: source,
   );
 
   /// What `[host]` names for canoa to serve, agents first, as written. canoa itself checks each one.
@@ -618,6 +652,7 @@ final class CanoaConfig {
     embedLimit: embedLimit,
     warnPermille: warnPermille,
     limitPhrases: limitPhrases,
+    source: source,
   );
 
   static Map<String, dynamic> _deepCopy(Map<dynamic, dynamic> map) => {
@@ -629,10 +664,19 @@ final class CanoaConfig {
       },
   };
 
-  factory CanoaConfig.parse(String source) {
-    final content = source.startsWith('#!toml')
-        ? source.substring(source.indexOf('\n') + 1) : source;
-    final data = TomlDocument.parse(content).toMap();
+  /// Reads [text], the file called [name] if it has one, as the person's own canoa.cfg over [below], the layers beneath it
+  /// (lowest first). Throws [FormatException] naming no value.
+  factory CanoaConfig.parse(String text, {String? name, List<ConfigLayer> below = const []}) =>
+      CanoaConfig.fromLayers(decodeConfig(text, name: name), below);
+
+  /// The person's own file [own] merged over [below]: what the app shows and edits.
+  factory CanoaConfig.fromLayers(ConfigText own, List<ConfigLayer> below) {
+    var lower = <String, dynamic>{};
+    for (final layer in below) {
+      lower = mergeConfig(lower, layer.data);
+    }
+    final data = mergeConfig(lower, own.data);
+    final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
             'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadout', 'sources', 'attachments', 'usage'}
@@ -800,6 +844,7 @@ final class CanoaConfig {
     if (rawStore != null && rawStore is! Map) throw const FormatException('canoa.cfg: store must be a table');
     if (rawStore is Map) StoreSettings.parse(rawStore);
     return CanoaConfig(
+      source: readFrom,
       overlays: overlays,
       profile: rawProfile == null ? const Profile() : _profile('profile', rawProfile as Map, LayerKind.user),
       agentProfiles: agentProfiles,
@@ -844,7 +889,7 @@ final class CanoaConfig {
     );
   }
 
-  String encode() => '''
+  String _encodeToml() => '''
 # Canoa deployment settings — Boriken Dev
 [desktop]
 start_hidden = $startHidden
@@ -882,6 +927,44 @@ ${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
 ''').join()}${tables.isEmpty ? '' : '\n${TomlDocument.fromMap(tables)}'}${host == null ? '' : '\n${TomlDocument.fromMap({'host': host})}'}''';
+
+  /// canoa.cfg as the person's own file is written: in the format and with the first line it was read with, holding the
+  /// keys the person changed or already had there and none that a lower layer gives the same.
+  String encode() {
+    final toml = _encodeToml();
+    if (source.layers.isEmpty && source.format == ConfigFormat.toml) return source.marked ? '#!toml\n$toml' : toml;
+    return encodeConfig(_ownDocument(), source.format, marked: source.marked);
+  }
+
+  static final _ownDocuments = Expando<Map<String, dynamic>>('own document');
+
+  Map<String, dynamic> _ownDocument() => _ownDocuments[this] ??=
+      ownDocument(TomlDocument.parse(_encodeToml()).toMap(), source.lower, source.own, _defaults);
+
+  static final Map<String, dynamic> _defaults = TomlDocument.parse(const CanoaConfig()._encodeToml()).toMap();
+
+  /// Where the value at [path] (`['desktop', 'start_hidden']`) comes from when a lower layer gives it and the person's file
+  /// does not, as Settings says it ("the system file"); null when the person's file holds it or nothing does.
+  String? lowerLayerOf(List<String> path) {
+    if (source.layers.isEmpty || originOf([(origin: ConfigOrigin.own, data: _ownDocument())], path) != null) return null;
+    return originOf(source.layers, path)?.words;
+  }
+
+  /// The lower layer that gives the value at [path], by the words Settings uses; null when none does.
+  String? lowerValueFrom(List<String> path) => originOf(source.layers, path)?.words;
+
+  /// Whether the person's file holds the value at [path] over one a lower layer gives.
+  bool overridesLowerLayer(List<String> path) =>
+      source.layers.isNotEmpty &&
+      originOf([(origin: ConfigOrigin.own, data: _ownDocument())], path) != null &&
+      originOf(source.layers, path) != null;
+
+  /// This configuration with the key at [path] taken out of the person's file, so that the lower layers' value (or the
+  /// default) shows again.
+  CanoaConfig resetKey(List<String> path) => CanoaConfig.fromLayers(
+    (format: source.format, marked: source.marked, data: withoutKey(_ownDocument(), path)),
+    source.layers,
+  );
 
   /// A profile table of canoa.cfg, its refusal named by [where] and never quoting a value.
   static Profile _profile(String where, Map<dynamic, dynamic> table, LayerKind kind) {

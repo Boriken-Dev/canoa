@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../config/canoa_config_file.dart' show hostConfigArgs;
 import 'host_tool.dart';
 
 enum HostPhase {
@@ -246,7 +247,7 @@ class HostSupervisor extends ChangeNotifier {
     notifyListeners();
     final HostChild child;
     try {
-      child = await tool!.start(['serve', '--config', _configPath!, '--allow-empty', '--local-sources', '--until-stdin-closes']);
+      child = await tool!.start(['serve', ...hostConfigArgs(_configPath!), '--allow-empty', '--local-sources', '--until-stdin-closes']);
     } on Object catch (error) {
       _problem = 'canoa could not start: $error';
       return _ended(generation, null);

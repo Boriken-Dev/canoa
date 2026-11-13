@@ -46,7 +46,11 @@ Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String 
   // link at a name known in advance.
   final random = Random.secure();
   final suffix = List.generate(16, (_) => random.nextInt(16).toRadixString(16)).join();
-  final file = File('${directory.path}${Platform.pathSeparator}.canoa.cfg.$suffix.check');
+  // The name keeps the config's extension (.cfg, .yaml, .json...), which is what tells the host its format.
+  final base = path.split(RegExp(r'[/\\]')).last;
+  final dot = base.lastIndexOf('.');
+  final extension = dot > 0 ? base.substring(dot) : '.cfg';
+  final file = File('${directory.path}${Platform.pathSeparator}.canoa.$suffix.check$extension');
   await file.create(exclusive: true);
   final writing = await file.open(mode: FileMode.writeOnlyAppend);
   try {

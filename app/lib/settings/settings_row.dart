@@ -1,5 +1,17 @@
 import 'package:flutter/material.dart';
 
+/// Which layer of canoa.cfg a value comes from when it is not the person's own file: said on its row, with a way back when the
+/// person's file overrides a lower layer.
+class SettingLayer {
+  const SettingLayer(this.words, {this.onReset});
+
+  /// "From the system file", "Overrides the installed file".
+  final String words;
+
+  /// Takes the value out of the person's file so that the lower layer's shows again; null when the person's file holds none.
+  final VoidCallback? onReset;
+}
+
 /// The row every Settings section is made of: a title and a one-line description on the left, the control on the right.
 ///
 /// A [child] row is a sub-option: it is indented under its parent and, with [enabled] false, drawn and disabled with it.
@@ -14,6 +26,7 @@ class SettingsRow extends StatelessWidget {
     this.enabled = true,
     this.machine = false,
     this.below,
+    this.layer,
   });
 
   final String title;
@@ -34,6 +47,9 @@ class SettingsRow extends StatelessWidget {
   /// Full-width content under the title, such as a field or a list.
   final Widget? below;
 
+  /// Where the value comes from when a lower layer of canoa.cfg gives it.
+  final SettingLayer? layer;
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -43,6 +59,11 @@ class SettingsRow extends StatelessWidget {
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
         Text(title, style: text.bodyLarge),
         if (machine) const MachineBadge(),
+        if (layer case final layer?) ...[
+          Text(layer.words, key: const Key('setting-layer'), style: text.labelSmall?.copyWith(color: muted)),
+          if (layer.onReset != null)
+            TextButton(key: const Key('setting-reset'), style: TextButton.styleFrom(visualDensity: VisualDensity.compact), onPressed: layer.onReset, child: const Text('Reset')),
+        ],
       ]),
       if (description != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(description!, style: text.bodySmall?.copyWith(color: muted))),
     ]);
@@ -142,10 +163,12 @@ class SwitchRow extends StatelessWidget {
     this.child = false,
     this.enabled = true,
     this.machine = false,
+    this.layer,
   });
 
   final String title;
   final String? description;
+  final SettingLayer? layer;
   final bool value;
   final ValueChanged<bool> onChanged;
   final bool child, enabled, machine;
@@ -157,6 +180,7 @@ class SwitchRow extends StatelessWidget {
     child: child,
     enabled: enabled,
     machine: machine,
+    layer: layer,
     control: Switch(value: value, onChanged: enabled ? onChanged : null),
   );
 }
@@ -174,10 +198,12 @@ class ChoiceRow<T> extends StatelessWidget {
     this.enabled = true,
     this.machine = false,
     this.fieldKey,
+    this.layer,
   });
 
   final String title;
   final String? description;
+  final SettingLayer? layer;
   final T value;
 
   /// The values and what each is called.
@@ -195,6 +221,7 @@ class ChoiceRow<T> extends StatelessWidget {
     child: child,
     enabled: enabled,
     machine: machine,
+    layer: layer,
     control: DropdownButton<T>(
       key: fieldKey,
       value: value,

@@ -113,3 +113,23 @@ fn main() -> ExitCode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::absolute_list;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn each_relative_entry_of_the_list_is_made_absolute_and_the_plus_is_kept() {
+        let separator = if cfg!(windows) { ';' } else { ':' };
+        let value = format!("+a.cfg{separator}{}", std::env::temp_dir().display());
+        let made = absolute_list(OsStr::new(&value)).expect("absolute");
+        let made = made.to_string_lossy().into_owned();
+        assert!(made.starts_with('+'), "{made}");
+        let entries: Vec<&str> = made[1..].split(separator).collect();
+        assert!(std::path::Path::new(entries[0]).is_absolute(), "{made}");
+        assert!(entries[0].ends_with("a.cfg"), "{made}");
+        assert_eq!(entries[1], std::env::temp_dir().to_string_lossy());
+        assert_eq!(absolute_list(OsStr::new("")).expect("empty"), "");
+    }
+}

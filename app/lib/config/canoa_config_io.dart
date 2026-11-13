@@ -1,28 +1,56 @@
 import 'dart:io';
 
+import 'config_layers.dart';
+
+/// Where canoa.cfg is read from and written, as the host finds it: the installed copy beside the program, the system's file
+/// and the person's own, or the files `CANOA_CONFIG` lists. Throws [FormatException] for an empty entry or a listed file
+/// that is missing.
+ConfigFiles configFiles() => ConfigFiles.resolve(
+  env: Platform.environment,
+  windows: Platform.isWindows,
+  programDir: File(Platform.resolvedExecutable).parent.path,
+  exists: (path) => File(path).existsSync(),
+);
+
+/// The person's own file: where the app writes, and beside which it keeps its other files; null when no place can be named.
 String? desktopConfigPath() {
-  final env = Platform.environment;
-  final named = env['CANOA_CONFIG'];
-  if (named != null && named.isNotEmpty) return named;
-  final home = env['HOME'];
-  if (Platform.isWindows) {
-    final base = env['APPDATA'];
-    return base == null ? null : '$base\\Canoa\\canoa.cfg';
+  try {
+    return configFiles().own;
+  } on FormatException {
+    return null;
   }
-  if (Platform.isMacOS) {
-    return home == null ? null :
-        '$home/Library/Application Support/Canoa/canoa.cfg';
+}
+
+/// What reading canoa.cfg found: the person's own file (its text, and the name that fixes its format) and the layers
+/// below it, lowest first. Null when no file exists.
+typedef ReadLayers = ({String? ownText, String ownName, List<ConfigLayer> below});
+
+Future<ReadLayers?> readDesktopLayers() async {
+  final files = configFiles();
+  _adoptLegacyName(files.own);
+  final below = <ConfigLayer>[];
+  String? ownText;
+  var any = false;
+  for (final file in files.files) {
+    final entry = File(file.path);
+    if (!entry.existsSync()) continue;
+    any = true;
+    final text = await entry.readAsString();
+    if (file.path == files.own) {
+      ownText = text;
+      continue;
+    }
+    try {
+      final read = decodeConfig(text, name: file.path);
+      below.add((origin: file.origin, data: read.data));
+    } on FormatException catch (error) {
+      throw FormatException('${file.path}: ${error.message}');
+    }
   }
-  final base = env['XDG_CONFIG_HOME'] ?? (home == null ? null : '$home/.config');
-  return base == null ? null : '$base/Canoa/canoa.cfg';
+  if (!any) return null;
+  return (ownText: ownText, ownName: files.own, below: below);
 }
-Future<String?> readDesktopConfig() async {
-  final path = desktopConfigPath();
-  if (path == null) return null;
-  _adoptLegacyName(path);
-  final file = File(path);
-  return file.existsSync() ? file.readAsString() : null;
-}
+
 Future<void> writeDesktopConfig(String source) async {
   final path = desktopConfigPath();
   if (path == null) throw StateError('canoa.cfg location unavailable');
@@ -30,6 +58,29 @@ Future<void> writeDesktopConfig(String source) async {
   final file = File(path);
   await file.parent.create(recursive: true);
   await file.writeAsString(source, flush: true);
+}
+
+/// The arguments that make `canoa` read the files the app reads, for the config at [path]: those of [configFiles] when it is
+/// the app's own, else that one file.
+List<String> hostConfigArgs(String path) {
+  try {
+    final files = configFiles();
+    if (files.own == path) return files.hostArgs;
+  } on FormatException {
+    // The host is given the path, and says what is wrong.
+  }
+  return ['--config', path];
+}
+
+/// What `canoa check --config` takes to check [candidate] as the content of the config at [path].
+String hostCheckSpec(String path, String candidate) {
+  try {
+    final files = configFiles();
+    if (files.own == path) return files.checkSpec(candidate);
+  } on FormatException {
+    // As above.
+  }
+  return candidate;
 }
 
 // Only the default place is adopted: a file CANOA_CONFIG names is the person's own choice of name.

@@ -61,6 +61,7 @@ class _GeneralSectionState extends State<GeneralSection> {
           SettingsGroup(title: 'Window', children: [
             SwitchRow(
               title: 'Start hidden in the tray',
+              layer: c.layerOf(const ['desktop', 'start_hidden']),
               description: 'Canoa starts with no window; open it from the tray icon',
               machine: true,
               value: config.startHidden,
@@ -68,6 +69,7 @@ class _GeneralSectionState extends State<GeneralSection> {
             ),
             SwitchRow(
               title: 'Close the window to the tray',
+              layer: c.layerOf(const ['desktop', 'close_to_tray']),
               description: 'Closing keeps Canoa and its sessions running',
               machine: true,
               value: config.closeToTray,
@@ -75,6 +77,7 @@ class _GeneralSectionState extends State<GeneralSection> {
             ),
             SwitchRow(
               title: 'Minimize the window to the tray',
+              layer: c.layerOf(const ['desktop', 'minimize_to_tray']),
               description: 'Minimizing hides the window instead of leaving it on the taskbar',
               machine: true,
               value: config.minimizeToTray,
@@ -84,12 +87,14 @@ class _GeneralSectionState extends State<GeneralSection> {
         SettingsGroup(title: 'Network', children: [
           SwitchRow(
             title: 'Prefer WebTransport',
+            layer: c.layerOf(const ['network', 'prefer_webtransport']),
             description: 'Falls back to WSS when WebTransport does not connect',
             value: config.preferWebTransport,
             onChanged: (v) => c.change((x) => x.copyWith(preferWebTransport: v)),
           ),
           ChoiceRow<int>(
             title: 'Network timeout',
+            layer: c.layerOf(const ['network', 'connect_timeout']),
             description: 'How long a connection may take before Canoa gives up',
             child: true,
             fieldKey: const Key('settings-timeout'),
@@ -101,6 +106,7 @@ class _GeneralSectionState extends State<GeneralSection> {
         SettingsGroup(title: 'Sessions', children: [
           ChoiceRow<int>(
             title: 'Sessions remembered',
+            layer: c.layerOf(const ['sessions', 'keep']),
             description: 'The least recently used go first',
             fieldKey: const Key('settings-keep'),
             value: config.sessions.keep,
@@ -110,6 +116,7 @@ class _GeneralSectionState extends State<GeneralSection> {
           SwitchRow(
             key: const Key('settings-keep-text'),
             title: 'Keep what was said with each session',
+            layer: c.layerOf(const ['sessions', 'keep_text']),
             description: 'Off: only the session\'s name and place are kept. Turning it off clears what was kept',
             child: true,
             machine: true,

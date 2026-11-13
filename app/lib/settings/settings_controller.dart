@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../config/canoa_config.dart';
+import 'settings_row.dart' show SettingLayer;
 
 /// Takes a changed configuration, applies and writes it, and gives back the one the app now holds: the same unless part of
 /// the change was refused, such as sources a restart was declined for.
@@ -22,6 +23,15 @@ class SettingsController extends ChangeNotifier {
   bool _closed = false;
 
   CanoaConfig get config => _config;
+
+  /// Which layer the value at [path] comes from when it is not the person's own, with a way back to it where the person's
+  /// file overrides one.
+  SettingLayer? layerOf(List<String> path) {
+    final from = _config.lowerLayerOf(path);
+    if (from != null) return SettingLayer('From $from');
+    if (!_config.overridesLowerLayer(path)) return null;
+    return SettingLayer('Overrides ${_config.lowerValueFrom(path)}', onReset: () => change((c) => c.resetKey(path)));
+  }
 
   /// Why the last change could not be written, or null.
   String? get problem => _problem;

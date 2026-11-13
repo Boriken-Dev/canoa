@@ -258,7 +258,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (host == null || path == null) return 'canoa.cfg has no place on this computer';
     final changed = config.withHost(fromDialog.host);
     if (changed.hostEntries.isNotEmpty) {
-      final problem = await withFileBeside(path, changed.encode(), host.check);
+      final problem = await withFileBeside(path, changed.encode(), (file) => host.check(hostCheckSpec(path, file)));
       if (problem != null) return problem;
     }
     await _write(changed);
@@ -759,7 +759,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (harness == null) return null;
       args = ['options', harness, '--format', 'json'];
     } else if (source.hostEntry != null && _configPath != null) {
-      args = ['options', source.hostEntry!, '--entry', '--config', _configPath!, '--format', 'json'];
+      args = ['options', source.hostEntry!, '--entry', ...hostConfigArgs(_configPath!), '--format', 'json'];
     } else {
       return null;
     }
