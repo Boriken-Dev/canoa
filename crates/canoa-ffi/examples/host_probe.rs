@@ -12,7 +12,7 @@ fn main() {
     let entry = std::env::args_os().nth(1).expect("the child entry");
     let request = serde_json::json!({
         "args": ["--version"],
-        "program": entry,
+        "program": std::path::PathBuf::from(entry),
         "program_args": [canoa_ffi::jobs::CHILD_FLAG],
     })
     .to_string();

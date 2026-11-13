@@ -217,6 +217,11 @@ fn link_secret(job: u64) -> [u8; LINK_SECRET_LEN] {
     out
 }
 
+/// The program that runs the host's own commands, the process starter's among them, in a test whose own process cannot.
+fn child_entry() -> PathBuf {
+    stdio_agent().with_file_name(format!("child_entry{}", std::env::consts::EXE_SUFFIX))
+}
+
 fn stdio_agent() -> PathBuf {
     let tests = std::env::current_exe().expect("the test knows where it is");
     let profile = tests
@@ -497,6 +502,8 @@ fn with_link<R>(
         "args": ["serve", "--until-stdin-closes", "--config", config],
         "home": scratch.0.join("home"),
         "holder": "a test",
+        "program": child_entry(),
+        "program_args": [canoa_ffi::jobs::CHILD_FLAG],
     }));
     let mut log = Vec::new();
     wait_for(job, &mut log, |out, _| {
