@@ -1,0 +1,22 @@
+name: canoa_web_link_test
+description: Runs the pop-out's BroadcastChannel link in a real browser. A Dart package of its own because it takes no Flutter, which keeps the app's test configuration out of the way.
+publish_to: none
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  coqui_acp:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-acp.git
+      path: bindings/dart/coqui_acp
+      ref: 5edddef2176e66ddb3c978a2b44d4008fb2b5b8f
+  coqui_acp_chat:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-acp.git
+      path: bindings/dart/coqui_acp_chat
+      ref: 5edddef2176e66ddb3c978a2b44d4008fb2b5b8f
+  web: ^1.1.1
+
+dev_dependencies:
+  test: ^1.25.0
