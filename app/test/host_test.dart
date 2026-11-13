@@ -367,6 +367,12 @@ void main() {
         reason: 'the host directory is outside the root');
     await File('${first.path}/draft').writeAsString('unsaved\n');
     expect((await worktrees.status(first)).changed, 1);
+    // The host's own git reads the same folder: the untracked file is one added line, and nothing was written.
+    final read = await HostGit(worktrees.call).read(first.path);
+    expect(read, isNotNull);
+    expect([for (final file in read!.files) (file.path, file.status, file.added)], [('draft', 'A', 1)]);
+    expect(read.branch, first.branch);
+    expect((await worktrees.status(first)).changed, 1);
     await expectLater(worktrees.remove(first), throwsA(isA<WorktreeFailure>()));
     expect((await worktrees.remove(first, discard: true)).branchKept, isFalse);
     expect((await worktrees.remove(second)).branchKept, isFalse);

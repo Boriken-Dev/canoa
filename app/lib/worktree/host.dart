@@ -7,11 +7,15 @@ import '../acp/client.dart';
 import '../acp/pipe_channel.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../chat/git_changes.dart';
 import 'worktree.dart';
 
 /// Worktrees this app's own host makes anywhere on this computer, over its control channel: the person is its owner, so no
 /// working root limits them, and every other check of the host stands.
-Worktrees controlWorktrees(HostControl control) => HostWorktrees((method, params) async {
+Worktrees controlWorktrees(HostControl control) => HostWorktrees(controlWorktreeCall(control));
+
+/// The calls [controlWorktrees] makes, for a reader of the same host that is not a [Worktrees].
+HostWorktreeCall controlWorktreeCall(HostControl control) => (method, params) async {
   try {
     final client = await control.ready();
     final answer = await client.call(method.replaceFirst('_canoa/', ''), params);
@@ -23,7 +27,7 @@ Worktrees controlWorktrees(HostControl control) => HostWorktrees((method, params
   } on TimeoutException {
     throw const WorktreeFailure('The host did not answer.');
   }
-});
+};
 
 /// One request to a host on a connection of its own, its `result` or a [WorktreeFailure] with the host's words.
 typedef HostWorktreeCall = Future<Map<String, Object?>> Function(String method, Map<String, Object?> params);
@@ -151,4 +155,15 @@ Future<Map<String, Object?>> _worktreeRequest(
   } finally {
     await closing.close();
   }
+}
+
+/// A session's repository read through a host: the folder's files against a commit, by the host's own git and under its
+/// working roots, so a hosted session's changes are the disk of the machine the agent runs on.
+final class HostGit implements GitReader {
+  const HostGit(this.call);
+  final HostWorktreeCall call;
+
+  @override
+  Future<GitState?> read(String folder, {String? base}) async =>
+      GitState.fromJson(await call('_canoa/worktree/diff', {'path': folder, 'base': ?base}));
 }

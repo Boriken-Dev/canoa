@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'chat/agent_events.dart';
 import 'chat/attachments.dart';
 import 'chat/cache_lifetime.dart';
+import 'chat/git_changes.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatEntryData, SecretCardEnvironment, shortLine;
@@ -265,6 +266,9 @@ class ChatSession {
   List<AgentCommandInfo> commands = const [];
   SessionUsage usage = const SessionUsage();
 
+  /// What the repository holds in this session's folder, as git on its host last said.
+  final SessionGit git = SessionGit();
+
   /// What the agent last said of the account's allowances, once it has said; null while it has not.
   UsageReport? usageReport;
 
@@ -415,6 +419,26 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Starts a draft's agent on its first message; set by the app. Without it a draft cannot start.
   DraftStarter? starter;
+
+  /// Reads the repository in a session's folder through the host its agent runs on; set by the app. Null where none can.
+  GitReader? Function(ChatSession session)? gitReader;
+
+  /// The folder a session's changes are read from: its worktree, else its folder, once it has started.
+  String? _gitFolder(ChatSession session) => session.isDraft ? null : (session.worktree?.path ?? session.cwd);
+
+  /// Reads [session]'s repository again, for the changes the inspector shows.
+  Future<void> refreshGit(ChatSession session) async {
+    final folder = _gitFolder(session), reader = gitReader?.call(session);
+    if (folder == null || reader == null) return;
+    if (await session.git.refresh(reader, folder)) notifyListeners();
+  }
+
+  /// A turn of [session] begins: the disk as it is now is what the turn is measured from. Never delays the message.
+  void _gitBeforeTurn(ChatSession session) {
+    final folder = _gitFolder(session), reader = gitReader?.call(session);
+    if (folder == null || reader == null) return;
+    unawaited(session.git.beginTurn(reader, folder).then((_) => notifyListeners()));
+  }
 
   /// Asks the host for a source's models and efforts before its agent runs; set by the app. Without it nothing is asked.
   ChoicesLoader? choicesLoader;
@@ -1567,6 +1591,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     _watchUsage(session, client);
     _watchTasks(session, client);
     if (record) _record(session, client);
+    unawaited(refreshGit(session));
     notifyListeners();
   }
 
@@ -2101,6 +2126,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _turnEnded(ChatSession session, String? held) {
     if (held == 'the turn failed' && session.id != _selectedId) session.failed = true;
     if (session.reportsUsage) unawaited(refreshUsage(session));
+    unawaited(refreshGit(session));
     if (session.queue.isEmpty) return;
     session.queueHeld = held;
     // After the update that ended the turn has been dispatched: an answer to the next prompt could otherwise arrive inside it.
@@ -2160,6 +2186,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         await toAcp(attachment, takes, embedLimit: embedLimit, read: readFile, agent: _named(session.agent)),
     ];
     await _applyPending(session);
+    _gitBeforeTurn(session);
     if (session.peerId != null) ledger?.touch(session.peerId!, session.remoteSessionId!);
     final sent = attachments.isEmpty ? null : 'Sent with this: ${attachments.map((item) => item.name).join(', ')}';
     if (client.protocolVersion == 1) {
@@ -2614,6 +2641,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     _selectedId = id;
     chosen.unread = false;
     chosen.failed = false;
+    if (!chosen.git.tried) unawaited(refreshGit(chosen));
     notifyListeners();
   }
 
