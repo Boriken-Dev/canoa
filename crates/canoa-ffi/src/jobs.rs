@@ -188,10 +188,7 @@ impl Front for JobFront {
     fn program(&self) -> std::io::Result<Program> {
         match &self.program {
             Some(program) => Ok(program.clone()),
-            None => Ok(Program::new(
-                std::env::current_exe()?,
-                vec![OsString::from(CHILD_FLAG)],
-            )),
+            None => default_program(),
         }
     }
 
@@ -217,6 +214,14 @@ impl Front for JobFront {
     }
 }
 
+/// This application, with [`CHILD_FLAG`], which runs the host's own commands when the request names no program.
+fn default_program() -> std::io::Result<Program> {
+    Ok(Program::new(
+        std::env::current_exe()?,
+        vec![OsString::from(CHILD_FLAG)],
+    ))
+}
+
 /// Whether a command runs long enough that the process's log belongs in what it says.
 fn follows_the_log(args: &[String]) -> bool {
     matches!(args.first().map(String::as_str), Some("serve" | "pair"))
@@ -236,6 +241,14 @@ pub(crate) fn start(request: &[u8]) -> Result<u64, i32> {
         (None, Some(_)) => return Err(STATUS_BAD_ARGUMENT),
         (None, None) => None,
     };
+    // Every child of the host starts from a process of its own, not this one: the application's process handling collects
+    // any child of this process that ends, and the host could not read how its children ended.
+    if let Ok(started_by) = match &program {
+        Some(program) => Ok(program.clone()),
+        None => default_program(),
+    } {
+        canoa_host::spawn::install(started_by);
+    }
     let job = Arc::new(Job::default());
     if follows_the_log(&request.args) {
         log::follow(&job);
@@ -283,7 +296,7 @@ fn run_command(args: &[String], front: &JobFront) -> i32 {
         // They change the process they run in: its directory, its standard input, its end.
         Ok(parsed) if parsed.is_a_hosts_own() => {
             front.say(&format!(
-                "canoa: provider, tool, agent, launch and mcp-bridge run only as a process of their own, through {CHILD_FLAG}"
+                "canoa: provider, tool, agent, launch, mcp-bridge and spawner run only as a process of their own, through {CHILD_FLAG}"
             ));
             return STATUS_USAGE;
         }
@@ -405,7 +418,9 @@ pub(crate) fn child_main() -> i32 {
     let parsed = match Cli::try_parse_from(line) {
         Ok(parsed) if parsed.is_a_hosts_own() => parsed,
         Ok(_) => {
-            eprintln!("canoa: {CHILD_FLAG} takes only provider, tool, agent, launch or mcp-bridge");
+            eprintln!(
+                "canoa: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge or spawner"
+            );
             return STATUS_USAGE;
         }
         Err(error) => {
