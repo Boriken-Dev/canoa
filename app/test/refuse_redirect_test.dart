@@ -7,7 +7,6 @@ import 'dart:io';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

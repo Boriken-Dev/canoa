@@ -13,7 +13,6 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/settings_fixture.dart';
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// An agent in memory, speaking v1, whose requests are whatever a test says they are.
 final class _Agent {

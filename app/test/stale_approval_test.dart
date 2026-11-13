@@ -8,7 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 SessionStore _store([SessionLedger? ledger]) => SessionStore(ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
 
