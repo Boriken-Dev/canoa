@@ -457,7 +457,7 @@ impl Hooks {
     }
 
     /// Where `identity`'s files are copied to, made when first needed from the bytes the digest covers.
-    fn copy_of(&self, identity: &str, overlay: &ReadOverlay) -> Option<PathBuf> {
+    pub(super) fn copy_of(&self, identity: &str, overlay: &ReadOverlay) -> Option<PathBuf> {
         let mut copies = self.copies.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(made) = copies.get(identity) {
             return Some(made.0.clone());

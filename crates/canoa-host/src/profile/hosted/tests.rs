@@ -982,3 +982,170 @@ fn the_overlays_are_chosen_as_a_list_of_names_or_the_first_message_is_refused() 
         assert_eq!(answer["error"]["code"], INVALID_PARAMS, "{answer}");
     }
 }
+
+const OPTIONS_MANIFEST: &str = "name = \"docs\"\n\
+    [options.depth]\ntype = \"string\"\ndefault = \"normal\"\n\
+    [options.rounds]\ntype = \"integer\"\ndefault = 2\n\
+    [options.token]\ntype = \"string\"\nsensitive = true\n";
+
+/// The profile's parts for Claude Code with overlay `docs` installed from `files` and `options` as canoa.cfg gives them.
+fn docs_parts(files: &[(&str, &str)], options: &str) -> (Temp, Connection, Parts) {
+    let temp = temp_with_skill();
+    install_files(&temp, "docs", files);
+    let config = format!(
+        "[overlays.docs]\n{options}\n{}",
+        config_with("overlays = [\"docs\"]\n")
+    );
+    let (connection, parts) = audit_parts_in(&temp, &config);
+    (temp, connection, parts)
+}
+
+#[test]
+fn a_bundled_skills_body_is_served_with_the_overlays_private_copy_as_its_root() {
+    let skill = "---\nname: audit\ndescription: For ${AOS_OVERLAY_NAME}\n---\n\
+        Read ${AOS_OVERLAY_ROOT}/kb.md, ${AOS_OVERLAY_NAME}, ${HOME} and $${AOS_OVERLAY_ROOT}.\n";
+    let (temp, _connection, parts) = docs_parts(
+        &[
+            ("overlay.cfg", OPTIONS_MANIFEST),
+            ("kb.md", "Knowledge.\n"),
+            ("skills/audit/SKILL.md", skill),
+        ],
+        "",
+    );
+    let text = std::fs::read_to_string(plugin_of(&parts).join("skills/audit/SKILL.md"))
+        .expect("the skill is written");
+    let (head, body) = text.split_once("\n---\n").expect("front matter");
+    assert_eq!(
+        head,
+        "---\nname: audit\ndescription: For ${AOS_OVERLAY_NAME}"
+    );
+    let line = body.trim_end().strip_prefix("Read ").expect("the body");
+    let (root, rest) = line.split_once("/kb.md").expect("a root and a path");
+    assert_eq!(rest, ", docs, ${HOME} and ${AOS_OVERLAY_ROOT}.");
+    let root = Path::new(root);
+    assert_eq!(
+        std::fs::read_to_string(root.join("kb.md")).expect("a copy of the overlay"),
+        "Knowledge.\n"
+    );
+    assert!(
+        !root.starts_with(temp.0.join("overlays")),
+        "the root is the private copy, not the installed files: {}",
+        root.display()
+    );
+    // The installed file keeps its names and its digest.
+    let installed = std::fs::read_to_string(temp.0.join("overlays/docs/skills/audit/SKILL.md"))
+        .expect("installed");
+    assert_eq!(installed, skill);
+    let record: Value = serde_json::from_slice(
+        &std::fs::read(temp.0.join("overlays/docs.json")).expect("its record"),
+    )
+    .expect("JSON");
+    assert_eq!(record["digest"], digest_of(&temp, "overlays/docs").as_str());
+}
+
+fn prompt_of(parts: &Parts) -> String {
+    parts.system_prompt.clone().expect("a system prompt")
+}
+
+#[test]
+fn a_configured_option_is_used_in_context_and_the_manifests_default_otherwise() {
+    let files = [
+        ("overlay.cfg", OPTIONS_MANIFEST),
+        (
+            "CONTEXT.md",
+            "Depth ${depth}, rounds ${rounds}, ${nothing}.\n",
+        ),
+    ];
+    let (_temp, _connection, parts) =
+        docs_parts(&files, "options = { depth = \"deep\", rounds = 5 }");
+    let prompt = prompt_of(&parts);
+    assert!(
+        prompt.contains("Depth deep, rounds 5, ${nothing}."),
+        "{prompt}"
+    );
+
+    let (_temp, _connection, parts) = docs_parts(&files, "");
+    let prompt = prompt_of(&parts);
+    assert!(
+        prompt.contains("Depth normal, rounds 2, ${nothing}."),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn a_sensitive_option_never_reaches_the_context_even_when_configured() {
+    let (_temp, _connection, parts) = docs_parts(
+        &[
+            ("overlay.cfg", OPTIONS_MANIFEST),
+            ("CONTEXT.md", "Token is ${token}.\n"),
+        ],
+        "options = { token = \"tok-never-shown\" }",
+    );
+    let prompt = prompt_of(&parts);
+    assert!(prompt.contains("Token is ${token}."), "{prompt}");
+    assert!(!parts.report.to_string().contains("tok-never-shown"));
+}
+
+#[test]
+fn an_option_of_the_wrong_type_refuses_the_text_that_reads_it_naming_the_key() {
+    let (_temp, _connection, parts) = docs_parts(
+        &[
+            ("overlay.cfg", OPTIONS_MANIFEST),
+            ("CONTEXT.md", "Rounds ${rounds}.\n"),
+            (
+                "skills/audit/SKILL.md",
+                "---\nname: audit\n---\nBody ${rounds}.\n",
+            ),
+        ],
+        "options = { rounds = \"many\" }",
+    );
+    assert!(parts.system_prompt.is_none(), "{:?}", parts.system_prompt);
+    for key in ["context", "skills.audit"] {
+        let refused = items_of(&parts.report, key, "overlay:docs");
+        assert_eq!(refused[0]["state"], "refused", "{}", parts.report);
+        let how = refused[0]["how"].as_str().expect("words");
+        assert!(how.contains("rounds"), "{how}");
+        assert!(!how.contains("many"), "a value is never quoted: {how}");
+    }
+}
+
+#[test]
+fn rules_are_not_templated_and_a_context_naming_the_project_gets_each_sessions_folder() {
+    let (_temp, _connection, parts) = docs_parts(
+        &[
+            ("overlay.cfg", OPTIONS_MANIFEST),
+            ("rules/style.md", "Rule ${depth}.\n"),
+            (
+                "CONTEXT.md",
+                "Work in ${AOS_PROJECT_ROOT}, depth ${depth}.\n",
+            ),
+        ],
+        "options = { depth = \"deep\" }",
+    );
+    let prompt = prompt_of(&parts);
+    assert!(prompt.contains("Rule ${depth}."), "{prompt}");
+    assert!(
+        prompt.contains("Work in ${AOS_PROJECT_ROOT}, depth deep."),
+        "no folder yet: {prompt}"
+    );
+
+    for folder in ["/work/one", "/work/two"] {
+        let mut params = json!({"cwd": folder, "mcpServers": []});
+        add_parts(params.as_object_mut().expect("an object"), &parts).expect("added");
+        let text = params["systemPrompt"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(
+            text.contains(&format!("Work in {folder}, depth deep.")),
+            "{text}"
+        );
+        assert!(text.contains("Rule ${depth}."), "{text}");
+    }
+    // A session with no folder gets the text as it stands.
+    let mut params = json!({"mcpServers": []});
+    add_parts(params.as_object_mut().expect("an object"), &parts).expect("added");
+    assert_eq!(
+        params["systemPrompt"]["content"][0]["text"],
+        prompt.as_str()
+    );
+}

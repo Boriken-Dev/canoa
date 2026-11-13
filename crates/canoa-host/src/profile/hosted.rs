@@ -28,6 +28,7 @@ use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
 use crate::usage_splice::{Client, Splice};
 use hooks::{Book, Hooks, PreEnv, Seen};
+use template::{Again, Templating};
 
 /// The `_meta` key a client names a profile under in `initialize`, and the host's report under in its answers.
 pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
@@ -74,6 +75,7 @@ pub const APPROVE_META: &str = "dev.boriken.canoa/approve";
 const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
 mod hooks;
+mod template;
 
 /// What became of one part of a profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -934,6 +936,8 @@ impl Drop for Written {
 #[derive(Debug, Default)]
 struct Parts {
     system_prompt: Option<String>,
+    /// The system prompt's texts in order, each with what replacing it again needs when it names `AOS_PROJECT_ROOT`.
+    pieces: Vec<(String, Option<Again>)>,
     /// Whether the agent takes a system prompt with a new session, whether the profile gives one or not.
     system_prompt_taken: bool,
     servers: Vec<Value>,
@@ -949,6 +953,34 @@ struct Parts {
         reason = "held so the directory is removed with the connection, not read"
     )]
     written: Option<Written>,
+}
+
+impl Parts {
+    /// The system prompt for a session opened in `project`: the texts that name `AOS_PROJECT_ROOT` replaced again with it.
+    fn system_prompt_for(&self, project: Option<&str>) -> Result<Option<String>, String> {
+        let Some(prompt) = &self.system_prompt else {
+            return Ok(None);
+        };
+        let Some(project) =
+            project.filter(|_| self.pieces.iter().any(|(_, again)| again.is_some()))
+        else {
+            return Ok(Some(prompt.clone()));
+        };
+        let mut texts = Vec::new();
+        for (text, again) in &self.pieces {
+            texts.push(match again {
+                Some(again) => again.render(Some(project))?,
+                None => text.clone(),
+            });
+        }
+        let joined = texts.join("\n\n");
+        if joined.len() > MAX_CONTEXT {
+            return Err(format!(
+                "the initial context passes {MAX_CONTEXT} bytes with this session's folder in it"
+            ));
+        }
+        Ok(Some(joined))
+    }
 }
 
 /// An MCP server of an overlay or a project that canoa.cfg does not allow, and what the client is shown of it.
@@ -1225,13 +1257,19 @@ fn acp_server(server: &ReadyMcp, version: u64) -> Option<Value> {
     })
 }
 
-/// A context's text: an overlay's from the bytes its digest covered, the host's own from its file.
+/// A context's text: an overlay's from the bytes its digest covered, the host's own from its file. An overlay's context
+/// file has its `${NAME}` names replaced.
 fn context_text(
     context: &Sourced<Context>,
     overlays: &[ReadOverlay],
-) -> Result<(String, String), String> {
+    templating: &Templating<'_>,
+) -> Result<(String, String, Option<Again>), String> {
     match &context.value {
-        Context::Text(text) => Ok((text.clone(), "text".to_owned())),
+        Context::Text(text) => Ok((text.clone(), "text".to_owned(), None)),
+        Context::Template(file) => {
+            let rendered = templating.context(&context.layer.name, file)?;
+            Ok((rendered.text, file.clone(), rendered.again))
+        }
         Context::File(file) => {
             let text = if context.layer.kind == LayerKind::Overlay {
                 overlays
@@ -1254,7 +1292,7 @@ fn context_text(
                 .expose()
                 .to_owned()
             };
-            Ok((text, file.clone()))
+            Ok((text, file.clone(), None))
         }
     }
 }
@@ -1264,8 +1302,9 @@ fn context_text(
 fn skill_files(
     skill: &Sourced<super::Skill>,
     overlays: &[ReadOverlay],
+    templating: &Templating<'_>,
 ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-    let files = if skill.layer.kind == LayerKind::Overlay {
+    let mut files = if skill.layer.kind == LayerKind::Overlay {
         overlays
             .iter()
             .find(|overlay| overlay.identity == skill.layer.name)
@@ -1297,6 +1336,18 @@ fn skill_files(
             .collect()
     };
 
+    // A skill the app fetched is delivered as it was fetched; a bundled one has its body replaced.
+    let bundled = !skill
+        .value
+        .path
+        .starts_with(&format!("{}/", fetched::SKILLS_DIR));
+    if skill.layer.kind == LayerKind::Overlay
+        && bundled
+        && let Some(bytes) = files.get("SKILL.md")
+    {
+        let replaced = templating.skill(&skill.layer.name, bytes)?;
+        files.insert("SKILL.md".to_owned(), replaced);
+    }
     if files.contains_key("SKILL.md") {
         Ok(files)
     } else {
@@ -1322,11 +1373,17 @@ fn parts_for(
     items.extend(notes);
     items.extend(connection.env_items.iter().cloned());
 
+    let templating = Templating {
+        overlays: &connection.overlays,
+        hooks: &connection.hooks,
+        layers: &effective.aos,
+        options: &connection.host.options,
+    };
     let mut texts = Vec::new();
     let mut bytes = 0;
     for context in effective.contexts.iter().chain(effective.context.as_ref()) {
-        match context_text(context, &connection.overlays) {
-            Ok((text, source)) => {
+        match context_text(context, &connection.overlays, &templating) {
+            Ok((text, source, again)) => {
                 bytes += text.len();
                 if bytes > MAX_CONTEXT {
                     items.push(Item::new(
@@ -1336,13 +1393,14 @@ fn parts_for(
                         format!("the initial context passes {MAX_CONTEXT} bytes"),
                     ));
                 } else {
-                    texts.push((text, context.layer.clone(), source));
+                    texts.push((text, context.layer.clone(), source, again));
                 }
             }
             Err(why) => items.push(Item::new("context", &context.layer, State::Refused, why)),
         }
     }
     let mut system_prompt = None;
+    let mut pieces = Vec::new();
     if !texts.is_empty() {
         let taken = takes.system_prompt();
         if taken {
@@ -1353,8 +1411,12 @@ fn parts_for(
                     .collect::<Vec<_>>()
                     .join("\n\n"),
             );
+            pieces = texts
+                .iter()
+                .map(|(text, _, _, again)| (text.clone(), again.clone()))
+                .collect();
         }
-        for (_, layer, source) in &texts {
+        for (_, layer, source, _) in &texts {
             items.push(if taken {
                 Item::new(
                     "context",
@@ -1376,7 +1438,7 @@ fn parts_for(
     let mut written_files = BTreeMap::new();
     let mut usable = Vec::new();
     for (name, skill) in &effective.skills {
-        match skill_files(skill, &connection.overlays) {
+        match skill_files(skill, &connection.overlays, &templating) {
             Ok(files) => usable.push((name, &skill.layer, files)),
             Err(why) => items.push(Item::new(
                 format!("skills.{name}"),
@@ -1584,6 +1646,7 @@ fn parts_for(
     );
     Parts {
         system_prompt,
+        pieces,
         system_prompt_taken: takes.system_prompt(),
         servers,
         names,
@@ -1601,19 +1664,22 @@ fn parts_for(
 }
 
 /// Adds `parts` to a session request's `params`. A client's MCP server may not take a name the profile holds.
-fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), &'static str> {
+fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), String> {
     let servers = params.entry("mcpServers").or_insert_with(|| json!([]));
-    let servers = servers.as_array_mut().ok_or("mcpServers is not a list")?;
+    let servers = servers
+        .as_array_mut()
+        .ok_or_else(|| "mcpServers is not a list".to_owned())?;
     if servers.iter().any(|server| {
         server
             .get("name")
             .and_then(Value::as_str)
             .is_some_and(|name| parts.names.iter().any(|held| held == name))
     }) {
-        return Err("an MCP server of that name comes from the host's profile");
+        return Err("an MCP server of that name comes from the host's profile".to_owned());
     }
     servers.extend(parts.servers.iter().cloned());
-    if let Some(text) = &parts.system_prompt {
+    let project = params.get("cwd").and_then(Value::as_str).map(str::to_owned);
+    if let Some(text) = parts.system_prompt_for(project.as_deref())? {
         let block = json!({"type": "text", "text": text});
         match params
             .get_mut("systemPrompt")
@@ -1638,7 +1704,7 @@ fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), &'sta
             .entry("additionalDirectories")
             .or_insert_with(|| json!([]));
         more.as_array_mut()
-            .ok_or("additionalDirectories is not a list")?
+            .ok_or_else(|| "additionalDirectories is not a list".to_owned())?
             .extend(parts.directories.iter().map(|directory| json!(directory)));
     }
     if let Some(meta) = &parts.meta {
@@ -1955,7 +2021,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
         let Some(params) = params else {
             return Err(error(&id, INVALID_PARAMS, "params must be an object"));
         };
-        add_parts(params, parts).map_err(|why| error(&id, INVALID_PARAMS, why))?;
+        add_parts(params, parts).map_err(|why| error(&id, INVALID_PARAMS, &why))?;
         if let Some(servers) = params.get_mut("mcpServers").and_then(Value::as_array_mut) {
             servers.extend(
                 parts

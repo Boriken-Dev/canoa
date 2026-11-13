@@ -1578,3 +1578,27 @@ fn the_yaml_and_json_examples_load_to_the_same_configuration() {
     );
     Config::load(&example("canoa.cfg")).expect("the TOML example");
 }
+
+#[test]
+fn an_overlays_options_are_read_from_its_entry_for_the_host_and_every_profile() {
+    let config = parse(
+        "[overlays.docs]\nsource = \"x\"\noptions = { depth = \"deep\", rounds = 3, strict = true }\n\
+         [overlays.plain]\nsource = \"y\"\n\
+         [host.agents.a]\nprogram = \"agent\"\nprofiles = [\"main\"]\n\
+         [host.profiles.main]\noverlays = [\"docs\"]\n",
+    )
+    .expect("parses");
+    let expected = serde_json::json!({"depth": "deep", "rounds": 3, "strict": true});
+    let local = &config.local_profiles.options;
+    assert_eq!(local.len(), 1, "an overlay with no options has none");
+    assert_eq!(serde_json::Value::Object(local["docs"].clone()), expected);
+    assert_eq!(config.profiles["main"].options, *local);
+}
+
+#[test]
+fn options_that_are_not_a_table_refuse_the_file_naming_the_overlay_and_no_value() {
+    let refused = parse("[overlays.docs]\noptions = \"secret-value\"\n").expect_err("refused");
+    let words = refused.to_string();
+    assert!(words.contains("overlays.docs.options"), "{words}");
+    assert!(!words.contains("secret-value"), "{words}");
+}

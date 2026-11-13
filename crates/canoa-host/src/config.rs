@@ -87,6 +87,8 @@ pub struct LocalProfiles {
     pub directory: PathBuf,
     /// `[skill_pins]`, by lower-case skill name.
     pub skill_pins: BTreeMap<String, String>,
+    /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name.
+    pub options: BTreeMap<String, coqui_aos::Document>,
 }
 
 /// One agent's `[agents.NAME.profile]` layer and `[agents.NAME.mcp]` choices.
@@ -148,6 +150,7 @@ impl LocalProfiles {
             off_mcp,
             directory: self.directory.clone(),
             skill_pins: self.skill_pins.clone(),
+            options: self.options.clone(),
         })
     }
 }
@@ -433,6 +436,9 @@ pub struct HostProfile {
     /// `[skill_pins]`: the tree digest a skill from elsewhere must have, by lower-case skill name. A skill is
     /// delivered only when this digest, its record's and the overlay's own pin (if it has one) are all the same.
     pub skill_pins: BTreeMap<String, String>,
+    /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name. The overlay's
+    /// manifest says which exist and of what type; a value of another type refuses the text that reads it.
+    pub options: BTreeMap<String, coqui_aos::Document>,
 }
 
 /// Where an entry listens, as an entry's `listen` writes it.
@@ -1109,6 +1115,8 @@ impl Config {
         }
         let skill_pins = skill_pins_of(raw.skill_pins)?;
         local_profiles.skill_pins.clone_from(&skill_pins);
+        let options = overlay_options_of(&raw.overlays)?;
+        local_profiles.options.clone_from(&options);
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
@@ -1132,6 +1140,7 @@ impl Config {
         for (name, table) in host.profiles {
             let mut profile = profile_of(&name, table, &directory)?;
             profile.skill_pins.clone_from(&skill_pins);
+            profile.options.clone_from(&options);
             profiles.insert(name, profile);
         }
         let account_store = match host.account_store.as_deref() {
@@ -1865,6 +1874,7 @@ fn profile_of(
         off_mcp: BTreeSet::new(),
         directory: directory.to_owned(),
         skill_pins: BTreeMap::new(),
+        options: BTreeMap::new(),
     })
 }
 
@@ -1947,6 +1957,7 @@ fn local_profiles_of(
         agents: by_agent,
         directory,
         skill_pins: BTreeMap::new(),
+        options: BTreeMap::new(),
     })
 }
 
@@ -1993,6 +2004,31 @@ fn skill_pins_of(table: toml::Table) -> Result<BTreeMap<String, String>, ConfigE
         {
             return Err(refused("names a skill twice, spelt in another case"));
         }
+    }
+    Ok(out)
+}
+
+/// `[overlays.NAME] options`: a table of option names and values, by overlay. Whether an option is declared and of what
+/// type is for the overlay's manifest to say, so the errors name a table and never a value.
+fn overlay_options_of(
+    overlays: &IndexMap<String, toml::Value>,
+) -> Result<BTreeMap<String, coqui_aos::Document>, ConfigError> {
+    let mut out = BTreeMap::new();
+    for (name, entry) in overlays {
+        let Some(options) = entry.as_table().and_then(|entry| entry.get("options")) else {
+            continue;
+        };
+        let invalid = || ConfigError::Invalid {
+            entry: None,
+            what: format!("overlays.{name}.options is not a table of values"),
+        };
+        let toml::Value::Table(table) = options else {
+            return Err(invalid());
+        };
+        let Ok(serde_json::Value::Object(values)) = serde_json::to_value(table) else {
+            return Err(invalid());
+        };
+        out.insert(name.clone(), values);
     }
     Ok(out)
 }
