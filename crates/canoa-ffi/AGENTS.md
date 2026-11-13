@@ -47,14 +47,14 @@ int32_t  canoa_ffi_child_main(void);
 | `args` | the command line without the program's name, as `canoa` takes it (see `crates/canoa-host/AGENTS.md`) | required |
 | `home` | the directory of the identity, trust store and lock | this user's home |
 | `holder` | what `serve` calls itself to another host that finds its home held | `an application` |
-| `program` | what runs the host's own `provider`, `tool` and `launch` | this application, with `--canoa-child` first |
+| `program` | what runs the host's own `provider`, `tool`, `launch` and `mcp-bridge` | this application, with `--canoa-child` first |
 | `program_args` | what goes before the subcommand on `program`'s command line; only with `program` | none |
 
 - `canoa_ffi_job_read`: what the job has said since the last read, `{"out": [line...], "err": [line...], "dropped": n, "exit": status or null}`, which `canoa_ffi_text_free` frees with the same length. `out` is what `canoa` prints on standard output, `err` what it says on standard error. `dropped` counts lines lost past 4096 unread of a kind, the oldest first. `exit` is set once the command has ended and has given up all it held, a home's lock and its addresses included; a command line `clap` refuses is status 2, a panicked command 101.
 - `canoa_ffi_job_stop`: closes the job's input. `serve --until-stdin-closes` then ends every listener, link and agent, and `pair --until-stdin-closes` gives up. It returns at once; `exit` says when the job has ended. A command with no such flag does not hear it.
 - `canoa_ffi_job_free`: forgets the job, closing its input first. A job still running goes on to its end with nobody reading it.
 - `canoa_ffi_link_open`: a connection to entry `entry` (UTF-8) of the `serve` job `job` runs, inside this process: no proof, no trust store, no sealing, and the entry's `peers` list is ignored, since only this process can call it. The entry serves it as a paired key's connection, its agent starting on the first message. Two threads of the link's own move messages, so no call blocks. `canoa_ffi_link_send` copies one ACP message and queues it in order (a worktree request goes first, as `_canoa/worktree/*`); `canoa_ffi_link_read` takes `{"messages": [text...], "closed": bool}`, the host's side holding 1024 unread before it waits; `canoa_ffi_link_close` ends the link and its agent. Stopping the job closes every link, which then read `closed`.
-- `canoa_ffi_child_main`: this process as the host's own `provider`, `tool`, `agent` or `launch`, from the process's command line, whose first argument is `--canoa-child` (`jobs::CHILD_FLAG`). Anything else is status 2. It returns the status to exit with, and is called before the application starts anything of its own.
+- `canoa_ffi_child_main`: this process as the host's own `provider`, `tool`, `agent`, `launch` or `mcp-bridge`, from the process's command line, whose first argument is `--canoa-child` (`jobs::CHILD_FLAG`). Anything else is status 2. It returns the status to exit with, and is called before the application starts anything of its own.
 
 ## What a long command changes in this process
 
@@ -85,7 +85,7 @@ The console comes before the pipe: attaching to one replaces the standard handle
 
 ## Gotchas
 
-- `provider`, `tool`, `agent` and `launch` are refused as jobs, status 2: they change the process they run in (its directory, its standard input, its end), so they run only as a process of their own, through `--canoa-child`. The app runs Claude and Codex that way, as `--canoa-child agent claude|codex`.
+- `provider`, `tool`, `agent`, `launch` and `mcp-bridge` are refused as jobs, status 2: they change the process they run in (its directory, its standard input, its end), so they run only as a process of their own, through `--canoa-child`. The app runs Claude and Codex that way, as `--canoa-child agent claude|codex`.
 - On Linux and macOS, while the Dart side has a process of its own running, Dart's process handling collects any child that ends, the host's among them. The host then cannot learn a child's status: a worktree request's `git` fails as if it had run too long, and an agent's stop signals a process id already collected. Not yet solved; it needs the host's children started outside the application's own process.
 - `held` naming the application's own process is an earlier host of its own that was given up on before it ended: the app waits it out and starts again.
 
