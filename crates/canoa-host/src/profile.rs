@@ -1424,6 +1424,7 @@ mod overlay;
 
 pub use hosted::{APPROVE_META, APPROVE_METHOD, OVERLAYS_META, PROFILE_META};
 pub use launch::launch;
+pub(crate) use overlay::active_facts;
 pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
 
 #[cfg(test)]

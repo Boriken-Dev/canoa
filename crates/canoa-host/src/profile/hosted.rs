@@ -381,7 +381,13 @@ impl Connection {
         let overlays = read_overlays(host, &mut notes);
         let layers = layers_of(host, &overlays, None, &mut notes);
         let effective = merge(&layers);
-        let hooks = Hooks::new(host, &effective.aos, &overlays, lookup);
+        let hooks = Hooks::new(
+            host,
+            &effective.aos,
+            &overlays,
+            &effective.share_env,
+            lookup,
+        );
         // Before the agent starts nobody can be asked, so only what canoa.cfg allows runs.
         let directory = host.directory.clone();
         let harness = harness_of(None, entry).unwrap_or("canoa");
@@ -422,6 +428,16 @@ impl Connection {
             ));
         }
         for report in &effective.overlays {
+            for (id, subject) in &report.reports {
+                if id == "env-script-not-allowed" {
+                    notes.push(Item::new(
+                        format!("env_scripts.{subject}"),
+                        &report.layer,
+                        State::Off,
+                        "env-script-not-allowed: its env scripts do not run until canoa.cfg names the overlay's digest for its hooks; the rest of the overlay still applies",
+                    ));
+                }
+            }
             for what in &report.not_applied {
                 notes.push(Item::new(
                     what.clone(),
@@ -692,8 +708,11 @@ fn layers_of(
                     ));
                 }
             }
-            Ok(layer) => {
+            Ok(mut layer) => {
                 let key = aos::normalize_name(&overlay.identity);
+                if let Some(aos) = layer.aos.as_mut() {
+                    aos.allowed = host.allow_hooks.get(&overlay.identity).cloned();
+                }
                 if let Some(aos) = &layer.aos {
                     manifests.insert(key.clone(), aos.manifest.clone());
                 }

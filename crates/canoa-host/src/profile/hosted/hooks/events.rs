@@ -12,7 +12,7 @@ use coqui_aos::{Decision, FiredEvent, HookEvent};
 use coqui_transport::Channel;
 use serde_json::{Map, Value, json};
 
-use super::report_item;
+use super::{Firing, report_item};
 use crate::profile::hosted::{Hosted, Item, SESSION_METHODS, error};
 
 /// The outputs Canoa applies for each event over ACP.
@@ -91,18 +91,18 @@ impl Book {
         notes
     }
 
-    /// The part of `context` the session's bound admits; the rest is reported.
-    fn admit(
-        &mut self,
-        hooks: &super::Hooks,
-        session: &str,
-        context: Vec<(String, String)>,
-        event: &str,
-    ) -> Vec<(String, String)> {
+    /// The bytes of hook context the session holds.
+    fn used(&self, session: &str) -> usize {
+        self.used.get(session).copied().unwrap_or(0)
+    }
+
+    /// Counts `context`, which the engine kept within the session's bound, among what the session holds.
+    fn took(&mut self, session: &str, context: Vec<(String, String)>) -> Vec<(String, String)> {
         let used = self.used.entry(session.to_owned()).or_default();
-        let (kept, items) = hooks.admit(used, context, event);
-        self.remember(items);
-        kept
+        for (_, text) in &context {
+            *used = used.saturating_add(text.len());
+        }
+        context
     }
 
     fn remember(&mut self, items: impl IntoIterator<Item = Item>) {
@@ -234,13 +234,18 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         for (key, value) in extra {
             known.insert((*key).to_owned(), value.clone());
         }
+        let context_used = self.hold().book.used(&session.id);
         let fired = self.connection.hooks.fire(
             &self.connection.overlays,
-            event,
-            &known,
-            select,
-            &session.allowed,
-            applies,
+            &Firing {
+                event,
+                known: &known,
+                select,
+                person: &session.allowed,
+                applies,
+                pre_env: &self.connection.pre_env.runs,
+                context_used,
+            },
         );
         for report in &fired.reports {
             tracing::warn!(
@@ -358,12 +363,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     "an overlay's hook that guards sessions failed, so the session did not open",
                 ));
             }
-            let context = self.hold().book.admit(
-                &self.connection.hooks,
-                &session.id,
-                fired.context,
-                "session-start",
-            );
+            let context = self.hold().book.took(&session.id, fired.context);
             if !context.is_empty() {
                 let takes = self
                     .hold()
@@ -476,12 +476,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "refusal"}});
                 return Err(serde_json::to_vec(&answer).unwrap_or_default());
             }
-            fresh = self.hold().book.admit(
-                &self.connection.hooks,
-                &session.id,
-                fired.context,
-                "prompt",
-            );
+            fresh = self.hold().book.took(&session.id, fired.context);
         }
         let mut context = self
             .hold()
@@ -740,12 +735,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 );
                 let mut hold = self.hold();
                 hold.book.remember(fired.reports.iter().map(report_item));
-                let context = hold.book.admit(
-                    &self.connection.hooks,
-                    &session.id,
-                    fired.context,
-                    "post-tool",
-                );
+                let context = hold.book.took(&session.id, fired.context);
                 if !context.is_empty() {
                     hold.book
                         .carry

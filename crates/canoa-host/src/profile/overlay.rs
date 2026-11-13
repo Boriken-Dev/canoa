@@ -47,6 +47,8 @@ pub struct AosLayer {
     /// The skills it names that it does not bundle: by source, or by a name for a catalog to resolve. Canoa fetches and
     /// resolves nothing itself; what the app fetched for them is read when a session starts.
     pub elsewhere: Vec<aos::SkillEntry>,
+    /// The digest canoa.cfg allows its hooks and env scripts at, when it names one.
+    pub allowed: Option<String>,
 }
 
 /// What Canoa needs to make a layer of an AOS overlay.
@@ -131,6 +133,8 @@ pub struct OverlayReport {
     pub unresolved: Vec<String>,
     /// Its non-default settings, each time it is activated.
     pub non_defaults: Vec<NonDefaultSetting>,
+    /// What the specification reports of it besides, as `(id, subject)`: `env-script-not-allowed`. Not in the view.
+    pub reports: Vec<(String, String)>,
 }
 
 impl OverlayReport {
@@ -371,6 +375,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
             root: input.root,
             os: input.os,
             pinned: input.pinned,
+            gate: None,
         },
         &[],
     ) {
@@ -604,6 +609,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         references,
         not_applied,
         elsewhere,
+        allowed: None,
     }));
     Ok(layer)
 }
@@ -691,6 +697,8 @@ struct Probed<'a> {
     root: &'a str,
     os: &'a str,
     pinned: bool,
+    /// Whether env scripts run only at the digest the person allowed: `allowed` is that digest, and `digest` the overlay's.
+    gate: Option<(&'a str, Option<&'a str>)>,
 }
 
 fn probe(overlay: &Probed<'_>, shared: &[String]) -> Result<aos::Effective, aos::Error> {
@@ -702,6 +710,7 @@ fn probe(overlay: &Probed<'_>, shared: &[String]) -> Result<aos::Effective, aos:
         root,
         os,
         pinned,
+        gate,
     } = *overlay;
     let mut manifest = manifest.clone();
     if let Some(Value::Object(env)) = manifest.get_mut("env") {
@@ -724,6 +733,11 @@ fn probe(overlay: &Probed<'_>, shared: &[String]) -> Result<aos::Effective, aos:
     facts.identity = identity.to_owned();
     facts.pinned = pinned;
     facts.grants.insert("env".to_owned(), shared.to_vec());
+    if let Some((digest, allowed)) = gate {
+        facts.gate_env_scripts = true;
+        facts.digest = Some(digest.to_owned());
+        facts.allowed = allowed.map(str::to_owned);
+    }
     facts.host_env = shared
         .iter()
         .map(|name| (name.clone(), String::new()))
@@ -745,7 +759,7 @@ pub(crate) fn report(
     let windows = aos.os == "windows";
     let names: Vec<String> = shared.keys().cloned().collect();
     // An overlay whose environment cannot be built starts no session; its view then lists no grants.
-    let (ungranted, non_defaults) = probe(
+    let (ungranted, non_defaults, reports) = probe(
         &Probed {
             manifest: &aos.manifest,
             files: &aos.files,
@@ -754,10 +768,11 @@ pub(crate) fn report(
             root: &aos.root,
             os: &aos.os,
             pinned: aos.pinned,
+            gate: Some((&aos.digest, aos.allowed.as_deref())),
         },
         &names,
     )
-    .map(|found| (found.ungranted, found.non_defaults))
+    .map(|found| (found.ungranted, found.non_defaults, found.reports))
     .unwrap_or_default();
     // Canoa runs no script, setup or install, so what only those would make non-default is not Canoa's to report.
     let non_defaults = non_defaults
@@ -791,6 +806,7 @@ pub(crate) fn report(
         ungranted,
         unresolved,
         non_defaults,
+        reports,
     }
 }
 
@@ -873,6 +889,39 @@ fn words(value: &Value, out: &mut BTreeSet<String>) {
     }
 }
 
+/// What each overlay's facts are to the specification's functions: its root, the digest canoa.cfg allowed its hooks and
+/// env scripts at, its files, and the variables the person's own layers share as its grants.
+pub(crate) fn active_facts<'a>(
+    layers: &'a [AosLayer],
+    shared: &IndexMap<String, LayerId>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Vec<(&'a Map<String, Value>, Facts)> {
+    let names: Vec<String> = shared.keys().cloned().collect();
+    let host_env: BTreeMap<String, String> = names
+        .iter()
+        .filter_map(|name| lookup(name).map(|value| (name.clone(), value)))
+        .collect();
+    layers
+        .iter()
+        .map(|layer| {
+            let mut facts = Facts::new(layer.os.clone());
+            facts.root = layer.root.clone();
+            facts.identity = layer.identity.clone();
+            facts.pinned = layer.pinned;
+            facts.gate_env_scripts = true;
+            facts.digest = Some(layer.digest.clone());
+            facts.allowed.clone_from(&layer.allowed);
+            facts.grants.insert("env".to_owned(), names.clone());
+            facts.host_env = host_env.clone();
+            let paths = OverlayTree::from_paths(layer.files.iter().cloned());
+            facts.tree = layer.texts.iter().fold(paths, |tree, (path, bytes)| {
+                tree.with_bytes(path, bytes.clone())
+            });
+            (&layer.manifest, facts)
+        })
+        .collect()
+}
+
 /// Builds the AOS overlays' environment after each overlay in turn, lowest first, over this process's environment as
 /// `lookup` reads it. A placeholder reads only what the overlays set and the variables the person's own layers share;
 /// any other variable of this process is seen by a path addition and `if_unset`, never by a placeholder. Only the
@@ -903,27 +952,7 @@ pub(crate) fn build_each(
             }
         }
     }
-    let names: Vec<String> = shared.keys().cloned().collect();
-    let host_env: BTreeMap<String, String> = names
-        .iter()
-        .filter_map(|name| lookup(name).map(|value| (name.clone(), value)))
-        .collect();
-    let active: Vec<(&Map<String, Value>, Facts)> = layers
-        .iter()
-        .map(|layer| {
-            let mut facts = Facts::new(layer.os.clone());
-            facts.root = layer.root.clone();
-            facts.identity = layer.identity.clone();
-            facts.pinned = layer.pinned;
-            facts.grants.insert("env".to_owned(), names.clone());
-            facts.host_env = host_env.clone();
-            let paths = OverlayTree::from_paths(layer.files.iter().cloned());
-            facts.tree = layer.texts.iter().fold(paths, |tree, (path, bytes)| {
-                tree.with_bytes(path, bytes.clone())
-            });
-            (&layer.manifest, facts)
-        })
-        .collect();
+    let active = active_facts(layers, shared, lookup);
     (0..layers.len())
         .map(|last| {
             let composed = aos::composed_environment(

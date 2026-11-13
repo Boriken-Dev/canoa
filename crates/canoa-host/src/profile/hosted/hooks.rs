@@ -17,13 +17,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use coqui_aos::{
-    self as aos, FiredEvent, Hook, HookEvent, HookFacts, HookPlan, HookRun, OnFailure, Settings,
+    self as aos, Document, Environment, Facts, FiredEvent, Hook, HookEvent, HookFacts, HookPlan,
+    HookRun, HookScope, OnFailure, Settings,
 };
+use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
 use super::{Item, LayerId, LayerKind, ReadOverlay, State, Written, os, program_of};
 use crate::config::HostProfile;
-use crate::profile::AosLayer;
+use crate::profile::{AosLayer, active_facts};
 
 pub(super) use events::{Book, Seen};
 
@@ -179,6 +181,10 @@ pub(super) struct Hooks {
     interpreters: BTreeMap<&'static str, PathBuf>,
     /// What a hook is given of the host's environment.
     base: Vec<(String, String)>,
+    /// Each overlay's manifest and facts, in composition order: what a hook's environment is made from.
+    active: Vec<(Document, Facts)>,
+    /// The manifests by normalized identity, which the order of hooks is taken from.
+    manifests: BTreeMap<String, Document>,
     /// Where the copies of the overlays' files are made, removed with the connection.
     under: PathBuf,
     copies: Mutex<BTreeMap<String, Written>>,
@@ -201,6 +207,7 @@ impl Hooks {
         host: &HostProfile,
         layers: &[AosLayer],
         overlays: &[ReadOverlay],
+        shared: &IndexMap<String, LayerId>,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Self {
         let mut interpreters = BTreeMap::new();
@@ -275,44 +282,17 @@ impl Hooks {
             settings: Settings::default(),
             interpreters,
             base,
+            active: active_facts(layers, shared, lookup)
+                .into_iter()
+                .map(|(manifest, facts)| (manifest.clone(), facts))
+                .collect(),
+            manifests: layers
+                .iter()
+                .map(|layer| (aos::normalize_name(&layer.identity), layer.manifest.clone()))
+                .collect(),
             under: std::env::temp_dir().join(format!("canoa-hooks-{name}")),
             copies: Mutex::new(BTreeMap::new()),
         }
-    }
-
-    /// The parts of `context` that fit the session's bound, counting what the session already holds in `used`; a part past it is
-    /// not added and is reported `hook-not-applied`.
-    pub(super) fn admit(
-        &self,
-        used: &mut usize,
-        context: Vec<(String, String)>,
-        event: &str,
-    ) -> (Vec<(String, String)>, Vec<Item>) {
-        let mut kept = Vec::new();
-        let mut items = Vec::new();
-        for (overlay, text) in context {
-            if self
-                .settings
-                .context_bytes
-                .allows(used.saturating_add(text.len()))
-            {
-                *used += text.len();
-                kept.push((overlay, text));
-            } else {
-                tracing::info!(
-                    overlay,
-                    event,
-                    "a hook's context passes the session's bound and was not added"
-                );
-                items.push(Item::new(
-                    format!("hooks.{overlay}.{event}"),
-                    LayerId::new(LayerKind::Overlay, overlay),
-                    State::Unsupported,
-                    "hook-not-applied: its context passes the session's context bound",
-                ));
-            }
-        }
-        (kept, items)
     }
 
     /// Whether any overlay has hooks.
@@ -493,18 +473,51 @@ impl Hooks {
         Some(root)
     }
 
-    /// One hook of `overlay` run for `event`, told `payload`.
-    fn run_one(
+    /// The environment `hook` of `identity` runs with, as the specification gives it: every overlay's root is the private
+    /// copy made of its verified files. None when a copy cannot be made or the overlay's declarations cannot be applied.
+    fn environment(
         &self,
-        overlay: &OverlayHooks,
-        read: &ReadOverlay,
-        hook: &Hook,
-        payload: &Map<String, Value>,
-        spent: u64,
-    ) -> HookRun {
+        event: HookEvent,
+        identity: &str,
+        turn: &Turn<'_>,
+    ) -> Option<Vec<(String, String)>> {
+        let mut active = Vec::new();
+        for (manifest, facts) in &self.active {
+            let read = turn
+                .overlays
+                .iter()
+                .find(|read| read.identity == facts.identity)?;
+            let mut facts = facts.clone();
+            facts.root = self
+                .copy_of(&facts.identity, read)?
+                .to_string_lossy()
+                .into_owned();
+            active.push((manifest, facts));
+        }
+        let base = Environment::new(self.base.clone(), cfg!(windows));
+        let made =
+            aos::hook_environment(event, &active, &base, turn.pre_env, Some(identity)).ok()?;
+        Some(made.values().to_vec())
+    }
+
+    /// One hook of `overlay` run in `turn`.
+    fn run_one(&self, overlay: &OverlayHooks, hook: &Hook, turn: &Turn<'_>) -> HookRun {
+        let Turn {
+            overlays,
+            payload,
+            spent,
+            ..
+        } = *turn;
         let mut run = HookRun::new(overlay.identity.clone(), Vec::new());
         run.on_failure = Some(hook.on_failure);
         run.sets.clone_from(&hook.sets);
+        let Some(read) = overlays
+            .iter()
+            .find(|read| read.identity == overlay.identity)
+        else {
+            run.not_run = true;
+            return run;
+        };
         let bytes = serde_json::to_vec(payload).unwrap_or_default();
         run.payload_size = bytes.len() as u64;
         let event_over = self
@@ -533,12 +546,10 @@ impl Hooks {
         };
         let mut script = root.clone();
         script.extend(path.split('/'));
-        let mut env = self.base.clone();
-        env.push(("AOS_HOOK_EVENT".to_owned(), hook.event.as_str().to_owned()));
-        env.push((
-            aos::root_variable(&overlay.identity),
-            root.to_string_lossy().into_owned(),
-        ));
+        let Some(env) = self.environment(hook.event, &overlay.identity, turn) else {
+            run.not_run = true;
+            return run;
+        };
         let limit = self.settings.hook_output_bytes.get().unwrap_or(u64::MAX);
         let outcome = run::run(&run::Job {
             program,
@@ -557,43 +568,66 @@ impl Hooks {
         run
     }
 
-    /// Every hook of `event` that is on, in composition order, run until one blocks, denies or refuses, and combined to
-    /// the tightest: what the event amounts to. `known` holds what the consumer knows of the payload, `select` the reason
-    /// or tool kind `match` selects on, `person` the overlays the person allowed, `applies` the outputs Canoa can apply
-    /// for this event.
-    pub(super) fn fire(
-        &self,
-        overlays: &[ReadOverlay],
-        event: HookEvent,
-        known: &Map<String, Value>,
-        select: Option<&str>,
-        person: &BTreeSet<String>,
-        applies: &[&str],
-    ) -> FiredEvent {
-        let payload = aos::hook_payload(event, known);
+    /// Every hook of the event that is on, in the order the specification gives, run until one blocks, denies or
+    /// refuses, and combined to the tightest: what the event amounts to. `overlays` are the overlays' files.
+    pub(super) fn fire(&self, overlays: &[ReadOverlay], firing: &Firing<'_>) -> FiredEvent {
+        let event = firing.event;
+        let payload = aos::hook_payload(event, firing.known);
+        let on =
+            |overlay: &OverlayHooks| overlay.allowed || firing.person.contains(&overlay.identity);
+        let has: Vec<String> = self
+            .overlays
+            .iter()
+            .filter(|overlay| on(overlay) && overlay.hooks.iter().any(|hook| hook.event == event))
+            .map(|overlay| aos::normalize_name(&overlay.identity))
+            .collect();
+        let requested: Vec<String> = self.manifests.keys().cloned().collect();
+        // Canoa has no hook of its own user's or project's: only the overlays' run.
+        let order = aos::hook_order(&self.manifests, &requested, &has, &[]).map_or_else(
+            |_| has.clone(),
+            |order| {
+                order
+                    .into_iter()
+                    .filter(|(scope, _)| *scope == HookScope::Overlay)
+                    .map(|(_, identity)| identity)
+                    .collect()
+            },
+        );
         let mut runs: Vec<HookRun> = Vec::new();
-        let mut spent = 0_u64;
-        for overlay in &self.overlays {
-            if !(overlay.allowed || person.contains(&overlay.identity)) {
-                continue;
-            }
-            let Some(read) = overlays
+        let mut turn = Turn {
+            overlays,
+            payload: &payload,
+            pre_env: firing.pre_env,
+            spent: 0,
+        };
+        let fired = |runs: &[HookRun]| {
+            aos::fire_event_after(
+                event,
+                runs,
+                Some(firing.applies),
+                &self.settings,
+                cfg!(windows),
+                firing.context_used,
+            )
+        };
+        for key in order {
+            let Some(overlay) = self
+                .overlays
                 .iter()
-                .find(|read| read.identity == overlay.identity)
+                .find(|overlay| aos::normalize_name(&overlay.identity) == key)
             else {
                 continue;
             };
             for hook in overlay.hooks.iter().filter(|hook| hook.event == event) {
-                if let Some(select) = select
+                if let Some(select) = firing.select
                     && !aos::hook_matches(event, hook.select.as_deref(), select)
                 {
                     continue;
                 }
-                let run = self.run_one(overlay, read, hook, &payload, spent);
-                spent = spent.saturating_add(run.seconds);
+                let run = self.run_one(overlay, hook, &turn);
+                turn.spent = turn.spent.saturating_add(run.seconds);
                 runs.push(run);
-                let so_far =
-                    aos::fire_event(event, &runs, Some(applies), &self.settings, cfg!(windows));
+                let so_far = fired(&runs);
                 if so_far
                     .decision
                     .is_some_and(|decision| decision != aos::Decision::Ask)
@@ -602,7 +636,7 @@ impl Hooks {
                 }
             }
         }
-        aos::fire_event(event, &runs, Some(applies), &self.settings, cfg!(windows))
+        fired(&runs)
     }
 
     /// The `pre-env` run of each overlay canoa.cfg allows hooks for, by identity: made before the agent starts, when nobody
@@ -622,13 +656,13 @@ impl Hooks {
             else {
                 continue;
             };
-            let Some(read) = overlays
-                .iter()
-                .find(|read| read.identity == overlay.identity)
-            else {
-                continue;
+            let turn = Turn {
+                overlays,
+                payload: &payload,
+                pre_env: &BTreeMap::new(),
+                spent: 0,
             };
-            let run = self.run_one(overlay, read, hook, &payload, 0);
+            let run = self.run_one(overlay, hook, &turn);
             // What the environment script's output sets, which the agent is given besides the overlay's declared variables;
             // a name the profile may not set from an overlay is left out and said so.
             let fired = aos::fire_event(
@@ -661,6 +695,32 @@ impl Hooks {
             refused,
         }
     }
+}
+
+/// What a hook is run in: the overlays' files, the payload, the `pre-env` runs of the connection and the seconds the
+/// event's hooks have used.
+struct Turn<'a> {
+    overlays: &'a [ReadOverlay],
+    payload: &'a Map<String, Value>,
+    pre_env: &'a BTreeMap<String, HookRun>,
+    spent: u64,
+}
+
+/// One firing of an event.
+pub(super) struct Firing<'a> {
+    pub(super) event: HookEvent,
+    /// What the consumer knows of the payload.
+    pub(super) known: &'a Map<String, Value>,
+    /// The reason or tool kind `match` selects on.
+    pub(super) select: Option<&'a str>,
+    /// The overlays the person allowed for the session.
+    pub(super) person: &'a BTreeSet<String>,
+    /// The outputs Canoa can apply for this event.
+    pub(super) applies: &'a [&'a str],
+    /// The connection's `pre-env` runs.
+    pub(super) pre_env: &'a BTreeMap<String, HookRun>,
+    /// The bytes of hook context the session already holds.
+    pub(super) context_used: usize,
 }
 
 /// The `pre-env` runs a connection's environment was built with. Their output is the environment's own and is not shown.
