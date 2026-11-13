@@ -14,7 +14,11 @@ repository = "https://github.com/Boriken-Dev/canoa"
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "env"] }
 # canoa.cfg: typed through serde, its entries kept in the document's order.
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde", "preserve_order"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display", "preserve_order"] }
+# canoa.cfg in any format its first line names: found, layered and read through anycfg, which is not published yet.
+anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
+# canoa.cfg in YAML.
+serde-saphyr = { version = "2", default-features = false, features = ["serialize", "deserialize"] }
 indexmap = { version = "2", default-features = false, features = ["std", "serde"] }
 # ACP messages a client sends, read to keep a program launch from reaching the agent.
 serde_json = "1"

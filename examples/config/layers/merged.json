@@ -1,0 +1,11 @@
+{
+  "desktop": {"start_hidden": false, "close_to_tray": true},
+  "appearance": {"look": "canoa", "brightness": "light"},
+  "sessions": {"keep": 50, "keep_text": true},
+  "usage": {"limit_phrases": ["rate limit"]},
+  "host": {"agents": {
+    "alpha": {"program": "other"},
+    "beta": {"program": "mine", "title": "Beta"}
+  }},
+  "agents": {"Claude": {"mcp": {"docs": true}}}
+}

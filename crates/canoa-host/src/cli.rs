@@ -22,7 +22,7 @@ use coqui_transport::{Channel as _, Failure};
 use coqui_transport_web::Limits;
 
 use crate::accounts::commands::Env as AccountsEnv;
-use crate::config::ImportSearch;
+use crate::config::{ImportSearch, Layers};
 use crate::home::{Home, LockError};
 use crate::{
     Config, HostLine, Origin, PeerState, ProviderOptions, ServeOptions, Serving, WebConfig,
@@ -544,10 +544,11 @@ struct ServeArgs {
 
 #[derive(Debug, Args)]
 struct ConfigArgs {
-    /// canoa.cfg to read; default %APPDATA%\Canoa\canoa.cfg, ~/Library/Application Support/Canoa/canoa.cfg, or
-    /// $XDG_CONFIG_HOME/Canoa/canoa.cfg (~/.config without it).
+    /// canoa.cfg files, a list split at `;` on Windows and `:` elsewhere, the last one highest. A leading `+` puts them on
+    /// top of the installed, system and user files; without it they are the only ones read. By default those three layers,
+    /// the user's at %APPDATA%\Canoa\canoa.cfg or $XDG_CONFIG_HOME/Canoa/canoa.cfg (~/.config without it).
     #[arg(long, env = "CANOA_CONFIG")]
-    config: Option<PathBuf>,
+    config: Option<String>,
     /// How `check` prints entries and `options` its choices.
     #[arg(long, value_enum, default_value_t = Format::Text)]
     format: Format,
@@ -559,26 +560,17 @@ pub(crate) enum Format {
     Json,
 }
 
-/// The platform's place for canoa.cfg, as the app reads it. A `Canoa.cfg` there with no `canoa.cfg` beside it is renamed
-/// first, on the platforms whose file names are case sensitive.
-fn default_config(front: &dyn Front) -> Option<PathBuf> {
-    let var = |name: &str| {
-        std::env::var_os(name)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    };
-    let base = if cfg!(windows) {
-        var("APPDATA")?
-    } else if cfg!(target_os = "macos") {
-        var("HOME")?.join("Library").join("Application Support")
-    } else {
-        var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|home| home.join(".config")))?
-    };
-    let path = base.join("Canoa").join("canoa.cfg");
-    if !cfg!(windows) {
-        adopt_legacy_name(&path, &|line| front.say(line));
+/// The files canoa.cfg is read from. With none named, the person's own is the user's, and a `Canoa.cfg` there with no
+/// `canoa.cfg` beside it is renamed first, on the platforms whose file names are case sensitive.
+fn layers_of(args: &ConfigArgs, front: &dyn Front, must_exist: bool) -> Result<Layers, Failed> {
+    let named = args.config.as_deref().filter(|value| !value.is_empty());
+    if named.is_none()
+        && !cfg!(windows)
+        && let Ok(user) = anycfg::user_config_path(Some(Path::new(crate::config::layers::NAME)))
+    {
+        adopt_legacy_name(&user, &|line| front.say(line));
     }
-    Some(path)
+    Layers::resolve(named, must_exist).map_err(Failed::usage)
 }
 
 /// Gives a `Canoa.cfg` beside `path` the name `path`, once, and says so on standard error. A file already at `path`, a
@@ -644,26 +636,19 @@ impl Failed {
     }
 }
 
-fn config_path(args: &ConfigArgs, front: &dyn Front) -> Result<PathBuf, Failed> {
-    args.config
-        .clone()
-        .or_else(|| default_config(front))
-        .ok_or_else(|| Failed::usage("no canoa.cfg: give --config or CANOA_CONFIG"))
-}
-
 fn load(args: &ConfigArgs, front: &dyn Front) -> Result<Config, Failed> {
-    Config::load(&config_path(args, front)?).map_err(Failed::usage)
+    Config::load_layers(&layers_of(args, front, true)?).map_err(Failed::usage)
 }
 
-/// canoa.cfg for `serve`. With `--allow-empty`, a file that does not exist names nothing, as an empty one does: a person
-/// who has written none yet has a host to run all the same.
+/// canoa.cfg for `serve`. With `--allow-empty`, no file at all names nothing, as an empty one does: a person who has
+/// written none yet has a host to run all the same.
 fn load_for_serving(args: &ServeArgs, front: &dyn Front) -> Result<Config, Failed> {
-    let path = config_path(&args.config, front)?;
-    match Config::load(&path) {
+    let layers = layers_of(&args.config, front, !args.allow_empty)?;
+    match Config::load_layers(&layers) {
         Err(crate::ConfigError::Read { source, .. })
             if args.allow_empty && source.kind() == std::io::ErrorKind::NotFound =>
         {
-            Config::from_str_in("", path.parent().unwrap_or_else(|| Path::new("")))
+            Config::from_str_in("", layers.own.parent().unwrap_or_else(|| Path::new("")))
                 .map_err(Failed::usage)
         }
         loaded => loaded.map_err(Failed::usage),
@@ -706,11 +691,13 @@ fn web_config(
     }
     if let Some(web) = web.as_mut() {
         // The site may hold neither canoa.cfg nor this user's identity and trust store.
-        let file = args.config.config.clone().or_else(|| default_config(front));
-        web.keep_out.extend(
-            file.and_then(|file| std::path::absolute(file).ok())
-                .and_then(|file| file.parent().map(PathBuf::from)),
-        );
+        if let Ok(layers) = layers_of(&args.config, front, false) {
+            web.keep_out.extend(layers.files.iter().filter_map(|file| {
+                std::path::absolute(file)
+                    .ok()
+                    .and_then(|file| file.parent().map(PathBuf::from))
+            }));
+        }
         web.keep_out.push(home.dir().to_owned());
     }
     Ok(web)
@@ -930,8 +917,9 @@ fn pair(
 
 /// canoa.cfg for a command that may make it: a file that does not exist names nothing.
 fn account_env<'a>(args: &ConfigArgs, front: &'a dyn Front) -> Result<AccountsEnv<'a>, Failed> {
-    let config_path = config_path(args, front)?;
-    let config = match Config::load(&config_path) {
+    let layers = layers_of(args, front, false)?;
+    let config_path = layers.own.clone();
+    let config = match Config::load_layers(&layers) {
         Err(crate::ConfigError::Read { source, .. })
             if source.kind() == std::io::ErrorKind::NotFound =>
         {
@@ -1308,7 +1296,7 @@ mod tests {
         let Command::Serve(args) = cli.command else {
             panic!("serve");
         };
-        assert_eq!(args.config.config, Some(PathBuf::from("x.cfg")));
+        assert_eq!(args.config.config.as_deref(), Some("x.cfg"));
         assert!(!args.until_stdin_closes);
     }
 

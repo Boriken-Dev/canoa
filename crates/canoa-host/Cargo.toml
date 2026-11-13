@@ -20,7 +20,10 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = []
+default = ["yaml", "json"]
+# canoa.cfg may be written in YAML (`#!yaml` on its first line) or JSON (`#!json`); TOML always.
+yaml = ["dep:serde-saphyr"]
+json = []
 # The web app built in: the site CANOA_WEB_DIST names at build time, served when [host.web] names no directory.
 web = []
 
@@ -69,6 +72,8 @@ rpassword = "7"
 # The digest of a worktree's status listing, and of what the examples print; the version the dependency graph already holds.
 sha2 = { version = "0.10", default-features = false }
 toml.workspace = true
+anycfg.workspace = true
+serde-saphyr = { workspace = true, optional = true }
 tracing.workspace = true
 ureq.workspace = true
 tar.workspace = true

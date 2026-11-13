@@ -213,18 +213,6 @@ fn a_setting_is_never_shown() {
 }
 
 #[test]
-fn a_misspelled_setting_is_refused_with_its_position_and_not_its_text() {
-    let Err(error) = parse("[host.agents.a]\nprogram = \"x\"\nlsten = \"127.0.0.1:1\"\n") else {
-        panic!("refused");
-    };
-    let ConfigError::Parse { line, .. } = &error else {
-        panic!("a parse error: {error}");
-    };
-    assert_eq!(*line, 3, "{error}");
-    assert!(!error.to_string().contains("lsten"), "{error}");
-}
-
-#[test]
 fn a_value_is_never_quoted_in_an_error() {
     let secret = "sk-ant-oat01-SECRETSECRET";
     for text in [
@@ -247,7 +235,7 @@ fn a_syntax_error_says_where() {
     let ConfigError::Parse { line, column, .. } = error else {
         panic!("a parse error");
     };
-    assert_eq!((line, column), (4, 11));
+    assert_eq!((line, column), (Some(4), Some(11)));
 }
 
 #[test]
@@ -1352,4 +1340,241 @@ fn host_history_and_the_hooks_tables_are_read_together() {
     assert_eq!(config.history.max_sessions, 5);
     assert_eq!(config.profiles["p"].allow_hooks["team"], digest);
     assert!(config.local_profiles.for_agent("Claude").is_some());
+}
+
+/// One configuration, written in each format a canoa.cfg may name on its first line.
+#[cfg(all(feature = "yaml", feature = "json"))]
+const SAME_TOML: &str = r#"[host]
+origins = ["https://app.example"]
+[host.agents.alpha]
+program = "claude-agent-acp"
+args = ["--acp", "x"]
+listen = "127.0.0.1:7801"
+max_peers = 2
+[host.providers.zeta]
+library = "echo.dll"
+provider = "echo_provider"
+[host.providers.zeta.settings]
+volume = 3
+loud = true
+[usage]
+limit_phrases = ["rate limit"]
+[permissions]
+protected = ["secrets/"]
+[desktop]
+start_hidden = true
+[overlays]
+team = "https://example.org/profiles.git@main#team"
+[skill_pins]
+review = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+"#;
+
+const SAME_YAML: &str = r#"#!yaml
+host:
+  origins: ["https://app.example"]
+  agents:
+    alpha:
+      program: claude-agent-acp
+      args: ["--acp", "x"]
+      listen: 127.0.0.1:7801
+      max_peers: 2
+  providers:
+    zeta:
+      library: echo.dll
+      provider: echo_provider
+      settings:
+        volume: 3
+        loud: true
+usage:
+  limit_phrases: [rate limit]
+permissions:
+  protected: [secrets/]
+desktop:
+  start_hidden: true
+overlays:
+  team: https://example.org/profiles.git@main#team
+skill_pins:
+  review: sha256:0000000000000000000000000000000000000000000000000000000000000000
+"#;
+
+const SAME_JSON: &str = r##"#!json
+{
+  "host": {
+    "origins": ["https://app.example"],
+    "agents": {"alpha": {"program": "claude-agent-acp", "args": ["--acp", "x"],
+      "listen": "127.0.0.1:7801", "max_peers": 2, "title": null}},
+    "providers": {"zeta": {"library": "echo.dll", "provider": "echo_provider",
+      "settings": {"volume": 3, "loud": true}}}
+  },
+  "usage": {"limit_phrases": ["rate limit"]},
+  "permissions": {"protected": ["secrets/"]},
+  "desktop": {"start_hidden": true},
+  "overlays": {"team": "https://example.org/profiles.git@main#team"},
+  "skill_pins": {"review": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+}
+"##;
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn the_same_configuration_loads_the_same_in_toml_yaml_and_json() {
+    let toml = parse(SAME_TOML).expect("TOML parses");
+    assert_eq!(toml.entries.len(), 2);
+    assert_eq!(parse(SAME_YAML).expect("YAML parses"), toml);
+    assert_eq!(parse(SAME_JSON).expect("JSON parses"), toml);
+    let marked = format!("#!toml\n{SAME_TOML}");
+    assert_eq!(parse(&marked).expect("a TOML marker"), toml);
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn a_file_is_read_in_the_format_its_name_or_first_line_gives() {
+    let dir = std::env::temp_dir().join(format!("canoa-config-formats-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("directory");
+    let expected = Config::from_str_in(SAME_TOML, &dir).expect("TOML parses");
+    for (name, text) in [
+        ("canoa.cfg", SAME_TOML),
+        ("canoa.cfg", SAME_YAML),
+        ("canoa.cfg", SAME_JSON),
+        ("canoa.yaml", SAME_YAML.trim_start_matches("#!yaml\n")),
+        ("canoa.json", SAME_JSON.trim_start_matches("#!json\n")),
+    ] {
+        let path = dir.join(name);
+        std::fs::write(&path, text).expect("write");
+        assert_eq!(Config::load(&path).expect(name), expected, "{name}");
+    }
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn an_unknown_format_is_refused_naming_the_ones_this_build_reads() {
+    let error = parse("#!ini\n[host]\n").expect_err("refused");
+    let shown = error.to_string();
+    assert!(shown.contains("toml"), "{shown}");
+    #[cfg(feature = "yaml")]
+    assert!(shown.contains("yaml"), "{shown}");
+    #[cfg(feature = "json")]
+    assert!(shown.contains("json"), "{shown}");
+    assert!(!shown.contains("ini"), "{shown}");
+}
+
+#[cfg(not(feature = "yaml"))]
+#[test]
+fn a_build_without_yaml_refuses_it_in_words() {
+    let shown = parse(SAME_YAML).expect_err("refused").to_string();
+    assert!(
+        shown.contains("not read") && shown.contains("toml"),
+        "{shown}"
+    );
+}
+
+#[cfg(not(feature = "json"))]
+#[test]
+fn a_build_without_json_refuses_it_in_words() {
+    let shown = parse(SAME_JSON).expect_err("refused").to_string();
+    assert!(
+        shown.contains("not read") && shown.contains("toml"),
+        "{shown}"
+    );
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn a_wrong_type_names_the_key_and_never_the_value_in_each_format() {
+    let secret = "sk-ant-oat01-SECRETSECRET";
+    for text in [
+        format!("[host.agents.a]\nprogram = \"x\"\nmax_peers = \"{secret}\"\n"),
+        format!(
+            "#!yaml\nhost:\n  agents:\n    a:\n      program: x\n      max_peers: \"{secret}\"\n"
+        ),
+        format!(
+            "#!json\n{{\"host\": {{\"agents\": {{\"a\": {{\"program\": \"x\", \"max_peers\": \"{secret}\"}}}}}}}}\n"
+        ),
+    ] {
+        let error = parse(&text).expect_err("refused");
+        let shown = error.to_string();
+        assert!(shown.contains("max_peers"), "{shown}");
+        assert!(!shown.contains("SECRET"), "{shown}");
+        assert!(!format!("{error:?}").contains("SECRET"), "{error:?}");
+    }
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn a_misspelled_setting_is_refused_without_its_text_in_each_format() {
+    for text in [
+        "[host.agents.a]\nprogram = \"x\"\nlsten = \"127.0.0.1:1\"\n",
+        "#!yaml\nhost:\n  agents:\n    a:\n      program: x\n      lsten: 127.0.0.1:1\n",
+        "#!json\n{\"host\": {\"agents\": {\"a\": {\"program\": \"x\", \"lsten\": \"y\"}}}}\n",
+    ] {
+        let shown = parse(text).expect_err("refused").to_string();
+        assert!(shown.contains("host.agents.a"), "{shown}");
+        assert!(!shown.contains("lsten"), "{shown}");
+    }
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn a_syntax_error_says_where_in_each_format() {
+    for (text, line) in [
+        ("[host]\n[host.agents.a\n", 2),
+        ("#!yaml\nhost:\n  agents: [\n", 3),
+        ("#!json\n{\n  \"host\": ,\n}\n", 3),
+    ] {
+        let ConfigError::Parse { line: at, .. } = parse(text).expect_err("refused") else {
+            panic!("a parse error: {text}");
+        };
+        assert_eq!(at, Some(line), "{text}");
+    }
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn yaml_and_json_have_no_null_a_key_with_one_is_unset() {
+    let config = parse("#!yaml\nhost:\n  agents:\n    a:\n      program: x\n      title: ~\n")
+        .expect("parses");
+    assert_eq!(config.entries.len(), 1);
+    assert!(parse("#!yaml\nhost:\n  origins: [null]\n").is_err());
+    assert!(parse("#!json\n[1]\n").is_err());
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn a_repeated_key_is_refused_in_each_format() {
+    for text in [
+        "[host]\n[host]\n",
+        "#!yaml\nhost: {}\nhost: {}\n",
+        "#!json\n{\"host\": {}, \"host\": {}}\n",
+    ] {
+        let shown = parse(text).expect_err("refused").to_string();
+        assert!(
+            shown.contains("twice") || shown.contains("duplicate"),
+            "{shown}"
+        );
+    }
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+fn example(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/config")
+        .join(name)
+}
+
+#[cfg(all(feature = "yaml", feature = "json"))]
+#[test]
+fn the_yaml_and_json_examples_load_to_the_same_configuration() {
+    let yaml = Config::load(&example("canoa-yaml.cfg")).expect("YAML example");
+    let json = Config::load(&example("canoa-json.cfg")).expect("JSON example");
+    assert_eq!(yaml, json);
+    assert_eq!(yaml.entries.len(), 1);
+    assert_eq!(yaml.entries[0].name, "claude");
+    assert_eq!(yaml.origins, ["https://app.example"]);
+    assert_eq!(
+        yaml.limit_phrases,
+        Some(vec![
+            "RESOURCE_EXHAUSTED".to_owned(),
+            "Error 429".to_owned()
+        ])
+    );
+    Config::load(&example("canoa.cfg")).expect("the TOML example");
 }

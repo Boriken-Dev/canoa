@@ -15,8 +15,12 @@ use coqui_transport_pipe::PipeName;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use crate::format::formats;
 use crate::profile::{LayerKind, Profile};
 use crate::tool::ToolSpec;
+
+pub(crate) mod layers;
+pub use layers::{ENTRIES, INSTALLED_DIR_VARIABLE, Layers, merge_into};
 
 /// Connections an entry serves at once when the file does not say.
 pub const DEFAULT_MAX_PEERS: usize = 4;
@@ -776,12 +780,14 @@ pub enum ConfigError {
         /// What the operating system said.
         source: std::io::Error,
     },
-    /// The file is not TOML of the expected shape.
+    /// The file is not a canoa.cfg of the expected shape, in TOML, YAML or JSON.
     Parse {
-        /// 1-based line.
-        line: usize,
-        /// 1-based column.
-        column: usize,
+        /// The file, when the text came from one.
+        file: Option<PathBuf>,
+        /// 1-based line, when the format's parser knows it; a setting of the wrong shape has none, and is named instead.
+        line: Option<usize>,
+        /// 1-based column, with the line.
+        column: Option<usize>,
         /// What was wrong, in words of the schema's.
         what: String,
     },
@@ -798,11 +804,25 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => write!(f, "could not read {}: {source}", path.display()),
-            Self::Parse { line, column, what } => {
-                write!(
-                    f,
-                    "the configuration is malformed at line {line}, column {column}: {what}"
-                )
+            Self::Parse {
+                file,
+                line,
+                column,
+                what,
+            } => {
+                if let Some(file) = file {
+                    write!(f, "{}: ", file.display())?;
+                }
+                match (line, column) {
+                    (Some(line), Some(column)) => write!(
+                        f,
+                        "the configuration is malformed at line {line}, column {column}: {what}"
+                    ),
+                    (Some(line), None) => {
+                        write!(f, "the configuration is malformed at line {line}: {what}")
+                    }
+                    _ => write!(f, "the configuration is malformed: {what}"),
+                }
             }
             Self::Invalid {
                 entry: Some(entry),
@@ -1004,7 +1024,8 @@ struct RawProvider {
 }
 
 impl Config {
-    /// Reads `path`. Relative `library` and `source` paths are taken from the file's directory, where a provider runs.
+    /// Reads the one file `path`, in the format its name or first line gives. Relative `library` and `source` paths are
+    /// taken from the file's directory, where a provider runs.
     ///
     /// # Errors
     ///
@@ -1014,28 +1035,61 @@ impl Config {
             path: path.to_owned(),
             source,
         })?;
-        let text = core::str::from_utf8(&bytes).map_err(|error| {
-            let (line, column) = position(&bytes, error.valid_up_to());
-            ConfigError::Parse {
-                line,
-                column,
-                what: "the file is not UTF-8".to_owned(),
-            }
-        })?;
+        let name = path.file_name().and_then(|name| name.to_str());
+        let raw = read_raw(&bytes, name).map_err(|error| config_error(&error, Some(path)))?;
         let base = path.parent().unwrap_or_else(|| Path::new(""));
-        Self::from_str_in(text, base)
+        Self::from_raw(raw, base)
     }
 
-    /// Parses canoa.cfg's text, with relative `library` and `source` paths taken from `base`, where a provider runs.
-    /// Touches no file.
+    /// Reads canoa.cfg's layers, the highest winning key by key (see [`merge_into`]); a layer that does not exist is
+    /// skipped. Relative `library` and `source` paths are taken from the directory of [`Layers::own`].
     ///
     /// # Errors
     ///
-    /// [`ConfigError::Parse`] for text that is not TOML of this shape, with its position; [`ConfigError::Invalid`] for a
-    /// setting the host refuses.
+    /// [`ConfigError::Read`] for the person's own file when no layer exists, [`ConfigError::Parse`] naming the file of a
+    /// layer that is malformed, and as [`Config::from_str_in`].
+    pub fn load_layers(layers: &Layers) -> Result<Self, ConfigError> {
+        let existing = layers.existing();
+        if existing.is_empty() {
+            return Self::load(&layers.own);
+        }
+        // Each layer on its own first, so that a refusal names its file; the merged document is read after.
+        for file in &existing {
+            formats()
+                .load_typed::<RawFile>(file, anycfg::Options::new())
+                .map_err(|error| config_error(&error, Some(file)))?;
+        }
+        let sources: Vec<Option<anycfg::Source<'_>>> = existing
+            .iter()
+            .map(|file| Some(anycfg::Source::path(file)))
+            .collect();
+        let raw = anycfg::Loader::new(formats(), "toml")
+            .load_typed::<_, _, _, RawFile>(sources, &layers::Merging)
+            .map_err(|error| config_error(&error, None))?;
+        let base = layers.own.parent().unwrap_or_else(|| Path::new(""));
+        Self::from_raw(raw, base)
+    }
+
+    /// Parses canoa.cfg's text, in TOML, or in YAML or JSON when its first line says `#!yaml` or `#!json`, with relative
+    /// `library` and `source` paths taken from `base`, where a provider runs. Touches no file.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::Parse`] for text that is not of this shape, naming the key or giving the position, never a value;
+    /// [`ConfigError::Invalid`] for a setting the host refuses.
     pub fn from_str_in(text: &str, base: &Path) -> Result<Self, ConfigError> {
-        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-        let raw: RawFile = toml::from_str(text).map_err(|error| parse_error(text, &error))?;
+        Self::from_str_named(text, "canoa.cfg", base)
+    }
+
+    /// As [`Config::from_str_in`] for text that is a file called `name`, whose extension (`.yaml`, `.json`, `.toml`) fixes
+    /// its format; `.cfg` leaves it to the first line.
+    pub(crate) fn from_str_named(text: &str, name: &str, base: &Path) -> Result<Self, ConfigError> {
+        let raw =
+            read_raw(text.as_bytes(), Some(name)).map_err(|error| config_error(&error, None))?;
+        Self::from_raw(raw, base)
+    }
+
+    fn from_raw(raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
         let limit_phrases = raw.usage.and_then(|usage| usage.limit_phrases);
         let protected_paths = raw
             .permissions
@@ -2412,36 +2466,70 @@ pub(crate) fn plain_absolute(path: &Path) -> bool {
             .any(|segment| segment == "." || segment == "..")
 }
 
-/// The 1-based line and column of byte `offset`.
-fn position(text: &[u8], offset: usize) -> (usize, usize) {
-    let before = &text[..offset.min(text.len())];
-    let line = before.iter().filter(|byte| **byte == b'\n').count() + 1;
-    let start = before
-        .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map_or(0, |at| at + 1);
-    let column = String::from_utf8_lossy(&before[start..]).chars().count() + 1;
-    (line, column)
+fn read_raw(bytes: &[u8], name: Option<&str>) -> Result<RawFile, anycfg::Error> {
+    let options = name.map_or_else(anycfg::Options::new, |name| {
+        anycfg::Options::new().name(name)
+    });
+    formats().from_slice_typed::<RawFile>(bytes, options)
 }
 
-/// The parser's position, and its words only where they come from the schema: a value, or a key nobody declared, is never told.
-fn parse_error(text: &str, error: &toml::de::Error) -> ConfigError {
-    let (line, column) = error
-        .span()
-        .map_or((1, 1), |span| position(text.as_bytes(), span.start));
-    let message = error.message();
-    let what = if message.starts_with("missing field") {
-        message.to_string()
-    } else if message.starts_with("unknown field") {
-        "a setting this host does not know".to_owned()
-    } else if message.starts_with("invalid type") {
-        "a setting has the wrong type".to_owned()
-    } else if message.starts_with("duplicate key") {
-        "a key is given twice".to_owned()
-    } else {
-        "not TOML of the expected shape".to_owned()
+/// anycfg's refusal as ours: the position or the key's path, and its words only where they come from the schema. A value,
+/// or a key nobody declared, is never told.
+fn config_error(error: &anycfg::Error, file: Option<&Path>) -> ConfigError {
+    use anycfg::Error;
+    let parse = |file: Option<&Path>, line, column, what: String| ConfigError::Parse {
+        file: file.map(Path::to_owned),
+        line,
+        column,
+        what,
     };
-    ConfigError::Parse { line, column, what }
+    match error {
+        Error::Source { cause, .. } => config_error(cause, file),
+        Error::File { path, cause } => config_error(cause, Some(path)),
+        Error::Parse {
+            format,
+            line,
+            column,
+            message,
+        } => parse(
+            file,
+            *line,
+            *column,
+            message
+                .clone()
+                .unwrap_or_else(|| format!("not valid {}", format.to_uppercase())),
+        ),
+        Error::Conversion { path, message } => {
+            let message = message.as_deref().unwrap_or("not of the expected shape");
+            let (path, what) = if message.starts_with("unknown field") {
+                // The unknown key is the last of the path, and is not told.
+                let parent = path
+                    .as_deref()
+                    .and_then(|path| path.rsplit_once('.'))
+                    .map(|(parent, _)| parent.to_owned());
+                (parent, "a setting this host does not know".to_owned())
+            } else if message.starts_with("duplicate field") {
+                (path.clone(), "a key is given twice".to_owned())
+            } else {
+                (path.clone(), message.to_owned())
+            };
+            let what = match path {
+                Some(path) if !path.is_empty() => format!("{path}: {what}"),
+                _ => what,
+            };
+            parse(file, None, None, what)
+        }
+        Error::UnsupportedFormat { registered } => parse(
+            file,
+            Some(1),
+            None,
+            format!(
+                "the first line names a format this build does not read; it reads {}",
+                registered.join(", ")
+            ),
+        ),
+        other => parse(file, None, None, other.to_string()),
+    }
 }
 
 #[cfg(test)]

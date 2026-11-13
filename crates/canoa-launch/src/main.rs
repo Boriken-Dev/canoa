@@ -34,6 +34,29 @@ fn base_dir() -> Result<PathBuf, Error> {
     Ok(root.join("Canoa"))
 }
 
+/// CANOA_CONFIG is a list of files (a leading `+` layers them over the installed, system and user ones), split at `;` on
+/// Windows and `:` elsewhere. Each entry is made absolute, as the person gave it otherwise: the app runs in another folder.
+fn absolute_list(list: &std::ffi::OsStr) -> Result<std::ffi::OsString, Error> {
+    let Some(text) = list.to_str() else {
+        return Ok(list.to_owned());
+    };
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    let (plus, rest) = text
+        .strip_prefix('+')
+        .map_or(("", text), |rest| ("+", rest));
+    let mut out = Vec::new();
+    for entry in rest.split(separator) {
+        if entry.is_empty() || !PathBuf::from(entry).is_relative() {
+            out.push(entry.to_owned());
+            continue;
+        }
+        let absolute = std::path::absolute(entry)
+            .map_err(|e| Error::Refused(format!("CANOA_CONFIG {entry}: {e}")))?;
+        out.push(absolute.to_string_lossy().into_owned());
+    }
+    Ok(format!("{plus}{}", out.join(&separator.to_string())).into())
+}
+
 fn run() -> Result<i32, Error> {
     let base = base_dir()?;
     let installed = install(
@@ -51,12 +74,15 @@ fn run() -> Result<i32, Error> {
     command
         .args(std::env::args_os().skip(1))
         .current_dir(&installed.dir);
-    if let Some(config) = std::env::var_os("CANOA_CONFIG").map(PathBuf::from)
-        && config.is_relative()
+    // The app runs from an unpacked copy, so "beside the program" for its installed canoa.cfg is this launcher's folder.
+    if let Some(folder) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
     {
-        let absolute = std::path::absolute(&config)
-            .map_err(|e| Error::Refused(format!("CANOA_CONFIG {}: {e}", config.display())))?;
-        command.env("CANOA_CONFIG", absolute);
+        command.env("CANOA_INSTALLED_DIR", folder);
+    }
+    if let Some(list) = std::env::var_os("CANOA_CONFIG") {
+        command.env("CANOA_CONFIG", absolute_list(&list)?);
     }
     let status = command
         .status()

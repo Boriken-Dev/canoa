@@ -9,6 +9,7 @@ pub mod cli;
 pub mod config;
 pub mod control;
 mod delegate;
+mod format;
 pub mod harness;
 mod history;
 pub mod home;
@@ -35,8 +36,9 @@ mod worktree;
 pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
-    DelegateConfig, Entry, EntryKind, HarnessOptions, Listen, Origin, Settings, StoreConfig,
-    UsageSource, WebConfig, cache_lifetime_name, cache_lifetime_named,
+    DelegateConfig, ENTRIES, Entry, EntryKind, HarnessOptions, INSTALLED_DIR_VARIABLE, Layers,
+    Listen, Origin, Settings, StoreConfig, UsageSource, WebConfig, cache_lifetime_name,
+    cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.
