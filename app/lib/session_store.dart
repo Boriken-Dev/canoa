@@ -63,11 +63,36 @@ class ChatMessage implements ChatEntryData {
   final Compaction? compaction;
 }
 
+/// The edit a permission request asks about: the file and its text before and after.
+final class PermissionDiff {
+  const PermissionDiff(this.path, this.oldText, this.newText);
+  final String path;
+  final String? oldText;
+  final String newText;
+
+  /// The diff in [toolCall]'s content, else the old and new strings of an edit's input; null when it has neither.
+  static PermissionDiff? of(Map<String, dynamic>? toolCall, Object? rawInput) {
+    final content = toolCall?['content'];
+    if (content is List) {
+      for (final item in content) {
+        if (item is Map && item['type'] == 'diff' && item['path'] is String && item['newText'] is String) {
+          return PermissionDiff(item['path'] as String, item['oldText'] is String ? item['oldText'] as String : null, item['newText'] as String);
+        }
+      }
+    }
+    if (rawInput is Map && rawInput['old_string'] is String && rawInput['new_string'] is String) {
+      final path = rawInput['file_path'] ?? rawInput['path'];
+      return PermissionDiff(path is String ? path : '', rawInput['old_string'] as String, rawInput['new_string'] as String);
+    }
+    return null;
+  }
+}
+
 /// A tool an agent wants to use, waiting on the person. Nothing answers it for them but Bypass, which answers a request that
 /// offers an allow before it would wait here.
 final class PermissionQuestion {
   PermissionQuestion(this.title, this.kind,
-      {this.detail, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId, this.subject, this.task, this.allowanceKey});
+      {this.detail, this.reason, this.diff, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId, this.subject, this.task, this.allowanceKey});
   final String title;
   final String? kind;
 
@@ -76,6 +101,12 @@ final class PermissionQuestion {
 
   /// What it would run or touch, when the agent said.
   final String? detail;
+
+  /// Why the agent says it needs this, when it said.
+  final String? reason;
+
+  /// The change an edit would make, when the request carries one.
+  final PermissionDiff? diff;
 
   /// The answers the agent offers, in its order.
   final List<AcpPermissionOption> options;
@@ -1131,10 +1162,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final question = PermissionQuestion(
       title,
       request.kind,
-      detail: [
-        ?shortLine(request.description),
-        ?describeToolInput(request.rawInput),
-      ].join('\n').trim(),
+      detail: describeToolInput(request.rawInput)?.trim(),
+      reason: shortLine(request.description),
+      diff: PermissionDiff.of(request.toolCall, request.rawInput),
       options: request.options,
       bypassPassed: target.bypass,
       forPerson: forPerson,

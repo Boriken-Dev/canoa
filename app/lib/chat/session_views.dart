@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../selectable.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
+import 'permission_card.dart';
 import 'remember_dialog.dart';
 
 /// What Canoa calls itself in the sentences of the package's cards.
@@ -33,10 +34,12 @@ class SessionPermissionCard extends StatelessWidget {
     final folder = session.cwd ?? '';
     final canRemember = question.subject != null && folder.isNotEmpty;
     final task = question.task;
-    return PermissionCard(
+    return SessionRequestCard(
       agent: task == null ? session.agent : (shortLine(task.source) ?? session.agent),
       title: question.title,
+      reason: question.reason,
       detail: question.detail,
+      diff: question.diff,
       options: question.options,
       bypassPassed: question.bypassPassed,
       forPerson: question.forPerson,

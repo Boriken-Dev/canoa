@@ -3,6 +3,7 @@
 import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
+import 'package:flutter/widgets.dart' show Key;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
@@ -39,12 +40,12 @@ void main() {
       await _started(tester, agent, store);
       agent.ask(11, _allow);
       await settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(_tool(store.selected!, 't11').status, ToolStatus.pending);
 
       agent.disconnect();
       await settle(tester);
-      expect(find.byType(PermissionCard), findsNothing, reason: 'gone, not disabled');
+      expect(find.byKey(const Key('permission-card')), findsNothing, reason: 'gone, not disabled');
       expect(store.selected!.pendingPermissions, isEmpty);
       expect(_tool(store.selected!, 't11').status, ToolStatus.stopped);
       expect(find.text('stopped'), findsOneWidget);
@@ -60,7 +61,7 @@ void main() {
       final session = store.selected!;
       agent.ask(12, _allow);
       await settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       final option = session.pendingPermissions.first.options.first;
 
       await tester.runAsync(() async {
@@ -68,7 +69,7 @@ void main() {
         store.attachVerifiedClient(session.id, again, record: false);
       });
       await settle(tester);
-      expect(find.byType(PermissionCard), findsNothing);
+      expect(find.byKey(const Key('permission-card')), findsNothing);
       expect(session.pendingPermissions, isEmpty);
       expect(_tool(session, 't12').status, ToolStatus.stopped);
       store.answerPermission(session, allow: true);

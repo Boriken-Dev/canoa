@@ -102,7 +102,7 @@ void main() {
 
   testWidgets('the placeholder is the usual one again once the card is answered', (tester) async {
     final (agent, session, _) = await _waiting(tester);
-    await tester.tap(find.widgetWithText(PermissionChoice, 'Yes'));
+    await tester.tap(find.byKey(const Key('permission-primary')));
     await _settle(tester);
     expect(session.pendingPermissions, isEmpty);
     expect(_hintOf(tester), isNot(_redirectHint));
@@ -131,7 +131,7 @@ void main() {
 
   testWidgets('a plain Deny answers the refusal and stops the turn', (tester) async {
     final (agent, session, _) = await _waiting(tester);
-    await tester.tap(find.widgetWithText(PermissionChoice, 'No'));
+    await tester.tap(find.byKey(const Key('permission-deny')));
     await _settle(tester);
     expect(agent.answerTo(7)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject'}});
     expect(agent.calls('session/cancel'), hasLength(1));

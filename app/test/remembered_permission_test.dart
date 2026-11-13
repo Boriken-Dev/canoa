@@ -375,7 +375,7 @@ void main() {
       expect(find.textContaining('Canoa itself answers allow once'), findsOneWidget);
       expect(find.textContaining('in /work/calc'), findsWidgets);
       // The agent's own "always" is still offered beside it, and keeps being the agent's.
-      expect(find.widgetWithText(PermissionChoice, 'Yes, and do not ask again'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('permission-primary')), matching: find.text('Yes, and do not ask again')), findsOneWidget);
       expect(find.textContaining('remembered by Scripted, not by Canoa'), findsOneWidget);
     });
 
@@ -383,7 +383,7 @@ void main() {
       final s = await _shown(tester);
       s.agent.ask(1, 'Read a file', kind: 'read', rawInput: {'file_path': 'a'});
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(_offer, findsNothing, reason: 'a read has nothing a rule states');
       await tester.runAsync(() async => s.store.cancelPermission(s.session));
       s.agent.run(2, 'npm test', options: _alwaysOnly);
@@ -409,7 +409,7 @@ void main() {
       await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));
       agent.run(1, 'npm test');
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(_offer, findsNothing);
     });
   });
@@ -442,7 +442,7 @@ void main() {
       await _settle(tester);
       s.agent.run(3, 'npm test');
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsNothing);
+      expect(find.byKey(const Key('permission-card')), findsNothing);
       expect(s.agent.chose(2), 'allow-once');
       expect(s.agent.chose(3), 'allow-once');
       expect(s.rules.rules.single.fired, 2);
@@ -462,7 +462,7 @@ void main() {
       s.agent.run(2, 'npm test', options: _alwaysOnly);
       await _settle(tester);
       expect(s.agent.answerTo(2), isNull, reason: 'a rule never takes an always');
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       s.store.cancelPermission(s.session);
       s.agent.run(3, 'npm test', options: _noAllow);
       await _settle(tester);
@@ -545,7 +545,7 @@ void main() {
       s.agent.run(1, 'npm test');
       await _settle(tester);
       expect(s.agent.answerTo(1), isNull);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(_offer, findsNothing);
       s.agent.setMode('manual');
       await _settle(tester);
@@ -655,7 +655,7 @@ void main() {
       final s = await _shown(tester, rules: PermissionRules(backend), backend: backend);
       s.agent.editFile(1, '/work/calc/src/a.js');
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(_offer, findsNothing);
     });
 
@@ -665,7 +665,7 @@ void main() {
       final s = await _shown(tester, rules: guarded, backend: backend);
       s.agent.editFile(1, '/work/calc/src/a.js');
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(_offer, findsNothing);
       s.store.cancelPermission(s.session);
       final above = PermissionRules(MemoryLedgerBackend(), real: _plain, guards: const PermissionGuards(home: '/work/calc/home'));
@@ -778,7 +778,7 @@ void main() {
       s.agent.run(2, 'npm test');
       await _settle(tester);
       expect(s.agent.answerTo(2), isNull);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
     });
   });
 
@@ -822,7 +822,7 @@ void main() {
         s.agent.editFile(id, path);
         await _settle(tester);
         expect(_offer, findsNothing, reason: path);
-        expect(find.byType(PermissionCard), findsOneWidget, reason: path);
+        expect(find.byKey(const Key('permission-card')), findsOneWidget, reason: path);
         s.store.cancelPermission(s.session);
         id++;
       }
@@ -885,7 +885,7 @@ void main() {
       await _settle(tester);
       s.agent.editFile(1, '/work/calc/a.js');
       await _settle(tester);
-      await tester.tap(find.widgetWithText(PermissionChoice, 'Yes, and do not ask again'));
+      await tester.tap(find.byKey(const Key('permission-primary')));
       await _settle(tester);
       expect(s.agent.chose(1), 'allow-always');
       expect(s.rules.rules, isEmpty, reason: 'Canoa adds no rule on top of the agent\'s own');

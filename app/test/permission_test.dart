@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';
+import 'fixtures/permission_answers.dart';
 import 'fixtures/process_agent.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
@@ -95,7 +96,6 @@ Future<(_Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, {CanoaCo
   return (agent, session, kept);
 }
 
-Finder _choice(String name) => find.descendant(of: find.byType(PermissionCard), matching: find.widgetWithText(PermissionChoice, name));
 
 void main() {
   group('the agent\'s own answers', () {
@@ -103,10 +103,9 @@ void main() {
       final (agent, session, _) = await _shown(tester);
       agent.ask(5, 'Edit a.txt', _all);
       await _settle(tester);
-      final names = [for (final choice in tester.widgetList<PermissionChoice>(find.byType(PermissionChoice))) choice.option.name];
-      expect(names, ['No', 'No, never', 'Yes', 'Yes, and don\'t ask again for edits']);
+      expect(await offered(tester), ['Deny', 'Yes, and don\'t ask again for edits', 'Yes', 'No, never'], reason: 'Deny, the always, then the menu');
       expect(find.textContaining('remembered by Scripted, not by Canoa'), findsOneWidget);
-      await tester.tap(_choice('Yes, and don\'t ask again for edits'));
+      await answerWith(tester, 'Yes, and don\'t ask again for edits');
       await _settle(tester);
       expect(agent.answerTo(5)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-always'}});
       expect(session.pendingPermissions, isEmpty);
@@ -116,7 +115,7 @@ void main() {
       final (agent, _, _) = await _shown(tester);
       agent.ask(6, 'Edit a.txt', _all);
       await _settle(tester);
-      await tester.tap(_choice('No, never'));
+      await answerWith(tester, 'No, never');
       await _settle(tester);
       expect(agent.answerTo(6)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject-always'}});
     });
@@ -129,11 +128,9 @@ void main() {
         {'optionId': 'v', 'name': 'Keep planning', 'kind': '_vendor'},
       ]);
       await _settle(tester);
-      expect(_choice('Allow once'), findsOneWidget);
-      expect(_choice('Refuse once'), findsOneWidget);
-      expect(_choice('Keep planning'), findsOneWidget);
+      expect(await offered(tester), ['Deny', 'Allow once', 'Keep planning']);
       expect(find.textContaining('not by Canoa'), findsNothing, reason: 'nothing here is remembered');
-      await tester.tap(_choice('Keep planning'));
+      await answerWith(tester, 'Keep planning');
       await _settle(tester);
       expect(agent.answerTo(7)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'v'}});
     });
@@ -142,8 +139,8 @@ void main() {
       final (agent, _, _) = await _shown(tester);
       agent.ask(8, 'Edit a.txt', [{'optionId': 7}]);
       await _settle(tester);
-      expect(find.byType(PermissionChoice), findsNothing);
-      await tester.tap(find.descendant(of: find.byType(PermissionCard), matching: find.text('Cancel the request')));
+      expect(find.byKey(const Key('permission-primary')), findsNothing);
+      await tester.tap(find.text('Cancel the request'));
       await _settle(tester);
       expect(agent.answerTo(8)?['result'], {'outcome': {'outcome': 'cancelled'}});
     });
@@ -158,7 +155,7 @@ void main() {
       expect(store.inBypass(session), isFalse);
       agent.ask(1, 'Edit a.txt', _all);
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(find.byKey(const Key('bypass-banner')), findsNothing);
     });
 
@@ -176,7 +173,7 @@ void main() {
 
       agent.ask(2, 'Edit a.txt', _all);
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsNothing);
+      expect(find.byKey(const Key('permission-card')), findsNothing);
       expect(agent.answerTo(2)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
       expect(session.messages.last.text, contains('Bypass allowed'));
     });
@@ -187,14 +184,14 @@ void main() {
       await tester.pump();
       agent.ask(4, 'Edit b.txt', _alwaysOnly);
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsNothing);
+      expect(find.byKey(const Key('permission-card')), findsNothing);
       expect(agent.answerTo(4)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-always'}});
       agent.ask(3, 'Edit a.txt', _noAllow);
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(agent.answerTo(3), isNull);
       expect(find.textContaining('Bypass answers only a request that offers to allow'), findsOneWidget);
-      await tester.tap(_choice('No'));
+      await tester.tap(find.byKey(const Key('permission-deny')));
       await _settle(tester);
       expect(agent.answerTo(3)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject'}});
     });
@@ -212,7 +209,7 @@ void main() {
       agent.ask(21, 'Edit b.txt', _alwaysOnly);
       await _settle(tester);
       expect(agent.answerTo(21), isNull);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       agent.ask(22, 'Edit c.txt', _all);
       await _settle(tester);
       expect(agent.answerTo(22)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'allow-once'}});
@@ -242,7 +239,7 @@ void main() {
       expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Bypass')), findsNothing);
       agent.ask(9, 'Edit a.txt', _all);
       await _settle(tester);
-      expect(find.byType(PermissionCard), findsOneWidget);
+      expect(find.byKey(const Key('permission-card')), findsOneWidget);
       expect(agent.answerTo(9), isNull);
     });
 
