@@ -459,7 +459,7 @@ What has been run, by platform:
 - **Linux (Fedora 44 under WSLg, arm64)**: tray_manager draws the icon as a StatusNotifier item, which passes no clicks on, so **Open Canoa** in its menu opens the chat. The app looks for a StatusNotifier host on the session bus (`org.kde.StatusNotifierWatcher`). With one, closing the window hides it, and picking Open Canoa from the menu over D-Bus, as a panel does, brings it back. WSLg's desktop has none, so there the app shows no icon, and closing the window minimizes it instead of hiding it where nothing could bring it back; WSLg does not report the window as minimized.
 - **macOS**: not run.
 
-The Settings action brings up the main window and opens the Canoa settings dialog. Saving writes the same canoa.cfg file, not an unrelated preferences database. A system-hosted web application cannot overwrite its deployment canoa.cfg.
+The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage, Hosting) and Overlays (Catalogs), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
 
 The default launch is visible, with close-to-tray enabled. The start-hidden option takes effect on the next launch.
 
