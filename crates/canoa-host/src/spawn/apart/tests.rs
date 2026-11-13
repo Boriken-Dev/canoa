@@ -398,7 +398,22 @@ fn a_child_has_no_descriptor_past_its_three_streams_and_none_of_them_is_the_star
     let mut out = String::new();
     std::io::Read::read_to_string(child.stdout.as_mut().expect("piped"), &mut out).expect("read");
     child.wait().expect("it ends");
-    assert_eq!(out, "", "what the child holds besides its streams");
+    // The test process itself passes on what its own parent left open (a build tool's descriptors): a plain child of it gets the
+    // same, and the starter and its socket add nothing to it.
+    let plain = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(
+            "for n in 3 4 5 6 7 8 9 10 11 12 13 14 15; do [ -e /dev/fd/$n ] && echo open $n; done;              for n in 0 1 2; do [ -S /dev/fd/$n ] && echo socket $n; done; exit 0",
+        )
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .expect("it runs");
+    assert_eq!(
+        out,
+        String::from_utf8_lossy(&plain.stdout),
+        "what the child holds besides its streams"
+    );
 }
 
 #[test]

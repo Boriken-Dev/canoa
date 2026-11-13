@@ -13,10 +13,11 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
+use core::time::Duration;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
-use std::io::{self, IoSlice, IoSliceMut, Read as _, Write as _};
+use std::io::{self, IoSlice, IoSliceMut, Read as _};
 use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::net::UnixStream;
@@ -26,7 +27,6 @@ use std::process::{ChildStderr, ChildStdin, ChildStdout, ExitStatus};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::Duration;
 
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags, SendAncillaryBuffer,
@@ -903,9 +903,7 @@ static STARTER: Mutex<Starter> = Mutex::new(Starter {
 /// Names what runs the starter: always when `named`, and otherwise only while nothing is.
 pub(super) fn install(program: Program, named: bool) {
     let mut starter = lock(&STARTER);
-    if named {
-        starter.program = Some(program);
-    } else if starter.program.is_none() {
+    if named || starter.program.is_none() {
         starter.program = Some(program);
     }
 }

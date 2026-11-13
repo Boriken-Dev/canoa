@@ -29,10 +29,16 @@ fn collect_every_child(stop: &AtomicBool) {
     }
 }
 
+fn alive(pid: u32) -> bool {
+    let pid = rustix::process::Pid::from_raw(i32::try_from(pid).expect("an id")).expect("not 0");
+    rustix::process::test_kill_process(pid).is_ok()
+}
+
 /// `(parent id, its command line)` of process `pid`, as the system's own `ps` says.
 fn parent_of(pid: u32) -> (u32, String) {
     let ps = |field: &str, of: u32| {
-        let listed = StdCommand::new("ps")
+        // Through the host's own way: this test's collector takes a child of the process that is its own.
+        let listed = Command::new("ps")
             .args(["-o", field, "-p", &of.to_string()])
             .output()
             .expect("ps runs");
@@ -122,23 +128,19 @@ fn run() {
     assert_eq!(exit.code, Some(5), "{exit}");
     sleeper.process.kill().expect("ended");
     let until = Instant::now() + Duration::from_secs(10);
-    while StdCommand::new("kill")
-        .args(["-0", &held.to_string()])
-        .status()
-        .is_ok_and(|s| s.success())
-        && Instant::now() < until
-    {
+    while alive(held) && Instant::now() < until {
         thread::sleep(Duration::from_millis(20));
     }
     assert!(
-        !StdCommand::new("kill")
-            .args(["-0", &held.to_string()])
-            .status()
-            .is_ok_and(|s| s.success()),
+        !alive(held),
         "the process the harness crate started outlived its kill"
     );
 
     // Control: a process this test starts itself is its own child, and is the kind the collector takes.
+    #[allow(
+        clippy::zombie_processes,
+        reason = "the collecting thread of this test is what collects it"
+    )]
     let mut own = StdCommand::new("sleep")
         .arg("300")
         .spawn()
