@@ -43,6 +43,9 @@ import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
+import 'popout/platform.dart' as popout_platform;
+import 'popout/popout_app.dart';
+import 'popout/popout_hub.dart';
 import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
@@ -82,6 +85,9 @@ Future<void> main(List<String> args) async {
   // The executable's own entry takes this before Flutter starts; reaching here means a runner built without it, which must
   // not answer a host's own command by opening another window.
   if (args.firstOrNull == canoaChildFlag) throw StateError('this build has no entry for $canoaChildFlag');
+  // A window the app opened for one conversation runs this same program, and only shows that conversation.
+  final popped = popout_platform.popoutLaunch(args);
+  if (popped != null) return runPopout(popped);
   WidgetsFlutterBinding.ensureInitialized();
   final config = await loadConfig();
   final shell = createDesktopShell();
@@ -133,8 +139,11 @@ class CanoaApp extends StatefulWidget {
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
-    this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none,
+    this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
   });
+
+  /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
+  final PopoutWindows? popoutWindows;
 
   /// What the conversation draws beyond the package's own: Canoa's content kinds (a delegation card, a chart), a card for a kind of
   /// tool, the lines a burst or a turn folds into. Registered here, never in the transcript.
@@ -389,6 +398,9 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// What the conversation shown offers the keyboard and the palette.
   final _conversation = _ConversationHandle();
+
+  /// The conversations shown in a window of their own.
+  late final PopoutHub _popout = PopoutHub(store, widget.popoutWindows ?? popout_platform.createPopoutWindows());
 
   /// This state sits above the app's Navigator, so its dialogs open in the Navigator's context.
   final _navigator = GlobalKey<NavigatorState>();
@@ -1079,6 +1091,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _conversation
       ..moveTargets = _moveTargets
       ..move = _moveTo;
+    _conversation.popout = _popout;
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
@@ -1099,6 +1112,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
+    _popout.dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
     unawaited(_attention?.cancel());
@@ -1150,6 +1164,9 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   Widget build(BuildContext context) {
+    _popout
+      ..look = (_preview ?? config).look.name
+      ..density = (_preview ?? config).density.name;
     return MaterialApp(
       navigatorKey: _navigator,
       scaffoldMessengerKey: _messenger,
@@ -1159,7 +1176,7 @@ class _CanoaAppState extends State<CanoaApp> {
       darkTheme: themeFor((_preview ?? config).look, Brightness.dark, density: (_preview ?? config).density),
       themeMode: (_preview ?? config).themeMode,
       home: AnimatedBuilder(
-        animation: store,
+        animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
           onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
@@ -1346,6 +1363,8 @@ final class _ConversationHandle {
   /// The sources a session can move to, by name and as shown, and the move itself; set by the app.
   Map<String, String> Function(ChatSession)? moveTargets;
   Future<void> Function(BuildContext, ChatSession)? move;
+  /// The conversations shown in a window of their own; set by the app.
+  PopoutHub? popout;
 }
 
 class _Conversation extends StatefulWidget {
@@ -1517,6 +1536,15 @@ class _ConversationState extends State<_Conversation> {
     final status => status.name,
   };
 
+  Future<void> _popOut(ChatSession session) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.handle.popout!.popOut(session);
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not open a window: ${error is StateError ? error.message : error}')));
+    }
+  }
+
   /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
   List<Widget> _headerActions(ChatSession? session) {
     final actions = <(String, IconData, VoidCallback)>[
@@ -1525,6 +1553,11 @@ class _ConversationState extends State<_Conversation> {
       if (session != null && sessionChanges(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
       if (session != null && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
+      if (session != null && !widget.narrow && !session.isDraft && (widget.handle.popout?.available ?? false))
+        if (widget.handle.popout!.isPoppedOut(session))
+          ('Bring back from its own window', Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
+        else
+          ('Open in its own window', Icons.open_in_new, () => unawaited(_popOut(session))),
       if (session?.profile case final report?)
         ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
           context: context,

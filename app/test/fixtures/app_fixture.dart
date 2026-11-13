@@ -10,6 +10,7 @@ import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/main.dart';
+import 'package:canoa/popout/popout_hub.dart' show PopoutWindows;
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/worktree/worktree.dart';
@@ -88,6 +89,7 @@ Future<List<CanoaConfig>> pumpApp(
   HostSupervisor? host,
   String? documents,
   ChoicesLoader? askChoices,
+  PopoutWindows? popoutWindows,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -124,6 +126,7 @@ Future<List<CanoaConfig>> pumpApp(
             if (value.any(missing.contains)) key: [for (final program in value) if (missing.contains(program)) program],
         }),
     askChoices: askChoices ?? FakeHost().call,
+    popoutWindows: popoutWindows,
   ));
   await tester.pumpAndSettle();
   return written;
