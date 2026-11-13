@@ -652,12 +652,12 @@ impl delegate::Host for DelegationHost {
 
     fn kind(&self, source: &str) -> Option<String> {
         let served = self.served.iter().find(|served| served.name == source)?;
+        let entries = &self.agents;
         match &served.run {
             Run::Agent {
                 agent: Agent::Harness(_),
                 ..
-            } => self
-                .agents
+            } => entries
                 .iter()
                 .find(|agent| agent.name == source)
                 .and_then(|agent| agent.harness.as_deref())
