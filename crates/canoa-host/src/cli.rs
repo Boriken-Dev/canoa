@@ -120,6 +120,8 @@ enum Command {
     Serve(ServeArgs),
     /// Check canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
+    /// Print the canoa.cfg files in the order they are read, lowest layer first, and the one that is written.
+    Layers(ConfigArgs),
     /// Print this host's peer id, which a client pins.
     /// A home a host is running on keeps its method: naming another is refused unless --force.
     Id {
@@ -974,6 +976,26 @@ fn accounts(command: AccountsCommand, front: &dyn Front) -> Result<(), Failed> {
     }
 }
 
+fn layers(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
+    let layers = layers_of(args, front, true)?;
+    match args.format {
+        Format::Json => print(
+            front,
+            &serde_json::json!({
+                "files": layers.files.iter().map(|file| file.display().to_string()).collect::<Vec<_>>(),
+                "own": layers.own.display().to_string(),
+            })
+            .to_string(),
+        ),
+        Format::Text => {
+            for file in &layers.files {
+                print(front, &file.display().to_string())?;
+            }
+            print(front, &format!("own {}", layers.own.display()))
+        }
+    }
+}
+
 fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     let config = load(args, front)?;
     for entry in &config.entries {
@@ -1068,6 +1090,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
     match cli.command {
         Command::Serve(args) => serve(&args, front),
         Command::Check(args) => check(&args, front),
+        Command::Layers(args) => layers(&args, front),
         Command::Options(args) => options(&args, front),
         Command::Id { method, force } => print(
             front,

@@ -827,6 +827,7 @@ Tests: `cargo build -p canoa-host --examples` first, then `cargo test -p canoa-h
 canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--local-sources] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
                  [--web [DIR]] [--web-listen ADDRESS]
 canoa check [--config FILE] [--format text|json]
+canoa layers [--config FILE] [--format text|json]
 canoa id [--method noise|webcrypto [--force]]
 canoa peers [--format text|json]
 canoa accept PEER
@@ -870,6 +871,7 @@ canoa accounts remove NAME [--config FILE]
 - `accept` and `revoke` take `--` before the id.
 - `tool` serves one tool entry on standard input and output, `JSON` being the entry as `ToolSpec` serializes it (without `listen`, `working_roots`, `peers`, `max_peers`): what `serve` runs per connection. A `JSON` that is not one, or that `check` refuses, is status 2.
 - `check` prints `NAME KIND LISTEN` per entry, or `{"name", "kind", "listen"}` with `--format json`, and serves nothing.
+- `layers` prints the canoa.cfg files in the order they are read, lowest first, whether or not they exist (the installed, system and user files, or the ones `--config` or `CANOA_CONFIG` list), then the one that is written: a JSON object `{"files", "own"}` with `--format json`, one path a line and `own PATH` otherwise. A listed file that is missing, or an empty entry, is refused.
 - `peers` prints `accepted ID` and `waiting ID [from ADDRESS]`, or `{"peer", "state", "source"}`.
 - canoa.cfg is read as layers, lowest first: `canoa.cfg` beside the program (or in `CANOA_INSTALLED_DIR`), the system's (`%PROGRAMDATA%\Canoa\canoa.cfg`, else `/etc/Canoa/canoa.cfg`) and the user's (`%APPDATA%\Canoa\canoa.cfg`, else `$XDG_CONFIG_HOME/Canoa/canoa.cfg`, else `~/.config/Canoa/canoa.cfg`, macOS included), each in the format its first line names, merged by `canoa_host::merge_into` (tables key by key; arrays and the `ENTRIES` named entries whole). `--config`, else `CANOA_CONFIG`, is a list of files split at `;` on Windows and `:` elsewhere, the last highest and the one `accounts` writes: without a leading `+` it replaces the three layers, with one it goes over them; an empty entry or a missing file is refused naming the entry. The app reads and writes the same files.
 - `provider` takes `--library` and `--source` from where it was started, then runs in `--directory`; with `--settings-on-stdin` it reads a `HostLine` first, as `serve` writes it; with `--connect` it serves on that loopback socket after sending the line's token, rather than on standard input and output.
