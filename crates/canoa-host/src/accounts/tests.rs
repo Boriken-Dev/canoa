@@ -250,7 +250,7 @@ fn the_files_a_provider_placed_go_with_the_last_connection() {
         .expect("held too");
     let state = accounts.state_dir("a");
     let place = |held: &Held| {
-        held.spawner()
+        held.spawner(|_| {})
             .write_file(
                 ".credentials.json",
                 coqui_acp_api::guatiao::Secret::new(coqui_acp_api::SecretBytes::new(b"x".to_vec())),

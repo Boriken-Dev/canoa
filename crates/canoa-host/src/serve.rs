@@ -1035,7 +1035,8 @@ impl Serving {
                         roots,
                     )
                     .map_err(|error| refused(error.to_string()))?
-                    .with_lifetime(asks.cache_lifetime);
+                    .with_lifetime(asks.cache_lifetime)
+                    .with_entry(&entry.name);
                     for (setting, value, default) in provider.non_defaults() {
                         tracing::info!(
                             "non-default: host.agents.{}: {setting} is {value}, default {default}",

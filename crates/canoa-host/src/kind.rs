@@ -21,7 +21,7 @@ use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
     AccountCatalog, AccountKeeper, AccountKindInfo, AcpHarness, CacheLifetime, Environment,
-    ProcessSpawner, StartRequest,
+    HarnessNotice, ProcessSpawner, StartRequest,
 };
 use coqui_acp_claude::ClaudeProvider;
 use coqui_acp_codex::CodexProvider;
@@ -90,6 +90,8 @@ pub(crate) struct Harness {
     accounts: Option<Offer>,
     /// The entry's `cache_lifetime`: what its sessions ask when the client does not choose.
     lifetime: Option<CacheLifetime>,
+    /// The entry's name, which the log carries with each notice its connections' providers give.
+    entry: String,
     /// Dropped after the instances, which point into what it loaded.
     _registry: Arc<Registry>,
 }
@@ -165,8 +167,24 @@ impl Harness {
             catalog,
             accounts: None,
             lifetime: None,
+            entry: String::new(),
             _registry: Arc::clone(registry),
         })
+    }
+
+    /// This harness serving the entry `entry`, whose name the log carries with a notice.
+    pub(crate) fn with_entry(mut self, entry: &str) -> Self {
+        entry.clone_into(&mut self.entry);
+        self
+    }
+
+    /// What a connection's spawner does with a notice its provider gives: the log, at `info`, with the entry and the kind.
+    /// A notice holds no client text and no secret value.
+    fn log_notices(&self) -> impl Fn(HarnessNotice) + Send + Sync + 'static + use<> {
+        let entry = self.entry.clone();
+        move |notice| {
+            tracing::info!(entry, kind = notice.kind.as_str(), "{}", notice.text);
+        }
     }
 
     /// This harness asking `lifetime` of its provider for the sessions whose client chooses none.
@@ -326,10 +344,12 @@ impl Harness {
         let (spawner, keeper) = match (account, &self.accounts) {
             (Some(held), Some(_)) => {
                 request = request.account(held.grant());
-                (held.spawner(), held.keeper(source))
+                (held.spawner(self.log_notices()), held.keeper(source))
             }
             _ => (
-                coqui_acp_harness::LocalSpawner::new().into_object(),
+                coqui_acp_harness::LocalSpawner::new()
+                    .notices(self.log_notices())
+                    .into_object(),
                 NoAccounts.into_object(),
             ),
         };

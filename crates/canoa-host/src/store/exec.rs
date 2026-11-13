@@ -236,6 +236,10 @@ impl<S: ProcessSpawner> ProcessSpawner for GuardedSpawner<S> {
     fn remove_file(&self, path: &str) -> Result<(), ProviderError> {
         self.inner.remove_file(path)
     }
+
+    fn notice(&self, notice: coqui_acp_api::HarnessNotice) -> Result<(), ProviderError> {
+        self.inner.notice(notice)
+    }
 }
 
 /// What a program printed and how it ended.

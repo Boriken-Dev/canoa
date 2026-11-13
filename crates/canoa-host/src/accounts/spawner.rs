@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use coqui_acp_api::guatiao::Secret;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{
-    FileInfo, ProcessSpawner, SecretBytes, SpawnSpec, SpawnedProcess, SpawnerInfo,
+    FileInfo, HarnessNotice, ProcessSpawner, SecretBytes, SpawnSpec, SpawnedProcess, SpawnerInfo,
 };
 use coqui_acp_harness::LocalSpawner;
 
@@ -57,9 +57,13 @@ pub(super) struct Recording {
 impl Recording {
     /// A spawner serving files in `dir`, when the account has one; without it the file methods are refused as this
     /// machine's spawner refuses them.
-    pub(super) fn new(dir: Option<&str>, written: Arc<Mutex<BTreeSet<String>>>) -> Self {
+    pub(super) fn new(
+        dir: Option<&str>,
+        written: Arc<Mutex<BTreeSet<String>>>,
+        notices: impl Fn(HarnessNotice) + Send + Sync + 'static,
+    ) -> Self {
         Self {
-            inner: dir.map_or_else(LocalSpawner::new, local),
+            inner: dir.map_or_else(LocalSpawner::new, local).notices(notices),
             written,
             note: dir.and_then(|dir| Path::new(dir).parent().map(|own| own.join("placed"))),
         }
@@ -104,5 +108,9 @@ impl ProcessSpawner for Recording {
 
     fn remove_file(&self, path: &str) -> Result<(), ProviderError> {
         self.inner.remove_file(path)
+    }
+
+    fn notice(&self, notice: HarnessNotice) -> Result<(), ProviderError> {
+        self.inner.notice(notice)
     }
 }

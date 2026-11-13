@@ -11,7 +11,7 @@ fn args_of(launch: &coqui_acp_harness::Launch) -> Vec<String> {
 }
 
 fn notice() -> coqui_acp_harness::acp::NoticeHook {
-    Arc::new(|_: &str| {})
+    Arc::new(|_, _: &str| {})
 }
 
 #[test]

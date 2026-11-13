@@ -726,8 +726,16 @@ impl Held {
 
     /// The spawner for the provider: this machine's, with the files confined to the account's directory, remembering
     /// which it was asked to write.
-    pub(crate) fn spawner(&self) -> Object<dyn ProcessSpawner> {
-        Recording::new(self.grant.state_dir.as_deref(), Arc::clone(&self.files)).into_object()
+    pub(crate) fn spawner(
+        &self,
+        notices: impl Fn(coqui_acp_api::HarnessNotice) + Send + Sync + 'static,
+    ) -> Object<dyn ProcessSpawner> {
+        Recording::new(
+            self.grant.state_dir.as_deref(),
+            Arc::clone(&self.files),
+            notices,
+        )
+        .into_object()
     }
 }
 

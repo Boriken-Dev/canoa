@@ -9,7 +9,7 @@ use super::*;
 use crate::accounts::store;
 
 fn place(held: &Held) {
-    held.spawner()
+    held.spawner(|_| {})
         .write_file(
             ".credentials.json",
             coqui_acp_api::guatiao::Secret::new(coqui_acp_api::SecretBytes::new(b"x".to_vec())),

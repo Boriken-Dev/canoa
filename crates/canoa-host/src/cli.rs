@@ -1193,7 +1193,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             let options = harness.options();
             let name = options.harness.as_str();
             let notice: coqui_acp_harness::acp::NoticeHook =
-                Arc::new(move |text: &str| eprintln!("canoa agent {name}: {text}"));
+                Arc::new(move |_, text: &str| eprintln!("canoa agent {name}: {text}"));
             if options.harness == crate::Harness::Codex
                 && options.cache_lifetime != coqui_acp_api::CacheLifetime::Default
             {

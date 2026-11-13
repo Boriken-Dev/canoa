@@ -733,6 +733,50 @@ fn a_setting_that_turns_bypass_on_is_logged_as_configuration() {
     );
 }
 
+/// What the provider tells the host through the kind (a version it was not tested with, a program that ended mid-session)
+/// is in the host's log, at `info`, with the entry's name.
+#[test]
+fn a_version_notice_and_an_exit_reach_the_hosts_log_through_the_kind() {
+    let scratch = Scratch::new();
+    let claude = standin(&scratch, "claude");
+    let config = format!(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n",
+        quoted(&claude.to_string_lossy())
+    );
+    let (host, log) = Host::start_logged(
+        scratch,
+        &config,
+        1,
+        &[("STANDIN_VERSION", OsString::from("9.9.9"))],
+    );
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    let written = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        let opened = rpc
+            .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        let session = opened["sessionId"].as_str().expect("an id").to_owned();
+        // The version notice comes as the session opens; the program ends while the client is still there.
+        log_holding(&log, &["9.9.9"]);
+        rpc.send(
+            &json!({"jsonrpc": "2.0", "id": 901, "method": "session/prompt",
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": "die"}]}}),
+        )
+        .expect("sent");
+        log_holding(&log, &["9.9.9", "code 3"])
+    })
+    .expect("a paired key is served");
+    for (text, kind) in [("9.9.9", "notice"), ("code 3", "exited")] {
+        let line = line_saying(&written, text);
+        assert!(
+            line.contains("INFO") && line.contains("Claude") && line.contains(kind),
+            "{line}"
+        );
+    }
+}
+
 /// A Codex entry whose roots are `scratch/work`, with or without the `main` profile, resuming a thread that was recorded in
 /// `recorded`: whether the resume was refused.
 fn resume_is_refused(recorded: &str, profile: bool) -> bool {

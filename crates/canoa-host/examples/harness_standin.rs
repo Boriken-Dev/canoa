@@ -7,6 +7,8 @@
 //! standard input (`fake-login` holding `refuse` there refuses it). A start records the names of its environment and the
 //! number its login's access token ends with, never a credential.
 //!
+//! `STANDIN_VERSION` is the version Claude Code's `initialize` and its first message report, and the prompt `die` ends the process at once.
+//!
 //! Each prompt asks one permission, a file write for Claude Code and a command for Codex, then answers `Done: <prompt>`
 //! when it was allowed, writing `standin.txt` in its directory, or `Refused: <prompt>`. When `STANDIN_RECORD` names a file,
 //! one JSON line is appended to it per process and per thing it was given: its arguments, the MCP servers its
@@ -23,6 +25,11 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+
+/// The version Claude Code reports: `STANDIN_VERSION` when set, else one coqui-acp's translator was tested with.
+fn version() -> String {
+    std::env::var("STANDIN_VERSION").unwrap_or_else(|_| "2.1.318".to_owned())
+}
 
 fn record(entry: &Value) {
     let Ok(path) = std::env::var("STANDIN_RECORD") else {
@@ -189,7 +196,8 @@ fn claude(args: &[String]) {
                 let subtype = message["request"]["subtype"].as_str().unwrap_or("");
                 record(&json!({"control": subtype, "request": message["request"]}));
                 let response = if subtype == "initialize" {
-                    json!({"commands": [{"name": "standin", "description": "A stand-in's command", "argumentHint": ""}],
+                    json!({"claude_code_version": version(),
+                        "commands": [{"name": "standin", "description": "A stand-in's command", "argumentHint": ""}],
                         "models": [{"value": "standin-small", "resolvedModel": "claude-standin-1-2", "displayName": "Small",
                             "description": "A stand-in model", "supportsEffort": true,
                             "supportedEffortLevels": ["low", "high"]}]})
@@ -201,7 +209,7 @@ fn claude(args: &[String]) {
                 if subtype == "initialize" {
                     send(
                         &json!({"type": "system", "subtype": "init", "cwd": cwd, "session_id": session,
-                        "claude_code_version": "2.1.318", "tools": ["Write"], "mcp_servers": [], "model": "standin-small",
+                        "claude_code_version": version(), "tools": ["Write"], "mcp_servers": [], "model": "standin-small",
                         "permissionMode": "default"}),
                     );
                 }
@@ -210,6 +218,9 @@ fn claude(args: &[String]) {
                 turn += 1;
                 let text = prompt_text(&message["message"]["content"]);
                 record(&json!({"prompt": text}));
+                if text == "die" {
+                    std::process::exit(3);
+                }
                 let tool = format!("toolu_standin_{turn}");
                 let file = cwd.join("standin.txt");
                 let input = json!({"file_path": file, "content": "standin\n"});
