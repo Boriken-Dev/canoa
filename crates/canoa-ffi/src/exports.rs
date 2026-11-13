@@ -31,7 +31,10 @@ pub const STATUS_BUSY: i32 = 7;
 pub const STATUS_ENDED: i32 = 8;
 
 /// The version of this ABI, raised by any change to a function here.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
+
+/// The bytes of the secret [`canoa_ffi_link_secret`] writes.
+pub const LINK_SECRET_LEN: usize = 32;
 
 /// Runs `body`, turning a panic into [`STATUS_PANIC`]. The payload is forgotten, since dropping it could panic again.
 fn guarded(body: impl FnOnce() -> i32) -> i32 {
@@ -220,6 +223,36 @@ pub unsafe extern "C" fn canoa_ffi_link_open(
             Ok(link) => {
                 // SAFETY: as the first write.
                 unsafe { out_link.write(link) };
+                STATUS_OK
+            }
+            Err(status) => status,
+        }
+    })
+}
+
+/// Writes to `out` the secret the host of the `serve` job `job` shares with this process: exactly [`LINK_SECRET_LEN`] bytes. The
+/// links the application opens are bound for secret prompts by it, and it goes over no wire and to no agent: the application derives
+/// its half of the binding from it and keeps it in memory only. `out` is zeroed first, whatever else is refused.
+/// [`STATUS_NO_ENTRY`] says the job is no `serve` yet or its host has no secret.
+///
+/// # Safety
+///
+/// `out` is null or valid for writing `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn canoa_ffi_link_secret(job: u64, out: *mut u8, len: usize) -> i32 {
+    guarded(|| {
+        if out.is_null() || isize::try_from(len).is_err() {
+            return STATUS_BAD_ARGUMENT;
+        }
+        // SAFETY: non-null, and the caller promises `len` writable bytes; `u8` has no alignment to get wrong.
+        unsafe { ptr::write_bytes(out, 0, len) };
+        if len != LINK_SECRET_LEN {
+            return STATUS_BAD_ARGUMENT;
+        }
+        match links::secret(job) {
+            Ok(secret) => {
+                // SAFETY: as the zeroing above, and `secret` is a local of the same length.
+                unsafe { ptr::copy_nonoverlapping(secret.as_ptr(), out, LINK_SECRET_LEN) };
                 STATUS_OK
             }
             Err(status) => status,

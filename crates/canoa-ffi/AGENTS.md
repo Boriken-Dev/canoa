@@ -13,13 +13,14 @@ The only consumer is the app's plugin, `app/native`, whose `lib/canoa_native.dar
 ## The C ABI (`canoa_ffi::exports`)
 
 ```c
-uint32_t canoa_ffi_abi(void);                                                      // ABI_VERSION, 2; refuse any other
+uint32_t canoa_ffi_abi(void);                                                      // ABI_VERSION, 3; refuse any other
 int32_t  canoa_ffi_job_start(const uint8_t *request, size_t len, uint64_t *out_job);
 int32_t  canoa_ffi_job_read(uint64_t job, uint8_t **out_text, size_t *out_len);
 void     canoa_ffi_text_free(uint8_t *text, size_t len);
 int32_t  canoa_ffi_job_stop(uint64_t job);
 int32_t  canoa_ffi_job_free(uint64_t job);
 int32_t  canoa_ffi_link_open(uint64_t job, const uint8_t *entry, size_t entry_len, uint64_t *out_link);
+int32_t  canoa_ffi_link_secret(uint64_t job, uint8_t *out, size_t len);            // len must be 32 (LINK_SECRET_LEN)
 int32_t  canoa_ffi_link_send(uint64_t link, const uint8_t *message, size_t len);
 int32_t  canoa_ffi_link_read(uint64_t link, uint8_t **out_text, size_t *out_len);
 int32_t  canoa_ffi_link_close(uint64_t link);
@@ -54,6 +55,7 @@ int32_t  canoa_ffi_child_main(void);
 - `canoa_ffi_job_stop`: closes the job's input. `serve --until-stdin-closes` then ends every listener, link and agent, and `pair --until-stdin-closes` gives up. It returns at once; `exit` says when the job has ended. A command with no such flag does not hear it.
 - `canoa_ffi_job_free`: forgets the job, closing its input first. A job still running goes on to its end with nobody reading it.
 - `canoa_ffi_link_open`: a connection to entry `entry` (UTF-8) of the `serve` job `job` runs, inside this process: no proof, no trust store, no sealing, and the entry's `peers` list is ignored, since only this process can call it. The entry serves it as a paired key's connection, its agent starting on the first message. Two threads of the link's own move messages, so no call blocks. `canoa_ffi_link_send` copies one ACP message and queues it in order (a worktree request goes first, as `_canoa/worktree/*`); `canoa_ffi_link_read` takes `{"messages": [text...], "closed": bool}`, the host's side holding 1024 unread before it waits; `canoa_ffi_link_close` ends the link and its agent. Stopping the job closes every link, which then read `closed`.
+- `canoa_ffi_link_secret`: writes the 32-byte secret the `serve` job's host minted for the links of this process, so the application can answer the host's secret prompts bound by it (`link-hmac-sha256`, `coqui_acp::secret::LinkKey`). `out` is zeroed first whatever is refused; `len` other than 32 is `STATUS_BAD_ARGUMENT`; a job that is no `serve` yet is `STATUS_NO_ENTRY`. The secret goes over no wire and to no agent, and is the application's to keep in memory only. Only the links this function's job opens are bound by it, a connection with a relay never is.
 - `canoa_ffi_child_main`: this process as the host's own `provider`, `tool`, `agent`, `launch` or `mcp-bridge`, from the process's command line, whose first argument is `--canoa-child` (`jobs::CHILD_FLAG`). Anything else is status 2. It returns the status to exit with, and is called before the application starts anything of its own.
 
 ## What a long command changes in this process
