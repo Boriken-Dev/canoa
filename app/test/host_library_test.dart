@@ -178,10 +178,11 @@ void main() {
       await supervisor.apply(configPath: cfg);
       await _until(() => supervisor.phase == HostPhase.running, 'the host to run');
       final link = supervisor.openLink('Scripted');
-      final secret = (link as HostLinkSecret).linkSecret;
+      final secret = (link as HostLinkSecret).takeLinkSecret();
       expect(secret, isNotNull, reason: 'the library gives the secret its host minted');
       expect(secret!.length, 32);
       expect(secret.any((byte) => byte != 0), isTrue);
+      expect(link.takeLinkSecret(), isNull, reason: 'the link hands it over once');
       final store = SessionStore();
       final client = VerifiedAgent.fromChild(
         label: 'Scripted', messages: link.messages, send: link.send, close: link.close,

@@ -96,6 +96,8 @@ impl Job {
     }
 
     fn end(&self, status: i32) {
+        // A stopped host has no secret to give.
+        *self.local.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.queues
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

@@ -159,16 +159,13 @@ pub(crate) fn open(job: u64, entry: &str) -> Result<u64, i32> {
     Ok(number)
 }
 
-/// The secret the host of job `job` shares with this process for the links it opens: 32 bytes. [`STATUS_NO_ENTRY`] when the job is no
-/// `serve` yet or its host could not mint one.
-pub(crate) fn secret(job: u64) -> Result<[u8; 32], i32> {
+/// The secret the host of job `job` shares with this process for the links it opens: 32 bytes, zeroed when dropped.
+/// [`STATUS_NO_ENTRY`] when the job is no `serve` yet, has ended, or its host could not mint one.
+pub(crate) fn secret(job: u64) -> Result<zeroize::Zeroizing<[u8; 32]>, i32> {
     match jobs::local_of(job) {
         Err(()) => Err(STATUS_UNKNOWN_JOB),
         Ok(None) => Err(STATUS_NO_ENTRY),
-        Ok(Some(local)) => local
-            .link_secret()
-            .map(|secret| *secret)
-            .ok_or(STATUS_NO_ENTRY),
+        Ok(Some(local)) => local.link_secret().ok_or(STATUS_NO_ENTRY),
     }
 }
 

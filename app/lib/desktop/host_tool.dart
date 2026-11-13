@@ -133,8 +133,9 @@ abstract interface class HostLink {
 /// A link that holds the secret its host shares with this process for the secret prompts of the links it opens: minted by the host,
 /// kept in memory, and never sent anywhere. Only a link to a host in this process has one.
 abstract interface class HostLinkSecret {
-  /// The 32 bytes, or null when the host has none to give.
-  Uint8List? get linkSecret;
+  /// The 32 bytes, once: the link forgets them as it hands them over, and the caller zeroes them after deriving what it needs. Null
+  /// when the host had none to give, or they were taken already.
+  Uint8List? takeLinkSecret();
 }
 
 /// A [HostChild] that is a `serve` in this process, which can be connected to without a socket.

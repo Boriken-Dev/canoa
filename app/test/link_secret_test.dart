@@ -139,6 +139,10 @@ void main() {
     await settle(tester);
     expect(find.byKey(const ValueKey('secret-password')), findsNothing, reason: 'no form is drawn for a key bound under another secret');
     expect(second.sent.map(jsonEncode).join(' '), isNot(contains('"enc"')), reason: 'nothing was sealed for it');
-    expect(withSecret.pendingSecrets.length <= 1, isTrue);
+    expect(withSecret.pendingSecrets, isEmpty, reason: 'nothing stays pending for it');
+    final answer = second.answerTo(10);
+    expect(answer, isNotNull, reason: 'the host got an answer');
+    expect(answer!['error'] != null || (answer['result'] as Map)['action'] == 'cancel', isTrue,
+        reason: 'an error or a cancel, never an answer that carries values');
   });
 }

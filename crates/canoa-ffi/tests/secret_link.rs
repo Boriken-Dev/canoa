@@ -15,10 +15,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use canoa_ffi::exports::{
-    LINK_SECRET_LEN, STATUS_BAD_ARGUMENT, STATUS_OK, STATUS_UNKNOWN_JOB, canoa_ffi_job_free,
-    canoa_ffi_job_read, canoa_ffi_job_start, canoa_ffi_job_stop, canoa_ffi_link_close,
-    canoa_ffi_link_open, canoa_ffi_link_read, canoa_ffi_link_secret, canoa_ffi_link_send,
-    canoa_ffi_text_free,
+    LINK_SECRET_LEN, STATUS_BAD_ARGUMENT, STATUS_NO_ENTRY, STATUS_OK, STATUS_UNKNOWN_JOB,
+    canoa_ffi_job_free, canoa_ffi_job_read, canoa_ffi_job_start, canoa_ffi_job_stop,
+    canoa_ffi_link_close, canoa_ffi_link_open, canoa_ffi_link_read, canoa_ffi_link_secret,
+    canoa_ffi_link_send, canoa_ffi_text_free,
 };
 use coqui_acp::secret::{
     BINDING_LINK, CAPABILITY, Capability, DEFAULT_LIFETIME, IdentityId, Limits, LinkKey, LinkRole,
@@ -711,20 +711,125 @@ fn the_secret_is_the_hosts_to_give_and_a_bad_call_gets_none_of_it() {
         link_secret(job),
         "one secret for the life of the host"
     );
+    // A length that is not the secret's writes nothing at all.
     let mut out = [7_u8; 16];
     // SAFETY: `out` is writable for its length.
     let status = unsafe { canoa_ffi_link_secret(job, out.as_mut_ptr(), out.len()) };
     assert_eq!(status, STATUS_BAD_ARGUMENT, "only 32 bytes are asked for");
-    assert_eq!(out, [0; 16], "zeroed first");
+    assert_eq!(out, [7; 16], "untouched");
     // SAFETY: a null out is what is being refused.
     let status = unsafe { canoa_ffi_link_secret(job, core::ptr::null_mut(), 32) };
     assert_eq!(status, STATUS_BAD_ARGUMENT);
-    let mut out = [7_u8; LINK_SECRET_LEN];
-    // SAFETY: `out` is writable for its length.
-    let status = unsafe { canoa_ffi_link_secret(u64::MAX, out.as_mut_ptr(), out.len()) };
-    assert_eq!(status, STATUS_UNKNOWN_JOB);
-    assert_eq!(out, [0; LINK_SECRET_LEN], "zeroed first");
+    assert_eq!(
+        secret_status(u64::MAX),
+        (STATUS_UNKNOWN_JOB, [0; LINK_SECRET_LEN])
+    );
+
+    // A job that is no `serve` has no secret to give, and what it is given to write is zeroed.
+    let other = start(&json!({"args": ["--version"]}));
+    wait_for(other, &mut log, |_, exit| exit.is_some());
+    assert_eq!(
+        secret_status(other),
+        (STATUS_NO_ENTRY, [0; LINK_SECRET_LEN])
+    );
+    assert_eq!(canoa_ffi_job_free(other), STATUS_OK);
+
+    // A stopped host gives none either.
     assert_eq!(canoa_ffi_job_stop(job), STATUS_OK);
     wait_for(job, &mut log, |_, exit| exit.is_some());
+    assert_eq!(secret_status(job), (STATUS_NO_ENTRY, [0; LINK_SECRET_LEN]));
     assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+}
+
+/// The status of asking `job` for the secret into a buffer that held other bytes, and what the buffer holds after.
+fn secret_status(job: u64) -> (i32, [u8; LINK_SECRET_LEN]) {
+    let mut out = [7_u8; LINK_SECRET_LEN];
+    // SAFETY: `out` is writable for its length.
+    let status = unsafe { canoa_ffi_link_secret(job, out.as_mut_ptr(), out.len()) };
+    (status, out)
+}
+
+/// Every form of the link's secret an accident could print.
+fn secret_forms(secret: &[u8]) -> Vec<(&'static str, String)> {
+    vec![
+        ("hex", HEXLOWER.encode(secret)),
+        ("HEX", HEXUPPER.encode(secret)),
+        ("base64", BASE64.encode(secret)),
+        ("base64 unpadded", BASE64_NOPAD.encode(secret)),
+        ("base64url", BASE64URL.encode(secret)),
+        ("base64url unpadded", BASE64URL_NOPAD.encode(secret)),
+    ]
+}
+
+fn secret_leaks(text: &str, secret: &[u8]) -> Vec<&'static str> {
+    secret_forms(secret)
+        .into_iter()
+        .filter(|(_, form)| text.contains(form.as_str()))
+        .map(|(name, _)| name)
+        .collect()
+}
+
+#[test]
+fn the_link_secret_reaches_no_log_file_transcript_or_agent_environment() {
+    let planted = [0x5C_u8; LINK_SECRET_LEN];
+    for (name, form) in secret_forms(&planted) {
+        assert!(
+            secret_leaks(&format!("before {form} after"), &planted).contains(&name),
+            "the scan missed {name}"
+        );
+    }
+    let ((secret, printed), seen, found) = with_link(
+        "default",
+        |wire, app, job, work| {
+            let secret = link_secret(job);
+            let session = wire.open(app, work);
+            app.will_type("{\"user\":\"ana\"}", &[("password", PASSWORD)]);
+            let asked = json_of(&wire.prompt(
+                app,
+                &session,
+                &format!(
+                    "Secret secret_request {}",
+                    json!({"message": "Registry login", "schema": SCHEMA})
+                ),
+            ));
+            let handle = asked["handles"]["password"]
+                .as_str()
+                .expect("a handle")
+                .to_owned();
+            // The command prints its whole environment: what the host started the agent's command with.
+            app.decisions.push_back("allow-once");
+            let printed = wire.prompt(
+                app,
+                &session,
+                &format!(
+                    "Secret secret_use {}",
+                    json!({"handle": handle, "env": {"name": "REGISTRY_TOKEN",
+                        "command": if cfg!(windows) { "set" } else { "env" }}})
+                ),
+            );
+            (secret, printed)
+        },
+        |secret| secret.to_vec(),
+    );
+    assert!(
+        printed.to_ascii_uppercase().contains("PATH"),
+        "the command printed its environment: {printed}"
+    );
+    assert!(secret.iter().any(|byte| *byte != 0));
+    assert!(
+        secret_leaks(&printed, &secret).is_empty(),
+        "the secret is in the command's environment"
+    );
+    for (path, text) in &found {
+        assert!(
+            secret_leaks(text, &secret).is_empty(),
+            "the link secret is in {path}"
+        );
+    }
+    for text in &seen {
+        assert!(
+            secret_leaks(text, &secret).is_empty(),
+            "the link secret is in a log line or the transcript: {text}"
+        );
+    }
 }

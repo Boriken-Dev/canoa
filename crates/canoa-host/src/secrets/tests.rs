@@ -619,6 +619,18 @@ fn the_in_process_link_is_given_the_tools_on_its_own_binding_and_no_other() {
     }
 }
 
+/// A task's connection is opened by the host for the delegation, in this process, with the host's own identity: nobody answers a
+/// prompt there, so whatever it offers, it gets no tools.
+#[test]
+fn a_task_connection_offering_the_in_process_binding_gets_no_tools() {
+    let dir = Dir::new("task");
+    let (hub, host) = hub(&dir, Method::WebCrypto);
+    assert!(hub.for_connection(&host.peer_id(), true, true).is_none());
+    // The same process's own link for the application is given them, and a peer with a key is bound by its key.
+    assert!(hub.for_connection(&host.peer_id(), true, false).is_some());
+    assert!(hub.for_connection(&host.peer_id(), false, false).is_none());
+}
+
 #[test]
 fn a_connection_with_a_key_never_takes_the_in_process_binding() {
     for method in [Method::WebCrypto, Method::Noise] {

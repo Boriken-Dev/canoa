@@ -987,12 +987,15 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     // The host in this process binds a secret prompt by the secret it shares with this app, which only this link has.
     LinkSecretIdentity? linkSecrets;
-    final secret = link is HostLinkSecret ? (link as HostLinkSecret).linkSecret : null;
+    final secret = link is HostLinkSecret ? (link as HostLinkSecret).takeLinkSecret() : null;
     if (secret != null) {
       try {
+        // Only what is derived from the secret is kept; the bytes are zeroed.
         linkSecrets = await linkSecretIdentity(secret);
       } on Object {
         // No secret prompts on this link: the host is offered nothing.
+      } finally {
+        secret.fillRange(0, secret.length, 0);
       }
     }
     final client = VerifiedAgent.fromChild(

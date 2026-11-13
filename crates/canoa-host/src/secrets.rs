@@ -142,6 +142,21 @@ impl Hub {
         Some(Link::new(Arc::clone(self), secrets, owner, keys.binding))
     }
 
+    /// The secrets of a connection: the application's in-process link is bound by the link's secret, a task's connection (which has no
+    /// person at its other end) gets none, and any other by its proven peer's key.
+    pub(crate) fn for_connection(
+        self: &Arc<Self>,
+        peer: &PeerId,
+        in_process: bool,
+        task: bool,
+    ) -> Option<Arc<Link>> {
+        match (in_process, task) {
+            (true, false) => self.local_link(),
+            (true, true) => None,
+            (false, _) => self.link(peer),
+        }
+    }
+
     /// The secret of the in-process link, for the application in this process to derive its half from.
     pub(crate) fn link_secret(&self) -> Option<Zeroizing<[u8; 32]>> {
         self.local

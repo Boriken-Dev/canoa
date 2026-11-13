@@ -232,8 +232,10 @@ pub unsafe extern "C" fn canoa_ffi_link_open(
 
 /// Writes to `out` the secret the host of the `serve` job `job` shares with this process: exactly [`LINK_SECRET_LEN`] bytes. The
 /// links the application opens are bound for secret prompts by it, and it goes over no wire and to no agent: the application derives
-/// its half of the binding from it and keeps it in memory only. `out` is zeroed first, whatever else is refused.
-/// [`STATUS_NO_ENTRY`] says the job is no `serve` yet or its host has no secret.
+/// its half of the binding from it and keeps it in memory only. A `len` other than [`LINK_SECRET_LEN`], or a null `out`, is
+/// [`STATUS_BAD_ARGUMENT`] and writes nothing; otherwise `out` is zeroed first, whatever else is refused. [`STATUS_UNKNOWN_JOB`]
+/// says no job has that number; [`STATUS_NO_ENTRY`] says the job is no `serve` yet, has ended (a stopped job gives no secret) or
+/// its host has none.
 ///
 /// # Safety
 ///
@@ -241,14 +243,12 @@ pub unsafe extern "C" fn canoa_ffi_link_open(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn canoa_ffi_link_secret(job: u64, out: *mut u8, len: usize) -> i32 {
     guarded(|| {
-        if out.is_null() || isize::try_from(len).is_err() {
+        // Nothing is written for a length that is not the secret's: the caller promised no more than `len` bytes.
+        if out.is_null() || len != LINK_SECRET_LEN {
             return STATUS_BAD_ARGUMENT;
         }
-        // SAFETY: non-null, and the caller promises `len` writable bytes; `u8` has no alignment to get wrong.
-        unsafe { ptr::write_bytes(out, 0, len) };
-        if len != LINK_SECRET_LEN {
-            return STATUS_BAD_ARGUMENT;
-        }
+        // SAFETY: non-null, and the caller promises `len` (the secret's length) writable bytes; `u8` has no alignment to get wrong.
+        unsafe { ptr::write_bytes(out, 0, LINK_SECRET_LEN) };
         match links::secret(job) {
             Ok(secret) => {
                 // SAFETY: as the zeroing above, and `secret` is a local of the same length.

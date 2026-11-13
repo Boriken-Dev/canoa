@@ -112,15 +112,22 @@ const Duration _linkBusyPause = Duration(milliseconds: 10);
 
 /// A link the library holds, read on a timer like a command.
 final class _LibraryLink implements HostLink, HostLinkSecret {
-  _LibraryLink(this._native, this._link, this.linkSecret) {
+  _LibraryLink(this._native, this._link, this._linkSecret) {
     _timer = Timer.periodic(_linkPollEvery, (_) => _read());
     scheduleMicrotask(_read);
   }
 
   final CanoaNative _native;
   final int _link;
+  Uint8List? _linkSecret;
+
   @override
-  final Uint8List? linkSecret;
+  Uint8List? takeLinkSecret() {
+    final taken = _linkSecret;
+    _linkSecret = null;
+    return taken;
+  }
+
   final _messages = StreamController<String>();
   late final Timer _timer;
   bool _closed = false;

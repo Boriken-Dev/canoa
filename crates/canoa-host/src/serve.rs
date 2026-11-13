@@ -1602,14 +1602,9 @@ fn give_agent<C: Channel>(
         });
     // The person's app, when it offered secret prompts and has an identity of its own to be bound to; the application in this
     // process is bound by the secret it shares with the host, and a task's connection has no person at its other end.
-    let link = if in_process {
-        context
-            .is_none()
-            .then(|| shared.secrets.local_link())
-            .flatten()
-    } else {
-        shared.secrets.link(peer)
-    };
+    let link = shared
+        .secrets
+        .for_connection(peer, in_process, context.is_some());
     let peeked = Peek::new(channel, conn.as_ref());
     let raw = Raw::new(&peeked, link.as_ref());
     let channel = &raw;

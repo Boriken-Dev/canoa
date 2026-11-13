@@ -115,12 +115,13 @@ final class CanoaNative {
   /// Throws [ArgumentError] when it cannot be loaded, and [StateError] for a library of another ABI.
   factory CanoaNative.open({String? path}) {
     final where = path ?? beside(Platform.resolvedExecutable);
-    final native = CanoaNative._(DynamicLibrary.open(where), where);
-    final found = native._abi();
+    final library = DynamicLibrary.open(where);
+    // Before any other symbol is looked up: a library of another ABI may lack them, and should be told so.
+    final found = library.lookupFunction<Uint32 Function(), int Function()>('canoa_ffi_abi')();
     if (found != canoaAbiVersion) {
       throw StateError('the host library at $where has ABI $found, and this app needs $canoaAbiVersion');
     }
-    return native;
+    return CanoaNative._(library, where);
   }
 
   /// Starts the command [request] names, and answers its job number.
