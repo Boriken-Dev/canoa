@@ -325,9 +325,10 @@ final class CanoaConfig {
     final source = overlays[name];
     if (source == null) throw ArgumentError.value(name, 'name', 'No overlay of that name');
     final raw = _deepCopy((tables['overlays'] as Map?) ?? const {});
+    final options = overlayOptions(name);
     raw[name] = switch (source) {
-      GitOverlay() => <String, dynamic>{'source': source.spec, 'pin': digest},
-      DirOverlay(:final dir) => <String, dynamic>{'dir': dir, 'pin': digest},
+      GitOverlay() => <String, dynamic>{'source': source.spec, 'pin': digest, if (options.isNotEmpty) 'options': options},
+      DirOverlay(:final dir) => <String, dynamic>{'dir': dir, 'pin': digest, if (options.isNotEmpty) 'options': options},
     };
     return withProfileTables(
       overlays: {
@@ -341,6 +342,36 @@ final class CanoaConfig {
       },
       tables: {...tables, 'overlays': raw},
     );
+  }
+
+  /// The values the person gave the options the overlay [name] declares: `[overlays.NAME] options`. The host reads them
+  /// when it assembles the overlay's context; the overlay's manifest says which options exist and of what type.
+  Map<String, Object?> overlayOptions(String name) {
+    final entry = (tables['overlays'] as Map?)?[name];
+    final options = entry is Map ? entry['options'] : null;
+    return options is Map ? {for (final MapEntry(:key, :value) in options.entries) '$key': value} : const {};
+  }
+
+  /// This configuration with the option values [options] for the overlay [name], or none when [options] is empty. A string
+  /// entry `NAME = "source"` becomes `{ source }` to carry them.
+  CanoaConfig withOverlayOptions(String name, Map<String, Object?> options) {
+    final source = overlays[name];
+    if (source == null) throw ArgumentError.value(name, 'name', 'No overlay of that name');
+    final raw = _deepCopy((tables['overlays'] as Map?) ?? const {});
+    final entry = raw[name];
+    final fields = entry is Map
+        ? <String, dynamic>{...entry}
+        : switch (source) {
+            GitOverlay() => <String, dynamic>{'source': source.spec, if (source.pin != null) 'pin': source.pin},
+            DirOverlay(:final dir, :final pin) => <String, dynamic>{'dir': dir, if (pin != null) 'pin': pin},
+          };
+    if (options.isEmpty) {
+      fields.remove('options');
+    } else {
+      fields['options'] = _deepCopy(options);
+    }
+    raw[name] = fields;
+    return _withTable('overlays', raw, overlays: overlays);
   }
 
   /// `[catalogs]`: each catalog the store lists, by the label the person gives it, a git source whose `#path` names the
@@ -832,12 +863,19 @@ final class CanoaConfig {
         final String digest when RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(digest) => digest,
         _ => throw FormatException('canoa.cfg: overlays.$key.pin is sha256: and 64 hexadecimal digits'),
       };
+      // The values of the overlay's declared options, which the host reads; only their shape is checked here.
+      Map<dynamic, dynamic> options(Map<dynamic, dynamic> entry) {
+        if (entry['options'] != null && entry['options'] is! Map) {
+          throw FormatException('canoa.cfg: overlays.$key.options is a table of values');
+        }
+        return entry;
+      }
       overlays['$key'] = switch (value) {
         final String spec => git(spec),
-        {'source': final String spec} when value.keys.every(const {'source', 'pin'}.contains) =>
-          git(spec).pinnedTo(pin(value)),
-        {'dir': final String dir} when dir.isNotEmpty && value.keys.every(const {'dir', 'pin'}.contains) =>
-          DirOverlay(dir, pin: pin(value)),
+        {'source': final String spec} when value.keys.every(const {'source', 'pin', 'options'}.contains) =>
+          git(spec).pinnedTo(pin(options(value))),
+        {'dir': final String dir} when dir.isNotEmpty && value.keys.every(const {'dir', 'pin', 'options'}.contains) =>
+          DirOverlay(dir, pin: pin(options(value))),
         _ => throw FormatException('canoa.cfg: overlays.$key is a git source, { source, pin } or { dir, pin }'),
       };
     }
