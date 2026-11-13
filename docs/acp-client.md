@@ -202,8 +202,12 @@ each have a control under the message, an option without a category is placed by
 has its modes there. A change goes to the agent with `session/set_config_option` (in v2 with `type: "id"`, as v2 requires)
 and shows once the agent's answer or a `config_option_update` says so. A value the agent refuses stays as it was, and its
 reason is said in the conversation. A change made while a turn runs is sent before the next prompt, and says so meanwhile.
-Before an agent has started, the controls list what its source's agent offered when it last ran, kept with the session list,
-else only Default. The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own modes.
+Model and effort are one pill beside Send ("Opus · High"): its menu lists the models, with **Effort** as a submenu of it.
+Before an agent has started, the menu lists what its source's agent offered when it last ran, kept with the session list,
+else only Default, and the pill says what Default is where the source knows it ("Opus 5.5", or "GPT-6 Luna · Medium" where
+the source also names the model's default effort) rather than Default twice; a source that cannot list its models says
+"Model: after start". The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own
+modes; its menu is headed "Permissions · this session" and gives each mode Canoa knows a line on what it does.
 
 ## Usage
 
