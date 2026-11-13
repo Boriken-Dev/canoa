@@ -123,7 +123,7 @@ void main() {
 
   for (final look in LookId.values) {
     testWidgets('the source picker shows each provider\'s mark in the ${look.label} look', (tester) async {
-      await pumpApp(tester, SessionStore(includePreview: false), config: CanoaConfig(look: look, agents: [scripted]), size: const Size(900, 640));
+      await pumpApp(tester, SessionStore(), config: CanoaConfig(look: look, agents: [scripted]), size: const Size(900, 640));
       await newSession(tester);
       await tester.tap(find.byKey(const Key('new-session-source')));
       await frames(tester);
@@ -137,7 +137,7 @@ void main() {
   }
 
   testWidgets('each session row in the rail carries the mark of its source', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     addTearDown(store.dispose);
     const sources = [
       AgentSource.hosted('Claude', harness: 'claude', local: true),

@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 
-SessionStore _store([SessionLedger? ledger]) => SessionStore(includePreview: false, ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
+SessionStore _store([SessionLedger? ledger]) => SessionStore(ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
 
 const _allow = [
   {'optionId': 'allow-once', 'name': 'Yes', 'kind': 'allow_once'},
@@ -264,7 +264,7 @@ void main() {
     test('that leaves Bypass is kept without it', () async {
       final backend = MemoryDraftBackend();
       final keeper = DraftKeeper(backend);
-      final store = SessionStore(includePreview: false, drafts: keeper);
+      final store = SessionStore(drafts: keeper);
       final draft = store.createDraft(bypass: true);
       await keeper.flush();
       expect((await keeper.load()).single.record['bypass'], isTrue);

@@ -106,7 +106,7 @@ void main() {
 
     for (final (title, put, word) in states) {
       testWidgets(word, (tester) async {
-        final store = SessionStore(includePreview: false);
+        final store = SessionStore();
         final session = _open(store, title, cwd: '/work/app');
         store.createDraft(title: 'Draft');
         put(store, session);
@@ -121,14 +121,15 @@ void main() {
     testWidgets('New for a session not started, Preview for the offline preview', (tester) async {
       final store = SessionStore();
       store.createDraft(title: 'Draft');
+      store.createPreviewSession(title: 'Offline view');
       await _show(tester, store);
       expect(find.descendant(of: _row('Draft'), matching: find.text('New')), findsOneWidget);
-      expect(find.descendant(of: _row('Getting started'), matching: find.text('Preview')), findsOneWidget);
+      expect(find.descendant(of: _row('Offline view'), matching: find.text('Preview')), findsOneWidget);
       store.dispose();
     });
 
     testWidgets('marks keep their tooltips: Needs you, Working and New since you looked', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       _open(store, 'Asks').pendingPermissions.add(PermissionQuestion('Edit a.txt', 'edit'));
       _open(store, 'Runs').status = SessionStatus.working;
       _open(store, 'Ended').unread = true;
@@ -141,7 +142,7 @@ void main() {
     });
 
     testWidgets('the row reads title, then state, branch or folder, agent and time on one line each', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       _open(store, 'Fix the build', cwd: '/home/ana/devel/canoa', ago: const Duration(minutes: 7));
       _open(store, 'On a branch', cwd: '/home/ana/devel/canoa', ago: const Duration(hours: 3)).worktree =
           const SessionWorktree(path: '/w/canoa-x', branch: 'canoa/x', repo: '/home/ana/devel/canoa');
@@ -155,7 +156,7 @@ void main() {
     });
 
     testWidgets('a title is one line however long', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       _open(store, 'A title that goes on and on and on and on, well past the width of the rail');
       store.createDraft(title: 'Draft');
       await _show(tester, store, unfold: true);
@@ -167,7 +168,7 @@ void main() {
 
   group('grouping', () {
     testWidgets('Working holds what needs the person, then what runs; Settled is folded with a count; Sessions holds the rest', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       _open(store, 'Quiet one');
       _open(store, 'Quiet two');
       _open(store, 'Runs').status = SessionStatus.working;
@@ -195,7 +196,7 @@ void main() {
     });
 
     testWidgets('a group with nothing in it is not shown', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       store.createDraft(title: 'Draft');
       await _show(tester, store);
       expect(find.text('Sessions'), findsOneWidget);
@@ -206,7 +207,7 @@ void main() {
     });
 
     testWidgets('Settled opens by itself for the session the person is in', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final quiet = _open(store, 'Quiet one');
       _open(store, 'Quiet two');
       store.createDraft(title: 'Draft');
@@ -219,7 +220,7 @@ void main() {
     });
 
     test('the order Ctrl+1 to Ctrl+9 count in is the list\'s, folded groups included', () {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final quiet = _open(store, 'Quiet');
       final pinned = _open(store, 'Pinned one')..pinned = true;
       final runs = _open(store, 'Runs')..status = SessionStatus.working;
@@ -232,7 +233,7 @@ void main() {
 
   group('pin and archive', () {
     testWidgets('Pin lifts a session under Pinned and Unpin puts it back', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       _open(store, 'Second');
       store.createDraft(title: 'Draft');
@@ -254,7 +255,7 @@ void main() {
     });
 
     testWidgets('Archive folds a session away under Archived, and Unarchive brings it back', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       _open(store, 'Second');
       store.createDraft(title: 'Draft');
@@ -280,7 +281,7 @@ void main() {
     });
 
     testWidgets('an archived session that needs the person is not hidden', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First')..archived = true;
       store.createDraft(title: 'Draft');
       await _show(tester, store);
@@ -296,7 +297,7 @@ void main() {
 
     test('pin and archive are kept with the session\'s ledger note and come back with it', () async {
       final ledger = SessionLedger(MemoryLedgerBackend());
-      final store = SessionStore(includePreview: false, ledger: ledger);
+      final store = SessionStore(ledger: ledger);
       ledger.record(peerId: 'local:claude', sessionId: 'r-One', entry: 'Claude', place: SessionPlace.local, title: 'One');
       final session = _open(store, 'One');
       store.setPinned(session, true);
@@ -314,7 +315,7 @@ void main() {
 
   group('the menu', () {
     testWidgets('it lists Pin, Rename, Fork, Archive and Close, each with its key', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       store.select(first.id);
       await _show(tester, store);
@@ -327,7 +328,7 @@ void main() {
     });
 
     testWidgets('the button shows on the row the pointer is over and on the one chosen, not on the rest', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       _open(store, 'Second');
       store.select(first.id);
@@ -345,7 +346,7 @@ void main() {
     });
 
     testWidgets('R renames while the menu is open, and a key does nothing with it closed', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       store.select(first.id);
       await _show(tester, store);
@@ -366,7 +367,7 @@ void main() {
     });
 
     testWidgets('F forks: a new session in the same folder and source, with nothing started', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First', cwd: '/work/app');
       store.select(first.id);
       await _show(tester, store);
@@ -382,7 +383,7 @@ void main() {
     });
 
     test('a fork of a session in a worktree starts a worktree of its own from the repository', () {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First', cwd: '/w/canoa-x')
         ..worktree = const SessionWorktree(path: '/w/canoa-x', branch: 'canoa/x', repo: '/home/ana/devel/canoa');
       final fork = store.fork(first);
@@ -392,7 +393,7 @@ void main() {
     });
 
     testWidgets('A archives and C closes', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       store.select(first.id);
       final asked = await _show(tester, store);
@@ -408,7 +409,7 @@ void main() {
     });
 
     testWidgets('a right click opens the same menu', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final first = _open(store, 'First');
       store.createDraft(title: 'Draft');
       store.select(first.id);
@@ -424,7 +425,7 @@ void main() {
 
   group('the entries', () {
     testWidgets('New session, Search, Connect, Hosting and Settings are named, with the keys of the first two', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final asked = await _show(tester, store);
       for (final label in const ['New session', 'Search', 'Connect', 'Hosting', 'Settings']) {
         expect(find.text(label), findsOneWidget);
@@ -441,7 +442,7 @@ void main() {
     });
 
     testWidgets('the entries keep their tooltips', (tester) async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       await _show(tester, store);
       for (final tip in const ['New session', 'Canoa settings', 'Hosting', 'Connect to verified agent']) {
         expect(find.byTooltip(tip), findsOneWidget);
@@ -452,7 +453,7 @@ void main() {
 
   group('goldens', () {
     Future<SessionStore> busy() async {
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final pinned = _open(store, 'Release notes', cwd: '/home/ana/devel/canoa', ago: const Duration(hours: 20))..pinned = true;
       _open(store, 'Quiet one', cwd: '/home/ana/devel/canoa', ago: const Duration(days: 1));
       _open(store, 'Quiet two', cwd: '/home/ana/devel/coqui-acp', ago: const Duration(days: 3));

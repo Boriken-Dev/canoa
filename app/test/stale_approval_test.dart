@@ -9,7 +9,7 @@ import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
-SessionStore _store([SessionLedger? ledger]) => SessionStore(includePreview: false, ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
+SessionStore _store([SessionLedger? ledger]) => SessionStore(ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
 
 const _allow = [
   {'optionId': 'allow-once', 'name': 'Yes', 'kind': 'allow_once'},

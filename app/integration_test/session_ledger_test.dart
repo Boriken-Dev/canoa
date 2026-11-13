@@ -58,7 +58,7 @@ void main() {
     // The app's own place for the list: beside canoa.cfg.
     final ledger = SessionLedger(platformLedgerBackend(configPath: configFile.path), settings: config.sessions);
     await ledger.load();
-    final store = SessionStore(includePreview: false, ledger: ledger);
+    final store = SessionStore(ledger: ledger);
     final screen = GlobalKey();
     // The folder dialog is the operating system's: the test answers it with each agent's workspace in turn.
     var folder = dir;

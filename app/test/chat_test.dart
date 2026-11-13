@@ -106,7 +106,7 @@ final class FakeAgent {
 }
 
 Future<(FakeAgent, ChatSession, SessionStore)> _fed(WidgetTester tester, {UpdateRecorder? recorder}) async {
-  final store = SessionStore(includePreview: false, recorder: recorder);
+  final store = SessionStore(recorder: recorder);
   final agent = FakeAgent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   return (agent, session, store);

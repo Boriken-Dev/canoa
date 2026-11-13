@@ -144,7 +144,7 @@ void main() {
     updatesFile?.writeAsStringSync('');
     final recorder = UpdateRecorder(write: (line) => updatesFile?.writeAsStringSync('$line\n', mode: FileMode.append));
     // The ledger holds what the agent offered and took, for the next session to start with.
-    final store = SessionStore(includePreview: false, recorder: recorder, ledger: SessionLedger(MemoryLedgerBackend()));
+    final store = SessionStore(recorder: recorder, ledger: SessionLedger(MemoryLedgerBackend()));
     // A real agent is the host's own source of that name, reached over the link as the app reaches it; Claude without the
     // person's user-level settings, which canoa.cfg's entry of the same name says.
     final scripted = AgentCommand(

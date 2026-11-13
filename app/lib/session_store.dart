@@ -321,27 +321,9 @@ String titleFrom(String text) {
 /// Shared UI state for desktop, PWA and packaged Chromium extension.
 /// Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier {
-  SessionStore({bool includePreview = true, this.recorder, this.ledger, this.rules, this.defaultMode, this.bypassOnceOnly = false,
+  SessionStore({this.recorder, this.ledger, this.rules, this.defaultMode, this.bypassOnceOnly = false,
       this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
-      : readFile = readFile ?? readLocalFile {
-    if (includePreview) {
-      final first = createPreviewSession(title: 'Getting started', agent: 'Canoa preview');
-      first.messages.addAll([
-        ChatMessage(
-          role: MessageRole.agent,
-          text: 'This is the Canoa interface preview. Connect a verified ACP peer to use a real agent.',
-          at: DateTime.utc(2026, 10, 31),
-        ),
-      ]);
-      final second = createPreviewSession(title: 'Another conversation', agent: 'Canoa preview');
-      second.messages.add(ChatMessage(
-        role: MessageRole.notice,
-        text: 'Separate chats will retain their own agent-issued session IDs when ACP is connected.',
-        at: DateTime.utc(2026, 10, 31),
-      ));
-      select(first.id);
-    }
-  }
+      : readFile = readFile ?? readLocalFile;
 
   /// Told the kind and shape of each update this store applies, for a test or the `CANOA_EVENT_LOG` setting.
   final UpdateRecorder? recorder;

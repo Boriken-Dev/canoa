@@ -34,7 +34,7 @@ Future<_Rig> _pump(WidgetTester tester, {String? peer, FakeTabBridge? given}) as
         ..open(_tab(1, 'Docs'))
         ..open(_tab(2, 'Mail'))
         ..open(_tab(3, 'Shop')));
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final session = store.createDraft()
     ..peerId = peer ?? _peer
     ..agent = 'Desk';
@@ -79,7 +79,7 @@ Future<void> _sample(WidgetTester tester, String name) async {
 
 void main() {
   testWidgets('outside the extension the composer shows nothing about tabs', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final session = store.createDraft()
       ..peerId = _peer
       ..agent = 'Desk';

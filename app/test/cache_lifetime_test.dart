@@ -44,7 +44,7 @@ String? _note(WidgetTester tester) {
   return found.evaluate().isEmpty ? null : (found.evaluate().single.widget as Text).data;
 }
 
-SessionStore _store() => SessionStore(includePreview: false, ledger: SessionLedger(MemoryLedgerBackend()));
+SessionStore _store() => SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
 
 /// The cache lifetime the agent was asked for on `initialize`, as the host reads it.
 Object? _asked(OptionsAgent agent) {
@@ -105,10 +105,10 @@ void main() {
 
   test('an entry sets the default until the person chooses', () async {
     const source = AgentSource.hosted('Claude', harness: 'claude', local: true);
-    final bare = SessionStore(includePreview: false);
+    final bare = SessionStore();
     expect(bare.cacheLifetimeOf(bare.createDraft(source: source)), (lifetime: CacheLifetime.long, chosen: false),
         reason: 'no entry says: the chat default');
-    final store = SessionStore(includePreview: false)..choicesLoader = (_) async => _answer('Claude', setting: 'short');
+    final store = SessionStore()..choicesLoader = (_) async => _answer('Claude', setting: 'short');
     final draft = store.createDraft(source: source);
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(store.cacheLifetimeOf(draft), (lifetime: CacheLifetime.short, chosen: false), reason: 'the entry replaces the chat default');
@@ -121,12 +121,12 @@ void main() {
   test('a draft keeps the choice across runs', () async {
     final backend = MemoryDraftBackend();
     final keeper = DraftKeeper(backend);
-    final store = SessionStore(includePreview: false, drafts: keeper);
+    final store = SessionStore(drafts: keeper);
     final draft = store.createDraft();
     store.setCacheLifetime(draft, CacheLifetime.short);
     await keeper.flush();
     expect((await keeper.load()).single.record['cacheLifetime'], 'short');
-    final again = SessionStore(includePreview: false, drafts: keeper);
+    final again = SessionStore(drafts: keeper);
     await again.restoreDrafts((label) => null);
     expect(again.sessions.single.cacheLifetime, CacheLifetime.short);
     again.setCacheLifetime(again.sessions.single, null);

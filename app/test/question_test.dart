@@ -77,7 +77,7 @@ Future<void> _settle(WidgetTester tester) async {
 Future<(_Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, {Size size = const Size(1100, 900)}) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: store));
@@ -191,7 +191,7 @@ void main() {
         }
       }
     });
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final client = await startProcessAgent(
       AgentCommand(label: 'Scripted', program: scripted!, args: scriptedArgs('${dir.path}/s.json')),
       decider: store.askPermission,

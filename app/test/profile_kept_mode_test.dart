@@ -22,7 +22,7 @@ Future<ChatSession> _reopened(OptionsAgent agent, {required String kept, require
   final ledger = SessionLedger(MemoryLedgerBackend());
   ledger.record(peerId: 'local:Scripted', sessionId: 'o1', entry: 'Scripted', place: SessionPlace.local, reopenBy: 'session/load', cwd: '/w');
   ledger.setMode('local:Scripted', 'o1', mode: kept, bypass: false);
-  final store = SessionStore(includePreview: false, ledger: ledger);
+  final store = SessionStore(ledger: ledger);
   agent.profileMeta = _profile(profile);
   final client = await agent.start(scripted);
   return store.reopen(ledger.entries.single, client);

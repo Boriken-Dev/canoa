@@ -77,7 +77,7 @@ Future<void> _settle(WidgetTester tester) async {
 Future<(List<_Agent>, List<ChatSession>, SessionStore)> _three(WidgetTester tester) async {
   await tester.binding.setSurfaceSize(const Size(1280, 800));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final agents = [_Agent(), _Agent(), _Agent()];
   final sessions = <ChatSession>[];
   for (final (index, agent) in agents.indexed) {

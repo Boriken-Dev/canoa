@@ -62,7 +62,7 @@ Map<String, Object?> _window(int seconds) => {
   'resets_at': _now + seconds,
 };
 
-SessionStore _store() => SessionStore(includePreview: false, ledger: SessionLedger(MemoryLedgerBackend()));
+SessionStore _store() => SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
 
 Future<void> _started(WidgetTester tester, OptionsAgent agent, SessionStore store, {CanoaConfig? config}) async {
   await pumpApp(tester, store, linked: agent.openLink, config: config ?? const CanoaConfig(agents: [scripted]));

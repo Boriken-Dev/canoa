@@ -13,7 +13,7 @@ import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
-SessionStore _store([SessionLedger? ledger]) => SessionStore(includePreview: false, ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
+SessionStore _store([SessionLedger? ledger]) => SessionStore(ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
 
 /// A new session of the stand-in, in its view.
 Future<void> _draft(WidgetTester tester) async {

@@ -47,7 +47,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('a finished turn behind is notified on this desktop, and choosing it opens the conversation', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final (agent, behind) = await _session(store, 'Behind');
     final (_, front) = await _session(store, 'Front');
     store.select(front.id);

@@ -89,7 +89,7 @@ Future<void> _settle(WidgetTester tester) async {
 Future<(_Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, Size size) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: store));

@@ -89,7 +89,7 @@ Future<(_Agent, ChatSession, ChatSession, SessionStore)> _two(WidgetTester teste
     {CanoaConfig config = const CanoaConfig()}) async {
   await tester.binding.setSurfaceSize(const Size(1100, 800));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final back = _Agent();
   final behind = await tester.runAsync(() => back.start(store, 'Back')) as ChatSession;
   final front = await tester.runAsync(() => _Agent().start(store, 'Front')) as ChatSession;

@@ -65,7 +65,7 @@ void main() {
   final skip = exampleMissing('stdio_agent');
 
   test('a message written during a turn waits, and is sent when the turn ends', () async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final (_, session) = await _scripted(store);
     unawaited(store.sendText('The test fails. Fix it.'));
     await _until(() => session.pendingPermissions.isNotEmpty, 'the agent to ask');
@@ -81,7 +81,7 @@ void main() {
   }, skip: skip, timeout: const Timeout(Duration(minutes: 1)));
 
   test('Stop keeps the queue, held until the person sends it on', () async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final (_, session) = await _scripted(store);
     unawaited(store.sendText('Rename addNumbers to sum'));
     await _until(() => session.pendingPermissions.isNotEmpty, 'the agent to ask');
@@ -103,7 +103,7 @@ void main() {
   testWidgets('the queue shows under the conversation, and each message can be edited or removed', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1100, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final incoming = StreamController<String>();
     final sent = <Map<String, dynamic>>[];
     final client = VerifiedAgent.fromChild(

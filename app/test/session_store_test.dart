@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('preview conversations remain independent', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final first = store.createPreviewSession(title: 'First');
     store.sendPreviewText('Hello');
     final second = store.createPreviewSession(title: 'Second');
@@ -18,7 +18,7 @@ void main() {
   });
 
   test("the host's notices about an agent show when its session opens, bounded", () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final session = store.addProviderSession(
       title: 'pi', agent: 'pi', peerId: 'sha256:example', remoteSessionId: 's1',
     );
@@ -51,7 +51,7 @@ void main() {
   });
 
   test('remote ACP session identity is distinct from local view', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final remote = store.addRemoteSession(
       title: 'Remote', agent: 'Example',
       peerId: 'sha256:example', remoteSessionId: 'agent-session-17',
@@ -65,7 +65,7 @@ void main() {
   });
 
   test('selected page context is local, per-session and not sent', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final first = store.createPreviewSession(title: 'First');
     final second = store.createPreviewSession(title: 'Second');
     store.addPageContext('{"url":"https://example.com/p",'
@@ -77,7 +77,7 @@ void main() {
   });
 
   test('malformed context is ignored', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final session = store.createPreviewSession();
     store.addPageContext('not json');
     store.addPageContext('{"url":"javascript:alert(1)"}');
@@ -86,7 +86,7 @@ void main() {
   });
 
   test('remote session stores WebTransport and same-host WSS fallback', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final session = store.addRemoteSession(
       title: 'Remote', agent: 'Example',
       peerId: 'sha256:example', remoteSessionId: 'session-22',
@@ -100,7 +100,7 @@ void main() {
   });
 
   test('session refuses fallback to a different host', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     expect(
       () => store.addRemoteSession(
         title: 'Remote', agent: 'Example',
@@ -114,7 +114,7 @@ void main() {
   });
 
   test('plain WS remote endpoints are rejected', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     expect(
       () => store.addRemoteSession(
         title: 'Insecure', agent: 'Example',

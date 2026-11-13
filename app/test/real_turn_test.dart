@@ -58,7 +58,7 @@ void main() {
     final host = await EmbeddedHost.start();
     addTearDown(host.stop);
     final dir = Directory.systemTemp.createTempSync('canoa-earlier-');
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final first = await host.agent(real!, decider: store.askPermission);
     final remote = await first.createSession(cwd: dir.path);
     final session = store.addProviderSession(title: 'T', agent: real, peerId: first.peerId, remoteSessionId: remote, cwd: dir.path);
@@ -79,7 +79,7 @@ void main() {
     stdout.writeln('ATTACHED IMAGE SEEN $sawIt');
     await first.close();
 
-    final later = SessionStore(includePreview: false);
+    final later = SessionStore();
     final second = await host.agent(real, decider: later.askPermission);
     final other = await second.createSession(cwd: dir.path);
     final here = later.addProviderSession(title: 'New', agent: real, peerId: second.peerId, remoteSessionId: other, cwd: dir.path);
@@ -121,7 +121,7 @@ void main() {
     settings.parent.createSync();
     settings.writeAsStringSync('{"permissions": {"ask": ["Write", "Edit", "Bash", "PowerShell"]}}');
     final allow = Platform.environment['CANOA_TEST_REAL_TURN_ANSWER'] != 'refuse';
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final client = await host.agent(real!, decider: store.askPermission);
     final remote = await client.createSession(cwd: dir.path);
     final session = store.addProviderSession(title: 'T', agent: real, peerId: client.peerId, remoteSessionId: remote);

@@ -56,7 +56,7 @@ void main() {
   tearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
 
   Future<SessionStore> conversation(WidgetTester tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final agent = OptionsAgent();
     await pumpApp(tester, store, linked: agent.openLink, size: const Size(1280, 1000));
     await newSession(tester);

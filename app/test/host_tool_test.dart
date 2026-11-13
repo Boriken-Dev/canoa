@@ -138,7 +138,7 @@ void main() {
       asked.add(request);
       return answer;
     });
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     try {
       final opened = await client.openSession(cwd: '${dir.path}/work');
       final local = store.addProviderSession(title: 'pi', agent: 'pi', peerId: peer, remoteSessionId: opened.id);

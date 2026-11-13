@@ -72,7 +72,7 @@ Future<(SessionStore, ChatSession, _Agent, VerifiedAgent)> _open({_Agent? with_}
     close: () async {},
   );
   await client.initialize();
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final remote = await client.createSession(cwd: '/w');
   final session = store.addProviderSession(title: 'Now', agent: 'Test', peerId: client.peerId, remoteSessionId: remote, cwd: '/w');
   store.attachVerifiedClient(session.id, client);

@@ -12,7 +12,7 @@ final class V2Agent {
   late final VerifiedAgent client;
 
   Future<(SessionStore, ChatSession)> start() async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     client = VerifiedAgent.fromChild(
       label: 'V2',
       messages: incoming.stream,

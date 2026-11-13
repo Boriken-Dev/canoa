@@ -99,7 +99,7 @@ void main() {
       final ledger = SessionLedger(MemoryLedgerBackend());
       ledger.record(peerId: 'local:Claude', sessionId: 's1', entry: 'Claude', place: SessionPlace.local, cwd: worktree.path,
           reopenBy: 'session/load', worktree: worktree, title: 'Fix');
-      final store = SessionStore(includePreview: false, ledger: ledger);
+      final store = SessionStore(ledger: ledger);
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: LedgerList(ledger: ledger, store: store))));
       expect(find.textContaining('branch canoa/fix-a1b2c3'), findsOneWidget);
       await tester.pump(SessionLedger.saveDelay);

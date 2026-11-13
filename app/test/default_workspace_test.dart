@@ -50,7 +50,7 @@ void main() {
   testWidgets('no folder chosen: the view shows the scratch folder, and the first message makes it and works in it', (tester) async {
     final documents = _documents();
     final ledger = SessionLedger(MemoryLedgerBackend());
-    final store = SessionStore(includePreview: false, ledger: ledger);
+    final store = SessionStore(ledger: ledger);
     final started = _Agent();
     await pumpApp(tester, store, documents: documents.path, linked: started.openLink);
     await newSession(tester);
@@ -83,7 +83,7 @@ void main() {
 
   testWidgets('two sessions with no folder get two folders', (tester) async {
     final documents = _documents();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     await pumpApp(tester, store, documents: documents.path);
     final first = store.createDraft(source: _source);
     final second = store.createDraft(source: _source);
@@ -92,7 +92,7 @@ void main() {
 
   testWidgets('picking a folder wins, and the scratch folder is not made', (tester) async {
     final documents = _documents();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final started = _Agent();
     final work = Directory.systemTemp.createTempSync('canoa-work');
     addTearDown(() => work.deleteSync(recursive: true));
@@ -130,14 +130,14 @@ void main() {
   });
 
   testWidgets('a draft kept between runs keeps its scratch id', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final draft = store.createDraft(source: _source, workspaceId: '11111111-2222-4333-8444-555555555555');
     expect(draft.workspaceId, '11111111-2222-4333-8444-555555555555');
   });
 
   testWidgets('the folder follows canoa.cfg\'s template', (tester) async {
     final documents = _documents();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     const config = CanoaConfig(agents: [scripted], sessions: LedgerSettings(workspace: r'${documents}/work/${source}/${session}'));
     await pumpApp(tester, store, documents: documents.path, config: config);
     await newSession(tester);
@@ -151,7 +151,7 @@ void main() {
 
   testWidgets('the time in the folder is fixed when the draft is made, and the pill shows the folder the message makes', (tester) async {
     final documents = _documents();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final started = _Agent();
     const config = CanoaConfig(agents: [scripted], sessions: LedgerSettings(workspace: r'${documents}/${datetime}/${session}'));
     await pumpApp(tester, store, documents: documents.path, config: config, linked: started.openLink);
@@ -172,7 +172,7 @@ void main() {
 
   testWidgets('Settings shows the template with a preview, refuses a bad one and saves a good one', (tester) async {
     final documents = _documents();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final written = await pumpApp(tester, store, documents: documents.path);
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();

@@ -50,7 +50,7 @@ void main() {
     File('${dir.path}/skill/SKILL.md')
       ..parent.createSync()
       ..writeAsStringSync('---\nname: canoa-marker\ndescription: A stand-in skill.\n---\nNothing to do.\n');
-    final store = SessionStore(includePreview: false, ledger: SessionLedger(MemoryLedgerBackend()));
+    final store = SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
     final cfg = File('${dir.path}${Platform.pathSeparator}canoa.cfg')..writeAsStringSync('');
     final host = HostSupervisor(LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home'));
     await host.apply(configPath: cfg.path);

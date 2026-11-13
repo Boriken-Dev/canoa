@@ -25,7 +25,7 @@ void main() {
     final worktrees = CountedWorktrees();
     final ledger = SessionLedger(MemoryLedgerBackend())
       ..rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true);
-    final store = SessionStore(includePreview: false, ledger: ledger);
+    final store = SessionStore(ledger: ledger);
     await pumpApp(tester, store, linked: agent.openLink, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -63,7 +63,7 @@ void main() {
     final agent = OptionsAgent(failStart: 'scripted-agent could not start: no such file');
     final worktrees = CountedWorktrees();
     final ledger = SessionLedger(MemoryLedgerBackend());
-    final store = SessionStore(includePreview: false, ledger: ledger);
+    final store = SessionStore(ledger: ledger);
     await pumpApp(tester, store, linked: agent.openLink, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -86,7 +86,7 @@ void main() {
 
   testWidgets('what goes with the first message, added before the agent starts, goes with it', (tester) async {
     final agent = OptionsAgent();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -108,7 +108,7 @@ void main() {
     final ledgerFile = File('${dir.path}/sessions.json');
     final ledger = SessionLedger(FileLedgerBackend(ledgerFile.path));
     final keeper = DraftKeeper(FileDraftBackend('${dir.path}/drafts'));
-    final store = SessionStore(includePreview: false, ledger: ledger, drafts: keeper);
+    final store = SessionStore(ledger: ledger, drafts: keeper);
     final draft = store.createDraft(source: _source, cwd: '/work/repo');
     store.keepDraftText(draft, 'Half a thought');
     expect(store.addAttachment(draft, 'shot.png', [137, 80, 78, 71]), isNull);
@@ -125,7 +125,7 @@ void main() {
   test('a session not yet started comes back after a restart, with its text, choices and attachments', () async {
     final dir = Directory.systemTemp.createTempSync('canoa-drafts');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final before = SessionStore(includePreview: false, drafts: DraftKeeper(FileDraftBackend('${dir.path}/drafts')));
+    final before = SessionStore(drafts: DraftKeeper(FileDraftBackend('${dir.path}/drafts')));
     final draft = before.createDraft(source: _source, cwd: '/work/repo', worktree: true);
     before.keepDraftText(draft, 'Half a thought');
     before.addAttachment(draft, 'shot.png', [137, 80, 78, 71]);
@@ -135,7 +135,7 @@ void main() {
     before.updateDraft(draft, overlays: {'team'});
     await before.drafts!.flush();
 
-    final after = SessionStore(includePreview: false, drafts: DraftKeeper(FileDraftBackend('${dir.path}/drafts')));
+    final after = SessionStore(drafts: DraftKeeper(FileDraftBackend('${dir.path}/drafts')));
     await after.restoreDrafts((label) => label == 'Scripted' ? _source : null);
     final back = after.sessions.single;
     expect((back.isDraft, back.source, back.cwd, back.wantsWorktree, back.draftText), (true, _source, '/work/repo', true, 'Half a thought'));
@@ -150,7 +150,7 @@ void main() {
   });
 
   test('a draft closed while its agent starts is not bound, and the starter takes back what it made', () async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final agent = OptionsAgent();
     var cleaned = false;
     store.starter = (draft) async {
@@ -173,7 +173,7 @@ void main() {
   });
 
   test('a choice before the agent starts that it does not offer is said, not sent', () async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final agent = OptionsAgent();
     store.starter = (draft) async {
       final client = await agent.start(scripted);

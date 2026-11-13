@@ -120,7 +120,7 @@ context = { text = "A profile, so that this entry starts through the host's own 
 
       await tester.pumpWidget(
         CanoaApp(
-          store: SessionStore(includePreview: false),
+          store: SessionStore(),
           config: const CanoaConfig(),
           shell: shell,
           host: host,

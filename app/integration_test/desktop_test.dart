@@ -132,7 +132,7 @@ void main() {
 
       await tester.pumpWidget(
         CanoaApp(
-          store: SessionStore(includePreview: false),
+          store: SessionStore(),
           config: config,
           shell: shell,
           host: host,

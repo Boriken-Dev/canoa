@@ -170,7 +170,7 @@ void main() {
     final client = await verified(channel);
     await client.initialize();
     expect(client.protocolVersion, 1);
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final session = store.addRemoteSession(
       title: 'Example', agent: 'Test', peerId: peerId,
       remoteSessionId: 'session-1',
@@ -209,7 +209,7 @@ void main() {
     final client = await verified(channel);
     await client.initialize();
     await client.createSession(cwd: '/work');
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final session = store.addRemoteSession(
       title: 'Example', agent: 'Test', peerId: peerId,
       remoteSessionId: 'session-1',

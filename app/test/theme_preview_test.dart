@@ -15,7 +15,7 @@ LookId _look(WidgetTester tester) =>
 ThemeMode _mode(WidgetTester tester) => tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode!;
 
 Future<List<CanoaConfig>> _open(WidgetTester tester) async {
-  final written = await pumpApp(tester, SessionStore(includePreview: false),
+  final written = await pumpApp(tester, SessionStore(),
       config: const CanoaConfig(look: LookId.canoa, brightness: 'dark'));
   await tester.tap(find.byTooltip('Canoa settings'));
   await frames(tester);

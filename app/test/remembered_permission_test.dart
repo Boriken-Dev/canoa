@@ -119,7 +119,7 @@ Future<_Shown> _shown(WidgetTester tester, {PermissionRules? rules, MemoryLedger
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final kept = backend ?? MemoryLedgerBackend();
   final list = rules ?? PermissionRules(kept, real: _plain);
-  final store = SessionStore(includePreview: false, rules: list);
+  final store = SessionStore(rules: list);
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));
@@ -403,7 +403,7 @@ void main() {
     testWidgets('is not offered where Canoa keeps no rules', (tester) async {
       await tester.binding.setSurfaceSize(const Size(1100, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final store = SessionStore(includePreview: false);
+      final store = SessionStore();
       final agent = _Agent();
       await tester.runAsync(() => agent.start(store));
       await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));
@@ -507,7 +507,7 @@ void main() {
       final again = PermissionRules(s.backend, real: _plain);
       await tester.runAsync(again.load);
       expect(again.rules.single.value, 'npm test');
-      final next = SessionStore(includePreview: false, rules: again);
+      final next = SessionStore(rules: again);
       final agent = _Agent();
       await tester.runAsync(() => agent.start(next));
       agent.setMode('manual');

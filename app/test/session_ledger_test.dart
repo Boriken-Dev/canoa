@@ -277,7 +277,7 @@ void main() {
   group('the store notes sessions', () {
     test('a session opened here is noted with what its agent said, its text only when turned on', () async {
       final ledger = SessionLedger(MemoryLedgerBackend());
-      final store = SessionStore(includePreview: false, ledger: ledger);
+      final store = SessionStore(ledger: ledger);
       final agent = _Agent(_v1(info: _claude));
       final client = agent.client('Claude');
       await client.initialize();
@@ -302,7 +302,7 @@ void main() {
         peerId: 'local:Claude', sessionId: 'old', entry: 'Claude', place: SessionPlace.local,
         reportedName: '@agentclientprotocol/claude-agent-acp', reopenBy: 'session/load', cwd: '/w', title: 'Noted',
       )!;
-      final store = SessionStore(includePreview: false, ledger: ledger);
+      final store = SessionStore(ledger: ledger);
       final agent = _Agent(_v1(info: _claude, capabilities: {'loadSession': true, 'sessionCapabilities': {'list': <String, Object?>{}}}));
       agent.listed.add({'sessionId': 'old', 'cwd': '/w', 'title': 'As the agent names it'});
       final client = agent.client('Claude');
@@ -322,7 +322,7 @@ void main() {
 
     test('a session on canoa is noted with the host as its peer, over plain WebSocket on loopback', () {
       final ledger = SessionLedger(MemoryLedgerBackend());
-      final store = SessionStore(includePreview: false, ledger: ledger);
+      final store = SessionStore(ledger: ledger);
       final session = store.addRemoteSession(
         title: 'Hosted', agent: 'sha256:aa', peerId: 'sha256:aa', remoteSessionId: 'h1',
         endpoint: Uri.parse('ws://127.0.0.1:7801'), place: SessionPlace.host, method: 'noise', cwd: '/srv',
@@ -342,7 +342,7 @@ void main() {
           reportedName: 'pi-acp', version: '0.0.34', reopenBy: 'session/load', cwd: '/b', title: 'Pi one');
       ledger.record(peerId: 'local:Plain', sessionId: 'x1', entry: 'Plain', place: SessionPlace.local, cwd: '/c', title: 'Plain one');
       await ledger.flush();
-      final store = SessionStore(includePreview: false, ledger: ledger);
+      final store = SessionStore(ledger: ledger);
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(
         child: LedgerList(ledger: ledger, store: store, onReopen: onReopen ?? (_) async {}),
       ))));

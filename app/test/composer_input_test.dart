@@ -48,7 +48,7 @@ Future<(SessionStore, OptionsAgent, FakeClipboard, _Disk)> _started(WidgetTester
   addTearDown(() => disk.dir.deleteSync(recursive: true));
   final agent = OptionsAgent(images: images, files: files);
   final clipboard = FakeClipboard();
-  final store = SessionStore(includePreview: false);
+  final store = SessionStore();
   final notes = disk.file('notes.txt', 'hello notes'.codeUnits);
   final big = disk.file('big.log', List.filled(2 * 1024 * 1024, 97));
   final shot = disk.file('shot.png', _png);

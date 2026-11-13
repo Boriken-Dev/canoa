@@ -36,7 +36,6 @@ String _written(WidgetTester tester) => tester.widget<TextField>(_composer).cont
 
 /// A store whose source has run before, so its model and effort are offered before it starts.
 SessionStore _remembering() => SessionStore(
-  includePreview: false,
   ledger: SessionLedger(MemoryLedgerBackend())
     ..rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true),
 );
@@ -132,7 +131,7 @@ void main() {
 
   testWidgets('a message the agent cannot be given stays in the composer, with what goes with it', (tester) async {
     final agent = OptionsAgent();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -150,7 +149,7 @@ void main() {
 
   testWidgets('a first message the started agent cannot be given says so, not that nothing started, and stays', (tester) async {
     final agent = OptionsAgent();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     await pumpApp(tester, store, linked: agent.openLink);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -166,7 +165,7 @@ void main() {
 
   test('a queued message that cannot be sent stays in the queue, held', () async {
     final agent = OptionsAgent()..holdTurns = true;
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     store.starter = (draft) async {
       final client = await agent.start(scripted);
       store.bindDraft(draft, client, await client.openSession(cwd: '/w'), cwd: '/w');
@@ -194,7 +193,7 @@ void main() {
     final agent = OptionsAgent();
     final worktrees = CountedWorktrees();
     final folders = ['/work/repo', '/work/plain'];
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     await pumpApp(tester, store, linked: agent.openLink, worktrees: worktrees, pickFolder: () async => folders.removeAt(0));
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -213,7 +212,7 @@ void main() {
     final held = _HeldStart(OptionsAgent());
     final worktrees = CountedWorktrees();
     final shell = _Shell();
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     await pumpApp(tester, store, linked: held.open, worktrees: worktrees, shell: shell);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -233,7 +232,7 @@ void main() {
     final held = _HeldStart(OptionsAgent());
     final worktrees = CountedWorktrees();
     final keeper = DraftKeeper(MemoryDraftBackend());
-    final store = SessionStore(includePreview: false, drafts: keeper, ledger: SessionLedger(MemoryLedgerBackend()));
+    final store = SessionStore(drafts: keeper, ledger: SessionLedger(MemoryLedgerBackend()));
     await pumpApp(tester, store, linked: held.open, worktrees: worktrees);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -256,7 +255,7 @@ void main() {
   });
 
   testWidgets('a hosted source is given none of the profile, model included', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final tool = FakeTool();
     final host = HostSupervisor(tool);
     await host.apply(configPath: '/c/canoa.cfg');
@@ -271,7 +270,7 @@ void main() {
   });
 
   testWidgets('a hosted entry is shown by its title and its provider icon, and its name stays its identity', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final tool = FakeTool();
     final host = HostSupervisor(tool);
     await host.apply(configPath: '/c/canoa.cfg');
@@ -299,7 +298,7 @@ void main() {
   });
 
   testWidgets('an entry the host starts serving is in the source picker, and one it stops serving is not', (tester) async {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final tool = FakeTool();
     final host = HostSupervisor(tool);
     await host.apply(configPath: '/c/canoa.cfg');
@@ -327,7 +326,7 @@ void main() {
   });
 
   test('a draft restored before the host served its source gets the source when the host does', () {
-    final store = SessionStore(includePreview: false);
+    final store = SessionStore();
     final draft = store.createDraft(keptSource: 'late');
     store.resolveKeptSources((label) => null);
     expect(draft.source, isNull);
@@ -340,7 +339,7 @@ void main() {
   test('a choice made before the start that the agent took is the source\'s last choice', () async {
     final ledger = SessionLedger(MemoryLedgerBackend())
       ..rememberSource('Scripted', options: OptionsAgentOptions.parsed, images: true, files: true);
-    final store = SessionStore(includePreview: false, ledger: ledger);
+    final store = SessionStore(ledger: ledger);
     final agent = OptionsAgent();
     store.starter = (draft) async {
       final client = await agent.start(scripted);
@@ -356,7 +355,7 @@ void main() {
 
   test('the session list keeps no words of the first message, though the title shown is taken from it', () async {
     final ledger = SessionLedger(MemoryLedgerBackend());
-    final store = SessionStore(includePreview: false, ledger: ledger);
+    final store = SessionStore(ledger: ledger);
     final agent = OptionsAgent();
     store.starter = (draft) async {
       final client = await agent.start(scripted);
@@ -371,18 +370,18 @@ void main() {
 
   test('a draft whose source is gone keeps it, for when it is back', () async {
     final backend = MemoryDraftBackend();
-    final before = SessionStore(includePreview: false, drafts: DraftKeeper(backend));
+    final before = SessionStore(drafts: DraftKeeper(backend));
     before.createDraft(source: _source, cwd: '/w');
     await before.drafts!.flush();
 
-    final without = SessionStore(includePreview: false, drafts: DraftKeeper(backend));
+    final without = SessionStore(drafts: DraftKeeper(backend));
     await without.restoreDrafts((label) => null);
     final orphan = without.sessions.single;
     expect(orphan.source, isNull);
     without.keepDraftText(orphan, 'still here');
     await without.drafts!.flush();
 
-    final again = SessionStore(includePreview: false, drafts: DraftKeeper(backend));
+    final again = SessionStore(drafts: DraftKeeper(backend));
     await again.restoreDrafts((label) => label == 'Scripted' ? _source : null);
     expect((again.sessions.single.source, again.sessions.single.draftText), (_source, 'still here'));
   });

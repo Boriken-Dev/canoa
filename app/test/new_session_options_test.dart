@@ -15,7 +15,7 @@ import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 import 'fixtures/source_choices.dart';
 
-SessionStore _store([SessionLedger? ledger]) => SessionStore(includePreview: false, ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
+SessionStore _store([SessionLedger? ledger]) => SessionStore(ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
 
 Future<void> _draft(WidgetTester tester, String source) async {
   await newSession(tester);

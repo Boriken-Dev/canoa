@@ -14,7 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 
-SessionStore _store(SessionLedger ledger) => SessionStore(includePreview: false, ledger: ledger);
+SessionStore _store(SessionLedger ledger) => SessionStore(ledger: ledger);
 
 Future<void> _draft(WidgetTester tester) async {
   await newSession(tester);
