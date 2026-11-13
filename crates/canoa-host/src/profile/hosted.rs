@@ -1266,6 +1266,10 @@ fn context_text(
 ) -> Result<(String, String, Option<Again>), String> {
     match &context.value {
         Context::Text(text) => Ok((text.clone(), "text".to_owned(), None)),
+        Context::TemplateBody(body) => {
+            let rendered = templating.body(&context.layer.name, body)?;
+            Ok((rendered.text, "text".to_owned(), rendered.again))
+        }
         Context::Template(file) => {
             let rendered = templating.context(&context.layer.name, file)?;
             Ok((rendered.text, file.clone(), rendered.again))

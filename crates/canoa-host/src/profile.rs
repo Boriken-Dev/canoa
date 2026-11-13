@@ -216,8 +216,11 @@ pub enum Context {
     /// A file holding it.
     File(String),
     /// A context file of an AOS overlay, relative to its root, whose `${NAME}` names are replaced when the context is
-    /// assembled (the front matter of `OVERLAY.md` is dropped first).
+    /// assembled.
     Template(String),
+    /// The body of an overlay's `OVERLAY.md` (its front matter is the manifest), whose `${NAME}` names are replaced when
+    /// the context is assembled.
+    TemplateBody(String),
 }
 
 /// A skill: a directory holding a `SKILL.md`, relative to its layer's directory.
@@ -1176,7 +1179,7 @@ pub(crate) struct Resolved {
 
 fn context_json(context: &Context) -> Value {
     match context {
-        Context::Text(text) => json!({"text": text}),
+        Context::Text(text) | Context::TemplateBody(text) => json!({"text": text}),
         Context::File(file) | Context::Template(file) => json!({"file": file}),
     }
 }

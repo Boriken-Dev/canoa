@@ -629,17 +629,15 @@ fn reading(error: &aos::Error) -> String {
     )
 }
 
-/// A context entry as the profile holds it: the file, templated when the context is assembled. `OVERLAY.md`'s front matter
-/// is the manifest and no context, and an empty body is no context.
+/// A context entry as the profile holds it: the file, templated when the context is assembled, or for `OVERLAY.md` its
+/// body as text, since the front matter is the manifest and no context. An empty body is no context.
 fn context_entry(tree: &OverlayTree, path: &str, settings: &Settings) -> Option<Context> {
-    if path == "OVERLAY.md" {
-        let body = aos::context_file_text(tree.bytes(path)?, settings).ok()?;
-        let text = core::str::from_utf8(body).ok()?;
-        if text.trim().is_empty() {
-            return None;
-        }
+    if path != "OVERLAY.md" {
+        return Some(Context::Template(path.to_owned()));
     }
-    Some(Context::Template(path.to_owned()))
+    let body = aos::context_file_text(tree.bytes(path)?, settings).ok()?;
+    let text = core::str::from_utf8(body).ok()?;
+    (!text.trim().is_empty()).then(|| Context::TemplateBody(text.to_owned()))
 }
 
 /// A text field of a mapping, empty when it is absent or not text.

@@ -1158,3 +1158,26 @@ fn rules_are_not_templated_and_a_context_naming_the_project_gets_each_sessions_f
         prompt.as_str()
     );
 }
+
+#[test]
+fn the_body_of_overlay_md_is_templated_and_its_front_matter_is_not_context() {
+    let (_temp, _connection, parts) = docs_parts(
+        &[(
+            "OVERLAY.md",
+            "---\nname: docs\noptions:\n  depth:\n    type: string\n    default: normal\n---\nBody at ${depth}, in ${AOS_PROJECT_ROOT}.\n",
+        )],
+        "options = { depth = \"deep\" }",
+    );
+    let prompt = prompt_of(&parts);
+    assert!(
+        prompt.contains("Body at deep, in ${AOS_PROJECT_ROOT}."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("options:"), "{prompt}");
+    let mut params = json!({"cwd": "/work/one", "mcpServers": []});
+    add_parts(params.as_object_mut().expect("an object"), &parts).expect("added");
+    let text = params["systemPrompt"]["content"][0]["text"]
+        .as_str()
+        .expect("text");
+    assert!(text.contains("Body at deep, in /work/one."), "{text}");
+}

@@ -24,6 +24,8 @@ pub(super) struct Again {
     bytes: Vec<u8>,
     manifest: Document,
     facts: TemplateFacts,
+    /// Whether the bytes are an `OVERLAY.md` body, whose front matter is already dropped.
+    body: bool,
 }
 
 impl Again {
@@ -32,6 +34,11 @@ impl Again {
         let mut facts = self.facts.clone();
         facts.project = project.map(str::to_owned);
         let values = aos::template_values(&self.manifest, &facts).map_err(words)?;
+        if self.body {
+            let text = core::str::from_utf8(&self.bytes)
+                .map_err(|_| "its text is not UTF-8".to_owned())?;
+            return Ok(aos::template(text, &values));
+        }
         aos::context_text(&self.bytes, &values, &Settings::default()).map_err(words)
     }
 }
@@ -106,6 +113,24 @@ impl Templating<'_> {
             bytes: bytes.to_vec(),
             manifest,
             facts,
+            body: false,
+        };
+        let text = again.render(None)?;
+        Ok(Rendered {
+            text,
+            again: names("AOS_PROJECT_ROOT").then_some(again),
+        })
+    }
+
+    /// The body of `OVERLAY.md` of `identity`, replaced, with no project.
+    pub(super) fn body(&self, identity: &str, body: &str) -> Result<Rendered, String> {
+        let names = |name: &str| body.contains(name);
+        let (manifest, facts) = self.facts(identity, names("AOS_OVERLAY_ROOT"))?;
+        let again = Again {
+            bytes: body.as_bytes().to_vec(),
+            manifest,
+            facts,
+            body: true,
         };
         let text = again.render(None)?;
         Ok(Rendered {
