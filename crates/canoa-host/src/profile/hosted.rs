@@ -32,6 +32,11 @@ use hooks::{Book, Hooks, PreEnv, Seen};
 /// The `_meta` key a client names a profile under in `initialize`, and the host's report under in its answers.
 pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
 
+/// The `_meta` key a client names, in `initialize`, the overlays this connection starts with: an array of the names the
+/// profile lists. It only narrows: a name the profile does not list adds nothing and is reported as ignored, and one the
+/// client leaves out is reported as not chosen. Absent, the connection starts with every overlay the profile lists.
+pub const OVERLAYS_META: &str = "dev.boriken.canoa/overlays";
+
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
 pub(crate) mod fetched;
@@ -204,6 +209,31 @@ pub(crate) fn choose(offer: &Offer, first: &[u8]) -> Result<usize, Refusal> {
         })
 }
 
+/// The overlays `first` chooses for the connection in `initialize`'s `_meta`; `None` when it chooses none, which is every
+/// overlay the profile lists. Anything but an array of names is refused.
+pub(crate) fn choose_overlays(first: &[u8]) -> Result<Option<Vec<String>>, Refusal> {
+    let message: Value = serde_json::from_slice(first).unwrap_or(Value::Null);
+    let Some(chosen) = message
+        .get("params")
+        .and_then(|params| params.get("_meta"))
+        .and_then(|meta| meta.get(OVERLAYS_META))
+    else {
+        return Ok(None);
+    };
+    let names: Option<Vec<String>> = chosen.as_array().and_then(|names| {
+        names
+            .iter()
+            .map(|name| name.as_str().map(str::to_owned))
+            .collect()
+    });
+    names.map(Some).ok_or_else(|| Refusal {
+        answer: message
+            .get("id")
+            .map(|id| error(id, INVALID_PARAMS, "the overlays are chosen as a list of names")),
+        log: "a client sent something other than a list of overlay names as its choice, which was refused",
+    })
+}
+
 /// An installed overlay as read when a connection starts: its tree, never read again.
 #[derive(Debug)]
 struct ReadOverlay {
@@ -295,14 +325,59 @@ impl Connection {
     /// # Errors
     ///
     /// The environment cannot be built, as [`super::ProfileError`] words it: no agent starts with it.
+    #[cfg(test)]
     pub(crate) fn prepare(
         offer: &Offer,
         index: usize,
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let (name, host) = &offer.profiles[index];
+        Self::prepare_with(offer, index, entry, lookup, None)
+    }
+
+    /// As [`Self::prepare`], with the overlays the client chose: only those of them the profile lists are read, and each
+    /// other overlay the profile lists is reported as not chosen for this connection.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::prepare`].
+    pub(crate) fn prepare_with(
+        offer: &Offer,
+        index: usize,
+        entry: &str,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        only: Option<&[String]>,
+    ) -> Result<Self, String> {
+        let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
+        let narrowed;
+        let host = if let Some(only) = only {
+            let mut host = listed.clone();
+            host.overlays.retain(|identity| {
+                let chosen = only.contains(identity);
+                if !chosen {
+                    notes.push(Item::new(
+                        "overlay",
+                        LayerId::new(LayerKind::Overlay, identity.clone()),
+                        State::Off,
+                        "not chosen for this session",
+                    ));
+                }
+                chosen
+            });
+            for asked in only.iter().filter(|asked| !listed.overlays.contains(asked)) {
+                notes.push(Item::new(
+                    "overlay",
+                    LayerId::new(LayerKind::Overlay, asked.clone()),
+                    State::Unsupported,
+                    "this profile does not list it, so a client cannot add it",
+                ));
+            }
+            narrowed = host;
+            &narrowed
+        } else {
+            listed
+        };
         let overlays = read_overlays(host, &mut notes);
         let layers = layers_of(host, &overlays, None, &mut notes);
         let effective = merge(&layers);

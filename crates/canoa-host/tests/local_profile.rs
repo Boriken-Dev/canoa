@@ -216,3 +216,46 @@ fn a_link_that_does_not_say_it_answers_is_never_asked() {
     assert!(asked.is_none());
     assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
 }
+
+/// What `initialize` reports when the client chooses `overlays` (every one the profile lists when `None`).
+fn report_choosing(overlays: Option<Value>) -> Value {
+    let host = Hosted::start_with(
+        &format!("{}[overlays]\nteam = \"fixture\"\n", config("")),
+        &["--local-sources"],
+    );
+    install_overlay(&host.scratch);
+    let link = host.local.open("Profiled").expect("a link");
+    let meta = overlays.map_or_else(
+        || json!({}),
+        |overlays| json!({canoa_host::profile::OVERLAYS_META: overlays}),
+    );
+    let (initialized, _) = ask(
+        &link,
+        1,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": meta}),
+    )
+    .expect("initialize is answered");
+    host.stop();
+    initialized["_meta"][PROFILE_META].clone()
+}
+
+#[test]
+fn the_overlays_a_session_chooses_are_the_ones_its_report_shows() {
+    let has = |report: &Value, key: &str, layer: &str| {
+        report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|item| item["key"] == key && item["layer"] == layer)
+    };
+    let all = report_choosing(None);
+    assert!(has(&all, "mcp.team", "overlay:team"), "{all}");
+    let named = report_choosing(Some(json!(["team"])));
+    assert!(has(&named, "mcp.team", "overlay:team"), "{named}");
+    let left_out = report_choosing(Some(json!([])));
+    assert!(!has(&left_out, "mcp.team", "overlay:team"), "{left_out}");
+    assert_eq!(item(&left_out, "overlay")["state"], "off", "{left_out}");
+    // The person's own layers are not overlays: they stay whatever is chosen.
+    assert_eq!(item(&left_out, "context")["state"], "applied", "{left_out}");
+}

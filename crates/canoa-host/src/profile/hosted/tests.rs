@@ -924,3 +924,61 @@ fn a_skill_directory_that_is_a_link_is_never_read() {
         parts.report
     );
 }
+
+#[test]
+fn a_client_narrows_the_overlays_a_connection_starts_with_and_never_adds_one() {
+    let temp = temp_with_skill();
+    install_overlay(&temp);
+    let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
+    let report_of = |only: Option<Vec<String>>| {
+        let connection =
+            Connection::prepare_with(&offer, 0, "a", &lookup, only.as_deref()).expect("prepared");
+        parts_for(&connection, Some("claude-code"), &claude(), &lookup).report
+    };
+
+    // Every listed overlay when the client chooses none.
+    let all = report_of(None);
+    assert_eq!(item(&all, "mcp.team")["state"], "off", "{all}");
+
+    // Left out: nothing of it applies, and the report says it was not chosen.
+    let none = report_of(Some(Vec::new()));
+    assert_eq!(item(&none, "overlay")["state"], "off", "{none}");
+    assert_eq!(item(&none, "overlay")["layer"], "overlay:team", "{none}");
+    assert!(
+        none["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|item| item["key"] != "mcp.team"),
+        "{none}"
+    );
+
+    // A name the profile does not list adds nothing, and the report says so.
+    let ghost = report_of(Some(vec!["team".into(), "ghost".into()]));
+    assert_eq!(item(&ghost, "mcp.team")["state"], "off", "{ghost}");
+    assert_eq!(item(&ghost, "overlay")["state"], "not supported", "{ghost}");
+    assert_eq!(item(&ghost, "overlay")["layer"], "overlay:ghost", "{ghost}");
+}
+
+#[test]
+fn the_overlays_are_chosen_as_a_list_of_names_or_the_first_message_is_refused() {
+    let first = |value: Value| {
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"_meta": {OVERLAYS_META: value}}}))
+        .expect("json")
+    };
+    assert_eq!(
+        choose_overlays(&first(json!(["a", "b"]))).expect("names"),
+        Some(vec!["a".into(), "b".into()])
+    );
+    assert_eq!(
+        choose_overlays(b"{\"method\":\"initialize\"}").expect("none"),
+        None
+    );
+    for bad in [json!("a"), json!([1]), json!({"a": true})] {
+        let refusal = choose_overlays(&first(bad)).expect_err("refused");
+        let answer: Value =
+            serde_json::from_slice(&refusal.answer.expect("an answer")).expect("json");
+        assert_eq!(answer["error"]["code"], INVALID_PARAMS, "{answer}");
+    }
+}

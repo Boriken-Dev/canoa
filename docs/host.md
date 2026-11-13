@@ -235,7 +235,9 @@ command = "/usr/local/bin/lint-mcp"
   message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A first message that is not
   `initialize` is refused too, before any secret is read or any agent starts; only [worktree requests](#worktrees),
   which the host answers itself with git, may come before it. A client never sends a
-  profile's contents: every value comes from canoa.cfg.
+  profile's contents: every value comes from canoa.cfg. It may narrow which of the profile's overlays one connection
+  starts with, as a list of names in `_meta["dev.boriken.canoa/overlays"]`: a name the profile does not list adds
+  nothing, and the report says which overlays were not chosen.
 - **The environment** reaches the agent's process when it starts, on the first line of its standard input through
   `canoa launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
   environment and files when the connection starts; one that cannot be read starts no agent.

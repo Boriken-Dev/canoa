@@ -1666,8 +1666,15 @@ fn prepare<C: Channel>(
             return None;
         }
     };
+    let only = match hosted::choose_overlays(first) {
+        Ok(only) => only,
+        Err(refusal) => {
+            refuse(refusal.answer, refusal.log);
+            return None;
+        }
+    };
     let lookup = |name: &str| std::env::var(name).ok();
-    match Connection::prepare(offer, index, &served.name, &lookup) {
+    match Connection::prepare_with(offer, index, &served.name, &lookup, only.as_deref()) {
         Ok(connection) => Some(connection.asking(in_process)),
         Err(why) => {
             let id = serde_json::from_slice::<serde_json::Value>(first)
