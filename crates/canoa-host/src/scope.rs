@@ -345,10 +345,15 @@ thread_local! {
 /// Runs `send`, which puts a message of the host's own on the client's stream: the one filter below lets it pass, which no
 /// message of an agent's can ask for.
 pub(crate) fn host_own<T>(send: impl FnOnce() -> T) -> T {
-    let before = HOST_OWN.with(|own| own.replace(true));
-    let done = send();
-    HOST_OWN.with(|own| own.set(before));
-    done
+    // Restored on a panic too: a send that unwinds is caught further up, and the thread goes on.
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            HOST_OWN.with(|own| own.set(self.0));
+        }
+    }
+    let _restore = Restore(HOST_OWN.with(|own| own.replace(true)));
+    send()
 }
 
 /// Whether an agent's `message` is a request or notification of the host's own, whose method starts with `_canoa/`: the host asks

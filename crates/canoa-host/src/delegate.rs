@@ -546,8 +546,16 @@ impl Conn {
             .and_then(Value::as_str)
             .and_then(|id| self.session(id));
         let task = params.get("taskId").and_then(Value::as_str);
+        // A task id that is not text names no task, and must not read as "all of them".
+        let named = params.get("taskId").is_some_and(|id| !id.is_null());
         let answer = match (method, session) {
             (_, None) => Err("no such session"),
+            (DELEGATE_STOP, Some(_)) if named && task.is_none() => Err("taskId must be text"),
+            (DELEGATE_STOP, Some(session))
+                if task.is_some_and(|task| session.history_of(task).is_none()) =>
+            {
+                Err("no such task")
+            }
             (DELEGATE_STOP, Some(session)) => {
                 self.engine.cancel_tasks(&session, task);
                 Ok(json!({}))

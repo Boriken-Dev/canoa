@@ -850,6 +850,98 @@ fn a_client_that_opted_in_is_told_each_state_of_a_task_and_what_its_agent_said_a
 }
 
 #[test]
+fn history_and_stop_reach_only_the_tasks_of_the_session_and_connection_that_ask() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let marker = dir.0.join("child.pids");
+    let config = format!(
+        "{}{}",
+        agent("parent", "default", ""),
+        marked("child", "default", &marker)
+    );
+    let host = Hosted::start(&config);
+    let (first, second) = (
+        host.local.open("parent").expect("a link"),
+        host.local.open("parent").expect("another link"),
+    );
+    let (mut one, mut two) = (Convo::new(&first), Convo::new(&second));
+    let a = one.open(true, &work);
+    let a2 = one
+        .request(
+            "session/new",
+            json!({"cwd": work.to_string_lossy(), "mcpServers": []}),
+            &|_| None,
+        )
+        .expect("a second session")["sessionId"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let b = two.open(true, &work);
+    let mut started = 0;
+    let mut wait = |convo: &mut Convo<'_>, session: &str| {
+        let task = convo.delegate(session, "child", "Wait");
+        started += 1;
+        until("the child started", || pids(&marker).len() == started);
+        (task, pids(&marker)[started - 1])
+    };
+    let (a_task, a_pid) = wait(&mut one, &a);
+    let (a_other, a_other_pid) = wait(&mut one, &a);
+    let (a2_task, a2_pid) = wait(&mut one, &a2);
+    let (_, b_pid) = wait(&mut two, &b);
+
+    // The stand-in numbers its sessions per process, so `a` is also the second connection's own id; `a2` is only the first's.
+    // Another connection's session id is no session here; another session's task id is no task.
+    for method in ["_canoa/delegate/history", "_canoa/delegate/stop"] {
+        let foreign = two
+            .request(method, json!({"sessionId": a2, "taskId": a2_task}), &|_| {
+                None
+            })
+            .expect_err("another connection's session");
+        assert_eq!(foreign["code"], -32602, "{method}");
+        let crossed = one
+            .request(method, json!({"sessionId": a, "taskId": a2_task}), &|_| {
+                None
+            })
+            .expect_err("another session's task");
+        assert_eq!(crossed["code"], -32602, "{method}");
+    }
+    let bare = two
+        .request("_canoa/delegate/stop", json!({"sessionId": a2}), &|_| None)
+        .expect_err("another connection's session, with no task named");
+    assert_eq!(bare["code"], -32602);
+    // A task id that is not text is refused, not read as "every task".
+    for id in [json!(5), json!(["x"]), json!({})] {
+        let refused = one
+            .request(
+                "_canoa/delegate/stop",
+                json!({"sessionId": a, "taskId": id}),
+                &|_| None,
+            )
+            .expect_err("a task id that is not text");
+        assert_eq!(refused["code"], -32602, "{id}");
+    }
+    for pid in [a_pid, a_other_pid, a2_pid, b_pid] {
+        assert!(running(pid), "nothing was stopped by a refused request");
+    }
+
+    // One task's stop ends that task only.
+    one.request(
+        "_canoa/delegate/stop",
+        json!({"sessionId": a, "taskId": a_task}),
+        &|_| None,
+    )
+    .expect("stopped");
+    gone(a_pid);
+    for pid in [a_other_pid, a2_pid, b_pid] {
+        assert!(running(pid));
+    }
+    assert_eq!(one.status(&a, &a_task, 20_000)["state"], "canceled");
+    assert_eq!(one.status(&a, &a_other, 0)["state"], "working");
+    drop((first, second));
+    host.stop();
+}
+
+#[test]
 fn the_parents_cancel_and_the_cancel_tool_end_the_childs_process_and_a_closed_connection_ends_all()
 {
     let dir = Scratch::new();

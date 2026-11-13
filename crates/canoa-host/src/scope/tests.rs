@@ -403,4 +403,7 @@ fn what_the_host_itself_sends_in_its_namespace_passes_and_only_while_it_is_sendi
         is_host_only(event.as_bytes()),
         "the exemption ends with the send"
     );
+    let unwound = std::panic::catch_unwind(|| super::host_own(|| panic!("a send that panics")));
+    assert!(unwound.is_err());
+    assert!(is_host_only(event.as_bytes()), "nor does a panic keep it");
 }
