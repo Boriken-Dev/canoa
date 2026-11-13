@@ -37,6 +37,11 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 
+# The secret-prompt test plays the application: the link's binding and the sealing, and the scan for the value's forms.
+[dev-dependencies]
+coqui-acp = { workspace = true, features = ["secret"] }
+data-encoding = { version = "2", default-features = false, features = ["std"] }
+
 # Whether a console has a window anybody can see, asked by a test's probe.
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
