@@ -10,13 +10,13 @@
 //! standard input, output and error), `KILL`, `KILL_GROUP` and `COLLECT`; the starter answers `SPAWNED`, `FAILED` and, once a
 //! child has ended, `EXITED`.
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
