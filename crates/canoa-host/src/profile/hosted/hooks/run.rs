@@ -8,9 +8,10 @@ use core::time::Duration;
 use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
+
+use crate::spawn::{Child, Command, Stdio};
 
 /// How often the run looks to see whether the process ended.
 const POLL: Duration = Duration::from_millis(5);
@@ -45,6 +46,9 @@ pub(super) struct Outcome {
     pub(super) exit: i32,
     /// Whether it was stopped for taking too long.
     pub(super) timed_out: bool,
+    /// Whether how the process ended could not be read, so what it said is not known: it was ended, and this is no timeout
+    /// and no pass.
+    pub(super) unreadable: bool,
     /// Whole seconds it ran.
     pub(super) seconds: u64,
 }
@@ -56,6 +60,7 @@ impl Outcome {
             stdout: Vec::new(),
             exit: -1,
             timed_out: false,
+            unreadable: false,
             seconds: 0,
         }
     }
@@ -69,56 +74,42 @@ struct Held {
 }
 
 impl Held {
-    /// Ends the process and everything it started, and collects it.
+    /// Ends the process and everything it started, and collects it. A process whose status could not be read is taken as
+    /// collected by someone else, and its group is left alone: its id may be anyone's.
     fn end(&mut self) {
         #[cfg(windows)]
         drop(self.job.take());
-        #[cfg(unix)]
-        self.end_group();
+        self.child.end_group();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 
-    #[cfg(unix)]
-    fn end_group(&self) {
-        if let Some(group) = i32::try_from(self.child.id())
-            .ok()
-            .filter(|pid| *pid > 1)
-            .and_then(rustix::process::Pid::from_raw)
-        {
-            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    /// Whether the process has ended and how, with what it started ended too.
+    fn finished(&mut self) -> Finished {
+        // Where the system can say a process has ended without collecting it, it is not collected until its group has
+        // been ended: until then, nobody else can have its id. Elsewhere the group is ended just after, which the system
+        // does not reuse an id for while any process is in it.
+        match self.child.peek() {
+            Ok(None) => return Finished::Running,
+            Err(_) => return Finished::Unreadable,
+            Ok(Some(_)) => {}
         }
-    }
-
-    /// The exit status once the process has ended, with what it started ended too.
-    fn finished(&mut self) -> Option<i32> {
-        // Where the system can say a process has ended without collecting it, its group is ended first: until it is
-        // collected, nobody else can have its id. Elsewhere the group is ended just after, which the system does not
-        // reuse an id for while any process is in it.
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let pid = i32::try_from(self.child.id())
-                .ok()
-                .and_then(rustix::process::Pid::from_raw)?;
-            let ended = rustix::process::waitid(
-                rustix::process::WaitId::Pid(pid),
-                rustix::process::WaitIdOptions::EXITED
-                    | rustix::process::WaitIdOptions::NOWAIT
-                    | rustix::process::WaitIdOptions::NOHANG,
-            )
-            .is_ok_and(|status| status.is_some());
-            if !ended {
-                return None;
-            }
-            self.end_group();
-        }
-        let status = self.child.try_wait().ok().flatten()?;
+        self.child.end_group_after_exit();
+        let Ok(Some(status)) = self.child.try_wait() else {
+            return Finished::Unreadable;
+        };
         #[cfg(windows)]
         drop(self.job.take());
-        #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
-        self.end_group();
-        Some(status.code().unwrap_or(-1))
+        Finished::Exited(status.code().unwrap_or(-1))
     }
+}
+
+/// What a look at the process found.
+enum Finished {
+    Running,
+    Exited(i32),
+    /// It has ended, or its status was taken by someone else: how it ended cannot be read.
+    Unreadable,
 }
 
 /// Runs `job` to its end, its time limit or its output bound, whichever is first.
@@ -129,15 +120,14 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
         .current_dir(job.cwd)
         .env_clear()
         .envs(job.env.iter().map(|(name, value)| (name, value)))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(Stdio::Piped)
+        .stdout(Stdio::Piped)
+        .stderr(Stdio::Piped);
     // The agent's windows are the person's: a hook's console is not one of them.
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    command.creation_flags(0x0800_0000);
     // Its own group, so that ending it reaches what it starts.
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command.own_group();
     let Ok(mut child) = command.spawn() else {
         return Outcome::not_started();
     };
@@ -209,10 +199,19 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
     let until = started + job.timeout;
     let mut exit = None;
     let mut timed_out = false;
+    let mut unreadable = false;
     loop {
-        if let Some(code) = held.finished() {
-            exit = Some(code);
-            break;
+        match held.finished() {
+            Finished::Exited(code) => {
+                exit = Some(code);
+                break;
+            }
+            Finished::Unreadable => {
+                unreadable = true;
+                held.end();
+                break;
+            }
+            Finished::Running => {}
         }
         if over.load(Ordering::SeqCst) {
             held.end();
@@ -241,6 +240,7 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
         stdout: take(&out),
         exit: exit.unwrap_or(-1),
         timed_out,
+        unreadable,
         seconds: started.elapsed().as_secs(),
     }
 }

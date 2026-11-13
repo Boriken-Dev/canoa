@@ -728,3 +728,97 @@ fn a_connections_copies_go_with_it() {
     drop(connection);
     assert!(!Path::new(&root).exists(), "removed with it");
 }
+
+fn outcome(unreadable: bool, timed_out: bool) -> run::Outcome {
+    run::Outcome {
+        started: true,
+        stdout: Vec::new(),
+        exit: -1,
+        timed_out,
+        unreadable,
+        seconds: 1,
+    }
+}
+
+fn fired(outcome: run::Outcome) -> FiredEvent {
+    let mut hook = HookRun::new("team", Vec::new());
+    hook.on_failure = Some(OnFailure::Report);
+    apply(&mut hook, outcome);
+    aos::fire_event(
+        HookEvent::PreTool,
+        &[hook],
+        None,
+        &Settings::default(),
+        false,
+    )
+}
+
+#[test]
+fn a_run_whose_status_cannot_be_read_refuses_whatever_the_hook_says_on_failure() {
+    // A deny the hook may have given is not to be dropped: the tool call is refused, though the hook only reports.
+    assert_eq!(
+        fired(outcome(true, false)).decision,
+        Some(aos::Decision::Deny)
+    );
+    // Control: a hook that only reports, and ran too long, passes.
+    assert_eq!(fired(outcome(false, true)).decision, None);
+}
+
+/// A hook the process around the host collects before the host asks, as Dart's process handling does, is a run whose status is
+/// unreadable. It is ended at once rather than waited on to its time limit, and it is no timeout.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_hook_collected_by_someone_else_is_unreadable_and_not_a_timeout() {
+    let scratch = Temp::new();
+    let pid_file = scratch.0.join("pid");
+    let collector_file = pid_file.clone();
+    let collector = std::thread::spawn(move || {
+        let until = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < until {
+            let pid = std::fs::read_to_string(&collector_file)
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok())
+                .and_then(rustix::process::Pid::from_raw);
+            if let Some(pid) = pid {
+                // The collection an application's exit handler does, of this process's child that has ended.
+                while std::time::Instant::now() < until {
+                    match rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::NOHANG)
+                    {
+                        Ok(None) => std::thread::sleep(Duration::from_millis(1)),
+                        _ => return,
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    });
+    let env = [("PATH".to_owned(), std::env::var("PATH").unwrap_or_default())];
+    let ran = run::run(&run::Job {
+        program: Path::new("/bin/sh"),
+        args: vec![
+            "-c".into(),
+            "echo $$ > \"$1\"; sleep 1; exit 2".into(),
+            "sh".into(),
+            pid_file.clone().into(),
+        ],
+        cwd: &scratch.0,
+        env: &env,
+        input: b"{}",
+        timeout: Duration::from_secs(30),
+        max_output: 1024,
+    });
+    collector.join().expect("the collector ended");
+    assert!(ran.started);
+    assert!(
+        !ran.timed_out,
+        "no timeout: it was never waited on to its limit"
+    );
+    assert!(ran.seconds < 15, "{}", ran.seconds);
+    // The collector wins the race almost always; when the host read the status first it is the hook's own.
+    assert!(
+        ran.unreadable || ran.exit == 2,
+        "unreadable {} exit {}",
+        ran.unreadable,
+        ran.exit
+    );
+}

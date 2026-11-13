@@ -55,6 +55,20 @@ pub(crate) fn ignore_broken_pipes() {
 #[cfg(not(unix))]
 pub(crate) const fn ignore_broken_pipes() {}
 
+/// Puts `SIGCHLD` back to the system's default in a process that an application started with it ignored: an ignored
+/// disposition outlives `exec`, and with it a process's children are collected as they end, which the host's own process
+/// starter cannot have.
+#[cfg(unix)]
+pub(crate) fn default_child_signal() {
+    // SAFETY: `signal` with a constant disposition, in a process that is the host's own command and has started nothing.
+    unsafe {
+        libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) const fn default_child_signal() {}
+
 /// Gives this process a console with no window when it has none, by attaching to the one a helper is started with. The
 /// console outlives the helper, since this process stays attached.
 #[cfg(windows)]

@@ -26,9 +26,10 @@ use std::process::{ChildStderr, ChildStdin, ChildStdout, ExitStatus};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
+use std::time::Duration;
 
 use rustix::net::{
-    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
+    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags, SendAncillaryBuffer,
     SendAncillaryMessage, SendFlags, recvmsg, sendmsg,
 };
 
@@ -50,6 +51,13 @@ const SPAWNED: u8 = 11;
 const FAILED: u8 = 12;
 const EXITED: u8 = 13;
 
+/// What `EXITED` says of a child whose end the starter could not wait for: no wait status is negative.
+const STATUS_LOST: i32 = -1;
+/// How long the host waits for the starter to answer a spawn before it takes the starter as lost.
+const SPAWN_WAIT: Duration = Duration::from_secs(60);
+/// The most descriptors a frame carries: a child's three standard streams.
+const MAX_FDS: usize = 3;
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -64,33 +72,71 @@ struct Frame {
     fds: Vec<OwnedFd>,
 }
 
+/// Makes a write to a socket whose other end has gone an error, not a signal, where the system asks for it of the socket
+/// (macOS); elsewhere each send says so itself.
+fn quiet_pipe(socket: &UnixStream) {
+    #[cfg(target_vendor = "apple")]
+    let _ = rustix::net::sockopt::set_socket_nosigpipe(socket, true);
+    #[cfg(not(target_vendor = "apple"))]
+    let _ = socket;
+}
+
+/// What every send says of signals: none.
+#[cfg(not(target_vendor = "apple"))]
+const NO_SIGNAL: SendFlags = SendFlags::NOSIGNAL;
+#[cfg(target_vendor = "apple")]
+const NO_SIGNAL: SendFlags = SendFlags::empty();
+
 /// Sends one frame, its descriptors with its first byte.
 fn send(socket: &UnixStream, kind: u8, body: &[u8], fds: &[BorrowedFd<'_>]) -> io::Result<()> {
     let length = u32::try_from(body.len()).map_err(|_| wrong("a frame too long"))?;
     let count = u8::try_from(fds.len()).map_err(|_| wrong("too many descriptors"))?;
+    let mut header = [kind, count, 0, 0, 0, 0, 0, 0];
+    header[4..].copy_from_slice(&length.to_le_bytes());
+    send_raw(socket, header, body, fds)
+}
+
+/// Sends `header`, `body` and `fds` as they are given, whole: the descriptors go with the first byte, the rest in as many
+/// sends as it takes.
+fn send_raw(
+    socket: &UnixStream,
+    header: [u8; HEADER],
+    body: &[u8],
+    fds: &[BorrowedFd<'_>],
+) -> io::Result<()> {
     let mut message = Vec::with_capacity(HEADER + body.len());
-    message.extend_from_slice(&[kind, count, 0, 0]);
-    message.extend_from_slice(&length.to_le_bytes());
+    message.extend_from_slice(&header);
     message.extend_from_slice(body);
-    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(3))];
-    let mut control = SendAncillaryBuffer::new(&mut space);
-    if !fds.is_empty() && !control.push(SendAncillaryMessage::ScmRights(fds)) {
-        return Err(wrong("too many descriptors"));
-    }
-    let sent = loop {
+    let mut sent = 0;
+    let mut first = true;
+    while sent < message.len() {
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(3))];
+        let mut control = SendAncillaryBuffer::new(&mut space);
+        if first && !fds.is_empty() && !control.push(SendAncillaryMessage::ScmRights(fds)) {
+            return Err(wrong("too many descriptors"));
+        }
         match sendmsg(
             socket,
-            &[IoSlice::new(&message)],
+            &[IoSlice::new(&message[sent..])],
             &mut control,
-            SendFlags::empty(),
+            NO_SIGNAL,
         ) {
             Err(rustix::io::Errno::INTR) => {}
-            other => break other.map_err(io::Error::from)?,
+            Err(error) => return Err(error.into()),
+            Ok(count) => {
+                sent += count;
+                first = false;
+            }
         }
-    };
-    let mut socket = socket;
-    socket.write_all(&message[sent..])
+    }
+    Ok(())
 }
+
+/// Descriptors that arrive closed on exec where the system can say so on receipt; elsewhere they are set so just after.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const RECV_FLAGS: RecvFlags = RecvFlags::CMSG_CLOEXEC;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+const RECV_FLAGS: RecvFlags = RecvFlags::empty();
 
 /// The next frame, or `None` when the other side has closed the socket between frames.
 fn receive(socket: &UnixStream) -> io::Result<Option<Frame>> {
@@ -105,12 +151,15 @@ fn receive(socket: &UnixStream) -> io::Result<Option<Frame>> {
                 socket,
                 &mut [IoSliceMut::new(&mut header[have..])],
                 &mut control,
-                RecvFlags::empty(),
+                RECV_FLAGS,
             ) {
                 Err(rustix::io::Errno::INTR) => {}
                 other => break other.map_err(io::Error::from)?,
             }
         };
+        if got.flags.contains(ReturnFlags::CTRUNC) {
+            return Err(wrong("more descriptors than a frame carries"));
+        }
         for message in control.drain() {
             if let RecvAncillaryMessage::ScmRights(received) = message {
                 fds.extend(received);
@@ -124,6 +173,9 @@ fn receive(socket: &UnixStream) -> io::Result<Option<Frame>> {
             };
         }
         have += got.bytes;
+    }
+    if fds.len() > MAX_FDS {
+        return Err(wrong("more descriptors than a frame carries"));
     }
     for fd in &fds {
         rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
@@ -212,11 +264,30 @@ pub fn serve() -> io::Result<()> {
 }
 
 fn run(socket: &UnixStream) -> io::Result<()> {
+    quiet_pipe(socket);
+    let result = serve_frames(socket);
+    // However it ended, the host is told by the socket ending: children that hold the writer open do not hold it up.
+    let _ = socket.shutdown(std::net::Shutdown::Both);
+    result
+}
+
+fn serve_frames(socket: &UnixStream) -> io::Result<()> {
     let writer = Arc::new(Mutex::new(socket.try_clone()?));
     let table: Table = Arc::default();
     while let Some(frame) = receive(socket)? {
         match frame.kind {
-            SPAWN => spawn(frame, &writer, &table)?,
+            // Apart from the requests that follow: a spawn can take as long as a program takes to start.
+            SPAWN => {
+                let (writer, table) = (Arc::clone(&writer), Arc::clone(&table));
+                let worker = thread::Builder::new()
+                    .name("canoa-spawner-spawn".to_owned())
+                    .spawn(move || {
+                        if spawn(frame, &writer, &table).is_err() {
+                            let _ = lock(&writer).shutdown(std::net::Shutdown::Both);
+                        }
+                    });
+                worker?;
+            }
             KILL | KILL_GROUP | COLLECT => {
                 let pid = Fields(&frame.body)
                     .number()
@@ -342,34 +413,37 @@ const HAS_DIR: u8 = 2;
 /// Waits for the child to end, says so, and collects it once the host asks.
 fn watch(pid: u32, entry: &Entry, writer: &Mutex<UnixStream>, table: &Table) {
     let status = ended(pid);
+    if status.is_none() {
+        // Not the starter's to wait for (its handling of `SIGCHLD` collects its children): its id may be anyone's.
+        lock(&entry.life).reaped = true;
+    }
     let mut said = Vec::new();
     said.extend_from_slice(&pid.to_le_bytes());
-    said.extend_from_slice(&status.to_le_bytes());
+    said.extend_from_slice(&status.unwrap_or(STATUS_LOST).to_le_bytes());
     let told = send(&lock(writer), EXITED, &said, &[]);
     let mut life = lock(&entry.life);
-    while !life.collect && told.is_ok() {
+    while status.is_some() && !life.collect && told.is_ok() {
         life = entry
             .changed
             .wait(life)
             .unwrap_or_else(PoisonError::into_inner);
     }
-    if let Some(pid) = i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
+    // Out of the table before it is collected: once it is, the id may be a new child's.
+    lock(table).remove(&pid);
+    if status.is_some()
+        && let Some(pid) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
     {
         let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
     }
     life.reaped = true;
-    drop(life);
-    lock(table).remove(&pid);
 }
 
-/// Waits for the child to end, leaving it uncollected, and gives its wait status.
-fn ended(pid: u32) -> i32 {
+/// Waits for the child to end, leaving it uncollected, and gives its wait status; `None` when it cannot be waited for.
+fn ended(pid: u32) -> Option<i32> {
     use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
-    let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) else {
-        return UNKNOWN;
-    };
+    let pid = i32::try_from(pid).ok().and_then(Pid::from_raw)?;
     loop {
         match waitid(
             WaitId::Pid(pid),
@@ -377,19 +451,11 @@ fn ended(pid: u32) -> i32 {
         ) {
             Err(rustix::io::Errno::INTR) => {}
             // A wait status: the exit code in the second byte, or the signal in the low seven bits.
-            Ok(Some(info)) => {
-                return match info.exit_status() {
-                    Some(code) => (code & 0xff) << 8,
-                    None => info.terminating_signal().unwrap_or(0) & 0x7f,
-                };
-            }
-            _ => return UNKNOWN,
+            Ok(Some(info)) => return Some(super::raw_status(&info)),
+            _ => return None,
         }
     }
 }
-
-/// The status of a child the starter could not wait on: exited with 255.
-const UNKNOWN: i32 = 0xff << 8;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The host's side.
@@ -399,6 +465,8 @@ const UNKNOWN: i32 = 0xff << 8;
 enum State {
     Running,
     Exited(i32),
+    /// The child ended, and the starter could not read how.
+    StatusLost,
     /// The starter ended with the child running: nothing more will be heard of it.
     Lost,
 }
@@ -434,6 +502,7 @@ impl Link {
     /// Runs on `socket`, whose other end the starter has, and listens for what it says on a thread of its own. `process` is
     /// the starter's, which that thread collects when the socket ends.
     fn over(socket: UnixStream, process: Option<std::process::Child>) -> io::Result<Arc<Self>> {
+        quiet_pipe(&socket);
         let listening = socket.try_clone()?;
         let link = Arc::new(Self {
             writer: Mutex::new(socket),
@@ -448,7 +517,11 @@ impl Link {
         thread::Builder::new()
             .name("canoa-spawner-link".to_owned())
             .spawn(move || {
+                // The starter sends no descriptor: a frame with one is not the starter's.
                 while let Ok(Some(frame)) = receive(&listening) {
+                    if !frame.fds.is_empty() {
+                        break;
+                    }
                     mine.heard(&frame);
                 }
                 mine.end();
@@ -513,7 +586,11 @@ impl Link {
                 if let (Some(pid), Some(status)) = (fields.number(), fields.signed()) {
                     let fate = lock(&self.book).children.get(&pid).cloned();
                     if let Some(fate) = fate {
-                        fate.set(State::Exited(status));
+                        fate.set(if status < 0 {
+                            State::StatusLost
+                        } else {
+                            State::Exited(status)
+                        });
                     }
                 }
             }
@@ -592,7 +669,15 @@ impl Link {
             lock(&self.book).pending.remove(&request);
             return Err(error);
         }
-        let (pid, fate) = answer.recv().map_err(|_| lost())??;
+        let (pid, fate) = match answer.recv_timeout(SPAWN_WAIT) {
+            Ok(answer) => answer?,
+            Err(_) => {
+                // A starter that answers nothing is as good as gone: ending the socket ends every wait on it.
+                lock(&self.book).pending.remove(&request);
+                let _ = lock(&self.writer).shutdown(std::net::Shutdown::Both);
+                return Err(lost());
+            }
+        };
         Ok(Child {
             stdin,
             stdout,
@@ -650,7 +735,8 @@ struct Plumbing {
 
 impl Plumbing {
     fn of(command: &Command) -> io::Result<Self> {
-        let (child_in, stdin) = match command.stdin {
+        let (child_in, stdin) = match &command.stdin {
+            Stdio::Pipe(_) => return Err(wrong("a pipe to write to is for output")),
             Stdio::Piped => {
                 let (read, write) = io::pipe()?;
                 (
@@ -661,7 +747,8 @@ impl Plumbing {
             Stdio::Null => (OwnedFd::from(File::open("/dev/null")?), None),
             Stdio::Inherit => (inherit(std::io::stdin().as_fd())?, None),
         };
-        let (child_out, stdout) = match command.stdout {
+        let (child_out, stdout) = match &command.stdout {
+            Stdio::Pipe(writer) => (OwnedFd::from(writer.try_clone()?), None),
             Stdio::Piped => {
                 let (read, write) = io::pipe()?;
                 (
@@ -672,7 +759,8 @@ impl Plumbing {
             Stdio::Null => (null_for_writing()?, None),
             Stdio::Inherit => (inherit(std::io::stdout().as_fd())?, None),
         };
-        let (child_err, stderr) = match command.stderr {
+        let (child_err, stderr) = match &command.stderr {
+            Stdio::Pipe(writer) => (OwnedFd::from(writer.try_clone()?), None),
             Stdio::Piped => {
                 let (read, write) = io::pipe()?;
                 (
@@ -700,13 +788,17 @@ fn null_for_writing() -> io::Result<OwnedFd> {
 
 /// A copy of this process's own stream, or nothing when it has none, as a process with its streams closed has.
 fn inherit(own: BorrowedFd<'_>) -> io::Result<OwnedFd> {
-    own.try_clone_to_owned().or_else(|_| {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/null")
-            .map(OwnedFd::from)
-    })
+    // A stream closed on exec is none a child would have, and nothing is behind it.
+    let open = rustix::io::fcntl_getfd(own)
+        .is_ok_and(|flags| !flags.contains(rustix::io::FdFlags::CLOEXEC));
+    if open && let Ok(copy) = own.try_clone_to_owned() {
+        return Ok(copy);
+    }
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/null")
+        .map(OwnedFd::from)
 }
 
 /// A child of the starter, as far as the host knows.
@@ -747,6 +839,9 @@ impl Handle {
         match self.state() {
             State::Running => Ok(None),
             State::Exited(status) => Ok(Some(ExitStatus::from_raw(status))),
+            State::StatusLost => Err(io::Error::other(
+                "the host's process starter could not read how the process ended",
+            )),
             State::Lost => Err(lost()),
         }
     }
@@ -805,8 +900,14 @@ static STARTER: Mutex<Starter> = Mutex::new(Starter {
     link: None,
 });
 
-pub(super) fn install(program: Program) {
-    lock(&STARTER).program = Some(program);
+/// Names what runs the starter: always when `named`, and otherwise only while nothing is.
+pub(super) fn install(program: Program, named: bool) {
+    let mut starter = lock(&STARTER);
+    if named {
+        starter.program = Some(program);
+    } else if starter.program.is_none() {
+        starter.program = Some(program);
+    }
 }
 
 /// The connection to the starter, started if need be, or `None` when none is installed.

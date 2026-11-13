@@ -24,6 +24,8 @@ use crate::cli::Program;
 
 #[cfg(unix)]
 mod apart;
+#[cfg(unix)]
+mod harness;
 
 #[cfg(all(unix, test))]
 pub(crate) use apart::SUBCOMMAND as SPAWNER_COMMAND;
@@ -31,7 +33,7 @@ pub(crate) use apart::SUBCOMMAND as SPAWNER_COMMAND;
 pub use apart::serve;
 
 /// Where one of a process's standard streams goes.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Default)]
 pub enum Stdio {
     /// This process's own.
     #[default]
@@ -40,16 +42,20 @@ pub enum Stdio {
     Null,
     /// A pipe to this process: [`Child::stdin`], [`Child::stdout`] or [`Child::stderr`] holds its end.
     Piped,
+    /// The write end of a pipe the caller holds the other end of, for output: what a standard output and a standard error that
+    /// are to be one stream are both given.
+    Pipe(std::io::PipeWriter),
 }
 
 /// A process to start: std's `Command` with what this host uses of it. Nothing is inherited that a method has not asked for
 /// beyond this process's environment and directory.
-#[derive(Clone, Debug)]
 pub struct Command {
     program: OsString,
     args: Vec<OsString>,
     /// In the order given: a value set, or `None` for a variable removed.
     env: Vec<(OsString, Option<OsString>)>,
+    /// Whether it starts with no environment but what `env` sets.
+    clear_env: bool,
     dir: Option<PathBuf>,
     stdin: Stdio,
     stdout: Stdio,
@@ -66,6 +72,7 @@ impl Command {
             program: program.as_ref().to_owned(),
             args: Vec::new(),
             env: Vec::new(),
+            clear_env: false,
             dir: None,
             stdin: Stdio::Inherit,
             stdout: Stdio::Inherit,
@@ -110,6 +117,13 @@ impl Command {
         for (key, value) in vars {
             self.env(key, value);
         }
+        self
+    }
+
+    /// Starts it with no environment but what [`Command::env`] and [`Command::envs`] set.
+    pub fn env_clear(&mut self) -> &mut Self {
+        self.clear_env = true;
+        self.env.clear();
         self
     }
 
@@ -177,13 +191,13 @@ impl Command {
     ///
     /// As [`Command::spawn`], or a stream could not be read.
     pub fn output(&mut self) -> io::Result<Output> {
-        if self.stdin == Stdio::Inherit {
+        if matches!(self.stdin, Stdio::Inherit) {
             self.stdin = Stdio::Null;
         }
-        if self.stdout == Stdio::Inherit {
+        if matches!(self.stdout, Stdio::Inherit) {
             self.stdout = Stdio::Piped;
         }
-        if self.stderr == Stdio::Inherit {
+        if matches!(self.stderr, Stdio::Inherit) {
             self.stderr = Stdio::Piped;
         }
         let mut child = self.spawn()?;
@@ -211,6 +225,9 @@ impl Command {
     fn spawn_own(&self) -> io::Result<Child> {
         let mut command = std::process::Command::new(&self.program);
         command.args(&self.args);
+        if self.clear_env {
+            command.env_clear();
+        }
         for (key, value) in &self.env {
             match value {
                 Some(value) => command.env(key, value),
@@ -221,9 +238,9 @@ impl Command {
             command.current_dir(dir);
         }
         command
-            .stdin(own(self.stdin))
-            .stdout(own(self.stdout))
-            .stderr(own(self.stderr));
+            .stdin(own(&self.stdin)?)
+            .stdout(own(&self.stdout)?)
+            .stderr(own(&self.stderr)?);
         #[cfg(unix)]
         if self.own_group {
             std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -245,7 +262,11 @@ impl Command {
     /// This process's environment with this command's changes made, the way a child of it would see it.
     #[cfg(unix)]
     fn environment(&self) -> Vec<(OsString, OsString)> {
-        let mut vars: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        let mut vars: Vec<(OsString, OsString)> = if self.clear_env {
+            Vec::new()
+        } else {
+            std::env::vars_os().collect()
+        };
         for (key, value) in &self.env {
             vars.retain(|(name, _)| name != key);
             if let Some(value) = value {
@@ -256,12 +277,28 @@ impl Command {
     }
 }
 
-fn own(how: Stdio) -> std::process::Stdio {
-    match how {
+/// What the command is, without its environment: a variable may hold a secret.
+impl core::fmt::Debug for Command {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Command")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("dir", &self.dir)
+            .field("stdin", &self.stdin)
+            .field("stdout", &self.stdout)
+            .field("stderr", &self.stderr)
+            .field("own_group", &self.own_group)
+            .finish_non_exhaustive()
+    }
+}
+
+fn own(how: &Stdio) -> io::Result<std::process::Stdio> {
+    Ok(match how {
         Stdio::Inherit => std::process::Stdio::inherit(),
         Stdio::Null => std::process::Stdio::null(),
         Stdio::Piped => std::process::Stdio::piped(),
-    }
+        Stdio::Pipe(writer) => writer.try_clone()?.into(),
+    })
 }
 
 /// A process started by [`Command::spawn`], and the ends of the pipes asked for.
@@ -311,9 +348,10 @@ impl Child {
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         match &mut self.inner {
             Inner::Own { child, collected } => {
-                let status = child.try_wait()?;
-                *collected |= status.is_some();
-                Ok(status)
+                let status = child.try_wait();
+                // A status that cannot be read is taken as collected by someone else: its id may be anyone's.
+                *collected |= !matches!(status, Ok(None));
+                status
             }
             #[cfg(unix)]
             Inner::Apart(handle) => handle.try_wait(),
@@ -330,7 +368,30 @@ impl Child {
         match &mut self.inner {
             #[cfg(unix)]
             Inner::Apart(handle) => handle.peek(),
-            Inner::Own { .. } => self.try_wait(),
+            Inner::Own { child, collected } => peek_own(child, collected),
+        }
+    }
+
+    /// Ends the process group of a process that has just ended, whether or not it has been collected: a group's id is not
+    /// reused while a process is in it. Only for the moment after [`Child::peek`] or [`Child::try_wait`] has said it ended.
+    /// Nothing on Windows.
+    pub fn end_group_after_exit(&mut self) {
+        match &mut self.inner {
+            #[cfg(unix)]
+            Inner::Own { child, .. } => {
+                if let Some(group) = i32::try_from(child.id())
+                    .ok()
+                    .filter(|pid| *pid > 1)
+                    .and_then(rustix::process::Pid::from_raw)
+                {
+                    let _ =
+                        rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+                }
+            }
+            #[cfg(unix)]
+            Inner::Apart(handle) => handle.end_group(),
+            #[cfg(windows)]
+            Inner::Own { .. } => {}
         }
     }
 
@@ -391,6 +452,45 @@ impl std::os::windows::io::AsRawHandle for Child {
     fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
         let Inner::Own { child, .. } = &self.inner;
         child.as_raw_handle()
+    }
+}
+
+/// Whether a child of this process has ended, leaving it uncollected where the system can say so (Linux): until it is collected
+/// its id, and its group's, cannot be anyone else's. Elsewhere it is collected, as by `try_wait`.
+fn peek_own(
+    child: &mut std::process::Child,
+    collected: &mut bool,
+) -> io::Result<Option<ExitStatus>> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if !*collected {
+        use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
+        use std::os::unix::process::ExitStatusExt as _;
+        let pid = i32::try_from(child.id())
+            .ok()
+            .and_then(Pid::from_raw)
+            .ok_or_else(|| io::Error::other("not a process id"))?;
+        return match waitid(
+            WaitId::Pid(pid),
+            WaitIdOptions::EXITED | WaitIdOptions::NOWAIT | WaitIdOptions::NOHANG,
+        ) {
+            Ok(info) => Ok(info.map(|info| ExitStatus::from_raw(raw_status(&info)))),
+            Err(error) => {
+                *collected = true;
+                Err(error.into())
+            }
+        };
+    }
+    let status = child.try_wait();
+    *collected |= !matches!(status, Ok(None));
+    status
+}
+
+/// A wait status for what `waitid` reported: the exit code in the second byte, or the signal in the low seven bits.
+#[cfg(unix)]
+fn raw_status(info: &rustix::process::WaitIdStatus) -> i32 {
+    match info.exit_status() {
+        Some(code) => (code & 0xff) << 8,
+        None => info.terminating_signal().unwrap_or(0) & 0x7f,
     }
 }
 
@@ -466,7 +566,22 @@ impl Process for Held {
 /// not yet started is run by, and the process is started at the first child's start, and again if it has ended. Does nothing on Windows.
 pub fn install(program: Program) {
     #[cfg(unix)]
-    apart::install(program);
+    {
+        apart::install(program, true);
+        harness::use_starter();
+    }
+    #[cfg(windows)]
+    let _ = program;
+}
+
+/// As [`install`], for a program the host chose for itself rather than one it was told to use: it is the starter's program
+/// unless one has been named, and a later [`install`] replaces it.
+pub fn install_default(program: Program) {
+    #[cfg(unix)]
+    {
+        apart::install(program, false);
+        harness::use_starter();
+    }
     #[cfg(windows)]
     let _ = program;
 }
@@ -475,4 +590,67 @@ pub fn install(program: Program) {
 #[cfg(unix)]
 fn lost() -> io::Error {
     io::Error::other("the host's process starter has ended")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_shows_what_it_runs_and_never_its_environment() {
+        let mut command = Command::new("tool");
+        command.arg("--flag").env("API_TOKEN", "hunter2-secret");
+        let shown = format!("{command:?}");
+        assert!(
+            shown.contains("tool") && shown.contains("--flag"),
+            "{shown}"
+        );
+        assert!(
+            !shown.contains("hunter2") && !shown.contains("API_TOKEN"),
+            "{shown}"
+        );
+    }
+
+    /// Every process the host starts for itself goes through [`Command`], so that none is a child of an application that
+    /// collects its own children. A use of std's is one that was left behind, unless it is one of these, which are the host's
+    /// own commands (they run as a process of their own, whose children are its own) or Windows-only.
+    #[test]
+    fn no_process_is_started_by_std_outside_this_module() {
+        const OWN: [&str; 2] = ["profile/launch.rs", "accounts/private.rs"];
+        fn scan(dir: &Path, root: &Path, found: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("a directory") {
+                let path = entry.expect("an entry").path();
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("below the root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if path.is_dir() {
+                    if relative != "spawn" {
+                        scan(&path, root, found);
+                    }
+                    continue;
+                }
+                let own = relative == "spawn.rs"
+                    || relative.ends_with("tests.rs")
+                    || relative.contains("/tests/")
+                    || OWN.contains(&relative.as_str());
+                if own || !relative.ends_with(".rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).expect("a source file");
+                for (number, line) in text.lines().enumerate() {
+                    let uses_std = line.contains("std::process::Command")
+                        || (line.contains("use std::process::") && line.contains("Command"));
+                    if uses_std && !line.trim_start().starts_with("//") {
+                        found.push(format!("{relative}:{}: {}", number + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut found = Vec::new();
+        scan(&root, &root, &mut found);
+        assert!(found.is_empty(), "std starts a process here: {found:#?}");
+    }
 }

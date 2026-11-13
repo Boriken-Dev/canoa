@@ -560,11 +560,7 @@ impl Hooks {
             timeout: Duration::from_secs(hook.timeout),
             max_output: usize::try_from(limit).unwrap_or(usize::MAX - 1),
         });
-        run.not_run = !outcome.started;
-        run.timed_out = outcome.timed_out;
-        run.exit = outcome.exit;
-        run.seconds = outcome.seconds;
-        run.stdout = outcome.stdout;
+        apply(&mut run, outcome);
         run
     }
 
@@ -740,6 +736,22 @@ impl core::fmt::Debug for PreEnv {
             .field("overlays", &self.runs.len())
             .field("exported", &self.exported)
             .finish()
+    }
+}
+
+/// What a run says of its hook, for `coqui-aos` to judge. A run whose status could not be read, because someone else
+/// collected the process, says only that: what the hook decided is not known, so it is a failure that refuses whatever the
+/// hook's `on_failure` is, and no timeout, which passes.
+fn apply(run: &mut HookRun, outcome: run::Outcome) {
+    run.not_run = !outcome.started;
+    run.timed_out = outcome.timed_out;
+    run.exit = outcome.exit;
+    run.seconds = outcome.seconds;
+    run.stdout = outcome.stdout;
+    if outcome.unreadable {
+        run.on_failure = Some(OnFailure::Refuse);
+        run.timed_out = false;
+        run.exit = -1;
     }
 }
 

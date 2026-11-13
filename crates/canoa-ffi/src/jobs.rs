@@ -222,14 +222,6 @@ fn default_program() -> std::io::Result<Program> {
     ))
 }
 
-/// Whether a command starts processes: `serve` and `pair` for their agents, `accounts` for a sign-in's provider.
-fn starts_children(args: &[String]) -> bool {
-    matches!(
-        args.first().map(String::as_str),
-        Some("serve" | "pair" | "accounts")
-    )
-}
-
 /// Whether a command runs long enough that the process's log belongs in what it says.
 fn follows_the_log(args: &[String]) -> bool {
     matches!(args.first().map(String::as_str), Some("serve" | "pair"))
@@ -251,13 +243,13 @@ pub(crate) fn start(request: &[u8]) -> Result<u64, i32> {
     };
     // What the host starts from now on is a child of a process of its own, not of this one: the application's process handling
     // collects any child of this process that ends, and the host could not read how its children ended.
-    if starts_children(&request.args)
-        && let Ok(started_by) = match &program {
-            Some(program) => Ok(program.clone()),
-            None => default_program(),
-        }
-    {
-        canoa_host::spawn::install(started_by);
+    match &program {
+        Some(program) => canoa_host::spawn::install(program.clone()),
+        None => match default_program() {
+            Ok(program) => canoa_host::spawn::install_default(program),
+            // Not a job that goes on without its children's status: one that could start a process could not read how it ended.
+            Err(_) => return Err(STATUS_FAILED),
+        },
     }
     let job = Arc::new(Job::default());
     if follows_the_log(&request.args) {
@@ -421,6 +413,7 @@ impl Front for ChildFront {
 
 /// See [`crate::exports::canoa_ffi_child_main`].
 pub(crate) fn child_main() -> i32 {
+    platform::default_child_signal();
     platform::share_parents_console();
     log::install_for_child();
     let args = std::env::args_os().skip(2);
