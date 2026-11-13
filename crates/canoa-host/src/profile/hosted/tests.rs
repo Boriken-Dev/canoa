@@ -1107,7 +1107,8 @@ fn an_option_of_the_wrong_type_refuses_the_text_that_reads_it_naming_the_key() {
         ],
         "options = { rounds = \"many\" }",
     );
-    assert!(parts.system_prompt.is_none(), "{:?}", parts.system_prompt);
+    // Only the host's own context is left: the overlay's is refused whole.
+    assert_eq!(parts.system_prompt.as_deref(), Some("Host context."));
     for key in ["context", "skills.audit"] {
         let refused = items_of(&parts.report, key, "overlay:docs");
         assert_eq!(refused[0]["state"], "refused", "{}", parts.report);
