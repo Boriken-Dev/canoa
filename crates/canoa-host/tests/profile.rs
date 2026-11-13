@@ -230,10 +230,10 @@ fn an_overlay_md_applies_as_the_overlay_cfg_and_context_md_form_does() {
         skill,
     ])
     .expect("overlay.cfg");
-    assert_eq!(md.profile.contexts, [Context::Text(body.to_owned())]);
+    assert_eq!(md.profile.contexts, [Context::TemplateBody(body.to_owned())]);
     assert_eq!(
         cfg.profile.contexts,
-        [Context::File("CONTEXT.md".to_owned())]
+        [Context::Template("CONTEXT.md".to_owned())]
     );
     let (mut md_profile, mut cfg_profile) = (md.profile.clone(), cfg.profile.clone());
     md_profile.contexts.clear();
@@ -257,7 +257,7 @@ fn a_body_that_is_context_ignores_and_reports_context_md() {
     .expect("applies");
     assert_eq!(
         layer.profile.contexts,
-        [Context::Text("From the body.\n".to_owned())]
+        [Context::TemplateBody("From the body.\n".to_owned())]
     );
     assert_eq!(
         layer.aos.expect("aos").not_applied,
@@ -275,7 +275,7 @@ fn naming_overlay_md_as_context_puts_its_body_there_and_a_blank_body_nothing() {
     .expect("applies");
     assert_eq!(
         named.profile.contexts,
-        [Context::Text("The body.\n".to_owned())]
+        [Context::TemplateBody("The body.\n".to_owned())]
     );
     let blank =
         layer_of(&[("OVERLAY.md", "---\ncontext: [OVERLAY.md]\n---\n \n")]).expect("applies");
