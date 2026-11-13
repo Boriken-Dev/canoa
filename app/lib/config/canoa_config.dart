@@ -167,7 +167,7 @@ final class CanoaConfig {
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
       LookId? look, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
-      NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources}) =>
+      NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources, int? warnPermille}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -193,7 +193,7 @@ final class CanoaConfig {
         hiddenSources: hiddenSources ?? this.hiddenSources,
         pasteAsFile: pasteAsFile,
         embedLimit: embedLimit,
-        warnPermille: warnPermille,
+        warnPermille: warnPermille ?? this.warnPermille,
         limitPhrases: limitPhrases,
       );
 
@@ -412,6 +412,21 @@ final class CanoaConfig {
 
   /// `[store]`: the store's limits.
   StoreSettings get store => StoreSettings.parse((tables['store'] as Map?) ?? const {});
+
+  /// This configuration with [limits] as `[store]`: only a value that differs from its default is written.
+  CanoaConfig withStore(StoreSettings limits) {
+    const d = StoreSettings();
+    final table = <String, dynamic>{
+      if (limits.catalogMaxBytes != d.catalogMaxBytes) 'catalog_max_bytes': limits.catalogMaxBytes,
+      if (limits.catalogMaxDepth != d.catalogMaxDepth) 'catalog_max_depth': limits.catalogMaxDepth,
+      if (limits.catalogMaxEntries != d.catalogMaxEntries) 'catalog_max_entries': limits.catalogMaxEntries,
+      if (limits.catalogMaxIcons != d.catalogMaxIcons) 'catalog_max_icons': limits.catalogMaxIcons,
+      if (limits.iconMaxBytes != d.iconMaxBytes) 'icon_max_bytes': limits.iconMaxBytes,
+      if (limits.iconMaxWidth != d.iconMaxWidth) 'icon_max_width': limits.iconMaxWidth,
+      if (limits.iconMaxHeight != d.iconMaxHeight) 'icon_max_height': limits.iconMaxHeight,
+    };
+    return _withTable('store', table);
+  }
 
   /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
   /// those of an overlay or a project allowed at one definition (its digest, `sha256:...`).

@@ -4,7 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import 'profiles_dialog.dart' show visible;
+import 'profiles_panel.dart' show visible;
 
 /// Where the host puts its report in an answer's `_meta`.
 const hostProfileMeta = 'dev.boriken.canoa/profile';

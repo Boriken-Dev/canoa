@@ -19,6 +19,7 @@ List<ShortcutLine> get shortcutHelp {
   return [
     (keys: '$mod+K', what: 'Open the command palette'),
     (keys: '$mod+N', what: 'Start a new session'),
+    (keys: '$mod+,', what: 'Open Settings'),
     (keys: '$mod+V in a message', what: 'Paste: an image or files go with it, long text as a file'),
     (keys: '$mod+A', what: 'Select all of the conversation, or of the message being written'),
     (keys: '$mod+C', what: 'Copy what is selected'),

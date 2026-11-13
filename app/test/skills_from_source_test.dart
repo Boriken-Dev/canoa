@@ -16,7 +16,7 @@ import 'package:canoa/profile/overlay_store_io.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_layers.dart';
-import 'package:canoa/profile/profiles_dialog.dart';
+import 'package:canoa/profile/profiles_panel.dart';
 import 'package:canoa/profile/skill_copies.dart';
 import 'package:canoa/loadout/loadout_page.dart';
 import 'package:canoa/store/skills.dart';

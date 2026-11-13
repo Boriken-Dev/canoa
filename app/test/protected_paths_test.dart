@@ -1,12 +1,12 @@
 // The protected list: its syntax (the one coqui-acp-pi's `protected` setting has), what a remembered rule does with it, and the
 // canoa.cfg key and Settings field that hold it.
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/permissions/protected_paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'fixtures/settings_fixture.dart';
 
 const _home = ['h'];
 
@@ -171,45 +171,29 @@ void main() {
       expect(() => CanoaConfig.parse('[permissions]\nprotected = ["a", 3]\n'), throwsFormatException);
     });
 
-    Future<void> open(WidgetTester tester, PermissionRules rules, void Function(CanoaConfig?) saved, {CanoaConfig config = const CanoaConfig()}) async {
-      await tester.binding.setSurfaceSize(const Size(1100, 1800));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(MaterialApp(
-        home: Builder(
-          builder: (context) => TextButton(
-            onPressed: () async => saved(await showDialog<CanoaConfig>(context: context, builder: (_) => SettingsDialog(config: config, rules: rules))),
-            child: const Text('open'),
-          ),
-        ),
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('settings-permissions')));
-      await tester.pumpAndSettle();
-    }
+    Future<SettingsHarness> open(WidgetTester tester, PermissionRules rules, {CanoaConfig config = const CanoaConfig()}) =>
+        openSettings(tester, config: config, rules: rules, section: 'permissions', size: const Size(1100, 2600));
 
-    testWidgets('the field shows the recommended list, an edit replaces it, Save puts it to use', (tester) async {
+    testWidgets('the field shows the recommended list, and an edit replaces it and is in use at once', (tester) async {
       final rules = PermissionRules(MemoryLedgerBackend(), real: (path) => path);
-      CanoaConfig? saved;
-      await open(tester, rules, (config) => saved = config);
+      final settings = await open(tester, rules);
       final field = find.byKey(const Key('settings-protected-paths'));
       expect(tester.widget<TextField>(field).controller!.text, recommendedProtected.join('\n'));
       expect(find.text('Every recommended line is kept.'), findsOneWidget);
       await tester.enterText(field, recommendedProtected.where((line) => line != 'package.json').join('\n'));
       await tester.pump();
       expect(find.text('1 recommended line is removed.'), findsOneWidget);
-      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      expect(saved!.protectedPaths, isNot(contains('package.json')));
-      expect(saved!.protectedPaths, contains('makefile'));
+      expect(find.text('Save'), findsNothing);
+      expect(settings.last.protectedPaths, isNot(contains('package.json')));
+      expect(settings.last.protectedPaths, contains('makefile'));
       final subject = subjectOf(kind: 'edit', rawInput: {'file_path': '/work/calc/package.json', 'old_string': 'a', 'new_string': 'b'})!;
       expect(rules.checkScope(RuleType.path, '/work/calc', subject, '/work/calc'), isNull, reason: 'the removed entry no longer protects');
     });
 
     testWidgets('Restore recommended brings the list back and writes none', (tester) async {
       final rules = PermissionRules(MemoryLedgerBackend(), real: (path) => path);
-      CanoaConfig? saved;
-      await open(tester, rules, (config) => saved = config, config: const CanoaConfig(protectedPaths: ['secrets']));
+      final settings = await open(tester, rules, config: const CanoaConfig(protectedPaths: ['secrets']));
       final field = find.byKey(const Key('settings-protected-paths'));
       expect(tester.widget<TextField>(field).controller!.text, 'secrets');
       await tester.ensureVisible(find.byKey(const Key('restore-recommended-paths')));
@@ -217,10 +201,9 @@ void main() {
       await tester.tap(find.byKey(const Key('restore-recommended-paths')));
       await tester.pump();
       expect(tester.widget<TextField>(field).controller!.text, recommendedProtected.join('\n'));
-      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      expect(saved!.protectedPaths, isNull);
-      expect(saved!.encode(), isNot(contains('protected')));
+      expect(settings.last.protectedPaths, isNull);
+      expect(settings.last.encode(), isNot(contains('protected')));
     });
   });
 }

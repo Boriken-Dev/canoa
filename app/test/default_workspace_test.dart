@@ -170,13 +170,14 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('Settings shows the template with a preview, refuses a bad one and saves a good one', (tester) async {
+  testWidgets('Settings shows the template with a preview, refuses a bad one and applies a good one', (tester) async {
     final documents = _documents();
     final store = SessionStore();
     final written = await pumpApp(tester, store, documents: documents.path);
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
     final field = find.byKey(const Key('settings-workspace'));
+    final before = written.length;
     await tester.ensureVisible(field);
     expect(tester.widget<TextField>(field).controller!.text, defaultWorkspace);
     expect(find.textContaining(documents.path), findsOneWidget, reason: 'the preview');
@@ -185,7 +186,7 @@ void main() {
     await tester.enterText(field, r'${documents}/${nope}/${session}');
     await tester.pump();
     expect(find.textContaining(r'unknown variable ${nope}'), findsOneWidget);
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed, isNull);
+    expect(written.length, before, reason: 'a template that is refused is not applied');
 
     await tester.enterText(field, r'${documents}/day/${date}/${session}');
     await tester.pump();
@@ -193,7 +194,6 @@ void main() {
     final today = DateTime.now();
     final date = '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     expect(find.textContaining('day$_sep$date$_sep$exampleSessionId'), findsOneWidget);
-    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(written.last.sessions.workspace, r'${documents}/day/${date}/${session}');
     expect(CanoaConfig.parse(written.last.encode()).sessions.workspace, written.last.sessions.workspace);

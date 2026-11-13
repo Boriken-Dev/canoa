@@ -4,7 +4,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../profile/profile.dart';
-import '../profile/profiles_dialog.dart' show visible;
+import '../profile/profiles_panel.dart' show visible;
 import '../profile/skill_copies.dart';
 import '../selectable.dart';
 import '../store/skills.dart';

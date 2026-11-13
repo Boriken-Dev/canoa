@@ -16,11 +16,12 @@ import 'profile_home.dart';
 import 'profile_layers.dart';
 import 'project_trust.dart';
 import '../selectable.dart';
+import '../settings/settings_row.dart' show ScopeBar;
 
 /// The effective profile of each agent, every value beside the layer it came from; the overlays, which install and sync
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
-class ProfilesDialog extends StatefulWidget {
-  const ProfilesDialog({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
+class ProfilesPanel extends StatefulWidget {
+  const ProfilesPanel({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
       this.onPin, this.onLoadout});
 
   final CanoaConfig config;
@@ -41,10 +42,10 @@ class ProfilesDialog extends StatefulWidget {
   final VoidCallback? onLoadout;
 
   @override
-  State<ProfilesDialog> createState() => ProfilesDialogState();
+  State<ProfilesPanel> createState() => ProfilesPanelState();
 }
 
-class ProfilesDialogState extends State<ProfilesDialog> {
+class ProfilesPanelState extends State<ProfilesPanel> {
   late String agent = widget.agents.isEmpty ? '' : widget.agents.first;
   late CanoaConfig config = widget.config;
   late final directory = TextEditingController(text: widget.workingDirectory ?? '');
@@ -153,27 +154,22 @@ class ProfilesDialogState extends State<ProfilesDialog> {
     final home = widget.home;
     final found = layers;
     final project = found?.project;
-    return AlertDialog(
-      title: const Text('Profiles'),
-      content: SizedBox(width: 680, child: SingleChildScrollView(child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text('What an agent starts with, layer by layer: built-in, overlays, yours, the project\'s once you '
               'trust it, the agent\'s entry, then the session. A later layer wins.'),
-          Row(children: [
-            const Text('Agent  '),
-            DropdownButton<String>(
-              key: const Key('profile-agent'),
-              value: widget.agents.contains(agent) ? agent : null,
-              items: [for (final label in widget.agents) DropdownMenuItem(value: label, child: Text(label))],
-              onChanged: (value) {
-                if (value == null) return;
-                setState(() => agent = value);
-                _load();
-              },
-            ),
-          ]),
+          ScopeBar(
+            fieldKey: const Key('profile-agent'),
+            label: 'agent',
+            value: widget.agents.contains(agent) ? agent : null,
+            choices: widget.agents,
+            onChanged: (value) {
+              setState(() => agent = value);
+              _load();
+            },
+          ),
           if (home != null)
             TextField(
               key: const Key('profile-directory'),
@@ -193,12 +189,7 @@ class ProfilesDialogState extends State<ProfilesDialog> {
             if (widget.onLoadout case final open?)
               TextButton(
                 key: const Key('profile-store'),
-                onPressed: busy != null
-                    ? null
-                    : () {
-                        Navigator.pop(context);
-                        open();
-                      },
+                onPressed: busy != null ? null : open,
                 child: const Text('Loadout…'),
               ),
           ]),
@@ -222,8 +213,6 @@ class ProfilesDialogState extends State<ProfilesDialog> {
           if (busy != null) Text('$busy…'),
           if (problem != null) Text(visible(problem!), style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ],
-      ))),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
     );
   }
 

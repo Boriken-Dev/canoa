@@ -6,13 +6,13 @@ import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'fixtures/settings_fixture.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// An agent in memory, speaking v1, whose requests are whatever a test says they are.
@@ -697,13 +697,8 @@ void main() {
   });
 
   group('Settings, Permissions', () {
-    Future<void> open(WidgetTester tester, PermissionRules rules) async {
-      await tester.binding.setSurfaceSize(const Size(1100, 1400));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsDialog(config: const CanoaConfig(), rules: rules))));
-      await tester.tap(find.byKey(const Key('settings-permissions')));
-      await tester.pumpAndSettle();
-    }
+    Future<void> open(WidgetTester tester, PermissionRules rules) =>
+        openSettings(tester, rules: rules, section: 'permissions', size: const Size(1100, 2600));
 
     testWidgets('lists each rule with when it was made and how often it answered, and revokes it in one action', (tester) async {
       final rules = PermissionRules(MemoryLedgerBackend(), clock: () => DateTime.utc(2026, 11, 12, 9));

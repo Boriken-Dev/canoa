@@ -9,7 +9,7 @@ import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home.dart';
-import 'package:canoa/profile/profiles_dialog.dart';
+import 'package:canoa/profile/profiles_panel.dart';
 import 'package:canoa/profile/project_trust.dart';
 import 'package:canoa/profile/skill_copies.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
@@ -143,7 +143,7 @@ model = "claude-x"
       '/work/.canoa/profile.toml': 'mode = "plan"\n',
     });
     final pins = <(String, String)>[];
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ProfilesDialog(
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ProfilesPanel(
       config: config,
       agents: const ['Claude', 'Codex'],
       home: home,

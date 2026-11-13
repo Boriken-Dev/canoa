@@ -1,5 +1,4 @@
 import 'attention/notifier.dart';
-import 'config/settings_dialog.dart';
 import 'dart:async';
 import 'dart:convert' show jsonEncode;
 import 'config/canoa_config.dart';
@@ -8,7 +7,6 @@ import 'desktop/desktop_shell.dart';
 import 'desktop/host_control.dart';
 import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
-import 'desktop/hosting_dialog.dart';
 import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
 import 'extension/site_documents.dart';
@@ -57,7 +55,7 @@ import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
 import 'profile/report.dart';
-import 'profile/profiles_dialog.dart';
+import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'rail/session_rail.dart';
 import 'session_store.dart';
@@ -234,27 +232,12 @@ class _CanoaAppState extends State<CanoaApp> {
   String? get _configPath => widget.configPath ?? desktopConfigPath();
   Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? saveConfig)(changed);
 
-  // One of each at a time: a second copy would hold a configuration the first one changes.
-  bool _hostingOpen = false, _settingsOpen = false;
+  // One at a time: a second copy would hold a configuration the first one changes.
+  bool _settingsOpen = false;
+  final _settingsKey = GlobalKey<SettingsPageState>();
 
-  /// The look and brightness being tried in Settings, which are the app's until it closes; never written.
-  CanoaConfig? _preview;
-
-  Future<void> _showHosting() async {
-    final host = widget.host;
-    if (host == null || _hostingOpen) return;
-    final above = _navigator.currentContext;
-    if (above == null) return;
-    _hostingOpen = true;
-    try {
-      await showSelectableDialog<void>(
-        context: above,
-        builder: (_) => HostingDialog(supervisor: host, config: config, onSave: _saveHosting),
-      );
-    } finally {
-      _hostingOpen = false;
-    }
-  }
+  /// Hosting is a section of Settings.
+  Future<void> _showHosting() => _showSettings(section: 'hosting');
 
   /// Saves canoa.cfg once canoa finds nothing wrong with it, then serves it.
   /// Only [host] comes from the dialog: the rest is what the app has now, which Settings may have changed meanwhile.
@@ -269,23 +252,25 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     await _write(changed);
     if (mounted) setState(() => config = changed);
+    _settingsKey.currentState?.controller.adopt(changed);
     await host.apply(configPath: path);
     return null;
   }
 
-  Future<void> _showSettings({bool sources = false}) async {
-    final shell = widget.shell;
+  Future<void> _showSettings({String? section}) async {
     final above = _navigator.currentContext;
     if (above == null || _settingsOpen) return;
     _settingsOpen = true;
-    final CanoaConfig? fromDialog;
     try {
-      fromDialog = await showSelectableDialog<CanoaConfig>(
-        context: above,
-        builder: (_) => SettingsDialog(
-          config: config, onQuit: shell != null && shell.isDesktop ? shell.quit : null, ledger: store.ledger, rules: store.rules,
-          onProfiles: _showProfiles,
-          onPreview: (preview) => setState(() => _preview = preview),
+      await showSettings(
+        above,
+        SettingsPage(
+          key: _settingsKey,
+          config: config,
+          apply: _applySettings,
+          section: section,
+          ledger: store.ledger,
+          rules: store.rules,
           workspacePreview: hasWorkspaceFolders && canRunLocalAgents
               ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
               : null,
@@ -297,29 +282,45 @@ class _CanoaAppState extends State<CanoaApp> {
           hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
           checkSource: _check,
           programs: _programs,
-          openSources: sources,
+          profileAgents: _profileAgents,
+          home: platformProfileHome(configPath: _configPath),
+          onPin: (name, digest) async {
+            final changed = config.withOverlayPin(name, digest);
+            await _write(changed);
+            if (mounted) setState(() => config = changed);
+            _settingsKey.currentState?.controller.adopt(changed);
+            return changed;
+          },
+          onLoadout: _showLoadout,
+          supervisor: widget.host,
+          saveHosting: _saveHosting,
+          version: const String.fromEnvironment('CANOA_VERSION'),
         ),
       );
     } finally {
       _settingsOpen = false;
-      // However Settings closed, the look it previewed goes; a save sets the chosen one in the same frame, below.
-      if (_preview != null && mounted) setState(() => _preview = null);
     }
-    if (fromDialog == null || !mounted) return;
-    // [host] and the profile tables stay as the app has them now: Hosting may have changed one, and an overlay installed
-    // from Profiles is pinned in [overlays], while Settings was open.
-    var changed = fromDialog.withHost(config.host).withProfilesOf(config);
+  }
+
+  /// Applies and writes what Settings changed, as it is changed, and gives back what the app now holds.
+  /// [host] stays as the app has it: Hosting writes it on its own.
+  Future<CanoaConfig> _applySettings(CanoaConfig fromPage) async {
+    var changed = fromPage.withHost(config.host);
     // The host serves a source from the moment it starts, so adding or removing one restarts it, which ends the sessions open
-    // on any of its sources.
-    // Profiles are read by the host when it starts too, so a change to them restarts it as well.
-    final sameProfiles = _sameProfiles(changed, config);
-    var restart = widget.host != null && (!_sameAgents(changed.agents, config.agents) || !sameProfiles);
-    if (restart && _openOnHost() > 0 && !await _confirmRestart()) {
-      changed = changed.copyWith(agents: config.agents);
-      if (!sameProfiles) changed = changed.withProfilesOf(config);
-      restart = false;
+    // on any of its sources; it reads the profile tables when it starts too.
+    final agentsChanged = !_sameAgents(changed.agents, config.agents);
+    var restart = widget.host != null && (agentsChanged || !_sameProfiles(changed, config));
+    if (restart && _openOnHost() > 0) {
+      if (agentsChanged) {
+        if (!await _confirmRestart()) {
+          changed = changed.copyWith(agents: config.agents);
+          restart = false;
+        }
+      } else if (!await _confirmApplyProfile()) {
+        restart = false;
+      }
     }
-    if (!mounted) return;
+    if (!mounted) return changed;
     setState(() => config = changed);
     store.embedLimit = changed.embedLimit;
     if (_checked) unawaited(_checkSources());
@@ -332,13 +333,8 @@ class _CanoaAppState extends State<CanoaApp> {
       if (restart && _configPath != null) await widget.host!.apply(configPath: _configPath);
     } on UnsupportedError {
       // canoa.cfg in web/PWA deployments is read-only.
-    } catch (error) {
-      if (mounted) {
-        _messenger.currentState?.showSnackBar(
-          SnackBar(content: Text('Could not save canoa.cfg: $error')),
-        );
-      }
     }
+    return changed;
   }
 
   /// Whether `[profile]`, `[overlays]` and the `[agents]` tables (a profile and MCP choices live in them) read the same.
@@ -401,6 +397,7 @@ class _CanoaAppState extends State<CanoaApp> {
       findProgram: findProgram,
     );
     if (left != null && mounted) setState(() => config = left);
+    _settingsKey.currentState?.controller.adopt(config);
   }
 
   /// Saves what Loadout changed. The host reads the profile when it starts, so a change to it is applied by starting the host
@@ -433,27 +430,6 @@ class _CanoaAppState extends State<CanoaApp> {
       ),
     );
     return ok ?? false;
-  }
-
-  /// The profiles as canoa.cfg has them now, for every agent the app offers or the file gives a profile.
-  Future<void> _showProfiles() async {
-    final above = _navigator.currentContext;
-    if (above == null) return;
-    await showSelectableDialog<void>(
-      context: above,
-      builder: (_) => ProfilesDialog(
-        config: config,
-        agents: _profileAgents,
-        onLoadout: _showLoadout,
-        home: platformProfileHome(configPath: _configPath),
-        onPin: (name, digest) async {
-          final changed = config.withOverlayPin(name, digest);
-          await _write(changed);
-          if (mounted) setState(() => config = changed);
-          return changed;
-        },
-      ),
-    );
   }
 
   /// What the conversation shown offers the keyboard and the palette.
@@ -1280,7 +1256,7 @@ class _CanoaAppState extends State<CanoaApp> {
     onLoadout: _showLoadout,
     pasteAsFile: config.pasteAsFile,
     warnPermille: config.warnPermille,
-    onSourceSettings: () => unawaited(_showSettings(sources: true)),
+    onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
     extension: _tabs,
     onProfile: (session) {
       final above = _navigator.currentContext;
@@ -1311,16 +1287,16 @@ class _CanoaAppState extends State<CanoaApp> {
   @override
   Widget build(BuildContext context) {
     _popout
-      ..look = (_preview ?? config).look.name
-      ..density = (_preview ?? config).density.name;
+      ..look = config.look.name
+      ..density = config.density.name;
     return MaterialApp(
       navigatorKey: _navigator,
       scaffoldMessengerKey: _messenger,
       title: 'Canoa',
       debugShowCheckedModeBanner: false,
-      theme: themeFor((_preview ?? config).look, Brightness.light, density: (_preview ?? config).density),
-      darkTheme: themeFor((_preview ?? config).look, Brightness.dark, density: (_preview ?? config).density),
-      themeMode: (_preview ?? config).themeMode,
+      theme: themeFor(config.look, Brightness.light, density: config.density),
+      darkTheme: themeFor(config.look, Brightness.dark, density: config.density),
+      themeMode: config.themeMode,
       home: AnimatedBuilder(
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
@@ -1331,7 +1307,7 @@ class _CanoaAppState extends State<CanoaApp> {
           renderers: widget.renderers,
           welcome: _withSite(WelcomeView(
             sources: _sources, checks: _checks, programs: _programs, onNewSession: _newSession,
-            onSettings: () => unawaited(_showSettings(sources: true)),
+            onSettings: () => unawaited(_showSettings(section: 'sources')),
           )),
         ),
       ),
@@ -1429,6 +1405,7 @@ class _CanoaHome extends StatelessWidget {
   Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
     chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
     chord(LogicalKeyboardKey.keyN): onNewSession,
+    chord(LogicalKeyboardKey.comma): onSettings,
     for (final (index, key) in const [
       LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3,
       LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5, LogicalKeyboardKey.digit6,

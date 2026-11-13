@@ -29,6 +29,17 @@ final class StoreSettings {
   /// The most entries one catalog lists, and the most distinct icon files read for one catalog.
   final int catalogMaxEntries, catalogMaxIcons;
 
+  /// These limits with the one named by [key] (a key of `[store]`) set to [value].
+  StoreSettings withLimit(String key, int value) => StoreSettings(
+    catalogMaxBytes: key == 'catalog_max_bytes' ? value : catalogMaxBytes,
+    catalogMaxDepth: key == 'catalog_max_depth' ? value : catalogMaxDepth,
+    iconMaxBytes: key == 'icon_max_bytes' ? value : iconMaxBytes,
+    iconMaxWidth: key == 'icon_max_width' ? value : iconMaxWidth,
+    iconMaxHeight: key == 'icon_max_height' ? value : iconMaxHeight,
+    catalogMaxEntries: key == 'catalog_max_entries' ? value : catalogMaxEntries,
+    catalogMaxIcons: key == 'catalog_max_icons' ? value : catalogMaxIcons,
+  );
+
   /// What a catalog is read within: its size and nesting.
   aos.Settings get catalogLimits => aos.defaultSettings.copyWith({'catalogBytes': catalogMaxBytes, 'manifestDepth': catalogMaxDepth});
 

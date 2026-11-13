@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../config/canoa_config.dart';
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
-import '../profile/profiles_dialog.dart' show OverlayIcon, OverlayUpdateDialog, visible;
+import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, visible;
 import '../selectable.dart';
 import '../store/programs.dart';
 import '../store/programs_view.dart';

@@ -90,41 +90,41 @@ void main() {
     // The button next to selectable text still works.
     await tester.tap(find.byTooltip('Canoa settings'));
     await frames(tester);
-    expect(find.text('Brightness'), findsOneWidget);
+    expect(find.byKey(const Key('settings-nav-general')), findsOneWidget);
     await finish(tester);
   });
 
   testWidgets('a dialog selects and copies, and Select all in it stays in the dialog', (tester) async {
     await conversation(tester);
-    await tester.tap(find.byTooltip('Canoa settings'));
+    await _chord(tester, LogicalKeyboardKey.slash);
     await frames(tester);
-    expect(await _dragAndCopy(tester, find.text('Brightness')), 'Brightness');
+    expect(await _dragAndCopy(tester, find.text('Keyboard shortcuts')), 'Keyboard shortcuts');
 
     await _chord(tester, LogicalKeyboardKey.keyA);
     await _chord(tester, LogicalKeyboardKey.keyC);
-    expect(_copied, contains('Brightness'));
+    expect(_copied, contains('Keyboard shortcuts'));
     expect(_copied, isNot(contains('What does the build say')), reason: 'the screen under a dialog is not part of it');
 
     // Its controls work: the dropdown opens and closing the dialog works.
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.text('Close'));
     await frames(tester);
-    expect(find.text('Brightness'), findsNothing);
+    expect(find.text('Keyboard shortcuts'), findsNothing);
     await finish(tester);
   });
 
   testWidgets('a tap outside a dialog closes it once, a tap on its text does not, a drag does not', (tester) async {
     await conversation(tester);
-    await tester.tap(find.byTooltip('Canoa settings'));
+    await _chord(tester, LogicalKeyboardKey.slash);
     await frames(tester);
-    await tester.tap(find.text('Brightness'));
+    await tester.tap(find.text('Open Settings'));
     await frames(tester);
-    expect(find.text('Canoa settings'), findsOneWidget);
+    expect(find.text('Keyboard shortcuts'), findsOneWidget);
     await tester.dragFrom(const Offset(4, 4), const Offset(200, 200), kind: PointerDeviceKind.mouse);
     await frames(tester);
-    expect(find.text('Canoa settings'), findsOneWidget, reason: 'a drag is not a tap');
+    expect(find.text('Keyboard shortcuts'), findsOneWidget, reason: 'a drag is not a tap');
     await tester.tapAt(const Offset(4, 4));
     await frames(tester);
-    expect(find.text('Canoa settings'), findsNothing);
+    expect(find.text('Keyboard shortcuts'), findsNothing);
     expect(find.byTooltip('Canoa settings'), findsOneWidget, reason: 'the screen under it stays');
     await finish(tester);
   });

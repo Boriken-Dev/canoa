@@ -8,7 +8,7 @@ import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/skill_copies.dart';
-import '../profile/profiles_dialog.dart' show EffectiveTable, OverlayReportView, visible;
+import '../profile/profiles_panel.dart' show EffectiveTable, OverlayReportView, visible;
 import 'links.dart';
 import 'skills.dart';
 import 'store.dart';

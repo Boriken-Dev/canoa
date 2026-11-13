@@ -45,7 +45,7 @@ Future<List<String>> _offered(WidgetTester tester) async {
 Future<void> _openSources(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Canoa settings'));
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const Key('settings-sources')));
+  await tester.tap(find.byKey(const Key('settings-nav-sources')));
   await tester.pumpAndSettle();
 }
 
@@ -86,8 +86,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('source-add')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('source Mine')), findsOneWidget);
-    await tester.tap(find.text('Save'));
+    expect(find.byKey(const Key('source-row Mine')), findsOneWidget);
+    await tester.pageBack();
     await tester.pumpAndSettle();
     final mine = written.last.agents.single;
     expect([mine.label, mine.program, ...mine.args], ['Mine', 'my-agent', '--acp', 'a b']);
@@ -103,7 +103,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('source-offered Antigravity')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save'));
+    await tester.pageBack();
     await tester.pumpAndSettle();
     expect(written.last.hiddenSources, {'Antigravity'});
     await newSession(tester);
@@ -118,10 +118,12 @@ void main() {
     debugPrint = (message, {wrapWidth}) => logged.add(message ?? '');
     final (store, starts, _, _) = await _app(tester, missing: {'claude'}, size: const Size(1280, 1400));
     await _openSources(tester);
-    // The welcome page behind Settings says the same, so the one in the dialog is the last drawn.
+    await tester.tap(find.byKey(const Key('source-row Claude')));
+    await tester.pumpAndSettle();
+    expect(find.text('Needs claude'), findsOneWidget, reason: 'the list says what it lacks in a line');
     expect(find.text('Claude needs claude on PATH: claude was not found. '
-        'Install what is missing, or start Canoa where PATH finds it.'), findsNWidgets(2));
-    await tester.tap(find.text('Cancel'));
+        'Install what is missing, or start Canoa where PATH finds it.'), findsOneWidget);
+    await tester.pageBack();
     await tester.pumpAndSettle();
 
     await newSession(tester);

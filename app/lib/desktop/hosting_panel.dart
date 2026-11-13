@@ -16,8 +16,8 @@ typedef SaveHosting = Future<String?> Function(CanoaConfig changed);
 
 /// What this computer hosts for browsers: the host's state, its agents, adding one, and the keys that may connect, each
 /// paired or removed only by the person's own click on a dialog that shows the whole id.
-class HostingDialog extends StatefulWidget {
-  const HostingDialog({
+class HostingPanel extends StatefulWidget {
+  const HostingPanel({
     super.key,
     required this.supervisor,
     required this.config,
@@ -31,10 +31,10 @@ class HostingDialog extends StatefulWidget {
   final Future<int> Function() freePort;
 
   @override
-  State<HostingDialog> createState() => _HostingDialogState();
+  State<HostingPanel> createState() => _HostingPanelState();
 }
 
-class _HostingDialogState extends State<HostingDialog> {
+class _HostingPanelState extends State<HostingPanel> {
   late CanoaConfig config = widget.config;
   late Future<List<HostKey>> keys = _keys();
   HostPairing? pairing;
@@ -196,74 +196,65 @@ class _HostingDialogState extends State<HostingDialog> {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return AlertDialog(
-      title: const Text('Hosting'),
-      content: SizedBox(
-        width: 560,
-        child: SingleChildScrollView(
-          child: ListenableBuilder(
-            listenable: widget.supervisor,
-            builder: (context, _) => Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Status(supervisor: widget.supervisor),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(child: Text('Agents this computer hosts', style: text.titleSmall)),
-                    TextButton.icon(
-                      onPressed: busy || widget.supervisor.tool == null ? null : _add,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add an agent'),
-                    ),
-                  ],
-                ),
-                if (config.hostEntries.isEmpty)
-                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('None yet.')),
-                for (final entry in config.hostEntries) _entryTile(entry),
-                const Divider(height: 32),
-                Row(
-                  children: [
-                    Expanded(child: Text('Keys that may connect', style: text.titleSmall)),
-                    IconButton(
-                      tooltip: 'Look again',
-                      onPressed: busy ? null : _refresh,
-                      icon: const Icon(Icons.refresh),
-                    ),
-                  ],
-                ),
-                const Text('A browser pairs by connecting once: its key then waits here until you pair it.'),
-                FutureBuilder<List<HostKey>>(
-                  future: keys,
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) return Text('The keys could not be read: ${snapshot.error}');
-                    final found = snapshot.data;
-                    if (found == null) return const LinearProgressIndicator();
-                    if (found.isEmpty) {
-                      return const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No keys yet.'));
-                    }
-                    return Column(children: [for (final key in found) _keyTile(key)]);
-                  },
-                ),
-                const Divider(height: 32),
-                Text('Pair a program by PIN', style: text.titleSmall),
-                const Text(
-                  'For a program with a key of its own, such as coqui-acp-bridge pair-dial. A browser cannot pair by PIN.',
-                ),
-                const SizedBox(height: 8),
-                _pinPanel(text),
-                if (message != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(message!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                  ),
-              ],
-            ),
+    return ListenableBuilder(
+      listenable: widget.supervisor,
+      builder: (context, _) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Status(supervisor: widget.supervisor),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: Text('Agents this computer hosts', style: text.titleSmall)),
+              TextButton.icon(
+                onPressed: busy || widget.supervisor.tool == null ? null : _add,
+                icon: const Icon(Icons.add),
+                label: const Text('Add an agent'),
+              ),
+            ],
           ),
-        ),
+          if (config.hostEntries.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('None yet.')),
+          for (final entry in config.hostEntries) _entryTile(entry),
+          const Divider(height: 32),
+          Row(
+            children: [
+              Expanded(child: Text('Keys that may connect', style: text.titleSmall)),
+              IconButton(
+                tooltip: 'Look again',
+                onPressed: busy ? null : _refresh,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          const Text('A browser pairs by connecting once: its key then waits here until you pair it.'),
+          FutureBuilder<List<HostKey>>(
+            future: keys,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) return Text('The keys could not be read: ${snapshot.error}');
+              final found = snapshot.data;
+              if (found == null) return const LinearProgressIndicator();
+              if (found.isEmpty) {
+                return const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No keys yet.'));
+              }
+              return Column(children: [for (final key in found) _keyTile(key)]);
+            },
+          ),
+          const Divider(height: 32),
+          Text('Pair a program by PIN', style: text.titleSmall),
+          const Text(
+            'For a program with a key of its own, such as coqui-acp-bridge pair-dial. A browser cannot pair by PIN.',
+          ),
+          const SizedBox(height: 8),
+          _pinPanel(text),
+          if (message != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(message!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+        ],
       ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
     );
   }
 

@@ -80,7 +80,8 @@ void main() {
     expect(store.selected!.cwd, '/home/ana/picked');
     await tester.tap(find.byKey(const Key('quick-sources')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('settings-sources')), findsWidgets);
+    expect(find.byKey(const Key('settings-nav-sources')), findsOneWidget);
+    expect(find.byKey(const Key('settings-section-sources')), findsOneWidget, reason: 'Sources opens Settings at its sources');
   });
 
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {

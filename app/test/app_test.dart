@@ -183,13 +183,15 @@ void main() {
     await tester.pumpWidget(CanoaApp(store: SessionStore(), shell: shell, host: host));
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
-    expect(find.text('Look'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    expect(find.byKey(const Key('settings-nav-general')), findsOneWidget);
+    expect(find.text('Quit Canoa'), findsNothing, reason: 'the tray and the menu quit, not Settings');
+    expect(find.text('Save'), findsNothing);
+    await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Hosting'));
     await tester.pumpAndSettle();
-    expect(find.text('Agents this computer hosts'), findsOneWidget);
-    await tester.tap(find.text('Close'));
+    expect(find.text('Agents this computer hosts'), findsOneWidget, reason: 'Hosting is a section of Settings');
+    await tester.pageBack();
     await tester.pumpAndSettle();
 
     await host.apply(configPath: '/c/canoa.cfg');
@@ -210,8 +212,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('settings-profiles')));
-    await tester.tap(find.byKey(const Key('settings-profiles')));
+    await tester.tap(find.byKey(const Key('settings-nav-profiles')));
     await tester.pumpAndSettle();
     expect(find.text('Effective profile'), findsOneWidget);
     expect(find.text('user'), findsOneWidget, reason: 'effort comes from the person\'s own layer');
@@ -256,10 +257,10 @@ void _staleDialogs() {
       writeConfig: (changed) async => written.add(changed),
     ));
 
-    // Settings from the tray, then Hosting over it: the agent removed there stays removed when Settings is saved.
+    // Settings from the tray, then Hosting in it: the agent removed there stays removed when another setting changes.
     settings.value++;
     await tester.pumpAndSettle();
-    hosting.value++;
+    await tester.tap(find.byKey(const Key('settings-nav-hosting')));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Stop hosting old'));
     await tester.pumpAndSettle();
@@ -267,24 +268,18 @@ void _staleDialogs() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(written.last.hostEntries, isEmpty);
-    await tester.tap(find.text('Close'));
+    await tester.tap(find.byKey(const Key('settings-nav-appearance')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
-    expect(written.last.hostEntries, isEmpty, reason: 'Settings saved its own copy of [host] back');
-
-    // Hosting open, then Settings over it: a look chosen there stays when Hosting adds an agent.
-    hosting.value++;
-    await tester.pumpAndSettle();
-    settings.value++;
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Dark'));
+    await tester.tap(find.byKey(const Key('settings-brightness')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Light').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
     expect(written.last.brightness, 'light');
+    expect(written.last.hostEntries, isEmpty, reason: 'Settings wrote its own copy of [host] back');
+
+    // A look chosen there stays when Hosting adds an agent.
+    await tester.tap(find.byKey(const Key('settings-nav-hosting')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Add an agent'));
     await tester.pumpAndSettle();
     final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
@@ -301,7 +296,7 @@ void _staleDialogs() {
     expect(written.last.hostEntries.map((entry) => entry.name), ['new']);
     expect(written.last.brightness, 'light', reason: 'Hosting saved its own copy of the look back');
 
-    // One Hosting at a time.
+    // One Settings at a time.
     hosting.value++;
     await tester.pumpAndSettle();
     expect(find.text('Agents this computer hosts'), findsOneWidget);

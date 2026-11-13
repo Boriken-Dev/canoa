@@ -5,7 +5,7 @@ import 'dart:async';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
-import 'package:canoa/desktop/hosting_dialog.dart';
+import 'package:canoa/desktop/hosting_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -41,7 +41,7 @@ final class _Harness {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: HostingDialog(
+          body: HostingPanel(
             supervisor: supervisor,
             config: config,
             onSave: (changed) async {

@@ -6,7 +6,6 @@ import 'dart:io' show Directory, File;
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/theme/look.dart';
@@ -14,6 +13,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'fixtures/settings_fixture.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// Text is drawn a little differently on each platform, by a fraction of a percent here, and a broken layout moves far more than that.
@@ -475,26 +475,10 @@ void main() {
       expect(const CanoaConfig().copyWith(density: ChatDensity.verbose).density, ChatDensity.verbose);
     });
 
-    testWidgets('the settings dialog chooses the density', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(900, 1000));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      CanoaConfig? saved;
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () async => saved = await showDialog<CanoaConfig>(
-          context: context,
-          builder: (_) => const SettingsDialog(config: CanoaConfig()),
-        ),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('settings-density')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Verbose').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      expect(saved?.density, ChatDensity.verbose);
+    testWidgets('Settings chooses the density', (tester) async {
+      final settings = await openSettings(tester, section: 'appearance');
+      await choose(tester, 'settings-density', 'Verbose');
+      expect(settings.last.density, ChatDensity.verbose);
     });
 
     testWidgets('the default density folds a finished turn into Worked for, and Verbose shows each step', (tester) async {
@@ -550,31 +534,13 @@ void main() {
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/canoa_normal_desktop.png'));
     });
 
-    testWidgets('the settings dialog chooses them', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(900, 1000));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      CanoaConfig? saved;
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () async => saved = await showDialog<CanoaConfig>(
-          context: context,
-          builder: (_) => const SettingsDialog(config: CanoaConfig()),
-        ),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Canoa'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Terminal').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Dark'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Light').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      expect(saved?.look, LookId.terminal);
-      expect(saved?.brightness, 'light');
+    testWidgets('Settings chooses the look and brightness', (tester) async {
+      final settings = await openSettings(tester, section: 'appearance');
+      await choose(tester, 'settings-look', 'Terminal');
+      expect(settings.last.look, LookId.terminal);
+      await choose(tester, 'settings-brightness', 'Light');
+      expect(settings.last.brightness, 'light');
+      expect(settings.last.look, LookId.terminal, reason: 'the second change keeps the first');
     });
 
     testWidgets('switching is live and keeps the conversation', (tester) async {

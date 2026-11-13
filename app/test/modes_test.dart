@@ -4,12 +4,12 @@
 import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption, parseConfigOptions;
 import 'package:canoa/chat/modes.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'fixtures/settings_fixture.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
@@ -259,26 +259,14 @@ void main() {
     });
 
     testWidgets('Settings holds it as one setting, asks nothing, and has no Full access of its own', (tester) async {
-      await tester.binding.setSurfaceSize(const Size(900, 1400));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      CanoaConfig? saved;
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () async => saved = await showDialog<CanoaConfig>(context: context, builder: (_) => const SettingsDialog(config: CanoaConfig())),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
+      final settings = await openSettings(tester, section: 'permissions');
       expect(find.text('Full access'), findsNothing);
       expect(find.byKey(const Key('settings-full-access')), findsNothing);
-      await tester.tap(find.byKey(const Key('settings-default-mode')).last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Bypass').last);
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget, reason: 'only Settings itself');
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      expect(saved?.defaultMode, 'bypass');
-      expect(CanoaConfig.parse(saved!.encode()).defaultMode, 'bypass');
+      await choose(tester, 'settings-default-mode', 'Bypass');
+      expect(find.byType(AlertDialog), findsNothing, reason: 'nothing is asked');
+      expect(find.text('Save'), findsNothing);
+      expect(settings.last.defaultMode, 'bypass');
+      expect(CanoaConfig.parse(settings.last.encode()).defaultMode, 'bypass');
     });
 
     test('canoa.cfg reads, checks and writes it back, and reads an older full_access list as nothing', () {

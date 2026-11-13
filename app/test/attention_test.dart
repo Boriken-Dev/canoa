@@ -6,11 +6,12 @@ import 'dart:convert';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/attention/notifier.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:canoa/settings/settings_row.dart' show SwitchRow;
+import 'fixtures/settings_fixture.dart';
 
 final class _Notifier implements Notifier {
   final shown = <({String title, String body, String sessionId})>[];
@@ -187,26 +188,11 @@ void main() {
   });
 
   testWidgets('Settings turns a kind off', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(900, 1400));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    CanoaConfig? saved;
-    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-      onPressed: () async => saved = await showDialog<CanoaConfig>(
-        context: context,
-        builder: (_) => const SettingsDialog(config: CanoaConfig()),
-      ),
-      child: const Text('open'),
-    ))));
-    await tester.tap(find.text('open'));
+    final settings = await openSettings(tester, section: 'notifications');
+    await tester.tap(find.descendant(of: find.byType(SwitchRow).at(2), matching: find.byType(Switch)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Notifications'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(SwitchListTile, 'It finished its turn'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
-    expect(saved?.notifications.finished, isFalse);
-    expect(saved?.notifications.permission, isTrue);
+    expect(settings.last.notifications.finished, isFalse);
+    expect(settings.last.notifications.permission, isTrue);
   });
 
   test('the words name the session and the kind, one line each', () {

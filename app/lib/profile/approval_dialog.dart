@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../acp/usage_wire.dart';
-import 'profiles_dialog.dart' show visible;
+import 'profiles_panel.dart' show visible;
 
 /// The host's two minutes to answer, less a margin for the answer to arrive.
 const approvalWait = Duration(seconds: 110);

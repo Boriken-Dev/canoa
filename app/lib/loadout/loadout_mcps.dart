@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../profile/profile.dart';
-import '../profile/profiles_dialog.dart' show visible;
+import '../profile/profiles_panel.dart' show visible;
 import '../selectable.dart';
 import '../store/overlay_page.dart' show oneLine;
 import 'loadout_controller.dart';
