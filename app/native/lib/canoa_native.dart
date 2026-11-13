@@ -55,8 +55,7 @@ final class LinkSaid {
 /// The library, loaded.
 final class CanoaNative {
   CanoaNative._(DynamicLibrary library, this.path)
-    : _abi = library.lookupFunction<Uint32 Function(), int Function()>('canoa_ffi_abi'),
-      _start = library.lookupFunction<
+    : _start = library.lookupFunction<
         Int32 Function(Pointer<Uint8>, Size, Pointer<Uint64>),
         int Function(Pointer<Uint8>, int, Pointer<Uint64>)
       >('canoa_ffi_job_start'),
@@ -89,7 +88,6 @@ final class CanoaNative {
 
   /// Where it was loaded from.
   final String path;
-  final int Function() _abi;
   final int Function(Pointer<Uint8>, int, Pointer<Uint64>) _start;
   final int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>) _read;
   final void Function(Pointer<Uint8>, int) _textFree;

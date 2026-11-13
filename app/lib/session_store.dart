@@ -1214,9 +1214,17 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   @override
-  Future<AcpSecretRequestReply> askSecret(AcpSecretRequestParams request, VerifiedAgent from) {
+  Future<AcpSecretRequestReply> askSecret(AcpSecretRequestParams request, VerifiedAgent from) async {
     final target = _secretTarget(request.context.sessionId, from);
-    if (target == null) return Future.value(const AcpSecretCancelled());
+    if (target == null) return const AcpSecretCancelled();
+    // A key not bound to the host this connection proved is never drawn as a form: the host is told it was cancelled.
+    try {
+      await target.$3.verifier.collector(
+        target.$2, AcpSecretMethod.request, request.context, request.recipient, DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
+    } on AcpSecretException {
+      return const AcpSecretCancelled();
+    }
     final prompt = SecretRequestPrompt(request, target.$2, identity: target.$3);
     target.$1.pendingSecrets.add(prompt);
     _needs(target.$1, AttentionKind.question);
