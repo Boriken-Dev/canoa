@@ -143,14 +143,18 @@ fn auth(args: &[String]) -> i32 {
             0
         }
         Some("status") => {
-            let signed_in = std::fs::read_to_string(&credentials)
-                .ok()
-                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-                .is_some_and(|file| {
-                    file["claudeAiOauth"]["accessToken"]
-                        .as_str()
-                        .is_some_and(|token| !token.is_empty())
-                });
+            let keyed = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+                .iter()
+                .any(|name| std::env::var(name).is_ok_and(|value| !value.is_empty()));
+            let signed_in = keyed
+                || std::fs::read_to_string(&credentials)
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                    .is_some_and(|file| {
+                        file["claudeAiOauth"]["accessToken"]
+                            .as_str()
+                            .is_some_and(|token| !token.is_empty())
+                    });
             println!(
                 "{}",
                 json!({"loggedIn": signed_in, "authMethod": if signed_in { "claude.ai" } else { "none" },

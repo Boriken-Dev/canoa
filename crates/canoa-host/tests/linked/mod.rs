@@ -86,8 +86,18 @@ impl Hosted {
 
     /// As [`Hosted::start_with`], in a `scratch` the test has already put things in, such as the host's identity.
     pub fn start_in(scratch: Scratch, entries: &str, more: &[&str]) -> Self {
+        Self::start_in_setup(scratch, |_| entries.to_owned(), more)
+    }
+
+    /// As [`Hosted::start_with`], with the configuration made from the scratch directory, where files it names may be put.
+    pub fn start_with_setup(setup: impl FnOnce(&std::path::Path) -> String, more: &[&str]) -> Self {
+        Self::start_in_setup(Scratch::new(), setup, more)
+    }
+
+    /// Both of those: a `scratch` already holding things, and a configuration made from it.
+    pub fn start_in_setup(scratch: Scratch, setup: impl FnOnce(&std::path::Path) -> String, more: &[&str]) -> Self {
         let config = scratch.0.join("canoa.cfg");
-        std::fs::write(&config, entries).expect("written");
+        std::fs::write(&config, setup(&scratch.0)).expect("written");
         let (sender, receiver) = mpsc::channel();
         let then = Arc::new(Mutex::new(None));
         let printed = Arc::new(Mutex::new(Vec::new()));
