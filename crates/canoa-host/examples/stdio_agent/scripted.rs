@@ -20,7 +20,8 @@
 //! SOURCE TEXT`, `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
 //! session is in, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
 //! to PATH and waits for a cancel, `Bearer` says the tool server's address and the session's bearer (a stand-in may; the host never
-//! does), `Pid` says its process id and `Cwd` the working directory the session was opened in. Given the entry as a stdio server
+//! does), `Secret TOOL JSON` calls a tool of the host's secret server (`secret_request`, `secret_use`, `secret_show`) and says what it
+//! answered, `Pid` says its process id and `Cwd` the working directory the session was opened in. Given the entry as a stdio server
 //! (what the host writes for an agent that says no HTTP), it starts that command and calls the tools through it as an MCP client
 //! does; `Bridge` says its process id and the command line it was started with, and `BridgeClose` closes its input and says
 //! whether it ended. `--marker=PATH` appends the process id
@@ -71,6 +72,8 @@ struct Shared {
     tools: Mutex<HashMap<String, (String, String)>>,
     /// The stdio server each session was given for them, started.
     bridges: Mutex<HashMap<String, Arc<Mutex<Bridge>>>>,
+    /// Each session's address and bearer for the host's secret tools.
+    secret_tools: Mutex<HashMap<String, (String, String)>>,
     /// The working directory each session was opened in.
     cwds: Mutex<HashMap<String, String>>,
 }
@@ -464,8 +467,24 @@ impl Shared {
 
     /// One call of the host's tool server, as an MCP client does it: the text the tool answered, or the failure.
     fn tool_call(&self, session: &str, name: &str, arguments: &Value) -> String {
-        let Some((url, token)) = lock(&self.tools).get(session).cloned() else {
-            return "this session has no delegation tools".to_owned();
+        self.call_on(&self.tools, "delegation", session, name, arguments)
+    }
+
+    /// As [`Shared::tool_call`], on the host's secret tools.
+    fn secret_call(&self, session: &str, name: &str, arguments: &Value) -> String {
+        self.call_on(&self.secret_tools, "secret", session, name, arguments)
+    }
+
+    fn call_on(
+        &self,
+        tools: &Mutex<HashMap<String, (String, String)>>,
+        kind: &str,
+        session: &str,
+        name: &str,
+        arguments: &Value,
+    ) -> String {
+        let Some((url, token)) = lock(tools).get(session).cloned() else {
+            return format!("this session has no {kind} tools");
         };
         let bridge = lock(&self.bridges).get(session).cloned();
         if let Some(bridge) = bridge {
@@ -551,6 +570,11 @@ impl Shared {
                 let (name, arguments) = rest.split_once(' ').unwrap_or((rest, "{}"));
                 let arguments = serde_json::from_str(arguments).unwrap_or(Value::Null);
                 self.tool_call(session, name, &arguments)
+            }
+            "Secret" => {
+                let (name, arguments) = rest.split_once(' ').unwrap_or((rest, "{}"));
+                let arguments = serde_json::from_str(arguments).unwrap_or(Value::Null);
+                self.secret_call(session, name, &arguments)
             }
             "Mode" => {
                 let mode = lock(&self.chosen)
@@ -893,11 +917,15 @@ impl Shared {
                         .find(|header| header["name"] == "Authorization")
                         .and_then(|header| header["value"].as_str())
                         .and_then(|value| value.strip_prefix("Bearer "));
-                    if server["name"] == "canoa-delegate"
-                        && let (Some(url), Some(token)) = (server["url"].as_str(), bearer)
-                    {
-                        lock(&self.tools)
-                            .insert(created.clone(), (url.to_owned(), token.to_owned()));
+                    if let (Some(url), Some(token)) = (server["url"].as_str(), bearer) {
+                        let kept = match server["name"].as_str() {
+                            Some("canoa-delegate") => Some(&self.tools),
+                            Some("canoa-secrets") => Some(&self.secret_tools),
+                            _ => None,
+                        };
+                        if let Some(kept) = kept {
+                            lock(kept).insert(created.clone(), (url.to_owned(), token.to_owned()));
+                        }
                     } else if server["name"] == "canoa-delegate"
                         && let Some((bridge, url, token)) = Bridge::start(server)
                     {
@@ -1042,6 +1070,7 @@ pub fn run(args: &[String]) {
             |list| list.split(',').map(str::to_owned).collect(),
         ),
         http: args.iter().any(|arg| arg == "--mcp-http"),
+        secret_tools: Mutex::new(HashMap::new()),
         tools: Mutex::new(HashMap::new()),
         bridges: Mutex::new(HashMap::new()),
         cwds: Mutex::new(HashMap::new()),

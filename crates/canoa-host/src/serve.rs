@@ -43,6 +43,7 @@ use crate::pipe;
 use crate::profile::hosted::{self, Connection, Hosted, Offer};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
+use crate::secrets::{self, Layer, Raw};
 use crate::sources;
 use crate::usage_splice::{Antigravity, Starter};
 use crate::worktree::Worktrees;
@@ -372,6 +373,8 @@ struct Shared {
     delegation: Option<Delegation>,
     /// The sessions the host serves, recorded in its home.
     history: Arc<history::Store>,
+    /// What gives a connection's sessions the secret tools.
+    secrets: Arc<secrets::Hub>,
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -842,6 +845,7 @@ impl Serving {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
+        let secrets = secrets::Hub::new(&identity, &store);
         // Turning the key change off is every method's to do: WebCrypto has none and takes only `false`, and ends a session at
         // its limit.
         let mut builder =
@@ -1162,6 +1166,7 @@ impl Serving {
         let serving = Self {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
+                secrets,
                 method,
                 store,
                 registry,
@@ -1581,8 +1586,11 @@ fn give_agent<C: Channel>(
                 },
             })
         });
+    // The person's app, when it offered secret prompts and has an identity of its own to be bound to.
+    let link = shared.secrets.link(peer);
     let peeked = Peek::new(channel, conn.as_ref());
-    let channel = &peeked;
+    let raw = Raw::new(&peeked, link.as_ref());
+    let channel = &raw;
     let connection = match offer {
         Some(offer) => match prepare(
             served,
@@ -1608,7 +1616,7 @@ fn give_agent<C: Channel>(
                 (peer, first),
                 options,
                 scope,
-                (connection.as_ref(), conn.as_ref()),
+                (connection.as_ref(), conn.as_ref(), link.as_ref()),
             );
         }
     };
@@ -1622,7 +1630,10 @@ fn give_agent<C: Channel>(
             }
         };
         let scoped = Scoped::new(channel, scope).agent(agent.pid());
-        let end = relay(&Delegating::new(&scoped, conn.as_ref()), &agent);
+        let end = relay(
+            &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
+            &agent,
+        );
         tracing::info!(entry = served.name, %peer, "left: {end:?}");
         shared.forget(key);
         let _ = agent.stop();
@@ -1644,7 +1655,10 @@ fn give_agent<C: Channel>(
         }
     };
     let hosted = Hosted::new(channel, scope, &connection).agent(agent.pid());
-    let end = relay(&Delegating::new(&hosted, conn.as_ref()), &agent);
+    let end = relay(
+        &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
+        &agent,
+    );
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
     let _ = agent.stop();
@@ -1892,7 +1906,11 @@ fn give_harness<C: Channel>(
     (peer, first): (&PeerId, &[u8]),
     harness: &kind::Harness,
     scope: &Scope,
-    (connection, conn): (Option<&Connection>, Option<&Arc<delegate::Conn>>),
+    (connection, conn, link): (
+        Option<&Connection>,
+        Option<&Arc<delegate::Conn>>,
+        Option<&Arc<secrets::Link>>,
+    ),
 ) {
     let turn_away = |why: String| {
         let id = serde_json::from_slice::<serde_json::Value>(first)
@@ -1948,14 +1966,17 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner, started.keeper);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &Delegating::new(
-                &Recording::new(
-                    &Hosted::in_process(&gated, scope, connection),
-                    &shared.history,
-                    &served.name,
-                    harness.id(),
+            &Layer::new(
+                &Delegating::new(
+                    &Recording::new(
+                        &Hosted::in_process(&gated, scope, connection),
+                        &shared.history,
+                        &served.name,
+                        harness.id(),
+                    ),
+                    conn,
                 ),
-                conn,
+                link,
             ),
             &*started.harness,
             to_provider,
@@ -1963,14 +1984,17 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &Delegating::new(
-                &Recording::new(
-                    &Scoped::new(&gated, scope),
-                    &shared.history,
-                    &served.name,
-                    harness.id(),
+            &Layer::new(
+                &Delegating::new(
+                    &Recording::new(
+                        &Scoped::new(&gated, scope),
+                        &shared.history,
+                        &served.name,
+                        harness.id(),
+                    ),
+                    conn,
                 ),
-                conn,
+                link,
             ),
             &*started.harness,
             to_provider,

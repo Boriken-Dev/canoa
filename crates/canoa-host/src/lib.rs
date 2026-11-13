@@ -21,6 +21,7 @@ pub mod pipe;
 pub mod profile;
 pub mod provider;
 mod scope;
+mod secrets;
 pub mod serve;
 mod sources;
 pub mod store;
