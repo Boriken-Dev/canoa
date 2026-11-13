@@ -14,6 +14,7 @@ import '../store/programs.dart';
 import 'agent_sections.dart';
 import 'app_sections.dart';
 import 'overlay_sections.dart';
+import 'setting_layers.dart';
 import 'settings_controller.dart';
 
 /// One page of Settings in the list at its left.
@@ -250,7 +251,7 @@ class SettingsPageState extends State<SettingsPage> {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(problem, key: const Key('settings-write-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
-            child,
+            SettingsLayers(controller: controller, child: child),
           ],
         ),
       ),

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../acp/agent_commands.dart';
 import '../acp/share_path.dart';
 import '../config/canoa_config.dart';
+import '../settings/setting_layers.dart' show SettingNote;
 import '../theme/look.dart';
 import 'host_supervisor.dart';
 import 'host_tool.dart';
@@ -271,10 +272,23 @@ class _HostingPanelState extends State<HostingPanel> {
       contentPadding: EdgeInsets.zero,
       leading: entry.kind == 'agent' ? SourceMark.provider(provider) : const Icon(Icons.extension_outlined),
       title: Text(entry.name),
-      subtitle: Text(
-        [entry.runs, ...entry.args].join(' ') + (url == null ? '' : '\n$url'),
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SettingNote(
+            config: config,
+            configKey: ['host', entry.kind == 'agent' ? 'agents' : 'providers', entry.name],
+            // Hosting writes [host] on its own, so a reset goes the same way.
+            onReset: busy
+                ? () {}
+                : () => _run(() => _save(config.resetKey(['host', entry.kind == 'agent' ? 'agents' : 'providers', entry.name]))),
+          ),
+          Text(
+            [entry.runs, ...entry.args].join(' ') + (url == null ? '' : '\n$url'),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

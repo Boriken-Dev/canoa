@@ -76,6 +76,18 @@ final class ConfigSource {
   /// The person's file as read.
   final Map<String, dynamic> own;
 
+  /// This source with the person's file holding [value] at the top-level [key], or none when [value] is null: what a save of one
+  /// table by another part of the app leaves in it.
+  ConfigSource withOwn(String key, Object? value) {
+    final next = {...own};
+    if (value == null) {
+      next.remove(key);
+    } else {
+      next[key] = value;
+    }
+    return ConfigSource(format: format, marked: marked, layers: layers, own: next);
+  }
+
   /// The layers below the person's file, merged.
   Map<String, dynamic> get lower {
     var merged = <String, dynamic>{};
@@ -231,7 +243,7 @@ final class CanoaConfig {
       );
 
   /// This configuration with [host] as its `[host]` table.
-  CanoaConfig withHost(Map<String, dynamic>? host) => CanoaConfig(
+  CanoaConfig withHost(Map<String, dynamic>? host, {ConfigSource? source}) => CanoaConfig(
     startHidden: startHidden,
     closeToTray: closeToTray,
     minimizeToTray: minimizeToTray,
@@ -258,7 +270,7 @@ final class CanoaConfig {
     embedLimit: embedLimit,
     warnPermille: warnPermille,
     limitPhrases: limitPhrases,
-    source: source,
+    source: source ?? this.source,
   );
 
   /// What `[host]` names for canoa to serve, agents first, as written. canoa itself checks each one.
@@ -939,7 +951,18 @@ args = ${jsonEncode(agent.args)}
   static final _ownDocuments = Expando<Map<String, dynamic>>('own document');
 
   Map<String, dynamic> _ownDocument() => _ownDocuments[this] ??=
-      ownDocument(TomlDocument.parse(_encodeToml()).toMap(), source.lower, source.own, _defaults);
+      ownDocument(TomlDocument.parse(_encodeToml()).toMap(), _lowerModel, source.own, _defaults);
+
+  static final _lowerModels = Expando<Map<String, dynamic>>('lower layers as the model writes them');
+
+  /// What the layers below the person's file hold, written the way this app writes a configuration, so that an entry of a
+  /// lower layer that the model fills in (an agent with no `args`) still reads as the same entry and is not copied into the
+  /// person's file.
+  Map<String, dynamic> get _lowerModel => source.layers.isEmpty
+      ? const {}
+      : _lowerModels[source] ??= TomlDocument.parse(
+          CanoaConfig.fromLayers((format: ConfigFormat.toml, marked: false, data: const <String, dynamic>{}), source.layers)._encodeToml(),
+        ).toMap();
 
   static final Map<String, dynamic> _defaults = TomlDocument.parse(const CanoaConfig()._encodeToml()).toMap();
 

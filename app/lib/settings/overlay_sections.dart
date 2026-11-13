@@ -83,6 +83,7 @@ class _CatalogsSectionState extends State<CatalogsSection> {
             SettingsRow(
               key: Key('catalog-$label'),
               title: label,
+              configKey: ['catalogs', label],
               description: source.spec,
               control: IconButton(
                 key: Key('catalog-remove-$label'),
@@ -113,6 +114,7 @@ class _CatalogsSectionState extends State<CatalogsSection> {
           for (final (key, title, description) in _limits)
             SettingsRow(
               title: title,
+              configKey: ['store', key],
               description: '$description. Default ${_value(const StoreSettings(), key)}',
               control: _LimitField(
                 key: Key('limit-$key'),

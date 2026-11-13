@@ -256,7 +256,8 @@ class _CanoaAppState extends State<CanoaApp> {
     final host = widget.host;
     final path = _configPath;
     if (host == null || path == null) return 'canoa.cfg has no place on this computer';
-    final changed = config.withHost(fromDialog.host);
+    // The person's file holds [host] as the dialog left it, so a value it took out falls back to a lower layer's.
+    final changed = config.withHost(fromDialog.host, source: config.source.withOwn('host', fromDialog.source.own['host']));
     if (changed.hostEntries.isNotEmpty) {
       final problem = await withFileBeside(path, changed.encode(), (file) => host.check(hostCheckSpec(path, file)));
       if (problem != null) return problem;

@@ -12,6 +12,7 @@ import '../sources/sources.dart';
 import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../theme/look.dart';
+import 'setting_layers.dart';
 import 'settings_controller.dart';
 import 'settings_row.dart';
 
@@ -124,6 +125,7 @@ class _SourcesSectionState extends State<SourcesSection> {
     Widget? toggle,
     Widget? detail,
     String? command,
+    List<String>? configKey,
   }) => FutureBuilder<SourceCheck>(
     future: _check(source),
     builder: (context, snapshot) {
@@ -150,6 +152,7 @@ class _SourcesSectionState extends State<SourcesSection> {
                           style: TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: scheme.onSurfaceVariant)),
                     if (check?.updateAvailable ?? false) Icon(Icons.arrow_circle_up, size: 16, color: scheme.primary),
                   ]),
+                  if (configKey != null) SettingNote(configKey: configKey),
                   Text(
                     check == null ? 'Looking for what it needs…' : _readiness(check),
                     key: Key('source-ready $key'),
@@ -193,6 +196,7 @@ class _SourcesSectionState extends State<SourcesSection> {
             _row(
               source: preset,
               key: preset.label,
+              configKey: const ['sources', 'hidden'],
               toggle: Switch(
                 key: Key('source-offered ${preset.label}'),
                 value: !config.hiddenSources.contains(preset.label),
@@ -207,6 +211,7 @@ class _SourcesSectionState extends State<SourcesSection> {
             _row(
               source: AgentSource.hosted(agent.label, local: true),
               key: agent.label,
+              configKey: ['agents', agent.label],
               command: [agent.program, ...agent.args].join(' '),
               detail: Align(
                 alignment: Alignment.centerRight,
@@ -282,6 +287,7 @@ class _McpSectionState extends State<McpSection> {
             SwitchRow(
               key: Key('mcp-$name'),
               title: name,
+              configKey: ['profile', 'mcp', name],
               description: _describe(server),
               enabled: agent != null,
               value: agent == null || c.config.agentMcp[agent]?[name] != false,
@@ -352,6 +358,12 @@ class _PermissionsSectionState extends State<PermissionsSection> {
     return SettingsGroup(title: 'Protected paths', children: [
       SettingsRow(
         title: 'Paths a remembered rule never covers',
+        configKey: const ['permissions', 'protected'],
+        onLayerReset: () {
+          widget.controller.change((c) => c.resetKey(const ['permissions', 'protected']));
+          _protected.text = (widget.controller.config.protectedPaths ?? recommendedProtected).join('\n');
+          widget.rules?.useProtected(widget.controller.config.protectedPaths == null ? null : ProtectedPaths(widget.controller.config.protectedPaths!));
+        },
         description: 'One pattern a line, as in a gitignore file: a "!" line allows one back, the last line that matches wins, "#" '
             'starts a comment, "~/" is your home folder, and a pattern without a start matches anywhere. Lines in the accent '
             'colour are Canoa\'s recommendation.',
@@ -442,6 +454,7 @@ class _PermissionsSectionState extends State<PermissionsSection> {
         SettingsGroup(title: 'New sessions', children: [
           ChoiceRow<String?>(
             title: 'Mode of a new session',
+            configKey: const ['permissions', 'default_mode'],
             description: 'Each session can change it from the composer, and keeps its own',
             fieldKey: const Key('settings-default-mode'),
             value: config.defaultMode,
@@ -453,6 +466,7 @@ class _PermissionsSectionState extends State<PermissionsSection> {
           SwitchRow(
             key: const Key('settings-allow-once-only'),
             title: 'Answer with allow once only',
+            configKey: const ['permissions', 'allow_once_only'],
             description: 'A request that offers only an "always" answer is then asked, not answered. Off, Bypass takes the "always" the agent offers',
             value: config.allowOnceOnly,
             onChanged: (v) => c.change((x) => x.copyWith(allowOnceOnly: v)),
@@ -487,6 +501,7 @@ class UsageSection extends StatelessWidget {
       return SettingsGroup(children: [
         ChoiceRow<int>(
           title: 'Warn from',
+          configKey: const ['usage', 'warn_permille'],
           description: 'The usage control shows a warning once this share of a limit is used',
           fieldKey: const Key('settings-warn'),
           value: warn,

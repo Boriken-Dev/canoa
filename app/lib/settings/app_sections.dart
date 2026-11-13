@@ -61,7 +61,7 @@ class _GeneralSectionState extends State<GeneralSection> {
           SettingsGroup(title: 'Window', children: [
             SwitchRow(
               title: 'Start hidden in the tray',
-              layer: c.layerOf(const ['desktop', 'start_hidden']),
+              configKey: const ['desktop', 'start_hidden'],
               description: 'Canoa starts with no window; open it from the tray icon',
               machine: true,
               value: config.startHidden,
@@ -69,7 +69,7 @@ class _GeneralSectionState extends State<GeneralSection> {
             ),
             SwitchRow(
               title: 'Close the window to the tray',
-              layer: c.layerOf(const ['desktop', 'close_to_tray']),
+              configKey: const ['desktop', 'close_to_tray'],
               description: 'Closing keeps Canoa and its sessions running',
               machine: true,
               value: config.closeToTray,
@@ -77,7 +77,7 @@ class _GeneralSectionState extends State<GeneralSection> {
             ),
             SwitchRow(
               title: 'Minimize the window to the tray',
-              layer: c.layerOf(const ['desktop', 'minimize_to_tray']),
+              configKey: const ['desktop', 'minimize_to_tray'],
               description: 'Minimizing hides the window instead of leaving it on the taskbar',
               machine: true,
               value: config.minimizeToTray,
@@ -87,14 +87,14 @@ class _GeneralSectionState extends State<GeneralSection> {
         SettingsGroup(title: 'Network', children: [
           SwitchRow(
             title: 'Prefer WebTransport',
-            layer: c.layerOf(const ['network', 'prefer_webtransport']),
+            configKey: const ['network', 'prefer_webtransport'],
             description: 'Falls back to WSS when WebTransport does not connect',
             value: config.preferWebTransport,
             onChanged: (v) => c.change((x) => x.copyWith(preferWebTransport: v)),
           ),
           ChoiceRow<int>(
             title: 'Network timeout',
-            layer: c.layerOf(const ['network', 'connect_timeout']),
+            configKey: const ['network', 'connect_timeout'],
             description: 'How long a connection may take before Canoa gives up',
             child: true,
             fieldKey: const Key('settings-timeout'),
@@ -106,7 +106,7 @@ class _GeneralSectionState extends State<GeneralSection> {
         SettingsGroup(title: 'Sessions', children: [
           ChoiceRow<int>(
             title: 'Sessions remembered',
-            layer: c.layerOf(const ['sessions', 'keep']),
+            configKey: const ['sessions', 'keep'],
             description: 'The least recently used go first',
             fieldKey: const Key('settings-keep'),
             value: config.sessions.keep,
@@ -116,7 +116,7 @@ class _GeneralSectionState extends State<GeneralSection> {
           SwitchRow(
             key: const Key('settings-keep-text'),
             title: 'Keep what was said with each session',
-            layer: c.layerOf(const ['sessions', 'keep_text']),
+            configKey: const ['sessions', 'keep_text'],
             description: 'Off: only the session\'s name and place are kept. Turning it off clears what was kept',
             child: true,
             machine: true,
@@ -142,6 +142,11 @@ class _GeneralSectionState extends State<GeneralSection> {
           if (widget.workspacePreview != null)
             SettingsRow(
               title: 'Folder of a session with none chosen',
+              configKey: const ['sessions', 'workspace'],
+              onLayerReset: () {
+                widget.controller.change((c) => c.resetKey(const ['sessions', 'workspace']));
+                _setWorkspace(widget.controller.config.sessions.workspace, text: true);
+              },
               description: preview == null ? 'A template; the folder it makes is shown under the field' : 'Now: $preview',
               machine: true,
               below: TextField(
@@ -185,6 +190,7 @@ class AppearanceSection extends StatelessWidget {
         SettingsGroup(title: 'Theme', children: [
           ChoiceRow<LookId>(
             title: 'Look',
+            configKey: const ['appearance', 'look'],
             description: 'Bubbles on a warm page, or a terminal\'s lines',
             fieldKey: const Key('settings-look'),
             value: config.look,
@@ -193,6 +199,7 @@ class AppearanceSection extends StatelessWidget {
           ),
           ChoiceRow<String>(
             title: 'Brightness',
+            configKey: const ['appearance', 'brightness'],
             description: 'Follow the system, or stay dark or light',
             fieldKey: const Key('settings-brightness'),
             value: config.brightness,
@@ -201,6 +208,7 @@ class AppearanceSection extends StatelessWidget {
           ),
           ChoiceRow<ChatDensity>(
             title: 'Detail of the agent\'s work',
+            configKey: const ['appearance', 'density'],
             description: 'Normal folds a finished turn into one line; Verbose shows every step',
             fieldKey: const Key('settings-density'),
             value: config.density,
@@ -296,18 +304,21 @@ class NotificationsSection extends StatelessWidget {
         SettingsGroup(title: 'When a conversation you are not looking at', children: [
           SwitchRow(
             title: 'It asks leave to use a tool',
+            configKey: const ['notifications', 'permission'],
             description: 'A permission request is waiting for your answer',
             value: n.permission,
             onChanged: (v) => controller.change((c) => c.copyWith(notifications: c.notifications.copyWith(permission: v))),
           ),
           SwitchRow(
             title: 'It has a question for you',
+            configKey: const ['notifications', 'question'],
             description: 'The agent stopped to ask, and waits',
             value: n.question,
             onChanged: (v) => controller.change((c) => c.copyWith(notifications: c.notifications.copyWith(question: v))),
           ),
           SwitchRow(
             title: 'It finished its turn',
+            configKey: const ['notifications', 'finished'],
             description: 'The agent is done and has said what it did',
             value: n.finished,
             onChanged: (v) => controller.change((c) => c.copyWith(notifications: c.notifications.copyWith(finished: v))),

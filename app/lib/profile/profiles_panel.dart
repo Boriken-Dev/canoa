@@ -16,6 +16,7 @@ import 'profile_home.dart';
 import 'profile_layers.dart';
 import 'project_trust.dart';
 import '../selectable.dart';
+import '../settings/setting_layers.dart' show SettingNote;
 import '../settings/settings_row.dart' show ScopeBar;
 
 /// The effective profile of each agent, every value beside the layer it came from; the overlays, which install and sync
@@ -247,14 +248,20 @@ class ProfilesPanelState extends State<ProfilesPanel> {
     );
   }
 
+  /// [subtitle] under the words that say which layer of canoa.cfg gives the overlay [name], when a lower one does.
+  Widget _noted(String name, Widget subtitle) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [SettingNote(configKey: ['overlays', name]), subtitle],
+  );
+
   Widget _overlayRow(String name, OverlaySource source) {
     final home = widget.home;
     switch (source) {
       case DirOverlay(:final dir, :final pin):
-        return ListTile(dense: true, leading: _icon(name), title: Text(name), subtitle: Text([
+        return ListTile(dense: true, leading: _icon(name), title: Text(name), subtitle: _noted(name, Text([
           ?_summary(name),
           'The directory $dir, read in place, ${pin == null ? 'not pinned' : 'pinned to $pin'}',
-        ].join('\n')));
+        ].join('\n'))));
       case GitOverlay():
         final installed = home?.overlays.installed(name);
         final state = home == null
@@ -268,7 +275,7 @@ class ProfilesPanelState extends State<ProfilesPanel> {
           dense: true,
           leading: _icon(name),
           title: Text('$name  ${source.spec}'),
-          subtitle: Text(visible([?_summary(name), state].join('\n'))),
+          subtitle: _noted(name, Text(visible([?_summary(name), state].join('\n')))),
           trailing: home == null
               ? null
               : TextButton(
