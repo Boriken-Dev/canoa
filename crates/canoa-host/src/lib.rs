@@ -23,6 +23,7 @@ pub mod provider;
 mod scope;
 mod secrets;
 pub mod serve;
+mod share;
 mod sources;
 pub mod store;
 pub mod tool;

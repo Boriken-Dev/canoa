@@ -131,7 +131,7 @@ impl Moves {
             .map(str::to_owned)
             .or_else(|| doc.header.cwd.clone())
             .ok_or_else(|| bad("cwd is needed: the history does not say where it ran"))?;
-        let path = Path::new(&cwd);
+        let path = crate::share::plain(Path::new(&cwd));
         if !path.is_absolute() || cwd.chars().any(char::is_control) {
             return Err(bad("cwd is an absolute path"));
         }
@@ -139,7 +139,7 @@ impl Moves {
             && !target
                 .roots()
                 .iter()
-                .any(|root| path.starts_with(Path::new(root)))
+                .any(|root| path.starts_with(crate::share::plain(Path::new(root))))
         {
             return Err(bad("that source serves only under its working roots"));
         }

@@ -535,3 +535,88 @@ fn a_provider_entrys_channel_screens_what_the_agent_sends_and_changes_nothing_el
             .all(|message| !message.contains("delegate/event"))
     );
 }
+
+#[cfg(windows)]
+mod shares {
+    use super::*;
+
+    fn session(cwd: &str, more: &[&str]) -> Vec<u8> {
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 2, "method": "session/new",
+            "params": {"cwd": cwd, "additionalDirectories": more, "mcpServers": []}}))
+        .expect("JSON")
+    }
+
+    #[test]
+    fn a_folder_on_a_share_is_an_ordinary_working_directory() {
+        let scope = Scope::new(vec![PathBuf::from(r"\\fileserver\projects")]);
+        for cwd in [
+            r"\\fileserver\projects",
+            r"\\fileserver\projects\app",
+            r"\\fileserver\projects\app\src",
+        ] {
+            assert!(
+                matches!(scope.check(&session(cwd, &[cwd])), Verdict::Forward(_)),
+                "{cwd}"
+            );
+        }
+        for cwd in [
+            r"\\fileserver\other\app",
+            r"\\otherserver\projects\app",
+            r"\\fileserver\projects-sibling",
+            r"\\fileserver\projects\..\other",
+            r"\\fileserver\projects\.\app",
+            r"\\.\pipe\projects",
+            r"C:\projects",
+        ] {
+            assert!(refused(&scope, &session(cwd, &[])).is_some(), "{cwd}");
+        }
+        assert!(
+            refused(
+                &scope,
+                &session(r"\\fileserver\projects\app", &[r"\\fileserver\other"])
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn a_verbatim_path_is_compared_and_forwarded_in_its_plain_form() {
+        for root in [r"\\fileserver\projects", r"\\?\UNC\fileserver\projects"] {
+            let scope = Scope::new(vec![PathBuf::from(root)]);
+            let sent = session(
+                r"\\?\UNC\fileserver\projects\app",
+                &[r"\\?\UNC\fileserver\projects\lib"],
+            );
+            let Verdict::Forward(bytes) = scope.check(&sent) else {
+                panic!("a verbatim folder under {root} was refused");
+            };
+            let params = serde_json::from_slice::<Value>(&bytes).expect("JSON")["params"].clone();
+            assert_eq!(params["cwd"], r"\\fileserver\projects\app", "{root}");
+            assert_eq!(
+                params["additionalDirectories"],
+                json!([r"\\fileserver\projects\lib"]),
+                "{root}"
+            );
+        }
+        let scope = Scope::new(vec![PathBuf::from(r"C:\work")]);
+        let Verdict::Forward(bytes) = scope.check(&session(r"\\?\C:\work\app", &[])) else {
+            panic!("a verbatim drive folder was refused");
+        };
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).expect("JSON")["params"]["cwd"],
+            r"C:\work\app"
+        );
+    }
+
+    #[test]
+    fn a_device_path_is_refused_with_or_without_roots() {
+        for scope in [
+            Scope::default(),
+            Scope::new(vec![PathBuf::from(r"C:\work")]),
+        ] {
+            for cwd in [r"\\.\pipe\x", r"\\?\Volume{1234}\work"] {
+                assert!(refused(&scope, &session(cwd, &[])).is_some(), "{cwd}");
+            }
+        }
+    }
+}

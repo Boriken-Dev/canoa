@@ -21,6 +21,7 @@ use coqui_transport::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;
+use crate::share;
 use crate::usage_splice::{Antigravity, Client, Inference, Splice};
 use crate::worktree::Worktrees;
 
@@ -122,7 +123,7 @@ impl Scope {
             }));
         }
         // ACP's parameters are always an object. A list would fill a request's fields in order, past every check below.
-        let checked = match object.get("params") {
+        let checked = match object.get_mut("params") {
             None => Ok(()),
             Some(Value::Object(params)) => self.check_params(params),
             Some(_) => Err("params must be an object"),
@@ -199,22 +200,19 @@ impl Scope {
         serde_json::to_vec(&value).map_or(Cow::Borrowed(message), Cow::Owned)
     }
 
-    fn check_params(&self, params: &Map<String, Value>) -> Result<(), &'static str> {
+    fn check_params(&self, params: &mut Map<String, Value>) -> Result<(), &'static str> {
         if let Some(servers) = params.get("mcpServers") {
             let servers = servers.as_array().ok_or("mcpServers is not a list")?;
             for server in servers {
                 check_server(server)?;
             }
         }
-        if self.roots.is_empty() {
-            return Ok(());
-        }
-        if let Some(cwd) = params.get("cwd") {
+        if let Some(cwd) = params.get_mut("cwd") {
             self.check_directory(cwd)?;
         }
-        if let Some(more) = params.get("additionalDirectories") {
+        if let Some(more) = params.get_mut("additionalDirectories") {
             for directory in more
-                .as_array()
+                .as_array_mut()
                 .ok_or("additionalDirectories is not a list")?
             {
                 self.check_directory(directory)?;
@@ -223,13 +221,33 @@ impl Scope {
         Ok(())
     }
 
-    fn check_directory(&self, directory: &Value) -> Result<(), &'static str> {
-        let path = Path::new(directory.as_str().ok_or("a directory is not text")?);
-        if plain_absolute(path) && self.roots.iter().any(|root| path.starts_with(root)) {
-            Ok(())
-        } else {
-            Err("this host serves this agent only under its working roots")
+    /// A directory the client names: in no device namespace, and under the roots when there are any. It is compared with
+    /// them, and handed to the agent, in its plain form (`\\?\UNC\server\share` as `\\server\share`).
+    fn check_directory(&self, directory: &mut Value) -> Result<(), &'static str> {
+        let Some(text) = directory.as_str() else {
+            return if self.roots.is_empty() {
+                Ok(())
+            } else {
+                Err("a directory is not text")
+            };
+        };
+        let path = share::plain(Path::new(text));
+        if share::is_device(&path) {
+            return Err("a device path is not a directory");
         }
+        if !self.roots.is_empty()
+            && !(plain_absolute(&path)
+                && self
+                    .roots
+                    .iter()
+                    .any(|root| path.starts_with(share::plain(root))))
+        {
+            return Err("this host serves this agent only under its working roots");
+        }
+        if let Cow::Owned(plain) = path {
+            *directory = Value::String(plain.to_string_lossy().into_owned());
+        }
+        Ok(())
     }
 }
 

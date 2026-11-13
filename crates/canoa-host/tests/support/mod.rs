@@ -505,3 +505,31 @@ pub fn cwd(scratch: &Scratch) -> String {
     std::fs::create_dir_all(&dir).expect("a working directory");
     dir.to_string_lossy().into_owned()
 }
+
+/// `path`, a drive path, as the same place named through this machine's administrative share (`\\localhost\C$\...`), which
+/// is how a test reaches a share with nothing on the network.
+///
+/// # Panics
+///
+/// `path` is not a drive path, or the share does not answer.
+#[cfg(windows)]
+pub fn on_share(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    let (drive, rest) = text.split_at(2);
+    assert!(drive.ends_with(':'), "{text} is not a drive path");
+    let shared = PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]));
+    assert!(
+        shared.is_dir(),
+        "{} does not answer: this test needs the administrative share",
+        shared.display()
+    );
+    shared
+}
+
+/// A directory named `work` in `scratch`, as a path on this machine's administrative share.
+#[cfg(windows)]
+pub fn shared_cwd(scratch: &Scratch) -> String {
+    let dir = scratch.0.join("work");
+    std::fs::create_dir_all(&dir).expect("a working directory");
+    on_share(&dir).to_string_lossy().into_owned()
+}

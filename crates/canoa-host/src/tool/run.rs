@@ -26,6 +26,7 @@ use super::{
 };
 use crate::child::OUTPUT_LIMIT;
 use crate::serve::MAX_LINE;
+use crate::share;
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -274,11 +275,10 @@ impl Link {
             Some(Value::Array(servers)) if servers.is_empty() => {}
             Some(_) => return Err(invalid("this agent takes no MCP servers")),
         }
-        // Looking at a share would reach that machine with this user's credentials, before any check.
-        if !local(&cwd) {
-            return Err(invalid(
-                "cwd on a network share or device namespace is refused: it would reach another machine",
-            ));
+        // A share is an ordinary folder, written plain wherever it came from; a device namespace is no folder.
+        let cwd = share::plain(&cwd).into_owned();
+        if share::is_device(&cwd) {
+            return Err(invalid("cwd in a device namespace is not a directory"));
         }
         if !cwd.is_dir() {
             return Err(invalid("cwd is not a directory"));
@@ -879,18 +879,6 @@ pub(super) fn line_of(value: &Value) -> Vec<u8> {
     line
 }
 
-/// Whether `path` names this machine's file system: on Windows a drive, not a share (`\\server\share`, `\\?\UNC\`) or a
-/// device namespace (`\\.\`, `\\?\Volume{…}`). Elsewhere every path does.
-fn local(path: &Path) -> bool {
-    match path.components().next() {
-        Some(std::path::Component::Prefix(prefix)) => matches!(
-            prefix.kind(),
-            std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)
-        ),
-        _ => true,
-    }
-}
-
 /// The largest char boundary in `text` at or below `max`.
 fn boundary(text: &str, max: usize) -> usize {
     if text.len() <= max {
@@ -975,6 +963,7 @@ impl Process {
         cwd: &Path,
         generation: u64,
     ) -> io::Result<(Self, ChildStdout, ChildStderr)> {
+        let (program, args) = share::launch_in(program, args, cwd)?;
         let mut command = Command::new(program);
         command
             .args(args)

@@ -374,16 +374,16 @@ fn a_tool_that_does_not_stop_when_asked_is_ended_after_the_grace() {
     .expect("linked");
 }
 
+/// A device namespace is no directory of any machine; a share is an ordinary one.
 #[cfg(windows)]
 #[test]
-fn a_network_path_is_never_a_sessions_directory() {
+fn a_device_path_is_never_a_sessions_directory() {
     let (host, client) = paired(&pi_config(&["--mode", "rpc"], ""));
     with_link(host.url("pi"), &client, host.peer, |rpc| {
         rpc.initialize().expect("initialized");
         for cwd in [
-            r"\\127.0.0.1\c$\Windows",
-            r"\\?\UNC\127.0.0.1\c$",
             r"\\.\pipe\x",
+            r"\\?\Volume{00000000-0000-0000-0000-000000000000}\",
         ] {
             let refused = rpc
                 .request("session/new", json!({"cwd": cwd, "mcpServers": []}))
@@ -391,13 +391,76 @@ fn a_network_path_is_never_a_sessions_directory() {
             assert!(
                 refused["message"]
                     .as_str()
-                    .is_some_and(|text| text.contains("network")),
+                    .is_some_and(|text| text.contains("device")),
                 "{cwd}: {refused}"
             );
         }
     })
     .expect("linked");
 }
+
+/// The tool runs in the folder on the share, in either written form of it.
+#[cfg(windows)]
+#[test]
+fn a_session_in_a_share_folder_runs_the_tool_there() {
+    let (host, client) = paired(&pi_config(&["--mode", "rpc"], ""));
+    let plain = support::shared_cwd(&host.scratch);
+    let verbatim = plain.replacen(r"\\", r"\\?\UNC\", 1);
+    for dir in [plain, verbatim] {
+        let _ = std::fs::remove_file(Path::new(&dir).join("tool.pid"));
+        with_link(host.url("pi"), &client, host.peer, |rpc| {
+            let (session, _) = open(rpc, &dir);
+            let hello = prompt(rpc, &session, "hello", "allow");
+            assert_eq!(hello.text("agent_message_chunk"), "echo: hello", "{dir}");
+        })
+        .expect("linked");
+        assert!(
+            Path::new(&dir).join("tool.pid").is_file(),
+            "{dir}: the tool did not run in the folder"
+        );
+    }
+}
+
+/// A tool started through an npm-style `.cmd` file, which cmd.exe cannot run in a folder on a share, runs there all the
+/// same: it is the file's program that is started, in the folder.
+#[cfg(windows)]
+#[test]
+fn a_command_file_tool_runs_in_a_share_folder() {
+    let scratch = Scratch::new();
+    let bin = scratch.0.join("bin");
+    std::fs::create_dir_all(bin.join("node_modules").join("pi")).expect("a directory");
+    std::fs::copy(example("jsonl_tool", false), bin.join("node.exe")).expect("copied");
+    std::fs::write(bin.join("node_modules").join("pi").join("cli.js"), "").expect("written");
+    let shim = bin.join("pi.cmd");
+    std::fs::write(&shim, NPM_SHIM).expect("written");
+    let config = pi_config(&["--mode", "rpc"], "").replace(
+        &quoted(&example("jsonl_tool", false).to_string_lossy()),
+        &quoted(&shim.to_string_lossy()),
+    );
+    let host = Host::start_in(scratch, &config, 1, &[]);
+    let client = support::key();
+    host.pair(&client);
+    let dir = support::shared_cwd(&host.scratch);
+    with_link(host.url("pi"), &client, host.peer, |rpc| {
+        let (session, _) = open(rpc, &dir);
+        let hello = prompt(rpc, &session, "hello", "allow");
+        assert_eq!(hello.text("agent_message_chunk"), "echo: hello");
+    })
+    .expect("linked");
+    assert!(
+        Path::new(&dir).join("tool.pid").is_file(),
+        "the tool did not run in the folder"
+    );
+}
+
+/// What npm writes for a package's command, with its own node beside it.
+#[cfg(windows)]
+const NPM_SHIM: &str = concat!(
+    "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\n",
+    "IF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n",
+    "  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\n",
+    "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\pi\\cli.js\" %*\r\n"
+);
 
 /// A batch file that names a program bare is not given one from the session's directory, where a client chose it.
 #[cfg(windows)]
