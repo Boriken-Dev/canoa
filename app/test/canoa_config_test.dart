@@ -36,11 +36,8 @@ cdn = "local"
   });
 
   test('an overlay entry carries the values of its declared options, kept when it is pinned and saved', () {
-    final config = CanoaConfig.parse('[overlays]
-mine = { dir = "mine", options = { depth = "deep", rounds = 3 } }
-'
-        'plain = "https://example.org/a.git@main"
-');
+    final config = CanoaConfig.parse('[overlays]\nmine = { dir = "mine", options = { depth = "deep", rounds = 3 } }\n'
+        'plain = "https://example.org/a.git@main"\n');
     expect(config.overlayOptions('mine'), {'depth': 'deep', 'rounds': 3});
     expect(config.overlayOptions('plain'), isEmpty);
     for (final saved in [config.withProfilesOf(config), config.withOverlayPin('mine', 'sha256:${'0' * 64}')]) {
@@ -50,9 +47,7 @@ mine = { dir = "mine", options = { depth = "deep", rounds = 3 } }
     expect(CanoaConfig.parse(changed.encode()).overlayOptions('plain'), {'depth': 'quick'});
     expect(CanoaConfig.parse(changed.encode()).overlays['plain'], config.overlays['plain']);
     expect(CanoaConfig.parse(config.withOverlayOptions('mine', {}).encode()).overlayOptions('mine'), isEmpty);
-    expect(() => CanoaConfig.parse('[overlays]
-mine = { dir = "mine", options = "deep" }
-'), throwsFormatException);
+    expect(() => CanoaConfig.parse('[overlays]\nmine = { dir = "mine", options = "deep" }\n'), throwsFormatException);
   });
 
   test('allow_once_only is read, written and kept by every copy, and off by default', () {
