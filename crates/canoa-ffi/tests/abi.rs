@@ -114,6 +114,8 @@ fn serve(config: &Path, home: &Path, holder: &str) -> u64 {
         "args": ["serve", "--allow-empty", "--until-stdin-closes", "--config", config],
         "home": home,
         "holder": holder,
+        "program": child_entry(),
+        "program_args": [canoa_ffi::jobs::CHILD_FLAG],
     }))
 }
 

@@ -24,7 +24,7 @@ use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
 use std::path::Path;
 use std::process::{ChildStderr, ChildStdin, ChildStdout, ExitStatus};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use rustix::net::{
@@ -794,31 +794,32 @@ impl Drop for Handle {
     }
 }
 
+/// What runs the starter, and the connection to the one running.
 struct Starter {
-    program: Program,
-    link: Mutex<Option<Arc<Link>>>,
+    program: Option<Program>,
+    link: Option<Arc<Link>>,
 }
 
-static STARTER: OnceLock<Starter> = OnceLock::new();
+static STARTER: Mutex<Starter> = Mutex::new(Starter {
+    program: None,
+    link: None,
+});
 
 pub(super) fn install(program: Program) {
-    let _ = STARTER.set(Starter {
-        program,
-        link: Mutex::new(None),
-    });
+    lock(&STARTER).program = Some(program);
 }
 
 /// The connection to the starter, started if need be, or `None` when none is installed.
 pub(super) fn link() -> io::Result<Option<Arc<Link>>> {
-    let Some(starter) = STARTER.get() else {
+    let mut starter = lock(&STARTER);
+    let Some(program) = starter.program.clone() else {
         return Ok(None);
     };
-    let mut held = lock(&starter.link);
-    if let Some(link) = held.as_ref().filter(|link| !link.has_ended()) {
+    if let Some(link) = starter.link.as_ref().filter(|link| !link.has_ended()) {
         return Ok(Some(Arc::clone(link)));
     }
-    let link = Link::start(&starter.program)?;
-    *held = Some(Arc::clone(&link));
+    let link = Link::start(&program)?;
+    starter.link = Some(Arc::clone(&link));
     Ok(Some(link))
 }
 

@@ -462,8 +462,8 @@ impl Process for Held {
 }
 
 /// Has every process this host starts from now on started by a process of the host's own, which `program` runs with `spawner`
-/// after its arguments, so that none is a child of the application's own process. The first call is the one that counts, and the
-/// process is started at the first child's start, and again if it has ended. Does nothing on Windows.
+/// after its arguments, so that none is a child of the application's own process. A later call names the program a starter
+/// not yet started is run by, and the process is started at the first child's start, and again if it has ended. Does nothing on Windows.
 pub fn install(program: Program) {
     #[cfg(unix)]
     apart::install(program);

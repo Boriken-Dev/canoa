@@ -222,6 +222,14 @@ fn default_program() -> std::io::Result<Program> {
     ))
 }
 
+/// Whether a command starts processes: `serve` and `pair` for their agents, `accounts` for a sign-in's provider.
+fn starts_children(args: &[String]) -> bool {
+    matches!(
+        args.first().map(String::as_str),
+        Some("serve" | "pair" | "accounts")
+    )
+}
+
 /// Whether a command runs long enough that the process's log belongs in what it says.
 fn follows_the_log(args: &[String]) -> bool {
     matches!(args.first().map(String::as_str), Some("serve" | "pair"))
@@ -241,12 +249,14 @@ pub(crate) fn start(request: &[u8]) -> Result<u64, i32> {
         (None, Some(_)) => return Err(STATUS_BAD_ARGUMENT),
         (None, None) => None,
     };
-    // Every child of the host starts from a process of its own, not this one: the application's process handling collects
-    // any child of this process that ends, and the host could not read how its children ended.
-    if let Ok(started_by) = match &program {
-        Some(program) => Ok(program.clone()),
-        None => default_program(),
-    } {
+    // What the host starts from now on is a child of a process of its own, not of this one: the application's process handling
+    // collects any child of this process that ends, and the host could not read how its children ended.
+    if starts_children(&request.args)
+        && let Ok(started_by) = match &program {
+            Some(program) => Ok(program.clone()),
+            None => default_program(),
+        }
+    {
         canoa_host::spawn::install(started_by);
     }
     let job = Arc::new(Job::default());

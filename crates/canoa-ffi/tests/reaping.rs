@@ -125,6 +125,10 @@ fn the_host_reads_how_its_children_ended_while_the_application_collects_every_ch
             );
 
             // An agent's stop reaches its own group while it lives, and no process of the application's own.
+            #[allow(
+                clippy::zombie_processes,
+                reason = "the collecting thread of this test is what collects it"
+            )]
             let mut bystander = StdCommand::new("sleep")
                 .arg("300")
                 .spawn()
