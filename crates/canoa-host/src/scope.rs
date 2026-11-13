@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 
 use crate::config::plain_absolute;
 use crate::share;
+use crate::site::Sites;
 use crate::usage_splice::{Antigravity, Client, Inference, Splice};
 use crate::worktree::Worktrees;
 
@@ -43,6 +44,8 @@ pub(crate) struct Scope {
     account: Option<String>,
     /// What the entry's failed turns have shown of its limits, for an agent that reports none; shared by its connections.
     usage: Arc<Inference>,
+    /// The Documents folder a webpage session's scratch folder is made in; `None` asks the system.
+    documents: Option<PathBuf>,
 }
 
 /// What becomes of one message from the client.
@@ -65,6 +68,7 @@ impl Scope {
             roots,
             account: None,
             usage: Arc::new(Inference::default()),
+            documents: None,
         }
     }
 
@@ -81,6 +85,19 @@ impl Scope {
     pub(crate) fn antigravity(mut self, command: Antigravity) -> Self {
         self.usage = Arc::new(Inference::new(self.usage.phrases()).with_antigravity(command));
         self
+    }
+
+    /// This scope making webpage sessions' folders in `documents`, rather than the system's Documents folder.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn documents(mut self, documents: PathBuf) -> Self {
+        self.documents = Some(documents);
+        self
+    }
+
+    /// One connection's webpage sessions.
+    pub(crate) fn sites(&self) -> Sites {
+        Sites::new(self.documents.clone())
     }
 
     /// One connection's share in the entry's inferred usage.
@@ -327,6 +344,7 @@ pub(crate) struct Scoped<'a, C: Channel + ?Sized> {
     inner: &'a C,
     scope: &'a Scope,
     splice: Splice,
+    sites: Sites,
     /// An unreadable line has been logged.
     noted: AtomicBool,
 }
@@ -344,6 +362,7 @@ impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
             inner,
             scope,
             splice: scope.splice(),
+            sites: scope.sites(),
             noted: AtomicBool::new(false),
         }
     }
@@ -651,8 +670,10 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
             }
             Screened::Pass(None) => message,
         };
-        self.splice
-            .relay(message, |sent| self.inner.send(&self.scope.stamp(sent)))
+        self.splice.relay(message, |sent| {
+            self.inner
+                .send(&self.sites.annotate(&self.scope.stamp(sent)))
+        })
     }
 
     /// A refused message reads as a timeout, after which the channel is still usable, so a caller polling for its own
@@ -663,7 +684,7 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
         let Some(message) = self.inner.receive(timeout)? else {
             return Ok(None);
         };
-        match self.scope.check(&message) {
+        match self.sites.check(self.scope, &message) {
             Verdict::Forward(bytes) => match self.splice.read_client(&bytes) {
                 Client::Answer(answer) => {
                     self.reply(&answer)?;

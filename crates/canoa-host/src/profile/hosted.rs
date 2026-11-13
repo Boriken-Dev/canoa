@@ -1727,6 +1727,7 @@ pub(crate) struct Hosted<'a, C: Channel + ?Sized> {
     connection: &'a Connection,
     hold: Mutex<Hold>,
     splice: Splice,
+    sites: crate::site::Sites,
     /// An unreadable line has been logged.
     noted: core::sync::atomic::AtomicBool,
 }
@@ -1761,6 +1762,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 book: Book::default(),
             }),
             splice: scope.splice(),
+            sites: scope.sites(),
             noted: core::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -1970,7 +1972,8 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             crate::scope::Screened::Pass(None) => message,
         };
         let stamped = self.scope.stamp(message);
-        let message = &*stamped;
+        let annotated = self.sites.annotate(&stamped);
+        let message = &*annotated;
         let mut hold = self.hold();
         if hold.pending.is_empty() {
             drop(hold);
@@ -2099,7 +2102,7 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
                 .and_then(|meta| meta.get(APPROVE_META))
                 == Some(&json!(true));
         }
-        let forwarded = match self.scope.check(&message) {
+        let forwarded = match self.sites.check(self.scope, &message) {
             Verdict::Forward(bytes) => {
                 let approved = self.approvals(&bytes);
                 match self.on_client(bytes, &approved.hooks) {

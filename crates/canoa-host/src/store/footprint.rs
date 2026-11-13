@@ -464,7 +464,7 @@ pub fn registry_path_addition(before: &str, after: &str) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn real_documents(home: &Path) -> Option<PathBuf> {
+pub(crate) fn real_documents(home: &Path) -> Option<PathBuf> {
     use windows_registry::CURRENT_USER;
     let key = CURRENT_USER
         .open(r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
