@@ -70,14 +70,14 @@ def sh_program() -> str:
     return sh
 
 
-def ensure_runner(platform: str, app: Path = APP, pub: bool = True) -> None:
+def ensure_runner(platform: str, app: Path = APP, offline: bool = False) -> None:
     """Generate the platform's runner when missing, then name it as tool/name_runner.sh does (safe to repeat)."""
     if runner_missing(platform, app):
         widget_test = app / "test" / "widget_test.dart"
         had_widget_test = widget_test.exists()
         subprocess.run(
             [flutter_program(), "create", "--org", "dev.boriken", f"--platforms={platform}",
-             "--project-name", "canoa", *([] if pub else ["--no-pub"]), "."],
+             "--project-name", "canoa", *(["--offline"] if offline else []), "."],
             check=True, cwd=app,
         )
         if not had_widget_test:
@@ -209,14 +209,15 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
         cache = choose_pub(mode)
         if cache is not None:
             os.environ["PUB_CACHE"] = str(cache)
-            if not pub_get_offline(cache, mode):
-                cache = None
-                restore_env("PUB_CACHE", user_cache)
+        # The runner first: pub get is what writes a platform's plugin files, so it must run once the runner exists.
+        ensure_runner(platform, offline=cache is not None)
+        if cache is not None and not pub_get_offline(cache, mode):
+            cache = None
+            restore_env("PUB_CACHE", user_cache)
         no_pub = ["--no-pub"] if cache is not None else []
         if portable:
             # The built library carries the web app, which the plugin builds in when CANOA_WEB_DIST names it.
             env = dict(os.environ, CANOA_WEB_DIST=str(build_web_for_host(cache is not None)))
-        ensure_runner(platform, pub=cache is None)
         if platform != "macos" and clear_stale_build(platform):
             print(f"Removed app/build/{platform}, configured before the runner was named")
         if run:

@@ -42,6 +42,14 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse((app / "test" / "widget_test.dart").exists())
 
     @patch("build.sh_program", return_value="/bin/sh")
+    @patch("build.flutter_program", return_value="flutter")
+    @patch("build.subprocess.run")
+    def test_an_offline_build_creates_the_runner_offline(self, run, _f, _s):
+        with tempfile.TemporaryDirectory() as tmp:
+            build.ensure_runner("linux", Path(tmp), offline=True)
+            self.assertIn("--offline", run.call_args_list[0].args[0])
+
+    @patch("build.sh_program", return_value="/bin/sh")
     @patch("build.subprocess.run")
     def test_existing_runner_is_only_renamed_and_keeps_its_own_widget_test(self, run, _s):
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,13 +210,15 @@ class PubModeTests(unittest.TestCase):
     def test_offline_is_chosen_when_deps_matches(self, plan, run, _t, _f, ensure, *_):
         seen = []
         run.side_effect = lambda *a, **k: seen.append(build.os.environ["PUB_CACHE"])
+        ensure.side_effect = lambda *a, **k: seen.append("runner")
         build.build_desktop("windows", False, False, mode="auto")
         self.assertEqual(self.commands(run), [
             ["flutter", "pub", "get", "--offline"], ["flutter", "build", "windows", "--release", "--no-pub"],
         ])
-        self.assertEqual(seen, [str(Path("/seeded"))] * 2)
+        seen = ["cache" if s == str(Path("/seeded")) else s for s in seen]
+        self.assertEqual(seen, ["runner", "cache", "cache"], "the runner exists before pub get writes its plugin files")
         self.assertEqual(build.os.environ["PUB_CACHE"], "/user/cache", "the cache is put back")
-        self.assertEqual(ensure.call_args.kwargs, {"pub": False})
+        self.assertEqual(ensure.call_args.kwargs, {"offline": True})
 
     @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "git dependencies are not in the pub cache"))
     def test_a_missing_dependency_falls_back_online_and_says_why(self, plan, run, *_):
