@@ -19,6 +19,9 @@ import 'session_views.dart' show appName;
 /// What the composer says while a permission card waits: a message refuses it once and goes to the agent.
 const String redirectHint = 'Send a message to decline and redirect the agent';
 
+/// [redirectHint] as it reads on a phone, where the placeholder is one line.
+const String narrowRedirectHint = 'Message to decline and redirect';
+
 /// What the composer offers beyond the session itself, from the app: where an agent can come from, folders, files and the
 /// clipboard, and the overlays a session can start with.
 final class ComposerKit {
@@ -226,7 +229,12 @@ class SessionComposer extends StatelessWidget {
   final bool centred;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => _composer(context, narrow: box.maxWidth < Composer.wideFrom),
+  );
+
+  /// [narrow] is a phone's width, where the placeholder is one line and so takes its short forms.
+  Widget _composer(BuildContext context, {required bool narrow}) {
     final draft = session.status == SessionStatus.draft;
     final options = store.optionsOf(session);
     final seen = store.optionsSeen(session);
@@ -251,9 +259,11 @@ class SessionComposer extends StatelessWidget {
       hint: !enabled
           ? (store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect an ACP peer to chat')
           : session.pendingPermissions.isNotEmpty
-          ? redirectHint
+          ? (narrow ? narrowRedirectHint : redirectHint)
           : session.isDraft
-          ? 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send. $inputs'
+          ? narrow
+                ? 'Message ${session.source?.displayName ?? 'an agent'}: $inputs'
+                : 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send. $inputs'
           : 'Message agent: $inputs',
       header: kit.extension?.header(context, session, controller),
       attachments: SessionAttachments(store, session, kit),

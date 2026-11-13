@@ -222,9 +222,11 @@ Each attachment shows as a chip above the message, an image with its thumbnail, 
 under the session's folder, by name or path, nearest first; a pick writes `@path` in the message and adds a chip. A mention
 always goes as a `resource_link` to the file's path, never its text, and only while the message still holds its `@path`. Nothing
 outside the folder is listed or taken: a path that climbs out of it, is absolute, or reaches outside through a link is refused,
-and names that start with a dot, `node_modules`, and names with control or direction characters are not offered. A session on
+and names with control or direction characters are not offered. In a git repository the list is what `git ls-files` gives by the
+repository's own rules (tracked, and untracked that no ignore rule covers; git is started with no shell and no `core.fsmonitor`);
+elsewhere the folder is walked, at most 8 levels deep and 5000 entries, with no list of names left out. A session on
 another computer has no `@`, since the agent could not read its links. The placeholder names what the message takes ("@ files,
-/ commands").
+/ commands") and is one line on a phone.
 
 **`/` lists two groups.** The agent's commands, then Canoa's own actions (the next mode, Settings, the source settings,
 Loadout, and what the session was given), each under its title. An action runs when chosen and sends nothing. `+` has Slash

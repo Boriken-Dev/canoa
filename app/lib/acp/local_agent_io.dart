@@ -103,14 +103,22 @@ typedef InsideFile = ({String path, bool folder, int size});
 /// Characters a name must not hold to be offered: controls, and the ones that hide or reorder text.
 final _unsafeName = RegExp('[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]');
 
-/// The files and folders under [folder], as paths relative to it with `/` (a folder ends in `/`), nearest first. Links are not
-/// followed or listed, and names that start with a dot, `node_modules` and names with control or direction characters are left
-/// out. At most [maxEntries] are read and [maxDepth] levels.
+/// The files and folders under [folder], as paths relative to it with `/` (a folder ends in `/`), nearest first. In a git
+/// repository they are the files git lists by the repository's own rules, tracked or untracked and not ignored; elsewhere
+/// the folder is walked. Either way links are neither followed nor listed, names with control or direction characters are
+/// left out, and at most [maxEntries] are read and [maxDepth] levels walked.
 Future<List<String>> listFolderEntries(String folder, {int maxEntries = 5000, int maxDepth = 8}) async {
-  final root = Directory(folder);
-  if (!await root.exists()) return const [];
+  if (!await Directory(folder).exists()) return const [];
+  if (inGitRepository(folder)) {
+    final listed = await _gitListing(folder, maxEntries);
+    if (listed != null) return listed;
+  }
+  return _walkListing(folder, maxEntries, maxDepth);
+}
+
+Future<List<String>> _walkListing(String folder, int maxEntries, int maxDepth) async {
   final found = <String>[];
-  final queue = <(Directory, String, int)>[(root, '', 0)];
+  final queue = <(Directory, String, int)>[(Directory(folder), '', 0)];
   for (var next = 0; next < queue.length && found.length < maxEntries; next++) {
     final (dir, prefix, depth) = queue[next];
     final here = <(String, bool)>[];
@@ -118,7 +126,7 @@ Future<List<String>> listFolderEntries(String folder, {int maxEntries = 5000, in
       await for (final entry in dir.list(followLinks: false)) {
         if (entry is Link) continue;
         final name = entry.path.split(RegExp(r'[\\/]')).last;
-        if (name.isEmpty || name.startsWith('.') || name == 'node_modules' || _unsafeName.hasMatch(name)) continue;
+        if (name.isEmpty || _unsafeName.hasMatch(name)) continue;
         if (entry is Directory) {
           here.add((name, true));
         } else if (entry is File) {
@@ -136,6 +144,67 @@ Future<List<String>> listFolderEntries(String folder, {int maxEntries = 5000, in
     }
   }
   return found;
+}
+
+const int _gitOutputLimit = 16 * 1024 * 1024;
+
+/// What `git ls-files` lists in [folder] (tracked, and untracked that no ignore rule covers), as files and their folders, or null
+/// when git is not there, fails or takes too long. git is found along PATH and started with no shell, with nothing from the
+/// repository's configuration that could run a program (`core.fsmonitor`), nothing asked of the person, and no optional lock.
+Future<List<String>?> _gitListing(String folder, int maxEntries) async {
+  final git = await findProgram('git');
+  if (git == null) return null;
+  Process process;
+  try {
+    process = await Process.start(
+      git,
+      ['-C', folder, '-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.'],
+      environment: const {'GIT_TERMINAL_PROMPT': '0', 'GIT_OPTIONAL_LOCKS': '0', 'GIT_LITERAL_PATHSPECS': '1'},
+    );
+  } on ProcessException {
+    return null;
+  }
+  final bytes = <int>[];
+  var tooMuch = false;
+  final done = process.stdout.forEach((chunk) {
+    if (bytes.length + chunk.length > _gitOutputLimit) {
+      tooMuch = true;
+      process.kill();
+    } else {
+      bytes.addAll(chunk);
+    }
+  });
+  unawaited(process.stderr.drain<void>());
+  try {
+    final code = await process.exitCode.timeout(const Duration(seconds: 10));
+    await done;
+    if (code != 0 || tooMuch) return null;
+  } on TimeoutException {
+    process.kill();
+    return null;
+  }
+  final base = folder.endsWith(Platform.pathSeparator) || folder.endsWith('/') ? folder.substring(0, folder.length - 1) : folder;
+  final files = <String>[];
+  for (final path in utf8.decode(bytes, allowMalformed: true).split('\u0000')) {
+    if (path.isEmpty || _unsafeName.hasMatch(path) || path.startsWith('/') || path.contains(r'\') || path.split('/').any((part) => part == '..' || part == '.')) {
+      continue;
+    }
+    // A tracked file that was deleted, a link and a submodule are not offered.
+    final local = '$base${Platform.pathSeparator}${path.replaceAll('/', Platform.pathSeparator)}';
+    if (FileSystemEntity.typeSync(local, followLinks: false) != FileSystemEntityType.file) continue;
+    files.add(path);
+  }
+  final entries = <String>{...files};
+  for (final path in files) {
+    final parts = path.split('/');
+    for (var i = 1; i < parts.length; i++) {
+      entries.add('${parts.sublist(0, i).join('/')}/');
+    }
+  }
+  int depth(String entry) => '/'.allMatches(entry.endsWith('/') ? entry.substring(0, entry.length - 1) : entry).length;
+  final ordered = entries.toList()
+    ..sort((a, b) => depth(a) != depth(b) ? depth(a).compareTo(depth(b)) : a.compareTo(b));
+  return ordered.take(maxEntries).toList();
 }
 
 /// The file or folder [relative] names under [folder], or null when it names anything else: a path that climbs, is absolute or

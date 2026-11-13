@@ -17,17 +17,15 @@ import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 final class _Tree {
   _Tree() : root = Directory.systemTemp.createTempSync('canoa-mentions') {
     folder = Directory('${root.path}${Platform.pathSeparator}work')..createSync();
-    _write('work/notes.txt', 'hello notes');
-    _write('work/src/main.dart', 'void main() {}');
-    _write('work/src/util.dart', 'int one() => 1;');
-    _write('work/.git/config', 'secret');
-    _write('work/node_modules/dep/index.js', 'x');
-    _write('outside.txt', 'not in the folder');
+    write('work/notes.txt', 'hello notes');
+    write('work/src/main.dart', 'void main() {}');
+    write('work/src/util.dart', 'int one() => 1;');
+    write('outside.txt', 'not in the folder');
   }
   final Directory root;
   late final Directory folder;
 
-  void _write(String relative, String text) {
+  void write(String relative, String text) {
     final file = File('${root.path}${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}');
     file.parent.createSync(recursive: true);
     file.writeAsStringSync(text);
@@ -74,13 +72,49 @@ void main() {
       expect(rankMentions(entries, '../x', limit: 5), isEmpty);
     });
 
-    test('a folder is listed without its dot entries and dependencies, and never as more than it holds', () async {
+    test('outside a repository the folder is walked, with no list of names left out and a bound on count and depth', () async {
       final tree = _Tree();
       addTearDown(() => tree.root.deleteSync(recursive: true));
+      tree.write('work/node_modules/dep/index.js', 'x');
+      tree.write('work/.hidden/note.txt', 'x');
+      tree.write('work/a/b/c/d/e/deep.txt', 'x');
       final entries = await listFolderEntries(tree.folder.path);
-      expect(entries, containsAll(['notes.txt', 'src/', 'src/main.dart', 'src/util.dart']));
-      expect(entries.where((entry) => entry.startsWith('.git') || entry.contains('node_modules')), isEmpty);
+      expect(entries, containsAll(['notes.txt', 'src/', 'src/main.dart', 'src/util.dart', 'node_modules/dep/index.js', '.hidden/note.txt']));
       expect(entries.where((entry) => entry.contains('outside')), isEmpty);
+      final shallow = await listFolderEntries(tree.folder.path, maxDepth: 2);
+      expect(shallow, contains('a/b/c/'));
+      expect(shallow, isNot(contains('a/b/c/d/e/')), reason: 'deeper than the bound');
+      expect((await listFolderEntries(tree.folder.path, maxEntries: 4)).length, lessThanOrEqualTo(4));
+    });
+
+    test('in a git repository the files are git\'s: tracked and untracked, never what an ignore rule covers', () async {
+      final tree = _Tree();
+      addTearDown(() => tree.root.deleteSync(recursive: true));
+      final folder = tree.folder.path;
+      Future<bool> git(List<String> args) async {
+        try {
+          return (await Process.run('git', ['-C', folder, ...args])).exitCode == 0;
+        } on ProcessException {
+          return false;
+        }
+      }
+
+      if (!await git(['init', '-q'])) {
+        markTestSkipped('git is not here');
+        return;
+      }
+      tree.write('work/.gitignore', 'dist/\n*.log\n');
+      tree.write('work/node_modules/dep/index.js', 'ignored by name only if the repository says so');
+      tree.write('work/dist/out.js', 'x');
+      tree.write('work/build.log', 'x');
+      tree.write('work/.github/workflows/ci.yml', 'x');
+      await git(['add', 'notes.txt']);
+      final entries = await listFolderEntries(folder);
+      expect(entries, containsAll(['notes.txt', 'src/main.dart', 'src/', '.gitignore', '.github/workflows/ci.yml', 'node_modules/dep/index.js']),
+          reason: 'tracked and untracked, a dot name included, and a folder no rule ignores');
+      expect(entries.where((entry) => entry.startsWith('dist') || entry.endsWith('.log') || entry.startsWith('.git/')), isEmpty);
+      tree.write('work/.gitignore', 'dist/\n*.log\nnode_modules/\n');
+      expect((await listFolderEntries(folder)).where((entry) => entry.contains('node_modules')), isEmpty, reason: 'the repository\'s rule, read from it');
     });
 
     test('a path outside the folder is refused, however it is spelled', () async {
@@ -113,6 +147,19 @@ void main() {
   testWidgets('the placeholder names the inputs', (tester) async {
     await _started(tester);
     expect(_hint(tester), 'Message agent: @ files, / commands');
+    await finish(tester);
+  });
+
+  testWidgets('on a phone the placeholder is one line, and a draft\'s names its inputs too', (tester) async {
+    await _started(tester, size: const Size(390, 844));
+    final hint = _hint(tester)!;
+    expect(hint, 'Message agent: @ files, / commands');
+    expect(tester.getSize(find.text(hint)).height, lessThan(30));
+    await newSession(tester);
+    final draft = _hint(tester)!;
+    expect(draft, 'Message Scripted: / commands', reason: 'no folder is chosen yet, so no @');
+    expect(draft, isNot(contains('it starts when you send')), reason: 'the short form');
+    expect(tester.getSize(find.text(draft)).height, lessThan(30));
     await finish(tester);
   });
 

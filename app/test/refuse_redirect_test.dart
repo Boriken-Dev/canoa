@@ -150,6 +150,9 @@ void main() {
     testWidgets('the waiting card and the redirect placeholder draw at $label width', (tester) async {
       await _waiting(tester, size: size);
       expect(tester.takeException(), isNull);
+      final hint = _hintOf(tester)!;
+      expect(hint, label == 'phone' ? 'Message to decline and redirect' : _redirectHint);
+      expect(tester.getSize(find.text(hint)).height, lessThan(30), reason: 'one line of placeholder at $label width');
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/refuse_redirect_$label.png'));
     });
   }
