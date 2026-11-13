@@ -132,7 +132,7 @@ class CanoaApp extends StatefulWidget {
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
-    this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
+    this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none,
   });
 
@@ -146,6 +146,8 @@ class CanoaApp extends StatefulWidget {
   /// The folder, file and clipboard services the composer uses, each the platform's by default.
   @visibleForTesting
   final bool Function(String folder)? isGitRepository;
+  @visibleForTesting
+  final bool Function(String folder)? folderExists;
   @visibleForTesting
   final Future<String?> Function()? pickFolder;
   @visibleForTesting
@@ -679,7 +681,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (session.isDraft) _hint(session);
   }
 
-  /// Folders sessions worked in, the last chosen first: a worktree's stands for its repository.
+  /// Folders sessions worked in, the last chosen first: a worktree's stands for its repository. One that is gone is left out.
   List<String> get _recentFolders => {
     ?_lastFolder,
     for (final session in store.sessions)
@@ -687,7 +689,7 @@ class _CanoaAppState extends State<CanoaApp> {
     for (final entry in store.ledger?.entries ?? const <LedgerEntry>[])
       if (entry.place == SessionPlace.local || entry.place == SessionPlace.host)
         ?(entry.worktree?.repo ?? entry.cwd),
-  }.take(8).toList();
+  }.where(widget.folderExists ?? folderExists).take(8).toList();
 
   /// A new session with nothing started, from the source and folder chosen last; one already waiting untouched is shown
   /// instead of another.

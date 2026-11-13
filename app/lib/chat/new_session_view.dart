@@ -22,6 +22,9 @@ class NewSessionView extends StatelessWidget {
   /// The menu value for the scratch folder; no folder's path holds a NUL.
   static const _scratchChoice = '\u0000scratch';
 
+  /// How many recent folders are offered as rows; the folder menu keeps the rest.
+  static const recentShown = 5;
+
   Future<void> _open(BuildContext context) async {
     final folder = await kit.pickFolder?.call();
     if (folder != null) store.updateDraft(session, cwd: folder);
@@ -34,6 +37,8 @@ class NewSessionView extends StatelessWidget {
     final cwd = session.cwd;
     final scratch = kit.scratchFolder?.call(session);
     final folders = {?cwd, ...kit.recentFolders}.toList();
+    final draft = session.status == SessionStatus.draft;
+    final recent = draft ? kit.recentFolders.take(recentShown).toList() : const <String>[];
     final notices = session.messages.where((message) => message.role == MessageRole.notice).toList();
     final folder = PopupMenuButton<String>(
       key: const Key('new-session-folder'),
@@ -106,6 +111,13 @@ class NewSessionView extends StatelessWidget {
               folder,
               const SizedBox(height: 20),
               composer,
+              if (draft) _RecentFolders(
+                folders: recent,
+                chosen: cwd,
+                onChoose: (path) => store.updateDraft(session, cwd: path),
+                onBrowse: kit.pickFolder == null ? null : () => unawaited(_open(context)),
+                onSources: kit.onSourceSettings,
+              ),
               if (cacheNote != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
@@ -123,5 +135,79 @@ class NewSessionView extends StatelessWidget {
         ),
       ),
     ));
+  }
+}
+
+/// The folders sessions worked in, newest first, one click each, and the quick actions beside them.
+class _RecentFolders extends StatelessWidget {
+  const _RecentFolders({required this.folders, required this.chosen, required this.onChoose, this.onBrowse, this.onSources});
+
+  final List<String> folders;
+  final String? chosen;
+  final void Function(String folder) onChoose;
+  final VoidCallback? onBrowse;
+  final VoidCallback? onSources;
+
+  /// The last part of [path], and the rest of it.
+  static (String, String) _split(String path) {
+    final trimmed = path.length > 1 ? path.replaceAll(RegExp(r'[\/]+$'), '') : path;
+    final cut = trimmed.lastIndexOf(RegExp(r'[\/]'));
+    if (cut < 0 || cut == trimmed.length - 1) return (trimmed, '');
+    return (trimmed.substring(cut + 1), trimmed.substring(0, cut));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.chatLook;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (folders.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 12, bottom: 4),
+            child: Text('RECENT FOLDERS', style: theme.textTheme.labelSmall?.copyWith(color: look.muted, letterSpacing: 1.2)),
+          ),
+          for (final folder in folders)
+            Builder(builder: (context) {
+              final (name, parent) = _split(folder);
+              final selected = folder == chosen;
+              return InkWell(
+                key: ValueKey('recent-folder $folder'),
+                borderRadius: BorderRadius.circular(look.radius),
+                onTap: () => onChoose(folder),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(children: [
+                    Icon(selected ? Icons.folder : Icons.folder_outlined, size: 18, color: selected ? look.accent : look.muted),
+                    const SizedBox(width: 10),
+                    Flexible(child: Text(name, overflow: TextOverflow.ellipsis, maxLines: 1, style: const TextStyle(fontWeight: FontWeight.w600))),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(parent, overflow: TextOverflow.ellipsis, maxLines: 1, style: TextStyle(color: look.muted))),
+                    if (selected) Icon(Icons.check, size: 16, color: look.accent),
+                  ]),
+                ),
+              );
+            }),
+          const SizedBox(height: 6),
+        ],
+        Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
+          if (onBrowse != null)
+            TextButton.icon(
+              key: const Key('quick-choose-folder'),
+              onPressed: onBrowse,
+              icon: const Icon(Icons.folder_open_outlined, size: 18),
+              label: const Text('Open a folder'),
+            ),
+          if (onSources != null)
+            TextButton.icon(
+              key: const Key('quick-sources'),
+              onPressed: onSources,
+              icon: const Icon(Icons.tune, size: 18),
+              label: const Text('Sources'),
+            ),
+        ]),
+      ]),
+    );
   }
 }

@@ -74,6 +74,9 @@ String? environmentVariable(String name) {
 /// The bytes of the file at [path] on this computer.
 Future<List<int>> readLocalFile(String path) => File(path).readAsBytes();
 
+/// Whether [folder] is a folder on this computer now.
+bool folderExists(String folder) => Directory(folder).existsSync();
+
 /// Whether [folder] is in a git repository: it or a folder above it holds `.git`.
 bool inGitRepository(String folder) {
   var dir = Directory(folder);
