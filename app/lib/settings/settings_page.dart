@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../accounts/accounts_controller.dart';
+import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
 import '../desktop/host_supervisor.dart';
 import '../desktop/hosting_panel.dart' show HostingPanel, SaveHosting;
@@ -39,6 +41,7 @@ const _sections = [
   SettingsSection(id: 'profiles', group: 'Agents', title: 'Profiles', icon: Icons.layers_outlined, keywords: 'overlays layers model effort mode skills trusted directories project'),
   SettingsSection(id: 'mcp', group: 'Agents', title: 'MCP servers', icon: Icons.extension_outlined, keywords: 'tools servers mcp allowed per agent'),
   SettingsSection(id: 'permissions', group: 'Agents', title: 'Permissions', icon: Icons.shield_outlined, keywords: 'bypass mode allow once remembered rules protected paths log revoke full access'),
+  SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription claude codex grok credentials add remove several'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
   SettingsSection(id: 'hosting', group: 'Agents', title: 'Hosting', icon: Icons.dns_outlined, keywords: 'serve browsers keys pair pin host listen'),
   SettingsSection(id: 'catalogs', group: 'Overlays', title: 'Catalogs', icon: Icons.storefront_outlined, keywords: 'store limits catalog sources icons size'),
@@ -66,6 +69,7 @@ class SettingsPage extends StatefulWidget {
     this.onPin,
     this.onLoadout,
     this.supervisor,
+    this.accounts,
     this.saveHosting,
     this.freePort = freeLoopbackPort,
     this.version = '',
@@ -113,6 +117,9 @@ class SettingsPage extends StatefulWidget {
 
   /// The host this app runs, for the Hosting section; none where the app runs none.
   final HostSupervisor? supervisor;
+
+  /// The accounts of this computer's host, for the Accounts section; none where the app runs no host.
+  final AccountsController? accounts;
   final SaveHosting? saveHosting;
   final Future<int> Function() freePort;
 
@@ -130,7 +137,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   List<SettingsSection> get _available => [
     for (final section in _sections)
-      if (section.id != 'hosting' || widget.supervisor != null) section,
+      if ((section.id != 'hosting' || widget.supervisor != null) && (section.id != 'accounts' || widget.accounts != null)) section,
   ];
 
   @override
@@ -223,6 +230,7 @@ class SettingsPageState extends State<SettingsPage> {
       ),
       'mcp' => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout),
       'permissions' => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents),
+      'accounts' => AccountsSection(controller: widget.accounts!),
       'usage' => UsageSection(controller: controller),
       'hosting' => HostingPanel(
         key: const Key('settings-hosting-panel'),

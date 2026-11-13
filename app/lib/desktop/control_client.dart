@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import '../acp/link_secret.dart';
 import 'host_tool.dart';
 
 /// The host answered a control request with an error.
@@ -67,6 +68,21 @@ final class ControlClient {
 
   /// Whether the link has ended, so nothing more can be asked.
   bool get over => _over;
+
+  /// What binds this app's sealed answers to the host's questions on this link, derived from the secret the host shares with this
+  /// process (which the link hands over once and the bytes are then zeroed). Null where the link has none, so the host asks nothing.
+  Future<LinkSecretIdentity?> linkSecrets() async {
+    final link = _link;
+    final secret = link is HostLinkSecret ? (link as HostLinkSecret).takeLinkSecret() : null;
+    if (secret == null) return null;
+    try {
+      return await linkSecretIdentity(secret);
+    } on Object {
+      return null;
+    } finally {
+      secret.fillRange(0, secret.length, 0);
+    }
+  }
 
   void _heard(String line) {
     final Object? message;

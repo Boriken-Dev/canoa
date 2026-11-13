@@ -310,6 +310,66 @@ final class CanoaConfig {
     return withHost(copy);
   }
 
+  Map<dynamic, dynamic> get _hostAgents => host?['agents'] is Map ? host!['agents'] as Map : const {};
+
+  /// The provider the agent entry [name] runs, or null for an entry that runs a program.
+  String? hostHarnessOf(String name) => _hostAgents[name] is Map ? (_hostAgents[name] as Map)['harness'] as String? : null;
+
+  /// The agent entries that run the provider [harness], in canoa.cfg's order.
+  List<String> hostEntriesRunning(String harness) => [
+    for (final MapEntry(:key, :value) in _hostAgents.entries)
+      if (value is Map && value['harness'] == harness) '$key',
+  ];
+
+  /// The `[host.accounts]` the agent entry [name] offers a client; empty when it offers none, which leaves its harness to run on
+  /// the login it has where it runs.
+  List<String> hostAccountsOf(String name) => [
+    if (_hostAgents[name] is Map && (_hostAgents[name] as Map)['accounts'] is List)
+      for (final each in (_hostAgents[name] as Map)['accounts'] as List) '$each',
+  ];
+
+  /// This configuration with the account [account] offered by the agent entry [entry], which is made when no entry runs the
+  /// provider [harness]: `entry` null picks the first that does.
+  CanoaConfig withAccountOffered({required String account, required String harness, String? entry}) {
+    final copy = _deepCopy(host ?? const {});
+    final table = (copy['agents'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+    var target = entry ?? hostEntriesRunning(harness).firstOrNull;
+    if (target == null) {
+      target = _freeEntryName('$harness-accounts');
+      table[target] = <String, dynamic>{'harness': harness, 'title': '${harness[0].toUpperCase()}${harness.substring(1)} accounts'};
+    }
+    final entryTable = Map<String, dynamic>.of((table[target] as Map?)?.cast<String, dynamic>() ?? const {});
+    final names = [...?(entryTable['accounts'] as List?)?.map((each) => '$each')];
+    if (!names.contains(account)) names.add(account);
+    entryTable['accounts'] = names;
+    table[target] = entryTable;
+    copy['agents'] = table;
+    return withHost(copy);
+  }
+
+  String _freeEntryName(String wanted) {
+    var name = wanted, n = 2;
+    while (_hostAgents.containsKey(name) || hostEntries.any((entry) => entry.name == name)) {
+      name = '$wanted-${n++}';
+    }
+    return name;
+  }
+
+  /// This configuration with the account [account] offered by no entry, or no longer by the entry [only]; an entry left with none goes
+  /// back to the harness's own login, which is what an entry with no `accounts` runs.
+  CanoaConfig withoutAccountOffered(String account, {String? only}) {
+    final copy = _deepCopy(host ?? const {});
+    final table = copy['agents'];
+    if (table is Map<String, dynamic>) {
+      for (final MapEntry(key: name, value: entry) in table.entries) {
+        if (entry is! Map<String, dynamic> || entry['accounts'] is! List || (only != null && name != only)) continue;
+        final left = [for (final each in entry['accounts'] as List) if ('$each' != account) '$each'];
+        left.isEmpty ? entry.remove('accounts') : entry['accounts'] = left;
+      }
+    }
+    return withHost(copy);
+  }
+
   /// This configuration without the `[host]` entry [name].
   CanoaConfig withoutHostEntry(String name) {
     final copy = _deepCopy(host ?? const {});
