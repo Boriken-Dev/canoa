@@ -4,7 +4,7 @@
 
 - Rust 1.89 or later to build the core.
 - Node.js 22 or later to run Chromium extension policy tests.
-- Flutter SDK with Dart 3.9 or newer for the standalone application. The exact Flutter version used by AI6's experimental windowing build is **not** required for this ordinary Material 3 UI.
+- Flutter SDK with Dart 3.9 or newer for the standalone application.
 
 ## Rust core
 

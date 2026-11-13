@@ -51,11 +51,9 @@ The desktop app carries the host as a library and lives in the tray. For the web
 
 Canoa is one implementation on two shared libraries: [coqui-transport](https://github.com/Boriken-Dev/coqui-transport) and [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
 
-The [project naming convention](https://boriken-dev.github.io/canoa/naming/) uses `boriken.dev` and reverse-DNS identifiers such as `dev.boriken.canoa` for application and native host identities.
-
 ## Desktop, configuration, and offline dependencies
 
-The desktop app supports the AI6-style [canoa.cfg](https://boriken-dev.github.io/canoa/configuration/) TOML file with a tray context menu (Open, Hosting, Settings, Hide, Exit). Closing the window keeps it and its agents running; a double click on the tray icon opens the chat on Windows, and Linux, whose tray icons pass no clicks on, uses **Open Canoa** in the menu. It runs `canoa` as its child, and its **Hosting** dialog adds agents and pairs browsers. The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/canoa/actions/workflows/deps.yml).
+The desktop app reads its settings from [canoa.cfg](https://boriken-dev.github.io/canoa/configuration/), a TOML file, and has a tray context menu (Open, Hosting, Settings, Hide, Exit). Closing the window keeps it and its agents running; a double click on the tray icon opens the chat on Windows, and Linux, whose tray icons pass no clicks on, uses **Open Canoa** in the menu. It runs `canoa` as its child, and its **Hosting** dialog adds agents and pairs browsers. The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/canoa/actions/workflows/deps.yml).
 
 The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/canoa/browser-mcp/). An agent of Canoa's own chat, and with a person's say an MCP client on a paired machine, reach those tools over a proven link with nothing listening in the browser: see [browser integration](https://boriken-dev.github.io/canoa/browser/).
 

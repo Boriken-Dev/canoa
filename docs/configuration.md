@@ -1,6 +1,6 @@
 # Desktop and canoa.cfg
 
-Canoa uses the **same deployment configuration convention** as AI6's Outer Office: a user-level TOML file ending in .cfg, with the environment override taking priority.
+Canoa reads its settings from canoa.cfg, a user-level TOML file, with the environment override taking priority.
 
 The default template is [examples/config/canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa.cfg).
 
@@ -526,7 +526,7 @@ has to be generated in `app/`, whose workspace the plugin finds from there. The 
 `python3 integration_test/sni_watcher.py` first to have one: it is a minimal StatusNotifier watcher that draws nothing,
 and the test picks the menu's entries over D-Bus.
 
-The `deps` branch mirrors those packages' Dart side and names these in its `manifest.json`. The desktop CI workflow generates the appropriate runner on each OS with Boriken Dev's reverse-DNS namespace and builds it. Windows, macOS and Linux compilation have been verified in GitHub Actions; the tray on a full Linux desktop panel (KDE, GNOME with its AppIndicator extension) has not been run. Platform-native plugins and tray host support are required. A standard Flutter Web/PWA build does not create a system notification icon.
+The `deps` branch mirrors those packages' Dart side and names these in its `manifest.json`. The desktop CI workflow generates the appropriate runner on each OS with the app's identifier and builds it. Windows, macOS and Linux compilation have been verified in GitHub Actions; the tray on a full Linux desktop panel (KDE, GNOME with its AppIndicator extension) has not been run. Platform-native plugins and tray host support are required. A standard Flutter Web/PWA build does not create a system notification icon.
 
 ## Limitations
 

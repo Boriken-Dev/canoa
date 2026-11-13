@@ -32,7 +32,6 @@ nav:
   - ACP v2 Flutter client: acp-client.md
   - Interoperability: interop.md
   - Transport selection: transport.md
-  - Namespaces and identifiers: naming.md
   - Desktop and configuration: configuration.md
   - The host: host.md
   - One file per platform: portable.md
