@@ -1727,6 +1727,8 @@ pub(crate) struct Hosted<'a, C: Channel + ?Sized> {
     connection: &'a Connection,
     hold: Mutex<Hold>,
     splice: Splice,
+    /// An unreadable line has been logged.
+    noted: core::sync::atomic::AtomicBool,
 }
 
 impl<C: Channel + ?Sized> core::fmt::Debug for Hosted<'_, C> {
@@ -1759,6 +1761,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 book: Book::default(),
             }),
             splice: scope.splice(),
+            noted: core::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -1953,11 +1956,8 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
     fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
         // `_canoa/` and the secret extension are the host's own to ask of its client: an agent's request of that name is never
         // passed on, or the client could be made to show the host's questions, or to answer the host's real ones, for the agent.
-        if crate::scope::is_host_only(message) {
-            tracing::info!(
-                entry = self.connection.entry,
-                "an agent's request in the host's own namespace was dropped"
-            );
+        if let Some(why) = crate::scope::dropped(message) {
+            crate::scope::note_dropped(why, &self.noted);
             return Ok(());
         }
         let stamped = self.scope.stamp(message);

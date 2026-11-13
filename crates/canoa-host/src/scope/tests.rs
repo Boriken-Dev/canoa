@@ -386,6 +386,47 @@ fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
     ] {
         assert!(is_host_only(dropped.to_string().as_bytes()), "{dropped}");
     }
+    // JSON may spell the same method with escapes, which the bytes do not show.
+    for escaped in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"_coqui_acp\/secret_request","params":{}}"#,
+        r#"{"jsonrpc":"2.0","method":"_coqui_acp/secret_show_open"}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"_canoa\/profile\/approve","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"_canoa/anything"}"#,
+    ] {
+        assert!(is_host_only(escaped.as_bytes()), "{escaped}");
+    }
+    // A line this reader cannot read is dropped, since a more lenient reader in the client might take it for a request of the host's.
+    let deep = format!(
+        r#"{{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{}1{}}}"#,
+        "[".repeat(200),
+        "]".repeat(200)
+    );
+    for unreadable in [
+        r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"pad":"\ud800"}}"#
+            .to_owned(),
+        deep,
+        r#"{"jsonrpc":"2.0","method":"_canoa/delegate/event","params":{"n":1e400}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"method":"_canoa/profile/approve","params":{"n":1e400}}"#
+            .to_owned(),
+        "not json at all".to_owned(),
+    ] {
+        assert_eq!(
+            dropped(unreadable.as_bytes()),
+            Some(Dropped::Unreadable),
+            "{unreadable}"
+        );
+    }
+    assert_eq!(
+        dropped(br#"{"jsonrpc":"2.0","method":"_canoa/delegate/event"}"#),
+        Some(Dropped::HostOnly)
+    );
+    // An escape that spells another method, or sits in text, is not one.
+    for passed in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"session\/update"}"#,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"text":"_canoa/x"}}"#,
+    ] {
+        assert!(!is_host_only(passed.as_bytes()), "{passed}");
+    }
     for passed in [
         json!({"jsonrpc": "2.0", "id": 1, "method": "session/request_permission"}),
         json!({"jsonrpc": "2.0", "id": 1, "method": "_coqui_acp/usage"}),

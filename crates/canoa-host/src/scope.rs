@@ -10,6 +10,7 @@ use alloc::borrow::{Cow, ToOwned};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -308,6 +309,8 @@ pub(crate) struct Scoped<'a, C: Channel + ?Sized> {
     inner: &'a C,
     scope: &'a Scope,
     splice: Splice,
+    /// An unreadable line has been logged.
+    noted: AtomicBool,
 }
 
 impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
@@ -323,6 +326,7 @@ impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
             inner,
             scope,
             splice: scope.splice(),
+            noted: AtomicBool::new(false),
         }
     }
 
@@ -356,26 +360,59 @@ pub(crate) fn host_own<T>(send: impl FnOnce() -> T) -> T {
     send()
 }
 
-/// Whether an agent's `message` is a request or notification of the host's own: one whose method starts with `_canoa/`, or is
-/// one of the secret extension's (`_coqui_acp/secret_`). The host asks its client those, so one an agent sends is never passed
-/// on, or the client could be made to show the host's questions, or a value in the host's name, for it.
+/// Why an agent's line is not passed to the client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Dropped {
+    /// This host's JSON reader cannot read it, though a more lenient one in the client might (a lone surrogate, nesting past the
+    /// reader's depth, a number out of range): what cannot be checked is not passed on.
+    Unreadable,
+    /// Its method is one of the host's own.
+    HostOnly,
+}
+
+/// Whether an agent's `message` is dropped, and why. Dropped: a line that cannot be read, and a request or notification of the
+/// host's own, whose method starts with `_canoa/` or is one of the secret extension's (`_coqui_acp/secret_`): the host asks its
+/// client those, so one an agent sends is never passed on, or the client could be made to show the host's questions, or a value
+/// in the host's name, for it. The method is the parsed one, so an escape (`\/`, `_`) spells nothing the bytes do not.
+pub(crate) fn dropped(message: &[u8]) -> Option<Dropped> {
+    // What the host itself is sending is its own to say.
+    if HOST_OWN.with(core::cell::Cell::get) {
+        return None;
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(message) else {
+        return Some(Dropped::Unreadable);
+    };
+    value
+        .get("method")
+        .and_then(Value::as_str)
+        .filter(|method| method.starts_with("_canoa/") || method.starts_with("_coqui_acp/secret_"))
+        .map(|_| Dropped::HostOnly)
+}
+
+/// Whether an agent's `message` is dropped.
+#[allow(dead_code, reason = "the one question callers outside this file ask")]
 pub(crate) fn is_host_only(message: &[u8]) -> bool {
-    !HOST_OWN.with(core::cell::Cell::get)
-        && (contains(message, b"_canoa/") || contains(message, b"_coqui_acp/secret_"))
-        && serde_json::from_slice::<Value>(message).is_ok_and(|value| {
-            value
-                .get("method")
-                .and_then(Value::as_str)
-                .is_some_and(|method| {
-                    method.starts_with("_canoa/") || method.starts_with("_coqui_acp/secret_")
-                })
-        })
+    dropped(message).is_some()
+}
+
+/// Says in the log, once for a connection and without the line, that an unreadable line was dropped.
+pub(crate) fn note_dropped(why: Dropped, noted: &AtomicBool) {
+    match why {
+        Dropped::HostOnly => {
+            tracing::info!("an agent's request in the host's own namespace was dropped");
+        }
+        Dropped::Unreadable => {
+            if !noted.swap(true, Ordering::SeqCst) {
+                tracing::warn!("an agent's line this host cannot read was dropped");
+            }
+        }
+    }
 }
 
 impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
-        if is_host_only(message) {
-            tracing::info!("an agent's request in the host's own namespace was dropped");
+        if let Some(why) = dropped(message) {
+            note_dropped(why, &self.noted);
             return Ok(());
         }
         self.splice
