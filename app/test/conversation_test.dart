@@ -77,7 +77,7 @@ void main() {
       agent.ask(91, 'Edit src/calc.js', {'file_path': 'src/calc.js', 'old_string': 'return a - b;', 'new_string': 'return a + b;'});
       await _settle(tester);
       final card = find.ancestor(of: find.text('Yes'), matching: find.byType(Card));
-      final asked = find.descendant(of: card, matching: find.text('Edit src/calc.js'));
+      final asked = find.descendant(of: card, matching: find.textContaining('to edit src/calc.js?'));
       expect(tester.getTopLeft(find.text('Yes')).dy, greaterThan(tester.getBottomLeft(asked).dy));
       expect(tester.getSize(card).height, lessThan(844 / 3));
     });

@@ -162,7 +162,7 @@ void main() {
       expect(find.textContaining('read only'), findsOneWidget);
       expect(find.byType(Composer), findsNothing, reason: 'the person cannot write to it');
       expect(find.byKey(const Key('task-asks')), findsOneWidget, reason: 'its pending approval');
-      expect(find.text('Edit a.txt'), findsOneWidget);
+      expect(find.textContaining('to edit a.txt?'), findsOneWidget);
 
       await scene.say(childUpdate('c0', {'sessionUpdate': 'tool_call', 'toolCallId': 'k2', 'title': 'Run the tests', 'kind': 'execute', 'status': 'completed'}));
       expect(find.text('Run the tests'), findsOneWidget, reason: 'it follows the child as it goes on');

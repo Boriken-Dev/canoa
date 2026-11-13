@@ -89,10 +89,10 @@ void main() {
       ]), client);
       await tester.pumpWidget(CanoaApp(store: store));
       await tester.pump();
-      expect(find.text('Delete a file'), findsOneWidget);
-      await tester.tap(find.text('Refuse'));
+      expect(find.textContaining('to delete a file?'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('permission-deny')));
       await tester.pump();
-      expect(find.text('Delete a file'), findsNothing);
+      expect(find.textContaining('to delete a file?'), findsNothing);
       expect(await answer, isA<AcpSelect>().having((select) => select.optionId, 'optionId', 'no'));
     });
   });
