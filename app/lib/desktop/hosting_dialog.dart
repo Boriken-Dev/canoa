@@ -9,6 +9,7 @@ import '../theme/look.dart';
 import 'host_supervisor.dart';
 import 'host_tool.dart';
 import '../selectable.dart';
+import '../sources/source_icons.dart';
 
 /// Checks and saves a changed canoa.cfg, then serves it: what is wrong with it, or null once it is saved.
 typedef SaveHosting = Future<String?> Function(CanoaConfig changed);
@@ -268,12 +269,15 @@ class _HostingDialogState extends State<HostingDialog> {
 
   Widget _entryTile(HostEntry entry) {
     String? url;
+    String? provider;
     for (final listening in widget.supervisor.served) {
-      if (listening.name == entry.name) url = listening.url;
+      if (listening.name != entry.name) continue;
+      url = listening.url;
+      provider = listening.harness ?? (listening.local ? listening.name.toLowerCase() : null);
     }
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(entry.kind == 'agent' ? Icons.smart_toy_outlined : Icons.extension_outlined),
+      leading: entry.kind == 'agent' ? SourceMark.provider(provider) : const Icon(Icons.extension_outlined),
       title: Text(entry.name),
       subtitle: Text(
         [entry.runs, ...entry.args].join(' ') + (url == null ? '' : '\n$url'),

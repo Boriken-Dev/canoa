@@ -9,6 +9,7 @@ import '../ledger/ledger_list.dart';
 import '../ledger/session_ledger.dart';
 import '../selectable.dart';
 import '../session_store.dart';
+import '../sources/source_icons.dart';
 import '../theme/canoa_mark.dart';
 import '../theme/look.dart';
 import 'session_groups.dart';
@@ -389,6 +390,7 @@ class _SessionRowState extends State<_SessionRow> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               contentPadding: const EdgeInsets.only(left: 12, right: 2),
               title: Row(children: [
+                if (session.source != null) ...[SourceMark.of(session.source, size: 14), const SizedBox(width: 6)],
                 Expanded(child: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 if (session.pinned) Icon(Icons.push_pin, size: 12, color: look.muted),
               ]),

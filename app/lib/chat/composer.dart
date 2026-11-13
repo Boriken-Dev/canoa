@@ -365,10 +365,13 @@ class AttachmentChips extends StatelessWidget {
 
 /// A compact control in the row under the message.
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, this.icon, this.danger = false, this.status = false, this.enabled = true, this.maxWidth = 180});
+  const _Pill({required this.label, this.icon, this.leading, this.danger = false, this.status = false, this.enabled = true, this.maxWidth = 180});
 
   final String label;
   final IconData? icon;
+
+  /// A widget drawn where [icon] would be, in the same size and colour.
+  final Widget? leading;
 
   /// [danger] is for what is wrong; [status] for what is on, in the accent of the scheme, never the colour of an error.
   final bool danger, status, enabled;
@@ -385,6 +388,10 @@ class _Pill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         if (icon != null) ...[Icon(icon, size: 16, color: color ?? look.muted), const SizedBox(width: 4)],
+        if (leading != null) ...[
+          IconTheme(data: IconThemeData(size: 16, color: color ?? look.muted), child: leading!),
+          const SizedBox(width: 4),
+        ],
         Flexible(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),
@@ -522,7 +529,7 @@ class _SourceChooser extends StatelessWidget {
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(sourceIcon(each), size: 18),
+              leading: SourceMark.of(each, size: 18),
               title: Text(each.displayName),
               subtitle: switch (kit.checks[each]) {
                 final check? when !check.ready => Text('Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}',
@@ -540,7 +547,7 @@ class _SourceChooser extends StatelessWidget {
         message: problem ?? 'Where its agent comes from',
         child: _Pill(
           label: source?.displayName ?? 'Choose a source',
-          icon: sourceIcon(source),
+          leading: SourceMark.of(source),
           danger: problem != null || source == null,
         ),
       ),

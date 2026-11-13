@@ -287,8 +287,8 @@ void main() {
     IconData iconOf(String name) => tester.widget<Icon>(find.descendant(of: find.byKey(Key('source $name')), matching: find.byType(Icon))).icon!;
     expect(find.descendant(of: find.byKey(const Key('source review')), matching: find.text('Claude for review')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('source other')), matching: find.text('other')), findsOneWidget, reason: 'no title shows the name');
-    expect(iconOf('review'), providerIcon('claude'));
-    expect(iconOf('review'), isNot(providerIcon(null)));
+    expect(find.descendant(of: find.byKey(const Key('source review')), matching: find.byType(Icon)), findsNothing,
+        reason: 'a Claude entry draws the vendor mark');
     expect(iconOf('other'), providerIcon(null), reason: 'an unknown provider has the generic icon');
     expect(iconOf('plain'), providerIcon(null));
     await tester.tap(find.byKey(const Key('source review')));

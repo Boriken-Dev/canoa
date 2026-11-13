@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
 import '../selectable.dart';
+import '../sources/source_icons.dart';
 import 'programs.dart';
 
 // The Store's programs on screen: each extension's program with the version found and whether a newer one exists, and the
@@ -114,7 +115,11 @@ class ProgramTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(status.info.title, style: Theme.of(context).textTheme.titleSmall),
+          Row(children: [
+            SourceMark.provider(id, size: 18),
+            const SizedBox(width: 8),
+            Flexible(child: Text(status.info.title, style: Theme.of(context).textTheme.titleSmall)),
+          ]),
           if (status.info.publisher.isNotEmpty) Text(status.info.publisher, style: Theme.of(context).textTheme.bodySmall),
           for (final line in statusLines(status)) Text(line, key: line.startsWith('Update available') ? Key('program-update-note-$id') : null),
           if (status.problem case final problem?) Text(problem, key: Key('program-problem-$id'), style: TextStyle(color: error)),
