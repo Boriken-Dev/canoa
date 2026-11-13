@@ -379,6 +379,10 @@ fn an_agents_request_in_the_hosts_own_namespace_is_never_passed_on() {
     for dropped in [
         json!({"jsonrpc": "2.0", "id": 1, "method": "_canoa/profile/approve", "params": {}}),
         json!({"jsonrpc": "2.0", "method": "_canoa/anything"}),
+        // The secret extension's methods are the host's to send: an agent forging a show would put a value on the card.
+        json!({"jsonrpc": "2.0", "id": 1, "method": "_coqui_acp/secret_show_open", "params": {}}),
+        json!({"jsonrpc": "2.0", "method": "_coqui_acp/secret_show_deliver", "params": {}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "_coqui_acp/secret_request", "params": {}}),
     ] {
         assert!(is_host_only(dropped.to_string().as_bytes()), "{dropped}");
     }

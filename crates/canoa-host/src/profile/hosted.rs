@@ -1951,12 +1951,12 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
 impl<C: Channel + ?Sized> Hosted<'_, C> {
     /// An answer to `initialize` or a session request gets the report; the first also settles what each session is given.
     fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
-        // `_canoa/` is the host's own to ask of its client: an agent's request of that name is never passed on, or the client could
-        // be made to show the host's questions, or to answer the host's real ones, for the agent.
+        // `_canoa/` and the secret extension are the host's own to ask of its client: an agent's request of that name is never
+        // passed on, or the client could be made to show the host's questions, or to answer the host's real ones, for the agent.
         if crate::scope::is_host_only(message) {
             tracing::info!(
                 entry = self.connection.entry,
-                "an agent's `_canoa/` request was dropped"
+                "an agent's request in the host's own namespace was dropped"
             );
             return Ok(());
         }

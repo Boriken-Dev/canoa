@@ -356,23 +356,26 @@ pub(crate) fn host_own<T>(send: impl FnOnce() -> T) -> T {
     send()
 }
 
-/// Whether an agent's `message` is a request or notification of the host's own, whose method starts with `_canoa/`: the host asks
-/// its client those, so one an agent sends is never passed on, or the client could be made to show the host's questions for it.
+/// Whether an agent's `message` is a request or notification of the host's own: one whose method starts with `_canoa/`, or is
+/// one of the secret extension's (`_coqui_acp/secret_`). The host asks its client those, so one an agent sends is never passed
+/// on, or the client could be made to show the host's questions, or a value in the host's name, for it.
 pub(crate) fn is_host_only(message: &[u8]) -> bool {
     !HOST_OWN.with(core::cell::Cell::get)
-        && contains(message, b"_canoa/")
+        && (contains(message, b"_canoa/") || contains(message, b"_coqui_acp/secret_"))
         && serde_json::from_slice::<Value>(message).is_ok_and(|value| {
             value
                 .get("method")
                 .and_then(Value::as_str)
-                .is_some_and(|method| method.starts_with("_canoa/"))
+                .is_some_and(|method| {
+                    method.starts_with("_canoa/") || method.starts_with("_coqui_acp/secret_")
+                })
         })
 }
 
 impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
         if is_host_only(message) {
-            tracing::info!("an agent's `_canoa/` request was dropped");
+            tracing::info!("an agent's request in the host's own namespace was dropped");
             return Ok(());
         }
         self.splice
