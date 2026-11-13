@@ -229,15 +229,23 @@ void main() {
   });
 
   group('the ledger', () {
-    testWidgets('keeps a change the agent makes by itself, and not its starting default', (tester) async {
+    testWidgets('keeps what the person set, not a change the agent makes by itself, and not its starting default', (tester) async {
       final ledger = SessionLedger(MemoryLedgerBackend());
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final store = _store(ledger);
       await _started(tester, agent, store);
-      expect(ledger.entries.single.mode, isNull, reason: 'the agent\'s default is not the person\'s choice');
-      agent.agentSets('plan');
+      expect(ledger.entries.single.mode, isNull, reason: "the agent's default is not the person's choice");
+      agent.agentSets('bypass');
       await settle(tester);
+      // It shows where the session is, and nothing is kept: reopened, no request would put the session back in a mode only the
+      // agent chose.
+      expect(store.sessions.single.chosenMode, isNull);
+      expect(ledger.entries.single.mode, isNull, reason: 'a mode the agent moved to by itself was not chosen');
+      await pick(tester, 'option-mode', 'Plan');
       expect(ledger.entries.single.mode, 'plan');
+      agent.agentSets('bypass');
+      await settle(tester);
+      expect(ledger.entries.single.mode, 'plan', reason: "a person's choice stands over the agent's own move");
       await finish(tester);
     });
   });

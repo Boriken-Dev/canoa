@@ -619,8 +619,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _agentChangedMode(ChatSession session, String? before) {
     final now = modeOptionIn(session.options)?.current;
     if (before == null || now == null || now == before || now == 'custom') return;
-    session.chosenMode = now;
-    _keepMode(session);
+    // It is shown, and nothing more: a mode the agent moved to by itself was not chosen, so it is neither kept for the ledger to put
+    // back as the person's request nor remembered as the session's chosen mode.
     final answered = session.alwaysAnsweredAt;
     if (answered != null && DateTime.now().difference(answered) < const Duration(seconds: 30)) {
       session.alwaysAnsweredAt = null;
