@@ -11,6 +11,7 @@ import '../sources/sources.dart';
 import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../theme/look.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity;
 import '../workspace/workspace_template.dart';
 
 /// The protected list's text, with the lines the recommended list also has shown in the accent colour.
@@ -394,6 +395,20 @@ class SettingsDialogState extends State<SettingsDialog> {
             onChanged: (value) {
               if (value == null) return;
               setState(() => config = config.copyWith(brightness: value));
+              widget.onPreview?.call(config);
+            },
+          ),
+        ),
+        ListTile(
+          title: const Text('Detail of the agent\'s work'),
+          subtitle: const Text('Normal folds a finished turn into one line; Verbose shows every step'),
+          trailing: DropdownButton<ChatDensity>(
+            key: const Key('settings-density'),
+            value: config.density,
+            items: [for (final density in ChatDensity.values) DropdownMenuItem(value: density, child: Text(density.label))],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() => config = config.copyWith(density: value));
               widget.onPreview?.call(config);
             },
           ),

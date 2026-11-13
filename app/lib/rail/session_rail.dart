@@ -1,3 +1,4 @@
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
@@ -84,7 +85,7 @@ class _SessionRailState extends State<SessionRail> {
           child: Align(
             alignment: Alignment.centerLeft,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              CanoaMark(color: context.look.accent),
+              CanoaMark(color: context.chatLook.accent),
               const SizedBox(width: 10),
               const Text('Canoa', softWrap: false, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             ]),
@@ -198,7 +199,7 @@ class _NavEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final look = context.look;
+    final look = context.chatLook;
     return Tooltip(
       message: tooltip ?? label,
       child: Padding(
@@ -229,7 +230,7 @@ class _GroupHeader extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(18, 10, 12, 2),
     child: Text(
       label,
-      style: TextStyle(color: context.look.muted, fontSize: 12, fontWeight: FontWeight.w600),
+      style: TextStyle(color: context.chatLook.muted, fontSize: 12, fontWeight: FontWeight.w600),
     ),
   );
 }
@@ -252,10 +253,10 @@ class _FoldHeader extends StatelessWidget {
       child: Row(children: [
         Text(
           '${group.label} $count',
-          style: TextStyle(color: context.look.muted, fontSize: 12, fontWeight: FontWeight.w600),
+          style: TextStyle(color: context.chatLook.muted, fontSize: 12, fontWeight: FontWeight.w600),
         ),
         const SizedBox(width: 2),
-        Icon(open ? Icons.expand_more : Icons.chevron_right, size: 16, color: context.look.muted),
+        Icon(open ? Icons.expand_more : Icons.chevron_right, size: 16, color: context.chatLook.muted),
       ]),
     ),
   );
@@ -337,7 +338,7 @@ class _SessionRowState extends State<_SessionRow> {
 
   Widget _stateMark(BuildContext context, RowState state) {
     final scheme = Theme.of(context).colorScheme;
-    final muted = context.look.muted;
+    final muted = context.chatLook.muted;
     return switch (state) {
       RowState.needsYou => Tooltip(message: 'Needs you', child: Icon(Icons.front_hand_outlined, size: 14, color: scheme.error)),
       RowState.working || RowState.starting => Tooltip(
@@ -358,11 +359,12 @@ class _SessionRowState extends State<_SessionRow> {
     final session = widget.session;
     final store = widget.store;
     final look = context.look;
+    final chat = context.chatLook;
     final state = rowStateOf(session);
     final stateColor = switch (state) {
       RowState.needsYou || RowState.failed => Theme.of(context).colorScheme.error,
       RowState.done => Theme.of(context).colorScheme.primary,
-      _ => look.muted,
+      _ => chat.muted,
     };
     final where = [
       if (store.inBypass(session)) 'Bypass',
@@ -392,17 +394,17 @@ class _SessionRowState extends State<_SessionRow> {
               title: Row(children: [
                 if (session.source != null) ...[SourceMark.of(session.source, size: 14), const SizedBox(width: 6)],
                 Expanded(child: Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (session.pinned) Icon(Icons.push_pin, size: 12, color: look.muted),
+                if (session.pinned) Icon(Icons.push_pin, size: 12, color: chat.muted),
               ]),
               subtitle: Row(children: [
                 _stateMark(context, state),
                 const SizedBox(width: 5),
                 Flexible(child: Text(state.word, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: stateColor, fontSize: 12))),
                 Expanded(
-                  child: Text(' · $where', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: look.muted, fontSize: 12)),
+                  child: Text(' · $where', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: chat.muted, fontSize: 12)),
                 ),
                 // The age stays whole: the agent's name is what gives way when the column is narrow.
-                Text(' · ${ageLabel(widget.now, session.lastActivity)}', maxLines: 1, style: TextStyle(color: look.muted, fontSize: 12)),
+                Text(' · ${ageLabel(widget.now, session.lastActivity)}', maxLines: 1, style: TextStyle(color: chat.muted, fontSize: 12)),
               ]),
               trailing: showMenu
                   ? IconButton(

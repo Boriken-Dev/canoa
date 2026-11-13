@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import '../chat/usage.dart';
+import '../chat/agent_events.dart';
 
 /// The `_meta` key of `initialize` with which a client says it answers the host's approval request.
 const approveMeta = 'dev.boriken.canoa/approve';

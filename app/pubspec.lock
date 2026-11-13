@@ -56,12 +56,38 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
+  convert:
+    dependency: transitive
+    description:
+      name: convert
+      sha256: b30acd5944035672bc15c6b7a8b47d773e41e2f17de064350988c5d02adb1c68
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.2"
   coqui_acp:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "5a19365d7eb48acde352126c12a0c3578a51bb8f"
-      resolved-ref: "5a19365d7eb48acde352126c12a0c3578a51bb8f"
+      ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      resolved-ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      url: "https://github.com/Boriken-Dev/coqui-acp.git"
+    source: git
+    version: "0.0.0-alpha.0"
+  coqui_acp_chat:
+    dependency: "direct main"
+    description:
+      path: "bindings/dart/coqui_acp_chat"
+      ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      resolved-ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      url: "https://github.com/Boriken-Dev/coqui-acp.git"
+    source: git
+    version: "0.0.0-alpha.0"
+  coqui_acp_chat_ui:
+    dependency: "direct main"
+    description:
+      path: "bindings/dart/coqui_acp_chat_ui"
+      ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
+      resolved-ref: ba5bf868cbf16cceac022dd4b7a6876ea0205735
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -99,6 +125,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.8"
+  cryptography:
+    dependency: transitive
+    description:
+      name: cryptography
+      sha256: "3eda3029d34ec9095a27a198ac9785630fe525c0eb6a49f3d575272f8e792ef0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.9.0"
   dbus:
     dependency: transitive
     description:
@@ -401,6 +435,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  pointycastle:
+    dependency: transitive
+    description:
+      name: pointycastle
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
   process:
     dependency: transitive
     description:

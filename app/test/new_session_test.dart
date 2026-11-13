@@ -99,6 +99,8 @@ void main() {
   testWidgets('a preset hidden in Settings is not offered', (tester) async {
     final (_, _, _, written) = await _app(tester, size: const Size(1280, 1400));
     await _openSources(tester);
+    await tester.ensureVisible(find.byKey(const Key('source-offered Antigravity')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('source-offered Antigravity')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));

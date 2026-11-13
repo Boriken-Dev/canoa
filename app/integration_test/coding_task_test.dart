@@ -18,14 +18,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa_native/canoa_native.dart';
-import 'package:canoa/chat/agent_events.dart' show ToolStatus;
-import 'package:canoa/chat/permission_card.dart';
-import 'package:canoa/chat/transcript.dart';
-import 'package:canoa/chat/update_record.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
@@ -37,6 +34,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 import '../test/fixtures/examples.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
+import 'package:canoa/chat/session_views.dart';
 
 final String? _real = Platform.environment['CANOA_TEST_TASK_AGENT'];
 final String? _shots = Platform.environment['CANOA_TEST_SHOTS'];
@@ -332,7 +331,7 @@ void main() {
     await shot('attached');
     final attached = await turn('notes', _followNotes, refuse: 'obsolete');
     debugPrint('STEP notes: asked ${attached.asked}, refused ${attached.refused}, outside the directory ${attached.outside}');
-    final usage = store.selected?.usage.describe();
+    final usage = store.selected == null ? null : describeUsage(store.selected!.usage);
     // Tools that ran without a question, such as reads, are seen here: none may have reached outside either.
     final ranOutside = [
       for (final entry in store.selected?.toolEntries.values ?? const <ChatMessage>[])

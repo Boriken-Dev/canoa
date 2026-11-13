@@ -6,12 +6,13 @@ import 'dart:io' show Directory, File;
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
-import 'package:canoa/chat/changes.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
+import 'package:canoa/chat/session_views.dart';
 
 final class _Tolerant extends LocalFileComparator {
   _Tolerant(super.testFile);
@@ -97,6 +98,8 @@ Future<(_Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, Size siz
   return (agent, session, store);
 }
 
+bool isViewed(ChatSession session, FileChange file) => session.viewedChanges[file.path] == file.version;
+
 void main() {
   setUpAll(() => goldenFileComparator = _Tolerant(Uri.file('${Directory.current.path}/test/changes_test.dart')));
 
@@ -107,7 +110,7 @@ void main() {
 
   testWidgets('each file once, at its latest, from the first text the agent showed to the last; what failed is left out', (tester) async {
     final (_, session, _) = await _shown(tester, const Size(1280, 800));
-    final files = changesOf(session);
+    final files = sessionChanges(session);
     expect([for (final file in files) file.path], ['src/calc.js', 'README.md', 'src/report.js']);
     final calc = files.first;
     expect(calc.before, contains('a - b'));
@@ -125,11 +128,11 @@ void main() {
     expect(find.byType(ChangesPane), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('viewed README.md')));
     await tester.pump();
-    expect(isViewed(session, changesOf(session)[1]), isTrue);
+    expect(isViewed(session, sessionChanges(session)[1]), isTrue);
     expect(find.text('1 of 3 viewed'), findsOneWidget);
     agent.tool('readme2', 'completed', [{'type': 'diff', 'path': 'README.md', 'oldText': '# tiny\n', 'newText': '# small\n'}]);
     await _settle(tester);
-    expect(isViewed(session, changesOf(session)[1]), isFalse);
+    expect(isViewed(session, sessionChanges(session)[1]), isFalse);
     expect(store.selected, session);
   });
 
@@ -148,9 +151,9 @@ void main() {
 
   testWidgets('a change cut short says so', (tester) async {
     final (agent, session, _) = await _shown(tester, const Size(1280, 800));
-    agent.tool('big', 'completed', [{'type': 'diff', 'path': 'big.txt', 'newText': 'x' * (maxToolText + 10)}]);
+    agent.tool('big', 'completed', [{'type': 'diff', 'path': 'big.txt', 'newText': 'x' * (chatLimits.toolText + 10)}]);
     await _settle(tester);
-    expect(changesOf(session).last.cut, isTrue);
+    expect(sessionChanges(session).last.cut, isTrue);
     await tester.tap(find.byTooltip('Changes'));
     await tester.pumpAndSettle();
     expect(find.textContaining('cut short'), findsOneWidget);

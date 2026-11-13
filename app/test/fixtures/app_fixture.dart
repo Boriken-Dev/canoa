@@ -4,7 +4,7 @@ import 'dart:io' show Directory;
 import 'dart:typed_data';
 
 import 'package:canoa/acp/agent_commands.dart';
-import 'package:canoa/chat/composer.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, ClipboardReader;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
@@ -74,7 +74,7 @@ const _needs = {'Claude': ['claude'], 'Codex': ['codex'], 'Antigravity': ['agy']
 Future<List<CanoaConfig>> pumpApp(
   WidgetTester tester,
   SessionStore store, {
-  CanoaConfig config = const CanoaConfig(agents: [scripted]),
+  CanoaConfig config = const CanoaConfig(agents: [scripted], density: ChatDensity.verbose),
   Set<String> missing = const {},
   Size size = const Size(1280, 800),
   Future<String?> Function()? pickFolder,

@@ -1,10 +1,10 @@
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
 import '../theme/canoa_mark.dart';
-import '../theme/look.dart';
 import 'composer.dart';
 
 /// A session before its first message: the mark, the folder it starts in, and the composer in the middle, whose row holds
@@ -29,7 +29,7 @@ class NewSessionView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final look = context.look;
+    final look = context.chatLook;
     final theme = Theme.of(context);
     final cwd = session.cwd;
     final scratch = kit.scratchFolder?.call(session);

@@ -54,7 +54,7 @@ Future<_Rig> _pump(WidgetTester tester, {String? peer, FakeTabBridge? given}) as
     home: Scaffold(
       body: Align(
         alignment: Alignment.bottomCenter,
-        child: Composer(store: store, session: session, controller: input, kit: ComposerKit(extension: extension), onSend: () {}),
+        child: SessionComposer(store: store, session: session, controller: input, kit: ComposerKit(extension: extension), onSend: () {}),
       ),
     ),
   ));
@@ -88,7 +88,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
       theme: themeFor(const CanoaConfig().look, Brightness.dark),
-      home: Scaffold(body: Composer(store: store, session: session, controller: input, kit: const ComposerKit(), onSend: () {})),
+      home: Scaffold(body: SessionComposer(store: store, session: session, controller: input, kit: const ComposerKit(), onSend: () {})),
     ));
     await _openPlus(tester);
     expect(find.textContaining('Sharing'), findsNothing);

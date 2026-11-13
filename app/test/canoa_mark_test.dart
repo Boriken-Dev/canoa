@@ -1,3 +1,4 @@
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
@@ -37,7 +38,7 @@ void main() {
     await tester.pumpWidget(CanoaApp(store: store, config: CanoaConfig(look: LookId.canoa)));
     await tester.pumpAndSettle();
     final mark = tester.widget<CanoaMark>(find.byType(CanoaMark));
-    expect(mark.color, tester.element(find.byType(CanoaMark)).look.accent);
+    expect(mark.color, tester.element(find.byType(CanoaMark)).chatLook.accent);
     expect(tester.getSize(find.byType(CanoaMark)), const Size(24, 24));
     expect(find.byIcon(Icons.sailing_rounded), findsNothing);
   });

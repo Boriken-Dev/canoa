@@ -1,6 +1,5 @@
 // What a person sees of a conversation while an agent works in it: the end it follows, the question it asks, and the frame around
 // it on a desktop.
-import 'package:canoa/chat/transcript.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
@@ -9,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/v2_agent.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 Future<(V2Agent, ChatSession, SessionStore)> _shown(WidgetTester tester, Size size, {HostSupervisor? host}) async {
   await tester.binding.setSurfaceSize(size);

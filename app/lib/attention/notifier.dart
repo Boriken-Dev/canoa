@@ -1,4 +1,4 @@
-import '../chat/agent_events.dart' show shortText;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show shortLine;
 import '../session_store.dart';
 import 'notifier_stub.dart' if (dart.library.io) 'notifier_io.dart' if (dart.library.js_interop) 'notifier_web.dart'
     as platform;
@@ -28,7 +28,7 @@ Notifier platformNotifier() => platform.createNotifier();
 /// The words of a notification about [session] needing the person for [kind]: the session's name and its agent's, and what
 /// kind of thing it wants, each one line long.
 ({String title, String body}) attentionText(ChatSession session, AttentionKind kind) {
-  String named(String text, String otherwise) => shortText(text) ?? otherwise;
+  String named(String text, String otherwise) => shortLine(text) ?? otherwise;
   final what = switch (kind) {
     AttentionKind.permission => 'asks leave to use a tool',
     AttentionKind.question => 'has a question for you',

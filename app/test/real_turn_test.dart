@@ -13,6 +13,7 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/embedded_host.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 String _shape(Object? value, [int depth = 0]) => switch (value) {
   final Map<dynamic, dynamic> map when depth < 4 =>
@@ -152,7 +153,7 @@ void main() {
       }
     });
     stdout.writeln('ANSWERED $answered WRITTEN ${written.existsSync()}');
-    stdout.writeln('ENTRIES ${session.messages.map((message) => message.role.name).toSet()} TOOLS ${session.toolEntries.length} COMMANDS ${session.commands.length} USAGE ${session.usage.describe()}');
+    stdout.writeln('ENTRIES ${session.messages.map((message) => message.role.name).toSet()} TOOLS ${session.toolEntries.length} COMMANDS ${session.commands.length} USAGE ${describeUsage(session.usage, )}');
     await client.close();
     expect(answered, greaterThan(0), reason: 'the agent has to have asked');
     expect(written.existsSync(), allow, reason: 'a refusal has to stop it');

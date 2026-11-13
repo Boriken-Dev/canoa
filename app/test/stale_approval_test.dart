@@ -1,13 +1,13 @@
 // A permission card from a connection that is gone cannot be answered: the card goes, the tool line it was about is marked
 // stopped, and nothing is sent. A session opened again is opened by `session/resume` where the agent offers it.
 import 'package:canoa/chat/agent_events.dart';
-import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 SessionStore _store([SessionLedger? ledger]) => SessionStore(includePreview: false, ledger: ledger ?? SessionLedger(MemoryLedgerBackend()));
 
@@ -85,7 +85,7 @@ void main() {
       agent.ask(13, _allow);
       await settle(tester);
       store.answerPermission(store.selected!, allow: true);
-      store.selected!.toolEntries['t13']!.tool!.status = ToolStatus.done;
+      store.selected!.toolEntries['t13']!.tool!.apply({'status': 'completed'}, chatLimits);
       agent.ask(14, _allow);
       await settle(tester);
       agent.disconnect();

@@ -1,7 +1,6 @@
 // Any text in the app can be selected with the mouse and copied: in a message, in a tool call, in the side list, in a
 // dialog, in a page over the screen, and the controls beside that text still work.
 import 'package:canoa/chat/agent_events.dart';
-import 'package:canoa/chat/transcript.dart' show SelectableTranscript;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/store/store_page.dart';
@@ -13,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 import 'fixtures/store_fixtures.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// [text] in the conversation, not in the side list, which shows a session by its first message.
 Finder _said(String text) => find.descendant(of: find.byType(SelectableTranscript), matching: find.text(text));
@@ -63,8 +63,13 @@ void main() {
     await chooseSource(tester, 'Scripted');
     await send(tester, 'What does the build say');
     final tool = ToolCall('t1')
-      ..title = 'Run the build'
-      ..blocks = const [ToolText('compiled 12 files')];
+      ..apply({
+        'sessionUpdate': 'tool_call',
+        'title': 'Run the build',
+        'content': [
+          {'type': 'content', 'content': {'type': 'text', 'text': 'compiled 12 files'}},
+        ],
+      }, chatLimits);
     store.selected!.messages.add(ChatMessage(role: MessageRole.tool, text: '', at: DateTime.now(), tool: tool));
     await send(tester, 'Next question');
     return store;

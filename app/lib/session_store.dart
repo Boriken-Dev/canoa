@@ -11,8 +11,7 @@ import 'chat/attachments.dart';
 import 'chat/cache_lifetime.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
-import 'chat/update_record.dart';
-import 'chat/usage.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatEntryData, shortLine;
 import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
@@ -23,6 +22,7 @@ import 'sources/sources.dart';
 import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
 
+export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
 export 'ledger/session_ledger.dart' show SessionPlace;
 
@@ -30,8 +30,6 @@ export 'ledger/session_ledger.dart' show SessionPlace;
 /// separate from the local view id and is absent from offline previews.
 /// A [draft] is a session whose agent has not started: it starts on the first message, and is [connecting] meanwhile.
 enum SessionStatus { preview, draft, disconnected, connecting, connected, working }
-
-enum MessageRole { user, agent, notice, thought, tool, compaction }
 
 /// The most a conversation keeps. An agent's turn can run a very long time, and the oldest entries are what go.
 const int maxEntries = 5000;
@@ -42,14 +40,19 @@ const int maxMessageText = 2 * 1024 * 1024;
 /// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
 const int maxPendingPermissions = 64;
 
-class ChatMessage {
+class ChatMessage implements ChatEntryData {
   ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool, this.compaction});
 
+  @override
   final MessageRole role;
+  @override
   String text;
+  @override
   final DateTime at;
   final String? messageId;
+  @override
   final ToolCall? tool;
+  @override
   final Compaction? compaction;
 }
 
@@ -484,7 +487,7 @@ class SessionStore extends ChangeNotifier {
       _note(session, 'Mode: Bypass. A request that offers to allow is allowed without asking you.');
       _answerWaiting(session);
     } else if (!session.bypass && wasAnswering) {
-      _note(session, 'Mode: ${shortText(entry.label) ?? entry.value}. Requests are asked again.');
+      _note(session, 'Mode: ${shortLine(entry.label) ?? entry.value}. Requests are asked again.');
     }
     _keepMode(session);
     _keepDraft(session);
@@ -547,7 +550,7 @@ class SessionStore extends ChangeNotifier {
       if (allow == null) continue;
       session.pendingPermissions.remove(question);
       question._answer.complete(AcpSelect(allow.optionId));
-      _note(session, 'Bypass allowed: ${question.title} (${shortText(allow.name) ?? allow.kind}).');
+      _note(session, 'Bypass allowed: ${question.title} (${shortLine(allow.name) ?? allow.kind}).');
     }
   }
 
@@ -570,7 +573,7 @@ class SessionStore extends ChangeNotifier {
     if (answered != null && DateTime.now().difference(answered) < const Duration(seconds: 30)) {
       session.alwaysAnsweredAt = null;
       final label = modeEntries(modeOptionIn(session.options)).where((entry) => entry.value == now).firstOrNull?.label ?? now;
-      _note(session, 'After your "always" answer, ${shortText(session.agent) ?? 'the agent'} switched this session to $label. '
+      _note(session, 'After your "always" answer, ${shortLine(session.agent) ?? 'the agent'} switched this session to $label. '
           'The mode control changes it back.');
     }
   }
@@ -592,7 +595,7 @@ class SessionStore extends ChangeNotifier {
   }
 
   /// A name an agent or a person gave, as it is shown and logged: one line, with nothing that could reorder what surrounds it.
-  static String _named(String name) => shortText(name) ?? 'an unnamed one';
+  static String _named(String name) => shortLine(name) ?? 'an unnamed one';
 
   final List<ChatSession> _sessions = [];
   final Map<String, VerifiedAgent> _verifiedClients = {};
@@ -892,7 +895,7 @@ class SessionStore extends ChangeNotifier {
       final option = session.options.where((option) => option.id == choice.id && option.choices.any((each) => each.value == choice.value)).firstOrNull ??
           session.options.where((option) => roleOf(option) == choice.role && option.choices.any((each) => each.value == choice.value)).firstOrNull;
       if (option == null) {
-        _note(session, 'The agent offers no ${choice.role == OptionRole.other ? choice.id : choice.role.name} of ${shortText(choice.value) ?? 'that'} now, so it was not set.');
+        _note(session, 'The agent offers no ${choice.role == OptionRole.other ? choice.id : choice.role.name} of ${shortLine(choice.value) ?? 'that'} now, so it was not set.');
         continue;
       }
       // A mode is sent even when it is the one shown: what shows may not be what is in effect.
@@ -1002,12 +1005,12 @@ class SessionStore extends ChangeNotifier {
     }
     // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about.
     if (request.toolCall != null) _applyTool(target, request.toolCall!);
-    final title = shortText(request.title) ?? shortText(request.kind) ?? 'A tool';
+    final title = shortLine(request.title) ?? shortLine(request.kind) ?? 'A tool';
     final forPerson = _isForPerson(request);
     if (target.bypass && !forPerson) {
       final allow = bypassAnswer(request.options, onceOnly: bypassOnceOnly);
       if (allow != null) {
-        _note(target, 'Bypass allowed: $title (${shortText(allow.name) ?? allow.kind}).');
+        _note(target, 'Bypass allowed: $title (${shortLine(allow.name) ?? allow.kind}).');
         notifyListeners();
         return Future.value(AcpSelect(allow.optionId));
       }
@@ -1033,7 +1036,7 @@ class SessionStore extends ChangeNotifier {
       title,
       request.kind,
       detail: [
-        ?shortText(request.description),
+        ?shortLine(request.description),
         ?describeToolInput(request.rawInput),
       ].join('\n').trim(),
       options: request.options,
@@ -1149,7 +1152,7 @@ class SessionStore extends ChangeNotifier {
         source: ruleSource(session), peer: session.peerId ?? '', folder: folder, kind: kind, toolName: subject.toolName, type: type, value: value);
     if (rule == null) return 'Canoa keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
     session.pendingPermissions.remove(question);
-    _note(session, 'Always allow here: ${rule.describe}, for ${shortText(session.agent) ?? 'this source'} in $folder. Canoa now '
+    _note(session, 'Always allow here: ${rule.describe}, for ${shortLine(session.agent) ?? 'this source'} in $folder. Canoa now '
         'answers a matching request with allow once, without asking you. Settings, Permissions revokes it.');
     question._answer.complete(AcpSelect(once.optionId));
     notifyListeners();
@@ -1194,7 +1197,7 @@ class SessionStore extends ChangeNotifier {
   }
 
   static void _stop(ToolCall? tool) {
-    if (tool != null && (tool.status == ToolStatus.pending || tool.status == ToolStatus.running)) tool.status = ToolStatus.stopped;
+    tool?.stop();
   }
 
   /// Answers everything still waiting in [session]: its permission requests with [answer], and its questions cancelled.
@@ -1438,13 +1441,13 @@ class SessionStore extends ChangeNotifier {
   /// What the agent said when it opened [session].
   void applyOpened(ChatSession session, AcpOpenedSession opened) {
     _setOptions(session, opened.raw['configOptions'], opened.raw['modes']);
-    session.commands = parseCommands(opened.raw['availableCommands']) ?? session.commands;
+    session.commands = parseCommands(opened.raw['availableCommands'], chatLimits) ?? session.commands;
     final meta = opened.raw['_meta'];
     session.hostReport = meta is Map ? meta[hostProfileMeta] : null;
     if (meta is Map && meta[hostNoticesKey] is List) {
       // Any agent can send these, not only the host, so each is shown as the agent's word, never as Canoa's.
       for (final notice in (meta[hostNoticesKey] as List).take(maxHostNotices)) {
-        final text = shortText(notice);
+        final text = shortLine(notice);
         if (text != null) _note(session, 'The agent says: $text');
       }
     }
@@ -1518,7 +1521,7 @@ class SessionStore extends ChangeNotifier {
       }
     } on AcpFailure catch (error) {
       final shown = option.choices.where((choice) => choice.value == value).firstOrNull?.label ?? value;
-      _note(session, 'The agent did not change ${option.label} to ${shortText(shown) ?? 'that'}: ${reasonOf(error)}');
+      _note(session, 'The agent did not change ${option.label} to ${shortLine(shown) ?? 'that'}: ${reasonOf(error)}');
       refused = true;
     }
     notifyListeners();
@@ -1645,16 +1648,16 @@ class SessionStore extends ChangeNotifier {
       session.toolEntries[id] = entry;
       session.messages.add(entry);
     }
-    entry.tool!.apply(raw);
+    entry.tool!.apply(raw, chatLimits);
   }
 
   void _applyTerminal(ChatSession session, Map<String, dynamic> raw) {
     final id = raw['terminalId'];
     if (id is! String || id.isEmpty) return;
-    if (session.terminals.length >= maxTerminals && !session.terminals.containsKey(id)) {
+    if (session.terminals.length >= chatLimits.terminals && !session.terminals.containsKey(id)) {
       session.terminals.remove(session.terminals.keys.first);
     }
-    (session.terminals[id] ??= TerminalView()).apply(raw);
+    (session.terminals[id] ??= TerminalView(chatLimits)).apply(raw, chatLimits);
   }
 
   /// A compaction's entry stays where its first update put it, and later ones change it there.
@@ -1663,11 +1666,11 @@ class SessionStore extends ChangeNotifier {
     if (id is! String || id.isEmpty) return;
     var entry = session.compactions[id];
     if (entry == null) {
-      entry = ChatMessage(role: MessageRole.compaction, text: '', at: DateTime.now(), compaction: Compaction(id));
+      entry = ChatMessage(role: MessageRole.compaction, text: '', at: DateTime.now(), compaction: Compaction(id, chatLimits));
       session.compactions[id] = entry;
       session.messages.add(entry);
     }
-    entry.compaction!.apply(raw);
+    entry.compaction!.apply(raw, chatLimits);
   }
 
   /// Names what went with a person's message, once per message.
@@ -1677,7 +1680,7 @@ class SessionStore extends ChangeNotifier {
   }
 
   void _applyUpdate(ChatSession session, AcpSessionUpdate update) {
-    final rendering = renderingOf(update);
+    final rendering = renderingOf(update, chatLimits);
     recorder?.record(update, rendering);
     switch (rendering) {
       case Rendering.toolCard:
@@ -1686,9 +1689,9 @@ class SessionStore extends ChangeNotifier {
         _applyTerminal(session, update.raw);
       case Rendering.plan:
         final entries = update.kind == 'plan_update' ? planItems(update.raw['plan']) : update.raw['entries'];
-        session.plan = parsePlan(entries) ?? session.plan;
+        session.plan = parsePlan(entries, chatLimits) ?? session.plan;
       case Rendering.notice:
-        final title = shortText(update.raw['title']);
+        final title = shortLine(update.raw['title']);
         if (title != null) {
           // Any agent can send these, so each is shown as the agent's word, never as Canoa's.
           final from = switch (update.raw['severity']) {
@@ -1696,15 +1699,15 @@ class SessionStore extends ChangeNotifier {
             'error' => 'Error from the agent',
             _ => 'From the agent',
           };
-          final detail = shortText(update.raw['description']);
+          final detail = shortLine(update.raw['description']);
           _note(session, '$from: $title${detail == null ? '' : '\n$detail'}');
         }
       case Rendering.compaction:
         _applyCompaction(session, update.raw);
       case Rendering.commands:
-        session.commands = parseCommands(update.raw['availableCommands']) ?? session.commands;
+        session.commands = parseCommands(update.raw['availableCommands'], chatLimits) ?? session.commands;
       case Rendering.usage:
-        session.usage = session.usage.applied(update.raw);
+        session.usage = session.usage.applied(update.raw, chatLimits);
       case Rendering.choices when update.kind == 'config_option_update':
         final before = modeOptionIn(session.options)?.current;
         _setOptions(session, update.raw['configOptions'], null);
@@ -1719,7 +1722,7 @@ class SessionStore extends ChangeNotifier {
           _agentChangedMode(session, before);
         }
       case Rendering.title:
-        final title = shortText(update.raw['title']);
+        final title = shortLine(update.raw['title']);
         if (title != null && session.agentNames) {
           session
             ..title = title
@@ -1787,7 +1790,7 @@ class SessionStore extends ChangeNotifier {
           }
         }
         // A replayed message carries its attachments as content blocks, which have no text of their own.
-        if (role == MessageRole.user) _nameAttachments(session, update.messageId, attachedNames(update.raw['content']));
+        if (role == MessageRole.user) _nameAttachments(session, update.messageId, attachedNames(update.raw['content'], chatLimits));
       case Rendering.unshown:
         break;
     }
@@ -2027,7 +2030,7 @@ class SessionStore extends ChangeNotifier {
       }
     }
     final session = addProviderSession(
-      title: shortText(earlier.title) ?? 'Earlier conversation',
+      title: shortLine(earlier.title) ?? 'Earlier conversation',
       agent: from.agent,
       peerId: client.peerId,
       remoteSessionId: earlier.id,
@@ -2074,7 +2077,7 @@ class SessionStore extends ChangeNotifier {
     try {
       if (await client.describe() case AcpDescription(sessions: AcpKnown(value: final listed))) {
         for (final info in listed.sessions) {
-          if (info.id == entry.sessionId) title = shortText(info.title) ?? title;
+          if (info.id == entry.sessionId) title = shortLine(info.title) ?? title;
         }
       }
     } on AcpFailure {

@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'update_record.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UpdateRecorder;
 
 /// A recorder writing to the file `CANOA_EVENT_LOG` names, appended to as each distinct update arrives, or null when it names none.
 UpdateRecorder? updateRecorderFromEnvironment() {

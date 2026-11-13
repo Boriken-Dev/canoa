@@ -5,9 +5,6 @@ import 'dart:io' show Directory, File;
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
-import 'package:canoa/chat/diff.dart';
-import 'package:canoa/chat/transcript.dart';
-import 'package:canoa/chat/update_record.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/main.dart';
@@ -17,6 +14,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// Text is drawn a little differently on each platform, by a fraction of a percent here, and a broken layout moves far more than that.
 final class _PlatformTolerant extends LocalFileComparator {
@@ -126,6 +124,9 @@ Future<void> _openAll(WidgetTester tester, Finder titles) async {
   }
 }
 
+/// Every step of a turn as a card of its own, which these tests look for: the app's own default folds them.
+const _verbose = CanoaConfig(density: ChatDensity.verbose);
+
 void main() {
   setUpAll(() {
     goldenFileComparator = _PlatformTolerant(Uri.file('${Directory.current.path}/test/chat_test.dart'));
@@ -136,7 +137,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1200, 2200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final (agent, session, store) = await _fed(tester);
-      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
       agent.everything();
       await _settle(tester);
 
@@ -186,7 +187,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final (agent, session, store) = await _fed(tester);
-      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
       agent.everything();
       await _settle(tester);
 
@@ -213,7 +214,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final (agent, session, store) = await _fed(tester);
-      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
       agent.incoming.add(jsonEncode({
         'jsonrpc': '2.0', 'id': 88, 'method': 'session/request_permission',
         'params': {
@@ -236,7 +237,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final (agent, session, store) = await _fed(tester);
-      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
       await tester.runAsync(() async {
         unawaited(store.sendText('go'));
         await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -286,7 +287,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final (agent, _, store) = await _fed(tester);
-      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
       agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'e', 'title': 'Edit src/calc.js', 'kind': 'edit', 'status': 'pending'});
       agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'e', 'status': 'cancelled'});
       await _settle(tester);
@@ -369,7 +370,7 @@ void main() {
       expect(tool.blocks, isEmpty);
       expect(session.plan, isEmpty);
       expect(session.options, isEmpty);
-      expect(session.usage.describe(), isNull);
+      expect(describeUsage(session.usage, ), isNull);
     });
 
     testWidgets('names lose what could disguise them, and nothing grows without limit', (tester) async {
@@ -377,14 +378,14 @@ void main() {
       agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'a', 'title': 'safe\u202Etxt.exe\nsecond line'});
       final huge = 'x' * (maxMessageText + 10);
       agent.update({'sessionUpdate': 'agent_message_chunk', 'messageId': 'big', 'content': {'type': 'text', 'text': huge}});
-      agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': base64Encode(utf8.encode('y' * (maxTerminalOutput * 2)))}});
+      agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': base64Encode(utf8.encode('y' * (chatLimits.terminalOutput * 2)))}});
       for (var i = 0; i < 20; i++) {
         agent.update({'sessionUpdate': 'terminal_output_chunk', 'terminalId': 't', 'data': base64Encode(utf8.encode('z' * 1024))});
       }
       await _settle(tester);
       expect(session.messages.first.tool!.title, 'safe txt.exe second line');
       expect(session.messages[1].text.length, lessThan(maxMessageText + 8));
-      expect(session.terminals['t']!.output.length, maxTerminalOutput);
+      expect(session.terminals['t']!.output.length, chatLimits.terminalOutput);
       expect(session.terminals['t']!.output.endsWith('z'), isTrue, reason: 'the end is where a failure says why');
 
       for (var i = 0; i < maxEntries + 50; i++) {
@@ -463,6 +464,64 @@ void main() {
       expect(() => CanoaConfig.parse('[appearance]\nsomething = 1\n'), throwsFormatException);
     });
 
+    test('canoa.cfg keeps the density, reads a file without one as Normal, and refuses one it does not know', () {
+      expect(const CanoaConfig().density, ChatDensity.normal);
+      expect(CanoaConfig.parse('[desktop]\nstart_hidden = true\n').density, ChatDensity.normal);
+      for (final density in ChatDensity.values) {
+        expect(CanoaConfig.parse(CanoaConfig(density: density).encode()).density, density);
+      }
+      expect(CanoaConfig.parse('[appearance]\ndensity = "thinking"\n').density, ChatDensity.thinking);
+      expect(() => CanoaConfig.parse('[appearance]\ndensity = "terse"\n'), throwsFormatException);
+      expect(const CanoaConfig().copyWith(density: ChatDensity.verbose).density, ChatDensity.verbose);
+    });
+
+    testWidgets('the settings dialog chooses the density', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      CanoaConfig? saved;
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
+        onPressed: () async => saved = await showDialog<CanoaConfig>(
+          context: context,
+          builder: (_) => const SettingsDialog(config: CanoaConfig()),
+        ),
+        child: const Text('open'),
+      ))));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('settings-density')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Verbose').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(saved?.density, ChatDensity.verbose);
+    });
+
+    testWidgets('the default density folds a finished turn into Worked for, and Verbose shows each step', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final (agent, _, store) = await _fed(tester);
+      await tester.pumpWidget(CanoaApp(key: const ValueKey('app'), store: store));
+      agent.update({'sessionUpdate': 'user_message_chunk', 'content': {'type': 'text', 'text': 'Fix addNumbers'}});
+      agent.update({
+        'sessionUpdate': 'tool_call', 'toolCallId': 'e', 'title': 'Edit calc.js', 'kind': 'edit', 'status': 'completed',
+        'content': [{'type': 'diff', 'path': 'src/calc.js', 'oldText': 'a - b\n', 'newText': 'a + b\n'}],
+      });
+      agent.update({'sessionUpdate': 'tool_call', 'toolCallId': 'r', 'title': 'Run it', 'kind': 'execute', 'status': 'completed'});
+      agent.update({'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'Fixed.'}});
+      await _settle(tester);
+      expect(find.textContaining('Worked for'), findsOneWidget);
+      expect(find.textContaining('Edited calc.js, ran a command'), findsOneWidget);
+      expect(find.text('Edit calc.js'), findsNothing);
+      expect(find.byType(AgentMarkdown), findsOneWidget, reason: 'the answer stays');
+
+      await tester.pumpWidget(CanoaApp(key: const ValueKey('app'), store: store, config: _verbose));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Worked for'), findsNothing);
+      expect(find.text('Edit calc.js'), findsOneWidget);
+      expect(find.text('Run it'), findsOneWidget);
+    });
+
     testWidgets('the settings dialog chooses them', (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -499,7 +558,7 @@ void main() {
       final entries = session.messages.length;
       for (final look in LookId.values) {
         for (final brightness in ['dark', 'light']) {
-          await tester.pumpWidget(CanoaApp(key: const ValueKey('app'), store: store, config: CanoaConfig(look: look, brightness: brightness)));
+          await tester.pumpWidget(CanoaApp(key: const ValueKey('app'), store: store, config: CanoaConfig(look: look, brightness: brightness, density: ChatDensity.verbose)));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           final context = tester.element(find.byType(TranscriptEntry).first);
@@ -517,7 +576,7 @@ void main() {
           await tester.binding.setSurfaceSize(size);
           addTearDown(() => tester.binding.setSurfaceSize(null));
           final (agent, _, store) = await _fed(tester);
-          await tester.pumpWidget(CanoaApp(store: store, config: CanoaConfig(look: look)));
+          await tester.pumpWidget(CanoaApp(store: store, config: CanoaConfig(look: look, density: ChatDensity.verbose)));
           agent.everything();
           await _settle(tester);
           await _openAll(tester, find.text('Thinking'));
@@ -554,7 +613,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final recorder = UpdateRecorder();
       final (agent, _, store) = await _fed(tester, recorder: recorder);
-      await tester.pumpWidget(CanoaApp(store: store));
+      await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
       for (final seen in fixture) {
         agent.update(filled(seen['shape'])! as Map<String, Object?>);
       }
@@ -572,7 +631,7 @@ void main() {
         addTearDown(() => tester.binding.setSurfaceSize(null));
         final (agent, session, store) = await _fed(tester);
         session.agentNames = true;
-        await tester.pumpWidget(CanoaApp(store: store));
+        await tester.pumpWidget(CanoaApp(store: store, config: _verbose));
         agent.update({'sessionUpdate': 'config_option_update', 'configOptions': [
           {'configId': 'mode', 'name': 'Mode', 'type': 'select', 'currentValue': 'ask', 'options': [
             {'value': 'ask', 'name': 'Ask first'},

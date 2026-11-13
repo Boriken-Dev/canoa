@@ -26,19 +26,16 @@ import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show KeyDownEvent, KeyRepeatEvent, LogicalKeyboardKey;
 
 import 'chat/cache_lifetime.dart';
-import 'chat/agent_events.dart' show AgentCommandInfo;
-import 'chat/changes.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
 import 'chat/new_session_view.dart';
 import 'chat/palette.dart';
-import 'chat/queue_panel.dart';
-import 'chat/question_card.dart';
-import 'chat/permission_card.dart';
-import 'chat/transcript.dart';
+import 'chat/agent_events.dart' show AgentCommandInfo;
+import 'chat/session_views.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
 import 'ledger/host_ledger_backend.dart';
@@ -134,8 +131,12 @@ class CanoaApp extends StatefulWidget {
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
-    this.worktrees, this.documents, this.askChoices,
+    this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none,
   });
+
+  /// What the conversation draws beyond the package's own: Canoa's content kinds (a delegation card, a chart), a card for a kind of
+  /// tool, the lines a burst or a turn folds into. Registered here, never in the transcript.
+  final chat.ChatRenderers renderers;
 
   /// Where sessions not yet started are kept between runs, for a store this app makes.
   final DraftKeeper? drafts;
@@ -150,7 +151,7 @@ class CanoaApp extends StatefulWidget {
   @visibleForTesting
   final Future<int?> Function(String path)? statFile;
   @visibleForTesting
-  final ClipboardReader? clipboard;
+  final chat.ClipboardReader? clipboard;
 
   /// The Documents folder `${documents}` stands for; by default the system's.
   @visibleForTesting
@@ -1115,8 +1116,8 @@ class _CanoaAppState extends State<CanoaApp> {
       scaffoldMessengerKey: _messenger,
       title: 'Canoa',
       debugShowCheckedModeBanner: false,
-      theme: themeFor((_preview ?? config).look, Brightness.light),
-      darkTheme: themeFor((_preview ?? config).look, Brightness.dark),
+      theme: themeFor((_preview ?? config).look, Brightness.light, density: (_preview ?? config).density),
+      darkTheme: themeFor((_preview ?? config).look, Brightness.dark, density: (_preview ?? config).density),
       themeMode: (_preview ?? config).themeMode,
       home: AnimatedBuilder(
         animation: store,
@@ -1125,6 +1126,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onHosting: widget.host == null ? null : _showHosting, onReopen: _reopen,
           conversation: _conversation,
           kit: _kit,
+          renderers: widget.renderers,
         ),
       ),
     );
@@ -1135,6 +1137,7 @@ class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
     this.onHosting, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
+    this.renderers = chat.ChatRenderers.none,
   });
 
   final SessionStore store;
@@ -1144,6 +1147,7 @@ class _CanoaHome extends StatelessWidget {
   /// Opens a new session's empty view.
   final VoidCallback onNewSession;
   final ComposerKit kit;
+  final chat.ChatRenderers renderers;
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
@@ -1196,7 +1200,7 @@ class _CanoaHome extends StatelessWidget {
       ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
         PaletteItem('Connect to an agent', () => _connect(context), icon: Icons.link_rounded),
-        if (session != null && conversation.showChanges != null && changesOf(session).isNotEmpty)
+        if (session != null && conversation.showChanges != null && sessionChanges(session).isNotEmpty)
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
@@ -1267,6 +1271,7 @@ class _CanoaHome extends StatelessWidget {
                   narrow: narrow,
                   handle: conversation,
                   kit: kit,
+                  renderers: renderers,
                 ),
               ),
             ],
@@ -1297,11 +1302,12 @@ final class _ConversationHandle {
 class _Conversation extends StatefulWidget {
   const _Conversation({
     super.key, required this.store, required this.narrow, required this.handle,
-    this.kit = const ComposerKit(),
+    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none,
   });
 
   final _ConversationHandle handle;
   final ComposerKit kit;
+  final chat.ChatRenderers renderers;
 
   final SessionStore store;
   final bool narrow;
@@ -1313,27 +1319,12 @@ class _Conversation extends StatefulWidget {
 
 class _ConversationState extends State<_Conversation> {
   final TextEditingController _input = TextEditingController();
-  final ScrollController _scroll = ScrollController();
 
-  /// The composer's focus. Up in an empty composer brings back the last message the person sent here; otherwise Up moves the
-  /// cursor as usual, since the composer's own handler sees the key before the text field's shortcuts do.
-  late final FocusNode _composerFocus = FocusNode(onKeyEvent: (node, event) {
-    if ((event is KeyDownEvent || event is KeyRepeatEvent) && event.logicalKey == LogicalKeyboardKey.arrowUp &&
-        _input.text.isEmpty) {
-      final last = widget.store.selected?.messages.lastWhere((message) => message.role == MessageRole.user,
-          orElse: () => ChatMessage(role: MessageRole.user, text: '', at: DateTime.now()));
-      if (last != null && last.text.isNotEmpty) {
-        _input.value = TextEditingValue(text: last.text, selection: TextSelection.collapsed(offset: last.text.length));
-        return KeyEventResult.handled;
-      }
-    }
-    return _composer.currentState?.onKey(node, event) ?? KeyEventResult.ignored;
-  });
+  /// The composer's focus.
+  final FocusNode _composerFocus = FocusNode();
 
-  final _composer = GlobalKey<ComposerState>();
-
-  /// The conversation's own selection, which Ctrl+A fills and Ctrl+C copies.
-  final _transcript = GlobalKey<SelectableTranscriptState>();
+  /// The conversation, which keeps its end in view while the person has not scrolled away.
+  final _transcript = GlobalKey<chat.ChatTranscriptState>();
 
   /// A draft's composer text goes with it, across sessions shown and runs of the app.
   void _keepText() {
@@ -1353,16 +1344,13 @@ class _ConversationState extends State<_Conversation> {
       ..focusComposer = _composerFocus.requestFocus
       ..showChanges = () {
         final session = widget.store.selected;
-        if (session != null && changesOf(session).isNotEmpty) _showChanges(session);
+        if (session != null && sessionChanges(session).isNotEmpty) _showChanges(session);
       }
       ..insert = (text) {
         _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
         _composerFocus.requestFocus();
       };
   }
-
-  /// Whether the transcript keeps its end in view as entries arrive: true until the person scrolls away from the end.
-  bool _following = true;
 
   /// Whether the changes pane is beside the conversation, on a wide window.
   bool _changesOpen = false;
@@ -1388,7 +1376,7 @@ class _ConversationState extends State<_Conversation> {
         heightFactor: 0.9,
         child: ListenableBuilder(
           listenable: widget.store,
-          builder: (context, _) => ChangesPane(
+          builder: (context, _) => SessionChangesPane(
             store: widget.store,
             session: session,
             onComment: (text) {
@@ -1400,34 +1388,6 @@ class _ConversationState extends State<_Conversation> {
         ),
       )),
     ));
-  }
-
-  /// How far from the end, in logical pixels, still counts as at the end.
-  static const double _nearEnd = 24;
-
-  bool _onScroll(ScrollNotification notification) {
-    // Only the transcript's own scrolling, not a code box's inside an entry.
-    if (notification.depth != 0 || (notification is! ScrollUpdateNotification && notification is! ScrollEndNotification)) {
-      return false;
-    }
-    final atEnd = notification.metrics.extentAfter <= _nearEnd;
-    if (atEnd != _following) setState(() => _following = atEnd);
-    return false;
-  }
-
-  /// The transcript grew or shrank: while following, its end comes into view.
-  bool _onMetrics(ScrollMetricsNotification notification) {
-    if (notification.depth == 0 && _following && notification.metrics.extentAfter > 0) _toEnd();
-    return false;
-  }
-
-  void _toEnd() {
-    if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
-  }
-
-  void _jumpToLatest() {
-    setState(() => _following = true);
-    _toEnd();
   }
 
   @override
@@ -1443,7 +1403,6 @@ class _ConversationState extends State<_Conversation> {
     _input.removeListener(_keepText);
     _composerFocus.dispose();
     _input.dispose();
-    _scroll.dispose();
     super.dispose();
   }
 
@@ -1487,8 +1446,7 @@ class _ConversationState extends State<_Conversation> {
         content: Text('Connect and verify an ACP peer before sending.'),
       ));
     }
-    setState(() => _following = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _toEnd());
+    _transcript.currentState?.jumpToLatest();
   }
 
   /// Under the title: the agent, and once a session made here has started, its folder and worktree, which stay as they are.
@@ -1514,7 +1472,7 @@ class _ConversationState extends State<_Conversation> {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && widget.store.canListEarlier(session))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && changesOf(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
+      if (session != null && sessionChanges(session).isNotEmpty) ('Changes', Icons.difference_outlined, () => _showChanges(session)),
       if (session?.profile case final report?)
         ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
           context: context,
@@ -1594,7 +1552,7 @@ class _ConversationState extends State<_Conversation> {
         ),
       ),
       if (session != null && widget.store.inBypass(session))
-        BypassBanner(onLeave: () => unawaited(widget.store.leaveBypass(session))),
+        chat.BypassBanner(onLeave: () => unawaited(widget.store.leaveBypass(session))),
       if (session == null)
         const Expanded(child: Center(child: Text('Create a conversation to begin.')))
       else if (session.isDraft)
@@ -1608,61 +1566,32 @@ class _ConversationState extends State<_Conversation> {
         )
       else ...[
         Expanded(
-          child: _dropping(session, Stack(children: [
-            NotificationListener<ScrollMetricsNotification>(
-              onNotification: _onMetrics,
-              child: NotificationListener<ScrollNotification>(
-                onNotification: _onScroll,
-                child: SelectableTranscript(
-                  key: _transcript,
-                  session: session,
-                  child: ListView.builder(
-                    controller: _scroll,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: widget.narrow ? 12 : 40,
-                      vertical: context.look.padding + 10,
-                    ),
-                    itemCount: session.messages.length,
-                    itemBuilder: (context, index) {
-                      return TranscriptEntry(message: session.messages[index], session: session);
-                    },
-                  ),
-                ),
-              ),
-            ),
-            if (!_following)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 12,
-                child: Center(
-                  child: IconButton.filledTonal(
-                    tooltip: 'Jump to latest',
-                    onPressed: _jumpToLatest,
-                    icon: const Icon(Icons.arrow_downward_rounded),
-                  ),
-                ),
-              ),
-          ])),
+          child: _dropping(session, chat.ChatTranscript(
+            key: _transcript,
+            entries: session.entries,
+            terminals: session.terminals,
+            plan: session.plan,
+            working: session.status == SessionStatus.working,
+            renderers: widget.renderers,
+            narrow: widget.narrow,
+          )),
         ),
-        if (session.plan.isNotEmpty) SelectionArea(child: PlanPanel(entries: session.plan)),
-        if (session.queue.isNotEmpty) QueuePanel(store: widget.store, session: session),
-        if (session.pendingPermissions.isNotEmpty)
-          PermissionCard(store: widget.store, session: session),
-        if (session.pendingQuestions.isNotEmpty) QuestionCard(store: widget.store, session: session),
-        SessionControls(session: session),
+        if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session),
+        if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
+        if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),
+        chat.UsageFooter(text: chat.describeUsage(session.usage, spend: session.spend)),
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
           child: Center(
             heightFactor: 1,
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: context.look.messageWidth + 100),
+              constraints: BoxConstraints(maxWidth: context.chatLook.messageWidth + 100),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 _composerFor(session),
                 if (!canRunLocalAgents || session.place != SessionPlace.local) ...[
                   const SizedBox(height: 8),
                   Text('Remote sessions require verified peer authentication',
-                    style: TextStyle(fontSize: 11, color: context.look.muted)),
+                    style: TextStyle(fontSize: 11, color: context.chatLook.muted)),
                 ],
               ]),
             ),
@@ -1670,14 +1599,14 @@ class _ConversationState extends State<_Conversation> {
         ),
       ],
     ]);
-    if (widget.narrow || !_changesOpen || session == null || changesOf(session).isEmpty) return conversation;
+    if (widget.narrow || !_changesOpen || session == null || sessionChanges(session).isEmpty) return conversation;
     return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Expanded(child: conversation),
       const VerticalDivider(width: 1),
       SizedBox(
         width: 420,
         child: SelectionArea(
-          child: ChangesPane(
+          child: SessionChangesPane(
             store: widget.store,
             session: session,
             onComment: _addToComposer,
@@ -1689,8 +1618,7 @@ class _ConversationState extends State<_Conversation> {
   }
 
   /// The composer of [session]: in the middle of a new session's view when [centred], else docked under the conversation.
-  Widget _composerFor(ChatSession session, {bool centred = false}) => Composer(
-    key: _composer,
+  Widget _composerFor(ChatSession session, {bool centred = false}) => SessionComposer(
     store: widget.store,
     session: session,
     controller: _input,

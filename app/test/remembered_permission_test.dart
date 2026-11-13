@@ -5,7 +5,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
-import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/settings_dialog.dart';
 import 'package:canoa/ledger/session_ledger.dart';
@@ -14,6 +13,7 @@ import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// An agent in memory, speaking v1, whose requests are whatever a test says they are.
 final class _Agent {

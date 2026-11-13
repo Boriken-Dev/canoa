@@ -7,10 +7,10 @@ import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
-import 'package:canoa/chat/transcript.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:canoa/chat/session_views.dart';
 
 final class _Agent {
   _Agent({this.images = true, this.files = true});

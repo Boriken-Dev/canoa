@@ -212,6 +212,8 @@ void main() {
       await open(tester, rules, (config) => saved = config, config: const CanoaConfig(protectedPaths: ['secrets']));
       final field = find.byKey(const Key('settings-protected-paths'));
       expect(tester.widget<TextField>(field).controller!.text, 'secrets');
+      await tester.ensureVisible(find.byKey(const Key('restore-recommended-paths')));
+      await tester.pump();
       await tester.tap(find.byKey(const Key('restore-recommended-paths')));
       await tester.pump();
       expect(tester.widget<TextField>(field).controller!.text, recommendedProtected.join('\n'));

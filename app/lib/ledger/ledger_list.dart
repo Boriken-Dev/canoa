@@ -1,9 +1,9 @@
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
-import '../theme/look.dart';
 import 'session_ledger.dart';
 import '../selectable.dart';
 
@@ -68,7 +68,7 @@ class _LedgerListState extends State<LedgerList> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.ledger,
     builder: (context, _) {
-      final look = context.look;
+      final look = context.chatLook;
       final open = {
         for (final session in widget.store.sessions)
           if (session.peerId != null && session.remoteSessionId != null)

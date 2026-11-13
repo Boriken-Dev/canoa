@@ -1,6 +1,5 @@
 // The conversation as text a person can select and copy: Ctrl+A and Ctrl+C there, dragging across messages, the context
 // menu's Copy, the copy buttons on a message and a code block, and the composer's own Ctrl+A.
-import 'package:canoa/chat/transcript.dart' show SelectableTranscript;
 import 'package:canoa/session_store.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// [text] in the conversation, not in the side list or the header.
 Finder _said(String text) => find.descendant(of: find.byType(SelectableTranscript), matching: find.text(text));

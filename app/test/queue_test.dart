@@ -6,7 +6,6 @@ import 'dart:io';
 
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
-import 'package:canoa/chat/queue_panel.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';
 import 'fixtures/process_agent.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// The scripted agent as a child, with a session open in [store].
 Future<(VerifiedAgent, ChatSession)> _scripted(SessionStore store) async {

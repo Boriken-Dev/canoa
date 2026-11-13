@@ -15,7 +15,7 @@ import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/acp/usage_wire.dart' show UsageNotice;
 import 'package:canoa/auth/peer_proof.dart';
-import 'package:canoa/chat/usage.dart';
+import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/sources/source_icons.dart';

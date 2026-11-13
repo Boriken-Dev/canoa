@@ -1,9 +1,9 @@
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
-import '../theme/look.dart';
 import 'tab_bridge.dart';
 import 'tab_shares.dart';
 
@@ -116,7 +116,7 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final look = context.look;
+    final look = context.chatLook;
     return Container(
       padding: const EdgeInsets.only(left: 10),
       decoration: BoxDecoration(border: Border.all(color: look.muted.withValues(alpha: 0.5)), borderRadius: BorderRadius.circular(16)),
@@ -146,7 +146,7 @@ class _Banner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final look = context.look;
+    final look = context.chatLook;
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),

@@ -4,7 +4,7 @@ import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:coqui_web/coqui_web.dart';
 
-import '../chat/usage.dart';
+import '../chat/agent_events.dart';
 import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';

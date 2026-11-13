@@ -7,7 +7,6 @@ import 'dart:io';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/modes.dart';
-import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
@@ -16,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';
 import 'fixtures/process_agent.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// An agent in memory, speaking v1, whose requests offer what a test gives them.
 final class _Agent {

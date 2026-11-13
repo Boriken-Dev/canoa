@@ -11,7 +11,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/acp/local_agent.dart';
-import 'package:canoa/chat/permission_card.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
@@ -22,6 +21,7 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 final String? _bin = Platform.environment['CANOA_TEST_STANDIN_BIN'];
 final String? _record = Platform.environment['STANDIN_RECORD'];

@@ -4,7 +4,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:canoa/chat/usage.dart';
+import 'package:canoa/chat/agent_events.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

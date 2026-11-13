@@ -6,7 +6,6 @@ import 'package:toml/toml.dart';
 
 import '../acp/agent_commands.dart';
 import '../chat/modes.dart' show modeOrder;
-import '../chat/usage.dart' show defaultWarnPermille;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
 import '../permissions/protected_paths.dart' show protectedLinesOf;
@@ -14,6 +13,7 @@ import '../profile/skill_copies.dart' show validSkillName;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, defaultWarnPermille;
 import '../workspace/workspace_template.dart' show defaultWorkspace, workspaceProblem;
 
 /// One entry of `[host]`, as canoa.cfg has it.
@@ -71,6 +71,7 @@ final class CanoaConfig {
     this.cdn = 'none',
     this.look = LookId.canoa,
     this.brightness = 'dark',
+    this.density = ChatDensity.normal,
     this.agents = const [],
     this.host,
     this.sessions = const LedgerSettings(),
@@ -153,6 +154,9 @@ final class CanoaConfig {
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
 
+  /// `[appearance] density`: how much of an agent's work a conversation shows, `normal`, `thinking` or `verbose`.
+  final ChatDensity density;
+
   ThemeMode get themeMode => switch (brightness) {
     'light' => ThemeMode.light,
     'system' => ThemeMode.system,
@@ -161,7 +165,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
+      LookId? look, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources}) =>
       CanoaConfig(
@@ -174,6 +178,7 @@ final class CanoaConfig {
         cdn: cdn,
         look: look ?? this.look,
         brightness: brightness ?? this.brightness,
+        density: density ?? this.density,
         agents: agents ?? this.agents,
         host: host,
         sessions: sessions ?? this.sessions,
@@ -203,6 +208,7 @@ final class CanoaConfig {
     cdn: cdn,
     look: look,
     brightness: brightness,
+    density: density,
     agents: agents,
     host: host,
     sessions: sessions,
@@ -490,6 +496,7 @@ final class CanoaConfig {
     cdn: cdn,
     look: look,
     brightness: brightness,
+    density: density,
     agents: agents,
     host: host,
     sessions: sessions,
@@ -541,7 +548,7 @@ final class CanoaConfig {
     final desktop = table('desktop', {'start_hidden','close_to_tray','minimize_to_tray','local_host'});
     final network = table('network', {'prefer_webtransport','connect_timeout'});
     final assets = table('assets', {'cdn'});
-    final appearance = table('appearance', {'look', 'brightness'});
+    final appearance = table('appearance', {'look', 'brightness', 'density'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace'});
     final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only', 'protected'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
@@ -595,6 +602,11 @@ final class CanoaConfig {
     final brightness = appearance['brightness'] ?? 'dark';
     if (brightness is! String || !{'light', 'dark', 'system'}.contains(brightness)) {
       throw const FormatException('canoa.cfg: appearance.brightness must be light, dark or system');
+    }
+    final densityName = appearance['density'] ?? ChatDensity.normal.name;
+    final density = densityName is String ? ChatDensity.named(densityName) : null;
+    if (density == null) {
+      throw FormatException('canoa.cfg: appearance.density must be one of ${ChatDensity.values.map((each) => each.name).join(', ')}');
     }
     final agents = <AgentCommand>[];
     final agentProfiles = <String, Profile>{};
@@ -695,7 +707,7 @@ final class CanoaConfig {
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
-      look: look, brightness: brightness,
+      look: look, brightness: brightness, density: density,
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
@@ -743,6 +755,7 @@ cdn = "$cdn"
 [appearance]
 look = "${look.name}"
 brightness = "$brightness"
+density = "${density.name}"
 
 [sessions]
 keep = ${sessions.keep}

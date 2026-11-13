@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
 
-import 'composer.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ClipboardReader;
 
 /// The system's clipboard: an image as PNG bytes, files by their paths, and text.
 final class SystemClipboard implements ClipboardReader {

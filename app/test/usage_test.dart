@@ -1,7 +1,7 @@
 // The usage control beside the mode: hidden for an agent that reports none, "No usage yet" before the first report, the bucket
 // that matters most with how it refills, its colour, a menu of every bucket, and a session's spend in the transcript's header.
-import 'package:canoa/chat/composer.dart' show UsageMenu;
-import 'package:canoa/chat/usage.dart';
+import 'package:canoa/chat/agent_events.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
