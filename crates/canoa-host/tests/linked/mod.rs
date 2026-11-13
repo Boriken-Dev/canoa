@@ -81,7 +81,11 @@ impl Hosted {
 
     /// As [`Hosted::start`], with more arguments to `serve`.
     pub fn start_with(entries: &str, more: &[&str]) -> Self {
-        let scratch = Scratch::new();
+        Self::start_in(Scratch::new(), entries, more)
+    }
+
+    /// As [`Hosted::start_with`], in a `scratch` the test has already put things in, such as the host's identity.
+    pub fn start_in(scratch: Scratch, entries: &str, more: &[&str]) -> Self {
         let config = scratch.0.join("canoa.cfg");
         std::fs::write(&config, entries).expect("written");
         let (sender, receiver) = mpsc::channel();
