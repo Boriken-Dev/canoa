@@ -37,6 +37,8 @@ jobs:
             --destination "$RUNNER_TEMP/canoa-deps" \
             --revision "$GITHUB_SHA"
           cp app/pubspec.lock "$RUNNER_TEMP/canoa-deps/pubspec.lock"
+          python tools/mirror_crates.py sync "$RUNNER_TEMP/canoa-deps"
+          python tools/mirror_crates.py check "$RUNNER_TEMP/canoa-deps"
       - name: Push cache
         run: |
           cd "$RUNNER_TEMP/canoa-deps"
