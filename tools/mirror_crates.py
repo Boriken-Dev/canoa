@@ -469,6 +469,7 @@ def export_commit(repo: Repo, into: Path) -> Path:
     )
     with tarfile.open(fileobj=made.stdout, mode="r|") as tar:
         tar.extractall(tree, filter="data")
+    made.stdout.read()  # tar stops at its end marker; git archive's padding would otherwise block it and wait()
     if made.wait():
         raise Problem(f"git archive of {repo.name} at {repo.commit} failed")
     shutil.rmtree(work, ignore_errors=True)
