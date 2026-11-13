@@ -146,6 +146,8 @@ pub(crate) struct Link {
     offered: Mutex<Option<Capability>>,
     /// The agent takes MCP servers over HTTP.
     http: AtomicBool,
+    /// The ACP version the agent answered in when it takes a stdio server, else 0.
+    stdio: AtomicU64,
     closed: AtomicBool,
     state: Mutex<State>,
     outbox: Mutex<VecDeque<Vec<u8>>>,
@@ -173,6 +175,7 @@ impl Link {
             binding,
             offered: Mutex::new(None),
             http: AtomicBool::new(false),
+            stdio: AtomicU64::new(0),
             closed: AtomicBool::new(false),
             state: Mutex::new(State::default()),
             outbox: Mutex::new(VecDeque::new()),
@@ -236,7 +239,7 @@ impl Link {
         lock(&self.offered)
             .as_ref()
             .is_some_and(|offer| offer.bindings.iter().any(|name| name == self.binding))
-            && self.http.load(Ordering::SeqCst)
+            && (self.http.load(Ordering::SeqCst) || self.stdio.load(Ordering::SeqCst) > 0)
             && !self.is_closed()
     }
 
@@ -341,12 +344,32 @@ impl Link {
             return false;
         };
         servers.retain(|server| server.get("name").and_then(Value::as_str) != Some(SERVER_NAME));
-        servers.push(json!({
-            "type": "http",
-            "name": SERVER_NAME,
-            "url": url,
-            "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-        }));
+        let version = self.stdio.load(Ordering::SeqCst);
+        servers.push(if self.http.load(Ordering::SeqCst) {
+            json!({
+                "type": "http",
+                "name": SERVER_NAME,
+                "url": url,
+                "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
+            })
+        } else {
+            // The same stdio bridge the delegation tools use, with the address and bearer in its environment. Version 1 writes
+            // a stdio server with no `type`; version 2 names it.
+            let bridge = &self.hub.bridge;
+            let mut entry = json!({
+                "name": SERVER_NAME,
+                "command": bridge.program,
+                "args": bridge.args,
+                "env": [
+                    {"name": crate::delegate::bridge::URL_VAR, "value": url},
+                    {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
+                ],
+            });
+            if version >= 2 {
+                entry["type"] = json!("stdio");
+            }
+            entry
+        });
         self.hub.tokens.add(digest);
         self.remember(
             id,
@@ -387,6 +410,17 @@ impl Link {
                     .or_else(|| result.pointer("/capabilities/session/mcp/http"))
                     .is_some_and(|http| http == &json!(true) || http.is_object());
                 self.http.store(http, Ordering::SeqCst);
+                let version = result
+                    .get("protocolVersion")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1);
+                // Version 1 has stdio in its baseline; version 2 says it.
+                let stdio = version < 2
+                    || result
+                        .pointer("/capabilities/session/mcp/stdio")
+                        .is_some_and(|said| said == &json!(true) || said.is_object());
+                self.stdio
+                    .store(if stdio { version } else { 0 }, Ordering::SeqCst);
             }
             (
                 Some(Pending::Open {

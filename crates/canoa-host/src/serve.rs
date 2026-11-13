@@ -845,7 +845,11 @@ impl Serving {
             return Err(ServeError::NothingToServe);
         }
         let store = Arc::new(store);
-        let secrets = secrets::Hub::new(&identity, &store);
+        let secrets = secrets::Hub::new(
+            &identity,
+            &store,
+            delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+        );
         // Turning the key change off is every method's to do: WebCrypto has none and takes only `false`, and ends a session at
         // its limit.
         let mut builder =

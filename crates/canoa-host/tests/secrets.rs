@@ -400,10 +400,20 @@ fn with_app<R>(
     modes: &str,
     body: impl FnOnce(&mut Wire<'_, websocket::Channel>, &mut App, &Host, &str) -> R,
 ) -> (R, Vec<(String, String)>) {
+    with_agent(modes, true, body)
+}
+
+/// As [`with_app`], the agent taking MCP servers over HTTP or only over stdio.
+fn with_agent<R>(
+    modes: &str,
+    http: bool,
+    body: impl FnOnce(&mut Wire<'_, websocket::Channel>, &mut App, &Host, &str) -> R,
+) -> (R, Vec<(String, String)>) {
+    let mcp = if http { "\"--mcp-http\", " } else { "" };
     let scratch = Scratch::new();
     let state = scratch.0.join("agent-state.json");
     let config = format!(
-        "[host.agents.Scripted]\nprogram = {}\nargs = [\"--scripted\", \"--mcp-http\", \"--modes={modes}\", \"--state={}\"]\nlisten = \"127.0.0.1:0\"\n",
+        "[host.agents.Scripted]\nprogram = {}\nargs = [\"--scripted\", {mcp}\"--modes={modes}\", \"--state={}\"]\nlisten = \"127.0.0.1:0\"\n",
         quoted(&example("stdio_agent", false).to_string_lossy()),
         state.to_string_lossy().replace('\\', "/"),
     );
@@ -681,4 +691,51 @@ fn an_app_that_did_not_offer_the_extension_gets_no_tools() {
         assert!(said.contains("no secret tools"), "{said}");
         assert!(app.extension.is_empty());
     });
+}
+
+#[test]
+fn an_agent_that_takes_only_stdio_gets_the_tools_through_the_bridge() {
+    let (seen, found) = with_agent("default", false, |wire, app, _host, work| {
+        let session = wire.open(app, work);
+        app.will_type("{\"user\":\"ana\"}", &[("password", PASSWORD)]);
+        let asked = json_of(&wire.prompt(
+            app,
+            &session,
+            &format!(
+                "Secret secret_request {}",
+                json!({"message": "Registry login", "schema": SCHEMA})
+            ),
+        ));
+        assert_eq!(asked["status"], "accepted", "{asked}");
+        let handle = asked["handles"]["password"]
+            .as_str()
+            .expect("a handle")
+            .to_owned();
+        app.decisions.push_back("allow-once");
+        let used = json_of(&wire.prompt(
+            app,
+            &session,
+            &format!(
+                "Secret secret_use {}",
+                json!({"handle": handle, "env": {"name": "REGISTRY_TOKEN", "command": echo_command("REGISTRY_TOKEN")}})
+            ),
+        ));
+        assert_eq!(used["status"], "exited", "{used}");
+        assert!(
+            used["stdout"]
+                .as_str()
+                .is_some_and(|out| out.contains(&handle)),
+            "{used}"
+        );
+        app.received.clone()
+    });
+    for (path, text) in found {
+        assert!(leaks(&text, PASSWORD).is_empty(), "the value is in {path}");
+    }
+    for text in seen {
+        assert!(
+            leaks(&text, PASSWORD).is_empty(),
+            "the value reached the app's transcript"
+        );
+    }
 }

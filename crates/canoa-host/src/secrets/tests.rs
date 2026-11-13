@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::link::is_bypass;
 use super::{Hub, Link};
+use crate::delegate::BridgeCommand;
 
 /// A directory of its own for a trust store, removed when dropped.
 struct Dir(std::path::PathBuf);
@@ -34,9 +35,13 @@ fn link(dir: &Dir, method: Method) -> Arc<Link> {
         .accept_key(&client.key_material())
         .expect("the client is paired");
     let host = Identity::generate(method).expect("a key");
-    Hub::new(&host, &store)
-        .link(&client.peer_id())
-        .expect("a link")
+    Hub::new(
+        &host,
+        &store,
+        BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+    )
+    .link(&client.peer_id())
+    .expect("a link")
 }
 
 fn offer(link: &Link, binding: &str) {
@@ -99,16 +104,16 @@ fn a_session_is_given_the_tools_only_when_the_app_offered_them_and_the_agent_tak
     offer(&link, "ecdsa-p256-sha256");
     let initialize = json!({"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {}});
     link.client_said(initialize.to_string().into_bytes());
-    // The agent takes no HTTP server.
+    // The agent takes no HTTP server: version 1 has stdio in its baseline, so it gets the bridge, the bearer in its environment.
     answer(
         &link,
         3,
         &json!({"agentCapabilities": {"mcpCapabilities": {"http": false}}}),
     );
-    assert_eq!(
-        servers(&new_session(&link, 4, &cwd))[0]["url"],
-        "http://elsewhere"
-    );
+    let stdio = servers(&new_session(&link, 4, &cwd));
+    assert_eq!(stdio[0]["args"], json!(["mcp-bridge"]));
+    assert!(stdio[0].get("type").is_none() && stdio[0].get("url").is_none());
+    assert_eq!(stdio[0]["env"][1]["value"].as_str().map(str::len), Some(64));
 
     let initialize = json!({"jsonrpc": "2.0", "id": 5, "method": "initialize", "params": {}});
     link.client_said(initialize.to_string().into_bytes());

@@ -45,6 +45,11 @@ enum Answer {
     Cancelled,
 }
 
+/// Each session's address and bearer.
+type Tools = Mutex<HashMap<String, (String, String)>>;
+/// Each session's started stdio server.
+type Bridges = Mutex<HashMap<String, Arc<Mutex<Bridge>>>>;
+
 struct Shared {
     state_path: Option<PathBuf>,
     /// The state when no file is named, and the lock that makes a read-change-write one step.
@@ -72,6 +77,8 @@ struct Shared {
     tools: Mutex<HashMap<String, (String, String)>>,
     /// The stdio server each session was given for them, started.
     bridges: Mutex<HashMap<String, Arc<Mutex<Bridge>>>>,
+    /// The same for the secret tools.
+    secret_bridges: Mutex<HashMap<String, Arc<Mutex<Bridge>>>>,
     /// Each session's address and bearer for the host's secret tools.
     secret_tools: Mutex<HashMap<String, (String, String)>>,
     /// The working directory each session was opened in.
@@ -467,17 +474,29 @@ impl Shared {
 
     /// One call of the host's tool server, as an MCP client does it: the text the tool answered, or the failure.
     fn tool_call(&self, session: &str, name: &str, arguments: &Value) -> String {
-        self.call_on(&self.tools, "delegation", session, name, arguments)
+        self.call_on(
+            (&self.tools, &self.bridges),
+            "delegation",
+            session,
+            name,
+            arguments,
+        )
     }
 
     /// As [`Shared::tool_call`], on the host's secret tools.
     fn secret_call(&self, session: &str, name: &str, arguments: &Value) -> String {
-        self.call_on(&self.secret_tools, "secret", session, name, arguments)
+        self.call_on(
+            (&self.secret_tools, &self.secret_bridges),
+            "secret",
+            session,
+            name,
+            arguments,
+        )
     }
 
     fn call_on(
         &self,
-        tools: &Mutex<HashMap<String, (String, String)>>,
+        (tools, bridges): (&Tools, &Bridges),
         kind: &str,
         session: &str,
         name: &str,
@@ -486,7 +505,7 @@ impl Shared {
         let Some((url, token)) = lock(tools).get(session).cloned() else {
             return format!("this session has no {kind} tools");
         };
-        let bridge = lock(&self.bridges).get(session).cloned();
+        let bridge = lock(bridges).get(session).cloned();
         if let Some(bridge) = bridge {
             let mut bridge = lock(&bridge);
             let answered = bridge.open().and_then(|()| {
@@ -926,11 +945,17 @@ impl Shared {
                         if let Some(kept) = kept {
                             lock(kept).insert(created.clone(), (url.to_owned(), token.to_owned()));
                         }
-                    } else if server["name"] == "canoa-delegate"
+                    } else if let Some(name) = server["name"].as_str()
+                        && (name == "canoa-delegate" || name == "canoa-secrets")
                         && let Some((bridge, url, token)) = Bridge::start(server)
                     {
-                        lock(&self.tools).insert(created.clone(), (url, token));
-                        lock(&self.bridges).insert(created.clone(), Arc::new(Mutex::new(bridge)));
+                        let (tools, bridges) = if name == "canoa-delegate" {
+                            (&self.tools, &self.bridges)
+                        } else {
+                            (&self.secret_tools, &self.secret_bridges)
+                        };
+                        lock(tools).insert(created.clone(), (url, token));
+                        lock(bridges).insert(created.clone(), Arc::new(Mutex::new(bridge)));
                     }
                 }
                 self.send(json!({"id": id, "result": {
@@ -1073,6 +1098,7 @@ pub fn run(args: &[String]) {
         secret_tools: Mutex::new(HashMap::new()),
         tools: Mutex::new(HashMap::new()),
         bridges: Mutex::new(HashMap::new()),
+        secret_bridges: Mutex::new(HashMap::new()),
         cwds: Mutex::new(HashMap::new()),
     });
     if let Some(marker) = option_of(args, "marker")

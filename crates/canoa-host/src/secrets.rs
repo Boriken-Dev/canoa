@@ -29,6 +29,8 @@ use coqui_agentic_peer::auth::Identity;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use zeroize::Zeroizing;
 
+use crate::delegate::BridgeCommand;
+
 pub(crate) use layers::{Layer, Raw};
 pub(crate) use link::Link;
 
@@ -72,6 +74,8 @@ impl Tokens {
 pub(crate) struct Hub {
     identity: Identity,
     store: Arc<TrustStore>,
+    /// What runs the stdio bridge, for an agent that takes no HTTP MCP server.
+    bridge: BridgeCommand,
     tokens: Arc<Tokens>,
     server: Mutex<Option<http::Listener>>,
 }
@@ -84,10 +88,15 @@ struct Keys {
 }
 
 impl Hub {
-    pub(crate) fn new(identity: &Identity, store: &Arc<TrustStore>) -> Arc<Self> {
+    pub(crate) fn new(
+        identity: &Identity,
+        store: &Arc<TrustStore>,
+        bridge: BridgeCommand,
+    ) -> Arc<Self> {
         Arc::new(Self {
             identity: identity.clone(),
             store: Arc::clone(store),
+            bridge,
             tokens: Arc::new(Tokens::default()),
             server: Mutex::new(None),
         })
