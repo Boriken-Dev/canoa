@@ -141,7 +141,12 @@ pub(crate) fn modes_of(result: &Value) -> Modes {
                 .find(|option| option.get("category").and_then(Value::as_str) == Some("mode"))
         });
     if let Some(option) = option {
-        modes.option = option.get("id").and_then(Value::as_str).map(str::to_owned);
+        // Version 1 names an option `id`, version 2 `configId`.
+        modes.option = option
+            .get("id")
+            .or_else(|| option.get("configId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         if !modes.set_mode {
             modes.available = option_values(option);
             modes.current = option

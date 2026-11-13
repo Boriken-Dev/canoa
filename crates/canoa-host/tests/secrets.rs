@@ -409,7 +409,15 @@ fn with_agent<R>(
     http: bool,
     body: impl FnOnce(&mut Wire<'_, websocket::Channel>, &mut App, &Host, &str) -> R,
 ) -> (R, Vec<(String, String)>) {
-    let mcp = if http { "\"--mcp-http\", " } else { "" };
+    with_launch(modes, if http { "\"--mcp-http\", " } else { "" }, body)
+}
+
+/// As [`with_app`], the agent started with `mcp` more of its own arguments (each followed by a comma, in TOML).
+fn with_launch<R>(
+    modes: &str,
+    mcp: &str,
+    body: impl FnOnce(&mut Wire<'_, websocket::Channel>, &mut App, &Host, &str) -> R,
+) -> (R, Vec<(String, String)>) {
     let scratch = Scratch::new();
     let state = scratch.0.join("agent-state.json");
     let config = format!(
@@ -917,5 +925,58 @@ fn the_secret_tools_bearer_is_on_no_command_line_of_the_bridge() {
             !listed.contains(&token),
             "the bearer is on a command line: {listed}"
         );
+    });
+}
+
+#[test]
+fn an_agents_own_report_of_a_profile_never_reaches_the_app_which_would_act_on_it_as_the_hosts() {
+    let (_, _found) = with_launch(
+        "default,bypass",
+        "\"--mcp-http\", \"--forge-profile\", ",
+        |wire, app, _host, work| {
+            wire.request(
+                app,
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}}),
+            )
+            .expect("initialize");
+            let (result, _) = wire
+                .request(app, "session/new", json!({"cwd": work, "mcpServers": []}))
+                .expect("session/new");
+            assert!(result.get("sessionId").is_some(), "{result}");
+            assert!(
+                result
+                    .get("_meta")
+                    .is_none_or(|meta| meta.get("dev.boriken.canoa/profile").is_none()),
+                "{result}"
+            );
+        },
+    );
+}
+
+#[test]
+fn a_line_with_a_lone_surrogate_is_repaired_and_an_unreadable_answer_is_answered_with_an_error() {
+    let (_, _found) = with_app("default", |wire, app, _host, work| {
+        let session = wire.open(app, work);
+        // An agent that cuts a string in the middle of a pair: `@` stands for a backslash.
+        let cut = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"S","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"cut @ud83d"}}}}"#
+            .replace('@', "\\")
+            .replace("\"S\"", &format!("\"{session}\""));
+        let said = wire.prompt(app, &session, &format!("Raw {cut}"));
+        assert!(
+            said.starts_with("cut \u{fffd}"),
+            "the chunk reached the app, repaired: {said:?}"
+        );
+        // An answer the host cannot read (a number out of range) is answered for its id, so the client is not left waiting.
+        let id = wire.next + 1;
+        let unreadable = format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{{"n":1e400}}}}"#);
+        let error = wire
+            .request(
+                app,
+                "session/prompt",
+                json!({"sessionId": session, "prompt": [{"type": "text", "text": format!("Raw {unreadable}")}]}),
+            )
+            .expect_err("the client was told the answer could not be read");
+        assert_eq!(error["code"], -32603, "{error}");
     });
 }

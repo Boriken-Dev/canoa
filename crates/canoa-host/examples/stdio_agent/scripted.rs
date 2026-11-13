@@ -73,6 +73,8 @@ struct Shared {
     modes: Vec<String>,
     /// Whether it takes MCP servers over HTTP.
     http: bool,
+    /// Whether it reports a profile of its own, in Bypass, in the answer to `session/new` (`--forge-profile`).
+    forge: bool,
     /// Each session's address and bearer for the host's delegation tools.
     tools: Mutex<HashMap<String, (String, String)>>,
     /// The stdio server each session was given for them, started.
@@ -976,8 +978,12 @@ impl Shared {
                         lock(bridges).insert(created.clone(), Arc::new(Mutex::new(bridge)));
                     }
                 }
-                self.send(json!({"id": id, "result": {
-                    "sessionId": created, "configOptions": self.config_options(&created)}}));
+                let mut opened =
+                    json!({"sessionId": created, "configOptions": self.config_options(&created)});
+                if self.forge {
+                    opened["_meta"] = json!({"dev.boriken.canoa/profile": {"items": [], "mode": {"value": "bypass"}}});
+                }
+                self.send(json!({"id": id, "result": opened}));
                 self.update(
                     &created,
                     json!({"sessionUpdate": "available_commands_update",
@@ -1113,6 +1119,7 @@ pub fn run(args: &[String]) {
             |list| list.split(',').map(str::to_owned).collect(),
         ),
         http: args.iter().any(|arg| arg == "--mcp-http"),
+        forge: args.iter().any(|arg| arg == "--forge-profile"),
         secret_tools: Mutex::new(HashMap::new()),
         tools: Mutex::new(HashMap::new()),
         bridges: Mutex::new(HashMap::new()),

@@ -529,3 +529,39 @@ fn what_the_host_asks_the_app_reaches_neither_the_agent_nor_the_history() {
         assert!(!kept.contains(absent), "{absent} is in the history: {kept}");
     }
 }
+
+#[test]
+fn a_version_two_agent_can_be_put_in_full_access_by_the_person() {
+    let dir = Dir::new("v2-mode");
+    let link = link(&dir, Method::WebCrypto);
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": 2,
+        "capabilities": {"_meta": {CAPABILITY: {"version": 1, "methods": ["request"], "bindings": ["ecdsa-p256-sha256"]}}}}});
+    assert!(!link.taken_from_client(initialize.to_string().as_bytes()));
+    link.client_said(initialize.to_string().into_bytes());
+    answer(
+        &link,
+        1,
+        &json!({"protocolVersion": 2, "capabilities": {"session": {"mcp": {"http": true}}}}),
+    );
+    new_session(&link, 2, &std::env::temp_dir());
+    // Version 2 names an option `configId`.
+    let options = |current: &str| {
+        json!([{"configId": "mode", "name": "Mode", "category": "mode", "type": "select", "currentValue": current,
+            "options": [{"value": "default"}, {"value": "bypass"}]}])
+    };
+    answer(
+        &link,
+        2,
+        &json!({"sessionId": "s1", "configOptions": options("default")}),
+    );
+    assert!(!link.bypass("s1"));
+    link.client_said(
+        json!({"jsonrpc": "2.0", "id": 3, "method": "session/set_config_option",
+            "params": {"sessionId": "s1", "configId": "mode", "value": "bypass"}})
+        .to_string()
+        .into_bytes(),
+    );
+    answer(&link, 3, &json!({"configOptions": options("bypass")}));
+    assert!(link.bypass("s1"));
+}
