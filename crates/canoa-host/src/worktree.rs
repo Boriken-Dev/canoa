@@ -28,6 +28,9 @@ pub(crate) const NEW: &str = "_canoa/worktree/new";
 pub(crate) const STATUS: &str = "_canoa/worktree/status";
 /// Removes one: `{"path", "discard"}` to `{"removed": true, "branch", "branchKept", "commits"}`.
 pub(crate) const REMOVE: &str = "_canoa/worktree/remove";
+/// What the work tree under a folder holds against a commit, read only: `{"path", "base"?}` to `{"exists": false}` or
+/// `{"exists": true, "head", "branch", "base", "added", "removed", "files", "more"}`.
+pub(crate) const DIFF: &str = "_canoa/worktree/diff";
 
 /// Every branch the host makes or removes starts with this.
 pub(crate) const BRANCH_PREFIX: &str = "canoa/";
@@ -112,7 +115,7 @@ impl Worktrees {
         serde_json::from_slice::<Value>(message).is_ok_and(|value| {
             matches!(
                 value.get("method").and_then(Value::as_str),
-                Some(NEW | STATUS | REMOVE)
+                Some(NEW | STATUS | REMOVE | DIFF)
             )
         })
     }
@@ -156,6 +159,14 @@ impl Worktrees {
         match method {
             NEW => self.make(text("cwd")?, text("branch")?),
             STATUS => self.status(text("path")?),
+            DIFF => {
+                let base = match params.get("base") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(base)) => Some(base.as_str()),
+                    Some(_) => return Err(refused("base must be text")),
+                };
+                self.diff(text("path")?, base)
+            }
             REMOVE => {
                 let discard = match params.get("discard") {
                     None => false,
@@ -750,5 +761,6 @@ fn resolve(path: &Path) -> std::io::Result<PathBuf> {
     Ok(resolved)
 }
 
+mod diff;
 #[cfg(test)]
 mod tests;

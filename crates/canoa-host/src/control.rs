@@ -313,7 +313,9 @@ impl Control {
             Some("ledger/put") => self.put(caller, &params),
             Some("ledger/remove") => self.remove(caller, &params),
             Some("ledger/clear") => self.clear(caller),
-            Some(method @ ("worktree/new" | "worktree/status" | "worktree/remove")) => {
+            Some(
+                method @ ("worktree/new" | "worktree/status" | "worktree/remove" | "worktree/diff"),
+            ) => {
                 return Some(self.worktree(caller, method, &request, &id));
             }
             Some(method @ ("store/list" | "store/report" | "store/latest" | "store/plan")) => {

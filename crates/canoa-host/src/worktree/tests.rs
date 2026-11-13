@@ -51,8 +51,8 @@ fn a_branch_is_canoa_then_plain_words() {
 }
 
 #[test]
-fn only_the_three_methods_are_worktree_requests() {
-    for method in [NEW, STATUS, REMOVE] {
+fn only_the_four_methods_are_worktree_requests() {
+    for method in [NEW, STATUS, REMOVE, DIFF] {
         let message = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {}});
         assert!(Worktrees::is_request(message.to_string().as_bytes()));
     }
@@ -575,4 +575,115 @@ fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
     let second = fixture.status(&made).expect("status");
     assert_eq!(first["changed"], second["changed"]);
     assert_ne!(first["listing"], second["listing"]);
+}
+
+#[test]
+fn a_diff_lists_tracked_and_untracked_files_against_a_commit_and_writes_nothing() {
+    let Some(fixture) = Fixture::new("diff") else {
+        return;
+    };
+    let repo = &fixture.repo;
+    std::fs::write(repo.join("README"), "hello\nworld\n").expect("a file");
+    std::fs::write(repo.join("fresh.txt"), "one\ntwo\n").expect("a file");
+    std::fs::write(repo.join("blob.bin"), [0u8, 1, 2]).expect("a file");
+    std::fs::remove_file(repo.join("sub").join("keep")).expect("removed");
+    let before = run_git(repo, &["status", "--porcelain=v1", "--untracked-files=all"]);
+    let asked = fixture
+        .worktrees
+        .diff(&repo.to_string_lossy(), None)
+        .expect("a diff");
+    assert_eq!(asked["exists"], true, "{asked}");
+    let head = run_git(repo, &["rev-parse", "HEAD"]);
+    assert_eq!(asked["head"], head.trim(), "{asked}");
+    let files = asked["files"].as_array().expect("files");
+    let by = |name: &str| {
+        files
+            .iter()
+            .find(|file| file["path"] == name)
+            .unwrap_or_else(|| panic!("{name} in {asked}"))
+    };
+    assert_eq!(
+        (
+            by("README")["added"].as_u64(),
+            by("README")["removed"].as_u64()
+        ),
+        (Some(1), Some(0))
+    );
+    assert!(
+        by("README")["patch"]
+            .as_str()
+            .expect("a patch")
+            .starts_with("@@ "),
+        "{asked}"
+    );
+    assert_eq!(by("sub/keep")["status"], "D");
+    assert_eq!(by("fresh.txt")["status"], "A");
+    assert_eq!(by("fresh.txt")["added"], 2);
+    assert_eq!(by("blob.bin")["binary"], true);
+    assert!(by("blob.bin")["patch"].is_null());
+    assert_eq!(asked["added"], 3, "{asked}");
+    // A folder limits it, with paths relative to it.
+    let inner = fixture
+        .worktrees
+        .diff(&repo.join("sub").to_string_lossy(), None)
+        .expect("a diff");
+    assert_eq!(
+        inner["files"].as_array().expect("files").len(),
+        1,
+        "{inner}"
+    );
+    assert_eq!(inner["files"][0]["path"], "keep");
+    // Against an earlier commit, what a later commit made counts too.
+    run_git(repo, &["add", "."]);
+    run_git(repo, &["commit", "-q", "-m", "second"]);
+    let since = fixture
+        .worktrees
+        .diff(&repo.to_string_lossy(), Some(head.trim()))
+        .expect("a diff");
+    assert_eq!(since["added"], 3, "{since}");
+    let now = fixture
+        .worktrees
+        .diff(&repo.to_string_lossy(), None)
+        .expect("a diff");
+    assert_eq!(now["files"].as_array().expect("files").len(), 0, "{now}");
+    // The same change has the same print, another has another.
+    assert_ne!(
+        since["files"][0]["print"], since["files"][1]["print"],
+        "{since}"
+    );
+    let _ = before;
+    for bad in ["nothex", "abc", &"0".repeat(40)] {
+        let reply = fixture.worktrees.diff(&repo.to_string_lossy(), Some(bad));
+        assert!(reply.is_err(), "{bad}");
+    }
+    assert_eq!(
+        fixture
+            .worktrees
+            .diff(&repo.join("nothing-here").to_string_lossy(), None)
+            .expect("answered")["exists"],
+        false
+    );
+}
+
+#[test]
+fn a_diff_changes_nothing_in_the_repository() {
+    let Some(fixture) = Fixture::new("diffreads") else {
+        return;
+    };
+    std::fs::write(fixture.repo.join("README"), "changed\n").expect("a file");
+    std::fs::write(fixture.repo.join("new.txt"), "x\n").expect("a file");
+    let status = || {
+        run_git(
+            &fixture.repo,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        )
+    };
+    let index = || std::fs::read(fixture.repo.join(".git").join("index")).expect("an index");
+    let (state, before) = (status(), index());
+    fixture
+        .worktrees
+        .diff(&fixture.repo.to_string_lossy(), None)
+        .expect("a diff");
+    assert_eq!(status(), state);
+    assert_eq!(index(), before, "the index is not rewritten");
 }

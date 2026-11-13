@@ -309,6 +309,7 @@ The requests, each answered by the host, never the agent:
 | `_canoa/worktree/new` | `cwd`, `branch` | `path` (under the root as written), `branch`, `repo` |
 | `_canoa/worktree/status` | `path` | `{"exists": false}`, or `exists`, `branch` (null when detached), `detached`, `changed`, `commits` (reached by HEAD or the branch alone), `listing` (SHA-256 of what `changed` counts) |
 | `_canoa/worktree/remove` | `path`, `discard` (default false) | `removed`, `branch`, `branchKept`, `commits` |
+| `_canoa/worktree/diff` | `path`, `base` (a commit's hex id, default HEAD) | `{"exists": false}`, or `head`, `branch`, `base`, `added`, `removed`, and `files` (each `path`, `status`, `added`, `removed`, `binary`, `patch`, `cut`, `print`), `more`: what the folder holds against `base`, read only |
 
 A link swapped in, between the host's check and git's work, by someone who can already write inside a root, is not
 guarded against.
