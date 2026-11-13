@@ -43,6 +43,11 @@ nothing of it and cannot undo it. A request offering no option Canoa can read ca
 an id is answered cancelled without being shown, since the agent could take that id for either. A conversation holds at most 64
 questions waiting; the agent's further ones are answered cancelled, and the conversation says so.
 
+While a card waits, the composer's placeholder reads "Send a message to decline and redirect the agent": sending refuses that one
+request with the agent's `reject_once` option (any other refusal, else a plain one) and sends the text, which goes at once or, while
+the turn is still open, when it ends. A refusal chosen on the card itself stops the turn with `session/cancel`; a subagent's request
+is refused alone.
+
 **Modes.** The mode a session is in shows at the composer's bottom left, as Claude Code's and Codex's own do, and is changed
 from its menu or with Shift+Tab in the message, which goes on to the next mode and round. Nothing is asked: choosing a mode is
 the whole act. The control offers the agent's own modes (the `mode` option, or an agent's `modes`), read from the agent and
@@ -212,6 +217,18 @@ An agent that advertises coqui-acp's usage extension (`dev.boriken.coqui.acp/usa
 files dropped on the conversation are added too. An image on the clipboard becomes an image, copied files become files, and
 text stays in the message unless it is longer than `[attachments] paste_as_file`, when it goes as an attachment of its own.
 Each attachment shows as a chip above the message, an image with its thumbnail, with its size and a way to take it back.
+
+**`@` names files.** In a session on this computer, an `@` at the start of the message or after a space lists files and folders
+under the session's folder, by name or path, nearest first; a pick writes `@path` in the message and adds a chip. A mention
+always goes as a `resource_link` to the file's path, never its text, and only while the message still holds its `@path`. Nothing
+outside the folder is listed or taken: a path that climbs out of it, is absolute, or reaches outside through a link is refused,
+and names that start with a dot, `node_modules`, and names with control or direction characters are not offered. A session on
+another computer has no `@`, since the agent could not read its links. The placeholder names what the message takes ("@ files,
+/ commands").
+
+**`/` lists two groups.** The agent's commands, then Canoa's own actions (the next mode, Settings, the source settings,
+Loadout, and what the session was given), each under its title. An action runs when chosen and sends nothing. `+` has Slash
+commands, which starts the list from an empty message.
 
 An image goes as ACP `image` content when the agent's `promptCapabilities.image` says it takes images; a file goes as an
 embedded `resource` when `embeddedContext` allows it, it is text and no larger than `[attachments] embed_limit`, and as a
