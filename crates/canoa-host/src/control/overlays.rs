@@ -8,12 +8,12 @@
     reason = "files, processes and clocks are std's"
 )]
 
+use crate::spawn::{Command, Stdio};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -979,12 +979,12 @@ impl Overlays {
             .env("SSH_ASKPASS_REQUIRE", "never")
             .env("GIT_LITERAL_PATHSPECS", "1")
             .stdin(if stdin.is_some() {
-                Stdio::piped()
+                Stdio::Piped
             } else {
-                Stdio::null()
+                Stdio::Null
             })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::Piped)
+            .stderr(Stdio::Piped)
             .spawn()
             .map_err(|_| refused("git could not be started"))?;
         let writer = stdin.and_then(|bytes| {
