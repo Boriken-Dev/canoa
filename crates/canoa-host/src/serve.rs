@@ -97,6 +97,10 @@ pub struct ServeOptions {
     /// its profile, so a change to `[overlays]`, `[profile]` or `[agents.NAME]` reaches the next session; a file that no longer
     /// parses leaves the profile as it was.
     pub layers: Option<Layers>,
+    /// The person's own canoa.cfg, which a key granted `config.write` edits by section; without it those methods are refused.
+    pub config_file: Option<PathBuf>,
+    /// The user's home, which a key granted `folders` may browse; the environment's when `None`.
+    pub home_dir: Option<PathBuf>,
 }
 
 impl ServeOptions {
@@ -113,6 +117,8 @@ impl ServeOptions {
             local_sources: false,
             programs: None,
             layers: None,
+            config_file: None,
+            home_dir: None,
         }
     }
 
@@ -138,6 +144,20 @@ impl ServeOptions {
         providers: Vec<String>,
     ) -> Self {
         self.programs = Some((programs, providers));
+        self
+    }
+
+    /// The canoa.cfg a key granted `config.write` edits, by section.
+    #[must_use]
+    pub fn with_config_file(mut self, file: impl Into<PathBuf>) -> Self {
+        self.config_file = Some(file.into());
+        self
+    }
+
+    /// The home a key granted `folders` may browse, in place of the environment's.
+    #[must_use]
+    pub fn with_home_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.home_dir = Some(dir.into());
         self
     }
 
@@ -1293,6 +1313,7 @@ impl Serving {
             options.state_dir.as_ref().map(|dir| dir.join("history")),
             config.history,
         ));
+        let stopped = Arc::new(AtomicBool::new(false));
         let serving = Self {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
@@ -1303,7 +1324,7 @@ impl Serving {
                 unproven: Gate::new(MAX_UNPROVEN),
                 agents,
                 ending: Mutex::new(()),
-                stopped: Arc::new(AtomicBool::new(false)),
+                stopped: Arc::clone(&stopped),
                 program_args: options.program_args.clone(),
                 control: Arc::new({
                     let kept = control::Control::open(
@@ -1334,6 +1355,45 @@ impl Serving {
                             .collect(),
                     )
                     .map_err(ServeError::Control)?;
+                    let kept =
+                        kept.with_stop(Arc::clone(&stopped))
+                            .with_files(control::Files::new(
+                                options.home_dir.clone().or_else(home_from_environment),
+                                config
+                                    .entries
+                                    .iter()
+                                    .filter(|entry| !entry.working_roots.is_empty())
+                                    .map(|entry| control::EntryRoots {
+                                        peers: entry.peers.as_ref().map(|peers| {
+                                            peers.iter().map(ToString::to_string).collect()
+                                        }),
+                                        roots: entry.working_roots.clone(),
+                                    })
+                                    .collect(),
+                                options.config_file.clone(),
+                                options
+                                    .state_dir
+                                    .as_ref()
+                                    .map(|dir| dir.join("control").join("uploads")),
+                                control::UploadLimits {
+                                    file_bytes: config
+                                        .control
+                                        .as_ref()
+                                        .map_or(control::DEFAULT_MAX_UPLOAD_BYTES, |c| {
+                                            c.max_upload_bytes
+                                        }),
+                                    total_bytes: config
+                                        .control
+                                        .as_ref()
+                                        .map_or(control::DEFAULT_MAX_UPLOAD_TOTAL, |c| {
+                                            c.max_upload_total_bytes
+                                        }),
+                                    files: config
+                                        .control
+                                        .as_ref()
+                                        .map_or(control::DEFAULT_MAX_UPLOADS, |c| c.max_uploads),
+                                },
+                            ));
                     let kept = kept.with_history(control::Moves {
                         store: recorded,
                         targets: movers,
@@ -1437,6 +1497,12 @@ impl Serving {
     #[must_use]
     pub fn stopper(&self) -> Stopper {
         Stopper(Arc::clone(&self.shared))
+    }
+
+    /// Raised when a key asked the host to end so that it starts again (`host/restart`).
+    #[must_use]
+    pub fn restart_flag(&self) -> Arc<AtomicBool> {
+        self.shared.control.restart_flag()
     }
 
     /// Takes connections on every entry until [`Stopper::stop`] or the process ends. Each handshake and proof runs on a
@@ -2225,6 +2291,14 @@ fn give_provider<C: Channel>(
     tracing::info!(entry = served.name, %peer, "left: {end}");
     shared.forget(key);
     running.stop();
+}
+
+/// The user's home as the environment names it.
+fn home_from_environment() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]

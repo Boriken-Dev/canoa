@@ -192,6 +192,12 @@ pub struct ControlConfig {
     pub max_records: usize,
     /// The largest ledger record, in bytes.
     pub max_record_bytes: usize,
+    /// The largest file a key may upload, in bytes.
+    pub max_upload_bytes: u64,
+    /// What one key may keep uploaded, in bytes.
+    pub max_upload_total_bytes: u64,
+    /// The files one key may keep uploaded.
+    pub max_uploads: usize,
 }
 
 /// `[host.history]`: the host records each session it serves in the session-history format, in its home beside the ledger, and
@@ -973,6 +979,9 @@ struct RawControl {
     grants: IndexMap<String, Vec<String>>,
     max_records: Option<usize>,
     max_record_bytes: Option<usize>,
+    max_upload_bytes: Option<u64>,
+    max_upload_total_bytes: Option<u64>,
+    max_uploads: Option<usize>,
 }
 
 /// `[host.accounts.NAME]`. A key it does not list is collected, so that it is refused by name and a credential written
@@ -1610,6 +1619,26 @@ fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
     if max_records == 0 || max_record_bytes == 0 {
         return Err(refused("max_records and max_record_bytes are at least 1"));
     }
+    let max_upload_bytes = raw
+        .max_upload_bytes
+        .unwrap_or(crate::control::DEFAULT_MAX_UPLOAD_BYTES);
+    let max_upload_total_bytes = raw
+        .max_upload_total_bytes
+        .unwrap_or(crate::control::DEFAULT_MAX_UPLOAD_TOTAL);
+    let max_uploads = raw
+        .max_uploads
+        .unwrap_or(crate::control::DEFAULT_MAX_UPLOADS);
+    if max_upload_bytes == 0 || max_upload_total_bytes == 0 || max_uploads == 0 {
+        return Err(refused(
+            "max_upload_bytes, max_upload_total_bytes and max_uploads are at least 1",
+        ));
+    }
+    // A request is at most MAX_REQUEST bytes, and an upload travels in base64 inside it.
+    if max_upload_bytes > (crate::control::MAX_REQUEST as u64 - 4096) / 4 * 3 {
+        return Err(refused(
+            "max_upload_bytes is more than one request can carry (about 12 MiB)",
+        ));
+    }
     if listen.is_some() && grants.is_empty() {
         return Err(refused(
             "listen without a key under grants would turn every key away",
@@ -1620,6 +1649,9 @@ fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
         grants,
         max_records,
         max_record_bytes,
+        max_upload_bytes,
+        max_upload_total_bytes,
+        max_uploads,
     })
 }
 

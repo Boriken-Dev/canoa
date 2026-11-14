@@ -215,6 +215,9 @@ pub const fn ServeOptions::with_nothing_to_serve(self, allowed: bool) -> ServeOp
 pub const fn ServeOptions::with_local_sources(self, on: bool) -> ServeOptions   // also serve the host's own sources over Local; see "The host's own sources"
 pub fn ServeOptions::with_layers(self, layers: Layers) -> ServeOptions   // read canoa.cfg's profile again from these files at each connection to a source of the host's own; `serve` sets it
 pub fn ServeOptions::with_state_dir(self, dir: impl Into<PathBuf>) -> ServeOptions   // where a private agy read gets its empty working directory, `<dir>/usage-read`; `canoa serve` gives the home; none, and no private agent is started
+pub fn ServeOptions::with_config_file(self, file: impl Into<PathBuf>) -> ServeOptions   // the canoa.cfg a key granted `config.write` edits; `canoa serve` gives the file `--config` lists last; none, and `config/*` is refused
+pub fn ServeOptions::with_home_dir(self, dir: impl Into<PathBuf>) -> ServeOptions   // the home a key granted `folders` may browse; the environment's (HOME, or USERPROFILE on Windows) when not given
+pub fn Serving::restart_flag(&self) -> Arc<AtomicBool>   // raised once a key asked for `host/restart`; `canoa serve` then ends with `cli::STATUS_RESTART`
 
 pub fn Serving::bind(config: &Config, identity: coqui_agentic_peer::auth::Identity, store: TrustStore, options: &ServeOptions) -> Result<Serving, ServeError>
 pub fn Serving::method(&self) -> coqui_agentic_peer::auth::Method   // the identity's: every entry proves by it
@@ -234,7 +237,7 @@ pub fn Serving::run(self)                      // takes connections until Stoppe
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
 pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
 #[non_exhaustive] pub struct Listening { pub name: String, pub kind: &'static str, pub url: String, pub harness: Option<String>, pub title: Option<String>, pub local: bool, pub missing: Vec<String> }   // local: no address (url is empty); missing: programs a local entry needs that were not found; url: ws://ADDRESS, or pipe:NAME / unix:PATH for an entry on a pipe
-pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it; false for a pipe entry   // kind: "agent", "provider", "tool" or "control" (the control channel, which `/canoa.json` never lists); harness: a harness entry's provider id; title: an agent entry's title
+pub fn Listening::on_address(&self) -> bool    // whether a browser can dial it; false for a pipe entry   // kind: "agent", "provider", "tool" or "control" (the control channel: `/canoa.json` lists it, as ``, only when `[host.control] listen` is an address); harness: a harness entry's provider id; title: an agent entry's title
 ```
 
 - `stop_agents` ends each agent and each provider process with what it started (job object on Windows, process group on Unix), and turns every later proven connection away before its agent serves it. The listeners stay bound.
@@ -305,7 +308,7 @@ pub fn WebStopper::stop(&self)                  // a connection already open end
 - HTTP/1.1 and 1.0, `GET` and `HEAD` only (else 405 with `Allow: GET, HEAD`). Refused with 400: a request with a body (`Transfer-Encoding`, more than one `Content-Length`, or one other than 0), no `Host` or two (HTTP/1.0 included), a target that does not start with `/` (absolute-form included), anything `httparse` refuses. A `Host` that is not `localhost`, an IP address or one of `hosts`, with any port, is refused with 421, which stops a page of another site reaching this one by DNS rebinding. More than 64 headers or `max_request_bytes` is 431; a head not complete within `request_time` is 408. Every refusal closes the connection.
 - **Paths.** The target's path (the query left out) is split at `/` and each segment percent-decoded; refused with 404 is any segment that is empty (but a last one), `.` or `..`, starts or ends with a dot, ends with a space, holds a control character, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>` or `|` once decoded, is not UTF-8, or is a Windows device name with any extension (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `CLOCK$`, `COM` or `LPT` and a digit or `¹`, `²`, `³`). The file is the resolved path (every link followed) under the resolved root, each segment of which, once resolved, must pass the same rules: one that resolves outside the root, or to a name a request could not give (an NTFS short name such as `GIT~1` resolving to `.git`, a link to a dot-name), is refused with 404 and logged, whatever it is, and a directory is never listed. From the site built in, the path is looked up as written.
 - **The app's routes.** A path naming nothing, or a directory, whose last segment has no `.` is answered with the root's `index.html` (200, `no-cache`); any other missing file is 404.
-- **`/canoa.json`** (`HOST_INDEX`, the query left out, before any file of that name): `{"peer", "method", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`, the host's id and method and each entry as `serve` prints it, `Cache-Control: no-store`. It names the host for a page to fill in; it proves nothing, and connecting still runs the proof both ways and needs the page's key accepted.
+- **`/canoa.json`** (`HOST_INDEX`, the query left out, before any file of that name): `{"peer", "method", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`, the host's id and method and each entry as `serve` prints it (the control channel too, kind `control`, when it listens on an address; a page needs its address to reach the ledger, folders and uploads), `Cache-Control: no-store`. It names the host for a page to fill in; it proves nothing, and connecting still runs the proof both ways and needs the page's key accepted.
 - **Headers on every answer**: `Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' URL...; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'`, the `connect-src` naming each entry's `url`, then each `connect` source; over HTTPS, to a request naming one of `hosts`, `Strict-Transport-Security: max-age=31536000` (never to `localhost` or an address, which other servers share); `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, `Date`, `Connection`. A file carries `Content-Type` by its extension (`application/octet-stream` when unknown), an `ETag` (weak, of length and modification time, from a directory; of the contents, built in), and `Cache-Control: public, max-age=IMMUTABLE_AGE, immutable` when its name holds a hash (a part of 8 or more hex digits after the first, split at `.`, `-`, `_`: `main.3f9a1b2c.js`), else `no-cache`. `If-None-Match` naming its tag is answered 304. No range, no compression.
 - **Connections**: one thread each, `max_connections` at once and `max_connections_per_address` from one address (past either a new one is closed unanswered), each ended after `connection_time` whatever it is doing; kept alive in HTTP/1.1 unless `Connection: close`, for `max_requests` requests; the first head must arrive within `request_time` of the connection (TLS handshake included), each later one within `idle_time` to start and `request_time` from its first byte; a write that makes no progress for `send_time` ends the connection.
 
@@ -539,9 +542,12 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "upload", "host.restart"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
+max_upload_bytes = 8388608                          # one upload (at most about 12 MiB: it travels in base64 inside a request of at most 16 MiB)
+max_upload_total_bytes = 268435456                  # what one key may keep uploaded
+max_uploads = 256                                   # files one key may keep uploaded
 ```
 
 | Grant | Methods |
@@ -550,8 +556,40 @@ max_record_bytes = 262144                           # one ledger record
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove`, `worktree/diff` |
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
+| `folders` | `fs/list` |
+| `config.read` | `config/get` |
+| `config.write` | `config/set` |
+| `upload` | `upload/put`, `upload/remove` |
+| `host.restart` | `host/restart` |
 | *(none)* | `store/apply`, `store/rollback`, `store/remove`: **owner only**; `[host.control]` refuses `store.write` as a grant |
 | *(none)* | `history/export`, `history/move`, `history/importable`, `history/import`, `history/imported`: **owner only**; no grant names them |
+
+**A page's files** (`fs/list`, `config/*`, `upload/*`, `host/restart`) are what a web page, which cannot touch the disk or run a
+program, asks its host to do as the user. Each is behind its own grant, so a key given only the ledger gets none of them.
+
+- `fs/list` `{"path"?: absolute, "hidden"?: bool, "files"?: bool}` -> `{"path", "parent", "entries": [{"name", "path", "dir"}], "more"}`,
+  folders only unless `files`, dot names only with `hidden`, folders first then by name, at most `MAX_LIST` (1000, `more` says so).
+  With no `path` it lists the places to start from: for a key the user's home and the working roots of the entries the key may use
+  (all keys when an entry has no `peers`); for the owner every drive or `/`. A path must be absolute with no `.` or `..` and, once
+  every link is resolved, under one of those places; a path outside them and one that is not there are the same answer (`-32003`).
+  An entry whose link leads out of the places is not listed. `parent` is null where the parent is outside them. Names with control
+  or bidirectional characters are left out.
+- `config/get` `{"section"}` -> `{"section", "value": object|null, "restart": false}` and `config/set` `{"section", "value": object|null}`
+  -> `{"section", "restart"}` read and write one table of the person's own canoa.cfg (the file `--config` lists last), in the format
+  it is in (a `.yaml`/`.json` name or a `#!` first line, else TOML; comments and layout are not kept). Only `SECTIONS` are named
+  (`appearance assets attachments catalogs network notifications overlays permissions sessions store usage`); any other, `host`,
+  `agents`, `profile`, `desktop` and `skill_pins` among them, is `-32001`, since those name programs to run or what may run. `value` is
+  an object of at most `MAX_SECTION_BYTES` (256 KiB) or null, which removes the table. The text that would result is read by the host's
+  own loader first, and a file it would refuse is not written (`-32002`); the write is beside the file first, then renamed. `restart` is
+  true for the sections the host itself reads at start (`overlays permissions usage`): they apply after `host/restart`. A host not
+  started with a canoa.cfg refuses both (`-32002`).
+- `upload/put` `{"name", "data": base64}` -> `{"path", "name", "size"}` keeps a file in `control/uploads/<digest of the key's id>/`
+  (`0700`; the file `0600`) as `<12 hex digits>-<name>`, the name cut to its last component and to 100 bytes with anything but
+  letters, digits and `.-_ ` made `_`. `max_upload_bytes`, `max_upload_total_bytes` and `max_uploads` hold per key (the owner has its
+  own folder), past one it is `-32002`; a bad base64 string is `-32602`. `upload/remove` `{"path"}` -> `{"removed"}` removes a file in
+  the caller's own folder and nothing else.
+- `host/restart` `{}` -> `{"restarting": true}` ends the host 300 ms later with status `cli::STATUS_RESTART` (75) and stops the web
+  server, for a supervisor to start it again: canoa.cfg is read at start. Without a supervisor it is an end.
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
 as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
@@ -743,6 +781,7 @@ An agent entry with `harness` can offer accounts: logins of the provider's, each
 
 ```rust
 pub const STATUS_HELD: u8 = 3;
+pub const STATUS_RESTART: u8 = 75;   // `serve` ended because a key granted `host.restart` asked it to: start it again
 pub trait Front: Send + Sync {
     fn print(&self, line: &str) -> io::Result<()>;     // a line of results: standard output for `canoa`
     fn say(&self, line: &str);                         // a line of diagnostics: standard error for `canoa`

@@ -61,6 +61,8 @@ percent-encoding.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# An upload travels in base64; already in the graph (the web_peer example reads it too).
+data-encoding = { version = "2", default-features = false, features = ["std"] }
 # An account's credential in the operating system's store, through keyring-core and the platform's store below.
 keyring-core = "1"
 # The file store's sealing, at the version the dependency graph already holds.
@@ -109,9 +111,8 @@ is_elevated = "0.1"
 [dev-dependencies]
 # A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
-# The peers the web_peer example plays the page of, and its base64; already in the graph through coqui-acp-bridge.
+# The peers the web_peer example plays the page of; already in the graph through coqui-acp-bridge.
 coqui-peer-noise.workspace = true
-data-encoding = { version = "2", default-features = false, features = ["std"] }
 
 # Fixtures the tests run, built by `cargo test` into target/<profile>/examples.
 [[example]]

@@ -32,6 +32,9 @@ use crate::{
 /// The status of `serve` when another host holds its home.
 pub const STATUS_HELD: u8 = 3;
 
+/// The status of `serve` when a key granted `host.restart` asked it to end so that its supervisor starts it again.
+pub const STATUS_RESTART: u8 = 75;
+
 /// What a command needs from whatever runs it.
 pub trait Front: Send + Sync {
     /// Writes one line of the command's results, standard output for the `canoa` program.
@@ -765,6 +768,9 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         .with_local_sources(args.local_sources)
         .with_layers(layers)
         .with_state_dir(home.dir());
+    if let Ok(layers) = layers_of(&args.config, front, false) {
+        options = options.with_config_file(layers.own);
+    }
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);
     }
@@ -817,6 +823,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
             )
             .map_err(Failed::run)?;
     }
+    let web_stopper = web.as_ref().map(WebServer::stopper);
     let web = web
         .map(|web| {
             std::thread::Builder::new()
@@ -825,9 +832,20 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         })
         .transpose()
         .map_err(Failed::run)?;
+    let restart = serving.restart_flag();
     serving.run();
+    let restarting = restart.load(Ordering::SeqCst);
+    if restarting && let Some(web) = &web_stopper {
+        web.stop();
+    }
     if let Some(web) = web {
         let _ = web.join();
+    }
+    if restarting {
+        return Err(Failed {
+            status: STATUS_RESTART,
+            why: "a paired key asked this host to restart".to_owned(),
+        });
     }
     Ok(())
 }

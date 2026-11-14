@@ -9,12 +9,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use coqui_transport::{Channel, Failure};
 
 use crate::worktree::Worktrees;
+pub use files::{
+    DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_LIST,
+    MAX_SECTION_BYTES, SECTIONS,
+};
+pub(crate) use files::{Files, UploadLimits};
 pub(crate) use import::{Homes, IMPORT_KEY};
 pub(crate) use moves::Moves;
 use serde::{Deserialize, Serialize};
@@ -66,6 +72,16 @@ pub enum Grant {
     /// `store/list`, `store/report`, `store/latest` and `store/plan`: what the host finds and would do, and nothing it writes.
     /// There is no grant for installing: only the owner installs, updates, rolls back and removes.
     StoreRead,
+    /// `fs/list`: the folders under the user's home and the working roots of the entries the key may use.
+    Folders,
+    /// `config/get`: a named section of canoa.cfg, the app's own tables only.
+    ConfigRead,
+    /// `config/set`: a named section of canoa.cfg, the app's own tables only; never `host`, `agents` or `profile`.
+    ConfigWrite,
+    /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
+    Upload,
+    /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
+    HostRestart,
 }
 
 impl Grant {
@@ -77,6 +93,11 @@ impl Grant {
             Self::LedgerWrite => "ledger.write",
             Self::Worktree => "worktree",
             Self::StoreRead => "store.read",
+            Self::Folders => "folders",
+            Self::ConfigRead => "config.read",
+            Self::ConfigWrite => "config.write",
+            Self::Upload => "upload",
+            Self::HostRestart => "host.restart",
         }
     }
 
@@ -88,6 +109,11 @@ impl Grant {
             Self::LedgerWrite,
             Self::Worktree,
             Self::StoreRead,
+            Self::Folders,
+            Self::ConfigRead,
+            Self::ConfigWrite,
+            Self::Upload,
+            Self::HostRestart,
         ]
         .into_iter()
         .find(|grant| grant.as_str() == name)
@@ -162,6 +188,11 @@ pub(crate) struct Control {
     /// The recorded histories and the harnesses a session may be moved to.
     history: Option<Moves>,
     entries: Vec<EntryRoots>,
+    /// What a page may do with this computer's files.
+    files: Files,
+    /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
+    restart: Arc<AtomicBool>,
+    stop: Option<Arc<AtomicBool>>,
     path: Option<PathBuf>,
     max_records: usize,
     max_record_bytes: usize,
@@ -248,6 +279,9 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             entries,
+            files: Files::default(),
+            restart: Arc::new(AtomicBool::new(false)),
+            stop: None,
             path,
             max_records,
             max_record_bytes,
@@ -260,6 +294,25 @@ impl Control {
     pub(crate) fn with_stores(self, stores: Stores) -> Self {
         let _ = self.stores.set(Ok(stores));
         self
+    }
+
+    /// Offers `fs/*`, `config/*` and `upload/*` over these files.
+    #[must_use]
+    pub(crate) fn with_files(mut self, files: Files) -> Self {
+        self.files = files;
+        self
+    }
+
+    /// Lets `host/restart` end the host by raising `stop`; [`Control::restart_flag`] then says it was asked.
+    #[must_use]
+    pub(crate) fn with_stop(mut self, stop: Arc<AtomicBool>) -> Self {
+        self.stop = Some(stop);
+        self
+    }
+
+    /// Raised when a key asked the host to end so that it starts again.
+    pub(crate) fn restart_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.restart)
     }
 
     /// Answers `history/*` from the recorded histories, moving a session to one of the harnesses it names.
@@ -314,6 +367,23 @@ impl Control {
             Some("ledger/put") => self.put(caller, &params),
             Some("ledger/remove") => self.remove(caller, &params),
             Some("ledger/clear") => self.clear(caller),
+            Some("fs/list") => {
+                allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
+            }
+            Some("config/get") => {
+                allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
+            }
+            Some("config/set") => {
+                allow(caller, Grant::ConfigWrite).and_then(|()| self.files.config_set(&params))
+            }
+            Some("upload/put") => {
+                allow(caller, Grant::Upload).and_then(|()| self.files.upload_put(caller, &params))
+            }
+            Some("upload/remove") => allow(caller, Grant::Upload)
+                .and_then(|()| self.files.upload_remove(caller, &params)),
+            Some("host/restart") => {
+                allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
+            }
             Some(
                 method @ ("worktree/new" | "worktree/status" | "worktree/remove" | "worktree/diff"),
             ) => {
@@ -702,6 +772,9 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+mod files;
+#[cfg(test)]
+mod files_tests;
 mod import;
 #[cfg(test)]
 mod import_tests;
@@ -710,3 +783,23 @@ mod stores;
 
 #[cfg(test)]
 mod tests;
+
+impl Control {
+    /// `host/restart`: ends the host after this answer is sent.
+    fn restart_now(&self) -> Result<Value, (i32, String)> {
+        let Some(stop) = &self.stop else {
+            return Err((
+                REFUSED,
+                "this host cannot be restarted from here".to_owned(),
+            ));
+        };
+        self.restart.store(true, Ordering::SeqCst);
+        // After the answer has been sent.
+        let stop = Arc::clone(stop);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            stop.store(true, Ordering::SeqCst);
+        });
+        Ok(json!({"restarting": true}))
+    }
+}

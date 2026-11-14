@@ -377,3 +377,57 @@ fn a_key_file_other_users_can_read_is_a_warning_and_one_they_cannot_is_not() {
     assert!(line.contains("WARN"), "nobody asked for it: {line}");
     assert!(!serve(0o600).contains("may be read by other users"));
 }
+
+#[test]
+fn the_control_channel_is_listed_for_the_page_only_when_it_listens() {
+    let site = site();
+    let key = support::key();
+    let config = format!(
+        "{}[host.control]\nlisten = \"127.0.0.1:0\"\ngrants = {{ \"{}\" = [\"ledger.read\"] }}\n",
+        agents(1),
+        key.peer_id()
+    );
+    let host = Host::start_with(
+        &config,
+        2,
+        &[
+            "--web",
+            &site.to_string_lossy(),
+            "--web-listen",
+            "127.0.0.1:0",
+        ],
+        &[],
+    );
+    let url = web_url(&host);
+    let listed: Value = serde_json::from_slice(&get(&url, "/canoa.json").1).expect("JSON");
+    let control = listed["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .find(|entry| entry["kind"] == "control")
+        .expect("the control channel is listed");
+    assert_eq!(control["name"], "@control");
+    assert_eq!(control["url"], host.url("@control"));
+
+    // With no control address, nothing is listed for it.
+    let bare = Host::start_with(
+        &agents(1),
+        1,
+        &[
+            "--web",
+            &site.to_string_lossy(),
+            "--web-listen",
+            "127.0.0.1:0",
+        ],
+        &[],
+    );
+    let url = web_url(&bare);
+    let listed: Value = serde_json::from_slice(&get(&url, "/canoa.json").1).expect("JSON");
+    assert!(
+        listed["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .all(|entry| entry["kind"] != "control")
+    );
+}
