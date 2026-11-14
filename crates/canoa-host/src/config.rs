@@ -109,6 +109,9 @@ pub struct LocalProfiles {
     pub skill_pins: BTreeMap<String, String>,
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name.
     pub options: BTreeMap<String, coqui_aos::Document>,
+    /// `[loadout] skills`: the skills the person chose themselves and turned on, which the host delivers from the app's record
+    /// of each, once the record and the files agree.
+    pub chosen_skills: Vec<String>,
 }
 
 /// One agent's `[agents.NAME.profile]` layer and `[agents.NAME.mcp]` choices.
@@ -143,6 +146,7 @@ impl LocalProfiles {
         let own = layer.and_then(|layer| layer.profile.clone());
         if self.profile.is_none()
             && self.overlays.is_empty()
+            && self.chosen_skills.is_empty()
             && own.is_none()
             && layer.is_none_or(|layer| layer.mcp.is_empty() && layer.hooks.is_empty())
         {
@@ -171,6 +175,7 @@ impl LocalProfiles {
             directory: self.directory.clone(),
             skill_pins: self.skill_pins.clone(),
             options: self.options.clone(),
+            chosen_skills: self.chosen_skills.clone(),
         })
     }
 }
@@ -475,6 +480,9 @@ pub struct HostProfile {
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name. The overlay's
     /// manifest says which exist and of what type; a value of another type refuses the text that reads it.
     pub options: BTreeMap<String, coqui_aos::Document>,
+    /// The skills the person chose themselves that are on (`[loadout] skills`), for the host's own sources only: each is
+    /// delivered from the app's record of it when the record and the files agree.
+    pub chosen_skills: Vec<String>,
 }
 
 /// Where an entry listens, as an entry's `listen` writes it.
@@ -904,6 +912,9 @@ struct RawFile {
     overlays: IndexMap<String, toml::Value>,
     #[serde(default)]
     skill_pins: toml::Table,
+    /// `[loadout]`: the app's table, of which the host reads `skills`.
+    #[serde(default)]
+    loadout: Option<toml::Table>,
 }
 
 /// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
@@ -1154,6 +1165,7 @@ impl Config {
         local_profiles.skill_pins.clone_from(&skill_pins);
         let options = overlay_options_of(&raw.overlays)?;
         local_profiles.options.clone_from(&options);
+        local_profiles.chosen_skills = chosen_skills_of(raw.loadout.as_ref())?;
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
@@ -1923,6 +1935,7 @@ fn profile_of(
         directory: directory.to_owned(),
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
+        chosen_skills: Vec::new(),
     })
 }
 
@@ -2006,6 +2019,7 @@ fn local_profiles_of(
         directory,
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
+        chosen_skills: Vec::new(),
     })
 }
 
@@ -2022,6 +2036,33 @@ fn hook_allowances(allowed: toml::Table) -> Result<BTreeMap<String, String>, Str
                 out.insert(overlay, text);
             }
             _ => return Err(format!(".{overlay} is not sha256: and 64 hex digits")),
+        }
+    }
+    Ok(out)
+}
+
+/// `[loadout] skills`: the names of the skills the person chose that are on. The rest of the table is the app's.
+fn chosen_skills_of(loadout: Option<&toml::Table>) -> Result<Vec<String>, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("[loadout] skills {what}"),
+    };
+    let Some(listed) = loadout.and_then(|table| table.get("skills")) else {
+        return Ok(Vec::new());
+    };
+    let toml::Value::Array(names) = listed else {
+        return Err(refused("is not a list of skill names"));
+    };
+    let mut out: Vec<String> = Vec::new();
+    for name in names {
+        let toml::Value::String(name) = name else {
+            return Err(refused("is not a list of skill names"));
+        };
+        if !crate::profile::hosted::fetched::confined(name) {
+            return Err(refused("names something that is not a skill's name"));
+        }
+        if !out.iter().any(|held| held.eq_ignore_ascii_case(name)) {
+            out.push(name.clone());
         }
     }
     Ok(out)

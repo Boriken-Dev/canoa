@@ -215,13 +215,14 @@ void main() {
     await tapKey(tester, 'store-skill-install-confirm');
     expect(overlays.skills.keys, ['pdf']);
     expect(tabText(tester, 'loadout-tab-skills'), 'Skills 1');
-    expect(saved.last.profile.skills['pdf']!.path, 'overlays/.skills/pdf');
+    expect(saved.last.loadoutSkills, {'pdf'});
+    expect(saved.last.profile.skills, isEmpty);
 
     final card = find.byKey(const Key('skill-installed-pdf'));
     expect(find.descendant(of: card, matching: find.text('Chosen by you')), findsOneWidget);
     expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data, contains('pinned sha256:'));
     await tapKey(tester, 'skill-default-pdf');
-    expect(saved.last.profile.skills, isEmpty, reason: 'off for new sessions, still installed');
+    expect(saved.last.loadoutSkills, isEmpty, reason: 'off for new sessions, still installed');
     expect(overlays.skills.keys, ['pdf']);
     await tapKey(tester, 'skill-remove-pdf');
     expect(overlays.skills, isEmpty);

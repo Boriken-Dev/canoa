@@ -59,10 +59,13 @@ void main() {
     expect(gone.loadoutMcp, isEmpty);
   });
 
-  test('a chosen skill is one profile entry, taken away by its name', () {
-    final config = CanoaConfig.parse(base).withProfileSkill('audit', 'overlays/.skills/audit');
-    expect(CanoaConfig.parse(config.encode()).profile.skills['audit']!.path, 'overlays/.skills/audit');
-    expect(CanoaConfig.parse(config.withProfileSkill('audit', null).encode()).profile.skills, isEmpty);
+  test('a chosen skill that is on is one name in [loadout] skills, taken away by its name', () {
+    final config = CanoaConfig.parse(base).withLoadoutSkills({'audit'});
+    final read = CanoaConfig.parse(config.encode());
+    expect(read.loadoutSkills, {'audit'});
+    expect(read.profile.skills, isEmpty, reason: 'no path is written for it');
+    expect(read.profileWithChosenSkills.skills['audit']!.path, 'overlays/.skills/audit');
+    expect(CanoaConfig.parse(read.withLoadoutSkills({}).encode()).loadoutSkills, isEmpty);
   });
 
   test('a loadout table that is not one is refused, naming it', () {

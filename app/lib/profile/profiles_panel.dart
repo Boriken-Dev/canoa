@@ -69,7 +69,7 @@ class ProfilesPanelState extends State<ProfilesPanel> {
     final dir = directory.text.trim();
     final found = await profileLayers(
       overlays: config.overlays,
-      user: config.profile,
+      user: config.profileWithChosenSkills,
       agents: config.agentProfiles,
       agent: agent,
       home: widget.home,

@@ -399,8 +399,9 @@ repository, the commit and digest it is pinned to), and everything is shown befo
   app tells its host through `initialize`'s `_meta["dev.boriken.canoa/overlays"]`; the host applies only those of the
   profile's overlays, and its report names each one left out ("not chosen for this session").
 - **Skills.** Installed: the skills fetched, with the overlays that name each or that you chose it, source and pin; one
-  you chose has a switch for new sessions, which adds or takes away a `[profile.skills.NAME]` entry pointing at the
-  fetched copy. Discover: the skills your catalogs list, and a spec to paste (`<repository>@<ref>#<skill directory>`). A
+  you chose has a switch for new sessions, which adds or takes away its name in `[loadout] skills`. The host delivers
+  such a skill from its record at each session, only when the record says you chose it and its files have the digest the
+  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Discover: the skills your catalogs list, and a spec to paste (`<repository>@<ref>#<skill directory>`). A
   skill is an [Agent Skills](https://agentskills.io/specification) directory: a `SKILL.md` with YAML front matter whose
   `name` is the directory's. It is fetched only on a yes, after its source and pin are shown, and checked against the
   pin before any file is read.
@@ -420,6 +421,7 @@ repository, the commit and digest it is pinned to), and everything is shown befo
 ```toml
 [loadout]
 off = ["review"]              # overlays new sessions start without
+skills = ["audit"]            # skills you chose that new sessions start with
 
 [loadout.mcp.files]           # where an MCP server the store installed came from
 registry = "https://registry.modelcontextprotocol.io"

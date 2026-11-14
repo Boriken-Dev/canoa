@@ -1627,3 +1627,20 @@ fn a2a_keys_and_agents_on_another_machine_are_read_and_a_wrong_one_is_refused() 
         assert!(parse(&format!("[agents.far]\n{bad}\n")).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn loadout_skills_are_the_chosen_skills_that_are_on_and_the_rest_of_the_table_is_the_apps() {
+    let config = Config::from_str_in(
+        "[loadout]\noff = [\"team\"]\nskills = [\"Audit\", \"audit\", \"lint\"]\n[loadout.mcp.files]\nregistry = \"x\"\n",
+        Path::new("."),
+    )
+    .expect("parses");
+    assert_eq!(config.local_profiles.chosen_skills, ["Audit", "lint"]);
+    for text in [
+        "[loadout]\nskills = \"audit\"\n",
+        "[loadout]\nskills = [1]\n",
+        "[loadout]\nskills = [\"../x\"]\n",
+    ] {
+        assert!(Config::from_str_in(text, Path::new(".")).is_err(), "{text}");
+    }
+}

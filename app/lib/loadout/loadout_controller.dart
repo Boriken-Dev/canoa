@@ -133,7 +133,7 @@ class LoadoutController extends ChangeNotifier {
       skills = await home.overlays.skillCopies();
       layers = await profileLayers(
         overlays: config.overlays,
-        user: config.profile,
+        user: config.profileWithChosenSkills,
         agents: config.agentProfiles,
         agent: agents.firstOrNull ?? '',
         home: home,
@@ -223,11 +223,11 @@ class LoadoutController extends ChangeNotifier {
 
   // Skills.
 
-  /// The path a chosen skill's profile entry takes, relative to canoa.cfg's directory.
-  static String skillPath(String name) => 'overlays/$skillsDirectory/${skillKey(name)}';
-
   /// Whether new sessions start with the skill [name] the person chose.
-  bool skillIsOn(String name) => config.profile.skills[name]?.path == skillPath(name);
+  bool skillIsOn(String name) => config.loadoutSkills.contains(name);
+
+  CanoaConfig _withSkillOn(CanoaConfig config, String name, bool on) =>
+      config.withLoadoutSkills({...config.loadoutSkills}..remove(name)..addAll(on ? [name] : const []));
 
   /// The skills the catalogs offer that are not here, as `(catalog label, name, entry)`.
   List<(String, String, aos.CatalogEntry)> skillsOffered() => [
@@ -237,13 +237,13 @@ class LoadoutController extends ChangeNotifier {
           if (!skills.containsKey(skillKey(name))) (catalog.label, name, offer),
   ];
 
-  Future<void> setSkillOn(String name, bool on) => apply(config.withProfileSkill(name, on ? skillPath(name) : null));
+  Future<void> setSkillOn(String name, bool on) => apply(_withSkillOn(config, name, on));
 
   /// Fetches the skill [item] reviewed, as the person's own choice, and turns it on for new sessions.
   Future<SkillOutcome?> installSkill(SkillItem item) => run('Installing ${item.name}', () async {
     final outcome = await installChosenSkill(home!.overlays, item);
     if (outcome.result == SkillResult.installed || outcome.result == SkillResult.kept) {
-      await apply(config.withProfileSkill(item.name, skillPath(item.name)));
+      await apply(_withSkillOn(config, item.name, true));
     } else {
       problem = '${item.name}: ${outcome.message}';
     }
@@ -252,7 +252,7 @@ class LoadoutController extends ChangeNotifier {
   });
 
   Future<void> removeSkill(SkillCopy copy) => run('Removing ${copy.name}', () async {
-    if (config.profile.skills.containsKey(copy.name)) await apply(config.withProfileSkill(copy.name, null));
+    if (config.loadoutSkills.contains(copy.name)) await apply(_withSkillOn(config, copy.name, false));
     if (copy.chosen) {
       await releaseChosenSkill(home!.overlays, copy.name);
     } else {

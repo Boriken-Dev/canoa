@@ -1181,3 +1181,101 @@ fn the_body_of_overlay_md_is_templated_and_its_front_matter_is_not_context() {
         .expect("text");
     assert!(text.contains("Body at deep, in /work/one."), "{text}");
 }
+
+/// The profile's parts for Claude Code of the person's own top-level `text` (`[loadout]`, `[skill_pins]`), for an agent `a`.
+fn chosen_parts(temp: &Temp, text: &str) -> (Connection, Parts) {
+    let config = Config::from_str_in(&format!("[agents.a]\nprogram = \"agent\"\n{text}"), &temp.0)
+        .expect("parses");
+    let local = config.local_profiles.for_agent("a").expect("a profile");
+    let offer = Arc::into_inner(
+        offer(&[], &IndexMap::new(), Some(&local), "launcher".into()).expect("an offer"),
+    )
+    .expect("one owner");
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    (connection, parts)
+}
+
+/// A skill the person chose, as the app keeps it, and its digest.
+fn choose_audit(temp: &Temp, chosen: bool) -> String {
+    let mut record = record_for(&[]);
+    record["chosen"] = json!(chosen);
+    fetch_audit(temp, "audit", &record)
+}
+
+#[test]
+fn a_skill_the_person_chose_is_delivered_from_its_record_when_the_files_agree() {
+    let temp = Temp::new();
+    choose_audit(&temp, true);
+    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "applied", "{}", parts.report);
+    assert_eq!(audit["layer"], "user", "{}", parts.report);
+    let plugin = plugin_of(&parts);
+    assert!(plugin.join("skills/audit/SKILL.md").is_file());
+    assert!(plugin.join("skills/audit/notes/more.md").is_file());
+}
+
+#[test]
+fn a_chosen_skill_whose_files_changed_after_the_record_was_written_is_not_delivered_and_is_reported()
+ {
+    let temp = Temp::new();
+    choose_audit(&temp, true);
+    temp.write("overlays/.skills/audit/notes/more.md", "Changed.\n");
+    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let audit = item(&parts.report, "skills.audit");
+    assert_eq!(audit["state"], "refused", "{}", parts.report);
+    assert!(
+        audit["how"].as_str().expect("how").contains("digest"),
+        "{audit}"
+    );
+    assert!(parts.meta.is_none() || !plugin_of(&parts).join("skills/audit").exists());
+
+    // A file added, and one that is another skill's, are not what the record names either.
+    let temp = Temp::new();
+    choose_audit(&temp, true);
+    temp.write("overlays/.skills/audit/extra.md", "Added.\n");
+    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    assert_eq!(item(&parts.report, "skills.audit")["state"], "refused");
+
+    // A pin in canoa.cfg that the record's digest is not.
+    let temp = Temp::new();
+    choose_audit(&temp, true);
+    let pin = format!("sha256:{}", "0".repeat(64));
+    let (_connection, parts) = chosen_parts(
+        &temp,
+        &format!("[loadout]\nskills = [\"audit\"]\n[skill_pins]\naudit = \"{pin}\"\n"),
+    );
+    assert_eq!(item(&parts.report, "skills.audit")["state"], "refused");
+}
+
+#[test]
+fn a_skill_a_record_does_not_say_the_person_chose_is_not_delivered_whoever_names_it() {
+    let temp = Temp::new();
+    choose_audit(&temp, false);
+    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    assert_eq!(
+        item(&parts.report, "skills.audit")["state"],
+        "not supported"
+    );
+    assert!(parts.meta.is_none() || !plugin_of(&parts).join("skills/audit").exists());
+}
+
+#[test]
+fn a_chosen_skill_with_no_record_is_reported_and_one_not_listed_is_never_read() {
+    let temp = Temp::new();
+    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    assert_eq!(
+        item(&parts.report, "skills.audit")["state"],
+        "not supported"
+    );
+    // Fetched and chosen, but not turned on in `[loadout] skills`.
+    let temp = Temp::new();
+    choose_audit(&temp, true);
+    let config = Config::from_str_in(
+        "[agents.a]\nprogram = \"agent\"\n[loadout]\noff = []\n",
+        &temp.0,
+    )
+    .expect("parses");
+    assert!(config.local_profiles.for_agent("a").is_none());
+}

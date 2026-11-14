@@ -300,6 +300,13 @@ const fn os() -> &'static str {
     }
 }
 
+/// The files of the person's chosen skills that passed the checks, by name.
+type Chosen = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
+
+/// The path a chosen skill's entry in the person's layer carries: not a path on disk, so what is delivered is only what
+/// was checked.
+const CHOSEN_PREFIX: &str = "<chosen>/";
+
 /// One profile, prepared for one connection when it starts: the overlays read, the environment resolved.
 #[derive(Debug)]
 pub(crate) struct Connection {
@@ -307,6 +314,8 @@ pub(crate) struct Connection {
     entry: String,
     host: HostProfile,
     overlays: Vec<ReadOverlay>,
+    /// The person's own chosen skills that passed the checks, by name: their files by path.
+    chosen: Chosen,
     /// The overlays' hooks, and the means to run them.
     hooks: Hooks,
     /// The `pre-env` runs the environment was built with: the same for every environment built after.
@@ -381,7 +390,8 @@ impl Connection {
             listed
         };
         let overlays = read_overlays(host, &mut notes);
-        let layers = layers_of(host, &overlays, None, &mut notes);
+        let chosen = read_chosen(host, &mut notes);
+        let layers = layers_of(host, &overlays, &chosen, None, &mut notes);
         let effective = merge(&layers);
         let hooks = Hooks::new(
             host,
@@ -463,6 +473,7 @@ impl Connection {
             entry: entry.to_owned(),
             host: host.clone(),
             overlays,
+            chosen,
             hooks,
             pre_env,
             notes,
@@ -547,6 +558,24 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
         });
     }
     out
+}
+
+/// The skills the person chose that are on (`[loadout] skills`), as the app recorded them, checked again here. What fails is
+/// reported and left out.
+fn read_chosen(host: &HostProfile, notes: &mut Vec<Item>) -> Chosen {
+    if host.chosen_skills.is_empty() {
+        return Chosen::new();
+    }
+    let layer = LayerId::new(LayerKind::User, "");
+    let found = fetched::read_chosen(
+        &host.directory.join("overlays"),
+        &host.chosen_skills,
+        &host.skill_pins,
+    );
+    for (name, state, how) in found.notes {
+        notes.push(Item::new(format!("skills.{name}"), &layer, state, how));
+    }
+    found.files
 }
 
 /// The skills `tree`'s manifest names that it does not bundle, as the app fetched them: what passed the checks, and a
@@ -684,6 +713,7 @@ fn deliver_fetched(
 fn layers_of(
     host: &HostProfile,
     overlays: &[ReadOverlay],
+    chosen: &Chosen,
     harness: Option<&str>,
     notes: &mut Vec<Item>,
 ) -> Vec<Layer> {
@@ -739,10 +769,17 @@ fn layers_of(
         .into_iter()
         .filter_map(|key| found.remove(&key))
         .collect();
+    let mut own = host.profile.clone();
+    for name in chosen.keys() {
+        // An entry the person wrote in `[profile.skills]` for the name is theirs and stays.
+        own.skills
+            .entry(name.clone())
+            .or_insert_with(|| Change::Set(Skill::new(format!("{CHOSEN_PREFIX}{name}"))));
+    }
     layers.push(Layer::new(
         LayerId::new(LayerKind::User, ""),
         Some(host.directory.clone()),
-        host.profile.clone(),
+        own,
     ));
     if let Some((label, profile)) = &host.agent {
         layers.push(Layer::new(
@@ -1306,9 +1343,12 @@ fn context_text(
 fn skill_files(
     skill: &Sourced<super::Skill>,
     overlays: &[ReadOverlay],
+    chosen: &Chosen,
     templating: &Templating<'_>,
 ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-    let mut files = if skill.layer.kind == LayerKind::Overlay {
+    let mut files = if let Some(name) = skill.value.path.strip_prefix(CHOSEN_PREFIX) {
+        chosen.get(name).cloned().unwrap_or_default()
+    } else if skill.layer.kind == LayerKind::Overlay {
         overlays
             .iter()
             .find(|overlay| overlay.identity == skill.layer.name)
@@ -1371,7 +1411,13 @@ fn parts_for(
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Parts {
     let mut notes = Vec::new();
-    let layers = layers_of(&connection.host, &connection.overlays, harness, &mut notes);
+    let layers = layers_of(
+        &connection.host,
+        &connection.overlays,
+        &connection.chosen,
+        harness,
+        &mut notes,
+    );
     let effective = merge(&layers);
     let mut items = connection.notes.clone();
     items.extend(notes);
@@ -1442,7 +1488,7 @@ fn parts_for(
     let mut written_files = BTreeMap::new();
     let mut usable = Vec::new();
     for (name, skill) in &effective.skills {
-        match skill_files(skill, &connection.overlays, &templating) {
+        match skill_files(skill, &connection.overlays, &connection.chosen, &templating) {
             Ok(files) => usable.push((name, &skill.layer, files)),
             Err(why) => items.push(Item::new(
                 format!("skills.{name}"),

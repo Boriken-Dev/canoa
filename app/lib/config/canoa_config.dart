@@ -10,7 +10,7 @@ import '../chat/modes.dart' show modeOrder;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
 import '../permissions/protected_paths.dart' show protectedLinesOf;
-import '../profile/skill_copies.dart' show validSkillName;
+import '../profile/skill_copies.dart' show skillKey, skillsDirectory, validSkillName;
 import '../profile/profile.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
@@ -408,10 +408,29 @@ final class CanoaConfig {
   /// and version there, and the digest of the `server.json` that was shown and accepted.
   Map<String, McpOrigin> get loadoutMcp => _loadout(tables['loadout']).mcp;
 
-  static ({Set<String> off, Map<String, McpOrigin> mcp}) _loadout(Object? raw) {
-    if (raw == null) return (off: const {}, mcp: const {});
-    if (raw is! Map || raw.keys.any((key) => key != 'off' && key != 'mcp')) {
-      throw const FormatException('canoa.cfg: loadout is a table with the keys off and mcp');
+  /// `[loadout] skills`: the skills the person chose themselves that are on for new sessions, by name. The host delivers each
+  /// from the record the app kept of it, once the record and its files agree.
+  Set<String> get loadoutSkills => _loadout(tables['loadout']).skills;
+
+  /// The person's own layer with the chosen skills that are on, each taken from where the app keeps them. A profile entry the
+  /// person wrote for the same name stays.
+  Profile get profileWithChosenSkills {
+    final chosen = loadoutSkills;
+    if (chosen.isEmpty) return profile;
+    return profile.withSkills({
+      for (final name in chosen) name: Skill('overlays/$skillsDirectory/${skillKey(name)}'),
+      ...profile.skills,
+    });
+  }
+
+  static ({Set<String> off, Map<String, McpOrigin> mcp, Set<String> skills}) _loadout(Object? raw) {
+    if (raw == null) return (off: const {}, mcp: const {}, skills: const {});
+    if (raw is! Map || raw.keys.any((key) => key != 'off' && key != 'mcp' && key != 'skills')) {
+      throw const FormatException('canoa.cfg: loadout is a table with the keys off, mcp and skills');
+    }
+    final skills = raw['skills'];
+    if (skills != null && (skills is! List || skills.any((name) => name is! String || !validSkillName(name)))) {
+      throw const FormatException('canoa.cfg: loadout.skills is a list of skill names');
     }
     final off = raw['off'];
     if (off != null && (off is! List || off.any((name) => name is! String || !isEntryName(name)))) {
@@ -427,14 +446,19 @@ final class CanoaConfig {
       }
       mcp['$key'] = origin;
     }
-    return (off: {for (final name in (off as List?) ?? const []) name as String}, mcp: mcp);
+    return (
+      off: {for (final name in (off as List?) ?? const []) name as String},
+      mcp: mcp,
+      skills: {for (final name in (skills as List?) ?? const []) name as String},
+    );
   }
 
-  CanoaConfig _withLoadout({Set<String>? off, Map<String, McpOrigin>? mcp}) {
+  CanoaConfig _withLoadout({Set<String>? off, Map<String, McpOrigin>? mcp, Set<String>? skills}) {
     final now = _loadout(tables['loadout']);
-    final offNow = off ?? now.off, mcpNow = mcp ?? now.mcp;
+    final offNow = off ?? now.off, mcpNow = mcp ?? now.mcp, skillsNow = skills ?? now.skills;
     return _withTable('loadout', {
       if (offNow.isNotEmpty) 'off': offNow.toList()..sort(),
+      if (skillsNow.isNotEmpty) 'skills': skillsNow.toList()..sort(),
       if (mcpNow.isNotEmpty) 'mcp': {for (final MapEntry(:key, :value) in mcpNow.entries) key: value.toMap()},
     });
   }
@@ -462,10 +486,8 @@ final class CanoaConfig {
     return out;
   }
 
-  /// This configuration with the skill [name] taken from [path] (relative to canoa.cfg's directory) in `[profile.skills]`,
-  /// or without it when [path] is null.
-  CanoaConfig withProfileSkill(String name, String? path) =>
-      _withProfileEntry('skills', name, path == null ? null : <String, dynamic>{'path': path});
+  /// This configuration with [skills] as `[loadout] skills`, sorted so the file does not churn.
+  CanoaConfig withLoadoutSkills(Set<String> skills) => _withLoadout(skills: skills);
 
   CanoaConfig _withProfileEntry(String section, String name, Map<String, dynamic>? entry) {
     final raw = _deepCopy((tables['profile'] as Map?) ?? const {});

@@ -69,7 +69,7 @@ pub(super) fn read(
     for entry in entries {
         let name = entry.name.as_str();
         let pinned = pins.contains_key(&name.to_ascii_lowercase());
-        match one(store, identity, entry, pins) {
+        match one(store, &Whose::Overlay(identity, entry), pins) {
             Ok((files, keys)) => {
                 if entry.origin == SkillOrigin::Source && entry.pin.is_none() && !pinned {
                     out.notes.push((
@@ -99,6 +99,42 @@ pub(super) fn read(
 
 type Read = (BTreeMap<String, Vec<u8>>, Vec<String>);
 
+/// Whom a record is read for: an overlay that names the skill, or the person who chose it themselves.
+enum Whose<'a> {
+    Overlay(&'a str, &'a SkillEntry),
+    Chosen(&'a str),
+}
+
+/// What the person's own chosen skills `names` came to, read from `store` with the checks of an overlay's fetched skill: the
+/// record says the person chose it, and its files have the record's digest and pass the checks. `pins` are canoa.cfg's
+/// `[skill_pins]`. A skill that fails is reported and not delivered.
+pub(super) fn read_chosen(
+    store: &Path,
+    names: &[String],
+    pins: &BTreeMap<String, String>,
+) -> Fetched {
+    let mut out = Fetched::default();
+    for name in names {
+        match one(store, &Whose::Chosen(name), pins) {
+            Ok((files, keys)) => {
+                if !keys.is_empty() {
+                    out.notes.push((
+                        format!("{name}.skill-keys"),
+                        State::Applied,
+                        format!(
+                            "its front matter has keys beyond the inert ones ({}), which a harness may take as a grant",
+                            keys.join(", ")
+                        ),
+                    ));
+                }
+                out.files.insert(name.clone(), files);
+            }
+            Err((state, why)) => out.notes.push((name.clone(), state, why)),
+        }
+    }
+    out
+}
+
 /// Whether `path` is a link of any kind, which the app never makes in the store.
 fn is_link(path: &Path) -> bool {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
@@ -117,23 +153,28 @@ fn is_link(path: &Path) -> bool {
 
 fn one(
     store: &Path,
-    identity: &str,
-    entry: &SkillEntry,
+    whose: &Whose<'_>,
     pins: &BTreeMap<String, String>,
 ) -> Result<Read, (State, String)> {
-    let name = entry.name.as_str();
+    let name = match whose {
+        Whose::Overlay(_, entry) => entry.name.as_str(),
+        Whose::Chosen(name) => name,
+    };
     if !confined(name) {
         return Err((State::Refused, "its name is not a skill name".to_owned()));
     }
     let lower = name.to_ascii_lowercase();
     let dir = store.join(SKILLS_DIR);
-    let not_fetched = || match entry.origin {
-        SkillOrigin::Source => format!(
+    let not_fetched = || match whose {
+        Whose::Overlay(_, entry) if entry.origin == SkillOrigin::Source => format!(
             "from {}, not fetched: install or sync the overlay in Canoa",
             entry.source.as_deref().unwrap_or("its source")
         ),
-        _ => "a named skill; no catalog resolved it here: install or sync the overlay in Canoa"
-            .to_owned(),
+        Whose::Overlay(..) => {
+            "a named skill; no catalog resolved it here: install or sync the overlay in Canoa"
+                .to_owned()
+        }
+        Whose::Chosen(_) => "chosen, but not fetched: install it again in Loadout".to_owned(),
     };
     let refused = |why: &str| (State::Refused, format!("not delivered: {why}"));
     if is_link(&dir) {
@@ -160,22 +201,27 @@ fn one(
     if !text("name").is_some_and(|recorded| recorded.eq_ignore_ascii_case(name)) {
         return Err(refused("its record is for another skill"));
     }
-    let listed = record
-        .get("overlays")
-        .and_then(Value::as_array)
-        .is_some_and(|names| {
-            names
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|named| aos::normalize_name(named) == aos::normalize_name(identity))
-        });
+    let listed = match whose {
+        Whose::Overlay(identity, _) => record
+            .get("overlays")
+            .and_then(Value::as_array)
+            .is_some_and(|names| {
+                names
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|named| aos::normalize_name(named) == aos::normalize_name(identity))
+            }),
+        Whose::Chosen(_) => record.get("chosen").and_then(Value::as_bool) == Some(true),
+    };
     if !listed {
         return Err((State::Unsupported, not_fetched()));
     }
     let Some(digest) = text("digest").filter(|digest| aos::Digest::parse(digest).is_ok()) else {
         return Err(refused("its record holds no digest"));
     };
-    if entry.origin == SkillOrigin::Source {
+    if let Whose::Overlay(_, entry) = whose
+        && entry.origin == SkillOrigin::Source
+    {
         if text("source") != entry.key.as_deref() {
             return Err(refused(
                 "its record is of another source than the overlay names",
