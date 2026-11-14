@@ -385,6 +385,11 @@ fn two_people_each_get_their_own_host_as_themselves_and_reach_nothing_of_the_oth
         "another browser is not"
     );
     assert!(!active("canoatesta"), "a refused sign-in started a host");
+    // An account outside the sign-in group has the right password, and is refused all the same: no host, no cookie.
+    let outsider = sign_in("canoatestc", "pw-c-test", "203.0.113.53");
+    assert_eq!(outsider.status, 401);
+    assert!(outsider.cookie().is_none());
+    assert!(!active("canoatestc"));
 
     // Each signs in and gets a host that is theirs.
     let a = Browser::sign_in(addr, PEOPLE[0].0, PEOPLE[0].1);
@@ -553,6 +558,46 @@ fn two_people_each_get_their_own_host_as_themselves_and_reach_nothing_of_the_oth
         );
         assert_eq!(out.status.code(), Some(2), "{who} ran a host in {dir}");
     }
+    // Nor the host of an account outside the groups, by itself or through the helper: each layer refuses on its own.
+    let out = sudo_as(
+        "canoatestc",
+        &[
+            "/opt/canoatest/canoa",
+            "serve",
+            "--allow-empty",
+            "--portal",
+            "/run/canoatest/canoatestc",
+            "--portal-user",
+            PORTAL_USER,
+            "--portal-group",
+            "canoatestusers",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = Command::new("sudo")
+        .args([
+            "-n",
+            "-u",
+            PORTAL_USER,
+            "sudo",
+            "-n",
+            "/opt/canoatest/canoa-instance",
+            "start",
+            "canoatest@canoatestc.service",
+        ])
+        .output()
+        .expect("sudo runs");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "the helper started a host for an account outside the group"
+    );
+    assert!(!active("canoatestc"));
     // The root helper takes only the units of real people.
     for unit in [
         "canoatest@root.service",

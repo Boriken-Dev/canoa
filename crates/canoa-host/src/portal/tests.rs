@@ -25,6 +25,7 @@ struct Fixed {
     /// Each name's password and user id.
     accounts: Mutex<HashMap<String, (String, u32)>>,
     gone: Mutex<HashSet<String>>,
+    unsure: Mutex<HashSet<String>>,
     asked: AtomicUsize,
 }
 
@@ -48,8 +49,14 @@ impl Accounts for Fixed {
         }
     }
 
-    fn still(&self, user: &str, _uid: u32) -> bool {
-        !self.gone.lock().unwrap().contains(user)
+    fn still(&self, user: &str, _uid: u32) -> Standing {
+        if self.gone.lock().unwrap().contains(user) {
+            Standing::Gone
+        } else if self.unsure.lock().unwrap().contains(user) {
+            Standing::Unknown
+        } else {
+            Standing::Present
+        }
     }
 }
 
@@ -230,6 +237,7 @@ fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
             .collect(),
         ),
         gone: Mutex::new(HashSet::new()),
+        unsure: Mutex::new(HashSet::new()),
         asked: AtomicUsize::new(0),
     });
     let hosts = Arc::new(Hosts {
@@ -458,7 +466,7 @@ fn the_login_form_works_with_the_headers_a_real_browser_sends() {
     assert_eq!(page.header("referrer-policy"), Some("same-origin"));
     assert_eq!(
         request(&to, "GET", "/portal/session", &[], "").header("referrer-policy"),
-        Some("no-referrer")
+        Some("same-origin")
     );
     let browser = |origin: &str, site: &str| {
         request(
@@ -1125,6 +1133,7 @@ fn the_unit_controller_takes_no_name_a_unit_is_not_made_of() {
         systemctl: PathBuf::from("/nonexistent/systemctl"),
         elevate: Vec::new(),
         unit: "canoa@{user}.service".to_owned(),
+        ..Systemd::new()
     };
     for bad in ["", "a b", "a@b", "../x", "a/b", "-x", "a\nb", "1000", "0"] {
         let error = systemd.start(bad).unwrap_err();
@@ -1151,6 +1160,7 @@ fn start_and_stop_never_wait_for_a_password() {
         systemctl: script.clone(),
         elevate: Vec::new(),
         unit: "canoa@{user}.service".to_owned(),
+        ..Systemd::new()
     };
     systemd.start("canoatesta").unwrap();
     let said = std::fs::read_to_string(dir.join("systemctl.said")).unwrap();
@@ -1172,10 +1182,11 @@ fn the_running_hosts_are_the_users_named_in_the_units_systemctl_lists() {
     )
     .unwrap();
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    // Listing is its own program: the one that starts and stops may be a helper that takes no other words.
     let systemd = Systemd {
-        systemctl: script,
-        elevate: Vec::new(),
-        unit: "canoa@{user}.service".to_owned(),
+        systemctl: PathBuf::from("/nonexistent/helper"),
+        list: script,
+        ..Systemd::new()
     };
     assert_eq!(systemd.running().unwrap(), ["canoatesta"]);
     let _ = std::fs::remove_dir_all(dir);
@@ -1188,6 +1199,7 @@ fn a_portal_with_no_site_or_a_site_without_an_index_does_not_start() {
         Arc::new(Fixed {
             accounts: Mutex::new(HashMap::new()),
             gone: Mutex::new(HashSet::new()),
+            unsure: Mutex::new(HashSet::new()),
             asked: AtomicUsize::new(0),
         }),
         Arc::new(Systemd::new()),
@@ -1204,6 +1216,7 @@ fn a_portal_with_no_site_or_a_site_without_an_index_does_not_start() {
         Arc::new(Fixed {
             accounts: Mutex::new(HashMap::new()),
             gone: Mutex::new(HashSet::new()),
+            unsure: Mutex::new(HashSet::new()),
             asked: AtomicUsize::new(0),
         }),
         Arc::new(Systemd::new()),
@@ -1294,4 +1307,101 @@ fn the_root_helper_refuses_what_the_validator_does_and_every_account_below_the_l
             .unwrap();
         assert_eq!(status.code(), Some(2), "{words:?}");
     }
+}
+
+#[test]
+fn a_session_stands_while_the_directory_cannot_say_and_ends_only_when_it_says_gone() {
+    let rig = rig(|_| {}, 0);
+    let cookie = signed_in(&rig, "canoatesta");
+    rig.accounts
+        .unsure
+        .lock()
+        .unwrap()
+        .insert("canoatesta".to_owned());
+    let index = |cookie: &str| {
+        call(
+            rig.addr,
+            "GET",
+            web::HOST_INDEX,
+            &[("Cookie", cookie.to_owned())],
+            "",
+        )
+        .status
+    };
+    assert_eq!(
+        index(&cookie),
+        200,
+        "a directory that does not answer signs nobody out"
+    );
+    rig.accounts
+        .gone
+        .lock()
+        .unwrap()
+        .insert("canoatesta".to_owned());
+    assert_eq!(index(&cookie), 401);
+}
+
+#[test]
+fn a_call_to_systemctl_that_never_ends_is_ended() {
+    let dir = std::env::temp_dir().join(format!("canoa-portal-slow-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("systemctl");
+    std::fs::write(&script, "#!/bin/sh\nexec sleep 30\n").unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let systemd = Systemd {
+        systemctl: script,
+        timeout: Duration::from_millis(400),
+        ..Systemd::new()
+    };
+    let started = std::time::Instant::now();
+    let error = systemd.start("canoatesta").unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_portal_that_starts_again_adopts_the_hosts_already_running_and_stops_them_when_idle() {
+    let first = rig(|_| {}, 0);
+    let cookie = signed_in(&first, "canoatesta");
+    assert_eq!(
+        call(
+            first.addr,
+            "GET",
+            web::HOST_INDEX,
+            &[("Cookie", cookie)],
+            ""
+        )
+        .status,
+        200
+    );
+    first.stopper.stop();
+    thread::sleep(Duration::from_millis(200));
+    // A second portal, on the same machine's units, with nobody using the host that is up.
+    let base = first.dir.parent().unwrap().to_path_buf();
+    let settings = Settings {
+        socket: Some(base.join("front").join("second.sock")),
+        listen: None,
+        site: Some(first.root.clone()),
+        socket_dir: first.dir.clone(),
+        idle: Duration::from_millis(400),
+        failure_floor: Duration::ZERO,
+        ..Settings::default()
+    };
+    let second = Portal::bind(settings, first.accounts.clone(), first.hosts.clone()).unwrap();
+    let stopper = second.stopper();
+    thread::spawn(move || second.run());
+    let stopped = (0..60).any(|_| {
+        thread::sleep(Duration::from_millis(100));
+        first.hosts.stops.load(Ordering::SeqCst) == 1
+    });
+    stopper.stop();
+    assert!(
+        stopped,
+        "a host that was up when the portal started was never stopped"
+    );
 }

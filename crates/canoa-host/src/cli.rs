@@ -569,7 +569,11 @@ struct ServeArgs {
     /// The portal's user, a name in /etc/passwd or a number: the only user whose processes may use those sockets.
     #[arg(long, value_name = "USER", requires = "portal")]
     portal_user: Option<String>,
-    /// The lowest user id a host run for a portal may have; root never may.
+    /// A group whose members may have a host run for a portal; this account must be in one (the portal's own `groups`).
+    /// Fixed in the unit, so that an account outside them is never given a host.
+    #[arg(long, value_name = "GROUP", requires = "portal")]
+    portal_group: Vec<String>,
+    /// The lowest user id a host run for a portal may have; root, `nobody` and the system ranges never may.
     #[arg(long, value_name = "UID", default_value_t = 1000, requires = "portal")]
     portal_min_uid: u32,
     /// Serve the host's own sources too (Claude, Codex, Antigravity, Grok, Pi), to this process only: they have no address,
@@ -835,7 +839,8 @@ fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     // Before anything of the home is touched: a host for a portal runs only as the account whose folder it is.
     if let Some(dir) = &args.portal {
-        crate::portal_link::check_account(dir, args.portal_min_uid).map_err(Failed::usage)?;
+        crate::portal_link::check_account(dir, args.portal_min_uid, &args.portal_group)
+            .map_err(Failed::usage)?;
     }
     let (config, layers) = load_for_serving(args, front)?;
     let home = home_of(front)?;

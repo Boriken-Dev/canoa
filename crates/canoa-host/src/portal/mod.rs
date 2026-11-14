@@ -30,7 +30,7 @@ pub use conn::Conn;
 pub use instance::{Controller, Instances, Lease, Systemd};
 pub use session::{Attempt, Session, Sessions, Throttle};
 pub use settings::Settings;
-pub use signin::{Accounts, MAX_PASSWORD, NAME_PATTERN, SignIn, System, valid_user};
+pub use signin::{Accounts, MAX_PASSWORD, NAME_PATTERN, SignIn, Standing, System, valid_user};
 
 use crate::pipe::PipeChannel;
 use crate::web::{self, Body, Lookup};
@@ -536,8 +536,9 @@ fn write_response(
     }
     let common = [
         ("X-Content-Type-Options", "nosniff"),
-        // A page may send a same-origin form its own origin, which a browser otherwise reports as `null`; the login page says so.
-        ("Referrer-Policy", "no-referrer"),
+        // A browser sends `Origin: null` with a form or a fetch posted from a page that sends no referrer, and every post here
+        // checks `Origin`, so the portal's own pages say `same-origin`: nothing leaves the site, and the origin is its own.
+        ("Referrer-Policy", "same-origin"),
         ("X-Frame-Options", "DENY"),
         ("Cross-Origin-Opener-Policy", "same-origin"),
         ("Cross-Origin-Resource-Policy", "same-origin"),
@@ -651,12 +652,10 @@ fn login_page(message: &str) -> Vec<u8> {
 
 const LOGIN_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
-/// The sign-in page. Its policy is `same-origin`, not `no-referrer`: a browser sends `Origin: null` with a form posted from a
-/// page that sends no referrer, and the sign-in checks `Origin`.
+/// The sign-in page.
 fn login_response(status: u16, message: &str) -> Response {
     Response::text(status, "text/html; charset=utf-8", login_page(message))
         .with("Content-Security-Policy", LOGIN_POLICY.to_owned())
-        .with("Referrer-Policy", "same-origin".to_owned())
 }
 
 fn serve_connection(inner: &Inner, mut conn: Conn) {
@@ -700,7 +699,7 @@ fn authed(inner: &Inner, request: &Request) -> Option<Session> {
 /// A host for the signed-in person, started if it must be: or the answer to give instead. An account that is no longer the one
 /// that signed in ends its sessions here.
 fn host_for(inner: &Inner, session: &Session) -> Result<Lease, Response> {
-    if !inner.accounts.still(&session.user, session.uid) {
+    if inner.accounts.still(&session.user, session.uid) == Standing::Gone {
         inner.sessions.close_user(&session.user);
         tracing::info!(
             "{} is no longer an account: its sessions ended",
@@ -831,7 +830,9 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
     let result = inner.accounts.sign_in(user.trim(), &password);
     inner.signing_in.fetch_sub(1, Ordering::SeqCst);
     match result {
-        SignIn::Admitted { user, uid } if uid != 0 && uid >= inner.settings.min_uid => {
+        SignIn::Admitted { user, uid }
+            if !crate::portal_link::system_uid(uid) && uid >= inner.settings.min_uid =>
+        {
             let Some((token, _)) = inner.sessions.open(&user, uid) else {
                 inner.throttle.succeeded(attempt);
                 return login_response(503, "Busy. Try again in a moment.");

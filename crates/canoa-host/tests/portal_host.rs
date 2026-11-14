@@ -19,6 +19,16 @@ use coqui_transport_pipe::ReadTimeout as _;
 use serde_json::{Value, json};
 use support::{Host, Scratch, cwd, example, host_binary, quoted, with_pipe_link};
 
+/// A group this test's user is in, which a host for a portal needs to be told may have one.
+fn my_group() -> String {
+    let out = Command::new("id").arg("-Gn").output().expect("id runs");
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .next()
+        .expect("a group")
+        .to_owned()
+}
+
 fn my_uid() -> u32 {
     std::fs::metadata("/proc/self").expect("proc").uid()
 }
@@ -33,11 +43,14 @@ fn portal_host(uid: u32) -> (Host, std::path::PathBuf) {
         quoted(&example("stdio_agent", false).to_string_lossy()),
     );
     let uid = uid.to_string();
+    let group = my_group();
     let args = [
         "--portal",
         dir.to_str().expect("utf-8"),
         "--portal-user",
         &uid,
+        "--portal-group",
+        &group,
     ];
     // One line for the entry and one for the control channel.
     // The account's name is the last part of the folder, as the unit makes it.
@@ -169,6 +182,21 @@ fn a_connection_from_any_user_but_the_portals_is_closed_before_a_byte_is_read() 
 
 /// Runs `serve --portal` on a folder the test made, with the given `USER` and extra arguments; the status it ends with.
 fn refused_portal(user: &str, extra: &[&str]) -> (Option<i32>, bool) {
+    let mut words = vec!["--portal-group".to_owned(), my_group()];
+    words.extend(extra.iter().map(|word| (*word).to_owned()));
+    refused_with(user, &words)
+}
+
+/// As [`refused_portal`] with exactly these groups named.
+fn refused_portal_in(user: &str, groups: &[&str]) -> (Option<i32>, bool) {
+    let words: Vec<String> = groups
+        .iter()
+        .flat_map(|group| ["--portal-group".to_owned(), (*group).to_owned()])
+        .collect();
+    refused_with(user, &words)
+}
+
+fn refused_with(user: &str, extra: &[String]) -> (Option<i32>, bool) {
     let scratch = Scratch::new();
     let dir = scratch.0.join("run");
     std::fs::create_dir_all(&dir).expect("a folder");
@@ -198,6 +226,12 @@ fn a_host_for_a_portal_refuses_an_account_that_is_not_the_one_whose_folder_it_is
         refused_portal("run", &["--portal-min-uid", "4000000"]),
         (Some(2), false)
     );
+    // An account in none of the groups named is refused, and so is no group named at all: not just anyone is given a host.
+    assert_eq!(
+        refused_portal_in("run", &["no-such-group-canoa"]),
+        (Some(2), false)
+    );
+    assert_eq!(refused_portal_in("run", &[]), (Some(2), false));
     if my_uid() == 0 {
         assert_eq!(refused_portal("run", &[]), (Some(2), false), "root");
     }

@@ -71,20 +71,51 @@ pub fn uid_of(user: &str) -> std::io::Result<u32> {
 /// # Errors
 ///
 /// A message saying which rule was broken.
-pub fn check_account(dir: &Path, min_uid: u32) -> Result<(), String> {
+pub fn check_account(dir: &Path, min_uid: u32, groups: &[String]) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt as _;
         let uid = rustix::process::geteuid().as_raw();
         let owner = std::fs::metadata(dir).map(|meta| meta.uid()).ok();
         let name = std::env::var("USER").ok();
-        check_account_of(uid, name.as_deref(), dir, owner, min_uid)
+        let own = if groups.is_empty() {
+            Vec::new()
+        } else {
+            own_groups()?
+        };
+        check_account_of(uid, name.as_deref(), dir, owner, min_uid, (&own, groups))
     }
     #[cfg(not(unix))]
     {
-        let _ = (dir, min_uid);
+        let _ = (dir, min_uid, groups);
         Err("--portal is Unix only".to_owned())
     }
+}
+
+/// Whether `uid` is one a person never has: the machine's service and dynamic-user ranges, `nobody` and the top of the range.
+/// People of a directory have large ids of their own, below these, so this is not a lowest-id rule.
+#[must_use]
+pub const fn system_uid(uid: u32) -> bool {
+    uid == 0 || (uid >= 61184 && uid <= 65535) || uid == u32::MAX
+}
+
+/// The names of the groups this process is in, as the system says.
+#[cfg(unix)]
+fn own_groups() -> Result<Vec<String>, String> {
+    let output = crate::spawn::Command::new("/usr/bin/id")
+        .arg("-Gn")
+        .env("LC_ALL", "C")
+        .stdin(crate::spawn::Stdio::Null)
+        .stderr(crate::spawn::Stdio::Null)
+        .output()
+        .map_err(|error| format!("--portal: the account's groups could not be read: {error}"))?;
+    if !output.status.success() {
+        return Err("--portal: the account's groups could not be read".to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect())
 }
 
 #[cfg(unix)]
@@ -94,14 +125,28 @@ fn check_account_of(
     dir: &Path,
     owner: Option<u32>,
     min_uid: u32,
+    (own, allowed): (&[String], &[String]),
 ) -> Result<(), String> {
     if uid == 0 {
         return Err("--portal: this host must not run as root".to_owned());
+    }
+    if system_uid(uid) {
+        return Err(format!(
+            "--portal: user id {uid} is a system or dynamic one"
+        ));
     }
     if uid < min_uid {
         return Err(format!(
             "--portal: user id {uid} is below --portal-min-uid {min_uid}"
         ));
+    }
+    if allowed.is_empty() {
+        return Err(
+            "--portal: name the groups that may have a host with --portal-group".to_owned(),
+        );
+    }
+    if !allowed.iter().any(|group| own.contains(group)) {
+        return Err("--portal: this account is in none of the --portal-group groups".to_owned());
     }
     let base = dir.file_name().and_then(|part| part.to_str());
     if name.is_none() || name != base {
@@ -312,20 +357,45 @@ mod tests {
     use super::check_account_of;
 
     #[test]
-    fn a_host_runs_for_a_portal_only_as_the_account_whose_folder_it_is() {
+    fn a_host_runs_for_a_portal_only_as_the_account_whose_folder_it_is_and_who_may_have_one() {
         let dir = Path::new("/run/canoa/alice");
-        assert!(check_account_of(1001, Some("alice"), dir, Some(1001), 1000).is_ok());
-        for (uid, name, owner, min) in [
-            (0, Some("alice"), Some(0), 1000),
-            (0, Some("root"), Some(0), 0),
-            (999, Some("alice"), Some(999), 1000),
-            (1001, Some("bob"), Some(1001), 1000),
-            (1001, None, Some(1001), 1000),
-            (1001, Some("alice"), Some(1002), 1000),
-            (1001, Some("alice"), None, 1000),
+        let team = vec!["canoa-users".to_owned()];
+        let (mine, other) = (
+            vec!["alice".to_owned(), "canoa-users".to_owned()],
+            vec!["alice".to_owned()],
+        );
+        let ok = |uid, name, owner, min, own: &[String], allowed: &[String]| {
+            check_account_of(uid, name, dir, owner, min, (own, allowed))
+        };
+        assert!(ok(1001, Some("alice"), Some(1001), 1000, &mine, &team).is_ok());
+        assert!(
+            ok(
+                486_801_112,
+                Some("alice"),
+                Some(486_801_112),
+                1000,
+                &mine,
+                &team
+            )
+            .is_ok(),
+            "a directory's large ids are people"
+        );
+        for (uid, name, owner, min, own, allowed) in [
+            (0, Some("alice"), Some(0), 1000, &mine, &team),
+            (0, Some("root"), Some(0), 0, &mine, &team),
+            (999, Some("alice"), Some(999), 1000, &mine, &team),
+            (65534, Some("alice"), Some(65534), 1000, &mine, &team),
+            (61184, Some("alice"), Some(61184), 1000, &mine, &team),
+            (65535, Some("alice"), Some(65535), 1000, &mine, &team),
+            (1001, Some("bob"), Some(1001), 1000, &mine, &team),
+            (1001, None, Some(1001), 1000, &mine, &team),
+            (1001, Some("alice"), Some(1002), 1000, &mine, &team),
+            (1001, Some("alice"), None, 1000, &mine, &team),
+            (1001, Some("alice"), Some(1001), 1000, &other, &team),
+            (1001, Some("alice"), Some(1001), 1000, &mine, &Vec::new()),
         ] {
             assert!(
-                check_account_of(uid, name, dir, owner, min).is_err(),
+                ok(uid, name, owner, min, own, allowed).is_err(),
                 "{uid} {name:?} {owner:?}"
             );
         }
@@ -335,7 +405,8 @@ mod tests {
                 Some("alice"),
                 Path::new("/run/canoa/alice/"),
                 Some(1001),
-                1000
+                1000,
+                (&mine, &team)
             )
             .is_ok()
         );

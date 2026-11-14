@@ -10,12 +10,19 @@
 #
 # [A-Za-z_][A-Za-z0-9._-]{0,31}
 #
-# (the pattern the portal and the polkit rule use: a name that begins with a digit is a user id to systemd), and must be an
-# account with a user id of MIN_UID or more: root and the machine's service accounts never get a host.
+# (the pattern the portal and the polkit rule use: a name that begins with a digit is a user id to systemd), must be an account
+# in one of ALLOWED_GROUPS (the portal's `groups`; with none named nothing is started), and must have a user id of MIN_UID or
+# more that is not in the machine's system and dynamic-user ranges: root, service accounts and `nobody` never get a host. The
+# host refuses the same ones itself, which is the check that decides.
 set -eu
+
+PATH=/usr/bin:/bin
+LC_ALL=C
+export PATH LC_ALL
 
 MIN_UID=1000
 PREFIX=canoa
+ALLOWED_GROUPS=canoa-users
 
 [ $# -ge 2 ] || exit 2
 verb=$1
@@ -31,6 +38,18 @@ case $name in
 ''|[!A-Za-z_]*|*[!A-Za-z0-9._-]*) exit 2 ;;
 esac
 [ "${#name}" -le 32 ] || exit 2
-uid=$(id -u -- "$name" 2>/dev/null) || exit 2
+uid=$(/usr/bin/id -u -- "$name" 2>/dev/null) || exit 2
 [ "$uid" -ge "$MIN_UID" ] || exit 2
+# systemd's dynamic users and `nobody`, and the top of the range; a directory's people have ids below and above these.
+if [ "$uid" -ge 61184 ] && [ "$uid" -le 65535 ]; then exit 2; fi
+[ "$uid" -lt 4294967295 ] || exit 2
+[ -n "$ALLOWED_GROUPS" ] || exit 2
+member=no
+have=$(/usr/bin/id -Gn -- "$name" 2>/dev/null) || exit 2
+for want in $ALLOWED_GROUPS; do
+    for got in $have; do
+        [ "$got" = "$want" ] && member=yes
+    done
+done
+[ "$member" = yes ] || exit 2
 exec /usr/bin/systemctl "$verb" --no-ask-password "$unit"

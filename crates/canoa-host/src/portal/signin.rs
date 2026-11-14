@@ -29,11 +29,24 @@ pub trait Accounts: Send + Sync {
     fn sign_in(&self, user: &str, password: &str) -> SignIn;
 
     /// Whether `user` is still the account with user id `uid`, asked again each time a host is wanted, so an account that was
-    /// removed, renamed or disabled since the sign-in is not given one. The default says yes.
-    fn still(&self, user: &str, uid: u32) -> bool {
+    /// removed or renamed since the sign-in is not given one. [`Standing::Unknown`] when the directory could not say, which
+    /// ends nothing. The default says present.
+    fn still(&self, user: &str, uid: u32) -> Standing {
         let _ = (user, uid);
-        true
+        Standing::Present
     }
+}
+
+/// What the accounts say of a signed-in account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Standing {
+    /// It is there under that name and user id.
+    Present,
+    /// Definitely not: removed, renamed or given another id.
+    Gone,
+    /// The directory did not answer: the session stands until it does.
+    Unknown,
 }
 
 /// The names a unit and a path are made of, as the polkit rule and the root helper in the guide write them. [`valid_user`] is this
@@ -81,12 +94,23 @@ impl System {
 }
 
 impl Accounts for System {
-    fn still(&self, user: &str, uid: u32) -> bool {
-        let found = self.0.lookup(coqui_access::Lookup {
-            by: "id".to_owned(),
-            value: uid.to_string(),
+    fn still(&self, user: &str, uid: u32) -> Standing {
+        let ask = || {
+            self.0.lookup(coqui_access::Lookup {
+                by: "id".to_owned(),
+                value: uid.to_string(),
+            })
+        };
+        // A directory that fails once may answer the next time; only a definite answer ends a session.
+        let found = ask().or_else(|_| {
+            std::thread::sleep(core::time::Duration::from_millis(200));
+            ask()
         });
-        matches!(found, Ok(Some(person)) if person.name == user)
+        match found {
+            Ok(Some(person)) if person.name == user => Standing::Present,
+            Ok(_) => Standing::Gone,
+            Err(_) => Standing::Unknown,
+        }
     }
 
     fn sign_in(&self, user: &str, password: &str) -> SignIn {

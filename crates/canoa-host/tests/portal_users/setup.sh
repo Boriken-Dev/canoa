@@ -16,7 +16,7 @@ tester=${SUDO_USER:?"run through sudo, so the test can reach the proxy's socket"
 tester_group=$(id -gn "$tester")
 here=$(dirname "$0")
 
-for name in canoatestportal canoatesta canoatestb; do
+for name in canoatestportal canoatesta canoatestb canoatestc; do
     if id "$name" >/dev/null 2>&1; then
         echo "$name exists already; run teardown.sh first" >&2
         exit 1
@@ -26,7 +26,12 @@ done
 useradd --system --no-create-home --shell /usr/sbin/nologin canoatestportal
 useradd --create-home --shell /usr/sbin/nologin canoatesta
 useradd --create-home --shell /usr/sbin/nologin canoatestb
-chmod 0700 /home/canoatesta /home/canoatestb
+# Outside the sign-in group: an account like any other on the machine, which must never be given a host.
+useradd --create-home --shell /usr/sbin/nologin canoatestc
+chmod 0700 /home/canoatesta /home/canoatestb /home/canoatestc
+groupadd canoatestusers
+usermod -aG canoatestusers canoatesta
+usermod -aG canoatestusers canoatestb
 # The portal may make the proxy's socket for the tester's group.
 usermod -aG "$tester_group" canoatestportal
 
@@ -37,7 +42,7 @@ echo '<!doctype html>the app' > /opt/canoatest/site/index.html
 # What the test runs as one account to reach another's sockets, from where every account can read it.
 install -m 0644 "$here/uds.py" /opt/canoatest/uds.py
 # The root helper, for units named canoatest@NAME.service.
-sed 's/^PREFIX=canoa$/PREFIX=canoatest/' "$here/../../dist/canoa-instance" > /opt/canoatest/canoa-instance
+sed 's/^PREFIX=canoa$/PREFIX=canoatest/; s/^ALLOWED_GROUPS=canoa-users$/ALLOWED_GROUPS=canoatestusers/' "$here/../../dist/canoa-instance" > /opt/canoatest/canoa-instance
 chmod 0755 /opt/canoatest/canoa-instance
 chown root:root /opt/canoatest/canoa-instance
 
@@ -56,6 +61,7 @@ unit = "canoatest@{user}.service"
 elevate = ["sudo", "-n"]
 systemctl = "/opt/canoatest/canoa-instance"
 pam_service = "canoatest"
+groups = ["canoatestusers"]
 min_uid = 1000
 idle_seconds = 4
 start_seconds = 20
@@ -65,7 +71,7 @@ failure_floor_seconds = 1
 EOF
 
 # The passwords of the test accounts, and the PAM service that checks them and counts how often it was asked.
-printf 'canoatesta:pw-a-test\ncanoatestb:pw-b-test\n' > /etc/canoatest/passwords
+printf 'canoatesta:pw-a-test\ncanoatestb:pw-b-test\ncanoatestc:pw-c-test\n' > /etc/canoatest/passwords
 chmod 0644 /etc/canoatest/passwords
 cat > /opt/canoatest/pam-check.sh <<'EOF'
 #!/bin/bash
@@ -109,7 +115,7 @@ User=%i
 WorkingDirectory=~
 ExecStartPre=+/usr/bin/install -d -m 0711 /run/canoatest
 ExecStartPre=+/usr/bin/install -d -o %i -g canoatestportal -m 0710 /run/canoatest/%i
-ExecStart=/opt/canoatest/canoa serve --portal /run/canoatest/%i --portal-user canoatestportal --supervised
+ExecStart=/opt/canoatest/canoa serve --portal /run/canoatest/%i --portal-user canoatestportal --portal-group canoatestusers --supervised
 Restart=on-failure
 RestartForceExitStatus=75
 MemoryMax=1G
@@ -120,6 +126,10 @@ PrivateTmp=yes
 ProtectSystem=full
 EOF
 systemctl daemon-reload
+
+# A folder for the account outside the group, as the unit would make it, so that only the host's own group check can refuse.
+install -d -m 0711 /run/canoatest
+install -d -o canoatestc -g canoatestportal -m 0710 /run/canoatest/canoatestc
 
 printf 'canoatestportal ALL=(root) NOPASSWD: /opt/canoatest/canoa-instance\n' > /etc/sudoers.d/canoatest
 chmod 0440 /etc/sudoers.d/canoatest

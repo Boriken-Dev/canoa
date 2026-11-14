@@ -9,10 +9,11 @@ done
 rm -f /etc/systemd/system/canoatest@.service /etc/systemd/system/canoatest.slice /etc/sudoers.d/canoatest /etc/pam.d/canoatest
 systemctl daemon-reload
 rm -rf /opt/canoatest /etc/canoatest /run/canoatest /run/canoatest-portal /var/tmp/canoatest-pam-count
-for name in canoatesta canoatestb canoatestportal; do
+for name in canoatesta canoatestb canoatestc canoatestportal; do
     if id "$name" >/dev/null 2>&1; then
         userdel --remove "$name" 2>/dev/null || userdel "$name"
     fi
 done
-rm -rf /home/canoatesta /home/canoatestb
+rm -rf /home/canoatesta /home/canoatestb /home/canoatestc
+getent group canoatestusers >/dev/null && groupdel canoatestusers
 echo "removed"

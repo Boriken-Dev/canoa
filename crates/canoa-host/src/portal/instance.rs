@@ -57,10 +57,15 @@ pub trait Controller: Send + Sync {
 pub struct Systemd {
     /// The `systemctl` program.
     pub systemctl: PathBuf,
-    /// A command put before `systemctl` for `start` and `stop`; listing runs without it.
+    /// A command put before `systemctl` for `start` and `stop`; listing runs without it, and without `systemctl` being the
+    /// helper, which takes only those two words.
     pub elevate: Vec<OsString>,
     /// The unit's name, `{user}` standing for the account.
     pub unit: String,
+    /// The program that lists the running units, which needs no privilege.
+    pub list: PathBuf,
+    /// How long a call may take before it is ended.
+    pub timeout: Duration,
 }
 
 impl Systemd {
@@ -71,7 +76,37 @@ impl Systemd {
             systemctl: PathBuf::from("systemctl"),
             elevate: Vec::new(),
             unit: "canoa@{user}.service".to_owned(),
+            list: PathBuf::from("systemctl"),
+            timeout: Duration::from_secs(60),
         }
+    }
+
+    /// Runs `command` for at most `timeout`: its output, or an error after ending it.
+    fn output(&self, command: &mut Command) -> io::Result<(bool, Vec<u8>, Vec<u8>)> {
+        let mut child = command.spawn()?;
+        let until = Instant::now() + self.timeout;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= until {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "systemctl took too long",
+                ));
+            }
+            thread::sleep(Duration::from_millis(25));
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        if let Some(mut stream) = child.stdout.take() {
+            let _ = stream.read_to_end(&mut out);
+        }
+        if let Some(mut stream) = child.stderr.take() {
+            let _ = stream.read_to_end(&mut err);
+        }
+        Ok((status.success(), out, err))
     }
 
     fn unit_of(&self, user: &str) -> io::Result<String> {
@@ -95,13 +130,13 @@ impl Systemd {
             .stdin(Stdio::Null)
             .stdout(Stdio::Null)
             .stderr(Stdio::Piped);
-        let output = command.output()?;
-        if output.status.success() {
+        let (ok, _, stderr) = self.output(&mut command)?;
+        if ok {
             return Ok(());
         }
         Err(io::Error::other(format!(
             "systemctl {verb} {unit}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            String::from_utf8_lossy(&stderr).trim()
         )))
     }
 }
@@ -123,15 +158,17 @@ impl Controller for Systemd {
 
     fn running(&self) -> io::Result<Vec<String>> {
         let pattern = self.unit.replace("{user}", "*");
-        let output = Command::new(&self.systemctl)
+        let mut command = Command::new(&self.list);
+        command
             .args(["list-units", "--plain", "--no-legend", "--state=active"])
             .arg(&pattern)
             .env("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
             .stdin(Stdio::Null)
-            .stderr(Stdio::Null)
-            .output()?;
+            .stdout(Stdio::Piped)
+            .stderr(Stdio::Null);
+        let (_, stdout, _) = self.output(&mut command)?;
         let (before, after) = self.unit.split_once("{user}").unwrap_or((&self.unit, ""));
-        Ok(String::from_utf8_lossy(&output.stdout)
+        Ok(String::from_utf8_lossy(&stdout)
             .lines()
             .filter_map(|line| {
                 let unit = line.split_whitespace().next()?;
@@ -184,6 +221,8 @@ pub struct Instances {
     start_wait: Duration,
     max_relays: usize,
     max_hosts: usize,
+    /// Hosts up or being started: one count, so that starts by different people cannot together pass `max_hosts`.
+    hosts: AtomicUsize,
     slots: Mutex<HashMap<String, Arc<Slot>>>,
 }
 
@@ -235,6 +274,7 @@ impl Instances {
             start_wait,
             max_relays,
             max_hosts,
+            hosts: AtomicUsize::new(0),
             slots: Mutex::new(HashMap::new()),
         })
     }
@@ -263,17 +303,23 @@ impl Instances {
         };
         for user in users {
             let slot = self.slot(&user);
-            slot.up.store(true, Ordering::SeqCst);
+            self.mark_up(&slot);
             *slot.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
         }
     }
 
-    fn running(&self) -> usize {
-        let slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
-        slots
-            .values()
-            .filter(|slot| slot.up.load(Ordering::SeqCst))
-            .count()
+    /// Counts the host as up, once.
+    fn mark_up(&self, slot: &Slot) {
+        if !slot.up.swap(true, Ordering::SeqCst) {
+            self.hosts.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Counts the host as down, once.
+    fn mark_down(&self, slot: &Slot) {
+        if slot.up.swap(false, Ordering::SeqCst) {
+            self.hosts.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 
     /// Makes sure `user`'s host runs and answers, starting it when it does not, and counts one more use of it until the lease
@@ -317,18 +363,25 @@ impl Instances {
         // Taken before the first question, so a stop that is under way ends before this user is told the host is there.
         match self.ask(user, uid, index) {
             Ok(_) => {
-                slot.up.store(true, Ordering::SeqCst);
+                self.mark_up(slot);
                 return Ok(());
             }
             // A socket another user made is not a host to start over.
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => return Err(error),
             Err(_) => {}
         }
-        if !slot.up.load(Ordering::SeqCst) && self.running() >= self.max_hosts {
-            return Err(io::Error::other("too many hosts are running"));
+        // The place is taken before the start, in the one count every person's start goes through.
+        if !slot.up.load(Ordering::SeqCst) {
+            if self.hosts.fetch_add(1, Ordering::SeqCst) >= self.max_hosts {
+                self.hosts.fetch_sub(1, Ordering::SeqCst);
+                return Err(io::Error::other("too many hosts are running"));
+            }
+            slot.up.store(true, Ordering::SeqCst);
         }
-        self.controller.start(user)?;
-        slot.up.store(true, Ordering::SeqCst);
+        if let Err(error) = self.controller.start(user) {
+            self.mark_down(slot);
+            return Err(error);
+        }
         let until = Instant::now() + self.start_wait;
         loop {
             match self.ask(user, uid, index) {
@@ -418,7 +471,7 @@ impl Instances {
             }
             match self.controller.stop(&user) {
                 Ok(()) => {
-                    slot.up.store(false, Ordering::SeqCst);
+                    self.mark_down(&slot);
                     *slot.last.lock().unwrap_or_else(PoisonError::into_inner) = None;
                     stopped.push(user);
                 }

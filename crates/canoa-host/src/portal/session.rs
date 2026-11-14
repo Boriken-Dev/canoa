@@ -164,9 +164,10 @@ pub struct Throttle {
 
 #[derive(Default)]
 struct Counts {
-    pairs: BTreeMap<(String, IpAddr), Vec<Instant>>,
-    addresses: BTreeMap<IpAddr, Vec<Instant>>,
-    users: BTreeMap<String, Vec<Instant>>,
+    next: u64,
+    pairs: BTreeMap<(String, IpAddr), Vec<(u64, Instant)>>,
+    addresses: BTreeMap<IpAddr, Vec<(u64, Instant)>>,
+    users: BTreeMap<String, Vec<(u64, Instant)>>,
 }
 
 impl core::fmt::Debug for Throttle {
@@ -182,7 +183,7 @@ pub struct Attempt {
     pair: (String, IpAddr),
     address: IpAddr,
     user: String,
-    at: Instant,
+    id: u64,
     /// How long the try waits before the accounts are asked: the account's failures, from anywhere, make it slower.
     pub wait: Duration,
 }
@@ -190,6 +191,11 @@ pub struct Attempt {
 /// An IPv6 address is the whole /64 it sits in, since one browser has all of it.
 fn key_of(address: IpAddr) -> IpAddr {
     match address {
+        // An IPv4 address a dual-stack socket reports as `::ffff:a.b.c.d` is that IPv4 address.
+        IpAddr::V6(v6) if v6.to_ipv4_mapped().is_some() => IpAddr::V4(
+            v6.to_ipv4_mapped()
+                .unwrap_or(core::net::Ipv4Addr::UNSPECIFIED),
+        ),
         IpAddr::V6(v6) => {
             let mut octets = v6.octets();
             octets[8..].fill(0);
@@ -199,12 +205,16 @@ fn key_of(address: IpAddr) -> IpAddr {
     }
 }
 
-fn recent(times: &mut Vec<Instant>, window: Duration, now: Instant) -> usize {
-    times.retain(|at| now.duration_since(*at) < window);
+fn recent(times: &mut Vec<(u64, Instant)>, window: Duration, now: Instant) -> usize {
+    times.retain(|(_, at)| now.duration_since(*at) < window);
     times.len()
 }
 
-fn trim<K: Ord + Clone>(map: &mut BTreeMap<K, Vec<Instant>>, window: Duration, now: Instant) {
+fn trim<K: Ord + Clone>(
+    map: &mut BTreeMap<K, Vec<(u64, Instant)>>,
+    window: Duration,
+    now: Instant,
+) {
     if map.len() <= MAX_TRACKED {
         return;
     }
@@ -212,7 +222,7 @@ fn trim<K: Ord + Clone>(map: &mut BTreeMap<K, Vec<Instant>>, window: Duration, n
     while map.len() > MAX_TRACKED {
         let Some(oldest) = map
             .iter()
-            .min_by_key(|(_, times)| times.last().copied())
+            .min_by_key(|(_, times)| times.last().map(|(_, at)| *at))
             .map(|(key, _)| key.clone())
         else {
             break;
@@ -266,9 +276,19 @@ impl Throttle {
             .get_mut(user)
             .map_or(0, |times| recent(times, self.window, now));
         let over = by_user.saturating_sub(self.slow_after).min(30);
-        state.pairs.entry(pair_key.clone()).or_default().push(now);
-        state.addresses.entry(address).or_default().push(now);
-        state.users.entry(user.to_owned()).or_default().push(now);
+        state.next += 1;
+        let id = state.next;
+        state
+            .pairs
+            .entry(pair_key.clone())
+            .or_default()
+            .push((id, now));
+        state.addresses.entry(address).or_default().push((id, now));
+        state
+            .users
+            .entry(user.to_owned())
+            .or_default()
+            .push((id, now));
         trim(&mut state.pairs, self.window, now);
         trim(&mut state.addresses, self.window, now);
         trim(&mut state.users, self.window, now);
@@ -276,7 +296,7 @@ impl Throttle {
             pair: pair_key,
             address,
             user: user.to_owned(),
-            at: now,
+            id,
             wait: self.slow * u32::try_from(over).unwrap_or(30),
         })
     }
@@ -288,17 +308,17 @@ impl Throttle {
             pair,
             address,
             user,
-            at,
+            id,
             ..
         } = attempt;
         if let Some(times) = state.pairs.get_mut(&pair) {
-            times.retain(|each| *each != at);
+            times.retain(|(each, _)| *each != id);
         }
         if let Some(times) = state.addresses.get_mut(&address) {
-            times.retain(|each| *each != at);
+            times.retain(|(each, _)| *each != id);
         }
         if let Some(times) = state.users.get_mut(&user) {
-            times.retain(|each| *each != at);
+            times.retain(|(each, _)| *each != id);
         }
     }
 }
@@ -424,6 +444,48 @@ mod tests {
         assert_eq!(fresh.wait, Duration::ZERO);
         std::thread::sleep(Duration::from_millis(260));
         assert!(throttle.begin(one, "a").is_some(), "the window passed");
+    }
+
+    #[test]
+    fn an_ipv4_address_a_dual_stack_socket_reports_in_ipv6_form_is_the_ipv4_address() {
+        let throttle = throttle(100, 2, 100);
+        let plain: IpAddr = "192.0.2.1".parse().unwrap();
+        let mapped: IpAddr = "::ffff:192.0.2.1".parse().unwrap();
+        let _a = throttle.begin(plain, "a").unwrap();
+        let _b = throttle.begin(mapped, "b").unwrap();
+        assert!(
+            throttle.begin(plain, "c").is_none(),
+            "one address, counted once"
+        );
+        let other: IpAddr = "::ffff:192.0.2.2".parse().unwrap();
+        assert!(
+            throttle.begin(other, "c").is_some(),
+            "another is not one with `::`"
+        );
+    }
+
+    #[test]
+    fn a_success_takes_back_its_own_count_and_no_other_made_in_the_same_instant() {
+        let throttle = throttle(100, 100, 100);
+        let address: IpAddr = "192.0.2.1".parse().unwrap();
+        let (first, second) = (
+            throttle.begin(address, "a").unwrap(),
+            throttle.begin(address, "a").unwrap(),
+        );
+        throttle.succeeded(first);
+        let _kept = second;
+        let third = throttle.begin(address, "a").unwrap();
+        // Two failures stand (the second try and the third); the limit of three lets one more and then no more.
+        let guarded = self::throttle(100, 3, 100);
+        let (a, b) = (
+            guarded.begin(address, "a").unwrap(),
+            guarded.begin(address, "a").unwrap(),
+        );
+        guarded.succeeded(a);
+        let _c = guarded.begin(address, "a").unwrap();
+        let _d = guarded.begin(address, "a").unwrap();
+        assert!(guarded.begin(address, "a").is_none());
+        drop((b, third));
     }
 
     #[test]
