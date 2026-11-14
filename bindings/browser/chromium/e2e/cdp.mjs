@@ -9,6 +9,7 @@ export class Session {
     this.socket = new WebSocket(url);
     this.pending = new Map();
     this.contexts = [];
+    this.logs = [];
     this.next = 1;
     this.opened = new Promise((resolve, reject) => {
       this.socket.onopen = resolve;
@@ -22,6 +23,8 @@ export class Session {
     this.socket.onmessage = (event) => {
       const message = JSON.parse(event.data);
       if (message.method === "Runtime.executionContextCreated") this.contexts.push(message.params.context);
+      if (message.method === "Runtime.consoleAPICalled") this.logs.push(`${message.params.type}: ${message.params.args.map((arg) => arg.value ?? arg.description ?? "").join(" ")}`);
+      if (message.method === "Runtime.exceptionThrown") this.logs.push(`exception: ${message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text}`);
       const waiting = this.pending.get(message.id);
       if (!waiting) return;
       this.pending.delete(message.id);
