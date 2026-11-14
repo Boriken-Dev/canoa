@@ -1162,7 +1162,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final question = PermissionQuestion(
       title,
       request.kind,
-      detail: describeToolInput(request.rawInput)?.trim(),
+      detail: describeToolInput(request.rawInput, chatLimits)?.trim(),
       reason: shortLine(request.description),
       diff: describeToolDiff(request.toolCall, request.rawInput, chatLimits),
       options: request.options,
@@ -1786,9 +1786,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   void _setOptions(ChatSession session, Object? configOptions, Object? modes) {
-    final parsed = parseConfigOptions(configOptions);
+    final parsed = parseConfigOptions(configOptions, chatLimits);
     // An agent with both says the same thing twice, and ACP prefers the options.
-    final mode = parsed == null || parsed.isEmpty ? parseModes(modes) : null;
+    final mode = parsed == null || parsed.isEmpty ? parseModes(modes, chatLimits) : null;
     if (parsed != null && parsed.isNotEmpty) {
       session.options = parsed;
     } else if (mode != null) {
@@ -1843,7 +1843,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         _setCurrent(session, option.id, value);
       } else {
         final reply = await client.setConfigOption(remote, option.id, value);
-        final told = parseConfigOptions(reply['configOptions']);
+        final told = parseConfigOptions(reply['configOptions'], chatLimits);
         if (told != null && told.isNotEmpty) {
           session.options = told;
         } else {
@@ -1947,13 +1947,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   void _setCurrent(ChatSession session, String id, String value) {
-    session.options = [
-      for (final option in session.options)
-        option.id == id
-            ? ConfigOption(id: id, label: option.label, current: value, choices: option.choices, isMode: option.isMode,
-                category: option.category)
-            : option,
-    ];
+    session.options = [for (final option in session.options) option.id == id ? option.withCurrent(value) : option];
   }
 
   void _note(ChatSession session, String text) {

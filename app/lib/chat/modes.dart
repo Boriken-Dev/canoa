@@ -1,10 +1,11 @@
-import 'package:coqui_acp/coqui_acp.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' as chat;
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show ModeEntry;
 
 import 'agent_events.dart';
 import 'session_options.dart';
 
-/// The mode ids the Rust translators (`coqui_acp_harness::mode`) offer, in the order Shift+Tab cycles them.
-const List<String> modeOrder = ['manual', 'accept_edits', 'auto', 'plan', 'bypass'];
+// The mode ids, what Bypass is and how Shift+Tab goes through the modes are `coqui_acp_chat`'s; the names are Canoa's.
+export 'package:coqui_acp_chat/coqui_acp_chat.dart' show ModeEntry, bypassAnswer, isBypassMode, modeOptionIn, modeOrder, nextMode, ownBypass;
 
 /// The names the translators' modes are shown under.
 const Map<String, String> modeLabels = {
@@ -59,31 +60,8 @@ String choiceLabel(OptionRole role, Choice choice) {
 bool _isRaw(String label, String value) =>
     label == value || label.toLowerCase() == value.toLowerCase() || (label.toUpperCase() == label && label.contains(RegExp('[A-Z]')));
 
-/// The ids an agent may give a mode that asks for nothing: the translators' own, and the names Claude Code and others use.
-const Set<String> _bypassIds = {'bypass', 'bypasspermissions', 'full_access', 'full-access', 'fullaccess', 'yolo'};
-
-/// Whether a mode of [value], or labelled [label], asks for nothing.
-bool isBypassMode(String value, [String? label]) =>
-    _bypassIds.contains(value.toLowerCase()) || label?.toLowerCase() == 'bypass';
-
-/// The id Canoa gives the bypass mode it provides itself, for an agent that has none.
-const String ownBypass = 'bypass';
-
-/// One entry of the mode menu: an agent's own mode, or the Bypass Canoa provides where the agent has no mode that asks for nothing.
-final class ModeEntry {
-  const ModeEntry(this.value, this.label, {this.own = false, this.selectable = true});
-  final String value;
-  final String label;
-
-  /// Whether it can be chosen: the agent's own `custom`, settings no mode names, only says what it is in.
-  final bool selectable;
-
-  /// Whether Canoa provides it, by answering the agent's requests, rather than the agent.
-  final bool own;
-
-  bool get bypass => isBypassMode(value, label);
-
-  /// One line on what the mode does, where its name is one Canoa knows; null for a mode an agent worded itself.
+/// One line on what [entry]'s mode does, where its name is one Canoa knows; null for a mode an agent worded itself.
+extension ModeEntryText on ModeEntry {
   String? get description => modeDescriptions[bypass ? 'Bypass' : label];
 }
 
@@ -97,41 +75,13 @@ const Map<String, String> modeDescriptions = {
   "Don't ask": 'Refuses what is not already allowed, rather than ask',
 };
 
-/// The modes [option] offers, and Bypass beside them when none of them asks for nothing.
-List<ModeEntry> modeEntries(ConfigOption? option) {
-  final entries = [
-    for (final choice in option?.choices ?? const <Choice>[])
-      ModeEntry(choice.value, choiceLabel(OptionRole.mode, choice), selectable: choice.value != 'custom'),
-  ];
-  if (!entries.any((entry) => entry.bypass)) entries.add(const ModeEntry(ownBypass, 'Bypass', own: true));
-  return entries;
-}
-
-/// The entry after [current] in [entries], in the order of [modeOrder] where the ids are known and the agent's own order
-/// otherwise, the first entry when [current] is not among them; never one that cannot be chosen or is in [skip]. Null when
-/// there is none.
-ModeEntry? nextMode(List<ModeEntry> entries, String? current, {Set<String> skip = const {}}) {
-  final ordered = [...entries];
-  int rank(ModeEntry entry) {
-    final at = modeOrder.indexOf(entry.bypass ? ownBypass : entry.value);
-    return at < 0 ? modeOrder.length : at;
-  }
-  if (ordered.every((entry) => entry.value == 'custom' || rank(entry) < modeOrder.length)) {
-    ordered.sort((a, b) => rank(a).compareTo(rank(b)));
-  }
-  final from = ordered.indexWhere((entry) => entry.value == current);
-  for (var step = 1; step <= ordered.length; step++) {
-    final entry = ordered[(from + step) % ordered.length];
-    if (entry.selectable && !skip.contains(entry.value) && entry.value != current) return entry;
-  }
-  return null;
-}
-
-/// The option a request in bypass is answered with: the first that allows once, else the first that allows always unless
-/// [onceOnly]. Null when it offers neither: that one is the person's.
-AcpPermissionOption? bypassAnswer(List<AcpPermissionOption> options, {bool onceOnly = false}) =>
-    options.where((option) => option.kind == 'allow_once').firstOrNull ??
-    (onceOnly ? null : options.where((option) => option.kind == 'allow_always').firstOrNull);
-
-/// The mode option among [options].
-ConfigOption? modeOptionIn(List<ConfigOption> options) => optionIn(options, OptionRole.mode);
+/// The modes [option] offers, worded for a person, and Bypass beside them when none of them asks for nothing.
+List<ModeEntry> modeEntries(ConfigOption? option) => [
+  for (final entry in chat.modeEntries(option))
+    ModeEntry(
+      entry.value,
+      entry.own ? entry.label : choiceLabel(OptionRole.mode, option!.choices.firstWhere((choice) => choice.value == entry.value)),
+      own: entry.own,
+      selectable: entry.selectable,
+    ),
+];

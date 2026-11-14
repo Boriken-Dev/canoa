@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-import '../chat/agent_events.dart' show ConfigOption, maxConfigOptions;
+import '../chat/agent_events.dart' show ConfigOption, chatLimits;
 import '../chat/session_options.dart';
 import '../workspace/workspace_template.dart' show defaultWorkspace;
 import '../worktree/worktree.dart';
@@ -279,7 +279,7 @@ final class SourceMemory {
       seen: seen,
       options: [
         if (json['options'] case final List<dynamic> options)
-          for (final option in options.take(maxConfigOptions)) ?optionFromJson(option),
+          for (final option in options.take(chatLimits.configOptions)) ?optionFromJson(option),
       ],
       images: json['images'] is bool ? json['images'] as bool : null,
       files: json['files'] is bool ? json['files'] as bool : null,

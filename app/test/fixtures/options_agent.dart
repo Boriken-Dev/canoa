@@ -9,7 +9,7 @@ import 'dart:convert';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/desktop/host_tool.dart';
-import 'package:canoa/chat/agent_events.dart' show ConfigOption, parseConfigOptions;
+import 'package:canoa/chat/agent_events.dart' show ConfigOption, chatLimits, parseConfigOptions;
 
 final class OptionsAgent {
   OptionsAgent({this.images = true, this.files = true, this.failStart, this.modes = const [('ask', 'Ask first'), ('edits', 'Accept edits')]})
@@ -293,5 +293,5 @@ final class _WireLink implements HostLink {
 
 /// What [OptionsAgent] offers at the start, as the app reads it.
 abstract final class OptionsAgentOptions {
-  static List<ConfigOption> get parsed => parseConfigOptions(OptionsAgent().options)!;
+  static List<ConfigOption> get parsed => parseConfigOptions(OptionsAgent().options, chatLimits)!;
 }

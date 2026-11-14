@@ -191,7 +191,7 @@ void main() {
     testWidgets('a remembered mode an agent named in capitals shows in words', (tester) async {
       final ledger = SessionLedger(MemoryLedgerBackend());
       ledger.rememberSource('Scripted', options: [
-        const ConfigOption(id: 'mode', label: 'Mode', current: 'ask', category: 'mode', choices: [Choice('ask', 'ASK'), Choice('bypass', 'BYPASS')]),
+        ConfigOption(id: 'mode', label: 'Mode', current: 'ask', category: 'mode', choices: [Choice('ask', 'ASK'), Choice('bypass', 'BYPASS')]),
       ], images: true, files: true);
       await pumpApp(tester, _store(ledger));
       await _draft(tester, 'Scripted');

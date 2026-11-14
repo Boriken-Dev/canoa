@@ -1,7 +1,7 @@
 // The mode beside the composer's Send, bottom left: each harness's own modes in one control, changed by its menu and by
 // Shift+Tab with nothing asked, Bypass shown as a status, the session's mode kept across reopen and restart, and Settings'
 // default for a new session.
-import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption, parseConfigOptions;
+import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption, chatLimits, parseConfigOptions;
 import 'package:canoa/chat/modes.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
@@ -152,13 +152,13 @@ void main() {
     });
 
     test('Shift+Tab\'s order is the translators\' where the ids are theirs, and the agent\'s own otherwise', () {
-      final claude = modeEntries(parseConfigOptions(OptionsAgent(modes: OptionsAgent.claudeModes).options)!.first)..shuffle();
+      final claude = modeEntries(parseConfigOptions(OptionsAgent(modes: OptionsAgent.claudeModes).options, chatLimits)!.first)..shuffle();
       var at = nextMode(claude, 'manual')!;
       expect(at.value, 'accept_edits');
       expect(nextMode(claude, 'bypass')!.value, 'manual');
       at = nextMode(modeEntries(null), null)!;
       expect((at.value, at.own), ('bypass', true));
-      final own = modeEntries(const ConfigOption(id: 'mode', label: 'Mode', current: 'b', choices: [Choice('b', 'B'), Choice('a', 'A')]));
+      final own = modeEntries(ConfigOption(id: 'mode', label: 'Mode', current: 'b', choices: [Choice('b', 'B'), Choice('a', 'A')]));
       expect([for (final entry in own) entry.value], ['b', 'a', 'bypass']);
       expect(nextMode(own, 'b')!.value, 'a');
     });
@@ -236,7 +236,7 @@ void main() {
   group('the default for a new session', () {
     testWidgets('is Settings\' mode, put in the new session before it starts', (tester) async {
       final ledger = SessionLedger(MemoryLedgerBackend())
-        ..rememberSource('Scripted', options: parseConfigOptions(OptionsAgent(modes: OptionsAgent.claudeModes).options)!, images: true, files: true);
+        ..rememberSource('Scripted', options: parseConfigOptions(OptionsAgent(modes: OptionsAgent.claudeModes).options, chatLimits)!, images: true, files: true);
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final store = _store(ledger)..defaultMode = 'plan';
       await pumpApp(tester, store, linked: agent.openLink);

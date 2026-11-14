@@ -22,7 +22,7 @@ List<ConfigOption> knownModes(AgentSource source) {
       ),
     ],
     'Antigravity' => [
-      const ConfigOption(id: 'mode', label: 'Mode', current: '', category: 'mode',
+      ConfigOption(id: 'mode', label: 'Mode', current: '', category: 'mode',
           choices: [Choice('default', 'Manual'), Choice('accept-edits', 'Accept edits'), Choice('plan', 'Plan')]),
     ],
     _ => const [],
