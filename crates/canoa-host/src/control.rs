@@ -872,10 +872,10 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+pub(crate) mod accounts;
 mod files;
 #[cfg(test)]
 mod files_tests;
-pub(crate) mod accounts;
 mod import;
 #[cfg(test)]
 mod import_tests;
