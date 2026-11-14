@@ -920,3 +920,28 @@ fn a_hook_and_a_delegation_tool_share_one_connection_and_each_does_its_part() {
     assert_eq!(result["result"], "shared");
     setup.host.stop();
 }
+
+#[test]
+fn a_hook_scoped_to_other_kinds_cannot_allow_a_call_of_kind_other_and_an_unscoped_one_can() {
+    // An MCP tool's call is of kind `other`: a hook that matches only `read` still runs for it, and may deny or ask, but
+    // its allow does not count.
+    for (table, allowed) in [
+        ("pre-tool = { match = [\"read\"] }", false),
+        ("pre-tool = {}", true),
+        ("pre-tool = { match = [\"other\"] }", true),
+    ] {
+        let setup = start(
+            &hooks(table),
+            &[("pre-tool", print(ALLOW))],
+            &Allow::Digest,
+            &[],
+        );
+        setup.initialize(false);
+        let session = session_id(&setup.new_session(2).expect("a session opens"));
+        let (turn, seen) = setup.turn(3, &session, "McpCall", "no");
+        turn.expect("the turn ends");
+        assert_eq!(asked(&seen), !allowed, "{table}: {seen:?}");
+        assert_eq!(ran(&seen), allowed, "{table}: {seen:?}");
+        setup.host.stop();
+    }
+}

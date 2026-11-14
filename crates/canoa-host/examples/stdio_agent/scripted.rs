@@ -4,7 +4,7 @@
 //! names.
 //!
 //! A prompt starting `Say ` is said back; one starting `Ask ` asks a question as a form, when the client takes them, shaped as
-//! Claude's adapter asks one; `Rename` is stopped by a cancel; a prompt with an attachment follows it; one saying `fails`
+//! Claude's adapter asks one; `Rename` is stopped by a cancel; `McpCall` asks about a call of kind `other`; a prompt with an attachment follows it; one saying `fails`
 //! also sends v2's plan_update, tool_call_content_chunk, notice and compaction updates. It offers a mode, a model and an
 //! effort as config options with their ACP categories, refuses the model `refuse-me` with -32602, and notes each session
 //! request and prompt in order in its state, under the session's `calls`. With `--usage` it also speaks the usage extension: a
@@ -824,6 +824,19 @@ impl Shared {
             }
         } else if text.contains("fails") {
             self.fix(session);
+        } else if text.starts_with("McpCall") {
+            // A call of kind `other`, as an MCP tool's is.
+            let answer = self.tool(
+                session,
+                "mcp",
+                "marker",
+                "other",
+                &json!({"text": "hi"}),
+                &json!([{"type": "content", "content": {"type": "text", "text": "marked"}}]),
+            );
+            if answer == Answer::Cancelled {
+                return "cancelled";
+            }
         } else if text.starts_with("Rename") {
             let answer = self.tool(
                 session,

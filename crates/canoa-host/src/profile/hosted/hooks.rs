@@ -579,6 +579,7 @@ impl Hooks {
         let mut run = HookRun::new(overlay.identity.clone(), Vec::new());
         run.on_failure = Some(hook.on_failure);
         run.sets.clone_from(&hook.sets);
+        run.select.clone_from(&hook.select);
         let Some(read) = overlays
             .iter()
             .find(|read| read.identity == overlay.identity)
@@ -673,13 +674,18 @@ impl Hooks {
             spent: 0,
         };
         let fired = |runs: &[HookRun]| {
-            aos::fire_event_after(
+            // On a call, the kind decides whose allow counts: a hook scoped to other kinds cannot allow an `other` one.
+            aos::fire_event_for_call(
                 event,
                 runs,
                 Some(firing.applies),
                 &self.settings,
                 cfg!(windows),
                 firing.context_used,
+                None,
+                (event == HookEvent::PreTool)
+                    .then_some(firing.select)
+                    .flatten(),
             )
         };
         for key in order {
