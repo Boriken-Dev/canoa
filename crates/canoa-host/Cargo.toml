@@ -46,6 +46,7 @@ coqui-agentic-peer.workspace = true
 coqui-peer.workspace = true
 coqui-peer-webcrypto.workspace = true
 coqui-transport-pipe.workspace = true
+coqui-transport-guatiao.workspace = true
 coqui-builder.workspace = true
 coqui-transport.workspace = true
 coqui-transport-web.workspace = true

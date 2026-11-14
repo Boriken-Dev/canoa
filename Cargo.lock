@@ -556,6 +556,7 @@ dependencies = [
  "coqui-peer-noise",
  "coqui-peer-webcrypto",
  "coqui-transport",
+ "coqui-transport-guatiao",
  "coqui-transport-pipe",
  "coqui-transport-web",
  "data-encoding",
@@ -1042,6 +1043,21 @@ version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-transport?rev=1283116a22de6a8918faa3d0ebd78b8b6777ff0a#1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
 dependencies = [
  "coqui-builder",
+]
+
+[[package]]
+name = "coqui-transport-guatiao"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-transport-guatiao?rev=bdb532dcdc35632b52ac4e6b07bd97b48dcd33a8#bdb532dcdc35632b52ac4e6b07bd97b48dcd33a8"
+dependencies = [
+ "coqui-builder",
+ "coqui-transport",
+ "coqui-transport-pipe",
+ "coqui-transport-web",
+ "guatiao",
+ "guatiao-builder",
+ "guatiao-channel",
+ "url",
 ]
 
 [[package]]
@@ -1815,6 +1831,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "guatiao-builder"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+dependencies = [
+ "coqui-builder",
+ "guatiao",
+ "guatiao-intake",
+]
+
+[[package]]
 name = "guatiao-channel"
 version = "0.0.0-alpha.1"
 source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
@@ -1830,6 +1856,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "guatiao-intake"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+dependencies = [
+ "guatiao",
 ]
 
 [[package]]
