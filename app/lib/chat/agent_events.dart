@@ -48,5 +48,3 @@ export 'package:coqui_acp_chat/coqui_acp_chat.dart'
 
 /// The bounds on what an agent sends, at their defaults.
 const ChatLimits chatLimits = ChatLimits();
-
-String boundedHead(String text, int limit) => text.length > limit ? '${text.substring(0, limit)}\n…' : text;

@@ -15,7 +15,7 @@ const String appName = 'Canoa';
 
 /// A session's entries as the transcript reads them.
 extension SessionEntries on ChatSession {
-  List<ChatEntryData> get entries => messages;
+  List<ChatEntryData> get entries => [for (final message in messages) ModelEntry(message)];
 }
 
 /// The keys that answer a card from anywhere in the window (`chord` in main.dart binds them), as this platform writes them.

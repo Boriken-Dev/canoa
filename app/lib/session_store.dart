@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'acp/chat_connection.dart';
 import 'acp/client.dart';
 import 'acp/delegate.dart';
 import 'acp/local_agent.dart' show readLocalFile;
 import 'acp/secret_wire.dart' show SecretIdentity;
-import 'acp/usage_wire.dart' show UsageNotice;
 import 'package:coqui_acp/secret.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' as model;
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show AttentionKind, ChatStatus, PermissionQuestion, Settlement, TurnEvent, TurnOutcome;
 import 'package:coqui_web/coqui_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -15,7 +17,7 @@ import 'chat/cache_lifetime.dart';
 import 'chat/git_changes.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatEntryData, SecretCardEnvironment, shortLine;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretCardEnvironment, shortLine;
 import 'drafts/draft_store.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
@@ -32,65 +34,20 @@ export 'acp/secret_wire.dart' show SecretIdentity;
 export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
 export 'ledger/session_ledger.dart' show SessionPlace;
+export 'package:coqui_acp_chat/coqui_acp_chat.dart' show AgentQuestion, AttentionKind, ChatMessage, PermissionQuestion, QueuedMessage;
 
 /// Canoa's local view of an agent-issued session. The agent session id is
 /// separate from the local view id and is absent from offline previews.
 /// A [draft] is a session whose agent has not started: it starts on the first message, and is [connecting] meanwhile.
 enum SessionStatus { preview, draft, disconnected, connecting, connected, working }
 
-/// The most a conversation keeps. An agent's turn can run a very long time, and the oldest entries are what go.
-const int maxEntries = 5000;
+/// The name the window that holds a conversation goes by among its views: the person's answers in it are made as this client.
+const String ownerClient = 'main';
 
-/// The most one message keeps, since an agent can send any amount.
-const int maxMessageText = 2 * 1024 * 1024;
-
-/// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
-const int maxPendingPermissions = 64;
-
-class ChatMessage implements ChatEntryData {
-  ChatMessage({required this.role, required this.text, required this.at, this.messageId, this.tool, this.compaction});
-
-  @override
-  final MessageRole role;
-  @override
-  String text;
-  @override
-  final DateTime at;
-  final String? messageId;
-  @override
-  final ToolCall? tool;
-  @override
-  final Compaction? compaction;
-}
-
-/// A tool an agent wants to use, waiting on the person. Nothing answers it for them but Bypass, which answers a request that
-/// offers an allow before it would wait here.
-final class PermissionQuestion {
-  PermissionQuestion(this.title, this.kind,
-      {this.detail, this.reason, this.diff, this.options = const [], this.bypassPassed = false, this.forPerson = false, this.toolCallId, this.subject, this.task, this.allowanceKey});
-  final String title;
-  final String? kind;
-
-  /// The tool call this asks about, whose line in the conversation is marked stopped when the request can no longer be answered.
-  final String? toolCallId;
-
-  /// What it would run or touch, when the agent said.
-  final String? detail;
-
-  /// Why the agent says it needs this, when it said.
-  final String? reason;
-
-  /// The change an edit would make, when the request carries one.
-  final ToolDiff? diff;
-
-  /// The answers the agent offers, in its order.
-  final List<AcpPermissionOption> options;
-
-  /// Whether Bypass was on and left this to the person.
-  final bool bypassPassed;
-
-  /// Whether it is a question or a plan for the person, which Bypass never answers.
-  final bool forPerson;
+/// What Canoa attached to a permission request, which the question carries as its `hostData`: the rule it could be remembered as,
+/// the task whose agent asks, and what an "allow for the session" given to it covers.
+final class RequestHost {
+  const RequestHost({this.subject, this.task, this.allowanceKey});
 
   /// What it would do, in the terms a remembered rule states; null when no rule could cover it, or the card offers none.
   final RuleSubject? subject;
@@ -100,27 +57,21 @@ final class PermissionQuestion {
 
   /// What an "allow for the session" given to this request covers: the same kind of request from the same task, nothing else.
   final String? allowanceKey;
-  final Completer<AcpDecision> _answer = Completer();
-
-  /// What the agent is told once this is answered, which another view of the session reads to show how it ended.
-  Future<AcpDecision> get answer => _answer.future;
 }
 
-/// The most questions one conversation holds waiting for the person; an agent asking more has the rest answered cancelled.
-const int maxPendingQuestions = 16;
+/// What Canoa knows of a permission request beyond the model's: see [RequestHost].
+extension RequestOfQuestion on PermissionQuestion {
+  RequestHost? get host => hostData is RequestHost ? hostData as RequestHost : null;
+  RuleSubject? get subject => host?.subject;
+  DelegateTask? get task => host?.task;
+  String? get allowanceKey => host?.allowanceKey;
+}
 
 /// The most kinds of request an "allow for the session" covers in one task.
 const int maxTaskAllowances = 64;
 
-/// An agent's question, waiting on the person. Nothing answers it for them; Bypass is for permission requests only.
-final class AgentQuestion {
-  AgentQuestion(this.request);
-  final AcpElicitation request;
-  final Completer<AcpElicitationAnswer> _answer = Completer();
-
-  /// What the agent is told once this is answered.
-  Future<AcpElicitationAnswer> get answer => _answer.future;
-}
+/// The most secret prompts one conversation holds waiting for the person.
+const int maxPendingSecrets = 16;
 
 /// A secret prompt of the host, waiting on the person: a request for values or a show of them. [host] is the host's proven identity,
 /// which the answer's binding names. Nothing the person types or is shown passes through the agent's conversation.
@@ -162,41 +113,49 @@ final class SecretShowPrompt extends SecretPrompt {
   }
 }
 
-/// The most messages one conversation holds waiting for its turn to end.
-const int maxQueued = 20;
-
-/// A message written while the agent was working, sent when its turn ends.
-final class QueuedMessage {
-  QueuedMessage(this.text, this.attachments);
-  String text;
-  final List<Attachment> attachments;
-}
-
-/// What a session needs the person for: a permission request, a question, or a turn it finished.
-enum AttentionKind { permission, question, finished }
-
+/// One conversation as Canoa holds it: the model's conversation ([chat]), which keeps what was said, the turn, the queue, what waits
+/// for the person and the modes, and beside it what is Canoa's own: where the agent runs, the draft, the ledger's notes, the rules,
+/// the tasks handed on, the secret prompts.
 class ChatSession {
   ChatSession({
-    required this.id,
-    required this.title,
-    required this.agent,
-    required this.status,
-    this.peerId,
-    this.remoteSessionId,
+    required String id,
+    required String title,
+    required String agent,
+    required SessionStatus status,
+    String? peerId,
+    String? remoteSessionId,
     this.endpoint,
     this.websocketFallback,
-    this.cwd,
+    String? cwd,
     this.place = SessionPlace.local,
     this.method,
     this.worktree,
     this.source,
     DateTime? created,
-    List<ChatMessage>? messages,
+    bool agentNames = false,
+    model.UpdateRecorder? recorder,
+    DateTime Function()? clock,
   }) : created = created ?? DateTime.now(),
-       messages = messages ?? <ChatMessage>[];
+       _phase = const {SessionStatus.preview, SessionStatus.draft, SessionStatus.connecting}.contains(status) ? status : null,
+       chat = model.ChatSession(
+         id: id,
+         title: title,
+         agent: agent,
+         peerId: peerId,
+         sessionId: remoteSessionId,
+         cwd: cwd,
+         recorder: recorder,
+         hostNoticesKey: SessionStore.hostNoticesKey,
+         clock: clock,
+         agentNames: agentNames,
+       );
+
+  /// The conversation: what was said, the turn, the queue, the requests waiting, the modes and options.
+  final model.ChatSession chat;
 
   /// Where the agent works, on its machine, when this side knows. A draft's folder until it starts.
-  String? cwd;
+  String? get cwd => chat.cwd;
+  set cwd(String? value) => chat.cwd = value;
 
   /// The git worktree [cwd] is, on the session's own branch, when it was started in one.
   SessionWorktree? worktree;
@@ -249,14 +208,8 @@ class ChatSession {
   /// The first message once it has reached the agent, for a composer still showing it to let it go.
   String? firstSent;
 
-  /// Choices made before the agent could take them, by option id: sent before the next prompt.
-  final Map<String, PendingChoice> pending = {};
-
   /// What goes with the next message.
   final List<Attachment> attachments = [];
-
-  /// What the agent is waiting for the person to answer, oldest first.
-  final List<PermissionQuestion> pendingPermissions = [];
 
   /// The tasks this conversation handed to other sources, as the host reported them.
   final DelegateTasks tasks = DelegateTasks();
@@ -268,54 +221,11 @@ class ChatSession {
   /// conversation's own or another task's.
   final Map<String, Set<String>> taskAllowances = {};
 
-  /// The agent's questions waiting for the person, oldest first.
-  final List<AgentQuestion> pendingQuestions = [];
-
   /// The host's requests for secrets, and shows of them, waiting for the person, oldest first.
   final List<SecretPrompt> pendingSecrets = [];
 
-  /// What the agent lets a person choose, its plan, its commands and what it has used, each as it last said.
-  List<ConfigOption> options = const [];
-  List<PlanEntry> plan = const [];
-  List<AgentCommandInfo> commands = const [];
-  SessionUsage usage = const SessionUsage();
-
   /// What the repository holds in this session's folder, as git on its host last said.
   final SessionGit git = SessionGit();
-
-  /// What the agent last said of the account's allowances, once it has said; null while it has not.
-  UsageReport? usageReport;
-
-  /// Whether this session's agent reports usage, which decides whether the control shows at all.
-  bool reportsUsage = false;
-
-  /// What this session has spent, as the agent last said.
-  UsageSpend? spend;
-
-  /// Commands the agent ran, which a tool's card shows.
-  final Map<String, TerminalView> terminals = {};
-  final Map<String, ChatMessage> toolEntries = {};
-  final Map<String, ChatMessage> compactions = {};
-
-  /// The person's messages whose attachments the conversation has named, so a message sent here and echoed back is named once.
-  final Set<String> attachmentsNamed = {};
-
-  /// Whether the agent may name the conversation, which it may until the person has.
-  bool agentNames = false;
-
-  /// Whether Canoa answers this session's permission requests that offer an allow, as the Bypass mode of an agent that has no
-  /// mode of its own that asks for nothing. Off unless the person chose it. It sits on the agent's own mode, which stays.
-  bool bypass = false;
-
-  /// Counts the times everything waiting in this conversation was ended (Stop, close, a connection that ended), so a request that
-  /// was waiting on something else when it happened can tell, and is dropped.
-  int epoch = 0;
-
-  /// The permission request before this one, which this one waits on so that cards keep the order the requests came in.
-  Future<void> askTail = Future.value();
-
-  /// The requests that are not yet a card or an answer, waiting on the rules file: Stop answers them cancelled at once.
-  final List<Completer<AcpDecision>> askWaiters = [];
 
   /// Whether Bypass was chosen before the agent was known, so it is the agent's own where the agent turns out to have one.
   bool bypassBeforeAgent = false;
@@ -323,37 +233,12 @@ class ChatSession {
   /// When the person last answered with the agent's own "always", for saying that a change of mode soon after is what it did.
   DateTime? alwaysAnsweredAt;
 
-  /// The mode the person, a profile or the agent last set, as the agent names it: what the ledger keeps. Never the agent's
-  /// starting default, which nobody chose.
-  String? chosenMode;
-
-  /// Whether the session is being opened again and its agent has not loaded it yet: nothing about its mode changes then.
-  bool opening = false;
-
-  /// The mode last asked for, until the agent has taken it or refused it, so a quick second Shift+Tab goes on from it.
-  String? targetMode;
-
-  /// Modes the agent refused, which Shift+Tab then skips.
-  final Set<String> refusedModes = {};
-
-  /// How many changes of mode are running or waiting their turn.
-  int modesWaiting = 0;
-
-  /// Changes of mode wait their turn here, so each starts from where the one before ended.
-  Future<void> modeQueue = Future.value();
-
-  /// Whether a turn ended here since the person last chose this session.
-  bool unread = false;
-
   /// Whether the last turn failed and the person has not looked since.
   bool failed = false;
 
   /// Whether the person pinned the session to the top of the list, or archived it out of the way. Archived hides it only
   /// while it needs nothing from the person.
   bool pinned = false, archived = false;
-
-  /// When something last happened here: the newest message, else when it was made.
-  DateTime get lastActivity => messages.isEmpty ? created : messages.last.at;
 
   /// The files of the changes pane the person marked viewed, each with the version of it they saw.
   final Map<String, int> viewedChanges = {};
@@ -367,25 +252,97 @@ class ChatSession {
   /// What the session was opened with, which an earlier conversation opened from it is opened with too.
   AcpSessionSetup setup = AcpSessionSetup.none;
 
-  /// Messages written while a turn ran, oldest first. The first is sent when a turn ends as it should.
-  final List<QueuedMessage> queue = [];
-
-  /// Why the queue waits for the person rather than going on: a turn that was stopped or failed. Null while it goes on.
-  String? queueHeld;
-
-  /// Whether something here waits for the person's answer.
-  bool get needsYou => pendingPermissions.isNotEmpty || pendingQuestions.isNotEmpty || pendingSecrets.isNotEmpty;
-
-  final String id;
-  String title;
-  String agent;
-  SessionStatus status;
-  String? peerId;
-  String? remoteSessionId;
   /// Preferred HTTPS WebTransport or direct WSS endpoint.
   Uri? endpoint;
   Uri? websocketFallback;
-  final List<ChatMessage> messages;
+
+  /// A status a draft, a connecting session or a preview has until an agent is bound; null once the conversation's own says.
+  SessionStatus? _phase;
+
+  String get id => chat.id;
+  String get title => chat.title;
+  set title(String value) => chat.retitle(value);
+  String get agent => chat.agent;
+  set agent(String value) => chat.agent = value;
+  String? get peerId => chat.peerId;
+  set peerId(String? value) => chat.peerId = value;
+  String? get remoteSessionId => chat.sessionId;
+  set remoteSessionId(String? value) => chat.sessionId = value;
+
+  SessionStatus get status =>
+      _phase ??
+      switch (chat.status) {
+        ChatStatus.disconnected => SessionStatus.disconnected,
+        ChatStatus.connected => SessionStatus.connected,
+        ChatStatus.working => SessionStatus.working,
+      };
+  set status(SessionStatus value) => _phase = value;
+
+  /// Whether the agent may name the conversation, which it may until the person has.
+  bool get agentNames => chat.agentNames;
+  set agentNames(bool value) => chat.agentNames = value;
+
+  /// Whether a turn ended here since the person last chose this session.
+  bool get unread => chat.unread;
+  set unread(bool value) => chat.unread = value;
+
+  List<model.ChatMessage> get messages => chat.messages;
+  Map<String, model.ChatMessage> get toolEntries => chat.toolEntries;
+  Map<String, model.ChatMessage> get compactions => chat.compactions;
+  Map<String, TerminalView> get terminals => chat.terminals;
+
+  /// What the agent lets a person choose, its plan, its commands and what it has used, each as it last said.
+  List<ConfigOption> get options => chat.options;
+  List<PlanEntry> get plan => chat.plan;
+  List<AgentCommandInfo> get commands => chat.commands;
+  SessionUsage get usage => chat.usage;
+
+  /// What the agent last said of the account's allowances, once it has said; null while it has not.
+  UsageReport? get usageReport => chat.usageReport;
+
+  /// Whether this session's agent reports usage, which decides whether the control shows at all.
+  bool get reportsUsage => chat.reportsUsage;
+
+  /// What this session has spent, as the agent last said.
+  UsageSpend? get spend => chat.spend;
+
+  /// What the agent is waiting for the person to answer, oldest first.
+  List<PermissionQuestion> get pendingPermissions => chat.pendingPermissions;
+
+  /// The agent's questions waiting for the person, oldest first.
+  List<model.AgentQuestion> get pendingQuestions => chat.pendingQuestions;
+
+  /// Choices made before the agent could take them, by option id: sent before the next prompt.
+  Map<String, PendingChoice> get pending => chat.pendingChoices;
+
+  /// Whether Canoa answers this session's permission requests that offer an allow, as the Bypass mode of an agent that has no mode
+  /// of its own that asks for nothing. Off unless the person chose it. It sits on the agent's own mode, which stays.
+  bool get bypass => chat.bypass;
+
+  /// The mode the person, a profile or the agent last set, as the agent names it: what the ledger keeps. Never the agent's
+  /// starting default, which nobody chose.
+  String? get chosenMode => chat.chosenMode;
+
+  /// Whether the session is being opened again and its agent has not loaded it yet: nothing about its mode changes then.
+  bool get opening => chat.opening;
+
+  /// The mode last asked for, until the agent has taken it or refused it, so a quick second Shift+Tab goes on from it.
+  String? get targetMode => chat.targetMode;
+
+  /// Modes the agent refused, which Shift+Tab then skips.
+  Set<String> get refusedModes => chat.refusedModes;
+
+  /// Messages written while a turn ran, oldest first. The first is sent when a turn ends as it should.
+  List<model.QueuedMessage> get queue => chat.queue;
+
+  /// Why the queue waits for the person rather than going on: a turn that was stopped or failed. Null while it goes on.
+  String? get queueHeld => chat.queueHeld;
+
+  /// When something last happened here: the newest message, else when it was made.
+  DateTime get lastActivity => messages.isEmpty ? created : messages.last.at;
+
+  /// Whether something here waits for the person's answer.
+  bool get needsYou => chat.needsYou || pendingSecrets.isNotEmpty;
 
   /// Whether its agent has not started: it starts on the first message.
   bool get isDraft => status == SessionStatus.draft || (status == SessionStatus.connecting && remoteSessionId == null);
@@ -397,24 +354,83 @@ typedef DraftStarter = Future<void> Function(ChatSession draft);
 
 //// Why [error] happened, in the words it carries for a person: for an agent's own error, the message it gave.
 String reasonOf(Object error) => switch (error) {
-  StateError(:final message) => message,
-  AcpFailure(:final message) => RegExp(r'^Agent error: \{.*\bmessage: (.*)\}$', dotAll: true).firstMatch(message)?.group(1) ?? message,
   WorktreeFailure(:final message) => message,
-  _ => '$error',
+  _ => model.reasonOf(error),
 };
 
 /// The title a draft takes from its first message when it was given none.
-String titleFrom(String text) {
-  final line = text.trim().split('\n').first.trim();
-  return line.length > 60 ? '${line.substring(0, 59).trimRight()}…' : line;
+String titleFrom(String text) => model.titleFrom(text);
+
+/// Decides what the host decides of a conversation's permission requests: what a remembered rule and a task's allowance answer,
+/// and which requests are the person's alone, for the model to put or answer.
+final class _Policy implements model.PermissionPolicy {
+  _Policy(this.store, this.session);
+  final SessionStore store;
+  final ChatSession session;
+
+  @override
+  Future<void> prepare(AcpPermissionRequest request) async {
+    // What another instance revoked since the file was read stops applying before this request is matched, and a file that could
+    // not be read earlier is tried again. A read that waits too long applies no rule: the request is asked.
+    final rules = store.rules;
+    if (rules != null && (rules.rules.isNotEmpty || rules.problem != null)) await rules.refresh();
+  }
+
+  @override
+  model.PermissionReview review(AcpPermissionRequest request, {required bool forPerson}) {
+    final task = SessionStore._taskOf(session, request);
+    // A question from an agent on another machine is the person's alone, as a plan is: Bypass, a remembered rule and a task's
+    // allowance were each given for agents this person chose to run here.
+    final alone = forPerson || (task?.remote ?? false);
+    final allowanceKey = task == null || alone ? null : SessionStore._allowanceKey(request);
+    final subject = alone ? null : store._ruleSubject(session, request);
+    final folder = session.cwd;
+    final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
+    final keepable = store.rules != null && subject != null && once != null && folder != null && folder.isNotEmpty;
+    return model.PermissionReview(
+      forPerson: alone,
+      // A task's tool call is its own thread's, not this conversation's.
+      ownCall: task == null,
+      label: task == null ? '' : ' for ${task.title}',
+      hostData: RequestHost(subject: keepable ? subject : null, task: task, allowanceKey: allowanceKey),
+    );
+  }
+
+  @override
+  model.PermissionAnswer? answer(AcpPermissionRequest request, model.PermissionReview review) {
+    final host = review.hostData as RequestHost;
+    final title = shortLine(request.title) ?? shortLine(request.kind) ?? 'A tool';
+    final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
+    final task = host.task, key = host.allowanceKey;
+    if (task != null && key != null && (session.taskAllowances[task.id]?.contains(key) ?? false) && once != null) {
+      return model.PermissionAnswer(AcpSelect(once.optionId), 'Allowed for the session of ${task.title}: $title.');
+    }
+    final subject = host.subject, rules = store.rules, folder = session.cwd;
+    if (rules != null && subject != null && once != null && folder != null) {
+      final rule = rules.match(source: SessionStore.ruleSource(session), peer: session.peerId ?? '', folder: folder, kind: request.kind, subject: subject);
+      if (rule != null) {
+        rules.recordUse(rule, switch (subject) {
+          CommandSubject(:final command) => command,
+          PathSubject(:final path) => path,
+          McpSubject(:final name) => name,
+        });
+        return model.PermissionAnswer(
+          AcpSelect(once.optionId),
+          'A remembered rule allowed: $title (${rule.describe}). Settings, Permissions shows it and revokes it.',
+        );
+      }
+    }
+    return null;
+  }
 }
 
-/// Shared UI state for desktop, PWA and packaged Chromium extension.
-/// Transport, verified peers and persistence are intentionally outside it.
+/// Shared UI state for desktop, PWA and packaged Chromium extension: Canoa's conversations, each a `coqui_acp_chat` conversation
+/// with what is Canoa's own beside it. Transport, verified peers and persistence are intentionally outside it.
 class SessionStore extends ChangeNotifier implements AgentSecrets {
-  SessionStore({this.recorder, this.ledger, this.rules, this.defaultMode, this.bypassOnceOnly = false,
+  SessionStore({this.recorder, this.ledger, this.rules, this.defaultMode, bool bypassOnceOnly = false,
       this.drafts, this.embedLimit = maxAttachedText, Future<List<int>> Function(String path)? readFile})
-      : readFile = readFile ?? readLocalFile;
+      : _bypassOnceOnly = bypassOnceOnly,
+        readFile = readFile ?? readLocalFile;
 
   /// Told the kind and shape of each update this store applies, for a test or the `CANOA_EVENT_LOG` setting.
   final UpdateRecorder? recorder;
@@ -499,8 +515,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// each agent's own. It wins over the person's last choice for the source, and a profile's mode wins over it.
   String? defaultMode;
 
+  bool _bypassOnceOnly;
+
   /// Whether Bypass answers only with an answer that allows once (`[permissions] allow_once_only`).
-  bool bypassOnceOnly;
+  bool get bypassOnceOnly => _bypassOnceOnly;
+  set bypassOnceOnly(bool value) {
+    _bypassOnceOnly = value;
+    for (final session in _sessions) {
+      session.chat.bypassOnceOnly = value;
+    }
+  }
 
   final _attention = StreamController<(ChatSession, AttentionKind)>.broadcast();
 
@@ -518,160 +542,87 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// The mode [session] is in as shown: Canoa's own Bypass, else the agent's mode option, a choice still waiting first. Null
   /// before an agent that has not said.
-  String? modeOf(ChatSession session) {
-    if (session.bypass) return ownBypass;
-    final pending = session.pending.values.where((choice) => choice.role == OptionRole.mode).firstOrNull;
-    return pending?.value ?? (session.isDraft ? null : modeOptionIn(session.options)?.current);
-  }
+  String? modeOf(ChatSession session) => session.chat.mode;
 
   /// The agent's own mode, which Canoa's Bypass sits on top of: what the agent says it is in now, never a choice waiting.
-  String? underlyingMode(ChatSession session) => session.isDraft ? null : modeOptionIn(session.options)?.current;
+  String? underlyingMode(ChatSession session) => session.chat.underlyingMode;
 
   /// Whether [session] is in a mode that asks for nothing, to show it: Canoa's own Bypass, or the agent's own as it says it
   /// is in it now. A choice still waiting is not yet in effect.
-  bool inBypass(ChatSession session) {
-    if (session.bypass) return true;
-    final value = underlyingMode(session);
-    if (value == null) return false;
-    final label = modeOptionIn(session.options)?.choices.where((choice) => choice.value == value).firstOrNull?.label;
-    return isBypassMode(value, label);
-  }
-
-  /// Runs one change of mode after those before it, whether the person's menu, Shift+Tab or the banner asked, so each starts
-  /// from where the one before ended; a failure of one leaves the next able to run.
-  Future<void> _inMode(ChatSession session, Future<void> Function() run) {
-    // The first runs at once, so it is as direct as it was before they queued; the rest wait for those before them.
-    session.modesWaiting++;
-    final idle = session.modesWaiting == 1;
-    Future<void> go() async {
-      try {
-        await run();
-      } finally {
-        session.modesWaiting--;
-      }
-    }
-    final next = idle ? go() : session.modeQueue.then((_) => go());
-    session.modeQueue = next.then<void>((_) {}, onError: (Object _) {});
-    return next;
-  }
-
-  /// Puts [session] in [entry]'s mode. Canoa's own Bypass answers every request that offers an allow, those already waiting
-  /// included, and sits on the agent's mode, which stays; a request with no allow, a question or a plan is still the person's.
-  Future<void> chooseMode(ChatSession session, ModeEntry entry) => _inMode(session, () => _chooseMode(session, entry));
-
-  Future<void> _chooseMode(ChatSession session, ModeEntry entry) async {
-    if (!entry.selectable) return;
-    final wasAnswering = session.bypass;
-    if (entry.own) {
-      session.pending.removeWhere((_, choice) => choice.role == OptionRole.mode);
-      session.bypass = true;
-      session.bypassBeforeAgent = session.isDraft;
-    } else {
-      session.bypass = false;
-      final option = modeOptionIn(optionsOf(session));
-      if (option != null) {
-        // Only an agent that refused it is not asked for it again by Shift+Tab: not one that could not be reached.
-        final refused = await choose(session, option, entry.value);
-        if (refused) {
-          session.refusedModes.add(entry.value);
-        } else {
-          session.chosenMode = entry.value;
-        }
-      }
-    }
-    if (session.bypass && !wasAnswering) {
-      _note(session, 'Mode: Bypass. A request that offers to allow is allowed without asking you.');
-      _answerWaiting(session);
-    } else if (!session.bypass && wasAnswering) {
-      _note(session, 'Mode: ${shortLine(entry.label) ?? entry.value}. Requests are asked again.');
-    }
-    _keepMode(session);
-    _keepDraft(session);
-    notifyListeners();
-  }
-
-  /// Takes back a draft's choice of mode, Bypass included, so its agent's own default holds.
-  void clearMode(ChatSession session) {
-    session.pending.removeWhere((_, choice) => choice.role == OptionRole.mode);
-    session.bypass = false;
-    _keepDraft(session);
-    notifyListeners();
-  }
+  bool inBypass(ChatSession session) => session.chat.inBypass;
 
   /// Whether [session]'s mode can be changed now: not while it connects, nor while it is opened again and not yet loaded.
   bool canChangeMode(ChatSession session) =>
       session.status != SessionStatus.connecting && session.status != SessionStatus.preview && !session.opening;
 
+  /// Puts [session] in [entry]'s mode. Canoa's own Bypass answers every request that offers an allow, those already waiting
+  /// included, and sits on the agent's mode, which stays; a request with no allow, a question or a plan is still the person's.
+  Future<void> chooseMode(ChatSession session, ModeEntry entry) async {
+    if (session.isDraft) {
+      _chooseDraftMode(session, entry);
+      return;
+    }
+    await session.chat.chooseMode(entry);
+    if (entry.own) session.bypassBeforeAgent = false;
+    _keepDraft(session);
+  }
+
+  /// A draft has no agent to ask, so what is chosen waits for it, in the options its source is known to offer.
+  void _chooseDraftMode(ChatSession session, ModeEntry entry) {
+    if (!entry.selectable) return;
+    final chat = session.chat;
+    final wasAnswering = chat.bypass;
+    if (entry.own) {
+      chat.dropChoices(where: (choice) => choice.role == OptionRole.mode);
+      chat.presetBypass(true);
+      session.bypassBeforeAgent = true;
+    } else {
+      chat.presetBypass(false);
+      final option = modeOptionIn(optionsOf(session));
+      if (option != null) chat.holdChoice(PendingChoice(option.id, OptionRole.mode, entry.value, byPerson: true));
+    }
+    if (chat.bypass && !wasAnswering) {
+      chat.note('Mode: Bypass. A request that offers to allow is allowed without asking you.');
+    } else if (!chat.bypass && wasAnswering) {
+      chat.note('Mode: ${shortLine(entry.label) ?? entry.value}. Requests are asked again.');
+    }
+    _keepDraft(session);
+  }
+
+  /// Takes back a draft's choice of mode, Bypass included, so its agent's own default holds.
+  void clearMode(ChatSession session) {
+    session.chat.dropChoices(where: (choice) => choice.role == OptionRole.mode);
+    session.chat.presetBypass(false);
+    _keepDraft(session);
+    notifyListeners();
+  }
+
   /// Puts [session] in the next of its modes, as Shift+Tab does. Presses queue against the mode last asked for, not the one
   /// the agent still shows, and a mode the agent refused is skipped.
-  Future<void> cycleMode(ChatSession session) {
-    if (!canChangeMode(session)) return Future.value();
-    final entries = modeEntries(modeOptionIn(optionsOf(session)));
-    final next = nextMode(entries, session.targetMode ?? modeOf(session), skip: session.refusedModes);
-    if (next == null) return Future.value();
-    session.targetMode = next.value;
-    return _inMode(session, () => _chooseMode(session, next)).whenComplete(() {
-      if (session.targetMode == next.value) session.targetMode = null;
-    });
+  Future<void> cycleMode(ChatSession session) async {
+    if (!canChangeMode(session)) return;
+    if (!session.isDraft) return session.chat.cycleMode();
+    final next = nextMode(modeEntries(modeOptionIn(optionsOf(session))), modeOf(session), skip: session.refusedModes);
+    if (next != null) _chooseDraftMode(session, next);
   }
 
   /// Takes [session] out of Bypass. Canoa's own sat on the agent's mode, which holds again; an agent's own goes to Manual,
   /// or the first mode it has that asks.
-  Future<void> leaveBypass(ChatSession session) => _inMode(session, () async {
-    if (session.bypass) {
-      session.bypass = false;
-      _note(session, 'Bypass is off. Requests are asked again.');
-      _keepMode(session);
+  Future<void> leaveBypass(ChatSession session) async {
+    if (!session.isDraft) {
+      await session.chat.leaveBypass();
+      return;
+    }
+    final chat = session.chat;
+    if (chat.bypass) {
+      chat.presetBypass(false);
+      chat.note('Bypass is off. Requests are asked again.');
       _keepDraft(session);
-      notifyListeners();
       return;
     }
     final entries = [for (final entry in modeEntries(modeOptionIn(optionsOf(session)))) if (!entry.bypass && entry.selectable) entry];
     if (entries.isEmpty) return;
-    final preferred = entries.where((entry) => const {'manual', 'default'}.contains(entry.value)).firstOrNull ?? entries.first;
-    await _chooseMode(session, preferred);
-  });
-
-  /// Whether a request is a question or a plan for the person, whatever mode: Bypass leaves it to them.
-  static bool _isForPerson(AcpPermissionRequest request) {
-    if (request.kind == 'switch_mode') return true;
-    final input = request.rawInput;
-    return input is Map && input['questions'] is List;
-  }
-
-  /// Answers the requests waiting in [session] that offer an allow and are not a question or a plan.
-  void _answerWaiting(ChatSession session) {
-    for (final question in [...session.pendingPermissions]) {
-      final allow = question.forPerson ? null : bypassAnswer(question.options, onceOnly: bypassOnceOnly);
-      if (allow == null) continue;
-      session.pendingPermissions.remove(question);
-      question._answer.complete(AcpSelect(allow.optionId));
-      _note(session, 'Bypass allowed: ${question.title} (${shortLine(allow.name) ?? allow.kind}).');
-    }
-  }
-
-  /// Notes in the ledger the mode that was set, and whether Canoa's Bypass is on, to put both back when [session] is opened
-  /// again. The agent's starting default was set by nobody and is not kept; nor is `custom`, which cannot be chosen.
-  void _keepMode(ChatSession session) {
-    final remote = session.remoteSessionId;
-    final peerId = session.peerId;
-    if (ledger == null || remote == null || peerId == null || session.isDraft || session.opening) return;
-    ledger!.setMode(peerId, remote, mode: session.chosenMode, bypass: session.bypass);
-  }
-
-  /// The agent changed its own mode, which is where the session now is.
-  void _agentChangedMode(ChatSession session, String? before) {
-    final now = modeOptionIn(session.options)?.current;
-    if (before == null || now == null || now == before || now == 'custom') return;
-    // It is shown, and nothing more: a mode the agent moved to by itself was not chosen, so it is neither kept for the ledger to put
-    // back as the person's request nor remembered as the session's chosen mode.
-    final answered = session.alwaysAnsweredAt;
-    if (answered != null && DateTime.now().difference(answered) < const Duration(seconds: 30)) {
-      session.alwaysAnsweredAt = null;
-      final label = modeEntries(modeOptionIn(session.options)).where((entry) => entry.value == now).firstOrNull?.label ?? now;
-      _note(session, 'After your "always" answer, ${shortLine(session.agent) ?? 'the agent'} switched this session to $label. '
-          'The mode control changes it back.');
-    }
+    _chooseDraftMode(session, entries.where((entry) => const {'manual', 'default'}.contains(entry.value)).firstOrNull ?? entries.first);
   }
 
   /// Puts a draft in the mode [value] names, which is Canoa's own Bypass where the agent has none that asks for nothing.
@@ -682,11 +633,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final entry = entries.where((entry) => entry.value == value).firstOrNull ??
         (isBypassMode(value) ? entries.where((entry) => entry.bypass).firstOrNull : null);
     if (entry != null && entry.own) {
-      session.bypass = true;
+      session.chat.presetBypass(true);
       session.bypassBeforeAgent = true;
     } else {
       final id = option?.id ?? OptionRole.mode.name;
-      session.pending[id] = PendingChoice(id, OptionRole.mode, entry?.value ?? value);
+      session.chat.holdChoice(PendingChoice(id, OptionRole.mode, entry?.value ?? value));
     }
   }
 
@@ -694,10 +645,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   static String _named(String name) => shortLine(name) ?? 'an unnamed one';
 
   final List<ChatSession> _sessions = [];
-  final Map<String, VerifiedAgent> _verifiedClients = {};
-  final Map<String, StreamSubscription<AcpSessionUpdate>> _subscriptions = {};
-  final Map<String, StreamSubscription<AcpEvent>> _turnSubscriptions = {};
-  final Map<String, StreamSubscription<UsageNotice>> _usageSubscriptions = {};
+  final Map<String, VerifiedAgent> _clients = {};
+  final Expando<VerifiedChatConnection> _connections = Expando();
+  final Map<String, StreamSubscription<model.ChatEvent>> _eventSubscriptions = {};
   final Map<String, StreamSubscription<DelegateNotice>> _taskSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
@@ -712,17 +662,85 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return null;
   }
 
+  ChatSession _newSession({
+    required String title,
+    required String agent,
+    required SessionStatus status,
+    String? peerId,
+    String? remoteSessionId,
+    Uri? endpoint,
+    Uri? websocketFallback,
+    String? cwd,
+    SessionPlace place = SessionPlace.local,
+    String? method,
+    SessionWorktree? worktree,
+    AgentSource? source,
+    DateTime? created,
+    bool agentNames = false,
+  }) => ChatSession(
+    id: 'local-${++_nextId}',
+    title: title,
+    agent: agent,
+    status: status,
+    peerId: peerId,
+    remoteSessionId: remoteSessionId,
+    endpoint: endpoint,
+    websocketFallback: websocketFallback,
+    cwd: cwd,
+    place: place,
+    method: method,
+    worktree: worktree,
+    source: source,
+    created: created,
+    agentNames: agentNames,
+    recorder: recorder,
+    clock: () => clock(),
+  );
+
+  /// What a conversation tells the store, and what the store decides of it for the conversation.
+  void _wire(ChatSession session) {
+    final chat = session.chat;
+    chat.attachClient(ownerClient, name: 'Canoa');
+    chat.onChange = () => _changed(session);
+    chat.onAttention = (kind) => _needs(session, kind);
+    chat.onModeKept = (mode, bypass) => _keepMode(session, mode, bypass);
+    chat.onPermissionSettled = (question) => _permissionSettled(session, question);
+    chat.onPrompt = (_, _) => _prompting(session);
+    chat.onChoice = (role, value) => _chosen(session, role, value);
+    chat.onOptions = () => _rememberSource(session);
+    chat.onTitle = (title) => _agentNamed(session, title);
+    chat.onAgentMode = (before, now) => _agentChangedMode(session, now);
+    chat.permissionPolicy = _Policy(this, session);
+    chat.bypassOnceOnly = bypassOnceOnly;
+    // A mode the agent moved to by itself was not chosen, so it is neither kept for the ledger to put back as the person's
+    // request nor remembered as the session's chosen mode.
+    chat.agentModeIsChosen = false;
+    chat.modeLabel = (choice) => choiceLabel(OptionRole.mode, choice);
+    _eventSubscriptions[session.id] = chat.events.listen((event) {
+      if (event is TurnEvent) _turnEnded(session, event.turn.outcome ?? TurnOutcome.completed);
+    });
+  }
+
+  /// A conversation changed: when its connection ended, what Canoa held for that connection ends with it.
+  void _changed(ChatSession session) {
+    if (_clients[session.id] != null && session.chat.connection == null) {
+      _clients.remove(session.id);
+      _strand(session);
+    }
+    final report = session.usageReport, account = report?.account;
+    if (report != null && account != null && (accountUsage[account]?.revision ?? -1) <= report.revision) {
+      accountUsage[account] = report;
+    }
+    notifyListeners();
+  }
+
   ChatSession createPreviewSession({
     String title = 'New conversation',
     String agent = 'Canoa preview',
   }) {
-    final session = ChatSession(
-      id: 'local-${++_nextId}',
-      title: title,
-      agent: agent,
-      status: SessionStatus.preview,
-    );
+    final session = _newSession(title: title, agent: agent, status: SessionStatus.preview);
     _sessions.insert(0, session);
+    _wire(session);
     _selectedId = session.id;
     notifyListeners();
     return session;
@@ -737,14 +755,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
       String? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
       CacheLifetime? cacheLifetime, String? account}) {
-    final session = ChatSession(
-      id: 'local-${++_nextId}',
+    final session = _newSession(
       title: title ?? draftTitle,
       agent: source?.label ?? draftTitle,
       status: SessionStatus.draft,
       cwd: cwd,
       source: source,
       created: created,
+      agentNames: title == null,
     )
       ..wantsWorktree = worktree
       ..cacheLifetime = cacheLifetime
@@ -754,12 +772,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..workspaceId = workspaceId ?? newSessionUuid()
       ..draftText = text
       ..keptSource = source == null ? keptSource : null
-      ..agentNames = title == null
-      ..bypass = bypass
       ..bypassBeforeAgent = bypass;
-    session.pending.addAll(pending);
-    session.attachments.addAll(attachments.take(maxAttachments));
     _insert(session);
+    session.chat.presetBypass(bypass);
+    for (final choice in pending.values) {
+      session.chat.holdChoice(choice);
+    }
+    session.attachments.addAll(attachments.take(maxAttachments));
     _keepDraft(session);
     _askChoices(source);
     return session;
@@ -801,14 +820,15 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (text != null) session.draftText = text;
     if (session.status == SessionStatus.draft) {
       if (source != null && source != session.source) {
+        // Choices for another source's options mean nothing to this one's. They go first: the conversation tells its listeners as
+        // each goes, and none should see a new source with the old one's choices.
+        session.chat.dropChoices();
+        session.chat.presetBypass(false);
+        session.account = null;
         session
           ..source = source
           ..keptSource = null
           ..agent = source.label;
-        // Choices for another source's options mean nothing to this one's.
-        session.pending.clear();
-        session.account = null;
-        session.bypass = false;
         _askChoices(source);
       }
       if (cwd != null) session.cwd = cwd;
@@ -926,7 +946,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Notes what [session]'s agent offers and takes, for its source's next draft.
   void _rememberSource(ChatSession session) {
     final source = session.source;
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     if (source == null || client == null) return;
     ledger?.rememberSource(sourceKey(source), options: session.options, images: client.takesImages, files: client.takesFiles);
   }
@@ -934,7 +954,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// What the agent of [session] is known to take with a prompt: its own word once it runs, else what its source's agent said
   /// last time; null when neither is known.
   PromptTakes? takesOf(ChatSession session) {
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     // A link names a path on this computer, which only an agent running here can read.
     final here = session.place == SessionPlace.local || session.place == SessionPlace.host;
     if (client != null && !client.isClosed) {
@@ -981,46 +1001,22 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       }
       final option = optionIn(optionsOf(session), role);
       final id = option?.id ?? role.name;
-      session.pending[id] = PendingChoice(id, role, value);
+      session.chat.holdChoice(PendingChoice(id, role, value));
     }
     _keepDraft(session);
     notifyListeners();
   }
 
-  /// Sends each choice made before the agent could take it, and says in [session] what it would not take.
-  Future<void> _applyPending(ChatSession session) async {
-    // Bypass chosen before the agent was known is the agent's own, once it turns out to have one that asks for nothing.
-    if (session.bypass && session.bypassBeforeAgent && !session.isDraft) {
-      session.bypassBeforeAgent = false;
-      final option = modeOptionIn(session.options);
-      final native = modeEntries(option).where((entry) => entry.bypass && !entry.own).firstOrNull;
-      if (option != null && native != null) {
-        session.bypass = false;
-        session.pending[option.id] = PendingChoice(option.id, OptionRole.mode, native.value);
-      }
+  /// Bypass chosen before the agent was known is the agent's own, once it turns out to have one that asks for nothing.
+  void _resolveBypass(ChatSession session) {
+    if (!session.bypass || !session.bypassBeforeAgent || session.isDraft) return;
+    session.bypassBeforeAgent = false;
+    final option = modeOptionIn(session.options);
+    final native = modeEntries(option).where((entry) => entry.bypass && !entry.own).firstOrNull;
+    if (option != null && native != null) {
+      session.chat.presetBypass(false);
+      session.chat.holdChoice(PendingChoice(option.id, OptionRole.mode, native.value));
     }
-    if (session.pending.isEmpty) return;
-    final waiting = [...session.pending.values];
-    session.pending.clear();
-    for (final choice in waiting) {
-      // `custom` only says what the agent is in: it is never chosen.
-      if (choice.role == OptionRole.mode && choice.value == 'custom') continue;
-      final option = session.options.where((option) => option.id == choice.id && option.choices.any((each) => each.value == choice.value)).firstOrNull ??
-          session.options.where((option) => roleOf(option) == choice.role && option.choices.any((each) => each.value == choice.value)).firstOrNull;
-      if (option == null) {
-        _note(session, 'The agent offers no ${choice.role == OptionRole.other ? choice.id : choice.role.name} of ${shortLine(choice.value) ?? 'that'} now, so it was not set.');
-        continue;
-      }
-      // A mode is sent even when it is the one shown: what shows may not be what is in effect.
-      if (option.current != choice.value || choice.role == OptionRole.mode) await _set(session, option, choice.value);
-      final took = session.options.where((each) => each.id == option.id).firstOrNull?.current == choice.value;
-      if (took && choice.role == OptionRole.mode) session.chosenMode = choice.value;
-      if (took && choice.byPerson && session.source != null) {
-        ledger?.rememberChoice(sourceKey(session.source!), choice.role, choice.value);
-      }
-    }
-    _keepMode(session);
-    notifyListeners();
   }
 
   /// Puts a person's message to a draft: its agent starts, then takes the message. Until it has started, the message stays the
@@ -1051,12 +1047,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
               ..titleFromMessage = false;
           }
           debugPrint('Canoa: ${session.source?.label ?? 'an agent'} was not started: ${reasonOf(error)}');
-          if (_sessions.contains(session)) _note(session, 'Not started: ${reasonOf(error)}');
+          if (_sessions.contains(session)) session.chat.note('Not started: ${reasonOf(error)}');
         }
         rethrow;
       }
-      if (_verifiedClients[session.id] == null) throw StateError('The agent did not start');
-      await _deliver(session, text, List.of(session.attachments), onSent: () {
+      if (_clients[session.id] == null) throw StateError('The agent did not start');
+      await _send(session, text, List.of(session.attachments), onSent: () {
         // Sent: what follows is queued or sent as usual, even while a v1 agent's first turn runs.
         _starting.remove(session.id);
         session.firstSent = text;
@@ -1073,131 +1069,29 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Whether [session]'s first message is still on its way, during which nothing else is sent.
   bool isStarting(ChatSession session) => _starting.contains(session.id);
 
-  /// Puts a permission request to the person, in the conversation it belongs to: the one [from] serves under the request's
-  /// session id. A request about no session here is refused, and one past [maxPendingPermissions] is cancelled.
-  Future<AcpDecision> askPermission(AcpPermissionRequest request, VerifiedAgent from) async {
+  /// The conversation the client [from] serves under the agent's session id [remote], if one is here.
+  ChatSession? _sessionOf(String remote, VerifiedAgent from) {
     ChatSession? target;
     for (final session in _sessions) {
-      if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
+      if (session.remoteSessionId == remote && identical(_clients[session.id], from)) target = session;
     }
-    if (target == null) return const AcpDeny('not a session here');
-    final ChatSession asked = target;
-    // Each request waits for the one before it, so a request that needs the rules read again cannot be passed by one that does not.
-    final epoch = asked.epoch;
-    final prior = asked.askTail;
-    final gate = Completer<void>();
-    final waiter = Completer<AcpDecision>();
-    asked.askTail = gate.future;
-    asked.askWaiters.add(waiter);
-    unawaited(() async {
-      try {
-        await prior;
-        // What another instance revoked since the file was read stops applying before this request is matched, and a file that
-        // could not be read earlier is tried again. A read that waits too long applies no rule: the request is asked.
-        if (rules != null && (rules!.rules.isNotEmpty || rules!.problem != null)) await rules!.refresh();
-        // Stop, closing the conversation or a connection that ended while this waited: nothing is answered but cancelled, and what
-        // the mode, Bypass and the waiting cards are now is read after this point, not before it.
-        final gone = asked.epoch != epoch || !_sessions.contains(asked) || !identical(_verifiedClients[asked.id], from);
-        if (!waiter.isCompleted) waiter.complete(gone ? const AcpCancel() : _decide(asked, request));
-      } on Object catch (error, stack) {
-        if (!waiter.isCompleted) waiter.completeError(error, stack);
-      } finally {
-        asked.askWaiters.remove(waiter);
-        gate.complete();
-      }
-    }());
-    return waiter.future;
+    return target;
   }
 
-  Future<AcpDecision> _decide(ChatSession target, AcpPermissionRequest request) {
-    if (target.pendingPermissions.length >= maxPendingPermissions) {
-      _note(target, 'The agent asked more questions than the $maxPendingPermissions a conversation holds waiting, so the rest '
-          'were answered cancelled.');
-      notifyListeners();
-      return Future.value(const AcpCancel());
-    }
-    final task = _taskOf(target, request);
-    // ACP has the tool call applied before the prompt shows, so the conversation shows what is being asked about. A task's tool
-    // call is its own thread's, not this conversation's.
-    if (request.toolCall != null && task == null) _applyTool(target, request.toolCall!);
-    final title = shortLine(request.title) ?? shortLine(request.kind) ?? 'A tool';
-    final byTask = task == null ? '' : ' for ${task.title}';
-    // A question from an agent on another machine is the person's alone, as a plan is: Bypass, a remembered rule and a task's
-    // allowance were each given for agents this person chose to run here.
-    final forPerson = _isForPerson(request) || (task?.remote ?? false);
-    if (target.bypass && !forPerson) {
-      final allow = bypassAnswer(request.options, onceOnly: bypassOnceOnly);
-      if (allow != null) {
-        _note(target, 'Bypass allowed: $title$byTask (${shortLine(allow.name) ?? allow.kind}).');
-        notifyListeners();
-        return Future.value(AcpSelect(allow.optionId));
-      }
-    }
-    final allowanceKey = task == null || forPerson ? null : _allowanceKey(request);
-    if (task != null && allowanceKey != null && (target.taskAllowances[task.id]?.contains(allowanceKey) ?? false)) {
-      final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
-      if (once != null) {
-        _note(target, 'Allowed for the session of ${task.title}: $title.');
-        notifyListeners();
-        return Future.value(AcpSelect(once.optionId));
-      }
-    }
-    final subject = forPerson ? null : _ruleSubject(target, request);
-    final once = request.options.where((option) => option.kind == 'allow_once').firstOrNull;
-    final folder = target.cwd;
-    final keepable = rules != null && subject != null && once != null && folder != null && folder.isNotEmpty;
-    if (keepable) {
-      final rule = rules!.match(source: ruleSource(target), peer: target.peerId ?? '', folder: folder, kind: request.kind, subject: subject);
-      if (rule != null) {
-        rules!.recordUse(rule, switch (subject) {
-          CommandSubject(:final command) => command,
-          PathSubject(:final path) => path,
-          McpSubject(:final name) => name,
-        });
-        _note(target, 'A remembered rule allowed: $title (${rule.describe}). Settings, Permissions shows it and revokes it.');
-        notifyListeners();
-        return Future.value(AcpSelect(once.optionId));
-      }
-    }
-    final question = PermissionQuestion(
-      title,
-      request.kind,
-      detail: describeToolInput(request.rawInput, chatLimits)?.trim(),
-      reason: shortLine(request.description),
-      diff: describeToolDiff(request.toolCall, request.rawInput, chatLimits),
-      options: request.options,
-      bypassPassed: target.bypass,
-      forPerson: forPerson,
-      toolCallId: request.toolCall?['toolCallId'] as String?,
-      subject: keepable ? subject : null,
-      task: task,
-      allowanceKey: allowanceKey,
-    );
-    target.pendingPermissions.add(question);
-    _needs(target, AttentionKind.permission);
-    notifyListeners();
-    return question._answer.future;
+  /// Puts a permission request to the person, in the conversation it belongs to: the one [from] serves under the request's
+  /// session id. A request about no session here is refused, and one past the conversation's limit is cancelled.
+  Future<AcpDecision> askPermission(AcpPermissionRequest request, VerifiedAgent from) {
+    final target = _sessionOf(request.sessionId, from);
+    if (target == null) return Future.value(const AcpDeny('not a session here'));
+    return target.chat.askPermission(request);
   }
 
   /// Puts an agent's question to the person, in the conversation the client [from] serves under its session id. A question about
-  /// no session here is cancelled, and so is one past [maxPendingQuestions].
+  /// no session here is cancelled, and so is one past the conversation's limit.
   Future<AcpElicitationAnswer> askQuestion(AcpElicitation request, VerifiedAgent from) {
-    ChatSession? target;
-    for (final session in _sessions) {
-      if (session.remoteSessionId == request.sessionId && identical(_verifiedClients[session.id], from)) target = session;
-    }
+    final target = _sessionOf(request.sessionId, from);
     if (target == null) return Future.value(const AcpElicitCancel());
-    if (target.pendingQuestions.length >= maxPendingQuestions) {
-      _note(target, 'The agent asked more questions than the $maxPendingQuestions a conversation holds waiting, so the rest '
-          'were answered cancelled.');
-      notifyListeners();
-      return Future.value(const AcpElicitCancel());
-    }
-    final question = AgentQuestion(request);
-    target.pendingQuestions.add(question);
-    _needs(target, AttentionKind.question);
-    notifyListeners();
-    return question._answer.future;
+    return target.chat.askQuestion(request);
   }
 
   /// This app's identity for secret prompts. Without one the host is offered nothing and every prompt is cancelled.
@@ -1220,14 +1114,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     } on AcpSecretException {
       return null;
     }
-    for (final session in _sessions) {
-      if (session.remoteSessionId == remote && identical(_verifiedClients[session.id], from)) {
-        if (session.pendingSecrets.length >= maxPendingQuestions) return null;
-        identity.verifier.trust(host);
-        return (session, host, identity);
-      }
-    }
-    return null;
+    final session = _sessionOf(remote, from);
+    if (session == null || session.pendingSecrets.length >= maxPendingSecrets) return null;
+    identity.verifier.trust(host);
+    return (session, host, identity);
   }
 
   /// What the secret cards of [prompt] check with and bind to.
@@ -1311,19 +1201,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   /// The person's answer to the oldest of [session]'s questions.
-  void answerQuestion(ChatSession session, AcpElicitationAnswer answer) {
-    if (session.pendingQuestions.isEmpty) return;
-    session.pendingQuestions.removeAt(0)._answer.complete(answer);
-    notifyListeners();
-  }
+  void answerQuestion(ChatSession session, AcpElicitationAnswer answer, {String by = ownerClient}) =>
+      session.chat.answerQuestion(answer, by: by);
 
   /// The person's answer to the oldest question in [session]: the agent's first option that allows once, or refuses once.
-  void answerPermission(ChatSession session, {required bool allow}) {
-    if (session.pendingPermissions.isEmpty) return;
-    final question = session.pendingPermissions.removeAt(0);
-    question._answer.complete(allow ? const AcpAllow() : const AcpDeny('the person refused'));
-    notifyListeners();
-  }
+  void answerPermission(ChatSession session, {required bool allow}) => session.chat.answerPermission(allow: allow, by: ownerClient);
 
   /// Marks [path] viewed at [version] in [session]'s changes, or not viewed when [version] is null.
   void markViewed(ChatSession session, String path, int? version) {
@@ -1338,35 +1220,41 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Answers the oldest question in [session] with the agent's own refusal of this one request (else a plain refusal), and
   /// leaves the turn running.
   void _refuseOnce(ChatSession session) {
-    final question = session.pendingPermissions.removeAt(0);
+    final question = session.pendingPermissions.first;
     final refusal = question.options.where((option) => option.kind == 'reject_once').firstOrNull ??
         question.options.where((option) => option.rejects).firstOrNull;
-    question._answer.complete(refusal == null ? const AcpDeny('the person declined and said what to do instead') : AcpSelect(refusal.optionId));
-    notifyListeners();
+    session.chat.settle(
+      question,
+      refusal == null ? const AcpDeny('the person declined and said what to do instead') : AcpSelect(refusal.optionId),
+      by: ownerClient,
+    );
   }
 
   /// The person's choice of one of the agent's own answers to the oldest question in [session]. What an "always" answer
   /// remembers is the agent's to keep.
-  void choosePermission(ChatSession session, AcpPermissionOption option) {
+  void choosePermission(ChatSession session, AcpPermissionOption option, {String by = ownerClient}) {
     if (session.pendingPermissions.isEmpty) return;
     final question = session.pendingPermissions.first;
-    if (!question.options.contains(option)) return;
-    session.pendingPermissions.removeAt(0);
-    if (option.kind == 'allow_always') {
-      final task = question.task, key = question.allowanceKey;
-      if (task != null && key != null) {
-        // A task's "always" is the task's: the conversation's own mode and the other tasks are not changed by it.
-        final allowed = session.taskAllowances.putIfAbsent(task.id, () => {});
-        if (allowed.length < maxTaskAllowances) allowed.add(key);
-      } else {
-        session.alwaysAnsweredAt = DateTime.now();
-      }
-    }
-    question._answer.complete(AcpSelect(option.optionId));
-    notifyListeners();
+    if (!session.chat.choosePermission(option, by: by)) return;
     // A plain Deny stops the turn, as it does in Claude; a subagent's request is that subagent's to lose.
     if (option.rejects && question.task == null && session.status == SessionStatus.working) {
       unawaited(cancelSession(session).catchError((Object _) {}));
+    }
+  }
+
+  /// An answer settled a request: an "always" is a task's own or the conversation's.
+  void _permissionSettled(ChatSession session, PermissionQuestion question) {
+    final outcome = question.outcome;
+    final answer = outcome?.answer;
+    if (outcome == null || outcome.how != Settlement.answered || outcome.by == model.bypassClient || answer is! AcpSelect) return;
+    if (question.options.where((option) => option.optionId == answer.optionId).firstOrNull?.kind != 'allow_always') return;
+    final task = question.task, key = question.allowanceKey;
+    if (task != null && key != null) {
+      // A task's "always" is the task's: the conversation's own mode and the other tasks are not changed by it.
+      final allowed = session.taskAllowances.putIfAbsent(task.id, () => {});
+      if (allowed.length < maxTaskAllowances) allowed.add(key);
+    } else {
+      session.alwaysAnsweredAt = DateTime.now();
     }
   }
 
@@ -1412,44 +1300,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final rule = store.add(
         source: ruleSource(session), peer: session.peerId ?? '', folder: folder, kind: kind, toolName: subject.toolName, type: type, value: value);
     if (rule == null) return 'Canoa keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
-    session.pendingPermissions.remove(question);
-    _note(session, 'Always allow here: ${rule.describe}, for ${shortLine(session.agent) ?? 'this source'} in $folder. Canoa now '
+    session.chat.note('Always allow here: ${rule.describe}, for ${shortLine(session.agent) ?? 'this source'} in $folder. Canoa now '
         'answers a matching request with allow once, without asking you. Settings, Permissions revokes it.');
-    question._answer.complete(AcpSelect(once.optionId));
-    notifyListeners();
+    session.chat.settle(question, AcpSelect(once.optionId), by: ownerClient);
     return null;
   }
 
   /// The person's answer to a question offering nothing they could choose: it is answered cancelled.
-  void cancelPermission(ChatSession session) {
-    if (session.pendingPermissions.isEmpty) return;
-    session.pendingPermissions.removeAt(0)._answer.complete(const AcpCancel());
-    notifyListeners();
-  }
+  void cancelPermission(ChatSession session, {String by = ownerClient}) => session.chat.cancelPermission(by: by);
 
-  /// Ends what [session] had in hand: a request still waiting on the rules file is answered cancelled now, and one that is not
-  /// told so by the time it is decided finds it so by the count.
-  void _cancelWaiters(ChatSession session) {
-    session.epoch++;
-    for (final waiter in [...session.askWaiters]) {
-      if (!waiter.isCompleted) waiter.complete(const AcpCancel());
-    }
-    session.askWaiters.clear();
-  }
-
-  /// Takes away what [session] was still asking of the person when its connection ended or was replaced: the permission cards
-  /// and questions go, and the tool line each card was about is marked stopped. Nothing is answered, since the agent that asked
-  /// is gone or is no longer the one this conversation is with.
+  /// Takes away what [session] held for the connection that ended or was replaced: its tasks' agents ended with it, and so did the
+  /// secret prompts put to the person.
   void _strand(ChatSession session) {
-    _cancelWaiters(session);
-    // Its tasks' agents ended with the connection, which asked for them.
     session.tasks.cancelLive(DateTime.now());
     session.taskAllowances.clear();
-    for (final question in session.pendingPermissions) {
-      if (question.toolCallId case final id?) _stop(session.toolEntries[id]?.tool);
-    }
-    session.pendingPermissions.clear();
-    session.pendingQuestions.clear();
     _cancelSecrets(session);
   }
 
@@ -1458,32 +1322,6 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       prompt.cancel();
     }
     session.pendingSecrets.clear();
-  }
-
-  /// Marks every tool line still waiting or running as stopped, for a session opened again, whose earlier run ended with the
-  /// process that held it.
-  void _stopLeftovers(ChatSession session) {
-    for (final entry in session.toolEntries.values) {
-      _stop(entry.tool);
-    }
-  }
-
-  static void _stop(ToolCall? tool) {
-    tool?.stop();
-  }
-
-  /// Answers everything still waiting in [session]: its permission requests with [answer], and its questions cancelled.
-  void _endWaiting(ChatSession session, AcpDecision answer) {
-    _cancelWaiters(session);
-    for (final question in session.pendingPermissions) {
-      question._answer.complete(answer);
-    }
-    session.pendingPermissions.clear();
-    for (final question in session.pendingQuestions) {
-      question._answer.complete(const AcpElicitCancel());
-    }
-    session.pendingQuestions.clear();
-    _cancelSecrets(session);
   }
 
   /// A session over a browser provider's connection, which has no endpoint of Canoa's own.
@@ -1496,12 +1334,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     SessionWorktree? worktree,
     String? site,
     String? workspaceId,
+    bool agentNames = false,
   }) {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
     }
-    return _insert(ChatSession(
-      id: 'local-${++_nextId}',
+    return _insert(_newSession(
       title: title,
       agent: agent,
       status: SessionStatus.disconnected,
@@ -1510,12 +1348,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       cwd: cwd,
       place: peerId.startsWith('local:') ? SessionPlace.local : SessionPlace.browser,
       worktree: worktree,
+      agentNames: agentNames,
     )..site = site
       ..workspaceId = workspaceId);
   }
 
   ChatSession _insert(ChatSession session) {
     _sessions.insert(0, session);
+    _wire(session);
     _selectedId = session.id;
     notifyListeners();
     return session;
@@ -1534,6 +1374,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String? method,
     String? cwd,
     SessionWorktree? worktree,
+    bool agentNames = false,
   }) {
     // This records transport locations, not the authentication state. The
     // session stays disconnected until peer proof and ACP are implemented.
@@ -1551,8 +1392,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
       throw ArgumentError('Peer identity and agent session ID are required');
     }
-    return _insert(ChatSession(
-      id: 'local-${++_nextId}',
+    return _insert(_newSession(
       title: title,
       agent: agent,
       peerId: peerId,
@@ -1564,8 +1404,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       method: method,
       cwd: cwd,
       worktree: worktree,
+      agentNames: agentNames,
     ));
   }
+
+  /// The model's connection over [client], one for each so that a conversation can tell its own.
+  VerifiedChatConnection _connectionOf(VerifiedAgent client) => _connections[client] ??= VerifiedChatConnection(client);
 
   /// A verified and initialized ACP client can be bound to one session, which the ledger then notes unless [record] is false.
   /// Opening and peer authentication remain the connector's responsibility.
@@ -1579,62 +1423,64 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       throw StateError('Verified peer and remote session must match');
     }
     final session = target;
-    unawaited(_subscriptions.remove(localId)?.cancel());
+    final earlier = _clients[localId];
     // What the earlier connection asked can no longer be answered, whichever client is asked.
-    if (_verifiedClients[localId] != null && !identical(_verifiedClients[localId], client)) _strand(session);
-    _verifiedClients[localId] = client;
-    session.status = SessionStatus.connected;
-    _subscriptions[localId] = client.updates.listen(
-      (update) {
-        if (update.sessionId == session.remoteSessionId) {
-          _applyUpdate(session, update);
-        }
-      },
-      onDone: () {
-        _verifiedClients.remove(localId);
-        session.status = SessionStatus.disconnected;
-        _strand(session);
-        notifyListeners();
-      },
-    );
-    // A v1 turn has no state updates: its end arrives as an event.
-    unawaited(_turnSubscriptions.remove(localId)?.cancel());
-    _turnSubscriptions[localId] = client.events.listen((event) {
-      if (event is AcpOutputLost) {
-        final messages = event.lines == 1 ? '1 message' : '${event.lines} messages';
-        _note(session, 'While nobody was connected, $messages from the agent (${event.bytes} bytes) were dropped, '
-            'so something it said or did is missing here.');
-        notifyListeners();
-        return;
-      }
-      if (event is AcpBlocked) {
-        // The agent was told the question was cancelled, and its turn goes on until it ends it.
-        _note(session, 'A question from the agent was answered cancelled: ${event.message}.');
-        notifyListeners();
-        return;
-      }
-      if (client.protocolVersion != 1) return;
-      if (event is AcpCompleted || event is AcpCancelled) {
-        session.status = SessionStatus.connected;
-        if (event is AcpCancelled) _note(session, 'Stopped.');
-        if (event is AcpCompleted) _needs(session, AttentionKind.finished);
-        _keepText(session);
-        _turnEnded(session, event is AcpCompleted ? null : 'the turn was stopped');
-        notifyListeners();
-      } else if (event is AcpFailed) {
-        session.status = SessionStatus.connected;
-        session.messages.add(ChatMessage(role: MessageRole.notice, text: event.message, at: DateTime.now()));
-        _needs(session, AttentionKind.finished);
-        _keepText(session);
-        _turnEnded(session, 'the turn failed');
-        notifyListeners();
-      }
-    });
-    _watchUsage(session, client);
+    if (earlier != null && !identical(earlier, client)) _strand(session);
+    _clients[localId] = client;
+    session._phase = null;
+    session.chat.attach(_connectionOf(client));
     _watchTasks(session, client);
     if (record) _record(session, client);
     unawaited(refreshGit(session));
     notifyListeners();
+  }
+
+  /// A turn of [session] ended, stopped or failed. Failing in a session not shown is told to the person.
+  void _turnEnded(ChatSession session, TurnOutcome outcome) {
+    if (outcome == TurnOutcome.failed && session.id != _selectedId) session.failed = true;
+    _keepText(session);
+    unawaited(refreshGit(session));
+  }
+
+  /// The agent names the conversation, which is then no longer taken from the first message.
+  void _agentNamed(ChatSession session, String title) {
+    session.titleFromMessage = false;
+    if (session.peerId != null && session.remoteSessionId != null) {
+      ledger?.touch(session.peerId!, session.remoteSessionId!, title: title);
+    }
+  }
+
+  /// A prompt of [session] is about to go: the disk as it is now is what the turn is measured from, and the ledger notes it.
+  void _prompting(ChatSession session) {
+    _gitBeforeTurn(session);
+    if (session.peerId != null && session.remoteSessionId != null) ledger?.touch(session.peerId!, session.remoteSessionId!);
+  }
+
+  /// The agent took a choice the person made: it is the source's default from now on.
+  void _chosen(ChatSession session, OptionRole role, String value) {
+    final source = session.source;
+    if (source == null) return;
+    ledger?.rememberChoice(sourceKey(source), role, value);
+    _rememberSource(session);
+  }
+
+  /// Notes in the ledger the mode that was set, and whether Canoa's Bypass is on, to put both back when [session] is opened
+  /// again. The agent's starting default was set by nobody and is not kept; nor is `custom`, which cannot be chosen.
+  void _keepMode(ChatSession session, String? mode, bool bypass) {
+    final remote = session.remoteSessionId;
+    final peerId = session.peerId;
+    if (ledger == null || remote == null || peerId == null || session.isDraft || session.opening) return;
+    ledger!.setMode(peerId, remote, mode: mode, bypass: bypass);
+  }
+
+  /// The agent changed its own mode, which is where the session now is: said when it follows the person's "always" answer.
+  void _agentChangedMode(ChatSession session, String now) {
+    final answered = session.alwaysAnsweredAt;
+    if (answered == null || DateTime.now().difference(answered) >= const Duration(seconds: 30)) return;
+    session.alwaysAnsweredAt = null;
+    final label = modeEntries(modeOptionIn(session.options)).where((entry) => entry.value == now).firstOrNull?.label ?? now;
+    session.chat.note('After your "always" answer, ${shortLine(session.agent) ?? 'the agent'} switched this session to $label. '
+        'The mode control changes it back.');
   }
 
   /// Follows the tasks the host reports for [session]. The tasks of an earlier connection ended with it, and the host keeps none for
@@ -1651,10 +1497,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       session.taskAllowances.remove(id);
       // The host gave the task's question up with the task, so a card still waiting for it has nothing to answer.
       for (final question in [...session.pendingPermissions]) {
-        if (question.task?.id == id) {
-          session.pendingPermissions.remove(question);
-          question._answer.complete(const AcpCancel());
-        }
+        if (question.task?.id == id) session.chat.settle(question, const AcpCancel());
       }
     }
     notifyListeners();
@@ -1683,43 +1526,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return '${request.kind ?? ''}\n${request.title ?? ''}\n$what';
   }
 
-  /// Follows the usage [client] reports for [session]: the account's allowances for every session on it, and the spend of the
-  /// one the report names. Nothing is shown for an agent that advertised no usage.
-  void _watchUsage(ChatSession session, VerifiedAgent client) {
-    unawaited(_usageSubscriptions.remove(session.id)?.cancel());
-    session.usageReport = null;
-    session.reportsUsage = client.reportsUsage;
-    if (!session.reportsUsage) return;
-    _usageSubscriptions[session.id] = client.usageNotices.listen((notice) => _usageArrived(session, notice.sessionId, notice.report));
-    unawaited(refreshUsage(session));
-  }
-
-  /// Asks the agent of [session] for its report now, as it does after each turn.
-  Future<void> refreshUsage(ChatSession session) async {
-    final client = _verifiedClients[session.id];
-    if (client == null || client.isClosed || !session.reportsUsage) return;
-    final report = await client.fetchUsage(sessionId: session.remoteSessionId);
-    if (report != null) _usageArrived(session, session.remoteSessionId, report);
-  }
-
-  /// Takes [report] for [session]: the newest by revision wins, and the spend is kept only when it is this session's.
-  void _usageArrived(ChatSession session, String? named, UsageReport report) {
-    final mine = session.remoteSessionId;
-    final own = report.spend != null && (named == mine || report.spend!.sessionId == mine);
-    if (own) session.spend = report.spend;
-    final held = session.usageReport;
-    if (held != null && held.revision > report.revision) {
-      notifyListeners();
-      return;
-    }
-    final account = report.account;
-    if (report.supported && account != null && (accountUsage[account]?.revision ?? -1) <= report.revision) {
-      accountUsage[account] = report.withSpend(null);
-    }
-    session.usageReport = report.supported ? report.withSpend(null) : null;
-    if (!report.supported) session.reportsUsage = false;
-    notifyListeners();
-  }
+  /// Asks the agent of [session] for its usage report now, as it does after each turn.
+  Future<void> refreshUsage(ChatSession session) => session.chat.refreshUsage();
 
   /// Notes [session] in the ledger, with what its agent said about itself.
   void _record(ChatSession session, VerifiedAgent client) {
@@ -1766,139 +1574,71 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// before using it: what a command-line tool does without asking, and whether it remembers earlier messages.
   static const hostNoticesKey = 'dev.boriken.canoa/notices';
 
-  /// Notices taken from one answer; the rest are passed over.
-  static const maxHostNotices = 4;
-
   /// What the agent said when it opened [session].
   void applyOpened(ChatSession session, AcpOpenedSession opened) {
-    _setOptions(session, opened.raw['configOptions'], opened.raw['modes']);
-    session.commands = parseCommands(opened.raw['availableCommands'], chatLimits) ?? session.commands;
-    final meta = opened.raw['_meta'];
-    session.hostReport = meta is Map ? meta[hostProfileMeta] : null;
-    if (meta is Map && meta[hostNoticesKey] is List) {
-      // Any agent can send these, not only the host, so each is shown as the agent's word, never as Canoa's.
-      for (final notice in (meta[hostNoticesKey] as List).take(maxHostNotices)) {
-        final text = shortLine(notice);
-        if (text != null) _note(session, 'The agent says: $text');
-      }
-    }
+    session.chat.applyOpened(opened);
+    _takeHostReport(session, opened);
     notifyListeners();
   }
 
-  void _setOptions(ChatSession session, Object? configOptions, Object? modes) {
-    final parsed = parseConfigOptions(configOptions, chatLimits);
-    // An agent with both says the same thing twice, and ACP prefers the options.
-    final mode = parsed == null || parsed.isEmpty ? parseModes(modes, chatLimits) : null;
-    if (parsed != null && parsed.isNotEmpty) {
-      session.options = parsed;
-    } else if (mode != null) {
-      session.options = [mode];
-    }
+  void _takeHostReport(ChatSession session, AcpOpenedSession opened) {
+    final meta = opened.raw['_meta'];
+    session.hostReport = meta is Map ? meta[hostProfileMeta] : null;
   }
 
   /// A person's choice of one of the agent's options. It goes to the agent now when it can take it; before the agent starts, or
   /// while a turn runs, it waits and goes before the next prompt. [value] null takes back a choice still waiting.
   /// Answers whether the agent refused it, which a choice still waiting has not yet.
   Future<bool> choose(ChatSession session, ConfigOption option, String? value) async {
-    final role = roleOf(option);
-    if (value == null) {
-      session.pending.remove(option.id);
-      _keepDraft(session);
-      notifyListeners();
-      return false;
-    }
-    if (session.isDraft || session.status == SessionStatus.working || isStarting(session)) {
-      session.pending[option.id] = PendingChoice(option.id, role, value, byPerson: true);
+    if (value != null && (session.isDraft || isStarting(session))) {
+      final role = roleOf(option);
+      session.chat.holdChoice(PendingChoice(option.id, role, value, byPerson: true));
       if (session.isDraft && role == OptionRole.model) _dropUnofferedEffort(session);
       _keepDraft(session);
-      notifyListeners();
       return false;
     }
-    session.pending.remove(option.id);
-    final refused = await _set(session, option, value);
-    if (session.options.where((each) => each.id == option.id).firstOrNull?.current == value && session.source != null) {
-      ledger?.rememberChoice(sourceKey(session.source!), role, value);
-      _rememberSource(session);
-    }
+    final refused = await session.chat.choose(option, value);
+    if (value == null) _keepDraft(session);
     return refused;
   }
 
   /// A new model's efforts replace the old one's: an effort chosen for the draft that the model does not take is taken back.
   void _dropUnofferedEffort(ChatSession session) {
     final effort = optionIn(optionsOf(session), OptionRole.effort);
-    session.pending.removeWhere((_, choice) => choice.role == OptionRole.effort && effort != null && !effort.choices.any((each) => each.value == choice.value));
-  }
-
-  /// Sets one of the agent's choices. It stays as it was unless the agent agrees, which it says in its answer or an update; a
-  /// refusal is said in the conversation, with the agent's reason.
-  /// Answers whether the agent refused it: an agent that could not be reached has refused nothing.
-  Future<bool> _set(ChatSession session, ConfigOption option, String value) async {
-    final client = _verifiedClients[session.id];
-    final remote = session.remoteSessionId;
-    if (client == null || remote == null) return false;
-    var refused = false;
-    try {
-      if (option.isMode) {
-        await client.setMode(remote, value);
-        _setCurrent(session, option.id, value);
-      } else {
-        final reply = await client.setConfigOption(remote, option.id, value);
-        final told = parseConfigOptions(reply['configOptions'], chatLimits);
-        if (told != null && told.isNotEmpty) {
-          session.options = told;
-        } else {
-          _setCurrent(session, option.id, value);
-        }
-      }
-    } on AcpFailure catch (error) {
-      final shown = option.choices.where((choice) => choice.value == value).firstOrNull?.label ?? value;
-      _note(session, 'The agent did not change ${option.label} to ${shortLine(shown) ?? 'that'}: ${reasonOf(error)}');
-      refused = true;
-    }
-    notifyListeners();
-    return refused;
+    session.chat.dropChoices(where: (choice) => choice.role == OptionRole.effort && effort != null && !effort.choices.any((each) => each.value == choice.value));
   }
 
   /// Finishes applying the profile the host prepared for [session], from what it reported when the session opened: the model,
   /// effort and mode are set where the agent offers an option with that value, and the report goes on the session and, in one
-  /// line, into it. A reopened session's [keptMode], the one it was left in, is put back instead of the profile's, which is
-  /// applied only if the agent does not take the kept one. With [expected] and no report, the session says it was given none.
+  /// line, into it. A reopened session's [keptMode], the one it was left in and which is put back first, wins over the profile's
+  /// mode, which is applied only if the agent did not take the kept one. With [expected] and no report, the session says it was
+  /// given none.
   Future<void> applyHostProfile(ChatSession session, {bool expected = false, String? keptMode}) async {
+    final chat = session.chat;
     final reported = hostProfileOf(session.hostReport, fallback: session.agent);
     session.hostReport = null;
     if (reported == null || reported.report.items.isEmpty) {
-      if (reported == null && expected) _note(session, 'The host gave this agent no profile.');
-      if (keptMode != null) await _restoreMode(session, keptMode);
+      if (reported == null && expected) chat.note('The host gave this agent no profile.');
       notifyListeners();
       return;
     }
     final chosen = _choicesFor(reported.values, [
-      for (final option in session.options)
+      for (final option in chat.options)
         (option.id, option.category, [for (final choice in option.choices) choice.value], option.isMode),
     ]);
+    final keptTaken = keptMode != null && (keptMode == 'custom' || modeOptionIn(chat.options)?.current == keptMode);
     final set = <String, String>{};
-    Future<void> setChosen(String id, String value, String key) async {
-      final option = session.options.firstWhere((option) => option.id == id);
-      await _set(session, option, value);
-      final now = session.options.where((option) => option.id == id).firstOrNull;
-      if (now?.current == value) {
-        set[key] = option.isMode ? 'session/set_mode' : 'session/set_config_option $id';
-        if (key == 'mode') session.chosenMode = value;
-      }
-    }
     for (final (id, value, key) in chosen) {
-      // The kept mode wins over the profile's: it is put back below, and the profile's only if the agent did not take it.
-      if (keptMode != null && key == 'mode') continue;
-      await setChosen(id, value, key);
-    }
-    var keptTaken = false;
-    if (keptMode != null) {
-      await _restoreMode(session, keptMode);
-      keptTaken = keptMode == 'custom' || modeOptionIn(session.options)?.current == keptMode;
-      if (!keptTaken) {
-        for (final (id, value, key) in chosen) {
-          if (key == 'mode') await setChosen(id, value, key);
-        }
+      if (keptTaken && key == 'mode') continue;
+      final option = chat.options.firstWhere((option) => option.id == id);
+      // Canoa's own Bypass stays where it is: the mode set is the agent's, which it sits on.
+      if (option.isMode && !chat.bypass) {
+        await chat.chooseMode(ModeEntry(value, value));
+      } else {
+        await chat.choose(option, value);
+      }
+      if (chat.options.where((option) => option.id == id).firstOrNull?.current == value) {
+        set[key] = option.isMode ? 'session/set_mode' : 'session/set_config_option $id';
       }
     }
     ProfileItem settled(ProfileItem item) {
@@ -1912,8 +1652,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           : ProfileItem(item.key, item.layer, ItemState.unsupported, 'the agent offers no ${item.key} option with this value');
     }
     session.profile = ProfileReport(reported.report.harness, [for (final item in reported.report.items) settled(item)]);
-    _note(session, session.profile!.summary);
-    _keepMode(session);
+    chat.note(session.profile!.summary);
     notifyListeners();
   }
 
@@ -1939,190 +1678,6 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return out;
   }
 
-  /// Sends the mode a reopened [session] was left in. Under Canoa's own Bypass it is the agent's mode that Bypass sat on.
-  Future<void> _restoreMode(ChatSession session, String mode) async {
-    final id = modeOptionIn(session.options)?.id ?? OptionRole.mode.name;
-    session.pending[id] = PendingChoice(id, OptionRole.mode, mode);
-    await _applyPending(session);
-  }
-
-  void _setCurrent(ChatSession session, String id, String value) {
-    session.options = [for (final option in session.options) option.id == id ? option.withCurrent(value) : option];
-  }
-
-  void _note(ChatSession session, String text) {
-    session.messages.add(ChatMessage(role: MessageRole.notice, text: text, at: DateTime.now()));
-  }
-
-  void _trim(ChatSession session) {
-    final over = session.messages.length - maxEntries;
-    if (over <= 0) return;
-    for (final gone in session.messages.take(over)) {
-      if (gone.tool != null) session.toolEntries.remove(gone.tool!.id);
-      if (gone.compaction != null) session.compactions.remove(gone.compaction!.id);
-    }
-    session.messages.removeRange(0, over);
-  }
-
-  void _applyTool(ChatSession session, Map<String, dynamic> raw) {
-    final id = raw['toolCallId'];
-    if (id is! String || id.isEmpty) return;
-    var entry = session.toolEntries[id];
-    if (entry == null) {
-      entry = ChatMessage(role: MessageRole.tool, text: '', at: DateTime.now(), tool: ToolCall(id));
-      session.toolEntries[id] = entry;
-      session.messages.add(entry);
-    }
-    entry.tool!.apply(raw, chatLimits);
-  }
-
-  void _applyTerminal(ChatSession session, Map<String, dynamic> raw) {
-    final id = raw['terminalId'];
-    if (id is! String || id.isEmpty) return;
-    if (session.terminals.length >= chatLimits.terminals && !session.terminals.containsKey(id)) {
-      session.terminals.remove(session.terminals.keys.first);
-    }
-    (session.terminals[id] ??= TerminalView(chatLimits)).apply(raw, chatLimits);
-  }
-
-  /// A compaction's entry stays where its first update put it, and later ones change it there.
-  void _applyCompaction(ChatSession session, Map<String, dynamic> raw) {
-    final id = raw['compactionId'];
-    if (id is! String || id.isEmpty) return;
-    var entry = session.compactions[id];
-    if (entry == null) {
-      entry = ChatMessage(role: MessageRole.compaction, text: '', at: DateTime.now(), compaction: Compaction(id, chatLimits));
-      session.compactions[id] = entry;
-      session.messages.add(entry);
-    }
-    entry.compaction!.apply(raw, chatLimits);
-  }
-
-  /// Names what went with a person's message, once per message.
-  void _nameAttachments(ChatSession session, String? messageId, List<String> names) {
-    if (names.isEmpty || (messageId != null && !session.attachmentsNamed.add(messageId))) return;
-    _note(session, 'Sent with this: ${names.join(', ')}');
-  }
-
-  void _applyUpdate(ChatSession session, AcpSessionUpdate update) {
-    final rendering = renderingOf(update, chatLimits);
-    recorder?.record(update, rendering);
-    switch (rendering) {
-      case Rendering.toolCard:
-        _applyTool(session, update.raw);
-      case Rendering.terminal:
-        _applyTerminal(session, update.raw);
-      case Rendering.plan:
-        final entries = update.kind == 'plan_update' ? planItems(update.raw['plan']) : update.raw['entries'];
-        session.plan = parsePlan(entries, chatLimits) ?? session.plan;
-      case Rendering.notice:
-        final title = shortLine(update.raw['title']);
-        if (title != null) {
-          // Any agent can send these, so each is shown as the agent's word, never as Canoa's.
-          final from = switch (update.raw['severity']) {
-            'warning' => 'Warning from the agent',
-            'error' => 'Error from the agent',
-            _ => 'From the agent',
-          };
-          final detail = shortLine(update.raw['description']);
-          _note(session, '$from: $title${detail == null ? '' : '\n$detail'}');
-        }
-      case Rendering.compaction:
-        _applyCompaction(session, update.raw);
-      case Rendering.commands:
-        session.commands = parseCommands(update.raw['availableCommands'], chatLimits) ?? session.commands;
-      case Rendering.usage:
-        session.usage = session.usage.applied(update.raw, chatLimits);
-      case Rendering.choices when update.kind == 'config_option_update':
-        final before = modeOptionIn(session.options)?.current;
-        _setOptions(session, update.raw['configOptions'], null);
-        _rememberSource(session);
-        _agentChangedMode(session, before);
-      case Rendering.choices:
-        if (update.raw['currentModeId'] case final String mode) {
-          final before = modeOptionIn(session.options)?.current;
-          for (final option in session.options) {
-            if (option.isMode) _setCurrent(session, option.id, mode);
-          }
-          _agentChangedMode(session, before);
-        }
-      case Rendering.title:
-        final title = shortLine(update.raw['title']);
-        if (title != null && session.agentNames) {
-          session
-            ..title = title
-            ..titleFromMessage = false;
-          if (session.peerId != null && session.remoteSessionId != null) {
-            ledger?.touch(session.peerId!, session.remoteSessionId!, title: title);
-          }
-        }
-      case Rendering.status:
-        if (update.state == 'running' || update.state == 'requires_action') {
-          session.status = SessionStatus.working;
-        } else if (update.state == 'idle') {
-          // A turn the person stopped is not news to them, and an idle state outside a turn ends nothing.
-          final ended = session.status == SessionStatus.working;
-          if (ended && update.reason != 'cancelled') _needs(session, AttentionKind.finished);
-          session.status = SessionStatus.connected;
-          if (ended) {
-            _turnEnded(session, switch (update.reason) {
-              'cancelled' => 'the turn was stopped',
-              'error' || 'refusal' => 'the turn failed',
-              _ => null,
-            });
-          }
-          if (update.reason == 'cancelled') {
-            _note(session, 'Stopped.');
-          } else if (update.reason == 'error') {
-            session.messages.add(ChatMessage(
-              role: MessageRole.notice,
-              text: 'Agent reported an operation failure.',
-              at: DateTime.now(),
-            ));
-          }
-          _keepText(session);
-        }
-      case Rendering.message || Rendering.thought:
-        final chunk = update.kind.endsWith('_chunk');
-        // A v2 message or thought without content patches its other fields and keeps its text; null content clears it.
-        final text = !chunk && !update.raw.containsKey('content') ? null : update.text ?? '';
-        final role = update.kind.startsWith('user')
-            ? MessageRole.user
-            : rendering == Rendering.thought ? MessageRole.thought : MessageRole.agent;
-        if (text != null) {
-          ChatMessage? existing;
-          if (update.messageId != null) {
-            for (final message in session.messages) {
-              if (message.messageId == update.messageId) {
-                existing = message;
-                break;
-              }
-            }
-          }
-          // A v1 chunk carries no message id: it continues the last message of its role.
-          if (existing == null && update.messageId == null && chunk &&
-              session.messages.isNotEmpty && session.messages.last.role == role &&
-              session.messages.last.messageId == null) {
-            existing = session.messages.last;
-          }
-          if (existing != null) {
-            existing.text = boundedHead(chunk ? existing.text + text : text, maxMessageText);
-          } else if (text.isNotEmpty) {
-            session.messages.add(ChatMessage(
-              role: role, text: boundedHead(text, maxMessageText),
-              at: DateTime.now(), messageId: update.messageId,
-            ));
-          }
-        }
-        // A replayed message carries its attachments as content blocks, which have no text of their own.
-        if (role == MessageRole.user) _nameAttachments(session, update.messageId, attachedNames(update.raw['content'], chatLimits));
-      case Rendering.unshown:
-        break;
-    }
-    _trim(session);
-    notifyListeners();
-  }
-
   /// A v2 prompt response confirms insertion, not agent turn completion.
   /// The prompt is never retried automatically after a disconnect. Written while a turn runs, the message is queued instead,
   /// with what goes with it, and sent when the turn ends.
@@ -2136,7 +1691,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// [sendText] for [session], which need not be the selected one. With [attached] false what the composer holds for the session
   /// does not go: a message written in another window of it has none of its own.
-  Future<void> sendTextTo(ChatSession session, String text, {bool attached = true}) async {
+  Future<void> sendTextTo(ChatSession session, String text, {bool attached = true, String? from}) async {
     // A file named by an @ goes only while the message still names it.
     if (attached) session.attachments.removeWhere((item) => item.mention && !text.contains('@${item.name}'));
     final held = attached ? List.of(session.attachments) : <Attachment>[];
@@ -2150,109 +1705,35 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       await _startThenDeliver(session, text);
       return;
     }
-    if (session.status == SessionStatus.working || session.queue.isNotEmpty) {
-      if (session.queue.length >= maxQueued) throw StateError('$maxQueued messages already wait for this turn to end');
-      session.queue.add(QueuedMessage(text, held));
-      if (attached) session.attachments.clear();
-      notifyListeners();
-      // A queue waiting on nothing, after a turn that ended as it should, goes on at once.
-      if (session.status != SessionStatus.working && session.queueHeld == null) await sendQueued(session);
-      return;
-    }
-    await _deliver(session, text, held);
-  }
-
-  /// A turn of [session] ended, stopped or failed when [held] says why. The next queued message goes, unless the turn did not
-  /// end as it should: then the queue waits for the person, who may send it, edit it or clear it.
-  void _turnEnded(ChatSession session, String? held) {
-    if (held == 'the turn failed' && session.id != _selectedId) session.failed = true;
-    if (session.reportsUsage) unawaited(refreshUsage(session));
-    unawaited(refreshGit(session));
-    if (session.queue.isEmpty) return;
-    session.queueHeld = held;
-    // After the update that ended the turn has been dispatched: an answer to the next prompt could otherwise arrive inside it.
-    if (held == null) {
-      scheduleMicrotask(() => unawaited(sendQueued(session).catchError((Object error) {
-        _note(session, 'A queued message was not sent: $error');
-        notifyListeners();
-      })));
-    }
+    await _send(session, text, held, from: from);
   }
 
   /// Sends the first queued message of [session] now, and lets the queue go on after it.
-  Future<void> sendQueued(ChatSession session) async {
-    if (session.queue.isEmpty || session.status == SessionStatus.working) return;
-    session.queueHeld = null;
-    final next = session.queue.removeAt(0);
-    notifyListeners();
-    try {
-      await _deliver(session, next.text, next.attachments);
-    } catch (error) {
-      // Not sent, so it stays first in the queue, which waits for the person.
-      if (!session.queue.contains(next)) session.queue.insert(0, next);
-      session.queueHeld = 'it could not be sent: ${reasonOf(error)}';
-      notifyListeners();
-      rethrow;
-    }
-  }
+  Future<void> sendQueued(ChatSession session) => session.chat.sendQueued();
 
   /// Changes the text of a queued message.
-  void editQueued(ChatSession session, QueuedMessage message, String text) {
-    if (!session.queue.contains(message) || (text.trim().isEmpty && message.attachments.isEmpty)) return;
-    message.text = text;
-    notifyListeners();
-  }
+  void editQueued(ChatSession session, model.QueuedMessage message, String text) => session.chat.editQueued(message, text);
 
   /// Takes one queued message out, or every one.
-  void removeQueued(ChatSession session, [QueuedMessage? message]) {
-    if (message == null) {
-      session.queue.clear();
-    } else {
-      session.queue.remove(message);
-    }
-    if (session.queue.isEmpty) session.queueHeld = null;
-    notifyListeners();
-  }
+  void removeQueued(ChatSession session, [model.QueuedMessage? message]) => session.chat.removeQueued(message);
 
+  /// Hands [text] and what goes with it to the conversation, which sends it, or queues it while a turn runs. Each attachment is
+  /// checked and read before anything is sent: one the agent cannot be given stops the message, which stays to be changed.
   /// [onSent] is told once the agent has the message, which for a v1 agent is before its turn ends.
-  Future<void> _deliver(ChatSession session, String text, List<Attachment> attached, {void Function()? onSent}) async {
-    final client = _verifiedClients[session.id];
+  Future<void> _send(ChatSession session, String text, List<Attachment> attached, {void Function()? onSent, String? from}) async {
+    final client = _clients[session.id];
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
     }
-    // Each is checked before anything is sent: one the agent cannot be given stops the message, which stays to be changed.
     final takes = takesOf(session)!;
     final attachments = <AcpAttachment>[
       for (final attachment in attached)
         await toAcp(attachment, takes, embedLimit: embedLimit, read: readFile, agent: _named(session.agent)),
     ];
-    await _applyPending(session);
-    _gitBeforeTurn(session);
-    if (session.peerId != null) ledger?.touch(session.peerId!, session.remoteSessionId!);
-    final sent = attachments.isEmpty ? null : 'Sent with this: ${attachments.map((item) => item.name).join(', ')}';
-    if (client.protocolVersion == 1) {
-      // A v1 answer arrives when the whole turn ends, so the message shows now.
-      if (text.trim().isNotEmpty) session.messages.add(ChatMessage(role: MessageRole.user, text: text, at: DateTime.now()));
-      if (sent != null) _note(session, sent);
-      session.attachments.removeWhere(attached.contains);
-      session.status = SessionStatus.working;
-      session.draftText = '';
-      final turn = client.prompt(session.remoteSessionId!, text, attachments: attachments);
-      onSent?.call();
-      notifyListeners();
-      await turn;
-      return;
-    }
-    final messageId = await client.prompt(session.remoteSessionId!, text, attachments: attachments);
+    _resolveBypass(session);
+    await session.chat.send(text, attachments: attachments, from: from);
     onSent?.call();
     session.attachments.removeWhere(attached.contains);
-    if (text.trim().isNotEmpty && !session.messages.any((message) => message.messageId == messageId)) {
-      session.messages.add(ChatMessage(
-        role: MessageRole.user,
-        text: text, at: DateTime.now(), messageId: messageId,
-      ));
-    }
-    _nameAttachments(session, messageId, [for (final item in attachments) item.name]);
     session.draftText = '';
     notifyListeners();
   }
@@ -2260,7 +1741,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Whether anything can go with this session's messages: a draft's, or one whose agent this app reaches.
   bool canAttach(ChatSession session) {
     if (session.isDraft) return true;
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     return client != null && !client.isClosed;
   }
 
@@ -2352,13 +1833,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Whether a person can ask this session's agent for its earlier conversations.
   bool canListEarlier(ChatSession session) {
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     return client != null && !client.isClosed && client.canReopenSessions;
   }
 
   /// The agent's other conversations, where this one is working when that is known. It lists them, and they are its own to name.
   Future<AcpSessionPage> earlierSessions(ChatSession from, {String? cursor}) async {
-    final client = _verifiedClients[from.id];
+    final client = _clients[from.id];
     if (client == null || client.isClosed) throw StateError('A verified ACP peer must be connected');
     final page = await client.listSessions(cwd: from.cwd, cursor: cursor);
     return AcpSessionPage(
@@ -2369,12 +1850,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Opens an earlier conversation beside this one, on the same agent. One already open is selected, not opened twice.
   Future<ChatSession> openEarlier(ChatSession from, AcpSessionInfo earlier) async {
-    final client = _verifiedClients[from.id];
+    final client = _clients[from.id];
     final cwd = earlier.cwd ?? from.cwd;
     if (client == null || client.isClosed) throw StateError('A verified ACP peer must be connected');
     if (cwd == null) throw StateError('The agent did not say where that conversation was');
     for (final session in _sessions) {
-      if (session.remoteSessionId == earlier.id && _verifiedClients[session.id] == client) {
+      if (session.remoteSessionId == earlier.id && _clients[session.id] == client) {
         select(session.id);
         return session;
       }
@@ -2392,11 +1873,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..setup = from.setup
       ..profile = from.profile;
     try {
-      final opened = await client.reopenSession(earlier.id, cwd: cwd, setup: from.setup);
-      applyOpened(session, opened);
-      if (from.profile case final profile?) _note(session, profile.summary);
-      if (!opened.replayed) _note(session, 'The agent resumed this without sending what was said before.');
-      session.status = SessionStatus.connected;
+      final opened = await session.chat.reopen(() => client.reopenSession(earlier.id, cwd: cwd, setup: from.setup));
+      _takeHostReport(session, opened);
+      if (from.profile case final profile?) session.chat.note(profile.summary);
       _record(session, client);
       notifyListeners();
       return session;
@@ -2427,20 +1906,19 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     );
     attachVerifiedClient(session.id, client, record: false);
     try {
-      final opened = await client.reopenSession(sessionId, cwd: cwd);
-      applyOpened(session, opened);
+      final opened = await session.chat.reopen(() => client.reopenSession(sessionId, cwd: cwd));
+      _takeHostReport(session, opened);
       // An agent that sent all of what was said before has shown it; one that sent less is shown the host's copy of it instead.
-      final shown = session.messages.where((m) => m.role == MessageRole.user || m.role == MessageRole.agent).length;
-      if (shown < carried.length) {
-        session.messages.removeWhere((m) => m.role == MessageRole.user || m.role == MessageRole.agent);
+      bool said(model.ChatMessage m) => m.role == MessageRole.user || m.role == MessageRole.agent;
+      if (session.messages.where(said).length < carried.length) {
+        session.chat.removeMessages(said);
         for (final each in carried) {
-          session.messages.add(ChatMessage(role: each.role, text: each.text, at: DateTime.now()));
+          session.chat.addMessage(each.role, each.text);
         }
       }
       for (final note in notes) {
-        _note(session, note);
+        session.chat.note(note);
       }
-      session.status = SessionStatus.connected;
       _record(session, client);
       notifyListeners();
       return session;
@@ -2478,8 +1956,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       // Only the name depends on it.
     }
     final endpoint = entry.endpoint == null ? null : Uri.tryParse(entry.endpoint!);
-    final session = _insert(ChatSession(
-      id: 'local-${++_nextId}',
+    final session = _insert(_newSession(
       title: title,
       agent: entry.entry,
       status: SessionStatus.disconnected,
@@ -2494,41 +1971,34 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     ))
       ..site = entry.site
       ..workspaceId = entry.canoaId
-      ..bypass = entry.bypass
       ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
       ..account = entry.account
       ..overlays = entry.overlays?.toSet()
       ..pinned = entry.pinned
-      ..archived = entry.archived
-      ..chosenMode = entry.mode
-      ..opening = true;
+      ..archived = entry.archived;
+    // The ledger's note changes as the mode goes back, so what it was left in is read first.
+    final keptMode = entry.mode, keptBypass = entry.bypass;
     attachVerifiedClient(session.id, client, record: false);
     try {
-      // A webpage's session is reopened in the folder its host made for it, which the host checks is that site's own.
-      final opened = await client.reopenSession(entry.sessionId, cwd: cwd, setup: entry.site == null ? AcpSessionSetup.none : siteSetup(entry.site!));
-      applyOpened(session, opened);
-      _stopLeftovers(session);
-      // The mode the session was left in goes back, once, before anything is sent: it wins over the profile's.
-      await applyHostProfile(session, expected: expected, keptMode: entry.mode);
-      await _applyPending(session);
-      session.opening = false;
-      // A change made while it was being opened, such as leaving Bypass, is kept now.
-      _keepMode(session);
-      if (!opened.replayed) {
-        _note(session, 'The agent resumed this without sending what was said before.');
-        if (entry.messages.isNotEmpty) {
-          _note(session, 'What Canoa kept of it follows, from its own list, not from the agent.');
-          for (final kept in entry.messages) {
-            session.messages.add(ChatMessage(role: _keptRole(kept.role), text: kept.text, at: kept.at));
-          }
+      // The mode the session was left in goes back, once, before anything is sent. A webpage's session is reopened in the folder its
+      // host made for it, which the host checks is that site's own.
+      final opened = await session.chat.reopen(
+        () => client.reopenSession(entry.sessionId, cwd: cwd, setup: entry.site == null ? AcpSessionSetup.none : siteSetup(entry.site!)),
+        keptMode: keptMode,
+        keptBypass: keptBypass,
+      );
+      _takeHostReport(session, opened);
+      await applyHostProfile(session, expected: expected, keptMode: keptMode);
+      if (!opened.replayed && entry.messages.isNotEmpty) {
+        session.chat.note('What Canoa kept of it follows, from its own list, not from the agent.');
+        for (final kept in entry.messages) {
+          session.chat.addMessage(_keptRole(kept.role), kept.text, at: kept.at);
         }
       }
-      session.status = SessionStatus.connected;
       _record(session, client);
       notifyListeners();
       return session;
     } catch (_) {
-      session.opening = false;
       forget(session);
       rethrow;
     }
@@ -2539,11 +2009,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Shows what Canoa kept of a session it cannot open again, as an offline preview that sends nothing.
   ChatSession showKept(LedgerEntry entry) {
     final session = createPreviewSession(title: entry.title ?? 'Earlier conversation', agent: entry.harness);
-    _note(session, 'What Canoa kept of this session. ${entry.whyNotReopened ?? ''} Nothing typed here reaches an agent.');
+    session.chat.note('What Canoa kept of this session. ${entry.whyNotReopened ?? ''} Nothing typed here reaches an agent.');
     for (final kept in entry.messages) {
-      session.messages.add(ChatMessage(role: _keptRole(kept.role), text: kept.text, at: kept.at));
+      session.chat.addMessage(_keptRole(kept.role), kept.text, at: kept.at);
     }
-    notifyListeners();
     return session;
   }
 
@@ -2551,11 +2020,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// preview: nothing typed here reaches an agent, and the harness's own files are not touched.
   ChatSession showImported({required String title, required String agent, required List<({MessageRole role, String text})> said}) {
     final session = createPreviewSession(title: title, agent: agent);
-    _note(session, 'Brought in from $agent\'s own folder. Nothing typed here reaches an agent.');
+    session.chat.note('Brought in from $agent\'s own folder. Nothing typed here reaches an agent.');
     for (final each in said) {
-      session.messages.add(ChatMessage(role: each.role, text: each.text, at: DateTime.now()));
+      session.chat.addMessage(each.role, each.text);
     }
-    notifyListeners();
     return session;
   }
 
@@ -2567,11 +2035,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       session.draftId = null;
       unawaited(drafts?.remove(id));
     }
-    unawaited(_subscriptions.remove(session.id)?.cancel());
-    unawaited(_usageSubscriptions.remove(session.id)?.cancel());
-    unawaited(_turnSubscriptions.remove(session.id)?.cancel());
+    unawaited(_eventSubscriptions.remove(session.id)?.cancel());
     unawaited(_taskSubscriptions.remove(session.id)?.cancel());
-    _verifiedClients.remove(session.id);
+    _clients.remove(session.id);
+    session.chat.detach();
+    _cancelSecrets(session);
+    session.chat.onChange = null;
     _sessions.remove(session);
     if (_selectedId == session.id) _selectedId = _sessions.isEmpty ? null : _sessions.first.id;
     notifyListeners();
@@ -2580,10 +2049,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Ends a conversation here: a question still open is answered cancelled, and its agent ends once no other conversation here
   /// uses it. What the agent saved stays with the agent, for Earlier conversations to open again.
   Future<void> close(ChatSession session) async {
-    final client = _verifiedClients[session.id];
-    _endWaiting(session, const AcpCancel());
+    final client = _clients[session.id];
+    session.chat.close();
     forget(session);
-    if (client != null && !_verifiedClients.values.contains(client)) await client.close();
+    if (client != null && !_clients.values.contains(client)) await client.close();
   }
 
   Future<void> cancelActiveSession() async {
@@ -2594,21 +2063,19 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Ends the turn of [session], which need not be the selected one.
   Future<void> cancelSession(ChatSession session) async {
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     if (session.remoteSessionId == null || client == null) {
       throw StateError('No active verified ACP session');
     }
     // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is.
-    _endWaiting(session, const AcpCancel());
-    notifyListeners();
-    await client.cancel(session.remoteSessionId!);
+    await session.chat.cancel();
     await stopTasks(session);
   }
 
   /// Ends every task of [session] that has not ended, and nothing else: the conversation's own turn goes on. The host's answer is
   /// that they ended.
   Future<void> stopTasks(ChatSession session) async {
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     final remote = session.remoteSessionId;
     if (client == null || remote == null || session.tasks.live.isEmpty) return;
     if (await client.stopTasks(remote)) _tasksStopped(session);
@@ -2621,7 +2088,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (task == null) return;
     session.openChild = taskId;
     notifyListeners();
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     final remote = session.remoteSessionId;
     if (task.updates.isEmpty && client != null && remote != null) {
       unawaited(client.taskHistory(remote, taskId).then((kept) {
@@ -2639,7 +2106,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Ends one of [session]'s tasks, which need not be running its turn.
   Future<void> stopTask(ChatSession session, String taskId) async {
-    final client = _verifiedClients[session.id];
+    final client = _clients[session.id];
     final remote = session.remoteSessionId;
     final task = session.tasks[taskId];
     if (client == null || remote == null || task == null || task.phase.ended) return;
@@ -2656,8 +2123,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }
     for (final question in [...session.pendingPermissions]) {
       if (question.task != null && (only == null || question.task!.id == only)) {
-        session.pendingPermissions.remove(question);
-        question._answer.complete(const AcpCancel());
+        session.chat.settle(question, const AcpCancel());
       }
     }
     notifyListeners();
@@ -2679,12 +2145,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       final title = decoded['title'] is String ? decoded['title'] as String : '';
       final selection = decoded['selection'] is String ? decoded['selection'] as String : '';
       final suffix = selection.isEmpty ? '' : '\\nSelected text: ${selection.length > 8000 ? selection.substring(0, 8000) : selection}';
-      session.messages.add(ChatMessage(
-        role: MessageRole.notice,
-        text: 'Attached page context (not sent): ${title.isEmpty ? uri.host : title}\\n$uri$suffix',
-        at: DateTime.now(),
-      ));
-      notifyListeners();
+      session.chat.note('Attached page context (not sent): ${title.isEmpty ? uri.host : title}\\n$uri$suffix');
     } on FormatException {
       // Ignore malformed extension messages.
     }
@@ -2725,11 +2186,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void rename(ChatSession session, String title) {
     final named = title.trim();
     if (named.isEmpty) return;
-    session.title = named;
-    session.agentNames = false;
+    session.chat.rename(named);
     session.titleFromMessage = false;
     final peer = session.peerId, remote = session.remoteSessionId;
-    if (peer != null && remote != null) ledger?.touch(peer, remote, title: named);
+    if (peer != null && remote != null) ledger?.touch(peer, remote, title: session.title);
     notifyListeners();
   }
 
@@ -2755,36 +2215,24 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (session.status != SessionStatus.preview) {
       throw StateError('A verified ACP transport is required to send');
     }
-    session.messages.add(ChatMessage(
-      role: MessageRole.user,
-      text: trimmed,
-      at: DateTime.now(),
-    ));
-    session.messages.add(ChatMessage(
-      role: MessageRole.notice,
-      text: 'Preview only — this message was not sent to an agent.',
-      at: DateTime.now(),
-    ));
-    notifyListeners();
+    session.chat.addMessage(MessageRole.user, trimmed);
+    session.chat.note('Preview only — this message was not sent to an agent.');
   }
+
   @override
   void dispose() {
     _disposed = true;
-    for (final subscription in _subscriptions.values) {
+    for (final subscription in [..._eventSubscriptions.values, ..._taskSubscriptions.values]) {
       unawaited(subscription.cancel());
     }
-    _subscriptions.clear();
-    for (final subscription in _usageSubscriptions.values) {
-      unawaited(subscription.cancel());
-    }
-    _usageSubscriptions.clear();
-    for (final subscription in _taskSubscriptions.values) {
-      unawaited(subscription.cancel());
-    }
+    _eventSubscriptions.clear();
     _taskSubscriptions.clear();
-    _verifiedClients.clear();
+    _clients.clear();
+    for (final session in _sessions) {
+      session.chat.onChange = null;
+      session.chat.dispose();
+    }
     unawaited(_attention.close());
     super.dispose();
   }
-
 }

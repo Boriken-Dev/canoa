@@ -574,8 +574,8 @@ class _CanoaAppState extends State<CanoaApp> {
         cwd: made?.folder ?? cwd,
         site: site,
         workspaceId: made?.id,
+        agentNames: title.isEmpty,
       );
-      local.agentNames = title.isEmpty;
       store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
@@ -1374,8 +1374,8 @@ class _CanoaAppState extends State<CanoaApp> {
         method: target.method.id,
         cwd: cwd,
         worktree: made,
+        agentNames: target.title.isEmpty,
       );
-      local.agentNames = target.title.isEmpty;
       store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
