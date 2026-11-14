@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-pi at 1b64a1c6e487374c40dcef8018cfc72ca4c1003e, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-pi at 9e1d4bb7f0ea7ae1880ec0c757144b2e685d3541, with what it inherits written out.
 bin = [{ name = "coqui-acp-pi", path = "src/main.rs" }]
 example = [{ name = "pi_provider", crate-type = ["cdylib"] }]
 [package]

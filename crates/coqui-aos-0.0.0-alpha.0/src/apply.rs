@@ -27,17 +27,28 @@ use crate::validate::validate;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct NonDefaultSetting {
-    /// `unpinned`, `setup-network`, `env-script`, `secret-read`, and the others AOS lists.
+    /// `unpinned`, `setup-network`, `env-script`, `secret-read`, and the others AOS lists, or a
+    /// host's own word.
     pub id: NonDefaultId,
     /// The variable, path, file or reference it is about; empty for `unpinned`.
     pub subject: String,
 }
 
 impl NonDefaultSetting {
-    fn new(id: NonDefaultId, subject: &str) -> Self {
+    /// A setting a host defines, by its own `id` (`read-only-not-enforced`, `skill-collision`):
+    /// shown as given wherever the id is, and the AOS id when `id` is a word AOS defines.
+    #[must_use]
+    pub fn host(id: &'static str, subject: impl Into<String>) -> Self {
+        Self::new(NonDefaultId::host(id), subject)
+    }
+
+    /// A non-default setting `id` about `subject`, empty for `unpinned`: the constructor a host
+    /// uses to report one of its own beside the ones [`effective`] finds.
+    #[must_use]
+    pub fn new(id: NonDefaultId, subject: impl Into<String>) -> Self {
         Self {
             id,
-            subject: subject.to_owned(),
+            subject: subject.into(),
         }
     }
 }
@@ -461,7 +472,7 @@ fn apply_mapping(
             } else {
                 non_defaults.push(NonDefaultSetting::new(
                     NonDefaultId::SecretRead,
-                    &reference_name(&entry),
+                    reference_name(&entry),
                 ));
             }
             value
@@ -1070,12 +1081,12 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
                 } else if reference.get("provider").and_then(Data::as_str) == Some("env") {
                     non_defaults.push(NonDefaultSetting::new(
                         NonDefaultId::EnvPassthrough,
-                        &text_of(value, "key"),
+                        text_of(value, "key"),
                     ));
                 } else {
                     non_defaults.push(NonDefaultSetting::new(
                         NonDefaultId::SecretRead,
-                        &reference_name(reference),
+                        reference_name(reference),
                     ));
                 }
             }
@@ -1115,7 +1126,7 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
             if host != "localhost" && host != "[::1]" && !host.starts_with("127.") {
                 non_defaults.push(NonDefaultSetting::new(
                     NonDefaultId::InsecureTransport,
-                    &text_of(server, "name"),
+                    text_of(server, "name"),
                 ));
             }
         }
@@ -1173,7 +1184,7 @@ pub enum Change {
     Remove,
 }
 
-/// A setup phase.
+/// A setup phase. With the `serde` feature it is written as its [`name`](Phase::name).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Phase {
@@ -1194,10 +1205,22 @@ impl Phase {
             Self::Remove => "remove",
         }
     }
+
+    /// The phase a name stands for: exactly `install`, `sync` or `remove`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "install" => Some(Self::Install),
+            "sync" => Some(Self::Sync),
+            "remove" => Some(Self::Remove),
+            _ => None,
+        }
+    }
 }
 
 /// The last preparation that succeeded for an overlay identity on one OS (per Theater, for a
-/// Station): its digest and phase.
+/// Station): its digest and phase. With the `serde` feature it is the object
+/// `{"digest": ..., "phase": ...}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SetupRecord {
@@ -1215,6 +1238,50 @@ impl SetupRecord {
             digest: digest.into(),
             phase,
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Phase {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Phase {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = <alloc::string::String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::named(&name)
+            .ok_or_else(|| serde::de::Error::unknown_variant(&name, &["install", "sync", "remove"]))
+    }
+}
+
+/// The object a record is written as and read from.
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename = "SetupRecord")]
+struct RecordObject<D> {
+    digest: D,
+    phase: Phase,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SetupRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RecordObject {
+            digest: self.digest.as_str(),
+            phase: self.phase,
+        }
+        .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SetupRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let object = RecordObject::<String>::deserialize(deserializer)?;
+        Ok(Self::new(object.digest, object.phase))
     }
 }
 

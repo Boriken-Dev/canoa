@@ -287,6 +287,20 @@ pub fn hooks_of(
     (entries, if needs_default { present } else { Vec::new() })
 }
 
+/// Whether the overlay declares a hook on any OS with any interpreter: [`hooks_of`] finds an entry
+/// or a `hook.<ext>` that cannot run, for some OS, were every interpreter AOS names present.
+/// Entries an overlay switches off (`false`, or `defaults.hooks = false`) are not declared.
+///
+/// For a consumer that runs no hooks and refuses an overlay that asks for any, whatever it runs on.
+#[must_use]
+pub fn hooks_declared(manifest: &Document, tree: &OverlayTree) -> bool {
+    let interpreters: Vec<String> = INTERPRETERS.iter().map(|name| (*name).to_owned()).collect();
+    ["windows", "linux"].into_iter().any(|os| {
+        let (hooks, not_run) = hooks_of(manifest, tree, os, &interpreters);
+        !hooks.is_empty() || !not_run.is_empty()
+    })
+}
+
 /// Whose hooks they are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
