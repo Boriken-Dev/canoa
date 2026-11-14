@@ -564,7 +564,7 @@ max_uploads = 256                                   # files one key may keep upl
 | `upload` | `upload/put`, `upload/remove` |
 | `host.restart` | `host/restart` |
 | `overlay.read` | `overlay/installed`, `overlay/read`, `catalog/read` |
-| `overlay.write` | `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove` |
+| `overlay.write` | `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove`; it can replace an installed overlay that `[overlays]` selects, which changes the context and environment of the next `own_profile` session (hooks and MCP servers stay pinned by digest), so it is as much as access to the agent |
 | *(none)* | `store/apply`, `store/rollback`, `store/remove`: **owner only**; `[host.control]` refuses `store.write` as a grant |
 | *(none)* | `history/export`, `history/move`, `history/importable`, `history/import`, `history/imported`: **owner only**; no grant names them |
 
@@ -595,7 +595,7 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   stands, or an `id` that is not this key's, is `-32002`. Until it is done the file is in the folder `.partial`, so a file called `x.part` is only a name. One upload step runs at a time, so the limits are checked and spent together. `max_upload_bytes` (one file;
   past it the upload ends and what was kept goes), `max_upload_total_bytes` and `max_uploads` hold per key (the owner has its own
   folder), past one it is `-32002`; a bad base64 string is `-32602`. An unfinished upload nobody continues for an hour is removed
-  when the key next starts one. `upload/remove` `{"path"}` or `{"id"}` -> `{"removed"}` removes a file in the caller's own folder,
+  when the key next starts one. `upload/remove` `{"id"}` (the `name` upload/put answered; never a path) -> `{"removed"}` removes a file in the caller's own folder,
   and what is left of an unfinished one, and nothing else.
 - `host/restart` `{}` -> `{"restarting": true}` is offered only when `serve` was started with `--supervised` (`ServeOptions::with_supervised`), which says a supervisor starts it again; otherwise it is `-32002`, "restart is not available". It ends the host 300 ms later with status `cli::STATUS_RESTART` (75) and stops the web
   server, for a supervisor to start it again: canoa.cfg is read at start. Without a supervisor it is an end.

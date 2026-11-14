@@ -152,7 +152,7 @@ impl Files {
 
     /// Whether `caller` may name the place on this computer `repo` stands for as a source: it needs the `folders` grant, and the
     /// place must be under a working root of an entry it may use (not the whole home), not a folder this host keeps for itself,
-    /// and a repository whose `.git` is a folder, not a file that points elsewhere.
+    /// and a repository's own top level: a `.git` folder (not a file that points elsewhere), or a bare repository.
     pub(crate) fn may_read_source(&self, caller: &Caller, repo: &str) -> bool {
         if !caller.may(super::Grant::Folders) {
             return false;
@@ -174,7 +174,9 @@ impl Files {
         if kept.into_iter().any(|dir| resolved.starts_with(dir)) {
             return false;
         }
-        !fs::symlink_metadata(resolved.join(".git")).is_ok_and(|meta| !meta.is_dir())
+        // The place must be a repository's own top level, or git could fall back to a sibling `<path>.git`.
+        fs::symlink_metadata(resolved.join(".git")).is_ok_and(|meta| meta.is_dir())
+            || (resolved.join("HEAD").is_file() && resolved.join("objects").is_dir())
     }
 
     /// `fs/list`: the folders in `path`, or the places to start from when it names none.
@@ -442,7 +444,7 @@ impl Files {
         }))
     }
 
-    /// `upload/remove`: deletes a file this caller uploaded, by its `path` or its `id`, and what is left of one not finished.
+    /// `upload/remove`: deletes a file this caller uploaded, by its `id` (the `name` it answered), and what is left of one not finished.
     pub(crate) fn upload_remove(&self, caller: &Caller, params: &Value) -> Outcome {
         let dir = self.owner_dir(caller)?;
         let _one = self
@@ -452,24 +454,11 @@ impl Files {
         let Ok(base) = fs::canonicalize(&dir).map(plain) else {
             return Ok(json!({"removed": false}));
         };
-        let name: String = if let Some(id) = text_param(params, "id")? {
-            id.to_owned()
-        } else {
-            let asked = text_param(params, "path")?.ok_or_else(|| bad("path or id is needed"))?;
-            let path = Path::new(asked);
-            // Only a plain name directly in the caller's own folder.
-            let named = path.file_name().and_then(|name| name.to_str()).filter(|_| {
-                path.parent()
-                    .and_then(|parent| fs::canonicalize(parent).ok())
-                    .map(plain)
-                    .as_deref()
-                    == Some(base.as_path())
-            });
-            let Some(named) = named else {
-                return Ok(json!({"removed": false}));
-            };
-            named.to_owned()
-        };
+        // Only the name an upload was given, never a path: nothing here is opened by a caller's text.
+        let name = text_param(params, "id")?
+            .or(text_param(params, "name")?)
+            .ok_or_else(|| bad("id is needed"))?
+            .to_owned();
         if !stored_name(&name) {
             return Ok(json!({"removed": false}));
         }
@@ -600,13 +589,20 @@ fn listable(name: &str) -> bool {
         })
 }
 
+/// Whether `text` opens with `\` or `//`: a network share, a verbatim path or a device path, which a filesystem call would open.
+pub(crate) fn network_path(text: &str) -> bool {
+    let text = text.replace('/', "\\");
+    text.starts_with("\\\\") || text.starts_with("\\??\\")
+}
+
 /// `asked` resolved, when it is plain and under one of `roots`.
 fn confined(asked: &str, roots: &[PathBuf]) -> Result<PathBuf, (i32, String)> {
     let path = Path::new(asked);
     // A network share, a verbatim or a device path is refused by its text, before anything opens it.
-    if asked.replace('/', "\\").starts_with("\\\\")
-        || !roots.iter().any(|root| text_under(asked, root))
-    {
+    if network_path(asked) {
+        return Err(bad("that is a network, verbatim or device path"));
+    }
+    if !roots.iter().any(|root| text_under(asked, root)) {
         return Err(not_found());
     }
     if !path.is_absolute()

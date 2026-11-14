@@ -247,7 +247,7 @@ class HostSupervisor extends ChangeNotifier {
     notifyListeners();
     final HostChild child;
     try {
-      child = await tool!.start(['serve', ...hostConfigArgs(_configPath!), '--allow-empty', '--local-sources', '--until-stdin-closes']);
+      child = await tool!.start(['serve', ...hostConfigArgs(_configPath!), '--allow-empty', '--local-sources', '--until-stdin-closes', '--supervised']);
     } on Object catch (error) {
       _problem = 'canoa could not start: $error';
       return _ended(generation, null);

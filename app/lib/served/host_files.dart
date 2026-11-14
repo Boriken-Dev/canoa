@@ -98,7 +98,8 @@ final class HostFiles {
   }
 
   /// Deletes a file [upload] kept; false when there was none.
-  Future<bool> removeUpload(String path) async => (await _call('upload/remove', {'path': path}))['removed'] == true;
+  Future<bool> removeUpload(String path) async =>
+      (await _call('upload/remove', {'id': path.split(RegExp(r'[\\/]')).last}))['removed'] == true;
 
   /// The table [section] of the person's canoa.cfg on the host, or null when it has none.
   Future<Map<String, Object?>?> configGet(String section) async {

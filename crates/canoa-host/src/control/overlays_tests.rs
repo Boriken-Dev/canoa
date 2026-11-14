@@ -532,8 +532,24 @@ fn a_key_names_a_source_on_this_computer_only_under_a_working_root_and_with_the_
             "unc",
             &json!({"repo": repo, "ref": "main", "path": ""}),
         );
-        assert!(denied["error"].is_object(), "{repo}: {denied}");
+        assert_eq!(denied["error"]["code"], BAD_PARAMS, "{repo}: {denied}");
+        // The file:// forms reach the host's own text check; the bare ones are refused earlier, as no git source.
+        assert!(
+            repo.starts_with("file:") || denied["error"].is_object(),
+            "{denied}"
+        );
+        assert!(
+            !repo.starts_with("file:")
+                || denied["error"]["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("network")),
+            "{repo}: {denied}"
+        );
     }
+    // A folder that is no repository is no source, though a sibling `<folder>.git` would be found by git beside it.
+    git(&home, &["init", "--quiet", "--bare", "work.git"]);
+    let denied = check(&s, &who, "sibling", &source(&work, ""));
+    assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
     // A working tree whose `.git` is a file points elsewhere, so it is no source.
     let linked = repo(&work, "linked", &[("OVERLAY.md", "x\n")]);
     fs::remove_dir_all(linked.join(".git")).expect("no git dir");
@@ -650,4 +666,42 @@ fn a_host_with_no_canoa_cfg_keeps_no_overlays() {
         let answer = ask(&control, &Caller::Owner, method, json!({"name": "o"}));
         assert_eq!(answer["error"]["code"], REFUSED, "{method}: {answer}");
     }
+}
+
+#[test]
+fn a_repository_around_the_overlays_folder_supplies_no_configuration() {
+    let s = setup(None, OverlayLimits::default());
+    let upstream = repo(&s.tmp, "up", &[("OVERLAY.md", "x\n")]);
+    // An enclosing repository whose configuration would send every file:// fetch nowhere.
+    let outer = dir("outer");
+    git(&outer, &["init", "--quiet"]);
+    git(
+        &outer,
+        &[
+            "config",
+            "url.file:///nonexistent-canoa/.insteadOf",
+            "file://",
+        ],
+    );
+    let inside = Overlays::new(
+        Some(outer.join("cfg").join("overlays")),
+        OverlayLimits::default(),
+    );
+    let control = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_overlays(inside);
+    let answer = ask(
+        &control,
+        &Caller::Owner,
+        "overlay/check",
+        plus(json!({"name": "o"}), source(&upstream, "")),
+    );
+    assert!(answer["result"]["token"].is_string(), "{answer}");
+    let _ = fs::remove_dir_all(outer);
+    let _ = fs::remove_dir_all(s.tmp);
 }

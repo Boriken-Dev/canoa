@@ -22,7 +22,7 @@ void main() {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
     await supervisor.apply(configPath: '/c/canoa.cfg');
-    expect(tool.started.single, contains('--allow-empty'));
+    expect(tool.started.single, containsAll(['--allow-empty', '--supervised']), reason: 'the app restarts its host, so a page may ask for it');
     expect(supervisor.phase, HostPhase.starting);
     tool.children.single.out.add('{"ready":true,"peer":"sha256:aa","method":"noise"}');
     expect(supervisor.phase, HostPhase.idle);
@@ -121,7 +121,7 @@ void main() {
     final tool = FakeTool();
     final supervisor = HostSupervisor(tool);
     await supervisor.apply(configPath: '/c/canoa.cfg');
-    expect(tool.started.single, ['serve', '--config', '/c/canoa.cfg', '--allow-empty', '--local-sources', '--until-stdin-closes']);
+    expect(tool.started.single, ['serve', '--config', '/c/canoa.cfg', '--allow-empty', '--local-sources', '--until-stdin-closes', '--supervised']);
     expect(supervisor.phase, HostPhase.starting);
     tool.children.single.out.add(_line);
     expect(supervisor.phase, HostPhase.running);

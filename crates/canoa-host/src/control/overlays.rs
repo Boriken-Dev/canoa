@@ -132,25 +132,9 @@ impl Overlays {
         std::sync::Arc::clone(gates.entry(name.to_owned()).or_default())
     }
 
-    /// Drops the plans that have expired, and the history fetched for an overlay that none holds and nothing installed.
+    /// Drops the plans that have expired. What was fetched for them stays for `overlay/discard`, `overlay/remove` and the caps.
     fn expire(&self, plans: &mut Vec<Plan>) {
-        let (kept, gone): (Vec<Plan>, Vec<Plan>) = std::mem::take(plans)
-            .into_iter()
-            .partition(|plan| plan.at.elapsed() < PLAN_TIME);
-        *plans = kept;
-        for plan in gone {
-            let held = plans.iter().any(|other| other.name == plan.name);
-            let installed = self
-                .root
-                .as_deref()
-                .is_some_and(|root| record_of(root, &plan.name).is_some());
-            if !held
-                && !installed
-                && let Ok(cache) = self.cache(&plan.name)
-            {
-                let _ = fs::remove_dir_all(cache);
-            }
-        }
+        plans.retain(|plan| plan.at.elapsed() < PLAN_TIME);
     }
 
     fn plans(&self) -> std::sync::MutexGuard<'_, Vec<Plan>> {
@@ -202,6 +186,12 @@ impl Overlays {
         let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
         let pin = pin_of(params)?;
         let (repo, reference, path, source) = git_source(params)?;
+        if is_local(&repo) && super::files::network_path(&local_path(&repo).to_string_lossy()) {
+            return Err(bad("a network path is no source"));
+        }
+        if is_local(&repo) && super::files::network_path(&local_path(&repo).to_string_lossy()) {
+            return Err(bad("a network path is no source"));
+        }
         if is_local(&repo) && !local(&repo) {
             return Err(refused(
                 "a source on this computer must be in a folder this key may browse",
@@ -663,6 +653,28 @@ impl Overlays {
     /// Fetches only what `reference` names, one commit deep, and returns its commit. A whole commit id is that object and
     /// nothing else: a branch or tag carrying the same name never stands in for it.
     fn fetch(&self, cache: &Path, repo: &str, reference: &str) -> Result<String, (i32, String)> {
+        let commit = self.fetch_into(cache, repo, reference)?;
+        // What the fetch wrote counts against the folder's cap at once: past it the history goes and nothing more is fetched.
+        if folder_size(self.root()?) > MAX_FOLDER_BYTES {
+            let _ = fs::remove_dir_all(cache);
+            return Err(refused(
+                "the fetch took the overlays folder past what this host keeps: remove some",
+            ));
+        }
+        Ok(commit)
+    }
+
+    fn fetch_into(
+        &self,
+        cache: &Path,
+        repo: &str,
+        reference: &str,
+    ) -> Result<String, (i32, String)> {
+        if folder_size(self.root()?) > MAX_FOLDER_BYTES {
+            return Err(refused(
+                "the overlays folder holds as much as this host keeps: remove some",
+            ));
+        }
         let dir = format!("--git-dir={}", cache.display());
         let fetch = |wants: &[&str]| -> Result<Vec<u8>, (i32, String)> {
             let mut args: Vec<OsString> = vec![
@@ -710,6 +722,7 @@ impl Overlays {
         let tags = format!("refs/tags/{reference}");
         let listed = self.run(
             &[
+                format!("--git-dir={}", cache.display()).into(),
                 "ls-remote".into(),
                 "--heads".into(),
                 "--tags".into(),
@@ -991,7 +1004,8 @@ impl Overlays {
         ceiling: usize,
     ) -> Result<Vec<u8>, (i32, String)> {
         let git = self.git()?;
-        // Run from the overlays folder, under a ceiling, so a repository around the host's own directory supplies no configuration.
+        // Run from the overlays folder with the ceiling at its parent, so git looks no higher for a repository whose configuration
+        // it would read; what names a cache takes `--git-dir`.
         let root = self.root()?;
         fs::create_dir_all(root)
             .map_err(|error| refused(format!("the overlays folder could not be made: {error}")))?;
@@ -1025,7 +1039,7 @@ impl Overlays {
             ])
             .args(args)
             .current_dir(root)
-            .env("GIT_CEILING_DIRECTORIES", root)
+            .env("GIT_CEILING_DIRECTORIES", root.parent().unwrap_or(root))
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")
             .env("SSH_ASKPASS_REQUIRE", "never")

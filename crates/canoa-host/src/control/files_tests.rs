@@ -66,7 +66,7 @@ fn every_method_needs_its_own_grant() {
         ("config/get", json!({"section": "sessions"})),
         ("config/set", json!({"section": "sessions", "value": {}})),
         ("upload/put", json!({"name": "a", "data": ""})),
-        ("upload/remove", json!({"path": "x"})),
+        ("upload/remove", json!({"id": "x"})),
         ("host/restart", json!({})),
     ] {
         let answer = ask(&control, &nothing, method, params);
@@ -484,7 +484,7 @@ fn an_upload_is_kept_under_a_safe_name_in_a_folder_of_its_keys_own() {
         &control,
         &b,
         "upload/remove",
-        json!({"path": path_text(&path)}),
+        json!({"id": path.file_name().and_then(|n| n.to_str()).expect("a name")}),
     );
     assert_eq!(theirs["result"], json!({"removed": false}), "{theirs}");
     assert!(path.exists());
@@ -492,7 +492,7 @@ fn an_upload_is_kept_under_a_safe_name_in_a_folder_of_its_keys_own() {
         &control,
         &a,
         "upload/remove",
-        json!({"path": path_text(&path)}),
+        json!({"id": path.file_name().and_then(|n| n.to_str()).expect("a name")}),
     );
     assert_eq!(mine["result"], json!({"removed": true}), "{mine}");
     assert!(!path.exists());
@@ -502,8 +502,11 @@ fn an_upload_is_kept_under_a_safe_name_in_a_folder_of_its_keys_own() {
     for target in [
         path_text(&outside),
         path_text(&tmp.join("uploads").join("..").join("keep.txt")),
+        "\\\\attacker\\share\\0123456789ab-x".to_owned(),
+        "\\??\\UNC\\attacker\\share\\0123456789ab-x".to_owned(),
+        "//attacker/share/0123456789ab-x".to_owned(),
     ] {
-        let answer = ask(&control, &a, "upload/remove", json!({"path": target}));
+        let answer = ask(&control, &a, "upload/remove", json!({"id": target}));
         assert_eq!(answer["result"], json!({"removed": false}), "{answer}");
     }
     assert!(outside.exists());
@@ -724,7 +727,7 @@ fn a_large_file_is_sent_in_chunks_in_order_and_is_whole_only_when_done() {
         &control,
         &a,
         "upload/remove",
-        json!({"path": path_text(&path)}),
+        json!({"id": path.file_name().and_then(|n| n.to_str()).expect("a name")}),
     );
     assert_eq!(removed["result"], json!({"removed": true}), "{removed}");
     let _ = fs::remove_dir_all(tmp);
@@ -854,14 +857,24 @@ fn a_network_or_device_path_is_refused_by_its_text() {
         UploadLimits::default(),
     ));
     let who = key("sha256:aa", &[Grant::Folders]);
+    // Refused by their text, with their own answer, not as a path that is merely absent.
     for path in [
-        "\\\\attacker\\share",
-        "//attacker/share",
-        "\\\\?\\C:\\",
-        "\\\\.\\pipe\\x",
-        "/etc",
-        "C:\\Windows",
+        r"\\attacker\share",
+        r"//attacker/share",
+        r"\\?\C:\\",
+        r"\\.\pipe\x",
+        r"\??\UNC\attacker\share",
     ] {
+        let answer = ask(&control, &who, "fs/list", json!({"path": path}));
+        assert_eq!(answer["error"]["code"], BAD_PARAMS, "{path}: {answer}");
+        assert!(
+            answer["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("network")),
+            "{answer}"
+        );
+    }
+    for path in ["/etc", r"C:\Windows"] {
         let answer = ask(&control, &who, "fs/list", json!({"path": path}));
         assert_eq!(answer["error"]["code"], NOT_FOUND, "{path}: {answer}");
     }
