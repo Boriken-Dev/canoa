@@ -1,0 +1,78 @@
+# coqui-transport-guatiao/. at f09bf2dca4bba2555d4d97ee93f7b05a9a109702, with what it inherits written out.
+example = [{ name = "pipe_library", crate-type = ["cdylib"], required-features = ["pipe"] }]
+test = [{ name = "macro", required-features = ["contract"] }, { name = "pipe", required-features = ["pipe", "contract"] }, { name = "library", required-features = ["pipe", "contract"] }, { name = "websocket", required-features = ["websocket", "contract"] }]
+[package]
+name = "coqui-transport-guatiao"
+version = "0.0.0-alpha.0"
+description = "The transport guatiao kind: dial, listen and channels a transport written in any language guatiao hosts provides, and the macro that makes a coqui-transport transport such a provider"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-transport-guatiao"
+homepage = "https://boriken-dev.github.io/coqui-transport-guatiao/"
+keywords = ["transport", "guatiao", "plugin", "channel", "provider"]
+categories = ["network-programming"]
+exclude = [".*", "*.local.*", "__pycache__", "/examples/provider-python/"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+contract = []
+pipe = ["dep:coqui-transport-pipe", "guatiao/load"]
+websocket = ["dep:coqui-transport-web", "coqui-transport-web/websocket", "dep:url", "guatiao/load"]
+[dependencies]
+[dependencies.guatiao]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+features = ["provider"]
+[dependencies.guatiao-channel]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+[dependencies.guatiao-builder]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
+[dependencies.coqui-transport]
+git = "https://github.com/Boriken-Dev/coqui-transport"
+rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+default-features = false
+[dependencies.coqui-transport-pipe]
+git = "https://github.com/Boriken-Dev/coqui-transport-pipe"
+rev = "1bf161f4d9349e9821d384859d3acdfb58aeae94"
+features = ["channel"]
+optional = true
+[dependencies.coqui-transport-web]
+git = "https://github.com/Boriken-Dev/coqui-transport-web"
+rev = "c8df84264ff8e60907f5cedf269104e91d5add22"
+optional = true
+[dependencies.url]
+version = "2.5"
+optional = true
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+[dev-dependencies.guatiao]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+features = ["provider", "load"]
+[dev-dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+features = ["json"]
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unsafe_code = "forbid"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

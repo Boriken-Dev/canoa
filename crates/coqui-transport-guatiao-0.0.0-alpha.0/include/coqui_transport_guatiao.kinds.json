@@ -1,0 +1,230 @@
+{
+  "kinds": [
+    {
+      "doc": "A transport: it dials an endpoint, or listens on one, and every connection is a\n[`Channel`] of whole, ordered messages.\n\nAn instance is built from the provider's settings (a schema the host checks first), and every method\nanswers for the transport as configured. A transport is not an authentication: a channel reaches whoever is\nat the endpoint, and the host runs the peer's proof over it before trusting what arrives.\n\nA message is one channel message in each direction, as the peer's side of the same transport sent it:\nthe kind adds no framing of its own, and a transport that carries a byte stream frames it as its own\ndocumentation says. Every method is synchronous; a host calls them from a thread of its own. Every\nobject a method is handed is the provider's from then on: it destroys it, even when it refuses.\n\nEvery method is required: a transport that cannot dial or cannot listen refuses with\n`GUATIAO_ERR_UNSUPPORTED` and says so in [`describe`](Self::describe).",
+      "floor_hash": 2030380456,
+      "name": "transport",
+      "object": false,
+      "slots": [
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "What the transport is and what it can do, with nothing started. Cheap, and the same on every call.",
+          "fallible": true,
+          "name": "describe",
+          "required": true
+        },
+        {
+          "answer": {
+            "kind": "channel",
+            "type": "object"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "kind": "channel_sink",
+              "name": "sink",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "Connects to `request.endpoint`, and serves the connection as a channel: the host's messages go in\nthrough the returned channel, and the peer's come back through `sink`.\n\nReturns once the connection is made, or it could not be: `GUATIAO_ERR_BAD_VALUE` for an endpoint the\ntransport cannot read, `GUATIAO_ERR_UNSUPPORTED` when it cannot dial, `GUATIAO_ERR_GONE` when nothing\nanswered within `request.timeout_ms` or the path is closed to it. `sink` follows the channel's rules,\nand is destroyed even on a refusal.",
+          "fallible": true,
+          "name": "dial",
+          "required": true
+        },
+        {
+          "answer": {
+            "kind": "transport_listener",
+            "type": "object"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            },
+            {
+              "kind": "transport_acceptor",
+              "name": "acceptor",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "Starts listening on `request.endpoint`. Each peer that connects is handed to `acceptor`, one at a time,\nfrom a thread of the provider's own. Refuses as [`dial`](Self::dial) does, and with\n`GUATIAO_ERR_GONE` when the endpoint is taken. `acceptor` is destroyed even on a refusal.",
+          "fallible": true,
+          "name": "listen",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "Each setting of this configured transport that differs from its default, generated from the\nsettings' own description.",
+          "fallible": true,
+          "name": "non_defaults",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "A transport that is listening, for [`Transport::listen`].",
+      "floor_hash": 2298448771,
+      "name": "transport_listener",
+      "object": true,
+      "slots": [
+        {
+          "answer": {
+            "type": "text"
+          },
+          "args": [],
+          "doc": "Where it listens, as an endpoint a peer of the same transport can dial: a port asked for as `0`\nis the one the system chose.",
+          "fallible": true,
+          "name": "address",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "status",
+              "type": "u32"
+            },
+            {
+              "name": "reason",
+              "type": "str"
+            }
+          ],
+          "doc": "Stops listening, and the provider calls the acceptor's `closed` with this `status` and `reason` unless it\nalready had. Connections already accepted go on. Repeatable, and dropping the listener is\n`close(GUATIAO_OK, \"\")`.",
+          "fallible": false,
+          "name": "close",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "What the host does with the peers a listening transport accepts. The host implements it, the provider owns it.\n\nThe provider makes every call from one thread at a time, in order, and none after `closed`.",
+      "floor_hash": 2525300295,
+      "name": "transport_acceptor",
+      "object": true,
+      "slots": [
+        {
+          "answer": {
+            "kind": "channel_sink",
+            "type": "object"
+          },
+          "args": [
+            {
+              "name": "peer",
+              "type": "str"
+            },
+            {
+              "kind": "channel",
+              "name": "channel",
+              "pass": "taken",
+              "type": "object"
+            }
+          ],
+          "doc": "A peer connected. `peer` is where it came from, as text, empty when the transport has no address for it.\n`channel` is the connection, which the host now owns; the host answers with the sink the peer's messages\ncome back through, which the provider owns from then on. An error refuses the peer: the provider closes\nthe channel and goes on listening.",
+          "fallible": true,
+          "name": "accepted",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "status",
+              "type": "u32"
+            },
+            {
+              "name": "reason",
+              "type": "str"
+            }
+          ],
+          "doc": "Listening ended, once: `GUATIAO_OK` when the host closed the listener, anything else the failure, with a\nreason for people.",
+          "fallible": false,
+          "name": "closed",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "What the host writes on, handed back by the provider that started it.\n\nThe provider implements it and the host holds the channel object,\nwhich may be shared between threads: `send` may be called from several\nat once, each thread's messages kept in its own order. Dropping the\nchannel is `close(GUATIAO_OK, \"\")`.",
+      "floor_hash": 3787630980,
+      "name": "channel",
+      "object": true,
+      "slots": [
+        {
+          "args": [
+            {
+              "name": "bytes",
+              "type": "bytes"
+            }
+          ],
+          "doc": "One message to the provider, lent for the call. Returns once the\nprovider has taken it, which may wait on the provider; answers\n`GUATIAO_ERR_GONE` once either side has closed, and a `send` that\nwas waiting when the host closed answers it too.",
+          "fallible": true,
+          "name": "send",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "status",
+              "type": "u32"
+            },
+            {
+              "name": "reason",
+              "type": "str"
+            }
+          ],
+          "doc": "Ends the stream from the host's side, with a `guatiao_status` the\nprovider hands to the sink's `closed`: `GUATIAO_OK` (0) for a plain\nend, an error status otherwise. `reason` is UTF-8 text for people,\nlent for the call and empty when there is none: why the host gives\nup. Called once, and returns without waiting for a `receive` still\nrunning; `send` answers `GUATIAO_ERR_GONE` after it. Cannot fail,\nbar a `reason` that is not UTF-8, which is refused with\n`GUATIAO_ERR_BAD_VALUE` before this runs and leaves the stream as\nit was.",
+          "fallible": false,
+          "name": "close",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "What the provider writes back on, handed in by the host.\n\nThe host implements it and hands it over with the call that starts\nthe channel; the provider owns it from then on, makes every call on it\nfrom one thread at a time, and destroys it when done.",
+      "floor_hash": 4115266557,
+      "name": "channel_sink",
+      "object": true,
+      "slots": [
+        {
+          "args": [
+            {
+              "name": "bytes",
+              "type": "bytes"
+            }
+          ],
+          "doc": "One message to the host, lent for the call. Returns once the host\nhas taken it, and a host never waits in it for its own `send`.\n`GUATIAO_ERR_GONE` says the host takes nothing more; any error\nends the stream, and the provider then calls `closed` with that\nstatus and delivers nothing still queued.",
+          "fallible": true,
+          "name": "receive",
+          "required": true
+        },
+        {
+          "args": [
+            {
+              "name": "status",
+              "type": "u32"
+            },
+            {
+              "name": "reason",
+              "type": "str"
+            }
+          ],
+          "doc": "The stream has ended, from either side: with the host's status from\nthe channel's `close`, or the provider's own, a `guatiao_status`\n(`GUATIAO_OK` is the normal end). `reason` is UTF-8 text for\npeople, lent for the call and empty when there is none: the\nprovider's failure, or the host's reason passed on. Called exactly\nonce, and nothing but `destroy` follows it. Cannot fail, bar a\n`reason` that is not UTF-8, which is refused with\n`GUATIAO_ERR_BAD_VALUE` before this runs and leaves the stream as\nit was.",
+          "fallible": false,
+          "name": "closed",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

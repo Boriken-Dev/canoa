@@ -1,0 +1,97 @@
+{
+  "DialRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "endpoint": {
+        "description": "Where to connect, in the transport's own text.",
+        "type": "string"
+      },
+      "timeout_ms": {
+        "default": 5000,
+        "description": "How long to wait for the connection, in milliseconds.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "endpoint"
+    ],
+    "type": "object"
+  },
+  "ListenRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "endpoint": {
+        "description": "Where to listen, in the transport's own text.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "endpoint"
+    ],
+    "type": "object"
+  },
+  "NonDefault": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "default": {
+        "description": "The default, written the same way.",
+        "type": "string"
+      },
+      "setting": {
+        "description": "The setting's key path (`limits.max_message`).",
+        "type": "string"
+      },
+      "value": {
+        "description": "Its value as `Type(text)` (`Duration(30s)`); a secret's is masked.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "setting",
+      "value",
+      "default"
+    ],
+    "type": "object"
+  },
+  "TransportInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "dials": {
+        "description": "Whether it dials.",
+        "type": "boolean"
+      },
+      "endpoint": {
+        "description": "What its endpoints look like, in a sentence (`pipe:NAME`).",
+        "type": "string"
+      },
+      "listens": {
+        "description": "Whether it listens.",
+        "type": "boolean"
+      },
+      "max_message_bytes": {
+        "description": "The largest message a channel carries, in either direction, as configured.",
+        "maximum": 18446744073709551615,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "description": "Its name for people.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "endpoint",
+      "dials",
+      "listens",
+      "max_message_bytes"
+    ],
+    "type": "object"
+  }
+}
