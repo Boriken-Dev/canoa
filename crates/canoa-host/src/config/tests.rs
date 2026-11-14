@@ -1644,3 +1644,107 @@ fn loadout_skills_are_the_chosen_skills_that_are_on_and_the_rest_of_the_table_is
         assert!(Config::from_str_in(text, Path::new(".")).is_err(), "{text}");
     }
 }
+
+#[test]
+fn an_entry_may_name_a_built_in_transport_and_the_endpoint_it_listens_on() {
+    let text = "[host.agents.a]\nprogram = \"x\"\ntransport = \"websocket\"\nlisten = \"ws://127.0.0.1:0\"\n\
+                transport_settings = { listen = { frames = \"binary\" } }\n";
+    let config = parse(text).expect("a built-in transport is accepted");
+    let Listen::Transport(spec) = &config.entries[0].listen else {
+        panic!("a transport: {:?}", config.entries[0].listen);
+    };
+    assert_eq!(spec.id, "websocket");
+    assert_eq!(spec.endpoint, "ws://127.0.0.1:0");
+    assert_eq!(spec.origin, None);
+    assert!(spec.settings.is_some());
+    assert_eq!(config.entries[0].listen.to_string(), "ws://127.0.0.1:0");
+    assert_eq!(config.entries[0].listen.address(), None);
+}
+
+#[test]
+fn an_entry_with_no_transport_key_listens_as_before() {
+    let config =
+        parse("[host.agents.a]\nprogram = \"x\"\nlisten = \"127.0.0.1:7801\"\n").expect("parses");
+    assert!(matches!(config.entries[0].listen, Listen::Address(_)));
+    let config = parse("[host.agents.a]\nprogram = \"x\"\n").expect("parses");
+    assert!(matches!(config.entries[0].listen, Listen::Address(_)));
+}
+
+#[test]
+fn an_outside_transport_loads_from_the_library_or_source_its_own_keys_name() {
+    let text = "[host.providers.p]\nlibrary = \"/p.dll\"\nprovider = \"echo\"\ntransport = \"mine\"\n\
+                transport_source = \"/s.dll\"\nlisten = \"mine:1\"\n\
+                [host.providers.p.transport_source_settings]\ndirs = [\"/d\"]\n";
+    let config = parse(text).expect("an outside transport is accepted");
+    let Listen::Transport(spec) = &config.entries[0].listen else {
+        panic!("a transport: {:?}", config.entries[0].listen);
+    };
+    assert!(matches!(spec.origin, Some(Origin::Source { .. })));
+    // The entry's own library is the provider's, and is untouched by the transport's.
+    let EntryKind::Provider { origin, .. } = &config.entries[0].kind else {
+        panic!("a provider");
+    };
+    assert!(matches!(origin, Origin::Library(_)));
+}
+
+#[test]
+fn a_tool_entry_may_name_a_transport_too() {
+    let tool = "runs = \"session\"\nunasked = \"x\"\nprompt = { type = \"prompt\", message = \"{prompt}\" }\n";
+    let text = format!(
+        "[host.tools.t]\nprogram = \"pi\"\ntransport = \"pipe\"\nlisten = \"pipe:t\"\n{tool}"
+    );
+    let config = parse(&text).expect("a tool names a transport");
+    assert!(matches!(config.entries[0].listen, Listen::Transport(_)));
+    let text =
+        format!("[host.tools.t]\nprogram = \"pi\"\ntransport_settings = {{ a = 1 }}\n{tool}");
+    let refused = parse(&text).expect_err("a stray transport key");
+    assert!(
+        refused.to_string().contains("goes with transport"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_transport_that_is_misnamed_or_half_given_is_refused_naming_the_entry_and_the_key() {
+    let cases = [
+        // No endpoint to listen on.
+        ("transport = \"pipe\"\n", "listen"),
+        ("transport = \"pipe\"\nlisten = \"\"\n", "listen is empty"),
+        // An id nothing built in offers, with nowhere to load it from.
+        (
+            "transport = \"mine\"\nlisten = \"x\"\n",
+            "transport is pipe",
+        ),
+        ("transport = \"\"\nlisten = \"x\"\n", "must not be empty"),
+        // Built in: nothing to load.
+        (
+            "transport = \"pipe\"\ntransport_library = \"/t.dll\"\nlisten = \"x\"\n",
+            "built in",
+        ),
+        // Keys of a transport that is not named.
+        ("transport_settings = { a = 1 }\n", "goes with transport"),
+        ("transport_library = \"/t.dll\"\n", "goes with transport"),
+        (
+            "transport = \"mine\"\ntransport_library = \"/t.dll\"\ntransport_source = \"/s.dll\"\nlisten = \"x\"\n",
+            "exclude each other",
+        ),
+        (
+            "transport = \"mine\"\ntransport_library = \"/t.dll\"\ntransport_import_search = \"path\"\nlisten = \"x\"\n",
+            "import_search goes with source",
+        ),
+    ];
+    for (keys, said) in cases {
+        let refused = parse(&format!("[host.agents.a]\nprogram = \"x\"\n{keys}")).expect_err(keys);
+        let text = refused.to_string();
+        assert!(text.contains('a'), "{text}");
+        assert!(text.contains(said), "{keys}: {text}");
+    }
+}
+
+#[test]
+fn two_entries_cannot_listen_on_one_transport_endpoint() {
+    let text = "[host.agents.a]\nprogram = \"x\"\ntransport = \"pipe\"\nlisten = \"pipe:t\"\n\
+                [host.agents.b]\nprogram = \"x\"\ntransport = \"pipe\"\nlisten = \"pipe:t\"\n";
+    let refused = parse(text).expect_err("refused");
+    assert!(refused.to_string().contains("same address"), "{refused}");
+}

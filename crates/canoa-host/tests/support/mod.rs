@@ -544,3 +544,28 @@ pub fn shared_cwd(scratch: &Scratch) -> String {
     std::fs::create_dir_all(&dir).expect("a working directory");
     on_share(&dir).to_string_lossy().into_owned()
 }
+
+/// As [`with_link`] for a connection the caller made: any channel, framed however its transport frames, which this proves over.
+pub fn with_channel<C: Channel, R>(
+    channel: C,
+    identity: &Identity,
+    host: PeerId,
+    body: impl FnOnce(&Rpc<'_, C>) -> R,
+) -> Result<R, String> {
+    let proof = Proof::builder(identity.clone())
+        .responders(Trust::pinned([host]))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let established = auth::prove_out(&proof, &channel, WAIT, method().record_length(MAX))
+        .map_err(|error| error.to_string())?;
+    let sealed = Sealed::new(&channel, established.session);
+    let rpc = Rpc {
+        channel: &sealed,
+        next: std::cell::Cell::new(0),
+        updates: std::cell::RefCell::new(Vec::new()),
+    };
+    let result = body(&rpc);
+    sealed.close();
+    channel.close();
+    Ok(result)
+}

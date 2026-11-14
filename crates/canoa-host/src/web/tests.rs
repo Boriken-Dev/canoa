@@ -227,6 +227,7 @@ fn a_source_the_settings_add_is_allowed_besides_the_entries() {
         kind: "agent",
         url: "ws://127.0.0.1:7801".to_owned(),
         harness: None,
+        transport: None,
         title: None,
         local: false,
         missing: Vec::new(),
@@ -242,12 +243,13 @@ fn a_source_the_settings_add_is_allowed_besides_the_entries() {
 }
 
 #[test]
-fn an_entry_on_a_pipe_is_neither_listed_for_the_page_nor_allowed_to_it() {
+fn an_entry_on_a_pipe_or_a_transport_is_neither_listed_for_the_page_nor_allowed_to_it() {
     let entry = |name: &str, url: &str| Listening {
         name: name.to_owned(),
         kind: "agent",
         url: url.to_owned(),
         harness: None,
+        transport: None,
         title: None,
         local: false,
         missing: Vec::new(),
@@ -256,6 +258,10 @@ fn an_entry_on_a_pipe_is_neither_listed_for_the_page_nor_allowed_to_it() {
         entry("socket", "ws://127.0.0.1:7801"),
         entry("piped", "pipe:canoa-test"),
         entry("sock", "unix:/tmp/canoa-test.sock"),
+        Listening {
+            transport: Some("websocket".to_owned()),
+            ..entry("carried", "ws://127.0.0.1:7802")
+        },
     ];
     let address = running(&loopback(&site()), &entries);
     let policy = get(address, "/").headers["content-security-policy"].clone();
@@ -264,6 +270,7 @@ fn an_entry_on_a_pipe_is_neither_listed_for_the_page_nor_allowed_to_it() {
         !policy.contains("pipe:") && !policy.contains("unix:"),
         "{policy}"
     );
+    assert!(!policy.contains("7802"), "{policy}");
     let index = get(address, crate::web::HOST_INDEX);
     let listed: serde_json::Value = serde_json::from_slice(&index.body).expect("JSON");
     let names: Vec<&str> = listed["entries"]
@@ -378,6 +385,7 @@ fn files_are_served_from_the_directory_with_their_types_and_headers() {
             kind: "agent",
             url: "ws://127.0.0.1:7801".to_owned(),
             harness: None,
+            transport: None,
             title: None,
             local: false,
             missing: Vec::new(),
@@ -497,6 +505,7 @@ fn the_host_index_lists_the_entries_it_was_given() {
             kind: "agent",
             url: "ws://127.0.0.1:7801".to_owned(),
             harness: Some("claude".to_owned()),
+            transport: None,
             title: Some("Claude for review".to_owned()),
             local: false,
             missing: Vec::new(),
@@ -506,6 +515,7 @@ fn the_host_index_lists_the_entries_it_was_given() {
             kind: "provider",
             url: "ws://127.0.0.1:7802".to_owned(),
             harness: None,
+            transport: None,
             title: None,
             local: false,
             missing: Vec::new(),

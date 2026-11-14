@@ -45,6 +45,7 @@ use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 use crate::secrets::{self, Layer, Raw};
 use crate::sources;
+use crate::transport;
 use crate::usage_splice::{Antigravity, Starter};
 use crate::worktree::Worktrees;
 
@@ -238,6 +239,13 @@ pub enum ServeError {
         /// Why.
         error: pipe::Error,
     },
+    /// An entry's transport provider could not be loaded, found, configured, or started on its endpoint.
+    Transport {
+        /// The entry.
+        entry: String,
+        /// Why; names a setting, never a value.
+        what: String,
+    },
     /// The proof could not be built from the options.
     Proof(String),
     /// A harness entry's provider could not be loaded, found, or configured.
@@ -268,6 +276,12 @@ impl fmt::Display for ServeError {
             Self::Pipe { entry, error } => {
                 write!(f, "host entry {entry} could not listen: {error}")
             }
+            Self::Transport { entry, what } => {
+                write!(
+                    f,
+                    "host entry {entry}: its transport provider is unusable: {what}"
+                )
+            }
             Self::Proof(reason) => write!(f, "the proof could not be built: {reason}"),
             Self::Harness { entry, what } => {
                 write!(
@@ -296,6 +310,9 @@ pub struct Listening {
     pub url: String,
     /// The provider id of a `harness` entry; `None` for any other entry.
     pub harness: Option<String>,
+    /// The `transport` provider's id of an entry that listens through one, whose `url` is then the endpoint it says a peer
+    /// dials; `None` for an entry on an address or a pipe.
+    pub transport: Option<String>,
     /// The entry's `title`, if it has one.
     pub title: Option<String>,
     /// Whether it is reached over [`Local`] only: one of the host's own sources, with no address.
@@ -305,10 +322,11 @@ pub struct Listening {
 }
 
 impl Listening {
-    /// Whether a browser can dial it: it listens on an address, not on a pipe or a Unix socket.
+    /// Whether a browser can dial it: it listens on an address, not on a pipe, a Unix socket or a transport provider, whose
+    /// framing a page does not know.
     #[must_use]
     pub fn on_address(&self) -> bool {
-        !self.url.starts_with("pipe:") && !self.url.starts_with("unix:")
+        self.transport.is_none() && !self.url.starts_with("pipe:") && !self.url.starts_with("unix:")
     }
 
     /// The entry as `serve` prints it and `/canoa.json` lists it: `name`, `kind`, `url`, and `harness` and `title` when set.
@@ -324,6 +342,9 @@ impl Listening {
         }
         if let Some(harness) = &self.harness {
             map.insert("harness".into(), harness.clone().into());
+        }
+        if let Some(transport) = &self.transport {
+            map.insert("transport".into(), transport.clone().into());
         }
         if let Some(title) = &self.title {
             map.insert("title".into(), title.clone().into());
@@ -869,6 +890,7 @@ pub struct Serving {
 enum Bound {
     Socket(websocket::Listener),
     Pipe(pipe::Listener),
+    Transport(alloc::boxed::Box<transport::Listening>),
 }
 
 impl fmt::Debug for Serving {
@@ -978,6 +1000,34 @@ fn bind_listen(
                 );
             }
             Ok((Bound::Pipe(listener), pipe_name.to_string()))
+        }
+        Listen::Transport(spec) => {
+            let listening = transport::Listening::start(
+                &spec.id,
+                spec.origin.as_ref(),
+                spec.settings.as_ref(),
+                &spec.endpoint,
+            )
+            .map_err(|what| ServeError::Transport {
+                entry: name.to_owned(),
+                what,
+            })?;
+            if let Some(origin) = &spec.origin {
+                say_transport_origin(name, table, origin);
+            }
+            // The provider says what of its settings is not its default: a weakening, such as plain WebSocket beyond
+            // loopback, is never silent.
+            for (setting, value, default) in listening.non_defaults() {
+                tracing::info!(
+                    "non-default: host.{table}.{name}.transport has {setting} at {value}, default {default}"
+                );
+            }
+            let address = if listening.address().is_empty() {
+                spec.endpoint.clone()
+            } else {
+                listening.address().to_owned()
+            };
+            Ok((Bound::Transport(alloc::boxed::Box::new(listening)), address))
         }
     }
 }
@@ -1309,6 +1359,10 @@ impl Serving {
                     EntryKind::Harness { harness, .. } => Some(harness.clone()),
                     _ => None,
                 },
+                transport: match &entry.listen {
+                    Listen::Transport(spec) => Some(spec.id.clone()),
+                    _ => None,
+                },
                 title: entry.title.clone(),
                 local: entry.local,
                 missing,
@@ -1346,6 +1400,7 @@ impl Serving {
                 kind: "control",
                 url,
                 harness: None,
+                transport: None,
                 title: None,
                 local: false,
                 missing: Vec::new(),
@@ -1596,6 +1651,9 @@ impl Serving {
                     .spawn(move || match &listener {
                         Bound::Socket(listener) => accept_loop(&shared, &served, listener),
                         Bound::Pipe(listener) => accept_pipe_loop(&shared, &served, listener),
+                        Bound::Transport(listening) => {
+                            accept_transport_loop(&shared, &served, listening);
+                        }
                     })
             })
             .collect();
@@ -1676,6 +1734,49 @@ fn accept_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &websocket:
             tracing::warn!("a connection was dropped: {error}");
         }
     }
+}
+
+/// [`accept_loop`] for a transport provider: what it hands over is already a connection, so the proof runs on it at once.
+fn accept_transport_loop(
+    shared: &Arc<Shared>,
+    served: &Arc<Served>,
+    listening: &transport::Listening,
+) {
+    while !shared.stopped.load(Ordering::SeqCst) {
+        let (from, link) = match listening.next(STOP_POLL) {
+            transport::Next::Nobody => continue,
+            transport::Next::Ended(status, reason) => {
+                tracing::warn!(
+                    entry = served.name,
+                    status,
+                    "its transport stopped listening: {reason}"
+                );
+                return;
+            }
+            transport::Next::Peer(from, link) => (from, link),
+        };
+        let Some(entered) = shared.unproven.enter() else {
+            tracing::warn!(
+                entry = served.name,
+                "a connection was dropped: too many are unproven"
+            );
+            continue;
+        };
+        // Information for the log: the key proof is what admits a peer.
+        tracing::debug!(entry = served.name, from, "a connection on a transport");
+        let shared = Arc::clone(shared);
+        let served = Arc::clone(served);
+        let spawned = thread::Builder::new()
+            .name("canoa-peer".to_owned())
+            .spawn(move || {
+                connection(&shared, &served, &link, entered);
+                link.close();
+            });
+        if let Err(error) = spawned {
+            tracing::warn!("a connection was dropped: {error}");
+        }
+    }
+    listening.close();
 }
 
 /// [`accept_loop`] for a pipe or Unix socket: there is no handshake to run before the proof.
@@ -2049,6 +2150,23 @@ const fn table_of(kind: &EntryKind) -> &'static str {
 
 /// What loading `origin` for `entry` departs from the defaults in, said as configuration where the file asked for it, and as
 /// a warning where the host fell back.
+/// What loading an outside transport weakens, said at every start: its code runs in the host's own process.
+fn say_transport_origin(name: &str, table: &str, origin: &Origin) {
+    match origin {
+        Origin::Library(_) => {
+            tracing::info!(
+                "host.{table}.{name}.transport_library loads an outside transport provider into the host's process"
+            );
+        }
+        Origin::Source { import_search, .. } => {
+            tracing::info!(
+                "host.{table}.{name}.transport_source loads an outside transport provider into the host's process, import_search {}",
+                import_search.as_str()
+            );
+        }
+    }
+}
+
 fn say_origin(entry: &Entry, origin: &Origin) {
     let Origin::Source {
         settings,

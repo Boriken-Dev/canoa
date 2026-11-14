@@ -1,6 +1,7 @@
 //! A provider written in Python, coqui-acp's `examples/provider-python` echo, served by the built `canoa` from one
 //! canoa.cfg entry through Guatiao's source of Python libraries, as an `agent_provider` behind the ACP facade and as an
-//! `acp_harness` provider chosen by id beside the built-in Claude. The source is a `cdylib` built against a Python, so this
+//! `acp_harness` provider chosen by id beside the built-in Claude, and as the `transport` provider an entry listens through
+//! (`transport = "<id>"`), with a client in this process dialling it over loopback TCP. The source is a `cdylib` built against a Python, so this
 //! test builds it from Cargo's checkout of Guatiao at the workspace's revision, with the Python `CANOA_TEST_PYTHON` names.
 //! Without that variable the test is ignored, and a run counts it as not run.
 #![allow(
@@ -22,13 +23,19 @@ mod support;
 #[cfg(canoa_test_python)]
 mod with_python {
     use std::ffi::OsString;
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpStream;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
 
     use coqui_agentic_peer::auth::Identity;
     use serde_json::{Value, json};
 
-    use crate::support::{Host, Scratch, cwd, log_holding, quoted, with_link};
+    use crate::support::{
+        Host, Scratch, cwd, example, log_holding, quoted, with_channel, with_link,
+    };
 
     /// Where the interpreter is and what a host needs to find its shared library.
     struct Python {
@@ -338,6 +345,173 @@ print(sys.version_info[0] * 100 + sys.version_info[1])
         })
         .expect("a paired key is served");
         assert_eq!(initialized["agentInfo"]["name"], "coqui-acp-claude");
+    }
+
+    /// The root of the package `name` from git, where its `Cargo.toml` is.
+    fn package_root(name: &str) -> PathBuf {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
+        let output = Command::new(cargo)
+            .args(["metadata", "--format-version", "1", "--manifest-path"])
+            .arg(&manifest)
+            .output()
+            .expect("cargo metadata runs");
+        let metadata: Value = serde_json::from_slice(&output.stdout).expect("JSON");
+        let package = metadata["packages"]
+            .as_array()
+            .expect("packages")
+            .iter()
+            .find(|package| package["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is in the graph"));
+        PathBuf::from(package["manifest_path"].as_str().expect("a path"))
+            .parent()
+            .expect("a manifest in a directory")
+            .to_path_buf()
+    }
+
+    /// The other end of a Python transport that frames messages as a four-byte big-endian length and the message, over TCP.
+    struct Framed {
+        stream: TcpStream,
+        reading: Mutex<Vec<u8>>,
+        writing: Mutex<()>,
+    }
+
+    impl coqui_transport::Channel for Framed {
+        fn send(&self, message: &[u8]) -> Result<(), coqui_transport::Failure> {
+            let _writing = self.writing.lock().expect("not poisoned");
+            let mut framed = u32::try_from(message.len())
+                .expect("a message under 4 GiB")
+                .to_be_bytes()
+                .to_vec();
+            framed.extend_from_slice(message);
+            (&self.stream)
+                .write_all(&framed)
+                .map_err(|_| coqui_transport::Failure::PathLost)
+        }
+
+        fn receive(
+            &self,
+            timeout: Option<Duration>,
+        ) -> Result<Option<Vec<u8>>, coqui_transport::Failure> {
+            use coqui_transport::Failure;
+            let until = timeout.map(|limit| Instant::now() + limit);
+            let mut buffer = self.reading.lock().expect("not poisoned");
+            loop {
+                if buffer.len() >= 4 {
+                    let size = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+                    let size = usize::try_from(size).expect("a size");
+                    if buffer.len() >= 4 + size {
+                        let body = buffer[4..4 + size].to_vec();
+                        buffer.drain(..4 + size);
+                        return Ok(Some(body));
+                    }
+                }
+                let wait = until.map(|at| at.saturating_duration_since(Instant::now()));
+                if wait.is_some_and(|wait| wait.is_zero()) {
+                    return Err(Failure::Timeout);
+                }
+                self.stream
+                    .set_read_timeout(wait)
+                    .map_err(|_| Failure::PathLost)?;
+                let mut chunk = [0_u8; 8192];
+                match (&self.stream).read(&mut chunk) {
+                    Ok(0) if buffer.is_empty() => return Ok(None),
+                    Ok(0) => return Err(Failure::PathLost),
+                    Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                        ) =>
+                    {
+                        return Err(Failure::Timeout);
+                    }
+                    Err(_) => return Err(Failure::PathLost),
+                }
+            }
+        }
+
+        fn close(&self) {
+            let _ = self.stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    /// A canoa.cfg entry `tcp` that runs the scripted echo agent and listens through the Python transport in `tests/python/transport`,
+    /// loaded as a source built against `python`.
+    fn transport_entry(python: &Python) -> String {
+        let guatiao = checkout("guatiao");
+        let kinds = package_root("coqui-transport-guatiao").join("python");
+        let source = build_source(python, &guatiao);
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/python/transport");
+        let list = |paths: &[PathBuf]| {
+            let quoted: Vec<String> = paths
+                .iter()
+                .map(|path| quoted(&path.to_string_lossy()))
+                .collect();
+            format!("[{}]", quoted.join(", "))
+        };
+        format!(
+            "[host.agents.tcp]\nprogram = {}\ntransport = \"tcp_transport_tcp\"\nlisten = \"tcp://127.0.0.1:0\"\n\
+             transport_source = {}\n\
+             [host.agents.tcp.transport_source_settings]\ndirs = {}\npaths = {}\n",
+            quoted(&example("stdio_agent", false).to_string_lossy()),
+            quoted(&source.to_string_lossy()),
+            list(&[fixture]),
+            list(&[guatiao.join("bindings/python/guatiao/src"), kinds]),
+        )
+    }
+
+    fn dial_tcp(url: &str) -> Framed {
+        let port: u16 = url
+            .rsplit(':')
+            .next()
+            .and_then(|port| port.parse().ok())
+            .expect("serve says tcp://127.0.0.1:PORT");
+        Framed {
+            stream: TcpStream::connect(("127.0.0.1", port)).expect("the transport answers"),
+            reading: Mutex::new(Vec::new()),
+            writing: Mutex::new(()),
+        }
+    }
+
+    /// An entry whose connections a transport provider written in Python carries, loaded from the source the entry names: a
+    /// paired key proves itself over it and runs scripted turns, and a key that is not paired gets nothing.
+    #[test]
+    fn a_python_transport_provider_carries_an_entry_to_a_paired_key_and_a_scripted_turn() {
+        let python = python();
+        let config = transport_entry(&python);
+        let host = Host::start_in(Scratch::new(), &config, 1, &environment(&python));
+        assert_eq!(host.served["tcp"]["transport"], "tcp_transport_tcp");
+        let url = host.url("tcp").to_owned();
+        assert!(url.starts_with("tcp://127.0.0.1:"), "{url}");
+        assert_ne!(url, "tcp://127.0.0.1:0", "the port the provider chose");
+        let client = crate::support::key();
+        let stranger = crate::support::key();
+        host.pair(&client);
+        let dir = cwd(&host.scratch);
+        let refused = with_channel(dial_tcp(&url), &stranger, host.peer, |rpc| rpc.initialize());
+        assert!(!matches!(refused, Ok(Ok(_))), "{refused:?}");
+        for _ in 0..2 {
+            let text = with_channel(dial_tcp(&url), &client, host.peer, |rpc| {
+                rpc.initialize().expect("initialize is answered");
+                let session = rpc
+                    .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                    .expect("a session opens");
+                let id = session["sessionId"].as_str().expect("an id").to_owned();
+                rpc.prompt(&id, "hello").expect("the turn ends")
+            })
+            .expect("a paired key is served");
+            assert_eq!(text, "echo: hello");
+        }
+    }
+
+    /// An id the transport source does not offer is refused when the host starts, naming the entry.
+    #[test]
+    fn a_transport_id_is_resolved_from_its_own_entrys_source_only() {
+        let python = python();
+        let config = transport_entry(&python).replace("tcp_transport_tcp", "no_such_transport");
+        let refused = bind_refused(&python, &config);
+        assert!(refused.contains("host entry tcp"), "{refused}");
     }
 
     /// A canoa.cfg harness entry `name` for `id` from the manifests in `dirs`: `harness_entry` under another name.

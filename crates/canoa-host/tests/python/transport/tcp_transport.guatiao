@@ -1,0 +1,5 @@
+# A transport provider written in Python over loopback TCP, which a client in another process can dial: the host test's fixture.
+type = "python"
+module = "tcp_transport"
+kinds = ["transport"]
+paths = ["."]

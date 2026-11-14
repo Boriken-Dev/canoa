@@ -506,6 +506,23 @@ pub enum Listen {
     /// A Windows named pipe (`pipe:NAME`) or a Unix socket (`unix:PATH`), which only a native client on this machine can
     /// reach, as the operating system's access control allows. The proof is the same as on an address.
     Pipe(PipeName),
+    /// An endpoint of a `transport` provider an entry names (`transport = "ID"`), which carries the entry's connections in
+    /// place of a WebSocket, a pipe or a Unix socket. The proof is the same as on an address.
+    Transport(alloc::boxed::Box<TransportListen>),
+}
+
+/// A `transport` provider and the endpoint an entry listens on through it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TransportListen {
+    /// The provider's id.
+    pub id: String,
+    /// Where an outside provider's code is loaded from; `None` for `pipe` and `websocket`, which are built in.
+    pub origin: Option<Origin>,
+    /// The provider's configuration, checked against its schema when the host starts; `None` takes its defaults.
+    pub settings: Option<Settings>,
+    /// What the provider listens on, as it reads it: the entry's `listen`, which the host does not interpret.
+    pub endpoint: String,
 }
 
 impl Listen {
@@ -537,7 +554,7 @@ impl Listen {
     pub const fn address(&self) -> Option<SocketAddr> {
         match self {
             Self::Address(address) => Some(*address),
-            Self::Pipe(_) => None,
+            Self::Pipe(_) | Self::Transport(_) => None,
         }
     }
 
@@ -545,7 +562,7 @@ impl Listen {
     const fn is_fixed(&self) -> bool {
         match self {
             Self::Address(address) => address.port() != 0,
-            Self::Pipe(_) => true,
+            Self::Pipe(_) | Self::Transport(_) => true,
         }
     }
 }
@@ -555,6 +572,7 @@ impl fmt::Display for Listen {
         match self {
             Self::Address(address) => address.fmt(f),
             Self::Pipe(name) => name.fmt(f),
+            Self::Transport(transport) => f.write_str(&transport.endpoint),
         }
     }
 }
@@ -1030,6 +1048,7 @@ struct RawWeb {
 /// The settings both tables share. serde does not hold `deny_unknown_fields` across `flatten`, so each table lists them.
 struct RawCommon {
     listen: Option<String>,
+    transport: Option<TransportSpec>,
     working_roots: Vec<String>,
     worktrees: Option<bool>,
     peers: Option<Vec<String>>,
@@ -1061,6 +1080,12 @@ struct RawAgent {
     usage: Option<String>,
     title: Option<String>,
     listen: Option<String>,
+    transport: Option<String>,
+    transport_library: Option<String>,
+    transport_source: Option<String>,
+    transport_source_settings: Option<toml::Table>,
+    transport_import_search: Option<String>,
+    transport_settings: Option<toml::Table>,
     #[serde(default)]
     working_roots: Vec<String>,
     worktrees: Option<bool>,
@@ -1089,6 +1114,12 @@ struct RawProvider {
     provider: String,
     max_sessions: Option<usize>,
     listen: Option<String>,
+    transport: Option<String>,
+    transport_library: Option<String>,
+    transport_source: Option<String>,
+    transport_source_settings: Option<toml::Table>,
+    transport_import_search: Option<String>,
+    transport_settings: Option<toml::Table>,
     #[serde(default)]
     working_roots: Vec<String>,
     peers: Option<Vec<String>>,
@@ -1295,6 +1326,19 @@ impl Config {
             }
             let common = RawCommon {
                 listen: agent.listen,
+                transport: transport_of(
+                    &name,
+                    base,
+                    &directory,
+                    TransportKeys {
+                        id: agent.transport,
+                        library: agent.transport_library,
+                        source: agent.transport_source,
+                        source_settings: agent.transport_source_settings,
+                        import_search: agent.transport_import_search,
+                        settings: agent.transport_settings,
+                    },
+                )?,
                 working_roots: agent.working_roots,
                 worktrees: agent.worktrees,
                 peers: agent.peers,
@@ -1508,6 +1552,19 @@ impl Config {
             }
             let common = RawCommon {
                 listen: provider.listen,
+                transport: transport_of(
+                    &name,
+                    base,
+                    &directory,
+                    TransportKeys {
+                        id: provider.transport,
+                        library: provider.transport_library,
+                        source: provider.transport_source,
+                        source_settings: provider.transport_source_settings,
+                        import_search: provider.transport_import_search,
+                        settings: provider.transport_settings,
+                    },
+                )?,
                 working_roots: provider.working_roots,
                 worktrees: Some(false),
                 peers: provider.peers,
@@ -1524,7 +1581,7 @@ impl Config {
         }
         for (name, table) in host.tools {
             check_name(&name)?;
-            let (common, spec) = tool_of(&name, table)?;
+            let (common, spec) = tool_of(&name, base, &directory, table)?;
             entries.push(entry(name, EntryKind::Tool { spec }, common)?);
         }
         check_unique(&entries)?;
@@ -2250,7 +2307,12 @@ fn json_of(value: toml::Value) -> Option<serde_json::Value> {
 
 /// A tool entry: the settings every entry has, taken out by hand since serde does not hold `deny_unknown_fields` across
 /// `flatten`, then the rest as the tool's. Errors name a setting, never a value.
-fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), ConfigError> {
+fn tool_of(
+    name: &str,
+    base: &Path,
+    directory: &Path,
+    mut table: toml::Table,
+) -> Result<(RawCommon, ToolSpec), ConfigError> {
     let wrong = |key: &str| invalid(name, &format!("{key} has the wrong type"));
     let text = |value: toml::Value, key: &str| match value {
         toml::Value::String(text) => Ok(text),
@@ -2264,6 +2326,47 @@ fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), 
         .remove("listen")
         .map(|value| text(value, "listen"))
         .transpose()?;
+    let tabled = |value: toml::Value, key: &str| match value {
+        toml::Value::Table(table) => Ok(table),
+        _ => Err(wrong(key)),
+    };
+    let transport_id = table
+        .remove("transport")
+        .map(|value| text(value, "transport"))
+        .transpose()?;
+    let transport_library = table
+        .remove("transport_library")
+        .map(|value| text(value, "transport_library"))
+        .transpose()?;
+    let transport_source = table
+        .remove("transport_source")
+        .map(|value| text(value, "transport_source"))
+        .transpose()?;
+    let transport_import_search = table
+        .remove("transport_import_search")
+        .map(|value| text(value, "transport_import_search"))
+        .transpose()?;
+    let transport_source_settings = table
+        .remove("transport_source_settings")
+        .map(|value| tabled(value, "transport_source_settings"))
+        .transpose()?;
+    let transport_settings = table
+        .remove("transport_settings")
+        .map(|value| tabled(value, "transport_settings"))
+        .transpose()?;
+    let transport = transport_of(
+        name,
+        base,
+        directory,
+        TransportKeys {
+            id: transport_id,
+            library: transport_library,
+            source: transport_source,
+            source_settings: transport_source_settings,
+            import_search: transport_import_search,
+            settings: transport_settings,
+        },
+    )?;
     let working_roots = table
         .remove("working_roots")
         .map(|value| texts(value, "working_roots"))
@@ -2304,6 +2407,7 @@ fn tool_of(name: &str, mut table: toml::Table) -> Result<(RawCommon, ToolSpec), 
     spec.check().map_err(|what| invalid(name, &what))?;
     let common = RawCommon {
         listen,
+        transport,
         working_roots,
         worktrees,
         peers,
@@ -2433,6 +2537,7 @@ fn local_agents_of(agents: &IndexMap<String, toml::Value>) -> Result<Vec<Entry>,
             },
             RawCommon {
                 listen: None,
+                transport: None,
                 working_roots: Vec::new(),
                 worktrees: None,
                 peers: None,
@@ -2527,10 +2632,110 @@ fn is_agy(program: &str) -> bool {
     stem.eq_ignore_ascii_case("agy")
 }
 
+/// The keys of an entry that name a `transport` provider and where it loads from.
+struct TransportKeys {
+    id: Option<String>,
+    library: Option<String>,
+    source: Option<String>,
+    source_settings: Option<toml::Table>,
+    import_search: Option<String>,
+    settings: Option<toml::Table>,
+}
+
+/// An entry's `transport` provider, before its endpoint is joined to it.
+struct TransportSpec {
+    id: String,
+    origin: Option<Origin>,
+    settings: Option<Settings>,
+}
+
+/// The transport an entry names, `None` when it names none. Relative paths are taken from `base`, as a harness's are; the id is
+/// `pipe` or `websocket` (built in) or an outside provider's, which `transport_library` or `transport_source` loads.
+fn transport_of(
+    name: &str,
+    base: &Path,
+    directory: &Path,
+    keys: TransportKeys,
+) -> Result<Option<TransportSpec>, ConfigError> {
+    let Some(id) = keys.id else {
+        let stray = [
+            (keys.library.is_some(), "transport_library"),
+            (keys.source.is_some(), "transport_source"),
+            (keys.source_settings.is_some(), "transport_source_settings"),
+            (keys.import_search.is_some(), "transport_import_search"),
+            (keys.settings.is_some(), "transport_settings"),
+        ];
+        return match stray.iter().find(|(set, _)| *set) {
+            Some((_, key)) => Err(invalid(name, &format!("{key} goes with transport"))),
+            None => Ok(None),
+        };
+    };
+    if id.is_empty() {
+        return Err(invalid(name, "transport must not be empty"));
+    }
+    let origin = origin_of(
+        name,
+        base,
+        directory,
+        OriginKeys {
+            library: keys.library.as_deref(),
+            source: keys.source.as_deref(),
+            source_settings: keys.source_settings,
+            import_search: keys.import_search.as_deref(),
+        },
+    )
+    .map_err(|error| match error {
+        ConfigError::Invalid { entry, what } => ConfigError::Invalid {
+            entry,
+            what: format!("transport: {what}"),
+        },
+        other => other,
+    })?;
+    let built_in = crate::transport::BUILT_IN_TRANSPORTS.contains(&id.as_str());
+    if built_in && origin.is_some() {
+        return Err(invalid(
+            name,
+            "pipe and websocket are built in: transport_library and transport_source load an outside provider under its own id",
+        ));
+    }
+    if origin.is_none() && !built_in {
+        return Err(invalid(
+            name,
+            "transport is pipe, websocket, or the id of an outside provider that transport_library or transport_source loads",
+        ));
+    }
+    let settings = keys
+        .settings
+        .map(|table| settings_of(name, table))
+        .transpose()?;
+    Ok(Some(TransportSpec {
+        id,
+        origin,
+        settings,
+    }))
+}
+
 fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, ConfigError> {
-    let listen = match common.listen {
-        None => Listen::Address(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
-        Some(text) => Listen::parse(&text).map_err(|what| invalid(&name, &what))?,
+    let listen = match (common.transport, common.listen) {
+        (None, None) => Listen::Address(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+        (None, Some(text)) => Listen::parse(&text).map_err(|what| invalid(&name, &what))?,
+        (Some(_), None) => {
+            return Err(invalid(
+                &name,
+                "listen is the endpoint the transport listens on, and is required with transport",
+            ));
+        }
+        (Some(spec), Some(endpoint)) => {
+            if endpoint.is_empty() {
+                return Err(invalid(&name, "listen is empty"));
+            }
+            Listen::Transport(alloc::boxed::Box::new(TransportListen {
+                id: spec.id,
+                origin: spec.origin,
+                settings: spec.settings,
+                endpoint,
+            }))
+        }
     };
     let mut working_roots = Vec::new();
     for root in common.working_roots {
