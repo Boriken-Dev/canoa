@@ -86,7 +86,11 @@ class AccountsController extends ChangeNotifier {
 
   /// Asks the host which accounts there are, and for the catalog of each provider they use.
   Future<void> refresh() async {
-    if (_loading) return;
+    // One in flight may have asked before what changed: ask once more when it is over, so the last word is the newest.
+    if (_loading) {
+      _again = true;
+      return;
+    }
     _loading = true;
     _notify();
     try {
@@ -105,7 +109,13 @@ class AccountsController extends ChangeNotifier {
       _loading = false;
       _notify();
     }
+    if (_again && !_disposed) {
+      _again = false;
+      await refresh();
+    }
   }
+
+  bool _again = false;
 
   /// Signs in and makes [name]; the account is offered by an entry running [harness] once it is made.
   SignIn add({required String name, required String harness, required String method, Map<String, String> inputs = const {}}) {

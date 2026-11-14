@@ -1,5 +1,6 @@
 import 'attention/notifier.dart';
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 import 'config/canoa_config.dart';
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
