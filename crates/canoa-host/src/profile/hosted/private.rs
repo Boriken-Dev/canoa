@@ -88,16 +88,18 @@ pub(super) fn check(path: &Path) -> std::io::Result<()> {
 fn protect(path: &Path) -> std::io::Result<()> {
     let root =
         std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
-    let status = std::process::Command::new(root.join("System32").join("icacls.exe"))
+    use crate::spawn::{Command, Stdio};
+    let mut icacls = Command::new(root.join("System32").join("icacls.exe"));
+    icacls
         .arg(path)
         .args(["/inheritance:r", "/grant:r"])
         // OWNER RIGHTS, so no name has to be looked up: the directory's creator is its owner.
         .arg("*S-1-3-4:(OI)(CI)F")
         .arg("*S-1-5-18:(OI)(CI)F")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Null)
+        .stderr(Stdio::Null);
+    let status = icacls.spawn()?.wait()?;
     if status.success() {
         Ok(())
     } else {
