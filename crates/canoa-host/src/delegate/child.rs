@@ -18,7 +18,7 @@ use coqui_a2a::model::{Artifact, Message, Part, Role, TaskState};
 use serde_json::{Value, json};
 
 use super::privilege::{self, Modes};
-use super::{ChildContext, Engine, Reservation, Session, Waiting, lock};
+use super::{ChildContext, Engine, META, Reservation, Session, Waiting, lock};
 use crate::local::{Link, LinkError};
 
 /// How long a task's agent has to end its turn after it was told to cancel, before its process is ended.
@@ -582,6 +582,25 @@ impl Work<'_> {
         }
     }
 
+    /// Tells the client this task asks for another machine's agent, as its state was told.
+    fn mark_remote(&self) {
+        let (Some(conn), Some(session), Some(mut task)) = (
+            self.session.conn(),
+            self.session.session_id(),
+            self.session
+                .store
+                .snapshot(&self.child.task)
+                .and_then(|task| serde_json::to_value(task).ok()),
+        ) else {
+            return;
+        };
+        task["metadata"]["remote"] = json!(true);
+        conn.notify(
+            json!({"sessionId": session, "taskId": self.child.task, "event": {"task": task}}),
+            false,
+        );
+    }
+
     /// Passes a question of the task's agent to the key that handed the task over: no person of this host's is at the other end
     /// of it, so the task waits as `INPUT_REQUIRED` and the key answers with a message of its own. Only an option the agent
     /// offered, or a cancel, reaches the agent.
@@ -616,7 +635,13 @@ impl Work<'_> {
         if self.session.is_remote() {
             return self.key_permission(id, params);
         }
-        let task = json!({"taskId": self.child.task, "title": self.child.title, "source": self.child.source});
+        let mut task = json!({"taskId": self.child.task, "title": self.child.title, "source": self.child.source});
+        // A question that came up from an agent on another machine, through a task of this host's own, stays one: the card's
+        // task is this one, so it is marked too.
+        if params["_meta"][META]["remote"] == json!(true) {
+            task["remote"] = json!(true);
+            self.mark_remote();
+        }
         let store = &self.session.store;
         let _ = store.update_status(
             &self.child.task,

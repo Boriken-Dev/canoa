@@ -310,7 +310,9 @@ impl Engine {
                 ),
             ));
         }
-        if session.is_remote() && state.remote_running + 1 >= self.config.max_running {
+        // A task nested under a key's own counts as the key's: its principal is carried down to every level.
+        let remote = session.is_a_keys();
+        if remote && state.remote_running + 1 >= self.config.max_running {
             return Err(limit(
                 "max_running",
                 format!(
@@ -329,11 +331,12 @@ impl Engine {
             ));
         }
         state.running += 1;
-        state.remote_running += usize::from(session.is_remote());
+        state.remote_running += usize::from(remote);
         session.live.fetch_add(1, Ordering::SeqCst);
         Ok(Reservation {
             engine: Arc::clone(self),
             session: Arc::clone(session),
+            remote,
         })
     }
 
@@ -455,13 +458,15 @@ fn limit(setting: &str, what: String) -> A2aError {
 pub(crate) struct Reservation {
     engine: Arc<Engine>,
     session: Arc<Session>,
+    /// Whether it was counted among the tasks of keys from other machines.
+    remote: bool,
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         let mut state = lock(&self.engine.state);
         state.running = state.running.saturating_sub(1);
-        if self.session.is_remote() {
+        if self.remote {
             state.remote_running = state.remote_running.saturating_sub(1);
         }
         drop(state);
@@ -497,6 +502,14 @@ impl Session {
         lock(&self.id)
             .as_ref()
             .map(|id| format!("local:{}:{id}", self.conn_id))
+    }
+
+    /// Whether the session is a key's from another machine, or runs a task of one, at any depth.
+    fn is_a_keys(&self) -> bool {
+        self.is_remote()
+            || self
+                .conn()
+                .is_some_and(|conn| matches!(conn.principal(), Principal::Remote(_)))
     }
 
     /// Whether its tasks are a key's that came over a link: nobody is at a client of this host to ask, so the key is.
@@ -1322,7 +1335,7 @@ impl Delegation {
 
     /// Serves a link of streams a key proved, from its first message (`first`) to its end: `a2a/1` to a key `[host.delegate]
     /// a2a` lists, and nothing to any other, however it is paired. Every stream is opened against that list, and again while
-    /// it runs, so taking a key off it ends what it has open.
+    /// it runs. The list is the configuration read when the host started, so a key is added or taken off with a restart.
     pub(crate) fn serve_link<C: coqui_transport::Channel>(
         &self,
         channel: &C,

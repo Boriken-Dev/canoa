@@ -54,6 +54,48 @@ fn engine(config: DelegateConfig) -> Arc<Engine> {
     engine
 }
 
+#[test]
+fn a_task_under_a_keys_task_takes_one_of_the_keys_places_and_not_the_persons() {
+    let key: coqui_peer_webcrypto::PeerId =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .parse()
+            .expect("a peer id");
+    let engine = engine(DelegateConfig {
+        max_running: 3,
+        ..DelegateConfig::default()
+    });
+    // The connection of a task of a key's, which a task of its own hands on from: its principal is the key's, its session is not.
+    let conn = engine.connect(ConnInfo {
+        principal: Principal::Remote(key),
+        ..info(true, 1)
+    });
+    let nested = engine.new_session(&conn, std::path::PathBuf::new(), [1; 32]);
+    let first = engine.reserve(&nested).expect("a place of the key's");
+    assert_eq!(
+        super::lock(&engine.state).remote_running,
+        1,
+        "counted as the key's"
+    );
+    let second = engine.reserve(&nested).expect("a second");
+    let Err(refused) = engine.reserve(&nested) else {
+        panic!("the last place is the person's");
+    };
+    assert!(
+        refused.message.contains("max_running"),
+        "{}",
+        refused.message
+    );
+    drop((first, second));
+    assert_eq!(super::lock(&engine.state).remote_running, 0);
+    // The person's own tasks are not the key's.
+    let own = engine.connect(info(false, 0));
+    let session = engine.new_session(&own, std::path::PathBuf::new(), [2; 32]);
+    let _held: Vec<_> = (0..3)
+        .map(|_| engine.reserve(&session).expect("the person's"))
+        .collect();
+    assert_eq!(super::lock(&engine.state).remote_running, 0);
+}
+
 fn info(child: bool, depth: usize) -> ConnInfo {
     ConnInfo {
         principal: Principal::Owner,

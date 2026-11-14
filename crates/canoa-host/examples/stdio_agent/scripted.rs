@@ -17,7 +17,7 @@
 //!
 //! Delegation: `--mcp-http` advertises HTTP MCP servers, and `--modes=a,b,c` lists the modes of its mode option (the first is the
 //! default). A session given the host's `canoa-delegate` entry can call its tools: `Delegate SOURCE TEXT`, `DelegateIn FOLDER
-//! SOURCE TEXT`, `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
+//! SOURCE TEXT`, `DelegateAwait SOURCE TEXT` (and waits for the task to end), `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
 //! session is in, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
 //! to PATH and waits for a cancel, `Bearer` says the tool server's address and the session's bearer (a stand-in may; the host never
 //! does), `Raw LINE` writes LINE to the client as it is, `SecretBearer` and `SecretBridge` say what `Bearer` and `Bridge` say for the secret tools, `Secret TOOL JSON` calls a tool of the host's secret server (`secret_request`, `secret_use`, `secret_show`) and says what it
@@ -576,6 +576,41 @@ impl Shared {
                     "delegate_task",
                     &json!({"source": source, "task": task, "folder": folder}),
                 )
+            }
+            "DelegateAwait" => {
+                // Hands a task on and stays in its turn until the task ends, so what the task asks of the person reaches
+                // the person through this session, and answers with the task's last state.
+                let (source, task) = rest.split_once(' ').unwrap_or((rest, ""));
+                let handed = self.tool_call(
+                    session,
+                    "delegate_task",
+                    &json!({"source": source, "task": task}),
+                );
+                let id = serde_json::from_str::<Value>(&handed)
+                    .ok()
+                    .and_then(|answer| answer["taskId"].as_str().map(str::to_owned));
+                match id {
+                    None => handed,
+                    Some(id) => {
+                        let mut last = handed;
+                        for _ in 0..60 {
+                            last = self.tool_call(
+                                session,
+                                "task_status",
+                                &json!({"taskId": id, "wait_ms": 5000}),
+                            );
+                            let ended = serde_json::from_str::<Value>(&last).is_ok_and(|state| {
+                                ["completed", "failed", "canceled", "rejected"]
+                                    .iter()
+                                    .any(|name| state["state"] == *name)
+                            });
+                            if ended {
+                                break;
+                            }
+                        }
+                        last
+                    }
+                }
             }
             "Status" => {
                 let (id, wait) = rest.split_once(' ').unwrap_or((rest, "0"));

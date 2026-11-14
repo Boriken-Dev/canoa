@@ -337,8 +337,9 @@ impl<C: Channel> Mirrored<'_, '_, '_, C> {
             .map(|data| json!({"toolCall": data["toolCall"], "options": data["options"]}));
         let answer = match (asked, self.session.conn(), self.session.session_id()) {
             (Some(params), Some(conn), Some(session)) => {
-                let task =
-                    json!({"taskId": child.task, "title": child.title, "source": child.source});
+                // Marked, so that nothing of this host's person's remembering answers for another machine's agent, however
+                // many tasks of this host's own the question passes up through.
+                let task = json!({"taskId": child.task, "title": child.title, "source": child.source, "remote": true});
                 let (engine, child) = (self.engine, self.child);
                 conn.ask(&session, &task, params, &|| {
                     child.cancelled() || engine.stopped()

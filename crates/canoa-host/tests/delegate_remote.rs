@@ -314,6 +314,9 @@ impl<'a> Convo<'a> {
             if message.get("method").is_some() && message.get("id").is_some() {
                 return message;
             }
+            if message["method"] == "_canoa/delegate/event" {
+                self.events.push(message["params"].clone());
+            }
         }
     }
 }
@@ -714,6 +717,57 @@ fn a_task_for_another_machine_is_marked_so_in_the_events_the_client_gets() {
         event["taskId"] == task.as_str() && event["event"]["task"]["metadata"]["remote"] == true
     });
     assert!(marked, "{:?}", convo.events);
+    drop(link);
+    near.stop();
+    far.host.stop();
+}
+
+#[test]
+fn a_far_agents_question_passed_up_through_a_local_task_is_still_marked_as_another_machines() {
+    let (scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    let work = directory(&scratch.0, "work");
+    let config = format!(
+        "{}{}[host.delegate]
+sources = [\"child\", \"far\"]
+max_depth = 2
+[agents.far]
+a2a = {{ url = {}, peer = \"{}\", source = \"shared\" }}
+",
+        agent("parent", "", ""),
+        agent("child", "", ""),
+        quoted(&far.url),
+        far.id
+    );
+    let near = Hosted::start_in(scratch, &config, &[]);
+    let link = near.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(&work);
+    // The person's session hands a task to `child`, which hands one to the far agent and waits for it.
+    let outer = convo.delegate(
+        &session,
+        "child",
+        "DelegateAwait far Please edit src/report.js",
+    );
+    let asked = convo.host_request();
+    assert_eq!(asked["method"], "session/request_permission");
+    let meta = &asked["params"]["_meta"][META];
+    assert_eq!(
+        meta["taskId"],
+        outer.as_str(),
+        "it is asked on the task the person's session handed out"
+    );
+    assert_eq!(meta["remote"], true, "{meta}");
+    let marked = convo.events.iter().any(|event| {
+        event["taskId"] == outer.as_str() && event["event"]["task"]["metadata"]["remote"] == true
+    });
+    assert!(
+        marked,
+        "the client is told the task asks for another machine: {:?}",
+        convo.events
+    );
+    convo.send(&json!({"jsonrpc": "2.0", "id": asked["id"], "result": {"outcome": {"outcome": "selected", "optionId": "no"}}}));
     drop(link);
     near.stop();
     far.host.stop();
