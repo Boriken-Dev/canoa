@@ -84,18 +84,62 @@ pub fn start_program(
     args: &[String],
     scripted: bool,
 ) -> Setup {
+    start_full(manifest, arms, allow, program, args, scripted, &[], "")
+}
+
+/// A second overlay of the profile whose hook logs to the same file as `team`'s, with its hooks allowed.
+pub struct Other<'a> {
+    pub name: &'a str,
+    pub manifest: &'a str,
+    pub arms: Vec<(&'a str, Arm)>,
+}
+
+/// As [`start`], with `others` besides `team` (their hooks allowed, in the order given) and `config` added to canoa.cfg.
+pub fn start_with(
+    manifest: &str,
+    arms: &[(&str, Arm)],
+    others: &[Other<'_>],
+    config: &str,
+) -> Setup {
+    let args = vec![
+        "--scripted".to_owned(),
+        "--name=coqui-acp-claude".to_owned(),
+    ];
+    start_full(
+        manifest,
+        arms,
+        &Allow::Digest,
+        &example("stdio_agent", false).to_string_lossy(),
+        &args,
+        true,
+        others,
+        config,
+    )
+}
+
+#[allow(clippy::too_many_arguments, reason = "a test's setup, all of it named")]
+fn start_full(
+    manifest: &str,
+    arms: &[(&str, Arm)],
+    allow: &Allow,
+    program: &str,
+    args: &[String],
+    scripted: bool,
+    others: &[Other<'_>],
+    extra: &str,
+) -> Setup {
     let logs = Scratch::new();
     let log = logs.0.join("hook.log");
     let state = logs.0.join("state.json");
     let staged = files(manifest, &log, arms);
     write_all(&logs.0.join("stage"), &staged);
-    let (_, digest) = coqui_aos::read_tree(
-        &coqui_aos::StdFs,
-        &logs.0.join("stage"),
-        &coqui_aos::Settings::default(),
-    )
-    .expect("read");
-    let digest = digest.digest.to_string();
+    let digest_of = |dir: &Path| {
+        let (_, digest) =
+            coqui_aos::read_tree(&coqui_aos::StdFs, dir, &coqui_aos::Settings::default())
+                .expect("read");
+        digest.digest.to_string()
+    };
+    let digest = digest_of(&logs.0.join("stage"));
     let named = match allow {
         Allow::Digest => Some(digest.clone()),
         Allow::Other => Some(format!("sha256:{}", "0".repeat(64))),
@@ -106,16 +150,49 @@ pub fn start_program(
         args.push(format!("--state={}", state.to_string_lossy()));
     }
     let mut config = format!(
-        "[agents.Scripted]\nprogram = {}\nargs = [{}]\n[overlays]\nteam = \"fixture\"\n",
+        "[agents.Scripted]
+program = {}
+args = [{}]
+[overlays]
+team = \"fixture\"
+",
         quoted(program),
         args.iter()
             .map(|arg| quoted(arg))
             .collect::<Vec<_>>()
             .join(", ")
     );
-    if let Some(named) = named {
-        config.push_str(&format!("[agents.Scripted.hooks]\nteam = \"{named}\"\n"));
+    let mut staged_others = Vec::new();
+    for other in others {
+        config.push_str(&format!(
+            "{} = \"fixture\"
+",
+            other.name
+        ));
+        let files = files(other.manifest, &log, &other.arms);
+        let dir = logs.0.join(format!("stage-{}", other.name));
+        write_all(&dir, &files);
+        staged_others.push((other.name, files, digest_of(&dir)));
     }
+    if named.is_some() || !others.is_empty() {
+        config.push_str(
+            "[agents.Scripted.hooks]
+",
+        );
+        if let Some(named) = named {
+            config.push_str(&format!(
+                "team = \"{named}\"
+"
+            ));
+        }
+        for (name, _, digest) in &staged_others {
+            config.push_str(&format!(
+                "{name} = \"{digest}\"
+"
+            ));
+        }
+    }
+    config.push_str(extra);
     let host = Hosted::start_with(&config, &["--local-sources"]);
     write_all(&host.scratch.0.join("overlays").join("team"), &staged);
     std::fs::write(
@@ -123,6 +200,14 @@ pub fn start_program(
         json!({"source": "fixture", "commit": "0", "digest": digest, "files": {}}).to_string(),
     )
     .expect("written");
+    for (name, files, digest) in &staged_others {
+        write_all(&host.scratch.0.join("overlays").join(name), files);
+        std::fs::write(
+            host.scratch.0.join("overlays").join(format!("{name}.json")),
+            json!({"source": "fixture", "commit": "0", "digest": digest, "files": {}}).to_string(),
+        )
+        .expect("written");
+    }
     let link = host.local.open("Scripted").expect("a link");
     let cwd = cwd(&host.scratch);
     Setup {

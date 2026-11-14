@@ -402,7 +402,7 @@ impl Connection {
         let chosen = read_chosen(host, &mut notes);
         let layers = layers_of(host, &overlays, &chosen, None, &mut notes);
         let effective = merge(&layers);
-        let hooks = Hooks::new(
+        let mut hooks = Hooks::new(
             host,
             &effective.aos,
             &overlays,
@@ -419,6 +419,20 @@ impl Connection {
         notes.extend(resolved.hook_reports.iter().map(hooks::report_item));
         notes.extend(pre_env.refused.iter().cloned());
         let env = resolved.env;
+        // The person's own layers' variables are part of the session's environment, which hooks run in; an overlay's reach
+        // them through the stack.
+        hooks.add_to_environment(effective.env.iter().filter_map(|(name, value)| {
+            let from_overlay = value.layer.kind == LayerKind::Overlay
+                && effective
+                    .aos
+                    .iter()
+                    .any(|aos| aos.identity == value.layer.name);
+            let (_, secret) = env
+                .iter()
+                .find(|(each, _)| each == name)
+                .filter(|_| !from_overlay)?;
+            Some((name.clone(), secret.expose().to_owned()))
+        }));
         let mut env_items = Vec::new();
         for (key, value) in &effective.env {
             if env.iter().any(|(name, _)| name == key) {

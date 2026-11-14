@@ -1,9 +1,10 @@
 //! Overlay hooks for a profile's connection: which hooks an overlay has and whether they are on, the processes that run
 //! them, and what an event's hooks amount to. Nothing here speaks ACP: `events` does.
 //!
-//! A hook runs from a private copy of the overlay's files made from the bytes its digest covers, with only the
-//! environment named below, never the session's.
+//! A hook runs from a private copy of the overlay's files made from the bytes its digest covers, in the session's folder
+//! with the session's environment: the host's own, and every overlay's declarations stacked in composition order.
 
+mod allow;
 mod events;
 mod forward;
 mod native;
@@ -51,28 +52,6 @@ const PARTIAL: [HookEvent; 1] = [HookEvent::PreTool];
 
 /// The reasons of `session-start` Canoa sends for every harness: it sees the sessions it opens itself.
 const REASONS: [&str; 2] = ["new", "resume"];
-
-/// The variables a hook gets from the host's own environment, besides its event and its overlay's root: nothing the person
-/// put there for the agent, or a credential, is among them.
-#[cfg(windows)]
-const PASSED: [&str; 14] = [
-    "PATHEXT",
-    "SystemRoot",
-    "SystemDrive",
-    "windir",
-    "ComSpec",
-    "TEMP",
-    "TMP",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "ProgramData",
-    "PROCESSOR_ARCHITECTURE",
-];
-#[cfg(not(windows))]
-const PASSED: [&str; 7] = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "USER"];
 
 /// The interpreters AOS names, and the programs that stand for each, in the order they are looked for.
 fn programs_of(interpreter: &str) -> &'static [&'static str] {
@@ -162,8 +141,10 @@ pub(super) struct Hooks {
     settings: Settings,
     /// The interpreters found on the host's `PATH` when the connection started, by AOS name.
     interpreters: BTreeMap<&'static str, PathBuf>,
-    /// What a hook is given of the host's environment.
+    /// The environment the agent starts from, which a hook gets too: this process's, and the person's own layers' variables.
     base: Vec<(String, String)>,
+    /// The places a hook's allow never answers for.
+    refusals: allow::Refusals,
     /// Each overlay's manifest and facts, in composition order: what a hook's environment is made from.
     active: Vec<(Document, Facts)>,
     /// The manifests by normalized identity, which the order of hooks is taken from.
@@ -201,26 +182,15 @@ impl Hooks {
                 }
             }
         }
-        let mut base: Vec<(String, String)> = PASSED
-            .iter()
-            .filter_map(|name| Some(((*name).to_owned(), lookup(name)?)))
+        // A Windows search for a program never starts at the folder the hook runs in, which is the session's.
+        let base: Vec<(String, String)> = std::env::vars()
+            .chain(cfg!(windows).then(|| {
+                (
+                    "NoDefaultCurrentDirectoryInExePath".to_owned(),
+                    "1".to_owned(),
+                )
+            }))
             .collect();
-        // Only absolute directories: a relative one would name whatever the overlay's root holds.
-        let path = lookup("PATH")
-            .map(|path| {
-                std::env::split_paths(&path)
-                    .filter(|directory| directory.is_absolute())
-                    .collect::<Vec<_>>()
-            })
-            .and_then(|directories| std::env::join_paths(directories).ok());
-        if let Some(path) = path {
-            base.push(("PATH".to_owned(), path.to_string_lossy().into_owned()));
-        }
-        #[cfg(windows)]
-        base.push((
-            "NoDefaultCurrentDirectoryInExePath".to_owned(),
-            "1".to_owned(),
-        ));
         let have: Vec<String> = interpreters.keys().map(|name| (*name).to_owned()).collect();
         let mut planned = Vec::new();
         for layer in layers {
@@ -264,6 +234,7 @@ impl Hooks {
             settings: Settings::default(),
             interpreters,
             base,
+            refusals: allow::Refusals::new(host.protected.as_deref()),
             active: active_facts(layers, shared, lookup)
                 .into_iter()
                 .map(|(manifest, facts)| (manifest.clone(), facts))
@@ -332,6 +303,30 @@ impl Hooks {
         .filter_map(|(wanted, kind, stops)| wanted.then_some((kind, stops)))
         .collect();
         (kinds, guarded)
+    }
+
+    /// Whether the permission request's `call` names a place the person protects, or one that cannot be placed, from the folder
+    /// `cwd`: an allow never answers for it.
+    pub(super) fn protects(&self, call: &Value, cwd: &Path) -> bool {
+        self.refusals.touches(call, cwd)
+    }
+
+    /// Adds to the environment hooks run in the variables the person's own layers give the agent.
+    pub(super) fn add_to_environment(
+        &mut self,
+        variables: impl IntoIterator<Item = (String, String)>,
+    ) {
+        for (name, value) in variables {
+            let same = |each: &str| {
+                if cfg!(windows) {
+                    each.eq_ignore_ascii_case(&name)
+                } else {
+                    each == name
+                }
+            };
+            self.base.retain(|(each, _)| !same(each));
+            self.base.push((name, value));
+        }
     }
 
     /// Whether an event has a hook that is on for `person`'s allowances plus canoa.cfg's.
@@ -538,8 +533,9 @@ impl Hooks {
         Some(root)
     }
 
-    /// The environment `hook` of `identity` runs with, as the specification gives it: every overlay's root is the private
-    /// copy made of its verified files. None when a copy cannot be made or the overlay's declarations cannot be applied.
+    /// The environment `hook` of `identity` runs with, as the specification gives it: the session's, with every overlay's root
+    /// the private copy made of its verified files. None when a copy cannot be made or the overlay's declarations cannot be
+    /// applied.
     fn environment(
         &self,
         event: HookEvent,
@@ -560,8 +556,15 @@ impl Hooks {
             active.push((manifest, facts));
         }
         let base = Environment::new(self.base.clone(), cfg!(windows));
-        let made =
-            aos::hook_environment(event, &active, &base, turn.pre_env, Some(identity)).ok()?;
+        let made = aos::hook_environment(
+            event,
+            &active,
+            &base,
+            turn.pre_env,
+            Some(identity),
+            &turn.earlier,
+        )
+        .ok()?;
         Some(made.values().to_vec())
     }
 
@@ -619,7 +622,7 @@ impl Hooks {
         let outcome = run::run(&run::Job {
             program,
             args: arguments(interpreter, &script, hook.event),
-            cwd: &root,
+            cwd: turn.cwd,
             env: &env,
             input: &bytes,
             timeout: Duration::from_secs(hook.timeout),
@@ -659,6 +662,14 @@ impl Hooks {
             overlays,
             payload: &payload,
             pre_env: firing.pre_env,
+            cwd: Path::new(
+                firing
+                    .known
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .unwrap_or("."),
+            ),
+            earlier: Vec::new(),
             spent: 0,
         };
         let fired = |runs: &[HookRun]| {
@@ -687,12 +698,18 @@ impl Hooks {
                 }
                 let run = self.run_one(overlay, hook, &turn);
                 turn.spent = turn.spent.saturating_add(run.seconds);
+                // What this hook set is part of the environment of the hooks after it, whether or not the host can apply it.
+                if let Ok(out) = aos::hook_result(event, &run, &self.settings)
+                    && let Some(set) = out.env
+                {
+                    turn.earlier.push(set);
+                }
                 runs.push(run);
                 let so_far = fired(&runs);
-                if so_far
-                    .decision
-                    .is_some_and(|decision| decision != aos::Decision::Ask)
-                {
+                // A block, a deny or a refusal ends the event; an ask or an allow leaves the next hook to decide.
+                if so_far.decision.is_some_and(|decision| {
+                    !matches!(decision, aos::Decision::Ask | aos::Decision::Allow)
+                }) {
                     return so_far;
                 }
             }
@@ -717,10 +734,13 @@ impl Hooks {
             else {
                 continue;
             };
+            // A `pre-env` hook reads what the `pre-env` hooks before it in composition order set.
             let turn = Turn {
                 overlays,
                 payload: &payload,
-                pre_env: &BTreeMap::new(),
+                pre_env: &out,
+                cwd,
+                earlier: Vec::new(),
                 spent: 0,
             };
             let run = self.run_one(overlay, hook, &turn);
@@ -758,12 +778,16 @@ impl Hooks {
     }
 }
 
-/// What a hook is run in: the overlays' files, the payload, the `pre-env` runs of the connection and the seconds the
-/// event's hooks have used.
+/// What a hook is run in: the overlays' files, the payload, the `pre-env` runs of the connection, the session's folder, what
+/// the event's earlier hooks set and the seconds the event's hooks have used.
 struct Turn<'a> {
     overlays: &'a [ReadOverlay],
     payload: &'a Map<String, Value>,
     pre_env: &'a BTreeMap<String, HookRun>,
+    /// The session's folder, where a hook runs.
+    cwd: &'a Path,
+    /// What each earlier hook of the event set, in run order.
+    earlier: Vec<aos::EnvSet>,
     spent: u64,
 }
 

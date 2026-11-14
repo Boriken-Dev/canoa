@@ -1,5 +1,5 @@
 //! The scripted agent as a source of the host's own, with an overlay whose hook logs what it is told: which event fires
-//! when, what the hook may add or ask, and what a hook that fails, goes too long or tries to grant does.
+//! when, what the hook may add or ask, and what a hook that fails or goes too long does.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -290,7 +290,7 @@ fn a_prompt_hook_can_block_and_the_agent_never_hears_the_prompt() {
 
 #[test]
 fn a_prompt_hook_that_goes_wrong_blocks_when_it_fails_closed_and_otherwise_the_prompt_goes_on() {
-    // Every cause: an exit status, too long, too much output, an attempt to grant, and output that is not an object.
+    // Every cause: an exit status, too long, too much output, a decision the event does not take, and output that is not an object.
     let causes: Vec<(&str, Arm, &str)> = vec![
         ("exit", Arm::Exit(3), "prompt = { on_failure = \"refuse\" }"),
         (
@@ -304,7 +304,7 @@ fn a_prompt_hook_that_goes_wrong_blocks_when_it_fails_closed_and_otherwise_the_p
             "prompt = { on_failure = \"refuse\" }",
         ),
         (
-            "grant",
+            "a decision the event does not take",
             print(r#"{"decision":"allow"}"#),
             "prompt = { on_failure = \"refuse\" }",
         ),
@@ -446,36 +446,160 @@ fn a_pre_tool_hook_that_decides_nothing_or_asks_leaves_the_question_to_the_perso
     }
 }
 
+/// Whether the client was asked about a call.
+fn asked(seen: &[Value]) -> bool {
+    seen.iter()
+        .any(|message| message["method"] == "session/request_permission")
+}
+
+/// Whether a call ran to its end.
+fn ran(seen: &[Value]) -> bool {
+    seen.iter()
+        .any(|message| message["params"]["update"]["status"] == "completed")
+}
+
 #[test]
-fn a_pre_tool_hook_cannot_approve_a_call() {
-    // `allow` is an attempt to grant: reported by default, a denial for a guard.
-    for (table, denied) in [
-        ("pre-tool = {}", false),
-        ("pre-tool = { on_failure = \"refuse\" }", true),
-    ] {
-        let setup = start(
-            &hooks(table),
-            &[("pre-tool", print(r#"{"decision":"allow"}"#))],
-            &Allow::Digest,
-            &[],
-        );
+fn a_pre_tool_allow_answers_the_question_the_person_would_have_been_asked_with_allow_once() {
+    let setup = start(
+        &hooks("pre-tool = { match = [\"edit\"] }"),
+        &[("pre-tool", print(r#"{"decision":"allow","reason":"fine"}"#))],
+        &Allow::Digest,
+        &[],
+    );
+    setup.initialize(false);
+    let session = session_id(&setup.new_session(2).expect("a session opens"));
+    // The person would have said no: the question never reaches them, and the call runs.
+    let (turn, seen) = setup.turn(3, &session, "Rename it", "no");
+    turn.expect("the turn ends");
+    assert!(!asked(&seen), "the client was asked: {seen:?}");
+    assert!(
+        ran(&seen),
+        "the allow did not answer the question: {seen:?}"
+    );
+    // Never the option that remembers: the agent asks about the next call of that kind as well.
+    let (turn, seen) = setup.turn(4, &session, "Hello", "no");
+    turn.expect("the turn ends");
+    assert!(ran(&seen), "{seen:?}");
+    assert_eq!(
+        setup.events("pre-tool", 2).len(),
+        2,
+        "the agent remembered an answer it was given"
+    );
+    setup.host.stop();
+}
+
+/// A profile with `team` (priority 100) and `other` (priority 600), each with a `pre-tool` hook printing what is given.
+fn two_overlays(team: &str, other: &str, config: &str) -> hooked::Setup {
+    let manifest = "priority = 100\n[hooks]\npre-tool = { match = [\"edit\"] }\n";
+    let second = "priority = 600\n[hooks]\npre-tool = { match = [\"edit\"] }\n";
+    hooked::start_with(
+        manifest,
+        &[("pre-tool", print(team))],
+        &[hooked::Other {
+            name: "other",
+            manifest: second,
+            arms: vec![("pre-tool", print(other))],
+        }],
+        config,
+    )
+}
+
+const ALLOW: &str = r#"{"decision":"allow"}"#;
+const DENY: &str = r#"{"decision":"deny","reason":"no edits"}"#;
+const ASK: &str = r#"{"decision":"ask","reason":"look"}"#;
+
+#[test]
+fn a_deny_beats_an_allow_in_either_order() {
+    for (team, other) in [(ALLOW, DENY), (DENY, ALLOW)] {
+        let setup = two_overlays(team, other, "");
         setup.initialize(false);
         let session = session_id(&setup.new_session(2).expect("a session opens"));
-        // The person says no: nothing a hook output made it run.
-        let (turn, seen) = setup.turn(3, &session, "Rename it", "no");
+        let (turn, seen) = setup.turn(3, &session, "Rename it", "yes");
         turn.expect("the turn ends");
-        let asked = seen
-            .iter()
-            .any(|message| message["method"] == "session/request_permission");
-        assert_eq!(asked, !denied, "{table}: {seen:?}");
+        assert!(!asked(&seen), "{team} then {other}: the client was asked");
+        assert!(!ran(&seen), "{team} then {other}: the call ran");
         assert!(
-            !seen
-                .iter()
-                .any(|message| message["params"]["update"]["status"] == "completed"),
-            "{table}: it ran"
+            seen.iter()
+                .any(|message| message["params"]["update"]["status"] == "failed"),
+            "{team} then {other}: {seen:?}"
         );
         setup.host.stop();
     }
+}
+
+#[test]
+fn an_ask_beats_an_allow_and_a_rewrite_that_came_with_it_is_dropped() {
+    let rewrite = r#"{"decision":"allow","input":{"file_path":"elsewhere.js"}}"#;
+    for (team, other) in [(rewrite, ASK), (ASK, rewrite), (ALLOW, ASK)] {
+        let setup = two_overlays(team, other, "");
+        setup.initialize(false);
+        let session = session_id(&setup.new_session(2).expect("a session opens"));
+        let (turn, seen) = setup.turn(3, &session, "Rename it", "no");
+        turn.expect("the turn ends");
+        let question = seen
+            .iter()
+            .find(|message| message["method"] == "session/request_permission")
+            .unwrap_or_else(|| panic!("{team} then {other}: the person was not asked: {seen:?}"));
+        assert_eq!(
+            question["params"]["toolCall"]["rawInput"],
+            json!({"file_path": "src/calc.js"}),
+            "they are asked about the call as the agent gave it"
+        );
+        assert!(!ran(&seen), "{team} then {other}: their no was not kept");
+        setup.host.stop();
+    }
+}
+
+#[test]
+fn an_allow_that_brings_an_input_is_not_applied_over_acp_and_the_person_is_asked() {
+    // The answer to `session/request_permission` names an option and carries no input, so the call cannot run as rewritten:
+    // the allow is not applied either.
+    let setup = start(
+        &hooks("pre-tool = { match = [\"edit\"] }"),
+        &[(
+            "pre-tool",
+            print(r#"{"decision":"allow","input":{"file_path":"elsewhere.js"}}"#),
+        )],
+        &Allow::Digest,
+        &[],
+    );
+    setup.initialize(false);
+    let session = session_id(&setup.new_session(2).expect("a session opens"));
+    let (turn, seen) = setup.turn(3, &session, "Rename it", "no");
+    turn.expect("the turn ends");
+    assert!(asked(&seen), "{seen:?}");
+    assert!(!ran(&seen), "{seen:?}");
+    setup.host.stop();
+}
+
+#[test]
+fn a_protected_path_is_still_asked_about_whatever_a_hook_allowed() {
+    let setup = start_protected("calc.js", &hooks("pre-tool = { match = [\"edit\"] }"));
+    setup.initialize(false);
+    let session = session_id(&setup.new_session(2).expect("a session opens"));
+    // `src/calc.js` is on the person's list: the question goes to them, and their no stands.
+    let (turn, seen) = setup.turn(3, &session, "Rename it", "no");
+    turn.expect("the turn ends");
+    assert!(
+        asked(&seen),
+        "the allow answered for a protected path: {seen:?}"
+    );
+    assert!(!ran(&seen), "{seen:?}");
+    // A path that is not on it is allowed as before.
+    let (turn, seen) = setup.turn(4, &session, "Hello", "no");
+    turn.expect("the turn ends");
+    assert!(!asked(&seen) && ran(&seen), "{seen:?}");
+    setup.host.stop();
+}
+
+/// A host whose canoa.cfg protects `list` (one pattern a line) and whose overlay `team` allows every edit.
+fn start_protected(list: &str, manifest: &str) -> hooked::Setup {
+    hooked::start_with(
+        manifest,
+        &[("pre-tool", print(ALLOW))],
+        &[],
+        &format!("[permissions]\nprotected = \"{list}\"\n"),
+    )
 }
 
 #[test]

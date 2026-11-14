@@ -7,6 +7,7 @@ use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use std::path::Path;
 
 use coqui_aos::{Decision, FiredEvent, HookEvent};
 use coqui_transport::Channel;
@@ -14,14 +15,16 @@ use serde_json::{Map, Value, json};
 
 use super::forward::Forward;
 use super::{Firing, report_item};
-use crate::profile::hosted::{Hosted, Item, SESSION_METHODS, Written, error};
+use crate::profile::hosted::{
+    Hosted, Item, LayerId, LayerKind, SESSION_METHODS, State, Written, error,
+};
 
 mod native;
 
 /// The outputs Canoa applies for each event over ACP.
 const SESSION_START: [&str; 2] = ["context", "refuse"];
 const PROMPT: [&str; 2] = ["context", "block"];
-const PRE_TOOL: [&str; 2] = ["deny", "ask"];
+pub(super) const PRE_TOOL: [&str; 3] = ["deny", "ask", "allow"];
 const POST_TOOL: [&str; 1] = ["context"];
 const NOTHING: [&str; 0] = [];
 
@@ -682,29 +685,46 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         hold.book.remember(fired.reports.iter().map(report_item));
         // No decision is not an approval: the question goes to the client as it would have without the hooks, and `ask` is
         // that same question.
-        if !matches!(fired.decision, Some(Decision::Deny)) {
-            return Seen::Passed(None);
-        }
-        let rejecting = params
-            .get("options")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .find(|option| option.get("kind").and_then(Value::as_str) == Some("reject_once"))
-            .or_else(|| {
-                params
-                    .get("options")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .find(|option| {
-                        option.get("kind").and_then(Value::as_str) == Some("reject_always")
-                    })
-            })
-            .and_then(|option| option.get("optionId").cloned());
-        let outcome = match rejecting {
-            Some(option) => json!({"outcome": "selected", "optionId": option}),
-            None => json!({"outcome": "cancelled"}),
+        let options = params.get("options").and_then(Value::as_array);
+        let option = |kind: &str| {
+            options
+                .into_iter()
+                .flatten()
+                .find(|option| option.get("kind").and_then(Value::as_str) == Some(kind))
+                .and_then(|option| option.get("optionId").cloned())
+        };
+        let outcome = match fired.decision {
+            Some(Decision::Deny) => match option("reject_once").or_else(|| option("reject_always"))
+            {
+                Some(option) => json!({"outcome": "selected", "optionId": option}),
+                None => json!({"outcome": "cancelled"}),
+            },
+            Some(Decision::Allow) => {
+                // An allow answers for the person only with the option that allows this once, never one that remembers the
+                // choice, and never for a place the person protects: those go to them as they would have.
+                let call = params.get("toolCall").unwrap_or(&Value::Null);
+                let protected = self
+                    .connection
+                    .hooks
+                    .protects(call, Path::new(&session.cwd));
+                let Some(allowing) = option("allow_once").filter(|_| !protected) else {
+                    let by = fired.by.clone().unwrap_or_default();
+                    let why = if protected {
+                        "the call names a place the person protects"
+                    } else {
+                        "the agent offers no option that allows it once"
+                    };
+                    hold.book.remember([Item::new(
+                        format!("hooks.{by}.pre-tool"),
+                        LayerId::new(LayerKind::Overlay, by),
+                        State::Unsupported,
+                        format!("hook-not-applied: allow, {why}, so the person is asked"),
+                    )]);
+                    return Seen::Passed(None);
+                };
+                json!({"outcome": "selected", "optionId": allowing})
+            }
+            _ => return Seen::Passed(None),
         };
         let answer = json!({"jsonrpc": "2.0", "id": id, "result": {"outcome": outcome}});
         if let Ok(answer) = serde_json::to_vec(&answer) {
@@ -712,7 +732,12 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         }
         tracing::info!(
             entry = self.connection.entry,
-            "a tool call was denied by an overlay's hook"
+            "a tool call was {} by an overlay's hook",
+            if fired.decision == Some(Decision::Allow) {
+                "allowed"
+            } else {
+                "denied"
+            }
         );
         Seen::Dropped
     }

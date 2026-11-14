@@ -112,6 +112,8 @@ pub struct LocalProfiles {
     /// `[loadout] skills`: the skills the person chose themselves and turned on, which the host delivers from the app's record
     /// of each, once the record and the files agree.
     pub chosen_skills: Vec<String>,
+    /// `[permissions] protected`: the places a hook's allow never answers for.
+    pub protected: Option<Vec<String>>,
 }
 
 /// One agent's `[agents.NAME.profile]` layer and `[agents.NAME.mcp]` choices.
@@ -176,6 +178,7 @@ impl LocalProfiles {
             skill_pins: self.skill_pins.clone(),
             options: self.options.clone(),
             chosen_skills: self.chosen_skills.clone(),
+            protected: self.protected.clone(),
         })
     }
 }
@@ -489,6 +492,9 @@ pub struct HostProfile {
     /// The skills the person chose themselves that are on (`[loadout] skills`), for the host's own sources only: each is
     /// delivered from the app's record of it when the record and the files agree.
     pub chosen_skills: Vec<String>,
+    /// `[permissions] protected`: the places a hook's allow never answers for, in gitignore syntax; none leaves it to the
+    /// host's recommended places.
+    pub protected: Option<Vec<String>>,
 }
 
 /// Where an entry listens, as an entry's `listen` writes it.
@@ -1179,6 +1185,7 @@ impl Config {
         let options = overlay_options_of(&raw.overlays)?;
         local_profiles.options.clone_from(&options);
         local_profiles.chosen_skills = chosen_skills_of(raw.loadout.as_ref())?;
+        local_profiles.protected.clone_from(&protected_paths);
         let Some(host) = raw.host else {
             return Ok(Self {
                 limit_phrases,
@@ -1204,6 +1211,7 @@ impl Config {
             let mut profile = profile_of(&name, table, &directory)?;
             profile.skill_pins.clone_from(&skill_pins);
             profile.options.clone_from(&options);
+            profile.protected.clone_from(&protected_paths);
             profiles.insert(name, profile);
         }
         let account_store = match host.account_store.as_deref() {
@@ -1980,6 +1988,7 @@ fn profile_of(
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
         chosen_skills: Vec::new(),
+        protected: None,
     })
 }
 
@@ -2064,6 +2073,7 @@ fn local_profiles_of(
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
         chosen_skills: Vec::new(),
+        protected: None,
     })
 }
 

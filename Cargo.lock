@@ -936,7 +936,7 @@ dependencies = [
 [[package]]
 name = "coqui-aos"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=424edccf9f00fd42d5e637a5baf5b570a9a2005f#424edccf9f00fd42d5e637a5baf5b570a9a2005f"
+source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=d1be62428eb2778cf67b18b6356496388185ea84#d1be62428eb2778cf67b18b6356496388185ea84"
 dependencies = [
  "granit-parser",
  "guatiao",

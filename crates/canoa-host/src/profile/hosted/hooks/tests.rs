@@ -141,7 +141,7 @@ fn prompt(connection: &Connection, text: &str) -> aos::FiredEvent {
 fn prompt_after(connection: &Connection, text: &str, used: usize) -> aos::FiredEvent {
     let mut known = Map::new();
     known.insert("harness".to_owned(), json!("claude-code"));
-    known.insert("cwd".to_owned(), json!("/work"));
+    known.insert("cwd".to_owned(), json!(std::env::temp_dir()));
     known.insert("session".to_owned(), json!("canoa-session-1"));
     known.insert("prompt".to_owned(), json!(text));
     connection.hooks.fire(
@@ -154,6 +154,30 @@ fn prompt_after(connection: &Connection, text: &str, used: usize) -> aos::FiredE
             applies: &["context", "block"],
             pre_env: &connection.pre_env.runs,
             context_used: used,
+        },
+    )
+}
+
+/// A `pre-tool` event for a call of `kind` with `input`, in the folder `cwd`, as the host answers one over ACP.
+fn pre_tool(connection: &Connection, kind: &str, input: Value, cwd: &Path) -> aos::FiredEvent {
+    let mut known = Map::new();
+    known.insert("harness".to_owned(), json!("claude-code"));
+    known.insert("cwd".to_owned(), json!(cwd));
+    known.insert("session".to_owned(), json!("canoa-session-1"));
+    known.insert(
+        "tool".to_owned(),
+        json!({"kind": kind, "name": "Tool", "input": input}),
+    );
+    connection.hooks.fire(
+        &connection.overlays,
+        &Firing {
+            event: HookEvent::PreTool,
+            known: &known,
+            select: Some(kind),
+            person: &BTreeSet::new(),
+            applies: &events::PRE_TOOL,
+            pre_env: &connection.pre_env.runs,
+            context_used: 0,
         },
     )
 }
@@ -252,25 +276,24 @@ fn a_pre_env_guard_that_fails_starts_no_agent() {
 }
 
 #[test]
-fn a_hook_is_given_its_event_and_its_roots_copy_and_nothing_of_the_hosts_environment() {
+fn a_hook_is_given_its_event_its_roots_copy_and_the_hosts_environment() {
     let temp = Temp::new();
-    let outside = std::env::vars()
-        .find(|(name, value)| {
-            !value.is_empty()
-                && name.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
-                && !PASSED
-                    .iter()
-                    .any(|passed| passed.eq_ignore_ascii_case(name))
-                && !name.eq_ignore_ascii_case("PATH")
-        })
-        .map(|(name, _)| name);
-    let Some(outside) = outside else {
+    let outside = std::env::vars().find(|(name, value)| {
+        !value.trim().is_empty()
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+            && name.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+            && !name.eq_ignore_ascii_case("PATH")
+    });
+    let Some((outside, value)) = outside else {
         return;
     };
     let digest = temp.install("", &[("pre-env", Arm::LogEnv(outside))]);
     connect(&temp, Some(&digest), &real).expect("prepared");
     let raw = std::fs::read_to_string(temp.log()).expect("logged");
-    assert!(raw.lines().any(|line| line.trim() == "envprobe="), "{raw}");
+    let expected = format!("envprobe={}", value.trim());
+    assert!(raw.lines().any(|line| line.trim() == expected), "{raw}");
 
     let temp = Temp::new();
     let digest = temp.install("", &[("pre-env", Arm::LogEnv("AOS_HOOK_EVENT".to_owned()))]);
@@ -336,12 +359,12 @@ fn every_way_a_run_fails_is_named_and_a_guard_blocks_on_each() {
             "prompt = { on_failure = \"refuse\" }",
         ),
         (
-            "grant",
+            "output",
             Arm::Print(r#"{"decision":"allow"}"#.to_owned()),
             "prompt = { on_failure = \"refuse\" }",
         ),
         (
-            "grant",
+            "output",
             Arm::Print(r#"{"decision":""}"#.to_owned()),
             "prompt = { on_failure = \"refuse\" }",
         ),
@@ -375,7 +398,7 @@ fn every_way_a_run_fails_is_named_and_a_guard_blocks_on_each() {
 }
 
 #[test]
-fn a_run_that_goes_over_a_bound_is_stopped_and_what_it_started_ends_with_it() {
+fn a_run_that_goes_over_a_bound_is_stopped() {
     let temp = Temp::new();
     let digest = temp.install(
         "[hooks]\nprompt = { timeout = 1 }\n",
@@ -473,7 +496,7 @@ fn context_a_hook_prints_is_kept_to_the_spec_s_characters() {
 
 #[cfg(unix)]
 #[test]
-fn a_process_that_leaves_the_hooks_group_and_holds_its_output_does_not_hold_the_relay() {
+fn a_process_a_hook_leaves_behind_and_that_holds_its_output_does_not_hold_the_relay() {
     let temp = Temp::new();
     let digest = temp.install("[hooks]\nprompt = {}\n", &[("prompt", Arm::Daemon)]);
     let connection = connect(&temp, Some(&digest), &real).expect("prepared");
@@ -618,7 +641,7 @@ fn a_hook_gets_its_overlays_declarations_name_and_root_and_a_pre_env_hook_does_n
 }
 
 #[test]
-fn a_hook_gets_what_pre_env_printed_but_not_what_another_overlay_declared() {
+fn a_hook_gets_what_pre_env_printed_and_what_another_overlay_declared() {
     let temp = Temp::new();
     let digest = temp.install(
         "[hooks]\npre-env = {}\nprompt = {}\n",
@@ -635,7 +658,7 @@ fn a_hook_gets_what_pre_env_printed_but_not_what_another_overlay_declared() {
     assert_eq!(probed(&temp), ["from-hook"]);
 
     for (variable, expected) in [
-        ("OTHER_VAR", ""),
+        ("OTHER_VAR", "theirs"),
         (aos::root_variable("other").as_str(), "*"),
     ] {
         let temp = Temp::new();
@@ -655,7 +678,7 @@ fn a_hook_gets_what_pre_env_printed_but_not_what_another_overlay_declared() {
                 "every overlay's root variable is given"
             );
         } else {
-            assert_eq!(seen[0], expected, "another overlay's declaration is not");
+            assert_eq!(seen[0], expected, "another overlay's declaration is given");
         }
     }
 }
@@ -686,6 +709,217 @@ fn hooks_run_in_composition_order_whatever_order_the_profile_lists_the_overlays_
     assert_eq!(order, ["early", "late"]);
 }
 
+/// What the script logged of the directory it ran in, one entry per run.
+fn cwds(temp: &Temp) -> Vec<String> {
+    std::fs::read_to_string(temp.log())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("cwd="))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_hook_of_a_later_overlay_reads_a_variable_an_earlier_overlay_declared_and_the_reverse() {
+    // Overlays stack: every hook runs on the finished stack, whichever overlay declared the variable and whichever order
+    // the profile lists them in.
+    for (hook_priority, other_priority) in [(600, 100), (100, 600)] {
+        let temp = Temp::new();
+        temp.install_as(
+            "first",
+            &format!("priority = {other_priority}\n[env]\nFIRST_VAR = \"one\"\n"),
+            &[],
+            &[],
+        );
+        let digest = temp.install_as(
+            "second",
+            &format!("priority = {hook_priority}\n[hooks]\nprompt = {{}}\n"),
+            &[("prompt", Arm::LogEnv("FIRST_VAR".to_owned()))],
+            &[],
+        );
+        let connection =
+            connect_overlays(&temp, &["first", "second"], &[("second", &digest)], &real)
+                .expect("prepared");
+        prompt(&connection, "hello");
+        assert_eq!(
+            probed(&temp),
+            ["one"],
+            "priorities {hook_priority}/{other_priority}"
+        );
+    }
+}
+
+#[test]
+fn a_pre_env_hook_reads_what_an_earlier_overlays_pre_env_hook_set_and_not_a_later_ones() {
+    let temp = Temp::new();
+    let first = temp.install_as(
+        "first",
+        "priority = 100\n[hooks]\npre-env = {}\n",
+        &[(
+            "pre-env",
+            Arm::Print(r#"{"FIRST_PRE":"from-first"}"#.to_owned()),
+        )],
+        &[],
+    );
+    let second = temp.install_as(
+        "second",
+        "priority = 600\n[hooks]\npre-env = {}\n",
+        &[("pre-env", Arm::LogEnv("FIRST_PRE".to_owned()))],
+        &[],
+    );
+    connect_overlays(
+        &temp,
+        &["second", "first"],
+        &[("first", &first), ("second", &second)],
+        &real,
+    )
+    .expect("prepared");
+    // The earlier overlay's own run read nothing of the later one's, and the later one's read the earlier one's.
+    assert_eq!(probed(&temp), ["from-first"]);
+}
+
+#[test]
+fn a_hook_runs_in_the_sessions_folder_not_its_overlays() {
+    let temp = Temp::new();
+    let digest = temp.install("[hooks]\nprompt = {}\n", &[("prompt", Arm::LogCwd)]);
+    let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+    prompt(&connection, "hello");
+    let ran_in = cwds(&temp);
+    assert_eq!(ran_in.len(), 1, "{ran_in:?}");
+    assert_eq!(
+        Path::new(&ran_in[0]).canonicalize().expect("a folder"),
+        std::env::temp_dir().canonicalize().expect("a folder"),
+        "{ran_in:?}"
+    );
+}
+
+#[test]
+fn a_hook_of_the_event_reads_what_an_earlier_hook_of_it_set() {
+    let temp = Temp::new();
+    let first = temp.install_as(
+        "first",
+        "priority = 100\n[hooks]\npre-tool = { sets = [\"SET_BY_FIRST\"] }\n",
+        &[(
+            "pre-tool",
+            Arm::Print(r#"{"env":{"SET_BY_FIRST":"yes"}}"#.to_owned()),
+        )],
+        &[],
+    );
+    let second = temp.install_as(
+        "second",
+        "priority = 600\n[hooks]\npre-tool = {}\n",
+        &[("pre-tool", Arm::LogEnv("SET_BY_FIRST".to_owned()))],
+        &[],
+    );
+    let connection = connect_overlays(
+        &temp,
+        &["first", "second"],
+        &[("first", &first), ("second", &second)],
+        &real,
+    )
+    .expect("prepared");
+    pre_tool(
+        &connection,
+        "execute",
+        json!({"command": "ls"}),
+        &std::env::temp_dir(),
+    );
+    assert_eq!(probed(&temp), ["yes"]);
+}
+
+/// Two overlays' `pre-tool` hooks, the first printing `first` and the second `second` (nothing for an empty text), and the
+/// event they fire for an edit.
+fn two_pre_tool_hooks(first: &str, second: &str) -> (Temp, aos::FiredEvent) {
+    let temp = Temp::new();
+    let mut allow = Vec::new();
+    for (name, priority, output) in [("first", 100, first), ("second", 600, second)] {
+        let arms = if output.is_empty() {
+            vec![]
+        } else {
+            vec![("pre-tool", Arm::Print(output.to_owned()))]
+        };
+        let digest = temp.install_as(
+            name,
+            &format!("priority = {priority}\n[hooks]\npre-tool = {{}}\n"),
+            &arms,
+            &[],
+        );
+        allow.push((name, digest));
+    }
+    let allow: Vec<(&str, &str)> = allow
+        .iter()
+        .map(|(name, digest)| (*name, digest.as_str()))
+        .collect();
+    let connection =
+        connect_overlays(&temp, &["first", "second"], &allow, &real).expect("prepared");
+    let fired = pre_tool(
+        &connection,
+        "edit",
+        json!({"file_path": "a.txt"}),
+        &std::env::temp_dir(),
+    );
+    (temp, fired)
+}
+
+const ALLOW: &str = r#"{"decision":"allow","reason":"fine"}"#;
+const DENY: &str = r#"{"decision":"deny","reason":"no"}"#;
+const ASK: &str = r#"{"decision":"ask","reason":"look"}"#;
+
+#[test]
+fn hooks_combine_to_the_tightest_a_deny_beats_an_ask_and_an_ask_beats_an_allow() {
+    for (first, second, expected) in [
+        (ALLOW, "", Some(aos::Decision::Allow)),
+        (ALLOW, ALLOW, Some(aos::Decision::Allow)),
+        (ALLOW, DENY, Some(aos::Decision::Deny)),
+        (DENY, ALLOW, Some(aos::Decision::Deny)),
+        (ALLOW, ASK, Some(aos::Decision::Ask)),
+        (ASK, ALLOW, Some(aos::Decision::Ask)),
+        (ASK, DENY, Some(aos::Decision::Deny)),
+        ("", "", None),
+    ] {
+        let (_temp, fired) = two_pre_tool_hooks(first, second);
+        assert_eq!(fired.decision, expected, "{first} then {second}");
+    }
+}
+
+#[test]
+fn a_deny_ends_the_event_and_an_allow_does_not() {
+    let (temp, fired) = two_pre_tool_hooks(DENY, ALLOW);
+    assert_eq!(fired.ran, ["first"], "{:?}", fired.ran);
+    drop(temp);
+    let (_temp, fired) = two_pre_tool_hooks(ALLOW, ASK);
+    assert_eq!(
+        fired.ran,
+        ["first", "second"],
+        "an allow lets the next hook decide"
+    );
+}
+
+#[test]
+fn an_allow_that_brings_an_input_is_not_applied_over_acp_and_is_reported() {
+    // ACP's answer to a permission request names an option and carries no input, so the call cannot run as rewritten.
+    let (_temp, fired) =
+        two_pre_tool_hooks(r#"{"decision":"allow","input":{"file_path":"b.txt"}}"#, "");
+    assert_eq!(fired.decision, None, "the allow is not applied either");
+    assert!(
+        fired
+            .reports
+            .iter()
+            .any(|report| report.id == "hook-not-applied"
+                && report.about == ["first", "pre-tool", "input"]),
+        "{:?}",
+        fired.reports
+    );
+    assert_eq!(fired.input, None);
+}
+
+#[test]
+fn a_rewrite_an_ask_beats_is_not_applied() {
+    let (_temp, fired) =
+        two_pre_tool_hooks(r#"{"decision":"allow","input":{"file_path":"b.txt"}}"#, ASK);
+    assert_eq!(fired.decision, Some(aos::Decision::Ask));
+    assert_eq!(fired.input, None, "the call is asked about as it was given");
+}
 /// Gives a directory an old modification time.
 fn age(dir: &Path, old: std::time::SystemTime) {
     let mut open = std::fs::OpenOptions::new();
@@ -1050,7 +1284,8 @@ mod native {
             .collect()
     }
 
-    /// A host with overlay `team` allowed for `manifest` and `arms`, and a session on `harness` working in `cwd`.
+    /// A host with overlay `team` allowed for `manifest` and `arms`, and a session on `harness` working in `cwd`, a folder
+    /// (with `sub` and `a` in it) made under the test's own directory.
     fn run(
         manifest: &str,
         arms: &[(&str, Arm)],
@@ -1064,7 +1299,11 @@ mod native {
         let client = Client::default();
         let scope = Scope::new(Vec::new());
         let hosted = Hosted::in_process(&client, &scope, &connection);
-        let opened = session(hosted, &client, harness, cwd);
+        let dir = temp.0.join(cwd);
+        for sub in ["sub", "a"] {
+            std::fs::create_dir_all(dir.join(sub)).expect("a folder");
+        }
+        let opened = session(hosted, &client, harness, &dir.to_string_lossy());
         then(&temp, opened);
     }
 
@@ -1077,7 +1316,7 @@ mod native {
             "[hooks]\npre-compact = {}\ncd = {}\n",
             &[],
             CLAUDE,
-            "/work",
+            "work",
             |_, session| {
                 let hooks = session.hooks();
                 let mut events: Vec<&str> = hooks["hooks"]
@@ -1112,7 +1351,7 @@ mod native {
     #[test]
     fn nothing_is_written_when_no_overlay_listens_or_the_harness_is_not_claude() {
         let none = "[hooks]\nprompt = {}\ncd = false\npre-compact = false\nsession-start = false\n";
-        run(none, &[], CLAUDE, "/work", |_, session| {
+        run(none, &[], CLAUDE, "work", |_, session| {
             assert!(
                 session.plugin.is_none(),
                 "an overlay with no hook for these events gets no plugin"
@@ -1123,7 +1362,7 @@ mod native {
                 "[hooks]\npre-compact = {}\ncd = {}\n",
                 &[],
                 harness,
-                "/work",
+                "work",
                 |_, session| {
                     assert!(session.plugin.is_none(), "{harness}");
                 },
@@ -1140,11 +1379,12 @@ mod native {
                 Arm::Print(r#"{"decision":"block","reason":"not now"}"#.to_owned()),
             )],
             CLAUDE,
-            "/work",
+            "work",
             |temp, session| {
+                let work = temp.0.join("work");
                 let stopped = session.report(
                     "pre-compact",
-                    json!({"trigger": "manual", "cwd": "/work", "session_id": "x"}),
+                    json!({"trigger": "manual", "cwd": work, "session_id": "x"}),
                 );
                 assert_eq!(stopped, Ok(true));
                 let payloads = payload_of(temp, "pre-compact");
@@ -1162,7 +1402,7 @@ mod native {
             "[hooks]\npre-compact = {}\n",
             &[],
             CLAUDE,
-            "/work",
+            "work",
             |temp, session| {
                 assert_eq!(
                     session.report("pre-compact", json!({"trigger": "auto"})),
@@ -1179,7 +1419,7 @@ mod native {
             "[hooks]\npre-compact = { on_failure = \"refuse\" }\n",
             &[("pre-compact", Arm::Exit(3))],
             CLAUDE,
-            "/work",
+            "work",
             |_, session| {
                 assert_eq!(
                     session.report("pre-compact", json!({"trigger": "manual"})),
@@ -1195,34 +1435,40 @@ mod native {
             "[hooks]\ncd = {}\n",
             &[],
             CLAUDE,
-            "/work",
+            "work",
             |temp, session| {
+                let work = temp.0.join("work");
+                let sub = work.join("sub");
+                let (work, sub) = (work.to_string_lossy(), sub.to_string_lossy());
                 // The harness says where it starts, spelled as it spells it: that is where the session is, not a change.
                 session
-                    .report("start", json!({"source": "startup", "cwd": "\\work\\"}))
+                    .report(
+                        "start",
+                        json!({"source": "startup", "cwd": format!("{work}{}", std::path::MAIN_SEPARATOR)}),
+                    )
                     .expect("answered");
                 session
-                    .report("batch", json!({"cwd": "/work"}))
+                    .report("batch", json!({"cwd": work}))
                     .expect("answered");
                 assert!(payload_of(temp, "cd").is_empty());
                 session
-                    .report("batch", json!({"cwd": "/work/sub"}))
+                    .report("batch", json!({"cwd": sub}))
                     .expect("answered");
                 session
-                    .report("batch", json!({"cwd": "/work/sub"}))
+                    .report("batch", json!({"cwd": sub}))
                     .expect("answered");
                 session
-                    .report("batch", json!({"cwd": "/work"}))
+                    .report("batch", json!({"cwd": work}))
                     .expect("answered");
                 let moves = payload_of(temp, "cd");
                 assert_eq!(moves.len(), 2, "{moves:?}");
                 assert_eq!(
                     (moves[0]["previous"].as_str(), moves[0]["cwd"].as_str()),
-                    (Some("/work"), Some("/work/sub"))
+                    (Some(&*work), Some(&*sub))
                 );
                 assert_eq!(
                     (moves[1]["previous"].as_str(), moves[1]["cwd"].as_str()),
-                    (Some("/work/sub"), Some("/work"))
+                    (Some(&*sub), Some(&*work))
                 );
             },
         );
@@ -1237,15 +1483,16 @@ mod native {
                 Arm::Print(r#"{"context":"AFTER-COMPACT"}"#.to_owned()),
             )],
             CLAUDE,
-            "/work",
+            "work",
             |temp, mut session| {
+                let work = temp.0.join("work");
                 // A start the host opened itself is not run again from the harness's own report.
                 session
-                    .report("start", json!({"source": "startup", "cwd": "/work"}))
+                    .report("start", json!({"source": "startup", "cwd": work}))
                     .expect("answered");
                 assert!(payload_of(temp, "session-start").is_empty());
                 session
-                    .report("start", json!({"source": "compact", "cwd": "/work"}))
+                    .report("start", json!({"source": "compact", "cwd": work}))
                     .expect("answered");
                 let starts = payload_of(temp, "session-start");
                 assert_eq!(starts.len(), 1);
@@ -1304,11 +1551,11 @@ mod native {
             "[hooks]\ncd = {}\n",
             &[],
             CLAUDE,
-            "/work",
+            "work",
             |temp, session| {
                 let channel = session.channel();
                 session
-                    .report("batch", json!({"cwd": "/work/a"}))
+                    .report("batch", json!({"cwd": temp.0.join("work").join("a")}))
                     .expect("answered");
                 assert_eq!(payload_of(temp, "cd").len(), 1);
                 send(
@@ -1481,7 +1728,7 @@ mod native {
 
     #[test]
     fn a_request_that_is_answered_keeps_its_plugin_until_the_session_ends() {
-        run("[hooks]\ncd = {}\n", &[], CLAUDE, "/work", |_, session| {
+        run("[hooks]\ncd = {}\n", &[], CLAUDE, "work", |_, session| {
             let plugin = session.plugin.clone().expect("a plugin");
             assert!(plugin.exists());
             send(

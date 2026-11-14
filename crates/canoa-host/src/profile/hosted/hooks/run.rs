@@ -1,5 +1,5 @@
-//! One run of a hook's process: its payload on standard input, its output read up to a bound, a time limit, and every
-//! process it started ended when it ends.
+//! One run of a hook's process: its payload on standard input, its output read up to a bound, and a time limit at which the
+//! process itself is stopped. What it started is its own business, as with an agent's own hooks.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -24,7 +24,7 @@ pub(super) struct Job<'a> {
     pub(super) program: &'a Path,
     /// Its arguments: the script, then the event.
     pub(super) args: Vec<OsString>,
-    /// The overlay's root.
+    /// Where it runs: the session's folder.
     pub(super) cwd: &'a Path,
     /// The whole environment: nothing else is inherited.
     pub(super) env: &'a [(String, String)],
@@ -38,7 +38,7 @@ pub(super) struct Job<'a> {
 
 /// How a run ended.
 pub(super) struct Outcome {
-    /// Whether the process started and was held by its job.
+    /// Whether the process started.
     pub(super) started: bool,
     /// What it wrote to standard output, up to one byte past the bound.
     pub(super) stdout: Vec<u8>,
@@ -66,50 +66,27 @@ impl Outcome {
     }
 }
 
-/// A started process and what ends all of it.
-struct Held {
-    child: Child,
-    #[cfg(windows)]
-    job: Option<win32job::Job>,
-}
-
-impl Held {
-    /// Ends the process and everything it started, and collects it. A process whose status could not be read is taken as
-    /// collected by someone else, and its group is left alone: its id may be anyone's.
-    fn end(&mut self) {
-        #[cfg(windows)]
-        drop(self.job.take());
-        self.child.end_group();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-
-    /// Whether the process has ended and how, with what it started ended too.
-    fn finished(&mut self) -> Finished {
-        // Where the system can say a process has ended without collecting it, it is not collected until its group has
-        // been ended: until then, nobody else can have its id. Elsewhere the group is ended just after, which the system
-        // does not reuse an id for while any process is in it.
-        match self.child.peek() {
-            Ok(None) => return Finished::Running,
-            Err(_) => return Finished::Unreadable,
-            Ok(Some(_)) => {}
-        }
-        self.child.end_group_after_exit();
-        let Ok(Some(status)) = self.child.try_wait() else {
-            return Finished::Unreadable;
-        };
-        #[cfg(windows)]
-        drop(self.job.take());
-        Finished::Exited(status.code().unwrap_or(-1))
-    }
-}
-
 /// What a look at the process found.
 enum Finished {
     Running,
     Exited(i32),
     /// It has ended, or its status was taken by someone else: how it ended cannot be read.
     Unreadable,
+}
+
+/// Whether the process has ended and how.
+fn finished(child: &mut Child) -> Finished {
+    match child.try_wait() {
+        Ok(None) => Finished::Running,
+        Ok(Some(status)) => Finished::Exited(status.code().unwrap_or(-1)),
+        Err(_) => Finished::Unreadable,
+    }
+}
+
+/// Stops the process, not what it started, and collects it.
+fn end(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Runs `job` to its end, its time limit or its output bound, whichever is first.
@@ -126,8 +103,6 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
     // The agent's windows are the person's: a hook's console is not one of them.
     #[cfg(windows)]
     command.creation_flags(0x0800_0000);
-    // Its own group, so that ending it reaches what it starts.
-    command.own_group();
     let Ok(mut child) = command.spawn() else {
         return Outcome::not_started();
     };
@@ -138,34 +113,12 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
         let _ = child.wait();
         return Outcome::not_started();
     };
-    #[cfg(windows)]
-    let job_object = {
-        use std::os::windows::io::AsRawHandle as _;
-        let mut limits = win32job::ExtendedLimitInfo::new();
-        limits.limit_kill_on_job_close();
-        match win32job::Job::create_with_limit_info(&limits).and_then(|made| {
-            made.assign_process(child.as_raw_handle() as isize)
-                .map(|()| made)
-        }) {
-            Ok(made) => Some(made),
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Outcome::not_started();
-            }
-        }
-    };
-    let mut held = Held {
-        child,
-        #[cfg(windows)]
-        job: job_object,
-    };
     let max = job.max_output;
     let over = Arc::new(AtomicBool::new(false));
     let closed = Arc::new(AtomicBool::new(false));
     let out = Arc::new(Mutex::new(Vec::new()));
-    // Threads of their own that nothing waits on past a deadline: a process that left its group (setsid) can hold a pipe
-    // open after the hook has ended, and must not hold the relay with it.
+    // Threads of their own that nothing waits on past a deadline: a process the hook started can hold a pipe open after the
+    // hook has ended, and must not hold the relay with it.
     let input = job.input.to_vec();
     std::thread::spawn(move || {
         let _ = stdin.write_all(&input);
@@ -201,30 +154,31 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
     let mut timed_out = false;
     let mut unreadable = false;
     loop {
-        match held.finished() {
+        match finished(&mut child) {
             Finished::Exited(code) => {
                 exit = Some(code);
                 break;
             }
             Finished::Unreadable => {
                 unreadable = true;
-                held.end();
+                end(&mut child);
                 break;
             }
             Finished::Running => {}
         }
         if over.load(Ordering::SeqCst) {
-            held.end();
+            end(&mut child);
             break;
         }
         if Instant::now() >= until {
             timed_out = true;
-            held.end();
+            end(&mut child);
             break;
         }
         std::thread::sleep(POLL);
     }
-    // What the process wrote is read to its end when the pipe closes; a holder outside its group gets a short grace, no more.
+    // What the process wrote is read to its end when the pipe closes; a process it left holding the pipe gets a short grace, no
+    // more.
     let grace = Instant::now() + GRACE;
     while !closed.load(Ordering::SeqCst) && Instant::now() < grace {
         std::thread::sleep(POLL);

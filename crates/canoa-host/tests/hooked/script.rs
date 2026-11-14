@@ -24,6 +24,8 @@ pub enum Arm {
     Daemon,
     /// Logs the value of this environment variable, as the line `envprobe=<value>`.
     LogEnv(String),
+    /// Logs the directory it runs in, as the line `cwd=<directory>`.
+    LogCwd,
 }
 
 /// The default hook script's name on this platform.
@@ -53,6 +55,10 @@ pub fn body(log: &Path, arms: &[(&str, Arm)]) -> String {
                         log.replace('\'', "''")
                     )
                 }
+                Arm::LogCwd => format!(
+                    "Add-Content -LiteralPath '{}' -Value \"cwd=$((Get-Location).Path)\"",
+                    log.replace('\'', "''")
+                ),
             };
             out.push_str(&format!("  '{event}' {{ {action} }}\n"));
         }
@@ -73,6 +79,10 @@ pub fn body(log: &Path, arms: &[(&str, Arm)]) -> String {
                 Arm::Daemon => "setsid sleep 15 &".to_owned(),
                 Arm::LogEnv(name) => format!(
                     "printf 'envprobe=%s\\n' \"${name}\" >> '{}'",
+                    log.replace('\'', "'\\''")
+                ),
+                Arm::LogCwd => format!(
+                    "printf 'cwd=%s\\n' \"$(pwd)\" >> '{}'",
                     log.replace('\'', "'\\''")
                 ),
             };
