@@ -7,10 +7,11 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
 | `web` | the site `CANOA_WEB_DIST` names at build time, built into the binary; `web::BUILT_IN` is `true` | serving the web app with no directory | off |
+| `portal` | `canoa portal` and `canoa_host::portal` (Unix only): `coqui-access` and `coqui-access-system` (PAM and NSS, linking the system's `libpam`) and `tungstenite` | signing people in with their accounts and giving each their own host | off |
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `portal` (feature `portal`, Unix), `portal_link`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -778,6 +779,53 @@ pub fn revoke(store: &TrustStore, id: &str) -> Result<bool, PeersError>   // fal
 
 A key is paired when the store accepts it. `accept` takes only a key that is waiting, so a person pairs a client by connecting with it once, then accepting the id the client shows.
 
+## The portal (`canoa_host::portal`, feature `portal`, Unix; `canoa_host::portal_link`)
+
+`canoa portal` serves the web app to people who sign in with their account on this machine, and gives each a `canoa serve --portal` of their own, started as them. The guide is `docs/portal.md`; this is the contract.
+
+```rust
+pub const COOKIE: &str = "__Host-canoa";
+pub const LOGIN: &str = "/portal/login";
+pub const MAX_PASSWORD: usize = 1024;
+
+#[non_exhaustive] pub struct Settings { pub listen: SocketAddr, pub site: Option<PathBuf>, pub socket_dir: PathBuf, pub unit: String, pub systemctl: PathBuf, pub elevate: Vec<String>, pub pam_service: String, pub min_uid: u32, pub groups: Vec<String>, pub hosts: Vec<String>, pub trusted_proxies: Vec<IpAddr>, pub client_address_header: String, pub session: Duration, pub idle: Duration, pub start: Duration, pub pair: Duration, pub max_failures_per_address: usize, pub max_failures_per_user: usize, pub failure_window: Duration, pub max_connections: usize, pub max_sign_ins: usize, pub max_sessions: usize, pub max_relays_per_user: usize, pub request: Duration, pub keep_alive: Duration, pub max_requests: usize }   // Default, Clone, Eq
+pub fn Settings::from_toml(text: &str) -> Result<Settings, String>   // deny_unknown_fields; the keys are the fields' names, durations as `NAME_seconds`, the file's `failure_window_seconds`, `idle_seconds`, ...
+pub fn Settings::check(&self) -> Result<(), String>   // loopback `listen`, `{user}` in `unit`, a plain `pam_service`, an absolute `socket_dir`, no zero limit
+
+pub trait Accounts: Send + Sync { fn sign_in(&self, user: &str, password: &str) -> SignIn; }   // blocks
+#[non_exhaustive] pub enum SignIn { Admitted { user: String }, Refused, Failed(String) }   // Admitted: the account's name as the system spells it
+pub struct System;   // Accounts: coqui-access's system provider; System::new(pam_service, min_uid, groups) -> Result<System, String>
+pub fn valid_user(name: &str) -> bool   // 1 to 32 of letters, digits, `_`, `.`, `-`, not starting with `.` or `-`: what a unit and a path are made of
+
+pub trait Controller: Send + Sync { fn start(&self, user: &str) -> io::Result<()>; fn stop(&self, user: &str) -> io::Result<()>; fn running(&self) -> io::Result<Vec<String>>; }
+pub struct Systemd { pub systemctl: PathBuf, pub elevate: Vec<OsString>, pub unit: String }   // Controller over `[elevate] systemctl start|stop|list-units`; start and stop refuse a name `valid_user` refuses, before any program runs
+pub struct Sessions; pub struct Session { pub user: String, pub id: u64 }; pub struct Throttle; pub struct Instances; pub struct Lease;
+
+pub fn Portal::bind(settings: Settings, accounts: Arc<dyn Accounts>, controller: Arc<dyn Controller>) -> Result<Portal, PortalError>
+pub fn Portal::local_addr(&self) -> io::Result<SocketAddr>
+pub fn Portal::stopper(&self) -> Stopper   // Clone; Stopper::stop ends run and every relay within a second
+pub fn Portal::run(self)
+#[non_exhaustive] pub enum PortalError { Settings(String), Site(String), Listen(io::Error) }
+```
+
+- Requests: `GET|POST /portal/login`, `POST /portal/logout`, `GET /portal/session`, `GET /canoa.json`, `POST /portal/pair`, `GET /portal/ws/entry/NAME` and `/portal/ws/control` (WebSocket), and any other `GET` or `HEAD` is the site, to a signed-in browser (else `303 /portal/login`). Every request carries one `Host` that is `localhost`, an address or one of `hosts` (else 421). A `POST` and a WebSocket upgrade need an `Origin` equal to `Host` and no `Sec-Fetch-Site` but `same-origin` (else 403). A body is at most 4096 bytes. HTTP/1.1, one thread a connection, loopback only (`listen` beyond loopback is refused: the cookie is `Secure`, so a proxy speaks TLS).
+- **Sign-in.** The throttle is asked before the accounts are: an address with `max_failures_per_address` failures in `failure_window`, or a name with `max_failures_per_user`, is `429` and PAM is not called. A wrong password, an unknown name and an account the provider does not admit (below `min_uid`, outside `groups`) are all `401`; accounts that cannot be asked are `503`, and count for nothing. A success does not clear a count. The session is a random 256-bit token; the cookie is `__Host-canoa=TOKEN; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=session_seconds`; only the SHA-256 of the token is kept. A cookie named twice is no session. The address counted is the connection's, or, from a `trusted_proxies` address, the last address in `client_address_header` that is not one.
+- **Channels.** The socket's path is `socket_dir/USER/entries/NAME.sock` or `socket_dir/USER/control.sock`, made from the session's account name and a `NAME` of letters, digits, `_` and `-` checked here, and nothing else the browser sends. Messages are relayed between the WebSocket (binary only; text ends the channel) and the socket's length-prefixed frames, at most 17 MiB each. A channel ends when either side does, when its session ends (sign-out or expiry, checked twice a second) or when the portal stops. A user may hold `max_relays_per_user` open.
+- **Hosts.** `acquire` asks the introduction socket and, when it does not answer, starts the unit and asks again for `start_seconds`. A host with no channel and no use for `idle_seconds` is stopped (checked every tenth of that, between 0.2 s and 30 s); one with a channel open never is. `POST /portal/pair` `{"peer"}` asks the host to accept that key every 250 ms for `pair_seconds`, `200` once it is, `404` when it never connected.
+
+```rust
+pub struct PortalSockets { pub dir: PathBuf, pub uid: u32 }   // canoa_host::portal_link, non_exhaustive; Clone, Eq
+pub fn PortalSockets::new(dir: impl Into<PathBuf>, uid: u32) -> PortalSockets
+pub fn uid_of(user: &str) -> io::Result<u32>   // a number, or a name in /etc/passwd
+pub fn entry_socket(dir: &Path, entry: &str) -> PathBuf
+pub const ENTRIES: &str = "entries"; pub const CONTROL: &str = "control.sock"; pub const INTRODUCTION: &str = "portal.sock";
+pub fn ServeOptions::with_portal(self, sockets: PortalSockets) -> ServeOptions
+```
+
+- **`serve --portal DIR --portal-user USER`** (`ServeOptions::with_portal`): `DIR/entries` is made (`0755`); every entry that is not a host source, and the control channel (made if canoa.cfg has none, with canoa.cfg's limits when it has), listen on a Unix socket there, mode `0666`, replacing any `listen` canoa.cfg gives; `[host.web]` and `--web` are ignored. Every connection is checked with the system's own word for who is at the other end (`SO_PEERCRED`): one whose user is not `USER` is closed before a byte is read and logged at `warn`. A paired key is the person's own browser, so on the control channel it holds `Grant::all()` with no entry under `grants`; an entry's `peers`, when it lists keys, still applies. `own_profile` still needs `peers` (config refuses it without), so an instance that offers it lists the keys it knows; the portal's introduced keys are not known in advance.
+- **The introduction socket**, `DIR/portal.sock`, takes one line of JSON a connection from `USER` only: `{"op":"index"}` answers `{"peer", "method", "os", "entries": [{"name", "kind", "harness"?, "title"?}]}` with no `url` (the control channel is there, `kind` `control`); `{"op":"accept","peer"}` is `peers::accept` (only a key that connected and waits) and answers `{"ok":true,"peer"}` or `{"error"}`; `{"op":"revoke","peer"}` answers `{"ok": bool}`; any other request `{"error"}`. A request is at most 4096 bytes and 5 s.
+- The sockets are `coqui-transport-pipe` listeners at mode `0666` with no group, so the pipe crate's own checks stand: a parent that others can write, or that another user owns, is refused. The unit makes `DIR` as root, owned by the person, under a `/run/canoa` only root writes.
+
 ## One host on a home (`canoa_host::home`)
 
 ```rust
@@ -981,7 +1029,8 @@ Tests: `cargo build -p canoa-host --examples` first, then `cargo test -p canoa-h
 
 ```text
 canoa serve [--config FILE] [--until-stdin-closes] [--allow-empty] [--local-sources] [--method noise|webcrypto] [--key-limit BYTES] [--no-rekey]
-                 [--web [DIR]] [--web-listen ADDRESS]
+                 [--web [DIR]] [--web-listen ADDRESS] [--portal DIR --portal-user USER] [--supervised]
+canoa portal [--config FILE] [--site DIR] [--listen ADDRESS]      # feature `portal`, Unix
 canoa check [--config FILE] [--format text|json]
 canoa layers [--config FILE] [--format text|json]
 canoa id [--method noise|webcrypto [--force]]
@@ -1021,6 +1070,8 @@ canoa accounts remove NAME [--config FILE]
 - `serve --allow-empty`: a canoa.cfg with no entry, or none at all at that path, runs with nothing to serve, printing only the `ready` line, where without it that is status 2. It writes no file. A canoa.cfg that exists and cannot be read or parsed is still status 2.
 - `serve --web [DIR]` serves the web app too (see "The web app"): from `DIR` (made absolute from the working directory), else `[host.web]`'s `dir`, else the site built in; on `[host.web]`'s settings, or the defaults without the table. `--web-listen` replaces `listen`, and needs `--web` or `[host.web]` (status 2). After the entries' lines it prints `{"web": URL}`, a line with no `name`. A site that cannot be served, no site, plain HTTP beyond loopback, a zero limit or an unusable certificate is status 2; an address that cannot be bound, status 1.
 - **A link from inside** (`Local::open`) is served as a paired key's connection is: the entry's agent, scope, worktrees (`_canoa/worktree/*` before the first ACP message) and `max_peers`. It skips the proof, the trust store and the entry's `peers` list, since whoever holds a `Local` is this process; no network peer can obtain one. `Stopper::stop` closes every link. The peer it is logged as is the host's own id.
+- `portal` (feature `portal`, Unix) reads its settings from `--config` (a TOML file, see "The portal"; no file is the defaults), `--site` and `--listen` replacing `site` and `listen`, prints `{"portal": URL}` once bound, and serves until killed. Status 2 for a settings file or site that does not work, 1 for an address that cannot be bound.
+- `serve --portal DIR --portal-user USER` runs the host for a portal (see "The portal"); `--portal-user` is required with it, and a name that is not in `/etc/passwd` is status 2. `--web` and `[host.web]` are ignored with it.
 - `serve --until-stdin-closes`: once every entry is bound, standard input is read and discarded; when it closes, every listener and agent is ended (`Stopper::stop`) and the host exits 0. For a parent that runs the host as its child: the host ends with it, however the parent ends. Without the flag the input is never read.
 - `pair` (`--listen` default `127.0.0.1:0`, another address logged at `info` as `non-default: pair --listen is ADDRESS, default loopback`; `--timeout-seconds` default 300) prints `{"pin", "peer", "method", "url"}`, a six-digit PIN, this host's id, its method and the address to dial, and pairs by that method; a native client joins with `coqui_agentic_peer::pairing::join` (`coqui-acp-bridge pair-dial URL`). The joiner's key is accepted in the store once the PIN confirms both keys, and `pair` prints `{"paired": ID}` and exits 0. One wrong try ends it (status 1), as does the timeout, and with `--until-stdin-closes` its input closing. A pairing connection serves no agent. A WebSocket upgrade that carries an `Origin` header, which every browser sends, is refused (403) before the handshake, so a web page cannot spend the PIN's one try; a browser pairs by connecting to `serve` once and being accepted.
 - On `serve --until-stdin-closes` and `pair --until-stdin-closes`, nothing is logged between the input closing and the exit, and the process exits within 5 s whatever is left: a parent that died can leave standard error a pipe a write to which never returns (seen on Windows under a Dart parent).
