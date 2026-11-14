@@ -149,10 +149,10 @@ void main() {
   group('the identity', () {
     test('is a non-extractable X25519 key that cannot be exported', () async {
       final identity = await NoiseIdentity.generate();
-      expect(identity.privateKey.extractable, isFalse);
-      expect(identity.privateKey.type, 'private');
+      expect(identity.privateKeyForTest.extractable, isFalse);
+      expect(identity.privateKeyForTest.type, 'private');
       for (final format in ['raw', 'pkcs8', 'jwk']) {
-        await expectLater(subtle().exportKey(format, identity.privateKey).toDart, throwsA(anything), reason: format);
+        await expectLater(subtle().exportKey(format, identity.privateKeyForTest).toDart, throwsA(anything), reason: format);
       }
     });
 
@@ -161,7 +161,7 @@ void main() {
       final first = await NoiseIdentity.loadOrCreate(name);
       final second = await NoiseIdentity.loadOrCreate(name);
       expect(second.peerId, first.peerId);
-      expect(second.privateKey.extractable, isFalse);
+      expect(second.privateKeyForTest.extractable, isFalse);
       final record = await kept(name);
       expect([for (final member in ['method', 'peerId', 'publicKey', 'privateKey']) record.has(member)], everyElement(isTrue));
       expect((record['peerId']! as JSString).toDart, first.peerId);
@@ -174,11 +174,11 @@ void main() {
       await keep(name, old);
       final identity = await NoiseIdentity.loadOrCreate(name);
       expect(identity.peerId, (old['peerId']! as JSString).toDart);
-      expect(identity.privateKey.extractable, isFalse);
+      expect(identity.privateKeyForTest.extractable, isFalse);
     });
 
     test('is refused unless it is a non-extractable X25519 key of the id it names', () async {
-      expect((await NoiseIdentity.fromStored(await storedRecord())).privateKey.extractable, isFalse);
+      expect((await NoiseIdentity.fromStored(await storedRecord())).privateKeyForTest.extractable, isFalse);
       await expectLater(NoiseIdentity.fromStored(await storedRecord(extractable: true)), failure());
       await expectLater(NoiseIdentity.fromStored(await storedRecord(peerId: 'sha256:${'0' * 64}')), failure());
       final good = await storedRecord();

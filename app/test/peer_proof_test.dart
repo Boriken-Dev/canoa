@@ -44,7 +44,7 @@ final class Scripted implements PeerBridge {
   }
 
   @override
-  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement() async => throw StateError('not scripted');
+  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement(Uint8List hostSpki) async => throw StateError('not scripted');
   @override
   Future<String> localId(PeerMethod method) async => 'sha256:${method.id}';
   @override

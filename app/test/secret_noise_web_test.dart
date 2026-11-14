@@ -44,10 +44,10 @@ void main() {
 
   test('the key agrees without leaving WebCrypto, and binds an answer that opens for the host under the id the host paired', () async {
     final key = await NoiseIdentity.generate();
-    expect(key.privateKey.extractable, isFalse);
+    expect(key.privateKeyForTest.extractable, isFalse);
     final hostSpki = await x25519Spki(_hostSecret);
     final hostId = AcpIdentityId.of(hostSpki).toString();
-    final app = noiseSecretIdentity(hostId: hostId, hostSpki: hostSpki, spki: key.spki, agree: key.agreeSecret)!;
+    final app = noiseSecretIdentity(hostId: hostId, hostSpki: hostSpki, spki: key.spki, agree: key.agreeWith(hostSpki))!;
     expect(app.prover.id.toString(), key.peerId);
 
     final host = await x25519Prover(_hostSecret, key.spki);
@@ -67,11 +67,15 @@ void main() {
 
   test('the bridge gives an agreement for its own Noise key, which agrees with the host\'s point and with the host\'s own result', () async {
     final bridge = WebPeerBridge(loadNoise: NoiseIdentity.generate);
-    final own = await bridge.noiseAgreement();
+    final hostSpki = await x25519Spki(_hostSecret);
+    final own = await bridge.noiseAgreement(hostSpki);
     expect(own.spki, hasLength(44));
-    final point = Uint8List.sublistView(await x25519Spki(_hostSecret), 12);
+    final point = Uint8List.sublistView(hostSpki, 12);
     final here = await own.agree(Uint8List.fromList(point));
     final there = await x25519Agreement(_hostSecret)(Uint8List.sublistView(own.spki, 12));
     expect(here, there, reason: 'the two static keys agree on one secret');
+    // The bridge's function is bound to the proven key: no other point is agreed with, whatever the caller does after.
+    await expectLater(own.agree(Uint8List(32)..[0] = 9), throwsA(anything));
+    await expectLater(own.agree(Uint8List.sublistView(await x25519Spki(List<int>.filled(32, 3)), 12)), throwsA(anything));
   });
 }

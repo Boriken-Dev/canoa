@@ -9,7 +9,6 @@ import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
-import 'package:canoa/acp/noise_secret.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/secret.dart';
@@ -80,14 +79,13 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  Future<VerifiedAgent> connect(SessionStore store, {bool provedByNoise = true}) => connectVerifiedAcp(
+  Future<VerifiedAgent> connect(SessionStore store, {bool ecdsaOffer = false}) => connectVerifiedAcp(
     chatEndpoints(webSocket: url),
     expectedPeerId: hostId,
     verifyPeer: (channel, expected) async {
       final peer = await provePeer(browser, channel, expected, method: PeerMethod.noise);
-      // A link whose far end this app's Noise key did not prove itself leaves none of the Noise binding behind.
-      if (!provedByNoise) noiseSecretsOf[peer.channel] = null;
-      return peer;
+      // The same proof, handed on with no Noise identity: the app then offers what the store has, a WebCrypto binding.
+      return ecdsaOffer ? VerifiedPeer(peer.peerId, peer.channel) : peer;
     },
     decider: store.askPermission,
     elicitor: store.askQuestion,
@@ -143,9 +141,9 @@ void main() {
     await client.close();
   }, skip: skip);
 
-  test('a link no Noise key of this app proved offers no Noise binding, and the host gives the agent no secret tools', () async {
+  test('a host paired by Noise refuses the ECDSA binding an app offers on its link, and gives the agent no secret tools', () async {
     final store = SessionStore()..secretIdentity = identity();
-    final client = await connect(store, provedByNoise: false);
+    final client = await connect(store, ecdsaOffer: true);
     expect(client.noiseSecrets, isNull);
     final opened = await client.openSession(cwd: dir.path);
     final said = StringBuffer();

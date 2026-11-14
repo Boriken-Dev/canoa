@@ -1192,7 +1192,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   (ChatSession, AcpIdentityId, SecretIdentity)? _secretTarget(String remote, VerifiedAgent from) {
     final linked = from.linkSecrets;
     // A connection a Noise key proved binds by that key alone, never by the store's WebCrypto identity.
-    final identity = linked?.identity ?? from.noiseSecrets ?? secretIdentity;
+    final identity = from.provedByNoise ? from.noiseSecrets : linked?.identity ?? secretIdentity;
     if (identity == null) return null;
     final AcpIdentityId host;
     try {

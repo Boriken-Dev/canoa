@@ -6,6 +6,7 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:web/web.dart' as web;
 
 import 'peer_session.dart';
@@ -103,13 +104,16 @@ JSObject _class(JSObject module, String name) => module[name]! as JSObject;
 
 /// This page's Noise key: an X25519 key whose private half cannot leave WebCrypto. The WebAssembly knows only the public half.
 final class NoiseIdentity {
-  NoiseIdentity._(this._key, this.privateKey, this._spki);
+  NoiseIdentity._(this._key, this._privateKey, this._spki);
 
   final _NoiseKey _key;
   final Uint8List _spki;
 
-  /// The private key, as WebCrypto holds it: `extractable` is false and it cannot be exported.
-  final web.CryptoKey privateKey;
+  final web.CryptoKey _privateKey;
+
+  /// The private key as WebCrypto holds it, for tests that check it cannot be exported. Nothing in the app reads it.
+  @visibleForTesting
+  web.CryptoKey get privateKeyForTest => _privateKey;
 
   String get peerId => _key.peerId;
 
@@ -206,21 +210,33 @@ final class NoiseIdentity {
     ..['method'] = 'noise'.toJS
     ..['peerId'] = peerId.toJS
     ..['publicKey'] = b64(_spki).toJS
-    ..['privateKey'] = privateKey;
+    ..['privateKey'] = _privateKey;
 
   /// X25519 of the private key with [point] (32 bytes): WebCrypto refuses a result of all zeros.
   Future<Uint8List> _agree(Uint8List point) async {
     try {
       final peer = await subtle().importKey('raw', js(point), _x25519(), false, usages(const [])).toDart;
-      return await deriveBits(_x25519(peer), privateKey, _keyLength);
+      return await deriveBits(_x25519(peer), _privateKey, _keyLength);
     } catch (_) {
       throw const PeerFailure('The static key could not compute the handshake');
     }
   }
 
-  /// X25519 of the private key with the one point of a secret binding's other end, which the caller has already checked is the host
-  /// the connection proved. The key stays in WebCrypto.
-  Future<Uint8List> agreeSecret(Uint8List point) => _agree(point);
+  /// X25519 of the private key with the static key of [provenSpki] alone: the host a proof ended with. The returned function refuses
+  /// every other point, so the key is never an oracle for an arbitrary one. The key stays in WebCrypto.
+  Future<Uint8List> Function(Uint8List point) agreeWith(Uint8List provenSpki) {
+    if (provenSpki.length != _spkiPrefix.length + _keyLength) throw const PeerFailure(_unusable);
+    final allowed = Uint8List.fromList(provenSpki.sublist(_spkiPrefix.length));
+    return (point) async {
+      if (point.length != allowed.length) throw const PeerFailure('Not the key this connection proved');
+      var diff = 0;
+      for (var i = 0; i < point.length; i++) {
+        diff |= point[i] ^ allowed[i];
+      }
+      if (diff != 0) throw const PeerFailure('Not the key this connection proved');
+      return await _agree(point);
+    };
+  }
 
   /// A proof of the agent [expectedPeerId], and no other.
   Future<NoiseRun> prove(String expectedPeerId, {Uri? base}) async {

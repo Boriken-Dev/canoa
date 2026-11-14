@@ -132,12 +132,12 @@ final class WebPeerBridge implements PeerBridge {
   }
 
   /// This page's Noise key as what a secret binding agrees with: its SubjectPublicKeyInfo and the X25519 of the private key, which stays
-  /// in WebCrypto, with a point.
+  /// in WebCrypto, with the static key of [hostSpki] and no other point.
   @override
-  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement() async {
+  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement(Uint8List hostSpki) async {
     await _reachable(PeerMethod.noise);
     final identity = await _noiseIdentity;
-    return (spki: identity.spki, agree: identity.agreeSecret);
+    return (spki: identity.spki, agree: identity.agreeWith(hostSpki));
   }
 
   @override

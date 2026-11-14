@@ -18,9 +18,13 @@ export 'secret_wire.dart' show AgentSecrets;
 
 /// A proven peer, and the channel that keeps everything after the proof with that peer.
 final class VerifiedPeer {
-  const VerifiedPeer(this.peerId, this.channel);
+  const VerifiedPeer(this.peerId, this.channel, {this.noise});
   final String peerId;
   final WebChannel channel;
+
+  /// Set when this app's own Noise key made the proof: what that gave secret prompts, which may be no identity at all. Null for a
+  /// proof by any other method, so the method is never read from anything a caller can write.
+  final NoiseSecrets? noise;
 }
 
 /// Must cryptographically verify the remote peer, not trust a supplied ID, and answer with a channel whose messages
@@ -106,7 +110,7 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets, this.noiseSecrets})
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false})
       : _delegate = delegate {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
@@ -127,6 +131,9 @@ final class VerifiedAgent {
   /// What binds this app's secret answers on a connection its own Noise key proved, and the host's identity on it (the peer id it proved):
   /// set only for such a connection, by the Diffie-Hellman of the two static keys. Null for any other connection.
   final SecretIdentity? noiseSecrets;
+
+  /// Whether this app's own Noise key proved the connection. Such a connection binds by [noiseSecrets] or not at all, never by the store's identity.
+  final bool provedByNoise;
 
   /// What the agent said about itself when it was initialized.
   final AgentIdentity identity;
@@ -181,7 +188,7 @@ final class VerifiedAgent {
       // Only a host whose peer id was proven can ask for a secret: the answer is bound to that identity, and a program this app
       // started, or a provider, has none. A connection this app's own Noise key proved binds by the two static keys alone and offers
       // nothing else; one whose proof gave no usable key of the host's offers nothing at all.
-      final noise = noiseSecretsOf[proven];
+      final noise = actual.noise;
       final noiseIdentity = noise?.identity;
       final secretWire = secrets == null || (noise != null && noiseIdentity == null)
           ? null
@@ -206,6 +213,7 @@ final class VerifiedAgent {
         elicitor: elicitor,
         delegate: delegate,
         noiseSecrets: secretWire == null ? null : noiseIdentity,
+        provedByNoise: noise != null,
       );
       secretWire?.agent = client;
       return client;

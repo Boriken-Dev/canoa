@@ -8,11 +8,6 @@ import 'secret_wire.dart' show SecretIdentity;
 /// usable key of the host's, in which case the connection offers the host no secret at all.
 typedef NoiseSecrets = ({SecretIdentity? identity});
 
-/// The Noise-proven channels, by the channel the proof ended in. A connection not proven by this app's own Noise key (a provider's, a
-/// child's, a WebCrypto one) has no entry, and so no Diffie-Hellman binding: a link that reaches the host through anything else
-/// cannot be taken for one this app proved directly.
-final Expando<NoiseSecrets> noiseSecretsOf = Expando('noise secrets');
-
 const _x25519SpkiLength = 44;
 
 bool _same(List<int> a, List<int> b) {

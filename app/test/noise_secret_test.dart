@@ -40,7 +40,7 @@ Future<Map<String, Object?>> noiseRequest(AcpSecretProver host, AcpIdentityId ap
   return AcpSecretRequestParams(context: context, recipient: receiver.recipient).toJson();
 }
 
-/// A connection to the stand-in host whose proof, as the app's own Noise key makes it, left [secrets] in [noiseSecretsOf].
+/// A connection to the stand-in host whose proof, as the app's own Noise key makes it, left [secrets] on the VerifiedPeer.
 Future<(SecretHost, ChatSession, VerifiedAgent)> proven(WidgetTester tester, SessionStore store, String hostId, {NoiseSecrets? secrets}) async {
   final host = SecretHost();
   final (session, client) = await tester.runAsync(() async {
@@ -48,8 +48,7 @@ Future<(SecretHost, ChatSession, VerifiedAgent)> proven(WidgetTester tester, Ses
       host,
       expectedPeerId: hostId,
       verifyPeer: (channel, expected) async {
-        if (secrets != null) noiseSecretsOf[channel] = secrets;
-        return VerifiedPeer(expected, channel);
+        return VerifiedPeer(expected, channel, noise: secrets);
       },
       decider: store.askPermission,
       elicitor: store.askQuestion,
@@ -183,8 +182,21 @@ void main() {
 
   testWidgets('a Noise proof that gave no usable key offers the host nothing, and a link no Noise key proved offers no Noise binding', (tester) async {
     final store = SessionStore()..secretIdentity = identity();
-    final (none, _, noKey) = await proven(tester, store, 'sha256:${'b' * 64}', secrets: (identity: null));
+    tester.view.physicalSize = const Size(1100, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final (none, noSession, noKey) = await proven(tester, store, 'sha256:${'b' * 64}', secrets: (identity: null));
     expect(noKey.noiseSecrets, isNull);
+    await tester.pumpWidget(CanoaApp(store: store));
+    await tester.pump();
+    // Even a request bound under the store's own WebCrypto identity is not drawn: a Noise link never falls back to it.
+    none.ask(9, acpSecretRequestMethod, (await tester.runAsync(() => requestParams('n9')))!);
+    await settle(tester);
+    expect(noSession.pendingSecrets, isEmpty);
+    expect(find.byKey(const ValueKey('secret-password')), findsNothing);
+    expect(jsonEncode(none.sent), isNot(contains('"enc"')));
+    final refused = none.answerTo(9);
+    expect(refused == null || refused['error'] != null, isTrue);
     expect(jsonEncode(none.initialize), isNot(contains(acpSecretsCapability)), reason: "not even the store's WebCrypto binding");
     // A link a provider, or anything but this app's Noise key, proved has no Noise binding to give.
     final (other, _, relayed) = await proven(tester, store, 'sha256:${'c' * 64}');

@@ -60,8 +60,8 @@ abstract interface class PeerBridge {
   Future<String?> unreachable(PeerMethod method);
 
   /// This runtime's Noise key as what a secret binding agrees with: its SubjectPublicKeyInfo and X25519 of its private key, which is
-  /// never handed over, with a point. Throws where Noise is unavailable.
-  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement();
+  /// never handed over, with the static key of [hostSpki] and no other point. Throws where Noise is unavailable.
+  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement(Uint8List hostSpki);
 
   /// This runtime's own peer id under [method]: each method has a key of its own.
   Future<String> localId(PeerMethod method);
@@ -117,8 +117,10 @@ Future<PeerStep> _exchange(
 /// What a Noise proof lets this connection bind secret answers with: this key agreeing with the host's static key, which the proof gave, or
 /// none when the proof gave no key whose digest is the pinned id. Never throws: no identity is no secret prompts.
 Future<SecretIdentity?> _noiseSecrets(PeerBridge bridge, PeerStep proof) async {
+  final hostKey = proof.peerKey;
+  if (hostKey == null) return null;
   try {
-    final own = await bridge.noiseAgreement();
+    final own = await bridge.noiseAgreement(hostKey);
     return noiseSecretIdentity(hostId: proof.peerId!, hostSpki: proof.peerKey, spki: own.spki, agree: own.agree);
   } catch (_) {
     return null;
@@ -157,8 +159,7 @@ Future<VerifiedPeer> provePeer(
       closeRecord: () => bridge.closeRecord(session),
       release: () => bridge.closeSession(session),
     );
-    if (method == PeerMethod.noise) noiseSecretsOf[sealed] = (identity: await _noiseSecrets(bridge, done));
-    return VerifiedPeer(done.peerId!, sealed);
+    return VerifiedPeer(done.peerId!, sealed, noise: method == PeerMethod.noise ? (identity: await _noiseSecrets(bridge, done)) : null);
   } finally {
     if (token != null) bridge.abort(token);
   }
