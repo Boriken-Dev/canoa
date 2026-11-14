@@ -181,6 +181,21 @@ void main() {
       expect(shown.clients.map((c) => c.id), unorderedEquals([ownerClient, 'win']));
     });
 
+    test('a view that calls itself the main window cannot detach it', () async {
+      final store = SessionStore();
+      addTearDown(store.dispose);
+      final agent = ScriptedAgent();
+      final session = await agent.start(store);
+      final share = ChatSessionShare(CanoaSharedChat(store, session), minInterval: Duration.zero);
+      addTearDown(share.close);
+      final (owner, far) = MemoryViewLink.pair();
+      share.serve(owner);
+      final view = await ChatSessionView.attach(far, clientId: ownerClient);
+      await view.detach();
+      await _later();
+      expect(session.chat.clients.map((client) => client.id), contains(ownerClient));
+    });
+
     test('a request answered in the main window reaches the view as answered by it, with the answer the agent got', () async {
       final store = SessionStore();
       addTearDown(store.dispose);

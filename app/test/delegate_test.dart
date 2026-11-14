@@ -322,6 +322,21 @@ void main() {
       expect(session.pendingPermissions, hasLength(1), reason: 'an "allow for the session" does not cover the next one');
     });
 
+    test('a late request of a task that ended or was never heard of is the person alone, even in Bypass, and shows no tool line', () async {
+      final (host, session, store) = await start();
+      await store.chooseMode(session, ModeEntry(ownBypass, 'Bypass', own: true));
+      host.say(taskNotice('t1', statusEvent('FAILED')));
+      await _settle();
+      host.ask(20, 'Edit a.txt', task: 't1');
+      host.ask(21, 'Edit a.txt', task: 'never-heard-of');
+      await _settle();
+      expect(session.pendingPermissions, hasLength(2), reason: 'Bypass answers for the own agent of the conversation only');
+      expect(host.answerTo(20), isNull);
+      expect(host.answerTo(21), isNull);
+      expect(session.pendingPermissions.every((question) => question.forPerson), isTrue);
+      expect(session.toolEntries, isEmpty, reason: 'a call of another thread is not drawn here');
+    });
+
     test('a task that ends takes its waiting card with it', () async {
       final (host, session, _) = await start();
       host.ask(10, 'Edit a.txt', task: 't1');

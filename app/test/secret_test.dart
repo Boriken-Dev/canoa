@@ -79,6 +79,18 @@ void main() {
     expect(host.answerTo(9)?['result'], {'action': 'cancel'});
   });
 
+  testWidgets('Stop closes a form that waits, and the host is told it was cancelled', (tester) async {
+    final (host, session, store) = await shown(tester);
+    host.ask(10, acpSecretRequestMethod, (await tester.runAsync(() => requestParams('r4')))!);
+    await settle(tester);
+    expect(find.byType(SecretRequestCard), findsOneWidget);
+    await tester.runAsync(() => store.cancelSession(session));
+    await settle(tester);
+    expect(find.byType(SecretRequestCard), findsNothing);
+    expect(session.pendingSecrets, isEmpty);
+    expect(host.answerTo(10)?['result'], {'action': 'cancel'});
+  });
+
   testWidgets('without an identity the host is cancelled, never asked of the person, and the agent\'s client still sees nothing', (tester) async {
     final (host, session, _) = await shown(tester, withIdentity: false);
     host.ask(10, acpSecretRequestMethod, (await tester.runAsync(() => requestParams('r4')))!);

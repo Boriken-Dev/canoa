@@ -25,7 +25,10 @@ final class CanoaSharedChat implements SharedChat {
   void attachClient(String id, {String? name}) => _model.attachClient(id, name: name);
 
   @override
-  void detachClient(String id) => _model.detachClient(id);
+  void detachClient(String id) {
+    // The window that holds the conversation is not a view's to detach, whatever a view calls itself.
+    if (id != ownerClient) _model.detachClient(id);
+  }
 
   @override
   Future<void> send(String text, {required String from}) => store.sendTextTo(canoa, text, attached: false, from: from);

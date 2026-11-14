@@ -380,8 +380,10 @@ final class _Policy implements model.PermissionPolicy {
   model.PermissionReview review(AcpPermissionRequest request, {required bool forPerson}) {
     final task = SessionStore._taskOf(session, request);
     // A question from an agent on another machine is the person's alone, as a plan is: Bypass, a remembered rule and a task's
-    // allowance were each given for agents this person chose to run here.
-    final alone = forPerson || (task?.remote ?? false);
+    // allowance were each given for agents this person chose to run here. So is one that names a task that has ended or that was
+    // never heard of: it is a task's, and what it is cannot be told.
+    final late = task == null && SessionStore._namesTask(request);
+    final alone = forPerson || late || (task?.remote ?? false);
     final allowanceKey = task == null || alone ? null : SessionStore._allowanceKey(request);
     final subject = alone ? null : store._ruleSubject(session, request);
     final folder = session.cwd;
@@ -390,7 +392,7 @@ final class _Policy implements model.PermissionPolicy {
     return model.PermissionReview(
       forPerson: alone,
       // A task's tool call is its own thread's, not this conversation's.
-      ownCall: task == null,
+      ownCall: task == null && !late,
       label: task == null ? '' : ' for ${task.title}',
       hostData: RequestHost(subject: keepable ? subject : null, task: task, allowanceKey: allowanceKey),
     );
@@ -1503,6 +1505,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     notifyListeners();
   }
 
+  /// Whether [request]'s tool call id has the shape the host gives a task's: the task's id and a colon before the call's own.
+  static bool _namesTask(AcpPermissionRequest request) => request.toolCallId.indexOf(':') > 0;
+
   /// The task of [session] that [request] comes from, while it runs: the host puts the task's id and a colon before the tool call
   /// id of a task's request. Null for the conversation's own agent's.
   static DelegateTask? _taskOf(ChatSession session, AcpPermissionRequest request) {
@@ -2067,7 +2072,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (session.remoteSessionId == null || client == null) {
       throw StateError('No active verified ACP session');
     }
-    // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is.
+    // ACP has a request still open at cancellation answered as cancelled, and the agent's turn cannot end until it is: the host's
+    // prompts for secrets are such requests too.
+    _cancelSecrets(session);
     await session.chat.cancel();
     await stopTasks(session);
   }

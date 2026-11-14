@@ -271,6 +271,29 @@ void main() {
     });
   });
 
+  group('Bypass left with no connection', () {
+    test('is kept off, so the session reopens without it', () async {
+      final ledger = SessionLedger(MemoryLedgerBackend());
+      ledger.record(
+        peerId: 'local:Scripted', sessionId: 'o1', entry: 'Scripted', place: SessionPlace.local, reopenBy: 'session/load', cwd: '/w',
+      );
+      ledger.setMode('local:Scripted', 'o1', mode: 'plan', bypass: true);
+      final agent = OptionsAgent(modes: OptionsAgent.codexModes);
+      final store = _store(ledger);
+      final session = await store.reopen(ledger.entries.single, await agent.start(scripted));
+      expect(session.bypass, isTrue);
+      agent.disconnect();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(session.status, SessionStatus.disconnected);
+      await store.leaveBypass(session);
+      expect(session.bypass, isFalse);
+      expect(ledger.entries.single.bypass, isFalse, reason: 'the person was told Bypass is off');
+      await store.close(session);
+      final again = await store.reopen(ledger.entries.single, await agent.start(scripted));
+      expect(again.bypass, isFalse);
+    });
+  });
+
   group('a draft', () {
     test('that leaves Bypass is kept without it', () async {
       final backend = MemoryDraftBackend();
