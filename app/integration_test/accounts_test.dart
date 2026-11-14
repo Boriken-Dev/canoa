@@ -94,7 +94,10 @@ bypass = true
     Future<void> until(bool Function() done, String what) async {
       final deadline = DateTime.now().add(const Duration(seconds: 45));
       while (!done()) {
-        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what: ${host.log}');
+        if (DateTime.now().isAfter(deadline)) {
+          final shown = [for (final text in find.byType(Text).evaluate()) (text.widget as Text).data].whereType<String>().take(40).toList();
+          fail('timed out waiting for $what; the screen says $shown; the host said: ${host.log}');
+        }
         await tester.pump(const Duration(milliseconds: 100));
       }
     }
