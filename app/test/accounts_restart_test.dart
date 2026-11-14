@@ -13,7 +13,7 @@ import 'fixtures/options_agent.dart';
 
 const _config = CanoaConfig(host: {
   'agents': {
-    'Claude-accounts': {'harness': 'claude', 'accounts': ['work']},
+    'Claude-accounts': {'harness': 'claude', 'accounts': ['work'], 'peers': <String>[]},
   },
 });
 

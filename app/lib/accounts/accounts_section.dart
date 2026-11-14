@@ -54,6 +54,33 @@ class _AccountsSectionState extends State<AccountsSection> {
     await showDialog<void>(context: context, builder: (_) => SignInDialog(run: run, title: 'Sign in to ${account.name}'));
   }
 
+  /// Offers [account] to [entry], or stops. An entry no `peers` restricts is open to every paired key (the extension, a phone,
+  /// the web app): the person is told so before an account that may be billed per use is offered there.
+  Future<void> _offer(AccountInfo account, String entry) async {
+    final offering = !_accounts.offering(account.name).contains(entry);
+    if (offering && _accounts.isOpen(entry)) {
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          key: const Key('offer-open-entry'),
+          title: Text('Offer ${account.name} in $entry?'),
+          content: Text(
+            '$entry has no list of keys, so every key paired with this host can start a session on it, and sessions there run on '
+            '${_accounts.offeredBy(entry).isEmpty ? account.name : 'any account it offers, ${account.name} included'}'
+            '${_accounts.offeredBy(entry).isEmpty ? ', which then replaces the login $entry runs on now' : ''}. '
+            'Add the keys that may use it to its peers in canoa.cfg, or keep ${account.name} to an entry only this computer reaches.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Do not offer it')),
+            FilledButton(key: const Key('offer-open-entry-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Offer it to every paired key')),
+          ],
+        ),
+      );
+      if (sure != true) return;
+    }
+    await _accounts.setOffered(account, entry, offered: offering);
+  }
+
   Future<void> _remove(AccountInfo account) async {
     final offered = _accounts.offering(account.name);
     final sure = await showDialog<bool>(
@@ -159,10 +186,7 @@ class _AccountsSectionState extends State<AccountsSection> {
             onSelected: (value) {
               if (value == 'remove') unawaited(_remove(account));
               if (value.startsWith('login:')) unawaited(_again(account, logins.where((each) => 'login:${each.id}' == value).firstOrNull));
-              if (value.startsWith('offer:')) {
-                final entry = value.substring(6);
-                unawaited(_accounts.setOffered(account, entry, offered: !_accounts.offering(account.name).contains(entry)));
-              }
+              if (value.startsWith('offer:')) unawaited(_offer(account, value.substring(6)));
             },
             itemBuilder: (context) => [
               for (final login in logins)

@@ -76,6 +76,12 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
     final method = catalog.login(_method!);
     if (method == null) return;
     var inputs = <String, String>{};
+    // A secret is asked in the sealed form once the sign-in runs, never in a form that runs before it: refuse rather than drop it.
+    if (method.inputFields.values.any(ProgramAsk.sensitive)) {
+      setState(() => _problem = '${method.title} asks for a secret before it signs in, which Canoa cannot take sealed here.');
+      return;
+    }
+    setState(() => _problem = null);
     if (method.inputFields.isNotEmpty) {
       final given = await showDialog<({Map<String, Object?> values, Map<String, Object?> secrets})>(
         context: context,
@@ -282,6 +288,8 @@ class _PageStep extends StatelessWidget {
         const Text('Open this page to sign in'),
         const SizedBox(height: 4),
         SelectableText(page.url, key: const Key('sign-in-url')),
+        if (webLink(page.url) == null)
+          Text('Canoa will not open this address: it is not a plain http or https link.', key: const Key('sign-in-url-refused'), style: TextStyle(color: scheme.error)),
         if (page.userCode case final code?) ...[
           const SizedBox(height: 8),
           const Text('and confirm this code there'),
@@ -299,7 +307,7 @@ class _PageStep extends StatelessWidget {
         Wrap(spacing: 8, children: [
           OutlinedButton(
             key: const Key('sign-in-open'),
-            onPressed: () => unawaited(openLink(Uri.parse(page.url))),
+            onPressed: webLink(page.url) == null ? null : () => unawaited(openLink(webLink(page.url)!)),
             child: const Text('Open the page'),
           ),
           TextButton(

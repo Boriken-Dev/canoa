@@ -328,17 +328,28 @@ final class CanoaConfig {
       for (final each in (_hostAgents[name] as Map)['accounts'] as List) '$each',
   ];
 
-  /// This configuration with the account [account] offered by the agent entry [entry], which is made when no entry runs the
-  /// provider [harness]: `entry` null picks the first that does.
+  /// Whether the agent entry [name] is open to every paired key: it names no `peers`.
+  bool hostEntryIsOpen(String name) => _hostAgents[name] is Map && (_hostAgents[name] as Map)['peers'] == null;
+
+  /// The name of the entry the app makes for the accounts it adds of the provider [harness].
+  static String accountsEntryOf(String harness) => '$harness-accounts';
+
+  /// This configuration with the account [account] offered by the agent entry [entry], or, with none named, by the entry the app
+  /// keeps for [harness]'s accounts, which is made with `peers = []`: no paired key reaches it, and only this computer's own
+  /// application, whose link ignores `peers`, runs sessions on it. An entry of the person's is never changed unless it is named.
+  /// The account is appended, so it never becomes the default of an entry that already offers others.
   CanoaConfig withAccountOffered({required String account, required String harness, String? entry}) {
     final copy = _deepCopy(host ?? const {});
     final table = (copy['agents'] as Map<String, dynamic>?) ?? <String, dynamic>{};
-    var target = entry ?? hostEntriesRunning(harness).firstOrNull;
-    if (target == null) {
-      target = _freeEntryName('$harness-accounts');
-      table[target] = <String, dynamic>{'harness': harness, 'title': '${harness[0].toUpperCase()}${harness.substring(1)} accounts'};
+    final target = entry ?? accountsEntryOf(harness);
+    if (table[target] == null) {
+      table[target] = <String, dynamic>{
+        'harness': harness,
+        'title': '${harness[0].toUpperCase()}${harness.substring(1)} accounts',
+        'peers': <String>[],
+      };
     }
-    final entryTable = Map<String, dynamic>.of((table[target] as Map?)?.cast<String, dynamic>() ?? const {});
+    final entryTable = Map<String, dynamic>.of((table[target] as Map).cast<String, dynamic>());
     final names = [...?(entryTable['accounts'] as List?)?.map((each) => '$each')];
     if (!names.contains(account)) names.add(account);
     entryTable['accounts'] = names;
@@ -347,12 +358,16 @@ final class CanoaConfig {
     return withHost(copy);
   }
 
-  String _freeEntryName(String wanted) {
-    var name = wanted, n = 2;
-    while (_hostAgents.containsKey(name) || hostEntries.any((entry) => entry.name == name)) {
-      name = '$wanted-${n++}';
+  /// This configuration with the entry [entry] offering exactly [accounts], in that order (none takes the key out).
+  CanoaConfig withAccountsOf(String entry, List<String> accounts) {
+    final copy = _deepCopy(host ?? const {});
+    final table = copy['agents'];
+    if (table is Map<String, dynamic> && table[entry] is Map) {
+      final one = Map<String, dynamic>.of((table[entry] as Map).cast<String, dynamic>());
+      accounts.isEmpty ? one.remove('accounts') : one['accounts'] = List<String>.of(accounts);
+      table[entry] = one;
     }
-    return name;
+    return withHost(copy);
   }
 
   /// This configuration with the account [account] offered by no entry, or no longer by the entry [only]; an entry left with none goes

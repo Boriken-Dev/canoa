@@ -809,7 +809,8 @@ class _CanoaAppState extends State<CanoaApp> {
           for (final title in ending.take(8)) Text('• $title', key: const Key('restart-accounts-session')),
           if (ending.length > 8) Text('and ${ending.length - 8} more'),
           const SizedBox(height: 8),
-          const Text('Or leave it: it is saved, and applies the next time the host starts.'),
+          const Text('Or leave it: it is saved, and applies the next time the host starts. Until then the running host still offers '
+              'what it did, so an account removed meanwhile fails to start a session.'),
         ]),
         actions: [
           TextButton(key: const Key('restart-accounts-later'), onPressed: () => Navigator.pop(context, false), child: const Text('Leave it for now')),
@@ -988,7 +989,10 @@ class _CanoaAppState extends State<CanoaApp> {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
-    if (listening.local) return _startViaLink(draft, name, folder, worktree, starting);
+    if (listening.local || (_accounts?.offeredBy(name).isNotEmpty ?? false)) {
+      draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
+      return _startViaLink(draft, name, folder, worktree, starting);
+    }
     draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
     final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
     if (method == null) throw StateError('canoa did not say which method it proves by');
@@ -1151,13 +1155,15 @@ class _CanoaAppState extends State<CanoaApp> {
     await _findWorktree(entry);
     final VerifiedAgent client;
     switch (entry.place) {
-      case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entry.entry):
+      case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entry.entry) ||
+          (_accounts?.offeredBy(entry.entry).isNotEmpty ?? false):
         client = await _linkAgent(entry.entry, {
           ..._cacheMeta((
             lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
             chosen: entry.cacheLifetime != null,
           )),
           if (entry.overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
+          ..._accountMeta(entry.account),
         });
       case SessionPlace.local:
         throw StateError('${entry.entry} is not one of the sources of this computer now');

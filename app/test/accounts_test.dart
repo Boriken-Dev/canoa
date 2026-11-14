@@ -151,6 +151,8 @@ void main() {
     await tester.pump();
     expect(saved.last.hostAccountsOf('claude-accounts'), ['metered']);
     expect(saved.last.hostHarnessOf('claude-accounts'), 'claude');
+    // No paired key reaches the entry the app made: only this computer's own application does.
+    expect(saved.last.hostEntryIsOpen('claude-accounts'), isFalse);
   });
 
   testWidgets('Cancel gives up a sign-in: the host is told to stop and the form it asked is cancelled', (tester) async {
@@ -289,5 +291,95 @@ void main() {
     final none = one.withoutAccountOffered('metered');
     expect(none.hostAccountsOf('claude-accounts'), isEmpty);
     expect(none.encode(), isNot(contains('accounts = ')));
+  });
+
+  group('who an account reaches', () {
+    const open = CanoaConfig(host: {
+      'agents': {
+        'Claude': {'harness': 'claude'},
+        'Shared': {'harness': 'claude', 'accounts': ['work', 'old']},
+      },
+    });
+
+    test("a new account never goes to an entry of the person's, and the entry the app makes reaches no paired key", () {
+      final changed = open.withAccountOffered(account: 'metered', harness: 'claude');
+      expect(changed.hostAccountsOf('Claude'), isEmpty, reason: 'an entry offering none keeps the login it runs on');
+      expect(changed.hostAccountsOf('Shared'), ['work', 'old']);
+      expect(changed.hostAccountsOf('claude-accounts'), ['metered']);
+      expect(changed.hostEntryIsOpen('claude-accounts'), isFalse);
+      expect(changed.hostEntryIsOpen('Shared'), isTrue);
+      expect(changed.encode(), contains('peers'));
+    });
+
+    test('an account offered to a named entry is appended, so the default stays', () {
+      final changed = open.withAccountOffered(account: 'metered', harness: 'claude', entry: 'Shared');
+      expect(changed.hostAccountsOf('Shared'), ['work', 'old', 'metered']);
+    });
+
+    test("an entry's offers can be put back exactly", () {
+      final changed = open.withoutAccountOffered('work').withAccountsOf('Shared', ['work', 'old']);
+      expect(changed.hostAccountsOf('Shared'), ['work', 'old']);
+    });
+
+    testWidgets('a refused removal puts the offers back in their order, the default included', (tester) async {
+      final host = FakeAccountsHost(accounts: [account('work', kind: 'claude-login'), account('old', kind: 'claude-login')])
+        ..removeRefusal = 'a session holds it';
+      final saved = <CanoaConfig>[];
+      final controller = _controller(host, config: open, saved: saved);
+      await controller.refresh();
+      await expectLater(controller.remove(controller.named('work')!), throwsA(anything));
+      expect(saved.last.hostAccountsOf('Shared'), ['work', 'old']);
+    });
+
+    testWidgets('offering an account to an entry every paired key reaches asks first, and does nothing when declined', (tester) async {
+      final host = FakeAccountsHost(accounts: [account('work', kind: 'claude-login'), account('old', kind: 'claude-login'), account('metered')]);
+      final saved = <CanoaConfig>[];
+      await _show(tester, _controller(host, config: open, saved: saved));
+      await tester.tap(find.byKey(const Key('account-menu metered')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-offer metered Shared')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('offer-open-entry')), findsOneWidget);
+      expect(find.textContaining('every key paired with this host'), findsOneWidget);
+      await tester.tap(find.text('Do not offer it'));
+      await tester.pumpAndSettle();
+      expect(saved, isEmpty);
+      await tester.tap(find.byKey(const Key('account-menu metered')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-offer metered Shared')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('offer-open-entry-confirm')));
+      await tester.pumpAndSettle();
+      expect(saved.last.hostAccountsOf('Shared'), ['work', 'old', 'metered']);
+    });
+  });
+
+  testWidgets('a sign-in that would ask a secret before it starts is refused, not run with the secret dropped', (tester) async {
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host));
+    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('login-method token-first')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('asks for a secret before it signs in'), findsOneWidget);
+    expect(host.signIns, isEmpty);
+    expect(find.byKey(const Key('program-ask')), findsNothing);
+  });
+
+  testWidgets('a page that is not a plain web link is shown but never opened', (tester) async {
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host));
+    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('login-method subscription')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pump();
+    host.signIns.single.showPage(const SignInPage(url: 'file:///c:/windows/system32/calc.exe'));
+    await tester.pump();
+    expect(find.byKey(const Key('sign-in-url-refused')), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(find.byKey(const Key('sign-in-open'))).onPressed, isNull);
   });
 }

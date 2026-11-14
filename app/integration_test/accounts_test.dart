@@ -4,7 +4,7 @@
 //
 //   flutter test integration_test/accounts_test.dart -d windows   (or -d linux)
 //
-// Needs the stand-in (`cargo build -p canoa-host --examples`, `harness_standin`) and the browser's peer (`web_peer`), found as
+// Needs the stand-in (`cargo build -p canoa-host --examples`, `harness_standin`), found as
 // test/fixtures/examples.dart says. CANOA_HOST has to be unset, as it is for a person.
 import 'dart:convert';
 import 'dart:io';
@@ -14,8 +14,6 @@ import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/accounts/accounts_section.dart';
 import 'package:canoa/acp/client.dart';
-import 'package:canoa/acp/connect.dart';
-import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
@@ -26,7 +24,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 import '../test/fixtures/examples.dart';
-import '../test/fixtures/web_peer_bridge.dart';
 
 const _canary = 'sk-ant-CANARY-0d7e53b1a9c4';
 
@@ -64,7 +61,6 @@ void main() {
     expect(Platform.environment['CANOA_HOST'], isNull, reason: 'the route under test takes no program');
     final standin = exampleBinary('harness_standin');
     if (standin == null) fail(exampleMissing('harness_standin')!);
-    if (exampleBinary('web_peer') == null) fail(exampleMissing('web_peer')!);
 
     final dir = await Directory.systemTemp.createTemp('canoa-accounts');
     final claude = File('${dir.path}${Platform.pathSeparator}claude${Platform.isWindows ? '.exe' : ''}')..writeAsBytesSync(File(standin).readAsBytesSync());
@@ -73,16 +69,14 @@ void main() {
 [host]
 account_store = "file"
 
-[host.agents.Claude]
+[host.agents.claude-accounts]
 harness = "claude"
 executable = ${_toml(claude.path)}
-bypass = true
+peers = []
 ''');
     final tool = LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home');
     final host = HostSupervisor(tool);
-    final browser = await WebPeerBridge.start();
     addTearDown(() async {
-      browser.kill();
       await host.stop();
       try {
         await dir.delete(recursive: true);
@@ -127,9 +121,12 @@ bypass = true
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('add-account-name')), name);
       await tester.tap(find.byKey(Key('login-method $method')));
-      await tester.pump();
+      await until(
+        () => tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed != null,
+        'Sign in to be offered for $method',
+      );
       await tester.tap(find.byKey(const Key('add-account-start')));
-      await tester.pump();
+      await until(() => find.byKey(const Key('add-account-start')).evaluate().isEmpty, 'the sign-in of $name to start');
     }
 
     Future<void> typeSealed(String field, String value) async {
@@ -152,7 +149,7 @@ bypass = true
     await typeSealed('api_key', _canary);
     await done('metered');
     // The entry now offers it, written before the host is restarted to serve that: the next sign-in waits for the host.
-    await until(() => controller.offeredBy('Claude').isNotEmpty, 'the entry to offer the account');
+    await until(() => controller.offeredBy('claude-accounts').isNotEmpty, 'the entry to offer the account');
     await tester.pump(const Duration(seconds: 1));
     await until(() => host.phase == HostPhase.running && host.served.isNotEmpty, 'the host to serve again');
 
@@ -165,21 +162,23 @@ bypass = true
     await controller.refresh();
     expect(controller.accounts.map((each) => each.name), containsAll(['metered', 'work']));
     expect(controller.accounts.every((each) => each.status == AccountStatus.signedIn), isTrue);
-    expect(controller.offeredBy('Claude').length, 2);
+    expect(controller.offeredBy('claude-accounts').length, 2);
 
-    // A turn on each: the entry serves it, the session names the account it runs on, and no credential is in what the app was told.
-    await until(() => host.phase == HostPhase.running && host.served.isNotEmpty, 'the host to serve the entry again');
-    final entry = host.served.firstWhere((listening) => listening.harness == 'claude');
-    final method = PeerMethod.parse(entry.method!);
+    // A turn on each, over the in-process link as the app starts one: the entry the app made reaches no paired key, and the
+    // session names the account it runs on in the answer, never a credential.
+    await until(() => host.phase == HostPhase.running && host.listening.any((entry) => entry.name == 'claude-accounts'), 'the host to serve the entry');
     Future<String> turn(String account) async {
-      final client = await connectVerifiedAcp(
-        chatEndpoints(webSocket: entry.url),
-        expectedPeerId: host.peerId!,
-        verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: method),
+      final link = host.openLink('claude-accounts');
+      final client = VerifiedAgent.fromChild(
+        label: 'claude-accounts',
+        messages: link.messages,
+        send: link.send,
+        close: link.close,
         decider: (request, from) => Future<AcpDecision>.value(const AcpAllow()),
         initializeMeta: {accountMeta: account},
       );
       try {
+        await client.initialize();
         final opened = await client.openSession(cwd: dir.path);
         final meta = (opened.raw['_meta'] as Map?)?[accountMeta];
         expect((meta as Map?)?['name'], account, reason: 'the answer names the account the session runs on');
@@ -194,9 +193,6 @@ bypass = true
       }
     }
 
-    // The browser's peer is turned away until it is paired.
-    await expectLater(turn('metered'), throwsA(anything));
-    await host.accept(await browser.localId(method));
     expect(await turn('metered'), contains('hello on metered'));
     expect(await turn('work'), contains('hello on work'));
     final leaked = _leaks(dir, _encodings(_canary).where((each) => each.length > 8).toList());

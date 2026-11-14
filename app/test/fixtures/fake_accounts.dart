@@ -37,6 +37,15 @@ const claudeCatalog = {
     {'id': 'subscription', 'title': 'Subscription', 'description': 'Sign in with your Claude plan', 'produces': 'claude-login', 'steps': ['open_url', 'paste_code']},
     {'id': 'api-key', 'title': 'API key', 'description': 'Paste a key from the console', 'produces': 'anthropic-api-key', 'steps': ['ask']},
     {
+      'id': 'token-first',
+      'title': 'Token first',
+      'produces': 'claude-login',
+      'inputs': {
+        'type': 'object',
+        'properties': {'token': {'type': 'string', 'title': 'Token', 'writeOnly': true, 'x-sensitive': true}},
+      },
+    },
+    {
       'id': 'sso',
       'title': 'Single sign-on',
       'produces': 'claude-login',

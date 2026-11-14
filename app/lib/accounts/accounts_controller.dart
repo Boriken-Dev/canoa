@@ -67,6 +67,9 @@ class AccountsController extends ChangeNotifier {
   /// The agent entries that run the provider [harness], which can offer its accounts.
   List<String> entriesRunning(String harness) => config().hostEntriesRunning(harness);
 
+  /// Whether the entry [entry] is open to every paired key, so an account offered there reaches them all.
+  bool isOpen(String entry) => config().hostEntryIsOpen(entry);
+
   /// The entries that offer [account].
   List<String> offering(String account) => [
     for (final entry in config().hostEntries)
@@ -165,14 +168,19 @@ class AccountsController extends ChangeNotifier {
   /// Forgets [account]: no entry offers it any more, then the host takes its credential and place away. A refusal (a session holds
   /// it) is the host's words, thrown as they are, and the offers stay as they were.
   Future<void> remove(AccountInfo account) async {
-    final offering = this.offering(account.name);
+    // What each entry offered, in its order, so a refusal puts back exactly that and not the account in another place.
+    final before = {for (final entry in offering(account.name)) entry: config().hostAccountsOf(entry)};
     await change((config) => config.withoutAccountOffered(account.name));
     try {
       await host.remove(account.name);
     } on Object {
-      for (final entry in offering) {
-        await change((config) => config.withAccountOffered(account: account.name, harness: account.harness, entry: entry));
-      }
+      await change((config) {
+        var restored = config;
+        for (final MapEntry(:key, :value) in before.entries) {
+          restored = restored.withAccountsOf(key, value);
+        }
+        return restored;
+      });
       rethrow;
     } finally {
       await refresh();
