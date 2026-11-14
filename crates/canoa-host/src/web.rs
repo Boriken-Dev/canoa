@@ -550,7 +550,7 @@ impl Drop for FromAddress {
 }
 
 /// `dir` resolved, holding `index.html` and none of `keep_out`.
-fn site_root(dir: &Path, keep_out: &[PathBuf]) -> Result<PathBuf, WebError> {
+pub(crate) fn site_root(dir: &Path, keep_out: &[PathBuf]) -> Result<PathBuf, WebError> {
     let refused = |why| WebError::Site {
         dir: dir.to_owned(),
         why,
@@ -661,7 +661,7 @@ fn host_index(peer: &str, method: &str, entries: &[Listening]) -> Vec<u8> {
 
 /// The Content-Security-Policy every answer carries: scripts, styles, images, fonts and workers from this origin only,
 /// WebAssembly compiled from them, and connections to this origin and to `connect`, the host's entries, alone.
-fn policy(connect: &[&str]) -> String {
+pub(crate) fn policy(connect: &[&str]) -> String {
     let mut sources = String::from("'self'");
     for url in connect {
         sources.push(' ');
@@ -679,7 +679,7 @@ fn policy(connect: &[&str]) -> String {
 /// target not starting with `/`, `.` or `..`, a segment starting or ending with a dot or ending with a space, an empty
 /// segment but a last one, a separator, colon or control character, a character Windows refuses in a name, or a name
 /// Windows keeps for a device. The query is left out.
-fn segments(target: &str) -> Option<Vec<String>> {
+pub(crate) fn segments(target: &str) -> Option<Vec<String>> {
     let path = target.split(['?', '#']).next()?;
     let rest = path.strip_prefix('/')?;
     let mut segments = Vec::new();
@@ -739,12 +739,12 @@ fn windows_device(name: &str) -> bool {
 }
 
 /// Whether `segments` name an app route, which is answered with `index.html`: a last segment with no extension.
-fn is_app_route(segments: &[String]) -> bool {
+pub(crate) fn is_app_route(segments: &[String]) -> bool {
     segments.last().is_none_or(|last| !last.contains('.'))
 }
 
 /// The media type of a file named `name`, by its extension; `application/octet-stream` for one not known.
-fn content_type(name: &str) -> &'static str {
+pub(crate) fn content_type(name: &str) -> &'static str {
     let Some((_, extension)) = name.rsplit_once('.') else {
         return "application/octet-stream";
     };
@@ -790,7 +790,7 @@ fn is_hashed(name: &str) -> bool {
 
 /// Whether a request's `Host` names this host: `localhost`, an IP address, or one of `hosts`, with any port. A name a
 /// page's own site resolves to this address (DNS rebinding) is none of these.
-fn host_allowed(value: &str, hosts: &[String]) -> bool {
+pub(crate) fn host_allowed(value: &str, hosts: &[String]) -> bool {
     let port = |text: &str| {
         !text.is_empty() && text.len() <= 5 && text.bytes().all(|byte| byte.is_ascii_digit())
     };
@@ -812,7 +812,7 @@ fn host_allowed(value: &str, hosts: &[String]) -> bool {
 }
 
 /// `time` as HTTP writes a date: `Sun, 06 Nov 1994 08:49:37 GMT`.
-fn http_date(time: SystemTime) -> String {
+pub(crate) fn http_date(time: SystemTime) -> String {
     const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -1075,7 +1075,7 @@ fn has_token(value: &str, token: &str) -> bool {
 }
 
 /// What an answer carries after its headers.
-enum Body {
+pub(crate) enum Body {
     None,
     #[cfg(feature = "web")]
     Bytes(&'static [u8]),
@@ -1227,12 +1227,12 @@ fn tag_matches(tags: &str, tag: &str) -> bool {
 }
 
 /// A file found in the site.
-struct Found {
-    body: Body,
-    tag: String,
+pub(crate) struct Found {
+    pub(crate) body: Body,
+    pub(crate) tag: String,
 }
 
-enum Lookup {
+pub(crate) enum Lookup {
     Found(Found),
     /// Nothing is there, or it is not a file.
     Missing,
@@ -1262,7 +1262,7 @@ fn lookup(site: &Site, segments: &[String]) -> Lookup {
 
 /// The file `segments` name under `root`, once every link on the way is resolved; one that resolves outside `root` is
 /// refused, whatever it is.
-fn lookup_dir(root: &Path, segments: &[String]) -> Lookup {
+pub(crate) fn lookup_dir(root: &Path, segments: &[String]) -> Lookup {
     let mut path = root.to_path_buf();
     for segment in segments {
         path.push(segment);

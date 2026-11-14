@@ -118,6 +118,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Sign people in with their accounts on this machine and give each their own host, as them: the web app for a machine
+    /// several people use. Binds loopback only, for a proxy that speaks TLS; prints {"portal": URL}.
+    #[cfg(all(unix, feature = "portal"))]
+    Portal(PortalArgs),
     /// Serve every entry of canoa.cfg's [host] table until stopped; prints one JSON line per entry, then {"ready"}.
     /// Only one host runs on a home: a second says which is running and ends with status 3.
     Serve(ServeArgs),
@@ -758,6 +762,63 @@ fn mcp_bridge() -> Result<(), Failed> {
         .map_err(Failed::run)
 }
 
+/// What `canoa portal` takes.
+#[cfg(all(unix, feature = "portal"))]
+#[derive(clap::Args, Debug)]
+struct PortalArgs {
+    /// The portal's settings, a TOML file; every key has a default.
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+    /// The web app's build to serve, in place of the file's `site`.
+    #[arg(long, value_name = "DIR")]
+    site: Option<PathBuf>,
+    /// Where to take browsers, in place of the file's `listen`; loopback only.
+    #[arg(long, value_name = "ADDRESS")]
+    listen: Option<SocketAddr>,
+}
+
+#[cfg(all(unix, feature = "portal"))]
+fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
+    use crate::portal::{Portal, Settings, Systemd};
+    let mut settings = match &args.config {
+        Some(file) => {
+            let text = std::fs::read_to_string(file)
+                .map_err(|error| Failed::usage(format!("{}: {error}", file.display())))?;
+            Settings::from_toml(&text).map_err(Failed::usage)?
+        }
+        None => Settings::default(),
+    };
+    if let Some(site) = &args.site {
+        settings.site = Some(site.clone());
+    }
+    if let Some(listen) = args.listen {
+        settings.listen = listen;
+    }
+    let accounts =
+        crate::portal::System::new(&settings.pam_service, settings.min_uid, &settings.groups)
+            .map_err(Failed::usage)?;
+    let mut controller = Systemd::new();
+    controller.systemctl.clone_from(&settings.systemctl);
+    controller.elevate = settings.elevate.iter().map(Into::into).collect();
+    controller.unit.clone_from(&settings.unit);
+    let portal = Portal::bind(
+        settings,
+        std::sync::Arc::new(accounts),
+        std::sync::Arc::new(controller),
+    )
+    .map_err(|error| match error {
+        crate::portal::PortalError::Listen(_) => Failed::run(error),
+        _ => Failed::usage(error),
+    })?;
+    let address = portal.local_addr().map_err(Failed::run)?;
+    print(
+        front,
+        &serde_json::json!({"portal": format!("http://{address}")}).to_string(),
+    )?;
+    portal.run();
+    Ok(())
+}
+
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     let (config, layers) = load_for_serving(args, front)?;
     let home = home_of(front)?;
@@ -1158,6 +1219,8 @@ fn peers_failure(error: peers::PeersError) -> Failed {
 /// Why it failed, and the status it ends with.
 pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
     match cli.command {
+        #[cfg(all(unix, feature = "portal"))]
+        Command::Portal(args) => portal(&args, front),
         Command::Serve(args) => serve(&args, front),
         Command::Check(args) => check(&args, front),
         Command::Layers(args) => layers(&args, front),

@@ -569,3 +569,38 @@ pub fn with_channel<C: Channel, R>(
     channel.close();
     Ok(result)
 }
+
+/// As [`with_link`] to a `url` that wants headers with the upgrade, such as the cookie and origin a portal checks.
+pub fn with_link_headers<R>(
+    url: &str,
+    headers: Vec<(String, String)>,
+    identity: &Identity,
+    host: PeerId,
+    body: impl FnOnce(&Rpc<'_, websocket::Channel>) -> R,
+) -> Result<R, String> {
+    let url = url::Url::parse(url).map_err(|error| error.to_string())?;
+    let channel = websocket::Dialer::builder()
+        .frames(Frames::Binary)
+        .headers(headers)
+        .limits(max_message(method().record_length(MAX)))
+        .build()
+        .expect("a dialer")
+        .dial(Kind::WebSocket, &url, WAIT)
+        .map_err(|failure| failure.to_string())?;
+    let proof = Proof::builder(identity.clone())
+        .responders(Trust::pinned([host]))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let established = auth::prove_out(&proof, &channel, WAIT, method().record_length(MAX))
+        .map_err(|error| error.to_string())?;
+    let sealed = Sealed::new(&channel, established.session);
+    let rpc = Rpc {
+        channel: &sealed,
+        next: std::cell::Cell::new(0),
+        updates: std::cell::RefCell::new(Vec::new()),
+    };
+    let result = body(&rpc);
+    sealed.close();
+    channel.close();
+    Ok(result)
+}

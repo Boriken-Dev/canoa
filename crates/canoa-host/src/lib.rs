@@ -19,6 +19,8 @@ mod local;
 pub mod options;
 pub mod peers;
 pub mod pipe;
+#[cfg(all(unix, feature = "portal"))]
+pub mod portal;
 pub mod portal_link;
 pub mod profile;
 pub mod provider;

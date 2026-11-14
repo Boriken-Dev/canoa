@@ -26,8 +26,16 @@ yaml = ["dep:serde-saphyr"]
 json = []
 # The web app built in: the site CANOA_WEB_DIST names at build time, served when [host.web] names no directory.
 web = []
+# `canoa portal`: sign users in through the operating system's accounts and give each their own host, as themselves. Unix only;
+# it links the system's libpam.
+portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:tungstenite"]
 
 [dependencies]
+coqui-access = { workspace = true, optional = true }
+coqui-access-system = { workspace = true, optional = true }
+# The WebSocket handshake of the portal's relay, which checks the session before it upgrades; already in the graph through
+# coqui-transport-web.
+tungstenite = { version = "0.30", optional = true, default-features = false, features = ["handshake"] }
 canoa = { path = "../canoa", features = ["store"] }
 clap.workspace = true
 coqui-acp = { workspace = true, features = ["secret"] }
