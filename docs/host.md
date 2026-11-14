@@ -514,6 +514,38 @@ page connect to one, since a browser cannot reach it. `canoa check` prints the e
 use, and a `unix:` path is refused on Windows.
 
 The app dials such an entry when the host it runs lists one (`app/lib/acp/pipe_channel.dart`: on Windows a pipe opened for overlapped I/O through `dart:ffi`, on Unix a socket from `dart:io`), proving the same pinned key, and so can a Rust client with `canoa_host::pipe::PipeChannel::connect`.
+## A transport provider
+
+An entry can listen through a transport provider instead of an address, a pipe or a Unix socket: name it with `transport`, and
+give the endpoint it listens on as `listen`. `pipe` and `websocket` are built in; any other id is loaded from a library or a
+source, as a harness provider is, with the entry's `transport_library` or `transport_source` (and `transport_source_settings`
+and `transport_import_search` for a source). Its own configuration is `transport_settings`, which the host checks against the
+provider's schema before it listens.
+
+```toml
+[host.agents.claude]
+harness = "claude"
+transport = "websocket"
+listen = "ws://127.0.0.1:7801"
+transport_settings = { listen = { frames = "binary" } }   # the proof sends bytes: binary frames
+
+[host.agents.other]
+program = "my-agent"
+transport = "my_transport_id"
+listen = "tcp://127.0.0.1:7802"
+transport_source = "guatiao_source_py.dll"
+[host.agents.other.transport_source_settings]
+dirs = ["transports"]
+```
+
+The proof is the same as on an address, and so is everything after it. What the provider decides is the wire: how messages
+are framed (the built-in `pipe` frames with a big-endian length, the entry's own `pipe:NAME` with a little-endian one, so a
+client of one does not talk to the other), who can reach it, and whether plain WebSocket may leave loopback (only with
+`listen.plain_beyond_loopback` in `transport_settings`, which the host logs). The host's `[host] origins` check belongs to
+the address listener and does not apply; give a provider that checks them its own list. An outside provider is code that runs
+in the host's process, and the host logs that at every start. The web app never lists such an entry. Dialling through a
+provider, `wss://` and WebTransport are not offered yet.
+
 ## What the host allows
 
 - **Loopback by default.** An entry listens on loopback unless its `listen` names another address, which `serve` logs as
