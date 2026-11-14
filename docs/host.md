@@ -251,8 +251,11 @@ command = "/usr/local/bin/lint-mcp"
   An overlay is read from the copy the app installed and checked against its record's digest; a changed copy is left out.
 - **An overlay's hooks stay off** until `allow_hooks` names the overlay's tree digest, or the person allows them for one
   session when the host asks; a changed overlay is off again. A hook runs outside the agent's sandbox with the person's
-  access, from a copy of the files the digest covered, and can add context, block a prompt, deny a tool call or refuse a
-  session, never approve one. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
+  access, from a copy of the files the digest covered, in the session's folder and with the session's environment (every
+  overlay's, stacked), and can add context, block a prompt, deny, ask about or allow a tool call, or refuse a session.
+  An allow answers the question the person would have been asked, with the allow-once option only, and never for a path on
+  the person's protected list (`[permissions] protected`), which still goes to them; a deny beats an ask and an ask beats
+  an allow. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
   `applied`, `not supported` or `off`; `crates/canoa-host/AGENTS.md`, "Overlay hooks", has what fires on which event.
 - **A skill an overlay names from elsewhere** is delivered only from the copy the app fetched (`overlays/.skills/`), at
   its record's digest, the overlay's pin and any pin a top-level `[skill_pins]` table in canoa.cfg gives its name
