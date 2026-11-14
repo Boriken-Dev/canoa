@@ -313,10 +313,13 @@ void main() {
     expect(kinds, {'allow_once', 'allow_always', 'reject_once', 'reject_always'});
     store.choosePermission(session, session.pendingPermissions.first.options.firstWhere((option) => option.kind == 'allow_always'));
     await first;
+    // The send is done once the agent has the message; a v1 turn ends later.
+    await until(() => session.status != SessionStatus.working);
     var asked = false;
     void watch() => asked |= session.pendingPermissions.isNotEmpty;
     store.addListener(watch);
     await store.sendText('Go on with the rename');
+    await until(() => session.status != SessionStatus.working);
     store.removeListener(watch);
     expect(session.messages.any((message) => message.text == 'Renamed everywhere.'), isTrue);
     expect(asked, isFalse, reason: 'the agent remembered the edit, and asked nothing');

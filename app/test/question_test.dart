@@ -218,12 +218,15 @@ void main() {
     expect([for (final field in request.fields) field.name], ['q0', 'q0_custom']);
     store.answerQuestion(session, const AcpElicitAccept({'q0': 'node'}));
     await first;
+    // The send is done once the agent has the message; a v1 turn ends later.
+    await until(() => session.status != SessionStatus.working);
     expect(session.messages.last.text, 'You chose node.');
 
     final second = store.sendText('Ask Which runner, again?');
     await until(() => session.pendingQuestions.isNotEmpty);
     store.answerQuestion(session, const AcpElicitDecline());
     await second;
+    await until(() => session.status != SessionStatus.working);
     expect(session.messages.last.text, 'You declined to answer.');
   }, skip: exampleMissing('stdio_agent'), timeout: const Timeout(Duration(minutes: 1)));
 }
