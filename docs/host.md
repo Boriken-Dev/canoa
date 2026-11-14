@@ -255,7 +255,7 @@ command = "/usr/local/bin/lint-mcp"
   overlay's, stacked), and can add context, block a prompt, deny, ask about or allow a tool call, or refuse a session.
   An allow answers the question the person would have been asked, with the allow-once option only, and never for a path on
   the person's protected list (`[permissions] protected`), which still goes to them; a deny beats an ask and an ask beats
-  an allow. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
+  an allow. A command is not read for the paths it touches, so allowing a command call can mean writes to protected paths. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
   `applied`, `not supported` or `off`; `crates/canoa-host/AGENTS.md`, "Overlay hooks", has what fires on which event.
 - **A skill an overlay names from elsewhere** is delivered only from the copy the app fetched (`overlays/.skills/`), at
   its record's digest, the overlay's pin and any pin a top-level `[skill_pins]` table in canoa.cfg gives its name

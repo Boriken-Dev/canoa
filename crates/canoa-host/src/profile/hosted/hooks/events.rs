@@ -670,7 +670,13 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         {
             return Seen::Passed(None);
         }
-        let tool = tool_of(params.get("toolCall").unwrap_or(&Value::Null));
+        // ACP v1 puts the call at `toolCall`, v2 at `subject.toolCall`; a v2 subject that is no tool call (a command, say)
+        // has none, and no allow answers for what the host cannot read.
+        let call = params
+            .get("toolCall")
+            .or_else(|| params.pointer("/subject/toolCall"))
+            .filter(|call| call.is_object());
+        let tool = tool_of(call.unwrap_or(&Value::Null));
         let fired = self.fire(
             HookEvent::PreTool,
             &session,
@@ -702,17 +708,27 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             Some(Decision::Allow) => {
                 // An allow answers for the person only with the option that allows this once, never one that remembers the
                 // choice, and never for a place the person protects: those go to them as they would have.
-                let call = params.get("toolCall").unwrap_or(&Value::Null);
-                let protected = self
-                    .connection
-                    .hooks
-                    .protects(call, Path::new(&session.cwd));
-                let Some(allowing) = option("allow_once").filter(|_| !protected) else {
+                let protected = call.is_none_or(|call| {
+                    self.connection
+                        .hooks
+                        .protects(call, Path::new(&session.cwd))
+                });
+                // An option whose id another option shares could be read as either.
+                let single = |id: &Value| {
+                    options
+                        .into_iter()
+                        .flatten()
+                        .filter(|each| each.get("optionId") == Some(id))
+                        .count()
+                        == 1
+                };
+                let Some(allowing) = option("allow_once").filter(|id| !protected && single(id))
+                else {
                     let by = fired.by.clone().unwrap_or_default();
                     let why = if protected {
-                        "the call names a place the person protects"
+                        "the call names a place the person protects, asks to widen the sandbox, or is not one the host can read"
                     } else {
-                        "the agent offers no option that allows it once"
+                        "the agent offers no unambiguous option that allows it once"
                     };
                     hold.book.remember([Item::new(
                         format!("hooks.{by}.pre-tool"),

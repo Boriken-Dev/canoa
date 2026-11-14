@@ -1867,4 +1867,91 @@ mod native {
             "its secret is not good"
         );
     }
+
+    const ALLOW_ALL: &str = r#"{"decision":"allow"}"#;
+
+    /// What the host answers a `session/request_permission` with `params` when one overlay's `pre-tool` hook allows every
+    /// call: the option it selected, or none when the question went on to the client.
+    fn allowed_option(params: Value) -> Option<String> {
+        let temp = Temp::new();
+        let digest = temp.install(
+            "[hooks]\npre-tool = {}\n",
+            &[("pre-tool", Arm::Print(ALLOW_ALL.to_owned()))],
+        );
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        let hosted = Hosted::in_process(&client, &scope, &connection);
+        let message = json!({"jsonrpc": "2.0", "id": 7, "method": "session/request_permission", "params": params});
+        match hosted.on_agent(&serde_json::to_vec(&message).expect("JSON")) {
+            Seen::Dropped => {
+                let sent = hosted.hold().book.next_injected()?;
+                let sent: Value = serde_json::from_slice(&sent).expect("JSON");
+                sent["result"]["outcome"]["optionId"]
+                    .as_str()
+                    .map(str::to_owned)
+            }
+            Seen::Passed(_) => None,
+        }
+    }
+
+    fn options() -> Value {
+        json!([
+            {"optionId": "yes", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "yes-always", "name": "Always", "kind": "allow_always"},
+            {"optionId": "no", "name": "Reject", "kind": "reject_once"}
+        ])
+    }
+
+    fn edit_of(path: &str) -> Value {
+        json!({"toolCallId": "c1", "title": "Edit", "kind": "edit", "rawInput": {"file_path": path}})
+    }
+
+    #[test]
+    fn an_allow_answers_a_call_asked_over_v1_and_over_v2_alike() {
+        let v1 = json!({"sessionId": "s", "toolCall": edit_of("src/lib.rs"), "options": options()});
+        let v2 = json!({"sessionId": "s", "subject": {"toolCall": edit_of("src/lib.rs")}, "options": options()});
+        assert_eq!(allowed_option(v1).as_deref(), Some("yes"));
+        assert_eq!(allowed_option(v2).as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn a_protected_path_is_asked_about_over_v2_as_over_v1() {
+        let v1 = json!({"sessionId": "s", "toolCall": edit_of(".env"), "options": options()});
+        let v2 = json!({"sessionId": "s", "subject": {"toolCall": edit_of(".env")}, "options": options()});
+        assert_eq!(allowed_option(v1), None);
+        assert_eq!(allowed_option(v2), None);
+    }
+
+    #[test]
+    fn a_question_with_no_tool_call_in_it_is_never_allowed() {
+        let command =
+            json!({"sessionId": "s", "subject": {"command": "rm -rf ."}, "options": options()});
+        let unknown = json!({"sessionId": "s", "subject": {"toolCall": "x"}, "options": options()});
+        let none = json!({"sessionId": "s", "options": options()});
+        for params in [command, unknown, none] {
+            assert_eq!(allowed_option(params.clone()), None, "{params}");
+        }
+    }
+
+    #[test]
+    fn a_request_to_widen_the_sandbox_is_never_answered_by_an_allow() {
+        let grant = json!({"toolCallId": "c1", "title": "Grant more permissions", "kind": "other",
+            "rawInput": {"fileSystem": {"write": ["/home/me"], "entries": [{"path": "/home/me"}]}}});
+        let v1 = json!({"sessionId": "s", "toolCall": grant, "options": options()});
+        let v2 = json!({"sessionId": "s", "subject": {"toolCall": grant}, "options": options()});
+        assert_eq!(allowed_option(v1), None);
+        assert_eq!(allowed_option(v2), None);
+    }
+
+    #[test]
+    fn an_allow_once_option_whose_id_another_option_shares_is_not_taken() {
+        let shared = json!([
+            {"optionId": "x", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "x", "name": "Reject", "kind": "reject_once"}
+        ]);
+        let params =
+            json!({"sessionId": "s", "toolCall": edit_of("src/lib.rs"), "options": shared});
+        assert_eq!(allowed_option(params), None);
+    }
 }

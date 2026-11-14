@@ -37,11 +37,17 @@ impl Refusals {
     /// Whether `call` (a permission request's `toolCall`) names a protected place, or one that cannot be placed, resolved
     /// against `cwd`.
     pub(super) fn touches(&self, call: &Value, cwd: &Path) -> bool {
-        named(call).iter().any(|path| !self.allows(path, cwd))
+        // A request to widen the sandbox for the turn (Codex's, which names a `fileSystem`) is the person's to decide.
+        if call.pointer("/rawInput/fileSystem").is_some() {
+            return true;
+        }
+        named(call)
+            .iter()
+            .any(|path| !self.allows(path, cwd, cfg!(windows)))
     }
 
-    fn allows(&self, path: &str, cwd: &Path) -> bool {
-        let Some(placed) = place(cwd, path) else {
+    fn allows(&self, path: &str, cwd: &Path, windows: bool) -> bool {
+        let Some(placed) = place(cwd, path, windows) else {
             return false;
         };
         let home = self.home.as_deref();
@@ -91,9 +97,29 @@ fn named(call: &Value) -> Vec<String> {
 
 /// `path` made absolute against `cwd` with `.` and `..` worked out; none for one that cannot be placed: empty, holding a
 /// zero byte, starting with `~` (which a shell expands and this does not), or climbing above its root.
-fn place(cwd: &Path, path: &str) -> Option<PathBuf> {
+fn place(cwd: &Path, path: &str, windows: bool) -> Option<PathBuf> {
     if path.is_empty() || path.contains('\0') || path.starts_with('~') {
         return None;
+    }
+    // A `..` follows a link on Unix before the name before it, so the lexical form is not where the file is.
+    let parts = || path.split(['/', '\\']);
+    if parts().any(|part| part == "..") {
+        return None;
+    }
+    if windows {
+        // Windows reads `CLAUDE.md.`, `build.rs ` and `Makefile::$DATA` as the protected names they look like.
+        let rest = match path.as_bytes() {
+            [drive, b':', ..] if drive.is_ascii_alphabetic() => &path[2..],
+            _ => path,
+        };
+        let rest = rest.strip_prefix("\\\\?\\").unwrap_or(rest);
+        if rest.contains(':')
+            || rest
+                .split(['/', '\\'])
+                .any(|part| part != "." && (part.ends_with('.') || part.ends_with(' ')))
+        {
+            return None;
+        }
     }
     let joined = cwd.join(path);
     let mut out = PathBuf::new();
@@ -222,6 +248,41 @@ mod tests {
         // The app's constant must equal this file; its own test (`protected_paths_test.dart`) fails when it drifts.
         assert!(RECOMMENDED.lines().any(|line| line == ".*"));
         assert!(RECOMMENDED.ends_with('\n') && !RECOMMENDED.contains('\r'));
+    }
+
+    #[test]
+    fn a_dot_dot_component_cannot_be_placed() {
+        let list = refusals(&[]);
+        let cwd = folder();
+        for path in ["a/../b", r"..\b", "link/../CLAUDE.md"] {
+            assert!(list.touches(&edit(path), &cwd), "{path}");
+        }
+    }
+
+    #[test]
+    fn on_windows_a_name_that_is_a_protected_one_in_disguise_cannot_be_placed() {
+        let list = refusals(&["claude.md", "build.rs", "makefile"]);
+        let cwd = folder();
+        for path in [
+            "CLAUDE.md.",
+            "build.rs ",
+            "Makefile::$DATA",
+            r"a\b.",
+            r"C:\x\y:z",
+        ] {
+            assert!(!list.allows(path, &cwd, true), "{path}");
+        }
+        assert!(list.allows(r"src\main.rs", &cwd, true));
+        assert!(list.allows(r"C:\work\src\main.rs", &cwd, true));
+        // The same names are ordinary ones elsewhere.
+        assert!(list.allows("notes.", &cwd, false));
+    }
+
+    #[test]
+    fn a_request_to_widen_the_sandbox_is_touched() {
+        let list = refusals(&[]);
+        let call = json!({"kind": "other", "rawInput": {"fileSystem": {"read": ["/x"]}}});
+        assert!(list.touches(&call, &folder()));
     }
 
     #[cfg(unix)]
