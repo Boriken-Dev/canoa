@@ -413,9 +413,9 @@ repository, the commit and digest it is pinned to), and everything is shown befo
   remote over plain `http` and anything else Canoa does not run is refused with the reason. An installed server is
   written to `[profile.mcp.NAME]`, noted in `[loadout.mcp.NAME]` (`registry`, `server`, `version`, `digest`) and turned
   off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
-- **Applying a change.** The host reads the profile when it starts, so a change to `[overlays]`, `[profile]` or
-  `[agents.*.mcp]` takes effect when the host starts again; with sessions open, Loadout asks first and may leave it for
-  the next start.
+- **Applying a change.** The host reads canoa.cfg's layers again when each session of its own sources starts, so a
+  change to `[overlays]`, `[profile]` or `[agents.*.mcp]` reaches the next session and ends none that is open. A file
+  that no longer parses is refused and the profile stays as the last good file gave it.
 
 ```toml
 [loadout]

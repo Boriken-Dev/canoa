@@ -649,9 +649,12 @@ fn load(args: &ConfigArgs, front: &dyn Front) -> Result<Config, Failed> {
 
 /// canoa.cfg for `serve`. With `--allow-empty`, no file at all names nothing, as an empty one does: a person who has
 /// written none yet has a host to run all the same.
-fn load_for_serving(args: &ServeArgs, front: &dyn Front) -> Result<Config, Failed> {
+fn load_for_serving(
+    args: &ServeArgs,
+    front: &dyn Front,
+) -> Result<(Config, crate::Layers), Failed> {
     let layers = layers_of(&args.config, front, !args.allow_empty)?;
-    match Config::load_layers(&layers) {
+    let config = match Config::load_layers(&layers) {
         Err(crate::ConfigError::Read { source, .. })
             if args.allow_empty && source.kind() == std::io::ErrorKind::NotFound =>
         {
@@ -659,7 +662,8 @@ fn load_for_serving(args: &ServeArgs, front: &dyn Front) -> Result<Config, Faile
                 .map_err(Failed::usage)
         }
         loaded => loaded.map_err(Failed::usage),
-    }
+    }?;
+    Ok((config, layers))
 }
 
 fn home_of(front: &dyn Front) -> Result<Home, Failed> {
@@ -723,7 +727,7 @@ fn mcp_bridge() -> Result<(), Failed> {
 }
 
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
-    let config = load_for_serving(args, front)?;
+    let (config, layers) = load_for_serving(args, front)?;
     let home = home_of(front)?;
     let web = web_config(&config, args, &home, front)?;
     // Before anything of the home is touched or any address bound.
@@ -744,6 +748,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         .with_rekey(!args.no_rekey)
         .with_nothing_to_serve(args.allow_empty)
         .with_local_sources(args.local_sources)
+        .with_layers(layers)
         .with_state_dir(home.dir());
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);

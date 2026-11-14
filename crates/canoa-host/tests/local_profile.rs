@@ -259,3 +259,51 @@ fn the_overlays_a_session_chooses_are_the_ones_its_report_shows() {
     // The person's own layers are not overlays: they stay whatever is chosen.
     assert_eq!(item(&left_out, "context")["state"], "applied", "{left_out}");
 }
+
+/// The profile `initialize` reports on a new link to `Profiled`.
+fn report_of_next_link(host: &Hosted) -> Value {
+    let link = host.local.open("Profiled").expect("a link");
+    let (initialized, _) = ask(
+        &link,
+        1,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}}),
+    )
+    .expect("initialize is answered");
+    initialized["_meta"][PROFILE_META].clone()
+}
+
+fn lists_team(report: &Value) -> bool {
+    report["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .any(|item| item["key"] == "mcp.team" && item["layer"] == "overlay:team")
+}
+
+#[test]
+fn an_overlay_added_to_canoa_cfg_under_a_running_host_reaches_the_next_session() {
+    let host = Hosted::start_with(&config(""), &["--local-sources"]);
+    let file = host.scratch.0.join("canoa.cfg");
+    assert!(!lists_team(&report_of_next_link(&host)));
+
+    install_overlay(&host.scratch);
+    std::fs::write(
+        &file,
+        format!("{}[overlays]\nteam = \"fixture\"\n", config("")),
+    )
+    .expect("written");
+    assert!(
+        lists_team(&report_of_next_link(&host)),
+        "the next initialize reports the installed overlay"
+    );
+
+    // A file that no longer parses is refused: the session still gets the last good profile.
+    std::fs::write(&file, "[overlays\nteam = ").expect("written");
+    assert!(lists_team(&report_of_next_link(&host)));
+
+    // A good file again is read again, here with the overlay taken out.
+    std::fs::write(&file, config("")).expect("written");
+    assert!(!lists_team(&report_of_next_link(&host)));
+    host.stop();
+}

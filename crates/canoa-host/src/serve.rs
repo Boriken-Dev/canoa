@@ -30,8 +30,8 @@ use indexmap::IndexMap;
 use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
 use crate::config::{
-    BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, ImportSearch, Listen, Origin,
-    Settings, UsageSource,
+    BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, HostProfile, ImportSearch,
+    Layers, Listen, Origin, Settings, UsageSource,
 };
 use crate::control;
 use crate::delegate::{self, Delegating, Delegation, Peek, Principal};
@@ -93,6 +93,10 @@ pub struct ServeOptions {
     /// The programs the control channel's `store/*` methods keep, and the ids of the stores it offers; without it, the built-in
     /// stores over this user's own programs folder.
     pub programs: Option<(Arc<crate::store::programs::Programs>, Vec<String>)>,
+    /// The files canoa.cfg was read from. With them, each connection to one of the host's own sources reads them again for
+    /// its profile, so a change to `[overlays]`, `[profile]` or `[agents.NAME]` reaches the next session; a file that no longer
+    /// parses leaves the profile as it was.
+    pub layers: Option<Layers>,
 }
 
 impl ServeOptions {
@@ -108,7 +112,15 @@ impl ServeOptions {
             state_dir: None,
             local_sources: false,
             programs: None,
+            layers: None,
         }
+    }
+
+    /// Reads canoa.cfg's profile again from `layers` at each connection to one of the host's own sources.
+    #[must_use]
+    pub fn with_layers(mut self, layers: Layers) -> Self {
+        self.layers = Some(layers);
+        self
     }
 
     /// Serves the host's own sources over [`Local`] alongside canoa.cfg's entries. A name canoa.cfg already uses is left to it.
@@ -332,6 +344,8 @@ enum Run {
         scope: Scope,
         /// The profiles a client may choose among; `None` starts the program bare.
         offer: Option<Arc<Offer>>,
+        /// Reads the offer again from canoa.cfg each time a connection starts; only the host's own sources have one.
+        refresh: Option<Refresh>,
         worktrees: Worktrees,
     },
     Provider {
@@ -343,6 +357,45 @@ enum Run {
     Control {
         grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
     },
+}
+
+/// What builds a local entry's offer again from canoa.cfg's layers, so that installing an overlay, skill or server reaches
+/// the next connection with no host restart.
+#[derive(Debug)]
+struct Refresh {
+    layers: Layers,
+    entry: String,
+    /// The entry's own profile names and the configuration's `[host.profiles]`, which the layers do not change while running.
+    names: Vec<String>,
+    profiles: IndexMap<String, HostProfile>,
+    launcher: OsString,
+    /// The offer the last readable file gave.
+    current: Mutex<Option<Arc<Offer>>>,
+}
+
+impl Refresh {
+    /// The offer for a connection starting now: the file read again, or the last good one when it no longer parses.
+    fn offer(&self) -> Option<Arc<Offer>> {
+        let mut current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
+        match Config::load_layers(&self.layers) {
+            Ok(config) => {
+                let local = config.local_profiles.for_agent(&self.entry);
+                *current = hosted::offer(
+                    &self.names,
+                    &self.profiles,
+                    local.as_ref(),
+                    self.launcher.clone(),
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    entry = self.entry,
+                    "canoa.cfg could not be read again, so the profile offered stays as it was: {error}"
+                );
+            }
+        }
+        current.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -458,6 +511,31 @@ impl Shared {
 
 /// How an agent started only to read its usage is started: recorded with the others, so that stopping the host ends it and
 /// none starts while it stops. The second part of what it hands back forgets the agent once it has ended.
+/// What re-reads an entry's profile at each connection: only an entry of the host's own, when the options hold canoa.cfg's files.
+fn refresh_of(
+    entry: &Entry,
+    names: &[String],
+    config: &Config,
+    options: &ServeOptions,
+) -> Option<Refresh> {
+    let layers = options.layers.clone().filter(|_| entry.local)?;
+    let launcher = options.provider_program.as_os_str().to_owned();
+    let local = config.local_profiles.for_agent(&entry.name);
+    Some(Refresh {
+        layers,
+        entry: entry.name.clone(),
+        names: names.to_vec(),
+        profiles: config.profiles.clone(),
+        current: Mutex::new(hosted::offer(
+            names,
+            &config.profiles,
+            local.as_ref(),
+            launcher.clone(),
+        )),
+        launcher,
+    })
+}
+
 fn private_starter(agents: &Arc<Mutex<Agents>>) -> Starter {
     let agents = Arc::clone(agents);
     Starter(Arc::new(move |program, args| {
@@ -991,6 +1069,7 @@ impl Serving {
                             local_profile.as_ref(),
                             options.provider_program.as_os_str().to_owned(),
                         ),
+                        refresh: refresh_of(entry, profiles, config, options),
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },
                 ),
@@ -1095,6 +1174,7 @@ impl Serving {
                                 local_profile.as_ref(),
                                 options.provider_program.as_os_str().to_owned(),
                             ),
+                            refresh: refresh_of(entry, profiles, config, options),
                             worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                         },
                     )
@@ -1111,6 +1191,7 @@ impl Serving {
                             .account(entry.name.clone())
                             .limit_phrases(config.limit_phrases.clone()),
                         offer: None,
+                        refresh: None,
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },
                 ),
@@ -1617,13 +1698,14 @@ fn give_agent<C: Channel>(
     (first, peer): (&[u8], &PeerId),
     (context, in_process): (Option<&delegate::ChildContext>, bool),
 ) {
-    let (agent, scope, offer) = match &served.run {
+    let (agent, scope, offer, refresh) = match &served.run {
         Run::Agent {
             agent,
             scope,
             offer,
+            refresh,
             ..
-        } => (agent, scope, offer),
+        } => (agent, scope, offer, refresh),
         Run::Provider {
             program,
             args,
@@ -1677,6 +1759,10 @@ fn give_agent<C: Channel>(
     let peeked = Peek::new(channel, conn.as_ref());
     let raw = Raw::new(&peeked, link.as_ref());
     let channel = &raw;
+    let fresh = refresh
+        .as_ref()
+        .map_or_else(|| offer.clone(), Refresh::offer);
+    let offer = fresh.as_ref();
     let connection = match offer {
         Some(offer) => match prepare(
             served,
