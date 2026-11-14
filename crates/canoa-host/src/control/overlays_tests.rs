@@ -63,19 +63,23 @@ fn change(repo: &Path, files: &[(&str, &str)], message: &str) {
     git(repo, &["commit", "--quiet", "-m", message]);
 }
 
-/// The source string for `repo`'s `main`, naming the folder `path` in it.
-fn source(repo: &Path, path: &str) -> String {
+/// The source for `repo`'s `main`, naming the folder `path` in it: what `overlay/check` and `catalog/fetch` are given.
+fn source(repo: &Path, path: &str) -> Value {
     let text = repo.to_string_lossy().replace('\\', "/");
     let url = if text.starts_with('/') {
-        format!("git+file://{text}")
+        format!("file://{text}")
     } else {
-        format!("git+file:///{text}")
+        format!("file:///{text}")
     };
-    if path.is_empty() {
-        format!("{url}@main")
-    } else {
-        format!("{url}@main#{path}")
+    json!({"repo": url, "ref": "main", "path": path})
+}
+
+/// `base` with the members of `add`.
+fn plus(mut base: Value, add: Value) -> Value {
+    if let (Some(base), Some(add)) = (base.as_object_mut(), add.as_object()) {
+        base.extend(add.clone());
     }
+    base
 }
 
 struct Setup {
@@ -125,12 +129,12 @@ fn key(id: &str, grants: &[Grant]) -> Caller {
 
 const BOTH: [Grant; 2] = [Grant::OverlayRead, Grant::OverlayWrite];
 
-fn check(s: &Setup, who: &Caller, name: &str, source: &str) -> Value {
+fn check(s: &Setup, who: &Caller, name: &str, source: &Value) -> Value {
     ask(
         &s.control,
         who,
         "overlay/check",
-        json!({"name": name, "source": source}),
+        plus(json!({"name": name}), source.clone()),
     )
 }
 
@@ -285,7 +289,7 @@ fn a_pin_that_is_not_the_trees_digest_installs_nothing() {
         &s.control,
         &who,
         "overlay/check",
-        json!({"name": "o", "source": source(&upstream, ""), "pin": wrong}),
+        plus(json!({"name": "o", "pin": wrong}), source(&upstream, "")),
     );
     assert_eq!(refused["error"]["code"], REFUSED, "{refused}");
     assert!(
@@ -299,14 +303,17 @@ fn a_pin_that_is_not_the_trees_digest_installs_nothing() {
         &s.control,
         &who,
         "overlay/check",
-        json!({"name": "o", "source": source(&upstream, ""), "pin": right["result"]["digest"]}),
+        plus(
+            json!({"name": "o", "pin": right["result"]["digest"]}),
+            source(&upstream, ""),
+        ),
     );
     assert!(pinned["result"]["token"].is_string(), "{pinned}");
     let bad = ask(
         &s.control,
         &who,
         "overlay/check",
-        json!({"name": "o", "source": source(&upstream, ""), "pin": "nope"}),
+        plus(json!({"name": "o", "pin": "nope"}), source(&upstream, "")),
     );
     assert_eq!(bad["error"]["code"], BAD_PARAMS, "{bad}");
     let _ = fs::remove_dir_all(s.tmp);
@@ -368,7 +375,10 @@ fn a_source_that_cannot_be_an_overlay_is_refused_whole() {
         &s.control,
         &who,
         "overlay/check",
-        json!({"name": "empty", "source": source(&empty, "").replace("@main", "@nothere")}),
+        plus(
+            json!({"name": "empty"}),
+            json!({"repo": source(&empty, "")["repo"], "ref": "nothere", "path": ""}),
+        ),
     );
     assert!(
         answer["error"]["message"]
@@ -432,7 +442,7 @@ fn a_plan_is_its_keys_alone_and_each_method_needs_its_grant() {
         (
             &reader,
             "overlay/check",
-            json!({"name": "o", "source": source(&upstream, "")}),
+            plus(json!({"name": "o"}), source(&upstream, "")),
         ),
         (&reader, "overlay/apply", json!({"token": token})),
         (&reader, "overlay/remove", json!({"name": "o"})),
@@ -440,7 +450,7 @@ fn a_plan_is_its_keys_alone_and_each_method_needs_its_grant() {
         (
             &reader,
             "catalog/fetch",
-            json!({"label": "c", "source": source(&upstream, "")}),
+            plus(json!({"label": "c"}), source(&upstream, "")),
         ),
         (&reader, "catalog/remove", json!({"label": "c"})),
     ] {
@@ -474,7 +484,7 @@ fn a_key_names_a_source_on_this_computer_only_under_the_places_it_may_browse() {
         &s.control,
         &who,
         "catalog/fetch",
-        json!({"label": "c", "source": source(&outside, "")}),
+        plus(json!({"label": "c"}), source(&outside, "")),
     );
     assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
     // The person running the host names any.
@@ -501,7 +511,7 @@ fn a_catalog_is_fetched_and_its_files_read_literally_within_a_size() {
         &s.control,
         &who,
         "catalog/fetch",
-        json!({"label": "main", "source": source(&upstream, "catalog.toml")}),
+        plus(json!({"label": "main"}), source(&upstream, "catalog.toml")),
     );
     let commit = fetched["result"]["commit"]
         .as_str()

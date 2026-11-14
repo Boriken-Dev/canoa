@@ -341,3 +341,43 @@ fn a_client_that_does_not_say_it_answers_is_never_asked() {
     assert_eq!(item(&report, "mcp.team")["state"], "off", "{report}");
     assert_eq!(opened["mcpServers"], json!(["probe"]), "{opened}");
 }
+
+#[test]
+fn an_entry_with_own_profile_gets_the_persons_own_layer_and_another_entry_does_not() {
+    let agent = quoted(&example("profile_agent", false).to_string_lossy());
+    let config = format!(
+        "[profile]\ncontext = {{ text = \"The person's own context.\" }}\n\
+         [host.agents.mine]\nprogram = {agent}\nown_profile = true\n\
+         [host.agents.theirs]\nprogram = {agent}\n"
+    );
+    let host = Host::start(&config, 2);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    let prompt_of = |entry: &str| {
+        with_link(host.url(entry), &client, host.peer, |rpc| {
+            rpc.initialize().expect("initialize is answered");
+            rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens")
+        })
+        .expect("a paired key is served")
+    };
+    assert_eq!(
+        prompt_of("mine")["systemPrompt"],
+        "The person's own context."
+    );
+    assert_eq!(prompt_of("theirs")["systemPrompt"], "");
+}
+
+#[test]
+fn own_profile_cannot_go_with_profiles() {
+    let config = "[host.agents.a]\nprogram = \"x\"\nown_profile = true\nprofiles = [\"p\"]\n[host.profiles.p]\n";
+    let parsed = canoa_host::Config::from_str_in(config, Path::new("."));
+    assert!(parsed.is_err(), "{parsed:?}");
+    let alone = canoa_host::Config::from_str_in(
+        "[host.agents.a]\nprogram = \"x\"\nown_profile = true\n",
+        Path::new("."),
+    )
+    .expect("parses");
+    assert!(alone.entries[0].own_profile);
+}

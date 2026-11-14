@@ -1053,10 +1053,9 @@ impl Serving {
                 )?;
                 (Some(bound), url)
             };
-            // The host's own sources are launched with what canoa.cfg's top level says; an entry on an address, with its
-            // `[host.profiles]`.
-            let local_profile = entry
-                .local
+            // The host's own sources are launched with what canoa.cfg's top level says, and so is an entry that sets `own_profile`;
+            // any other entry on an address, with its `[host.profiles]`.
+            let local_profile = (entry.local || entry.own_profile)
                 .then(|| config.local_profiles.for_agent(&entry.name))
                 .flatten();
             let (kind, run) = match &entry.kind {

@@ -169,17 +169,8 @@ impl Overlays {
         local: &dyn Fn(&str) -> bool,
     ) -> Outcome {
         let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
-        let source = text_param(params, "source")?.ok_or_else(|| bad("source is needed"))?;
         let pin = pin_of(params)?;
-        let OverlaySource::Git {
-            repo,
-            reference,
-            path,
-        } = OverlaySource::parse_git(source)
-            .map_err(|_| bad("source is not a git source this host fetches"))?
-        else {
-            return Err(bad("source is not a git source this host fetches"));
-        };
+        let (repo, reference, path, source) = git_source(params)?;
         if is_local(&repo) && !local(&repo) {
             return Err(refused(
                 "a source on this computer must be in a folder this key may browse",
@@ -260,7 +251,7 @@ impl Overlays {
             token,
             owner,
             name: name.to_owned(),
-            source: source.to_owned(),
+            source,
             commit,
             digest,
             files,
@@ -474,14 +465,7 @@ impl Overlays {
     pub(crate) fn catalog_fetch(&self, params: &Value, local: &dyn Fn(&str) -> bool) -> Outcome {
         let label =
             checked_name(text_param(params, "label")?.ok_or_else(|| bad("label is needed"))?)?;
-        let source = text_param(params, "source")?.ok_or_else(|| bad("source is needed"))?;
-        let OverlaySource::Git {
-            repo, reference, ..
-        } = OverlaySource::parse_git(source)
-            .map_err(|_| bad("source is not a git source this host fetches"))?
-        else {
-            return Err(bad("source is not a git source this host fetches"));
-        };
+        let (repo, reference, _path, _spec) = git_source(params)?;
         if is_local(&repo) && !local(&repo) {
             return Err(refused(
                 "a source on this computer must be in a folder this key may browse",
@@ -1146,6 +1130,35 @@ fn checked_name(name: &str) -> Result<&str, (i32, String)> {
         Ok(name)
     } else {
         Err(bad("a name has 1 to 64 letters, digits, - or _"))
+    }
+}
+
+/// The source `params` name: `repo`, `ref` and `path` (empty for the root), held to what the host fetches, and `spec`, the text
+/// canoa.cfg writes it as, which the record keeps (the canonical form when none is given).
+fn git_source(params: &Value) -> Result<(String, String, String, String), (i32, String)> {
+    let wrong = || bad("repo and ref name a git source this host fetches");
+    let repo = text_param(params, "repo")?.ok_or_else(wrong)?;
+    let reference = text_param(params, "ref")?.ok_or_else(wrong)?;
+    let path = text_param(params, "path")?.unwrap_or("");
+    let repo = repo.strip_prefix("git+").unwrap_or(repo);
+    let canonical = if path.is_empty() {
+        format!("git+{repo}@{reference}")
+    } else {
+        format!("git+{repo}@{reference}#{path}")
+    };
+    match OverlaySource::parse_git(&canonical) {
+        Ok(OverlaySource::Git {
+            repo,
+            reference,
+            path,
+        }) => {
+            let spec = text_param(params, "spec")?.map_or(canonical, str::to_owned);
+            if spec.len() > 4096 || spec.chars().any(char::is_control) {
+                return Err(bad("spec is a line of text"));
+            }
+            Ok((repo, reference, path, spec))
+        }
+        _ => Err(wrong()),
     }
 }
 

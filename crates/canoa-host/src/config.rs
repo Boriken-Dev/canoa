@@ -578,6 +578,9 @@ pub struct Entry {
     pub worktrees: bool,
     /// The paired peers that may use it; `None` lets every paired peer.
     pub peers: Option<Vec<PeerId>>,
+    /// Whether canoa.cfg's top level (`[profile]`, `[overlays]`, `[agents.NAME]`) is this entry's profile, as it is the host's own
+    /// sources': the person's own layer, with the overlays they installed. Off unless `own_profile = true`; never with `profiles`.
+    pub own_profile: bool,
     /// Connections served at once; another is turned away while they run.
     pub max_peers: usize,
     /// What a client shows for an agent entry instead of its name; `None` shows the name. Always `None` for a provider or tool.
@@ -1047,6 +1050,7 @@ struct RawAgent {
     modes: Option<Vec<String>>,
     cache_lifetime: Option<String>,
     profiles: Option<Vec<String>>,
+    own_profile: Option<bool>,
     accounts: Option<Vec<String>>,
     usage: Option<String>,
     title: Option<String>,
@@ -1241,6 +1245,13 @@ impl Config {
         for (name, agent) in host.agents {
             check_name(&name)?;
             let offered = agent.profiles.unwrap_or_default();
+            let own_profile = agent.own_profile.unwrap_or(false);
+            if own_profile && !offered.is_empty() {
+                return Err(invalid(
+                    &name,
+                    "own_profile is the person's own layer and cannot go with profiles",
+                ));
+            }
             if let Some(title) = &agent.title {
                 check_title(&name, title)?;
             }
@@ -1450,6 +1461,7 @@ impl Config {
                 }
             };
             let mut served = entry(name, kind, common)?;
+            served.own_profile = own_profile;
             served.title = title;
             entries.push(served);
         }
@@ -2544,6 +2556,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         peers,
         max_peers,
         title: None,
+        own_profile: false,
         local: false,
     })
 }

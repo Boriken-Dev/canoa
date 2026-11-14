@@ -29,6 +29,7 @@ account_store = "os"                  # optional: where accounts keep their cred
 program = "gemini"                    # this or harness, one of the two; found as the OS finds a command
 args = ["--acp"]
 profiles = ["review", "plain"]        # optional: [host.profiles] a client may choose among, the first by default
+own_profile = false                    # optional: canoa.cfg's top level (`[profile]`, `[overlays]`, `[agents.NAME]`) is this entry's profile too, as it is the host's own sources': the person's own layer and the overlays they installed; never with `profiles`; set it for an entry only this person's keys reach (`peers`)
 usage = "antigravity"                 # optional, with program: read the agent's quota too; only "antigravity" (agy acp); see Usage
 title = "Claude for review"             # optional: what a client shows for this entry instead of its name; 1 to 64 characters, not blank, no control characters (MAX_TITLE)
 
@@ -599,7 +600,7 @@ overlays are kept where the host already reads them: `overlays/<name>/` (the fil
 `commit`, `digest`, `files` by blob id, `skipped`, `installed`, `catalog`?) beside the person's own canoa.cfg, and the fetched history
 in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`). A name is a valid AOS overlay name of 1 to 64 letters, digits, `-` or `_`.
 
-- `overlay/check` `{"name", "source": "git+<repository>@<ref>[#<path>]", "pin"?: "sha256:…"}` fetches the source (one commit deep; a whole
+- `overlay/check` `{"name", "repo", "ref", "path"?, "spec"?, "pin"?: "sha256:…"}` (`repo` as canoa.cfg writes it, with or without `git+`; `spec` is the text a record keeps as its source, `repo@ref#path` when none) fetches the source (one commit deep; a whole
   commit id is that object and nothing else; a branch or tag by `ls-remote`) and lists the tree at that commit as git does, never checking
   anything out: a link, a submodule, a name that is not a relative path or two names equal without ASCII case refuse the overlay; entries
   under an excluded name (`.git`, `node_modules`, `__pycache__`, `*.pyc`, …) are left out and reported as `skipped`; more than
@@ -614,7 +615,7 @@ in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`
   the store installed it from, kept for a later apply of the same source.
 - `overlay/installed` `{"name"?}` -> `{"overlays": {name: record}}`; `overlay/remove` `{"name"}` deletes folder, record and history;
   `overlay/discard` `{"name"}` deletes what a check fetched for an overlay that is not installed.
-- `catalog/fetch` `{"label", "source"}` -> `{"commit"}`; `catalog/read` `{"label", "commit" (whole id), "paths", "maxBytes"?}` -> `{"files":
+- `catalog/fetch` `{"label", "repo", "ref", "path"?}` -> `{"commit"}`; `catalog/read` `{"label", "commit" (whole id), "paths", "maxBytes"?}` -> `{"files":
   {path: {"size", "data"?: base64} | null}}` reads regular files at that commit by their literal paths, with no data past `maxBytes`
   (at most 8 MiB) and null for a path that is not a regular file or not a relative path; `catalog/remove` `{"label"}`.
 - **Git** runs as this user from an absolute directory of `PATH` with every `GIT_` variable of the host's removed, `protocol.allow=never` and
