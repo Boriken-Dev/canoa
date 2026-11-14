@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "0139c1bed0ce47bdd4db5567be13d1e973483869",
+  "sourceCommit": "6ee8e93fc1404de732ee68cf8c8071bb7f97c90d",
   "status": "complete",
   "pubPackages": [
     ".cache",
