@@ -546,7 +546,7 @@ listen = "127.0.0.1:0"                              # or a pipe, as an entry has
 grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "upload", "host.restart", "overlay.read", "overlay.write"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
-max_upload_bytes = 8388608                          # one upload (at most about 12 MiB: it travels in base64 inside a request of at most 16 MiB)
+max_upload_bytes = 8388608                          # one uploaded file, sent in chunks of at most 512 KiB
 max_upload_total_bytes = 268435456                  # what one key may keep uploaded
 max_uploads = 256                                   # files one key may keep uploaded
 ```
@@ -586,11 +586,16 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   own loader first, and a file it would refuse is not written (`-32002`); the write is beside the file first, then renamed. `restart` is
   true for the sections the host itself reads at start (`overlays permissions usage`): they apply after `host/restart`. A host not
   started with a canoa.cfg refuses both (`-32002`).
-- `upload/put` `{"name", "data": base64}` -> `{"path", "name", "size"}` keeps a file in `control/uploads/<digest of the key's id>/`
-  (`0700`; the file `0600`) as `<12 hex digits>-<name>`, the name cut to its last component and to 100 bytes with anything but
-  letters, digits and `.-_ ` made `_`. `max_upload_bytes`, `max_upload_total_bytes` and `max_uploads` hold per key (the owner has its
-  own folder), past one it is `-32002`; a bad base64 string is `-32602`. `upload/remove` `{"path"}` -> `{"removed"}` removes a file in
-  the caller's own folder and nothing else.
+- `upload/put` `{"name", "data": base64, "done"?: bool}` -> `{"id", "path", "name", "size", "done"}` keeps a file in
+  `control/uploads/<digest of the key's id>/` (`0700`; the file `0600`) as `<12 hex digits>-<name>`, the name cut to its last
+  component and to 100 bytes with anything but letters, digits and `.-_ ` made `_`. A chunk is at most `MAX_CHUNK` (512 KiB), since a
+  page's transport carries no message over a mebibyte: a larger file starts with `done: false`, which answers an `id`, and goes on
+  with `{"id", "offset": the size so far, "data", "done"?}` until `done` is true or absent; an `offset` that is not where the upload
+  stands, or an `id` that is not this key's, is `-32002`. Until it is done the file is `<name>.part`. `max_upload_bytes` (one file;
+  past it the upload ends and what was kept goes), `max_upload_total_bytes` and `max_uploads` hold per key (the owner has its own
+  folder), past one it is `-32002`; a bad base64 string is `-32602`. An unfinished upload nobody continues for an hour is removed
+  when the key next starts one. `upload/remove` `{"path"}` or `{"id"}` -> `{"removed"}` removes a file in the caller's own folder,
+  and what is left of an unfinished one, and nothing else.
 - `host/restart` `{}` -> `{"restarting": true}` ends the host 300 ms later with status `cli::STATUS_RESTART` (75) and stops the web
   server, for a supervisor to start it again: canoa.cfg is read at start. Without a supervisor it is an end.
 

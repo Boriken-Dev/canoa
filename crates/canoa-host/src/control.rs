@@ -17,7 +17,7 @@ use coqui_transport::{Channel, Failure};
 
 use crate::worktree::Worktrees;
 pub use files::{
-    DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_LIST,
+    DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_CHUNK, MAX_LIST,
     MAX_SECTION_BYTES, SECTIONS,
 };
 pub(crate) use files::{Files, UploadLimits};

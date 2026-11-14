@@ -588,3 +588,148 @@ fn memory_control() -> Control {
     )
     .expect("opens")
 }
+
+#[test]
+fn a_large_file_is_sent_in_chunks_in_order_and_is_whole_only_when_done() {
+    let (tmp, control) = uploading(UploadLimits {
+        file_bytes: 30,
+        total_bytes: 1000,
+        files: 4,
+    });
+    let a = key("sha256:aa", &[Grant::Upload]);
+    let b = key("sha256:bb", &[Grant::Upload]);
+    let first = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "big.bin", "data": encoded(b"0123456789"), "done": false}),
+    );
+    let id = first["result"]["id"].as_str().expect("an id").to_owned();
+    assert_eq!(first["result"]["done"], false, "{first}");
+    assert_eq!(first["result"]["size"], 10);
+    let path = PathBuf::from(first["result"]["path"].as_str().expect("a path"));
+    assert!(!path.exists(), "not whole yet");
+    assert!(PathBuf::from(format!("{}.part", path.display())).exists());
+
+    // A chunk is accepted only where the upload stands.
+    for offset in [0, 9, 11] {
+        let wrong = ask(
+            &control,
+            &a,
+            "upload/put",
+            json!({"id": id, "offset": offset, "data": encoded(b"x")}),
+        );
+        assert_eq!(wrong["error"]["code"], REFUSED, "{offset}: {wrong}");
+    }
+    let nothing = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"id": id, "data": encoded(b"x")}),
+    );
+    assert_eq!(nothing["error"]["code"], REFUSED, "{nothing}");
+    // Another key has no such upload.
+    let theirs = ask(
+        &control,
+        &b,
+        "upload/put",
+        json!({"id": id, "offset": 10, "data": encoded(b"x")}),
+    );
+    assert_eq!(theirs["error"]["code"], REFUSED, "{theirs}");
+    // A name that is not one this host made is no id.
+    for bad_id in ["../x", "a", "0123456789ab-x.part", "0123456789ab-../x"] {
+        let wrong = ask(
+            &control,
+            &a,
+            "upload/put",
+            json!({"id": bad_id, "offset": 0, "data": encoded(b"x")}),
+        );
+        assert!(wrong["error"].is_object(), "{bad_id}: {wrong}");
+    }
+
+    let more = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"id": id, "offset": 10, "data": encoded(b"ABCDEFGHIJ"), "done": false}),
+    );
+    assert_eq!(more["result"]["size"], 20, "{more}");
+    let last = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"id": id, "offset": 20, "data": encoded(b"abc")}),
+    );
+    assert_eq!(last["result"]["done"], true, "{last}");
+    assert_eq!(fs::read(&path).expect("whole"), b"0123456789ABCDEFGHIJabc");
+    assert!(!PathBuf::from(format!("{}.part", path.display())).exists());
+
+    // Past the file limit mid-way, what was kept goes and the upload ends.
+    let start = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "toolong", "data": encoded(&[1; 20]), "done": false}),
+    );
+    let id = start["result"]["id"].as_str().expect("an id").to_owned();
+    let over = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"id": id, "offset": 20, "data": encoded(&[1; 11])}),
+    );
+    assert_eq!(over["error"]["code"], REFUSED, "{over}");
+    let gone = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"id": id, "offset": 20, "data": encoded(b"x")}),
+    );
+    assert_eq!(gone["error"]["code"], REFUSED, "{gone}");
+
+    // An unfinished upload is removed by its id, and so is a finished one.
+    let unfinished = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "later", "data": encoded(b"zz"), "done": false}),
+    );
+    let removed = ask(
+        &control,
+        &a,
+        "upload/remove",
+        json!({"id": unfinished["result"]["id"]}),
+    );
+    assert_eq!(removed["result"], json!({"removed": true}), "{removed}");
+    let removed = ask(
+        &control,
+        &a,
+        "upload/remove",
+        json!({"path": path_text(&path)}),
+    );
+    assert_eq!(removed["result"], json!({"removed": true}), "{removed}");
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn a_chunk_is_at_most_what_a_page_can_carry() {
+    let (tmp, control) = uploading(UploadLimits::default());
+    let a = key("sha256:aa", &[Grant::Upload]);
+    let over = vec![0_u8; super::files::MAX_CHUNK + 1];
+    let refused = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "f", "data": encoded(&over)}),
+    );
+    assert_eq!(refused["error"]["code"], REFUSED, "{refused}");
+    let exact = vec![0_u8; super::files::MAX_CHUNK];
+    let kept = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "f", "data": encoded(&exact)}),
+    );
+    assert_eq!(kept["result"]["size"], super::files::MAX_CHUNK, "{kept}");
+    let _ = fs::remove_dir_all(tmp);
+}

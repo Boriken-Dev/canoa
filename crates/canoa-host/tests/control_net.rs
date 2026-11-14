@@ -97,7 +97,6 @@ fn a_control_table_that_would_turn_everyone_away_or_names_what_is_unknown_is_ref
         "[host.control]\nmax_records = 0\n".to_owned(),
         "[host.control]\nmax_upload_bytes = 0\n".to_owned(),
         "[host.control]\nmax_uploads = 0\n".to_owned(),
-        "[host.control]\nmax_upload_bytes = 99999999\n".to_owned(),
         "[host.control]\nlisten = \"127.0.0.1:0\"\nsurprise = 1\n".to_owned(),
     ] {
         let parsed = canoa_host::Config::from_str_in(&config, std::path::Path::new("."));

@@ -26,6 +26,8 @@ pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 8 * 1024 * 1024;
 pub const DEFAULT_MAX_UPLOAD_TOTAL: u64 = 256 * 1024 * 1024;
 /// The files one owner may keep uploaded, unless `max_uploads` says otherwise.
 pub const DEFAULT_MAX_UPLOADS: usize = 256;
+/// The most raw bytes one `upload/put` carries: a page's transport takes no message over a mebibyte, base64 and sealing included.
+pub const MAX_CHUNK: usize = 512 * 1024;
 /// The most of a file's name that is kept.
 const MAX_NAME: usize = 100;
 /// The largest section `config/set` writes, in bytes of JSON.
@@ -293,80 +295,135 @@ impl Files {
         Ok(json!({"section": section, "restart": READ_AT_START.contains(&section)}))
     }
 
-    /// `upload/put`: keeps a file a page sends, in a folder of this caller's, and answers where.
+    /// `upload/put`: keeps a file a page sends, in a folder of this caller's, and answers where. A file travels in chunks of at most
+    /// [`MAX_CHUNK`] bytes, since the transport a page uses carries no larger message: the first call (`name`, `data`) names the file
+    /// and, with `done: false`, answers an `id` to continue with (`id`, `offset` the size so far, `data`); the call with `done`
+    /// true or absent ends it. A file sent in one chunk needs no `id`. A file is kept as `<id>.part` until it is done.
     pub(crate) fn upload_put(&self, caller: &Caller, params: &Value) -> Outcome {
         let dir = self.owner_dir(caller)?;
-        let name = text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?;
         let data = text_param(params, "data")?.ok_or_else(|| bad("data is needed"))?;
         // Before decoding, so a page cannot make the host hold more than it would keep.
-        let ceiling = usize::try_from(self.limits.file_bytes / 3 * 4 + 8).unwrap_or(usize::MAX);
-        if data.len() > ceiling {
-            return Err(too_big(self.limits.file_bytes));
+        if data.len() > MAX_CHUNK / 3 * 4 + 8 {
+            return Err(refused(&format!("a chunk is at most {MAX_CHUNK} bytes")));
         }
         let bytes = data_encoding::BASE64
             .decode(data.as_bytes())
             .map_err(|_| bad("data is base64"))?;
-        if bytes.len() as u64 > self.limits.file_bytes {
+        if bytes.len() > MAX_CHUNK {
+            return Err(refused(&format!("a chunk is at most {MAX_CHUNK} bytes")));
+        }
+        let done = params.get("done") != Some(&Value::Bool(false));
+        let (count, held) = usage(&dir);
+        let added = bytes.len() as u64;
+        let (stored, part, so_far) = if let Some(id) = text_param(params, "id")? {
+            if !stored_name(id) {
+                return Err(bad("id is what upload/put answered"));
+            }
+            let part = dir.join(format!("{id}.part"));
+            let so_far = fs::metadata(&part)
+                .map(|meta| meta.len())
+                .map_err(|_| refused("that upload is not under way: start it again"))?;
+            if params.get("offset").and_then(Value::as_u64) != Some(so_far) {
+                return Err(refused(&format!(
+                    "offset is {so_far}, where the upload stands"
+                )));
+            }
+            (id.to_owned(), part, so_far)
+        } else {
+            let name = text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?;
+            if count >= self.limits.files {
+                return Err(refused(
+                    "this caller has no room for another upload: remove some",
+                ));
+            }
+            private_dir(&dir)
+                .map_err(|error| refused(&format!("uploads could not be kept: {error}")))?;
+            forget_stale(&dir);
+            let mut tag = [0_u8; 6];
+            getrandom::fill(&mut tag).map_err(|_| refused("no randomness to name the upload"))?;
+            let stored = format!(
+                "{}-{}",
+                data_encoding::HEXLOWER.encode(&tag),
+                file_name_of(name)
+            );
+            let part = dir.join(format!("{stored}.part"));
+            (stored, part, 0)
+        };
+        if so_far + added > self.limits.file_bytes {
+            let _ = fs::remove_file(&part);
             return Err(too_big(self.limits.file_bytes));
         }
-        let (count, held) = usage(&dir);
-        if count >= self.limits.files || held + bytes.len() as u64 > self.limits.total_bytes {
-            return Err((
-                REFUSED,
-                "this caller has no room for another upload: remove some".to_owned(),
+        if held + added > self.limits.total_bytes {
+            return Err(refused(
+                "this caller has no room for another upload: remove some",
             ));
         }
-        private_dir(&dir)
-            .map_err(|error| refused(&format!("uploads could not be kept: {error}")))?;
-        let mut tag = [0_u8; 6];
-        getrandom::fill(&mut tag).map_err(|_| refused("no randomness to name the upload"))?;
-        let stored = format!(
-            "{}-{}",
-            data_encoding::HEXLOWER.encode(&tag),
-            file_name_of(name)
-        );
-        let path = dir.join(&stored);
-        let mut file = private_new(&path)
-            .map_err(|error| refused(&format!("the upload could not be kept: {error}")))?;
+        let mut file = if so_far == 0 {
+            private_new(&part)
+        } else {
+            fs::OpenOptions::new().append(true).open(&part)
+        }
+        .map_err(|error| refused(&format!("the upload could not be kept: {error}")))?;
         file.write_all(&bytes)
             .and_then(|()| file.sync_all())
             .map_err(|error| {
-                let _ = fs::remove_file(&path);
+                let _ = fs::remove_file(&part);
                 refused(&format!("the upload could not be kept: {error}"))
             })?;
-        Ok(json!({"path": text_of(&path), "name": stored, "size": bytes.len()}))
+        drop(file);
+        let path = dir.join(&stored);
+        if done {
+            fs::rename(&part, &path).map_err(|error| {
+                let _ = fs::remove_file(&part);
+                refused(&format!("the upload could not be kept: {error}"))
+            })?;
+        }
+        Ok(json!({
+            "id": stored,
+            "path": text_of(&path),
+            "name": stored,
+            "size": so_far + added,
+            "done": done,
+        }))
     }
 
-    /// `upload/remove`: deletes a file this caller uploaded.
+    /// `upload/remove`: deletes a file this caller uploaded, by its `path` or its `id`, and what is left of one not finished.
     pub(crate) fn upload_remove(&self, caller: &Caller, params: &Value) -> Outcome {
         let dir = self.owner_dir(caller)?;
-        let asked = text_param(params, "path")?.ok_or_else(|| bad("path is needed"))?;
         let Ok(base) = fs::canonicalize(&dir).map(plain) else {
             return Ok(json!({"removed": false}));
         };
-        let path = Path::new(asked);
-        // Only a plain name directly in the caller's own folder.
-        let name = path.file_name().filter(|name| {
-            path.parent()
-                .and_then(|parent| fs::canonicalize(parent).ok())
-                .map(plain)
-                .as_deref()
-                == Some(base.as_path())
-                && !name.is_empty()
-        });
-        let Some(name) = name else {
-            return Ok(json!({"removed": false}));
+        let name: String = if let Some(id) = text_param(params, "id")? {
+            id.to_owned()
+        } else {
+            let asked = text_param(params, "path")?.ok_or_else(|| bad("path or id is needed"))?;
+            let path = Path::new(asked);
+            // Only a plain name directly in the caller's own folder.
+            let named = path.file_name().and_then(|name| name.to_str()).filter(|_| {
+                path.parent()
+                    .and_then(|parent| fs::canonicalize(parent).ok())
+                    .map(plain)
+                    .as_deref()
+                    == Some(base.as_path())
+            });
+            let Some(named) = named else {
+                return Ok(json!({"removed": false}));
+            };
+            named.strip_suffix(".part").unwrap_or(named).to_owned()
         };
-        let target = base.join(name);
-        match fs::symlink_metadata(&target) {
-            Ok(meta) if meta.is_file() => {
+        if !stored_name(&name) {
+            return Ok(json!({"removed": false}));
+        }
+        let mut removed = false;
+        for target in [base.join(&name), base.join(format!("{name}.part"))] {
+            if fs::symlink_metadata(&target).is_ok_and(|meta| meta.is_file()) {
                 fs::remove_file(&target).map_err(|error| {
                     refused(&format!("the upload could not be removed: {error}"))
                 })?;
-                Ok(json!({"removed": true}))
+                removed = true;
             }
-            _ => Ok(json!({"removed": false})),
         }
+        Ok(json!({"removed": removed}))
     }
 
     /// The folder this caller's uploads are in: one for each key, named by a digest of its id.
@@ -377,6 +434,37 @@ impl Files {
             .ok_or_else(|| (REFUSED, "this host keeps no uploads".to_owned()))?;
         let digest = Sha256::digest(caller.owner().as_bytes());
         Ok(root.join(data_encoding::HEXLOWER.encode(&digest[..12])))
+    }
+}
+
+/// Whether `name` is one `upload/put` made: 12 hexadecimal digits, a hyphen and a plain name.
+fn stored_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    name.len() > 13
+        && bytes[..12].iter().all(u8::is_ascii_hexdigit)
+        && bytes[12] == b'-'
+        && !name.contains(['/', '\\', ':'])
+        && !name.contains("..")
+        && !name.chars().any(char::is_control)
+        && !name.ends_with(".part")
+}
+
+/// Takes away the unfinished uploads nobody has continued for an hour.
+fn forget_stale(dir: &Path) {
+    let Ok(reader) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in reader.flatten() {
+        let stale = entry.file_name().to_string_lossy().ends_with(".part")
+            && entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|at| at.elapsed().ok())
+                .is_some_and(|age| age > std::time::Duration::from_secs(3600));
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
     }
 }
 

@@ -1645,12 +1645,6 @@ fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
             "max_upload_bytes, max_upload_total_bytes and max_uploads are at least 1",
         ));
     }
-    // A request is at most MAX_REQUEST bytes, and an upload travels in base64 inside it.
-    if max_upload_bytes > (crate::control::MAX_REQUEST as u64 - 4096) / 4 * 3 {
-        return Err(refused(
-            "max_upload_bytes is more than one request can carry (about 12 MiB)",
-        ));
-    }
     if listen.is_some() && grants.is_empty() {
         return Err(refused(
             "listen without a key under grants would turn every key away",
