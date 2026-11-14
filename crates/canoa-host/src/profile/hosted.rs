@@ -75,6 +75,7 @@ pub const APPROVE_META: &str = "dev.boriken.canoa/approve";
 const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
 mod hooks;
+pub(crate) use hooks::forward as forward_hook;
 mod template;
 
 /// What became of one part of a profile.
@@ -145,6 +146,9 @@ impl Item {
 pub(crate) struct Offer {
     pub(crate) profiles: Vec<(String, HostProfile)>,
     pub(crate) launcher: OsString,
+    /// What goes between the launcher and a subcommand of the host's own: the forwarder is run as `launcher [before]
+    /// hook-forward`.
+    pub(crate) before: Vec<OsString>,
 }
 
 /// A client's first message refused: the answer to send, when it was a request, and what to log.
@@ -328,6 +332,9 @@ pub(crate) struct Connection {
     skills: PathBuf,
     /// Whether the client is this process's own link, the only one the host asks to approve servers.
     in_process: bool,
+    /// The host's own program and what goes before its subcommand: how a harness's hooks run the forwarder.
+    launcher: OsString,
+    before: Vec<OsString>,
 }
 
 impl Connection {
@@ -481,6 +488,8 @@ impl Connection {
             env_items,
             skills,
             in_process: false,
+            launcher: offer.launcher.clone(),
+            before: offer.before.clone(),
         })
     }
 
@@ -950,6 +959,32 @@ impl Written {
             )?;
         }
         Ok(written)
+    }
+
+    /// The directory everything is written under.
+    fn root(&self) -> &Path {
+        &self.0
+    }
+
+    /// Writes one more file, at a plain relative path.
+    fn add(&self, path: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let mut target = self.0.clone();
+        for part in path.split('/') {
+            if part.is_empty() || part == "." || part == ".." {
+                return Err(std::io::Error::other("a path that is not plain"));
+            }
+            target.push(part);
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::io::Write::write_all(
+            &mut std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)?,
+            bytes,
+        )
     }
 
     fn path(&self, below: &str) -> String {
@@ -1673,7 +1708,7 @@ fn parts_for(
         }
     }
 
-    items.extend(connection.hooks.items(&BTreeSet::new()));
+    items.extend(connection.hooks.items(&BTreeSet::new(), harness));
 
     let label = harness.unwrap_or(&connection.entry);
     let applied = items
@@ -1758,9 +1793,27 @@ fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), Strin
             .extend(parts.directories.iter().map(|directory| json!(directory)));
     }
     if let Some(meta) = &parts.meta {
-        params.insert("_meta".to_owned(), meta.clone());
+        merge_meta(params, meta);
     }
     Ok(())
+}
+
+/// Puts the profile's `_meta` in the request's, keeping the plugins the host has already added for the session's hooks.
+fn merge_meta(params: &mut Map<String, Value>, meta: &Value) {
+    let mut merged = meta.clone();
+    let held = params
+        .get("_meta")
+        .and_then(|held| held.pointer("/claudeCode/options/plugins"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(plugins) = merged
+        .pointer_mut("/claudeCode/options/plugins")
+        .and_then(Value::as_array_mut)
+    {
+        plugins.extend(held);
+    }
+    params.insert("_meta".to_owned(), merged);
 }
 
 /// The report with the servers the person allowed for this session shown as applied.
@@ -2191,6 +2244,8 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
 
     /// The launch line first; then the client's messages, a refused one reading as a timeout as [`crate::scope`] has it.
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        // What the harness's own hooks have reported since the last look: run before anything else moves.
+        self.drain_forwarded();
         let first = {
             let mut hold = self.hold();
             if let Some(line) = hold.launch.take() {
@@ -2285,11 +2340,13 @@ pub(crate) fn offer(
     profiles: &IndexMap<String, HostProfile>,
     local: Option<&HostProfile>,
     launcher: OsString,
+    before: Vec<OsString>,
 ) -> Option<Arc<Offer>> {
     if let Some(local) = local {
         return Some(Arc::new(Offer {
             profiles: vec![(LOCAL_PROFILE.to_owned(), local.clone())],
             launcher,
+            before,
         }));
     }
     if names.is_empty() {
@@ -2301,6 +2358,7 @@ pub(crate) fn offer(
             .filter_map(|name| Some((name.clone(), profiles.get(name)?.clone())))
             .collect(),
         launcher,
+        before,
     }))
 }
 

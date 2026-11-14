@@ -80,8 +80,17 @@ fn offer_of(temp: &Temp, text: &str) -> Offer {
     let crate::config::EntryKind::Agent { profiles, .. } = &config.entries[0].kind else {
         panic!("an agent");
     };
-    Arc::into_inner(offer(profiles, &config.profiles, None, "launcher".into()).expect("an offer"))
-        .expect("one owner")
+    Arc::into_inner(
+        offer(
+            profiles,
+            &config.profiles,
+            None,
+            "launcher".into(),
+            Vec::new(),
+        )
+        .expect("an offer"),
+    )
+    .expect("one owner")
 }
 
 fn config_with(extra: &str) -> String {

@@ -236,6 +236,18 @@ enum Command {
     /// CANOA_DELEGATE_URL, with the bearer in CANOA_DELEGATE_TOKEN; ends when standard input closes.
     #[command(hide = true)]
     McpBridge,
+    /// Report what a harness's own hook was told to the host that runs the session, on the channel in a file only that
+    /// session's directory holds, and exit with the status that says whether the harness is to stop what it was about to
+    /// do (2) or not (0). Prints nothing: what an overlay's hook says never reaches the harness. Reads the harness's payload
+    /// from standard input.
+    #[command(hide = true, name = "hook-forward")]
+    HookForward {
+        /// The file that holds the channel's address and secret.
+        #[arg(long)]
+        channel: PathBuf,
+        /// What the harness reports: `start`, `pre-compact` or `batch`.
+        kind: String,
+    },
     /// Start the processes this host asks for, over a socket on standard input, until it closes: the host's own process
     /// starter, for a host that runs inside an application whose process handling collects every child that ends.
     #[cfg(unix)]
@@ -1223,6 +1235,13 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         }
         Command::Accounts { command } => accounts(command, front),
         Command::McpBridge => mcp_bridge(),
+        Command::HookForward { channel, kind } => {
+            match crate::profile::forward_hook(&kind, &channel, std::io::stdin()) {
+                Ok(false) => Ok(()),
+                Ok(true) => Err(Failed::usage("an overlay's hook stopped this")),
+                Err(why) => Err(Failed::usage(why)),
+            }
+        }
         #[cfg(unix)]
         Command::Spawner => crate::spawn::serve().map_err(Failed::run),
         Command::Launch { program, args } => {
@@ -1252,6 +1271,7 @@ impl Cli {
                 | Command::Agent { .. }
                 | Command::Launch { .. }
                 | Command::McpBridge
+                | Command::HookForward { .. }
         )
     }
 }
@@ -1398,6 +1418,7 @@ mod tests {
         };
         assert!(own(&["launch", "x"]));
         assert!(own(&["mcp-bridge"]));
+        assert!(own(&["hook-forward", "--channel", "x", "start"]));
         #[cfg(unix)]
         assert!(own(&[crate::spawn::SPAWNER_COMMAND]));
         assert!(own(&["tool", "--name", "t", "--spec", "{}"]));

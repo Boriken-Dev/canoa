@@ -12,8 +12,11 @@ use coqui_aos::{Decision, FiredEvent, HookEvent};
 use coqui_transport::Channel;
 use serde_json::{Map, Value, json};
 
+use super::forward::Forward;
 use super::{Firing, report_item};
-use crate::profile::hosted::{Hosted, Item, SESSION_METHODS, error};
+use crate::profile::hosted::{Hosted, Item, SESSION_METHODS, Written, error};
+
+mod native;
 
 /// The outputs Canoa applies for each event over ACP.
 const SESSION_START: [&str; 2] = ["context", "refuse"];
@@ -76,6 +79,10 @@ pub(in crate::profile::hosted) struct Book {
     inject: VecDeque<Vec<u8>>,
     /// What went wrong with hooks outside a session request, for the reports to come.
     items: Vec<Item>,
+    /// Where a harness's own hooks report to this connection, once a session has asked for it.
+    forward: Option<Forward>,
+    /// The plugins of hooks written for each session, by Canoa's id for it: removed with it.
+    plugins: BTreeMap<String, Vec<Written>>,
 }
 
 impl Book {
@@ -403,7 +410,12 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 }
             }
         }
-        notes.extend(self.connection.hooks.items(allowed));
+        notes.extend(
+            self.connection
+                .hooks
+                .items(allowed, Some(&self.harness_label())),
+        );
+        changed |= self.native_plugin(params, &session);
         let mut hold = self.hold();
         // A request the agent never answers is not kept for ever.
         if hold.book.opening.len() >= MAX_TRACKED {
@@ -518,6 +530,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
 
     fn end(&self, session: &SessionHooks) {
         self.hold().book.carry.remove(&session.id);
+        self.revoke_native(&session.id);
         if self
             .connection
             .hooks

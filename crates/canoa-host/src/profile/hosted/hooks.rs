@@ -5,6 +5,8 @@
 //! environment named below, never the session's.
 
 mod events;
+mod forward;
+mod native;
 mod run;
 
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -28,14 +30,18 @@ use crate::config::HostProfile;
 use crate::profile::{AosLayer, active_facts};
 
 pub(super) use events::{Book, Seen};
+pub(crate) use forward::forward;
 
-/// The events Canoa fires: the ones it sees itself over ACP. `cd` and `pre-compact` it cannot see.
-const FIRES: [HookEvent; 7] = [
+/// The events Canoa fires: the ones it sees itself over ACP, and `cd` and `pre-compact`, which only a harness's own hooks
+/// show and which it fires for the harnesses whose hooks it can reach (`native`).
+const FIRES: [HookEvent; 9] = [
     HookEvent::PreEnv,
     HookEvent::SessionStart,
     HookEvent::SessionEnd,
     HookEvent::Prompt,
     HookEvent::TurnEnd,
+    HookEvent::Cd,
+    HookEvent::PreCompact,
     HookEvent::PreTool,
     HookEvent::PostTool,
 ];
@@ -43,7 +49,7 @@ const FIRES: [HookEvent; 7] = [
 /// Events Canoa fires for some occurrences only: `pre-tool` for the tool calls the agent asks permission for.
 const PARTIAL: [HookEvent; 1] = [HookEvent::PreTool];
 
-/// The reasons of `session-start` Canoa sends: it sees only the sessions it opens itself.
+/// The reasons of `session-start` Canoa sends for every harness: it sees the sessions it opens itself.
 const REASONS: [&str; 2] = ["new", "resume"];
 
 /// The variables a hook gets from the host's own environment, besides its event and its overlay's root: nothing the person
@@ -300,6 +306,54 @@ impl Hooks {
         !self.overlays.is_empty()
     }
 
+    /// What the harness's own hooks are to report for a session whose person allowed `person`: which reports, and which of
+    /// them stop the harness when the host cannot be asked because an overlay's hook that guards it is on.
+    pub(in crate::profile::hosted::hooks) fn native(
+        &self,
+        person: &BTreeSet<String>,
+    ) -> (Vec<forward::Kind>, BTreeMap<&'static str, bool>) {
+        let (mut start, mut pre, mut batch) = (false, false, false);
+        let mut refuse = BTreeMap::new();
+        for overlay in self
+            .overlays
+            .iter()
+            .filter(|overlay| overlay.allowed || person.contains(&overlay.identity))
+        {
+            for hook in &overlay.hooks {
+                match hook.event {
+                    HookEvent::Cd => {
+                        start = true;
+                        batch = true;
+                    }
+                    HookEvent::PreCompact => {
+                        pre = true;
+                        if hook.on_failure == OnFailure::Refuse {
+                            refuse.insert(forward::Kind::PreCompact.as_str(), true);
+                        }
+                    }
+                    HookEvent::SessionStart => {
+                        let compacts = hook.select.as_ref().is_none_or(|select| {
+                            select
+                                .iter()
+                                .any(|reason| reason == "compact" || reason == "clear")
+                        });
+                        start |= compacts;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let kinds = [
+            (start, forward::Kind::Start),
+            (pre, forward::Kind::PreCompact),
+            (batch, forward::Kind::Batch),
+        ]
+        .into_iter()
+        .filter_map(|(wanted, kind)| wanted.then_some(kind))
+        .collect();
+        (kinds, refuse)
+    }
+
     /// Whether an event has a hook that is on for `person`'s allowances plus canoa.cfg's.
     pub(super) fn listens(&self, event: HookEvent, person: &BTreeSet<String>) -> bool {
         self.overlays.iter().any(|overlay| {
@@ -362,7 +416,7 @@ impl Hooks {
     }
 
     /// What the report says of each overlay's hooks.
-    pub(super) fn items(&self, person: &BTreeSet<String>) -> Vec<Item> {
+    pub(super) fn items(&self, person: &BTreeSet<String>, harness: Option<&str>) -> Vec<Item> {
         let mut items = Vec::new();
         for overlay in &self.overlays {
             let layer = LayerId::new(LayerKind::Overlay, overlay.identity.clone());
@@ -397,6 +451,7 @@ impl Hooks {
                     .on_reports
                     .iter()
                     .any(|(id, subject)| id == "hook-partial" && subject == event);
+                let native = native::support(harness, hook.event, hook.select.as_deref());
                 let never = hook.event == HookEvent::SessionStart
                     && hook.select.as_ref().is_some_and(|select| {
                         !select
@@ -411,6 +466,16 @@ impl Hooks {
                         State::Unsupported,
                         "hook-not-applied: pre-env runs before the agent starts, when nobody can be asked; only canoa.cfg's allowance runs it",
                     )
+                } else if let Some(support) = native {
+                    match support {
+                        Ok(how) => Item::new(key, &layer, State::Applied, how),
+                        Err(why) => Item::new(
+                            key,
+                            &layer,
+                            State::Unsupported,
+                            format!("hook-unsupported: {why}, so this hook never runs"),
+                        ),
+                    }
                 } else if unsupported {
                     Item::new(
                         key,

@@ -120,7 +120,14 @@ fn connect_overlays(
         panic!("an agent");
     };
     let offer = Arc::into_inner(
-        offer(profiles, &config.profiles, None, "launcher".into()).expect("an offer"),
+        offer(
+            profiles,
+            &config.profiles,
+            None,
+            "launcher".into(),
+            Vec::new(),
+        )
+        .expect("an offer"),
     )
     .expect("one owner");
     Connection::prepare(&offer, 0, "a", lookup)
@@ -821,4 +828,454 @@ fn a_hook_collected_by_someone_else_is_unreadable_and_not_a_timeout() {
         ran.unreadable,
         ran.exit
     );
+}
+
+/// The harness's own hooks, through a host whose agent is a stand-in that only answers `initialize` and session requests:
+/// what the host writes for the session, what it does with a report from the forwarder, and what the forwarder is told.
+mod native {
+    use alloc::collections::VecDeque;
+    use std::io::Cursor;
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    use coqui_transport::{Channel, Failure};
+
+    use super::*;
+    use crate::profile::hosted::Hosted;
+    use crate::scope::Scope;
+
+    /// The client's end: what it sends, and what the host sent it.
+    #[derive(Default)]
+    struct Client {
+        from: Mutex<VecDeque<Vec<u8>>>,
+        to: Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl Channel for Client {
+        fn send(&self, message: &[u8]) -> Result<(), Failure> {
+            self.to.lock().expect("lock").push(message.to_vec());
+            Ok(())
+        }
+
+        fn receive(&self, _timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+            Ok(self.from.lock().expect("lock").pop_front())
+        }
+
+        fn close(&self) {}
+    }
+
+    /// A session of a host, open on a stand-in agent.
+    struct Session<'a> {
+        hosted: Hosted<'a, Client>,
+        client: &'a Client,
+        next: u64,
+        /// The plugin directory the session request carried, when it carried one.
+        plugin: Option<PathBuf>,
+        id: String,
+    }
+
+    fn send(client: &Client, id: u64, method: &str, params: Value) {
+        let request = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        client
+            .from
+            .lock()
+            .expect("lock")
+            .push_back(serde_json::to_vec(&request).expect("JSON"));
+    }
+
+    fn session<'a>(
+        hosted: Hosted<'a, Client>,
+        client: &'a Client,
+        harness: &str,
+        cwd: &str,
+    ) -> Session<'a> {
+        send(
+            client,
+            1,
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}}),
+        );
+        hosted
+            .receive(Some(Duration::from_millis(10)))
+            .expect("read");
+        let answer = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1,
+            "agentCapabilities": {}, "agentInfo": {"name": harness}}});
+        hosted
+            .send(&serde_json::to_vec(&answer).expect("JSON"))
+            .expect("sent");
+        send(
+            client,
+            2,
+            "session/new",
+            json!({"cwd": cwd, "mcpServers": []}),
+        );
+        let request = hosted
+            .receive(Some(Duration::from_millis(10)))
+            .expect("read")
+            .expect("the request goes on");
+        let request: Value = serde_json::from_slice(&request).expect("JSON");
+        let plugin = request
+            .pointer("/params/_meta/claudeCode/options/plugins")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|plugin| plugin["path"].as_str())
+            .map(PathBuf::from)
+            .find(|path| path.join("hooks").join("hooks.json").exists());
+        let answer = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}});
+        hosted
+            .send(&serde_json::to_vec(&answer).expect("JSON"))
+            .expect("sent");
+        Session {
+            hosted,
+            client,
+            next: 3,
+            plugin,
+            id: "s1".to_owned(),
+        }
+    }
+
+    impl Session<'_> {
+        /// The plugin's hooks.json.
+        fn hooks(&self) -> Value {
+            let plugin = self.plugin.as_ref().expect("a plugin");
+            serde_json::from_slice(
+                &std::fs::read(plugin.join("hooks").join("hooks.json")).expect("read"),
+            )
+            .expect("JSON")
+        }
+
+        fn channel(&self) -> PathBuf {
+            self.plugin.as_ref().expect("a plugin").join("channel.json")
+        }
+
+        /// What the harness's hook does: the forwarder with `payload` as its input, while the host reads between messages.
+        fn report(&self, kind: &'static str, payload: Value) -> Result<bool, String> {
+            let channel = self.channel();
+            let run = std::thread::spawn(move || {
+                forward(
+                    kind,
+                    &channel,
+                    Cursor::new(payload.to_string().into_bytes()),
+                )
+            });
+            let until = Instant::now() + Duration::from_secs(60);
+            while !run.is_finished() && Instant::now() < until {
+                let _ = self.hosted.receive(Some(Duration::from_millis(10)));
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            run.join().expect("the forwarder ended")
+        }
+
+        /// A prompt the client sends: the request that goes to the agent.
+        fn prompt(&mut self, text: &str) -> Value {
+            let id = self.next;
+            self.next += 1;
+            send(
+                self.client,
+                id,
+                "session/prompt",
+                json!({"sessionId": self.id, "prompt": [{"type": "text", "text": text}]}),
+            );
+            let request = self
+                .hosted
+                .receive(Some(Duration::from_millis(10)))
+                .expect("read")
+                .expect("the request goes on");
+            serde_json::from_slice(&request).expect("JSON")
+        }
+    }
+
+    fn payload_of(temp: &Temp, event: &str) -> Vec<Value> {
+        script::logged(&temp.log())
+            .into_iter()
+            .filter(|(each, _)| each == event)
+            .map(|(_, payload)| payload)
+            .collect()
+    }
+
+    /// A host with overlay `team` allowed for `manifest` and `arms`, and a session on `harness` working in `cwd`.
+    fn run(
+        manifest: &str,
+        arms: &[(&str, Arm)],
+        harness: &str,
+        cwd: &str,
+        then: impl FnOnce(&Temp, Session<'_>),
+    ) {
+        let temp = Temp::new();
+        let digest = temp.install(manifest, arms);
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        let hosted = Hosted::in_process(&client, &scope, &connection);
+        let opened = session(hosted, &client, harness, cwd);
+        then(&temp, opened);
+    }
+
+    const CLAUDE: &str = "coqui-acp-claude";
+
+    #[test]
+    fn claude_is_given_a_plugin_whose_hooks_run_the_forwarder_for_the_events_an_overlay_listens_to()
+    {
+        run(
+            "[hooks]\npre-compact = {}\ncd = {}\n",
+            &[],
+            CLAUDE,
+            "/work",
+            |_, session| {
+                let hooks = session.hooks();
+                let mut events: Vec<&str> = hooks["hooks"]
+                    .as_object()
+                    .expect("an object")
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+                events.sort_unstable();
+                assert_eq!(events, ["PostToolBatch", "PreCompact", "SessionStart"]);
+                let command = hooks["hooks"]["PreCompact"][0]["hooks"][0]["command"]
+                    .as_str()
+                    .expect("a command");
+                assert!(command.contains("hook-forward --channel"), "{command}");
+                assert!(command.ends_with(" pre-compact"), "{command}");
+                // The channel is a file of the session's own directory, and nothing a process list shows holds its secret.
+                let file: Value =
+                    serde_json::from_slice(&std::fs::read(session.channel()).expect("read"))
+                        .expect("JSON");
+                let secret = file["secret"].as_str().expect("a secret");
+                assert!(secret.len() >= 32);
+                assert!(!hooks.to_string().contains(secret));
+                assert!(
+                    file["addr"]
+                        .as_str()
+                        .is_some_and(|addr| addr.starts_with("127.0.0.1:"))
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn nothing_is_written_when_no_overlay_listens_or_the_harness_is_not_claude() {
+        let none = "[hooks]\nprompt = {}\ncd = false\npre-compact = false\nsession-start = false\n";
+        run(none, &[], CLAUDE, "/work", |_, session| {
+            assert!(
+                session.plugin.is_none(),
+                "an overlay with no hook for these events gets no plugin"
+            );
+        });
+        for harness in ["coqui-acp-codex", "gemini-cli", "pi-acp"] {
+            run(
+                "[hooks]\npre-compact = {}\ncd = {}\n",
+                &[],
+                harness,
+                "/work",
+                |_, session| {
+                    assert!(session.plugin.is_none(), "{harness}");
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn a_compaction_runs_the_hook_with_its_trigger_and_a_block_stops_it() {
+        run(
+            "[hooks]\npre-compact = {}\n",
+            &[(
+                "pre-compact",
+                Arm::Print(r#"{"decision":"block","reason":"not now"}"#.to_owned()),
+            )],
+            CLAUDE,
+            "/work",
+            |temp, session| {
+                let stopped = session.report(
+                    "pre-compact",
+                    json!({"trigger": "manual", "cwd": "/work", "session_id": "x"}),
+                );
+                assert_eq!(stopped, Ok(true));
+                let payloads = payload_of(temp, "pre-compact");
+                assert_eq!(payloads.len(), 1);
+                assert_eq!(payloads[0]["trigger"], "manual");
+                assert_eq!(payloads[0]["event"], "pre-compact");
+                assert!(
+                    payloads[0]["session"]
+                        .as_str()
+                        .is_some_and(|id| id.starts_with("canoa-session-"))
+                );
+            },
+        );
+        run(
+            "[hooks]\npre-compact = {}\n",
+            &[],
+            CLAUDE,
+            "/work",
+            |temp, session| {
+                assert_eq!(
+                    session.report("pre-compact", json!({"trigger": "auto"})),
+                    Ok(false)
+                );
+                assert_eq!(payload_of(temp, "pre-compact")[0]["trigger"], "auto");
+            },
+        );
+    }
+
+    #[test]
+    fn a_guard_on_compaction_that_fails_stops_it() {
+        run(
+            "[hooks]\npre-compact = { on_failure = \"refuse\" }\n",
+            &[("pre-compact", Arm::Exit(3))],
+            CLAUDE,
+            "/work",
+            |_, session| {
+                assert_eq!(
+                    session.report("pre-compact", json!({"trigger": "manual"})),
+                    Ok(true)
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn a_working_directory_that_changed_runs_cd_with_where_it_was_and_the_same_place_does_not() {
+        run(
+            "[hooks]\ncd = {}\n",
+            &[],
+            CLAUDE,
+            "/work",
+            |temp, session| {
+                // The harness says where it starts, spelled as it spells it: that is where the session is, not a change.
+                session
+                    .report("start", json!({"source": "startup", "cwd": "\\work\\"}))
+                    .expect("answered");
+                session
+                    .report("batch", json!({"cwd": "/work"}))
+                    .expect("answered");
+                assert!(payload_of(temp, "cd").is_empty());
+                session
+                    .report("batch", json!({"cwd": "/work/sub"}))
+                    .expect("answered");
+                session
+                    .report("batch", json!({"cwd": "/work/sub"}))
+                    .expect("answered");
+                session
+                    .report("batch", json!({"cwd": "/work"}))
+                    .expect("answered");
+                let moves = payload_of(temp, "cd");
+                assert_eq!(moves.len(), 2, "{moves:?}");
+                assert_eq!(
+                    (moves[0]["previous"].as_str(), moves[0]["cwd"].as_str()),
+                    (Some("/work"), Some("/work/sub"))
+                );
+                assert_eq!(
+                    (moves[1]["previous"].as_str(), moves[1]["cwd"].as_str()),
+                    (Some("/work/sub"), Some("/work"))
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn a_session_start_after_compaction_runs_its_hooks_and_its_context_goes_in_the_next_prompt() {
+        run(
+            "[hooks]\nsession-start = { match = [\"compact\"] }\n",
+            &[(
+                "session-start",
+                Arm::Print(r#"{"context":"AFTER-COMPACT"}"#.to_owned()),
+            )],
+            CLAUDE,
+            "/work",
+            |temp, mut session| {
+                // A start the host opened itself is not run again from the harness's own report.
+                session
+                    .report("start", json!({"source": "startup", "cwd": "/work"}))
+                    .expect("answered");
+                assert!(payload_of(temp, "session-start").is_empty());
+                session
+                    .report("start", json!({"source": "compact", "cwd": "/work"}))
+                    .expect("answered");
+                let starts = payload_of(temp, "session-start");
+                assert_eq!(starts.len(), 1);
+                assert_eq!(starts[0]["reason"], "compact");
+                let prompt = session.prompt("go on");
+                assert!(prompt.to_string().contains("AFTER-COMPACT"), "{prompt}");
+            },
+        );
+    }
+
+    #[test]
+    fn a_clear_cannot_be_reached_and_the_report_says_so_for_claude_and_every_cannot_for_codex() {
+        let temp = Temp::new();
+        let digest = temp.install(
+            "[hooks]\nsession-start = { match = [\"clear\"] }\ncd = {}\npre-compact = {}\n",
+            &[],
+        );
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let say = |harness: &str, key: &str| {
+            connection
+                .hooks
+                .items(&BTreeSet::new(), Some(harness))
+                .into_iter()
+                .map(|item| item.json())
+                .find(|item| item["key"] == key)
+                .map(|item| (item["state"].to_string(), item["how"].to_string()))
+                .expect("an item")
+        };
+        let (state, how) = say("claude-code", "hooks.team.session-start");
+        assert!(
+            state.contains("not supported") && how.contains("/clear"),
+            "{state} {how}"
+        );
+        assert!(say("claude-code", "hooks.team.cd").0.contains("applied"));
+        assert!(
+            say("claude-code", "hooks.team.pre-compact")
+                .0
+                .contains("applied")
+        );
+        for key in [
+            "hooks.team.cd",
+            "hooks.team.pre-compact",
+            "hooks.team.session-start",
+        ] {
+            let (state, how) = say("codex", key);
+            assert!(
+                state.contains("not supported") && how.contains("Codex") || how.contains("harness"),
+                "{key}: {state} {how}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_session_that_ended_is_not_heard() {
+        run(
+            "[hooks]\ncd = {}\n",
+            &[],
+            CLAUDE,
+            "/work",
+            |temp, session| {
+                let channel = session.channel();
+                session
+                    .report("batch", json!({"cwd": "/work/a"}))
+                    .expect("answered");
+                assert_eq!(payload_of(temp, "cd").len(), 1);
+                send(
+                    session.client,
+                    9,
+                    "session/close",
+                    json!({"sessionId": "s1"}),
+                );
+                session
+                    .hosted
+                    .receive(Some(Duration::from_millis(10)))
+                    .expect("read");
+                // The secret ended with the session: the forwarder is not answered, and nothing runs.
+                let started = Instant::now();
+                let heard = forward(
+                    "batch",
+                    &channel,
+                    Cursor::new(br#"{"cwd":"/elsewhere"}"#.to_vec()),
+                );
+                assert_eq!(heard, Ok(false));
+                assert!(started.elapsed() < Duration::from_secs(10));
+                assert_eq!(payload_of(temp, "cd").len(), 1);
+            },
+        );
+    }
 }

@@ -13,6 +13,7 @@ mod support;
 use canoa_host::profile::PROFILE_META;
 use hooked::{Allow, Arm, has, hooks, item, said, start};
 use serde_json::{Value, json};
+use support::example;
 
 const START: &str = r#"{"context":"CTX-START"}"#;
 const PROMPT: &str = r#"{"context":"CTX-PROMPT"}"#;
@@ -543,7 +544,9 @@ fn session_end_fires_when_a_session_is_closed_and_for_those_left_when_the_connec
 fn what_canoa_cannot_see_is_reported_and_never_skipped_silently() {
     let setup = start(
         &hooks(
-            "session-start = { match = [\"clear\"] }\npre-tool = { match = [\"execute\"] }\npre-compact = {}",
+            "session-start = { match = [\"clear\"] }
+pre-tool = { match = [\"execute\"] }
+pre-compact = {}",
         ),
         &[],
         &Allow::Digest,
@@ -551,21 +554,19 @@ fn what_canoa_cannot_see_is_reported_and_never_skipped_silently() {
     );
     let report = setup.initialize(false);
     let report = &report["_meta"][PROFILE_META];
-    // The default hook is bound to `cd`, which ACP never shows, and a hook for `pre-compact` has nothing to fire it.
-    for key in [
-        "hooks.team.cd",
-        "hooks.team.pre-compact",
-        "hooks.team.session-start",
-    ] {
+    // Claude Code's own hooks show a compaction and a changed directory, and over ACP a /clear ends its session.
+    for key in ["hooks.team.cd", "hooks.team.pre-compact"] {
         let each = item(report, key);
-        assert_eq!(each["state"], "not supported", "{key}: {report}");
-        assert!(
-            each["how"]
-                .as_str()
-                .is_some_and(|how| how.contains("hook-unsupported")),
-            "{key}"
-        );
+        assert_eq!(each["state"], "applied", "{key}: {report}");
     }
+    let clear = item(report, "hooks.team.session-start");
+    assert_eq!(clear["state"], "not supported", "{report}");
+    assert!(
+        clear["how"]
+            .as_str()
+            .is_some_and(|how| how.contains("hook-unsupported") && how.contains("/clear")),
+        "{clear}"
+    );
     let partial = item(report, "hooks.team.pre-tool");
     assert_eq!(partial["state"], "applied");
     assert!(
@@ -574,6 +575,42 @@ fn what_canoa_cannot_see_is_reported_and_never_skipped_silently() {
             .is_some_and(|how| how.contains("hook-partial")),
         "{partial}"
     );
+    setup.host.stop();
+}
+
+#[test]
+fn what_codex_gives_no_way_to_see_is_reported_as_unsupported_with_the_reason() {
+    let args = ["--scripted".to_owned(), "--name=coqui-acp-codex".to_owned()];
+    let setup = hooked::start_program(
+        &hooks(
+            "session-start = { match = [\"compact\"] }
+pre-compact = {}",
+        ),
+        &[],
+        &Allow::Digest,
+        &example("stdio_agent", false).to_string_lossy(),
+        &args,
+        true,
+    );
+    let report = setup.initialize(false);
+    let report = &report["_meta"][PROFILE_META];
+    for (key, why) in [
+        (
+            "hooks.team.cd",
+            "no event for a change of working directory",
+        ),
+        ("hooks.team.pre-compact", "no way to compact over ACP"),
+        ("hooks.team.session-start", "no way to compact over ACP"),
+    ] {
+        let each = item(report, key);
+        assert_eq!(each["state"], "not supported", "{key}: {report}");
+        assert!(
+            each["how"]
+                .as_str()
+                .is_some_and(|how| how.contains("hook-unsupported") && how.contains(why)),
+            "{key}: {each}"
+        );
+    }
     setup.host.stop();
 }
 

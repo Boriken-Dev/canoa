@@ -59,6 +59,31 @@ fn write_all(root: &Path, files: &[(String, String)]) {
 /// hook does, `allow` what canoa.cfg says, `flags` more arguments of the agent (`--name=coqui-acp-claude` is always given, so
 /// the harness is known).
 pub fn start(manifest: &str, arms: &[(&str, Arm)], allow: &Allow, flags: &[&str]) -> Setup {
+    let mut args = vec![
+        "--scripted".to_owned(),
+        "--name=coqui-acp-claude".to_owned(),
+    ];
+    args.extend(flags.iter().map(|flag| (*flag).to_owned()));
+    start_program(
+        manifest,
+        arms,
+        allow,
+        &example("stdio_agent", false).to_string_lossy(),
+        &args,
+        true,
+    )
+}
+
+/// As [`start`], with another program as the agent: `args` are all of its arguments, and the scripted agent's state file is
+/// added when `scripted`.
+pub fn start_program(
+    manifest: &str,
+    arms: &[(&str, Arm)],
+    allow: &Allow,
+    program: &str,
+    args: &[String],
+    scripted: bool,
+) -> Setup {
     let logs = Scratch::new();
     let log = logs.0.join("hook.log");
     let state = logs.0.join("state.json");
@@ -76,15 +101,13 @@ pub fn start(manifest: &str, arms: &[(&str, Arm)], allow: &Allow, flags: &[&str]
         Allow::Other => Some(format!("sha256:{}", "0".repeat(64))),
         Allow::Nothing => None,
     };
-    let mut args = vec![
-        "--scripted".to_owned(),
-        "--name=coqui-acp-claude".to_owned(),
-        format!("--state={}", state.to_string_lossy()),
-    ];
-    args.extend(flags.iter().map(|flag| (*flag).to_owned()));
+    let mut args = args.to_vec();
+    if scripted {
+        args.push(format!("--state={}", state.to_string_lossy()));
+    }
     let mut config = format!(
         "[agents.Scripted]\nprogram = {}\nargs = [{}]\n[overlays]\nteam = \"fixture\"\n",
-        quoted(&example("stdio_agent", false).to_string_lossy()),
+        quoted(program),
         args.iter()
             .map(|arg| quoted(arg))
             .collect::<Vec<_>>()
