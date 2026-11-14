@@ -170,68 +170,8 @@ fn a_request_past_the_size_bound_or_not_one_request_is_dropped() {
     assert_eq!(taken.len(), 1);
     assert_eq!(taken[0].cwd, None);
     taken.remove(0).answer(Verdict::default());
-    assert!(answered.join().expect("ran").is_some());
-}
-
-#[test]
-fn a_session_may_report_only_so_often() {
-    let dir = Dir::new("rate");
-    let (host, path) = opened(&dir);
-    let addr = addr_of(&path);
-    let secret = secret_of(&path);
-    let line = format!("{{\"secret\":\"{secret}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"batch\",\"fields\":{{}}}}
-");
-    let mut taken = 0;
-    for _ in 0..RATE + 10 {
-        let sent = line.clone();
-        let asked = std::thread::spawn(move || raw(addr, sent.as_bytes()));
-        let until = Instant::now() + Duration::from_millis(400);
-        let mut got = Vec::new();
-        while got.is_empty() && Instant::now() < until {
-            got = host.take();
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        taken += got.len();
-        for each in got {
-            each.answer(Verdict::default());
-        }
-        let _ = asked.join();
-    }
-    assert_eq!(
-        taken, RATE,
-        "{RATE} reports a window are taken and the rest are dropped"
-    );
-}
-
-#[test]
-fn many_wrong_secrets_in_a_row_are_slowed_and_the_right_one_is_still_heard() {
-    let dir = Dir::new("guess");
-    let (host, path) = opened(&dir);
-    let addr = addr_of(&path);
-    let started = Instant::now();
-    for guess in 0..BAD_FREE + 3 {
-        let line = format!("{{\"secret\":\"{guess:032}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"batch\",\"fields\":{{}}}}
-");
-        assert_eq!(raw(addr, line.as_bytes()), None);
-    }
-    assert!(host.take().is_empty());
-    assert!(
-        started.elapsed() >= BAD_WAIT,
-        "the guesses past the bound waited"
-    );
-    let right = secret_of(&path);
-    let line = format!("{{\"secret\":\"{right}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"batch\",\"fields\":{{}}}}
-");
-    let answered =
-        std::thread::spawn(move || raw_for(addr, line.as_bytes(), Duration::from_secs(5)));
-    let mut taken = reported(&host, 1);
-    assert_eq!(
-        taken.len(),
-        1,
-        "the secret that is held is heard after the guesses"
-    );
-    taken.remove(0).answer(Verdict::default());
-    assert!(answered.join().expect("ran").is_some());
+    let got = answered.join().expect("ran");
+    assert!(got.is_some(), "no answer");
 }
 
 #[test]
@@ -338,46 +278,17 @@ fn channel_to(dir: &Dir, addr: SocketAddr) -> PathBuf {
 }
 
 #[test]
-fn an_answer_that_is_not_signed_for_its_nonce_by_the_secret_is_no_answer() {
+fn an_answer_that_does_not_echo_the_nonce_is_no_answer() {
     let dir = Dir::new("nonce");
-    type Answer = Box<dyn FnOnce(&str) -> String + Send>;
-    let cases: [(&str, Answer); 4] = [
-        (
-            "another nonce",
-            Box::new(|_| json!({"nonce": "not-the-one", "block": false, "mac": "x"}).to_string()),
-        ),
-        (
-            "no mac",
-            Box::new(|nonce| json!({"nonce": nonce, "block": false}).to_string()),
-        ),
-        (
-            "a mac of another secret",
-            Box::new(|nonce| {
-                json!({"nonce": nonce, "block": false, "mac": mac("other", nonce, false)})
-                    .to_string()
-            }),
-        ),
-        (
-            "a mac of another verdict",
-            Box::new(|nonce| {
-                json!({"nonce": nonce, "block": true, "mac": mac("the-secret", nonce, false)})
-                    .to_string()
-            }),
-        ),
-    ];
-    for (what, answer) in cases {
-        let (addr, serving) = answering(answer);
-        let path = channel_to(&dir, addr);
-        assert!(
-            forward("pre-compact", &path, true, Cursor::new(Vec::new())).is_err(),
-            "{what} does not pass for the host's"
-        );
-        serving.join().expect("ran");
-    }
-    // What the host signs is taken.
-    let (addr, serving) = answering(|nonce| {
-        json!({"nonce": nonce, "block": true, "mac": mac("the-secret", nonce, true)}).to_string()
-    });
+    let (addr, serving) =
+        answering(|_| json!({"nonce": "not-the-one", "block": false}).to_string());
+    let path = channel_to(&dir, addr);
+    assert!(
+        forward("pre-compact", &path, true, Cursor::new(Vec::new())).is_err(),
+        "an answer for another request does not pass for this one's"
+    );
+    serving.join().expect("ran");
+    let (addr, serving) = answering(|nonce| json!({"nonce": nonce, "block": true}).to_string());
     let path = channel_to(&dir, addr);
     assert_eq!(
         forward("pre-compact", &path, true, Cursor::new(Vec::new())),
@@ -390,10 +301,7 @@ fn an_answer_that_is_not_signed_for_its_nonce_by_the_secret_is_no_answer() {
 fn a_block_stops_only_a_compaction() {
     let dir = Dir::new("kinds");
     for kind in ["start", "batch"] {
-        let (addr, serving) = answering(|nonce| {
-            json!({"nonce": nonce, "block": true, "mac": mac("the-secret", nonce, true)})
-                .to_string()
-        });
+        let (addr, serving) = answering(|nonce| json!({"nonce": nonce, "block": true}).to_string());
         let path = channel_to(&dir, addr);
         assert_eq!(
             forward(kind, &path, false, Cursor::new(Vec::new())),
@@ -405,27 +313,43 @@ fn a_block_stops_only_a_compaction() {
 }
 
 #[test]
-fn the_mac_is_hmac_sha256() {
-    // RFC 4231 test case 2.
-    let tag: String = hmac(b"Jefe", b"what do ya want for nothing?")
-        .iter()
-        .map(|b| format!("{b:02x}"))
+fn a_peer_that_sends_a_byte_at_a_time_does_not_keep_a_place() {
+    let dir = Dir::new("trickle");
+    let (host, path) = opened(&dir);
+    let addr = addr_of(&path);
+    let stop = Arc::new(AtomicBool::new(false));
+    // Each sends a byte before the read limit is up, and again, as a peer keeping a handler would.
+    let tricklers: Vec<_> = (0..MAX_HANDLERS * 2)
+        .map(|_| {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2))
+                else {
+                    return;
+                };
+                while !stop.load(Ordering::SeqCst) {
+                    if stream.write_all(b"{").is_err() {
+                        return;
+                    }
+                    std::thread::sleep(READ_LIMIT / 3);
+                }
+            })
+        })
         .collect();
+    std::thread::sleep(READ_LIMIT * 4);
+    let run = forwarding("batch", &path, "{\"cwd\":\"/x\"}");
+    let mut taken = reported(&host, 1);
     assert_eq!(
-        tag,
-        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        taken.len(),
+        1,
+        "the trickling connections gave up their places at the deadline"
     );
-    let long: String = hmac(
-        &[0xaa; 131],
-        b"Test Using Larger Than Block-Size Key - Hash Key First",
-    )
-    .iter()
-    .map(|b| format!("{b:02x}"))
-    .collect();
-    assert_eq!(
-        long,
-        "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
-    );
+    taken.remove(0).answer(Verdict::default());
+    assert_eq!(run.join().expect("ran"), Ok(false));
+    stop.store(true, Ordering::SeqCst);
+    for each in tricklers {
+        let _ = each.join();
+    }
 }
 
 #[test]
@@ -448,39 +372,6 @@ fn idle_connections_do_not_keep_a_report_from_being_heard() {
     taken.remove(0).answer(Verdict::default());
     assert_eq!(run.join().expect("ran"), Ok(false));
     drop(idle);
-}
-
-#[test]
-fn each_kind_has_a_rate_of_its_own() {
-    let dir = Dir::new("kinds-rate");
-    let (host, path) = opened(&dir);
-    let addr = addr_of(&path);
-    let secret = secret_of(&path);
-    let send = |kind: &str| {
-        let line = format!(
-            "{{\"secret\":\"{secret}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"{kind}\",\"fields\":{{}}}}\n"
-        );
-        let asked = std::thread::spawn(move || raw(addr, line.as_bytes()));
-        let until = Instant::now() + Duration::from_millis(400);
-        let mut got = Vec::new();
-        while got.is_empty() && Instant::now() < until {
-            got = host.take();
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let heard = got.len();
-        for each in got {
-            each.answer(Verdict::default());
-        }
-        let _ = asked.join();
-        heard
-    };
-    let batches: usize = (0..RATE + 5).map(|_| send("batch")).sum();
-    assert_eq!(batches, RATE);
-    assert_eq!(
-        send("pre-compact"),
-        1,
-        "a busy kind does not use up a compaction's"
-    );
 }
 
 #[test]

@@ -1197,7 +1197,14 @@ fn chosen_parts(temp: &Temp, text: &str) -> (Connection, Parts) {
         .expect("parses");
     let local = config.local_profiles.for_agent("a").expect("a profile");
     let offer = Arc::into_inner(
-        offer(&[], &IndexMap::new(), Some(&local), "launcher".into()).expect("an offer"),
+        offer(
+            &[],
+            &IndexMap::new(),
+            Some(&local),
+            "launcher".into(),
+            Vec::new(),
+        )
+        .expect("an offer"),
     )
     .expect("one owner");
     let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");

@@ -86,24 +86,13 @@ pub(super) fn check(path: &Path) -> std::io::Result<()> {
 /// Takes every right to `path` away from everyone but this user and the system, and from what it would inherit.
 #[cfg(windows)]
 fn protect(path: &Path) -> std::io::Result<()> {
-    let user = match (
-        std::env::var("USERDOMAIN").ok(),
-        std::env::var("USERNAME").ok(),
-    ) {
-        (Some(domain), Some(name)) if !name.is_empty() => format!("{domain}\\{name}"),
-        (None, Some(name)) if !name.is_empty() => name,
-        _ => {
-            return Err(std::io::Error::other(
-                "no user name to give the directory to",
-            ));
-        }
-    };
     let root =
         std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
     let status = std::process::Command::new(root.join("System32").join("icacls.exe"))
         .arg(path)
         .args(["/inheritance:r", "/grant:r"])
-        .arg(format!("{user}:(OI)(CI)F"))
+        // OWNER RIGHTS, so no name has to be looked up: the directory's creator is its owner.
+        .arg("*S-1-3-4:(OI)(CI)F")
         .arg("*S-1-5-18:(OI)(CI)F")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -254,14 +243,25 @@ fn is_stale(prefix: &str, entry: &std::fs::DirEntry) -> bool {
     let named = rest
         .split_once('-')
         .and_then(|(pid, _)| pid.parse::<u32>().ok());
-    #[cfg(unix)]
-    if let Some(pid) = named {
-        return !running(pid);
-    }
-    let _ = named;
+    // Old as well as dead: a host in another process namespace that shares this directory is not dead for having no process
+    // here, and a process id that has been used again does not keep a dead host's directory for ever.
     if !old {
         return false;
     }
+    #[cfg(unix)]
+    {
+        let ancient = meta
+            .modified()
+            .ok()
+            .and_then(|made| made.elapsed().ok())
+            .is_some_and(|age| age > UNNAMED);
+        // A process id that was used again does not keep a directory a day old.
+        if let Some(pid) = named {
+            return ancient || !running(pid);
+        }
+    }
+    #[cfg(windows)]
+    let _ = named;
     #[cfg(windows)]
     {
         // A live connection holds `.live` open without leave to delete it.

@@ -416,6 +416,10 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         let plugin = self.native_plugin(params, &session);
         let (native, failed) = match plugin {
             native::Plugin::Nothing => (None, None),
+            native::Plugin::Kept => {
+                changed = true;
+                (None, None)
+            }
             native::Plugin::Added(enrolled) => {
                 changed = true;
                 (Some(enrolled), None)

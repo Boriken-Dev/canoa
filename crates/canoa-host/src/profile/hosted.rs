@@ -2307,13 +2307,18 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
         match forwarded {
             Ok(bytes) => match self.splice.read_client(&bytes) {
                 Client::Answer(answer) => {
+                    self.abandon_opening(&bytes);
                     self.reply(&answer)?;
                     Err(Failure::Timeout)
                 }
-                Client::Held => Err(Failure::Timeout),
+                Client::Held => {
+                    self.abandon_opening(&bytes);
+                    Err(Failure::Timeout)
+                }
                 Client::Forward => Ok(Some(bytes)),
             },
             Err(answer) => {
+                self.abandon_opening(&message);
                 if !answer.is_empty() {
                     self.reply(&answer)?;
                 }

@@ -345,7 +345,7 @@ enum Run {
         /// The profiles a client may choose among; `None` starts the program bare.
         offer: Option<Arc<Offer>>,
         /// Reads the offer again from canoa.cfg each time a connection starts; only the host's own sources have one.
-        refresh: Option<Refresh>,
+        refresh: Option<Box<Refresh>>,
         worktrees: Worktrees,
     },
     Provider {
@@ -369,6 +369,7 @@ struct Refresh {
     names: Vec<String>,
     profiles: IndexMap<String, HostProfile>,
     launcher: OsString,
+    before: Vec<OsString>,
     /// The offer the last readable file gave.
     current: Mutex<Option<Arc<Offer>>>,
 }
@@ -385,6 +386,7 @@ impl Refresh {
                     &self.profiles,
                     local.as_ref(),
                     self.launcher.clone(),
+                    self.before.clone(),
                 );
             }
             Err(error) => {
@@ -520,6 +522,7 @@ fn refresh_of(
 ) -> Option<Refresh> {
     let layers = options.layers.clone().filter(|_| entry.local)?;
     let launcher = options.provider_program.as_os_str().to_owned();
+    let before = options.program_args.clone();
     let local = config.local_profiles.for_agent(&entry.name);
     Some(Refresh {
         layers,
@@ -531,8 +534,10 @@ fn refresh_of(
             &config.profiles,
             local.as_ref(),
             launcher.clone(),
+            before.clone(),
         )),
         launcher,
+        before,
     })
 }
 
@@ -1070,7 +1075,7 @@ impl Serving {
                             options.provider_program.as_os_str().to_owned(),
                             options.program_args.clone(),
                         ),
-                        refresh: refresh_of(entry, profiles, config, options),
+                        refresh: refresh_of(entry, profiles, config, options).map(Box::new),
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },
                 ),
@@ -1176,7 +1181,7 @@ impl Serving {
                                 options.provider_program.as_os_str().to_owned(),
                                 options.program_args.clone(),
                             ),
-                            refresh: refresh_of(entry, profiles, config, options),
+                            refresh: refresh_of(entry, profiles, config, options).map(Box::new),
                             worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                         },
                     )
@@ -1763,7 +1768,7 @@ fn give_agent<C: Channel>(
     let channel = &raw;
     let fresh = refresh
         .as_ref()
-        .map_or_else(|| offer.clone(), Refresh::offer);
+        .map_or_else(|| offer.clone(), |refresh| refresh.offer());
     let offer = fresh.as_ref();
     let connection = match offer {
         Some(offer) => match prepare(

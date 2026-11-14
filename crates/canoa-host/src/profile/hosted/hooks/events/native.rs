@@ -39,11 +39,36 @@ pub(super) enum Plugin {
     /// No overlay listens for what the harness's hooks show, or the harness is not Claude Code.
     Nothing,
     Added(Enrolled),
+    /// The session already holds one, from the request that opened it: it is given again, with its secret.
+    Kept,
     /// One was needed and could not be made; `guarded` when an overlay's hook that needs it fails closed.
     Failed {
         why: String,
         guarded: bool,
     },
+}
+
+/// Adds the plugin at `path` to the session request's Claude Code plugins.
+fn add_plugin(params: &mut Map<String, Value>, path: &str) {
+    let meta = params.entry("_meta").or_insert_with(|| json!({}));
+    if !meta.is_object() {
+        *meta = json!({});
+    }
+    let options = &mut meta["claudeCode"];
+    if !options.is_object() {
+        *options = json!({});
+    }
+    let options = &mut options["options"];
+    if !options.is_object() {
+        *options = json!({});
+    }
+    let plugins = &mut options["plugins"];
+    if !plugins.is_array() {
+        *plugins = json!([]);
+    }
+    if let Some(plugins) = plugins.as_array_mut() {
+        plugins.push(json!({"type": "local", "path": path}));
+    }
 }
 
 impl<C: Channel + ?Sized> Hosted<'_, C> {
@@ -70,6 +95,17 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             Plugin::Failed { why, guarded }
         };
         let mut hold = self.hold();
+        let kept = hold
+            .book
+            .plugins
+            .get(&session.id)
+            .and_then(|held| held.first())
+            .map(|held| held.root().to_string_lossy().into_owned());
+        if let Some(path) = kept {
+            drop(hold);
+            add_plugin(params, &path);
+            return Plugin::Kept;
+        }
         if hold.book.forward.is_none() {
             match Forward::open() {
                 Ok(open) => hold.book.forward = Some(open),
@@ -113,26 +149,27 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         };
         let path = written.root().to_string_lossy().into_owned();
         drop(hold);
-        let meta = params.entry("_meta").or_insert_with(|| json!({}));
-        if !meta.is_object() {
-            *meta = json!({});
-        }
-        let options = &mut meta["claudeCode"];
-        if !options.is_object() {
-            *options = json!({});
-        }
-        let options = &mut options["options"];
-        if !options.is_object() {
-            *options = json!({});
-        }
-        let plugins = &mut options["plugins"];
-        if !plugins.is_array() {
-            *plugins = json!([]);
-        }
-        if let Some(plugins) = plugins.as_array_mut() {
-            plugins.push(json!({"type": "local", "path": path}));
-        }
+        add_plugin(params, &path);
         Plugin::Added(Enrolled { secret, written })
+    }
+
+    /// A request that ended before the agent had it: the channel and plugin made for it end too.
+    pub(in crate::profile::hosted) fn abandon_opening(&self, request: &[u8]) {
+        let Some(id) = serde_json::from_slice::<Value>(request)
+            .ok()
+            .and_then(|value| value.get("id").cloned())
+        else {
+            return;
+        };
+        let mut hold = self.hold();
+        let native = hold
+            .book
+            .opening
+            .remove(&id.to_string())
+            .and_then(|opening| opening.native);
+        if let (Some(native), Some(forward)) = (native, &hold.book.forward) {
+            forward.revoke_secret(&native.secret);
+        }
     }
 
     /// Ends the channel and the plugins of a session.

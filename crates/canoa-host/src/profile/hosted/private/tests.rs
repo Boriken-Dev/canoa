@@ -47,7 +47,7 @@ fn a_directory_is_made_only_where_nothing_is_and_never_with_its_parents() {
 #[test]
 fn a_private_directory_is_not_used_when_something_is_already_at_its_path_and_that_is_left_alone() {
     let under = Under::new();
-    let private = Private::new("canoa-test");
+    let private = Private::new("canoa-collide");
     // Another user made it first.
     std::fs::create_dir_all(private.path()).expect("made first");
     std::fs::write(private.path().join("theirs"), b"x").expect("written");
@@ -66,7 +66,7 @@ fn a_private_directory_is_not_used_when_something_is_already_at_its_path_and_tha
             entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(&format!("canoa-test-{}-", std::process::id()))
+                .starts_with(&format!("canoa-collide-{}-", std::process::id()))
         })
         .count();
     assert_eq!(
@@ -77,7 +77,7 @@ fn a_private_directory_is_not_used_when_something_is_already_at_its_path_and_tha
         if entry
             .file_name()
             .to_string_lossy()
-            .starts_with(&format!("canoa-test-{}-", std::process::id()))
+            .starts_with(&format!("canoa-collide-{}-", std::process::id()))
         {
             let _ = std::fs::remove_dir_all(entry.path());
         }
@@ -138,7 +138,7 @@ fn the_runtime_directory_is_preferred_where_there_is_one() {
 
 #[cfg(windows)]
 #[test]
-fn a_directory_gives_no_right_to_anyone_but_this_user_and_the_system() {
+fn a_directory_gives_rights_only_to_its_owner_and_the_system() {
     let under = Under::new();
     let dir = under.0.join("d");
     make(&dir).expect("made");
@@ -156,7 +156,12 @@ fn a_directory_gives_no_right_to_anyone_but_this_user_and_the_system() {
     ] {
         assert!(!rights.contains(other), "{other} has rights: {rights}");
     }
-    assert!(rights.contains("NT AUTHORITY\\SYSTEM"), "{rights}");
+    assert!(rights.contains(r"NT AUTHORITY\SYSTEM"), "{rights}");
+    assert!(
+        rights.contains("OWNER RIGHTS"),
+        "the owner is granted by its rights, with no name looked up: {rights}"
+    );
+    std::fs::write(dir.join("mine"), b"x").expect("the owner can still write in it");
     // What is made inside inherits that.
     make_inside(&dir.join("inner")).expect("inside");
     let shown = std::process::Command::new(

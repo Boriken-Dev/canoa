@@ -716,9 +716,20 @@ fn what_a_killed_host_left_in_the_temporary_directory_is_removed_when_old_and_on
         std::fs::create_dir_all(temp.0.join(name)).expect("a directory");
     }
     let old = std::time::SystemTime::now() - Duration::from_secs(48 * 3600);
-    for name in names.into_iter().filter(|name| *name != "canoa-hooks-new") {
+    let live = format!("canoa-profile-{me}-ab");
+    for name in names
+        .into_iter()
+        .filter(|name| *name != "canoa-hooks-new" && *name != live)
+    {
         age(&temp.0.join(name), old);
     }
+    age(
+        &temp.0.join(&live),
+        std::time::SystemTime::now() - Duration::from_secs(2 * 3600),
+    );
+    // Dead, but not old: a host in another process namespace has no process here either.
+    #[cfg(unix)]
+    std::fs::create_dir_all(temp.0.join("canoa-profile-4194998-fresh")).expect("a directory");
     remove_stale(&temp.0);
     assert!(!temp.0.join("canoa-hooks-old").exists());
     assert!(
@@ -733,7 +744,10 @@ fn what_a_killed_host_left_in_the_temporary_directory_is_removed_when_old_and_on
     );
     // A host that runs is not swept: by its process id where the system can say, by the file it holds open on Windows.
     #[cfg(unix)]
-    assert!(temp.0.join(format!("canoa-profile-{me}-ab")).exists());
+    {
+        assert!(temp.0.join(&live).exists());
+        assert!(temp.0.join("canoa-profile-4194998-fresh").exists());
+    }
 }
 
 #[test]
@@ -1510,5 +1524,100 @@ mod native {
         );
         drop(connection);
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_session_loaded_again_is_given_the_plugin_and_secret_it_has_and_no_new_ones() {
+        let temp = Temp::new();
+        let digest = temp.install("[hooks]\ncd = {}\n", &[]);
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        let hosted = Hosted::in_process(&client, &scope, &connection);
+        let (_, first) = begin(&hosted, &client, CLAUDE);
+        let first = first.expect("a plugin");
+        let answer = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}});
+        hosted
+            .send(&serde_json::to_vec(&answer).expect("JSON"))
+            .expect("sent");
+        send(
+            &client,
+            3,
+            "session/load",
+            json!({"sessionId": "s1", "cwd": "/work", "mcpServers": []}),
+        );
+        let request = hosted
+            .receive(Some(Duration::from_millis(10)))
+            .ok()
+            .flatten()
+            .expect("the request goes on");
+        let request: Value = serde_json::from_slice(&request).expect("JSON");
+        let plugins: Vec<&str> = request["params"]["_meta"]["claudeCode"]["options"]["plugins"]
+            .as_array()
+            .expect("plugins")
+            .iter()
+            .filter_map(|plugin| plugin["path"].as_str())
+            .collect();
+        assert_eq!(plugins, [first.to_string_lossy()], "the plugin it has");
+        assert_eq!(
+            dirs_in(connection.skills()),
+            1,
+            "no second plugin was written"
+        );
+        // An error for the load does not end the session's own channel.
+        let failed = json!({"jsonrpc": "2.0", "id": 3, "error": {"code": -32000, "message": "no"}});
+        hosted
+            .send(&serde_json::to_vec(&failed).expect("JSON"))
+            .expect("sent");
+        assert!(first.exists());
+        assert!(heard(&hosted, &first), "its secret is still good");
+    }
+
+    /// Whether the host answers a forwarder with the secret in the channel file of the plugin at `plugin`.
+    fn heard(hosted: &Hosted<'_, Client>, plugin: &Path) -> bool {
+        let channel = plugin.join("channel.json");
+        let run =
+            std::thread::spawn(move || forward("batch", &channel, true, Cursor::new(Vec::new())));
+        let until = Instant::now() + Duration::from_secs(20);
+        while !run.is_finished() && Instant::now() < until {
+            let _ = hosted.receive(Some(Duration::from_millis(10)));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        run.join().expect("ran").is_ok()
+    }
+
+    /// The directories directly in `dir`.
+    fn dirs_in(dir: &Path) -> usize {
+        std::fs::read_dir(dir)
+            .expect("read")
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .count()
+    }
+
+    #[test]
+    fn a_request_the_host_stops_before_the_agent_has_it_ends_its_channel_and_plugin() {
+        let temp = Temp::new();
+        let digest = temp.install("[hooks]\ncd = {}\n", &[]);
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        let hosted = Hosted::in_process(&client, &scope, &connection);
+        let (request, plugin) = begin(&hosted, &client, CLAUDE);
+        let plugin = plugin.expect("a plugin");
+        let copy = temp.0.join("channel-copy.json");
+        std::fs::copy(plugin.join("channel.json"), &copy).expect("copied");
+        // What the host does with a request it stops after the hooks said yes (a part that cannot be added, the usage
+        // splice answering it itself).
+        hosted.abandon_opening(&serde_json::to_vec(&request).expect("JSON"));
+        assert_eq!(
+            dirs_in(connection.skills()),
+            0,
+            "the plugin written for it is gone"
+        );
+        assert!(
+            forward("batch", &copy, true, Cursor::new(Vec::new())).is_err(),
+            "its secret is not good"
+        );
     }
 }
