@@ -1,0 +1,54 @@
+# Every file and folder whose name starts with a dot: version control, editor and agent settings, secrets.
+.*
+# Files that run code when a build, a test or an editor starts.
+package.json
+makefile
+justfile
+pyproject.toml
+setup.py
+build.rs
+rakefile
+cargo.toml
+conftest.py
+directory.build.props
+directory.build.targets
+directory.packages.props
+mise.toml
+pytest.ini
+tox.ini
+setup.cfg
+noxfile.py
+shell.nix
+flake.nix
+gradlew
+mvnw
+gradle-wrapper.properties
+build.gradle*
+pom.xml
+go.mod
+go.work
+nuget.config
+cmakelists.txt
+meson.build
+gemfile
+dockerfile
+rust-toolchain*
+requirements*.txt
+gulpfile.*
+gruntfile.*
+*.config.*
+*.pth
+*.csproj
+*.code-workspace
+# Installed dependencies and environments.
+node_modules
+venv
+env
+__pycache__
+vendor
+# The files agents read their instructions from.
+agents.md
+agents.override.md
+claude.md
+claude.local.md
+gemini.md

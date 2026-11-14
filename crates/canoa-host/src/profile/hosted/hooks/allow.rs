@@ -2,7 +2,7 @@
 //!
 //! The agent asks permission only for a call its own rules and mode have left to the person, so an allow answers what the
 //! person would have been asked. What the host can add is the person's list of protected paths (`[permissions] protected`,
-//! else the host's recommended places): a call that names one, or a path the host cannot place, goes to the person.
+//! else the recommended list the app uses too): a call that names one, or a path the host cannot place, goes to the person.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -10,7 +10,10 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::store::protect::{Protected, RECOMMENDED_PLACES};
+use crate::store::protect::Protected;
+
+/// What the host protects when the person wrote no list: the app's recommended list, one file both read.
+pub(crate) const RECOMMENDED: &str = include_str!("../../../protected_default.txt");
 
 /// The keys of a call's input that name a file.
 const PATH_KEYS: [&str; 4] = ["file_path", "path", "notebook_path", "filePath"];
@@ -26,10 +29,7 @@ impl Refusals {
     /// The list `lines` write, or the host's recommended places when the person wrote none.
     pub(super) fn new(lines: Option<&[String]>) -> Self {
         Self {
-            list: lines.map_or_else(
-                || Protected::new(RECOMMENDED_PLACES.iter().copied()),
-                Protected::new,
-            ),
+            list: lines.map_or_else(|| Protected::new(RECOMMENDED.lines()), Protected::new),
             home: std::env::home_dir(),
         }
     }
@@ -201,13 +201,27 @@ mod tests {
     }
 
     #[test]
-    fn the_hosts_recommended_places_apply_when_the_person_wrote_no_list() {
+    fn the_recommended_list_applies_when_the_person_wrote_no_list() {
         let list = Refusals::new(None);
-        let Some(home) = std::env::home_dir() else {
-            return;
-        };
-        let key = home.join(".ssh").join("id_ed25519");
-        assert!(list.touches(&edit(&key.to_string_lossy()), &folder()));
+        let cwd = folder();
+        for path in [
+            ".env",
+            "src/.git/config",
+            "package.json",
+            "a/Cargo.toml",
+            "node_modules/x/y.js",
+            "CLAUDE.md",
+        ] {
+            assert!(list.touches(&edit(path), &cwd), "{path}");
+        }
+        assert!(!list.touches(&edit("src/main.rs"), &cwd));
+    }
+
+    #[test]
+    fn the_recommended_list_is_the_one_the_app_reads() {
+        // The app's constant must equal this file; its own test (`protected_paths_test.dart`) fails when it drifts.
+        assert!(RECOMMENDED.lines().any(|line| line == ".*"));
+        assert!(RECOMMENDED.ends_with('\n') && !RECOMMENDED.contains('\r'));
     }
 
     #[cfg(unix)]

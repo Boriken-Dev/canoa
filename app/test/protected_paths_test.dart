@@ -1,5 +1,6 @@
 // The protected list: its syntax (the one coqui-acp-pi's `protected` setting has), what a remembered rule does with it, and the
 // canoa.cfg key and Settings field that hold it.
+import 'dart:io';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
@@ -26,6 +27,11 @@ String? _problem(String file, {ProtectedPaths? list, String? home, String scope 
 );
 
 void main() {
+  test('the recommended list is the file the host reads when the person wrote none', () {
+    final file = File('../crates/canoa-host/src/protected_default.txt');
+    expect(recommendedProtected, file.readAsStringSync().trimRight().split('\n'));
+  });
+
   group('the list syntax is the one of the Pi translator', () {
     test('a pattern covers what is under it and a later line wins', () {
       final rules = _list(['~/.ssh', '!~/.ssh/known_hosts', '~/.ssh/known_hosts2']);
