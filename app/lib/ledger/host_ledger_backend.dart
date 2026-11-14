@@ -5,20 +5,19 @@ import 'package:crypto/crypto.dart';
 
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
-import '../desktop/host_supervisor.dart';
+import '../desktop/host_supervisor.dart' show HostSupervisor;
 import 'session_ledger.dart';
 
 /// The session list kept by the host, over its control channel: one record for each session, and one for what is not a session
 /// (the sources' memory) with the sessions' order. The ledger still reads and writes one document; this turns it into
 /// the records the host keeps, and puts only those that changed.
 final class HostLedgerBackend implements LedgerBackend {
-  HostLedgerBackend(this._host, {this.wait = const Duration(seconds: 20)});
+  HostLedgerBackend(HostSupervisor host, {Duration wait = const Duration(seconds: 20)}) : _control = HostControl(host, wait: wait);
 
-  final HostSupervisor _host;
+  /// The list kept by a host reached through [control]: a web page keeps its sessions in the host that served it.
+  HostLedgerBackend.over(this._control);
 
-  /// How long the host has to be up when the list is read.
-  final Duration wait;
-  late final HostControl _control = HostControl(_host, wait: wait);
+  final HostControl _control;
 
   /// What the host holds, by record id, as last read or written: what a write need not send again.
   final _held = <String, String>{};

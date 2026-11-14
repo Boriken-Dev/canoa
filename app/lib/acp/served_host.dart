@@ -14,7 +14,7 @@ final class ServedEntry {
 
   final String name;
 
-  /// `agent`, `provider` or `tool`.
+  /// `agent`, `provider`, `tool` or `control`.
   final String kind;
 
   /// Its WebSocket address.
@@ -31,7 +31,7 @@ final class ServedEntry {
 /// connect dialog: connecting still proves the host holds [peer]'s key, and the host still turns this browser away until
 /// its key is accepted there.
 final class ServedHost {
-  const ServedHost({required this.peer, required this.method, required this.entries});
+  const ServedHost({required this.peer, required this.method, required this.entries, this.control});
 
   /// The host's peer id.
   final String peer;
@@ -39,6 +39,10 @@ final class ServedHost {
   /// The proof the host runs.
   final PeerMethod method;
   final List<ServedEntry> entries;
+
+  /// The host's control channel (its session list, folders, uploads and overlays), when it listens on an address a page may dial; a
+  /// key reaches it only with the grants the host gives it. Not one of [entries]: it is no agent.
+  final ServedEntry? control;
 
   static final _peerId = RegExp(r'^sha256:[0-9a-f]{64}$');
 
@@ -51,6 +55,7 @@ final class ServedHost {
       final [peer, method, entries] = [value['peer'], value['method'], value['entries']];
       if (peer is! String || !_peerId.hasMatch(peer) || method is! String || entries is! List) return null;
       final served = <ServedEntry>[];
+      ServedEntry? control;
       for (final entry in entries) {
         if (entry is! Map) return null;
         final [name, kind, url] = [entry['name'], entry['kind'], entry['url']];
@@ -58,15 +63,20 @@ final class ServedHost {
         final address = Uri.tryParse(url);
         if (address == null || !{'ws', 'wss'}.contains(address.scheme) || !address.hasAuthority) return null;
         final [harness, title] = [entry['harness'], entry['title']];
-        served.add(ServedEntry(
+        final listed = ServedEntry(
           name: name,
           kind: kind,
           url: url,
           harness: harness is String ? harness : null,
           title: title is String ? title : null,
-        ));
+        );
+        if (kind == 'control') {
+          control ??= listed;
+        } else {
+          served.add(listed);
+        }
       }
-      return ServedHost(peer: peer, method: PeerMethod.parse(method), entries: served);
+      return ServedHost(peer: peer, method: PeerMethod.parse(method), entries: served, control: control);
     } on FormatException {
       return null;
     } on ArgumentError {
