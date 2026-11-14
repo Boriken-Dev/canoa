@@ -37,6 +37,7 @@ final class ComposerKit {
     this.pickFiles,
     this.statFile,
     this.uploadFile,
+    this.hostFiles,
     this.listFolder,
     this.resolveInside,
     this.clipboard = const TextClipboard(),
@@ -84,6 +85,10 @@ final class ComposerKit {
   /// small image then goes as that file, where it would otherwise have to be text embedded in the message. Null where a picked
   /// file is read as it is.
   final Future<({String path, int size})> Function(String name, List<int> bytes)? uploadFile;
+
+  /// Whether [pickFolder] and [uploadFile] reach the computer [session]'s agent runs on: false for a session on another peer, whose
+  /// agent could not read a folder or file of this page's host. Null means they do for every session.
+  final bool Function(ChatSession session)? hostFiles;
   final ClipboardReader clipboard;
 
   /// The files and folders under a folder on this computer, as paths relative to it, and the file or folder one names when it is
@@ -179,7 +184,7 @@ final class SessionAttachments implements ComposerAttachments {
       } else {
         try {
           final bytes = await file.read();
-          final upload = kit.uploadFile;
+          final upload = kit.hostFiles?.call(session) == false ? null : kit.uploadFile;
           final String? problem;
           if (upload != null && !(imageTypeOf(file.name, file.mimeType) != null && bytes.length <= maxAttachedImage)) {
             if (bytes.isEmpty) {
@@ -305,7 +310,7 @@ class SessionComposer extends StatelessWidget {
               for (final file in await kit.pickFiles!())
                 (name: file.name, path: file.path, mimeType: file.mimeType, read: file.readAsBytes),
             ],
-      pickFolder: kit.pickFolder,
+      pickFolder: kit.hostFiles?.call(session) == false ? null : kit.pickFolder,
       clipboard: kit.clipboard,
       pasteAsFile: kit.pasteAsFile,
       plusItems: [

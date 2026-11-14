@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../acp/served_host.dart';
 import '../config/canoa_config.dart';
 import '../desktop/host_control.dart';
@@ -63,7 +65,7 @@ final class ServedSupervisor extends HostSupervisor {
 /// What the overlay store and Loadout need of the host's computer, with the store's git work done by the host over its control
 /// channel. The host's files are not readable here, so a layer's tree is left out of what a page shows of the profile.
 final class ServedProfileHome implements ProfileHome {
-  ServedProfileHome(this.overlays)
+  ServedProfileHome(this.overlays, {required this.os})
       : trust = ProjectTrust(
           read: () async => null,
           write: (_) async => throw StateError('A project profile is trusted from the host\'s own computer, not from a web page'),
@@ -79,7 +81,7 @@ final class ServedProfileHome implements ProfileHome {
   String get configDir => '';
 
   @override
-  String get os => 'linux';
+  final String os;
 
   @override
   String join(String dir, String relative) => dir.isEmpty ? relative : '$dir/$relative';
@@ -123,13 +125,23 @@ final class ServedApp {
   late final HostFiles files = HostFiles(control);
   late final HostConfigStore configStore = HostConfigStore(files);
   final ControlOverlayManager overlays;
-  late final ServedProfileHome home = ServedProfileHome(overlays);
+  late final ServedProfileHome home = ServedProfileHome(overlays, os: host.os ?? '');
 
   /// The session list the host keeps for this page's key.
   final LedgerBackend ledger;
 
-  /// Why the control channel cannot be used, once [probe] has found out; null while it can or has not been asked.
+  /// Why the control channel cannot be used, once [probe] has found out; null while it can or has not been asked. Always one of a
+  /// few fixed sentences: what the host or the network said is in [detail] and the log, never in the page's words.
   String? problem;
+
+  /// What went wrong, as the failure said it: for the log, since it may come from an endpoint this page has not proven.
+  String? detail;
+
+  /// Why canoa.cfg was not read from the host, when it was not; the page then writes nothing to the host's file.
+  String? configProblem;
+
+  /// Whether canoa.cfg was read from the host whole, which is what every write to it is made against.
+  bool get configLoaded => configStore.loaded;
 
   /// Whether the control channel was reached and the key proved: false when the host lists none, this page's key is not accepted
   /// there, or it grants the key nothing.
@@ -147,18 +159,23 @@ final class ServedApp {
       await (await control.ready()).call('ledger/list', {'limit': 1}).timeout(within);
       problem = null;
     } on Object catch (error) {
-      problem = 'The host\'s control channel cannot be used: $error. Pair this browser with the host, give its key the grants in '
+      detail = '$error';
+      debugPrint('Canoa: the host\'s control channel cannot be used: $error');
+      problem = 'The host\'s control channel cannot be used. Pair this browser with the host, give its key the grants in '
           'canoa.cfg\'s [host.control], and reload.';
     }
   }
 
-  /// canoa.cfg as the host holds it, or defaults and [problem] when it cannot be read.
-  Future<CanoaConfig> loadConfig() async {
+  /// canoa.cfg as the host holds it, or null, with [configProblem] set, when it cannot be read or this page cannot take a table of
+  /// it whole: nothing is then written to the host's file.
+  Future<CanoaConfig?> loadConfig() async {
     try {
       return await configStore.load();
     } on Object catch (error) {
-      problem ??= 'The host\'s canoa.cfg cannot be read: $error';
-      return const CanoaConfig();
+      debugPrint('Canoa: the host\'s canoa.cfg cannot be read: $error');
+      configProblem = 'The host\'s canoa.cfg could not be read whole by this page, so changes in Settings stay in this page and '
+          'nothing is written to the host\'s file.';
+      return null;
     }
   }
 
@@ -167,7 +184,8 @@ final class ServedApp {
     try {
       await overlays.refresh();
     } on Object catch (error) {
-      problem ??= 'The host\'s overlays cannot be read: $error';
+      debugPrint('Canoa: the host\'s overlays cannot be read: $error');
+      configProblem ??= 'The host\'s installed overlays could not be read.';
     }
   }
 

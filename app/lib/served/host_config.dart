@@ -29,28 +29,49 @@ final class HostConfigStore {
 
   final HostFiles _files;
 
-  /// Each table as the host last held it, by name, as JSON text; absent for a table it has none of.
+  /// Each table as this page's own encoding of the configuration it read spells it, by name, as JSON text; absent for a table the
+  /// host has none of. Compared with the same spelling at [save], so only a table the person changed is sent, and a table the host
+  /// spells another way is left as it is.
   final _held = <String, String?>{};
+  bool _loaded = false;
 
-  /// canoa.cfg as the host holds it.
+  /// Whether canoa.cfg was read whole: [save] refuses until it has been.
+  bool get loaded => _loaded;
+
+  static String? _textOf(Object? table) => table is Map && table.isNotEmpty ? jsonEncode(table) : null;
+
+  static Map<String, Object?> _tablesOf(CanoaConfig config) {
+    final text = config.encode();
+    return text.trim().isEmpty ? const {} : decodeConfig(text, name: 'canoa.json').data;
+  }
+
+  /// canoa.cfg as the host holds it. A table this page cannot read (a key it does not know) fails the whole read, and nothing is held:
+  /// a configuration read in part would write the rest over the host's file.
   Future<CanoaConfig> load() async {
+    _loaded = false;
     final tables = <String, Object?>{};
     for (final section in hostConfigSections) {
       final value = await _files.configGet(section);
-      _held[section] = value == null ? null : jsonEncode(value);
       if (value != null) tables[section] = value;
     }
-    return CanoaConfig.parse(jsonEncode(tables), name: 'canoa.json');
+    final config = CanoaConfig.parse(jsonEncode(tables), name: 'canoa.json');
+    final data = _tablesOf(config);
+    _held
+      ..clear()
+      ..addEntries([for (final section in hostConfigSections) MapEntry(section, _textOf(data[section]))]);
+    _loaded = true;
+    return config;
   }
 
-  /// Writes the tables of [config] that differ from what the host held, and says whether the host reads one of them only when it
-  /// starts, so that [HostFiles.restart] is what applies the change.
+  /// Writes the tables of [config] that differ from what was read, and says whether the host reads one of them only when it
+  /// starts, so that [HostFiles.restart] is what applies the change. A table is removed on the host only when the host had one and
+  /// [config] has none now. Throws [StateError] when canoa.cfg was not read whole.
   Future<bool> save(CanoaConfig config) async {
-    final data = decodeConfig(config.encode(), name: 'canoa.json').data;
+    if (!_loaded) throw StateError('canoa.cfg on the host was not read, so nothing is written to it');
+    final data = _tablesOf(config);
     var restart = false;
     for (final section in hostConfigSections) {
-      final now = data[section];
-      final text = now is Map && now.isNotEmpty ? jsonEncode(now) : null;
+      final text = _textOf(data[section]);
       if (text == _held[section]) continue;
       restart |= await _files.configSet(section, text == null ? null : (jsonDecode(text) as Map<String, Object?>));
       _held[section] = text;

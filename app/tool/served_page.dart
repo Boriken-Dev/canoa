@@ -93,7 +93,7 @@ Future<String> _first(String options) async {
 
     // The overlay: previewed from a local catalog, installed by the host, selected in canoa.cfg, and given to the next session.
     report['at'] = 'config';
-    var current = await app.loadConfig();
+    var current = (await app.loadConfig())!;
     final catalogs = CanoaConfig.parse('[catalogs]\nteam = ${jsonEncode(asked['catalog'])}\n');
     final listing = StoreListing([
       for (final MapEntry(key: label, value: source) in catalogs.catalogs.entries)
@@ -145,7 +145,7 @@ Future<String> _second(String options) async {
       report['reopened'] = reopened.id;
       await client.close();
     }
-    final config = await app.loadConfig();
+    final config = (await app.loadConfig())!;
     report['selected'] = config.overlays.keys.toList();
     await app.refreshOverlays();
     report['installed'] = app.overlays.installed(asked['overlay']! as String)?.digest;

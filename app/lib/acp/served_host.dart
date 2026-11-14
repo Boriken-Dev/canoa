@@ -31,7 +31,7 @@ final class ServedEntry {
 /// connect dialog: connecting still proves the host holds [peer]'s key, and the host still turns this browser away until
 /// its key is accepted there.
 final class ServedHost {
-  const ServedHost({required this.peer, required this.method, required this.entries, this.control});
+  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os});
 
   /// The host's peer id.
   final String peer;
@@ -39,6 +39,9 @@ final class ServedHost {
   /// The proof the host runs.
   final PeerMethod method;
   final List<ServedEntry> entries;
+
+  /// The operating system the host runs on as Rust names it (`windows`, `linux`, `macos`), when it says; overlays are read for it.
+  final String? os;
 
   /// The host's control channel (its session list, folders, uploads and overlays), when it listens on an address a page may dial; a
   /// key reaches it only with the grants the host gives it. Not one of [entries]: it is no agent.
@@ -76,7 +79,10 @@ final class ServedHost {
           served.add(listed);
         }
       }
-      return ServedHost(peer: peer, method: PeerMethod.parse(method), entries: served, control: control);
+      return ServedHost(
+        peer: peer, method: PeerMethod.parse(method), entries: served, control: control,
+        os: value['os'] is String ? value['os'] as String : null,
+      );
     } on FormatException {
       return null;
     } on ArgumentError {

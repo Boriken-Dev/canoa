@@ -274,6 +274,11 @@ class _CanoaAppState extends State<CanoaApp> {
   /// in its own words. A table the host reads only at start applies after the host restarts, which the person is offered.
   Future<void> _writeToHost(CanoaConfig changed) async {
     final served = widget.served!;
+    if (!served.configLoaded) {
+      _messenger.currentState?.showSnackBar(const SnackBar(
+          content: Text('The host canoa.cfg was not read whole, so that change is kept in this page and not written to the host.')));
+      return;
+    }
     try {
       if (await served.configStore.save(changed)) _offerRestart();
     } on ControlFailed catch (error) {
@@ -1059,13 +1064,14 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _cacheMeta(({CacheLifetime lifetime, bool chosen}) asked) =>
       {cacheLifetimeMeta: cacheLifetimeRequest(asked.lifetime, chosen: asked.chosen)};
 
-  /// What `initialize` carries to an entry of the host that served this page: the cache lifetime and, as for the host's own
-  /// sources, the overlays the session starts with, which an entry with `own_profile` narrows its own layer to.
+  /// What `initialize` carries to an entry of the host that served this page: the cache lifetime and, only when the person chose
+  /// overlays for this session, which they are. Sent unasked, a name from canoa.cfg's own `[overlays]` would narrow an operator's
+  /// profile of the entry by names that mean nothing there.
   Map<String, Object?> _startMeta(ChatSession draft) {
     final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)};
-    if (widget.served == null || config.overlays.isEmpty) return cache;
-    final chosen = draft.overlays?.where(config.overlays.containsKey).toSet() ?? config.defaultOverlays.toSet();
-    draft.overlays = chosen;
+    final asked = draft.overlays;
+    if (widget.served == null || asked == null || config.overlays.isEmpty) return cache;
+    final chosen = asked.where(config.overlays.containsKey).toSet();
     return {...cache, overlaysMeta: _overlaysNamed(chosen)};
   }
 
@@ -1415,7 +1421,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.addListener(_showWaiting);
     // The welcome page, which a window with no session shows, lists each source with what it needs.
     scheduleMicrotask(_noteLast);
-    if (widget.served?.problem case final problem?) {
+    if (widget.served?.problem ?? widget.served?.configProblem case final problem?) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _messenger.currentState?.showSnackBar(SnackBar(duration: const Duration(seconds: 30), content: Text(problem)));
       });
@@ -1481,6 +1487,12 @@ class _CanoaAppState extends State<CanoaApp> {
     return pickHostFolder(above, (path) => served.files.listFolders(path: path), start: _lastFolder);
   }
 
+  /// Whether [session]'s agent runs on the host that served this page: a draft starts on one of its entries, and a started session
+  /// is on it when it was reached at its key.
+  bool _onServedHost(ChatSession session) => session.isDraft
+      ? session.source != null
+      : session.place == SessionPlace.host && session.peerId == widget.served?.host.peer;
+
   /// Keeps a file the person attached on the host's computer, where the agent reads it.
   Future<({String path, int size})> _upload(String name, List<int> bytes) async {
     final kept = await widget.served!.files.upload(name, bytes);
@@ -1498,6 +1510,7 @@ class _CanoaAppState extends State<CanoaApp> {
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     uploadFile: widget.served == null ? null : _upload,
+    hostFiles: widget.served == null ? null : _onServedHost,
     listFolder: canRunLocalAgents ? listFolderEntries : null,
     resolveInside: canRunLocalAgents ? resolveInside : null,
     clipboard: widget.clipboard ?? const SystemClipboard(),

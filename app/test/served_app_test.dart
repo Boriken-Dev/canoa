@@ -14,6 +14,8 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/served/folder_dialog.dart';
+import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/served/host_config.dart';
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/served/served_app.dart';
 import 'package:canoa/session_store.dart';
@@ -94,8 +96,10 @@ void main() {
       final app = ServedApp.over(_host(), HostControl.dialing(() async => throw StateError('the host turned this key away')));
       await app.probe();
       expect(app.reachable, isFalse);
-      expect(app.problem, contains('turned this key away'));
       expect(app.problem, contains('[host.control]'));
+      // What the failure said is for the log: it may come from an endpoint the page has not proven.
+      expect(app.problem, isNot(contains('turned this key away')));
+      expect(app.detail, contains('turned this key away'));
     });
 
     test('a probe asks the host something, since a key it grants nothing is turned away only after the proof', () async {
@@ -113,6 +117,81 @@ void main() {
       await app.probe();
       expect(app.reachable, isFalse);
       await app.close();
+    });
+  });
+
+  group('canoa.cfg on the host', () {
+    /// A host whose canoa.cfg holds [tables], by section; the requests it was sent are kept.
+    (_Link, HostFiles) hostWith(Map<String, Map<String, Object?>> tables) {
+      final link = _Link((method, params) => switch (method) {
+        'config/get' => {'section': params['section'], 'value': tables[params['section']], 'restart': false},
+        'config/set' => {'section': params['section'], 'restart': params['section'] == 'permissions'},
+        _ => throw StateError('not asked: $method'),
+      });
+      return (link, HostFiles(HostControl.dialing(() async => link)));
+    }
+
+    test('a table this page cannot read fails the whole read, and nothing is then written, so nothing is removed', () async {
+      final (link, files) = hostWith({
+        'permissions': {'a_key_this_build_does_not_know': true},
+        'overlays': {'docs': 'https://example.com/docs.git'},
+      });
+      final store = HostConfigStore(files);
+      await expectLater(store.load(), throwsA(anything));
+      expect(store.loaded, isFalse);
+      await expectLater(store.save(const CanoaConfig()), throwsA(isA<StateError>()));
+      expect(link.asked.where((method) => method == 'config/set'), isEmpty);
+    });
+
+    test('a page that read it whole sends only the table the person changed, not tables the host spells another way', () async {
+      final (link, files) = hostWith({
+        'appearance': {'density': 'verbose', 'brightness': 'dark'},
+        'sessions': {'workspace': r'${documents}/a/${session}'},
+      });
+      final store = HostConfigStore(files);
+      final config = await store.load();
+      expect(store.loaded, isTrue);
+      // Saving what was read changes nothing on the host.
+      expect(await store.save(config), isFalse);
+      expect(link.asked.where((method) => method == 'config/set'), isEmpty);
+      final changed = CanoaConfig.parse(
+        jsonEncode({'appearance': {'density': 'verbose', 'brightness': 'light'}, 'sessions': {'workspace': r'${documents}/a/${session}'}}),
+        name: 'canoa.json',
+      );
+      await store.save(changed);
+      expect(link.asked.where((method) => method == 'config/set'), hasLength(1));
+    });
+
+    test('a table the host had is removed only when the person emptied it, and one it never had is never sent as removed', () async {
+      final removed = <String>[];
+      final link = _Link((method, params) {
+        if (method == 'config/get') return {'section': params['section'], 'value': params['section'] == 'sessions' ? {'workspace': r'${documents}/x/${session}'} : null};
+        removed.add('${params['section']}=${params['value']}');
+        return {'section': params['section'], 'restart': false};
+      });
+      final store = HostConfigStore(HostFiles(HostControl.dialing(() async => link)));
+      await store.load();
+      await store.save(CanoaConfig.parse('{}', name: 'canoa.json'));
+      expect(removed, ['sessions=null']);
+    });
+
+    test('the app reads none of it when a table is unreadable: no config, a fixed sentence, and nothing to write against', () async {
+      final link = _Link((method, params) => {
+        'section': params['section'],
+        'value': params['section'] == 'permissions' ? {'a_key_this_build_does_not_know': true} : null,
+      });
+      final app = ServedApp.over(_host(), HostControl.dialing(() async => link));
+      expect(await app.loadConfig(), isNull);
+      expect(app.configLoaded, isFalse);
+      expect(app.configProblem, isNotNull);
+      expect(app.configProblem, isNot(contains('a_key_this_build_does_not_know')));
+    });
+
+    test('the host\'s operating system comes from what it lists, and an overlay is read for it', () {
+      final served = ServedHost.parse(jsonEncode({'peer': _peer, 'method': 'noise', 'entries': <Object?>[], 'os': 'windows'}))!;
+      expect(served.os, 'windows');
+      expect(ServedApp.over(served, HostControl.dialing(() async => throw StateError('x'))).home.os, 'windows');
+      expect(ServedHost.parse(jsonEncode({'peer': _peer, 'method': 'noise', 'entries': <Object?>[]}))!.os, isNull);
     });
   });
 
@@ -238,6 +317,21 @@ void main() {
       expect([for (final attachment in session.attachments) attachment.name], ['data.bin', 'notes.txt']);
       expect(session.attachments.first.kind, AttachmentKind.file);
       expect(session.attachments.first.path, '/home/ana/.local/share/canoa/uploads/ab12-data.bin');
+    });
+
+    test('a session on another peer gets no upload, since its agent is not on the host that served the page', () async {
+      final (store, session) = await draft();
+      var uploads = 0;
+      final kit = ComposerKit(
+        hostFiles: (each) => false,
+        uploadFile: (name, bytes) async {
+          uploads++;
+          return (path: '/x', size: bytes.length);
+        },
+      );
+      final problems = await SessionAttachments(store, session, kit).addFiles([picked('data.bin', [0xff, 0xfe, 0xfd])]);
+      expect(uploads, 0);
+      expect(problems.single, contains('not text'));
     });
 
     test('a small image goes in the message, as on a desktop, and is not kept', () async {
