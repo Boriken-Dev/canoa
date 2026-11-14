@@ -7,9 +7,10 @@ use std::collections::BTreeMap;
 use super::support::{object, strings};
 use super::{Report, Runner};
 use crate::{
-    Environment, Facts, Hook, HookEvent, HookFacts, HookRun, HookScope, Limit, OnFailure,
-    OverlayTree, Settings, composition_order, fire_event_after, hook_environment, hook_matches,
-    hook_order, hook_payload, hook_plan, hook_result, read_overlay, resolve, validate,
+    EnvSet, Environment, Facts, Hook, HookEvent, HookFacts, HookRun, HookScope, Limit, OnFailure,
+    OverlayProcess, OverlayTree, Settings, composition_order, fire_event_for_call,
+    hook_environment, hook_matches, hook_order, hook_payload, hook_plan, hook_result,
+    process_environment, read_overlay, resolve, validate,
 };
 use serde_json::{Map, Value, json};
 
@@ -152,6 +153,9 @@ fn output_case(case: &Value) -> Result<(), String> {
             if let Some(context) = &output.context {
                 got.insert("context".into(), json!(context));
             }
+            if let Some(input) = &output.input {
+                got.insert("input".into(), Value::Object(input.clone()));
+            }
             if let Some(env) = &output.env {
                 got.insert("env".into(), env_json(env));
             }
@@ -176,15 +180,17 @@ fn event_case(case: &Value) -> Result<(), String> {
         .as_ref()
         .map(|list| list.iter().map(String::as_str).collect());
     let windows = case["os"].as_str() == Some("windows");
-    let fired = fire_event_after(
+    let fired = fire_event_for_call(
         event_of(case),
         &runs,
         applies.as_deref(),
         &settings_of(&case["limits"]),
         windows,
         usize::try_from(case["context_used"].as_u64().unwrap_or(0)).expect("a size"),
+        case.get("input"),
+        case["kind"].as_str(),
     );
-    let got = json!({
+    let mut got = json!({
         "ran": fired.ran,
         "decision": fired.decision.map(|decision| decision.as_str()),
         "by": fired.by,
@@ -198,6 +204,10 @@ fn event_case(case: &Value) -> Result<(), String> {
         }).collect::<Vec<_>>(),
         "non_defaults": fired.non_defaults.iter().map(|(a, b)| json!([a, b])).collect::<Vec<_>>(),
     });
+    if let Some(seen) = &fired.seen {
+        got["seen"] = seen.iter().map(|(a, b)| json!([a, b])).collect();
+        got["input"] = fired.input.clone().unwrap_or(Value::Null);
+    }
     (got == case["expect"])
         .then_some(())
         .ok_or(format!("{got}"))
@@ -283,8 +293,37 @@ fn environment_case(case: &Value) -> Result<(), String> {
         Some("user" | "project") => None,
         _ => Some(case["identity"].as_str().expect("an identity")),
     };
-    let env = hook_environment(event_of(case), &active, &base, &pre_env, identity)
-        .map_err(|error| error.to_string())?;
+    let env = if let Some(process) = case["process"].as_str() {
+        let process = match process {
+            "setup" => OverlayProcess::Setup,
+            "server" => OverlayProcess::Server,
+            "command" => OverlayProcess::Command,
+            "env-script" => OverlayProcess::EnvScript,
+            other => panic!("process {other}"),
+        };
+        process_environment(
+            process,
+            &active,
+            &base,
+            &pre_env,
+            identity.expect("an identity"),
+        )
+    } else {
+        let earlier: Vec<EnvSet> = raw["earlier"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|set| {
+                set.as_object()
+                    .expect("an object")
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.as_str().map(str::to_owned)))
+                    .collect()
+            })
+            .collect();
+        hook_environment(event_of(case), &active, &base, &pre_env, identity, &earlier)
+    }
+    .map_err(|error| error.to_string())?;
     let got = json!({"env": Value::Object(
         env.values()
             .iter()
@@ -301,7 +340,7 @@ pub(super) fn hooks(runner: &Runner) -> Report {
         let id = case["id"].as_str().expect("id");
         if id.starts_with("order-") {
             order_case(case)
-        } else if id.starts_with("environment-") {
+        } else if id.starts_with("environment-") || id.starts_with("process-") {
             environment_case(case)
         } else if id.starts_with("plan-") {
             plan_case(case)

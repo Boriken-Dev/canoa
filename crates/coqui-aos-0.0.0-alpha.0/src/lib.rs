@@ -60,11 +60,11 @@ pub use front_matter::{
 #[cfg(feature = "fs")]
 pub use fs::StdFs;
 pub use fs::{FileKind, FileSystem, Metadata};
-pub use hook_env::{hook_environment, hook_order};
+pub use hook_env::{EnvSet, OverlayProcess, hook_environment, hook_order, process_environment};
 pub use hooks::{
     Decision, FiredEvent, Hook, HookEvent, HookFacts, HookFailure, HookOutput, HookPlan,
-    HookReport, HookRun, HookScope, OnFailure, fire_event, fire_event_after, hook_matches,
-    hook_payload, hook_plan, hook_result, hooks_declared, hooks_of, read_hook_output,
+    HookReport, HookRun, HookScope, OnFailure, fire_event, fire_event_after, fire_event_for_call,
+    hook_matches, hook_payload, hook_plan, hook_result, hooks_declared, hooks_of, read_hook_output,
 };
 pub use kinds::{FailStep, Format, LeftState, ManifestFile, NonDefaultId, Runtime, Step};
 pub use limits::{Limit, NonDefault, Settings};

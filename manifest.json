@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "11cd51cad827335217838f6ebef415befe7de2d1",
+  "sourceCommit": "f713c1775f91a6518ef804e086221d82e7fdbf73",
   "status": "complete",
   "pubPackages": [
     ".cache",
@@ -114,8 +114,8 @@
       "package": "coqui_aos",
       "url": "https://github.com/Boriken-Dev/coqui-aos.git",
       "path": "dart",
-      "ref": "424edccf9f00fd42d5e637a5baf5b570a9a2005f",
-      "revision": "424edccf9f00fd42d5e637a5baf5b570a9a2005f"
+      "ref": "5176974f30f664a4a9c382fdd467d4a1ab87765b",
+      "revision": "5176974f30f664a4a9c382fdd467d4a1ab87765b"
     },
     {
       "package": "coqui_web",

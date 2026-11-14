@@ -40,16 +40,98 @@ pub fn hook_order(
     Ok(order)
 }
 
-/// The environment a hook of `event` runs with.
+/// What one earlier hook of an event set, `None` unsetting.
+pub type EnvSet = Vec<(String, Option<String>)>;
+
+fn set_all(env: &mut Environment, set: &[(String, Option<String>)]) {
+    for (name, value) in set {
+        match value {
+            Some(value) => env.set(name, value.clone(), false),
+            None => env.unset(name),
+        }
+    }
+}
+
+fn own_variables(env: &mut Environment, chosen: &Facts) {
+    env.set("AOS_OVERLAY_ROOT", chosen.root.clone(), false);
+    env.set("AOS_OVERLAY_NAME", normalize_name(&chosen.identity), false);
+    if let Some(state) = &chosen.state {
+        env.set("AOS_OVERLAY_STATE", state.clone(), false);
+    }
+}
+
+fn chosen<'a>(active: &'a [(&Document, Facts)], identity: &str) -> Result<&'a Facts, Error> {
+    active
+        .iter()
+        .map(|(_, facts)| facts)
+        .find(|facts| facts.identity == identity)
+        .ok_or_else(|| Error::new(crate::Class::UnresolvedReference, identity))
+}
+
+/// The session's environment at one point of the order of application: the base, every overlay's
+/// root and state variable, the `pre-env` output of the overlays before `until` (all when `None`),
+/// then, past `pre-env`, every overlay's declarations up to and including `through` (all when
+/// `None`) and what the `earlier` hooks set.
+fn session_environment(
+    event: HookEvent,
+    active: &[(&Document, Facts)],
+    base: &Environment,
+    pre_env: &BTreeMap<String, HookRun>,
+    until: Option<&str>,
+    through: Option<&str>,
+    earlier: &[EnvSet],
+) -> Result<Environment, Error> {
+    let mut env = base.clone();
+    for (_, facts) in active {
+        env.set(&root_variable(&facts.identity), facts.root.clone(), false);
+        if let Some(state) = &facts.state {
+            env.set(&state_variable(&facts.identity), state.clone(), false);
+        }
+    }
+    for (_, facts) in active {
+        if until == Some(facts.identity.as_str()) {
+            break;
+        }
+        let Some(run) = pre_env.get(&facts.identity) else {
+            continue;
+        };
+        let mut run = run.clone();
+        run.source.clone_from(&facts.identity);
+        let fired = fire_event(
+            HookEvent::PreEnv,
+            &[run],
+            None,
+            &facts.settings,
+            env.windows(),
+        );
+        set_all(&mut env, &fired.env);
+    }
+    if event == HookEvent::PreEnv {
+        return Ok(env);
+    }
+    for (manifest, facts) in active {
+        apply_overlay(&mut env, manifest, facts, &mut Vec::new(), &mut Vec::new())?;
+        if through == Some(facts.identity.as_str()) {
+            break;
+        }
+    }
+    for set in earlier {
+        set_all(&mut env, set);
+    }
+    Ok(env)
+}
+
+/// The environment a hook of `event` runs with: the session's.
 ///
-/// `active` and `base` are as [`composed_environment`](crate::composed_environment) takes them. The
-/// hook of the overlay `identity` gets what that overlay's own processes get: the base, every
-/// overlay's root (and state) variable, that overlay's own `pre-env` output and declarations with
-/// the values they had in the session's order of application, and `AOS_OVERLAY_ROOT`,
-/// `AOS_OVERLAY_NAME`, `AOS_OVERLAY_STATE` (when it has one) and `AOS_HOOK_EVENT`; nothing another
-/// overlay's declarations or `pre-env` output set. A `pre-env` hook gets the base, the root and
-/// the state variables only. With `identity` `None`, a user's or a project's own hook, it gets the
-/// base and `AOS_HOOK_EVENT`.
+/// `active` and `base` are as [`composed_environment`](crate::composed_environment) takes them. A
+/// hook gets the base, every overlay's root (and state) variable, what every overlay's `pre-env`
+/// hook set, every overlay's declarations in the order of application, and what the hooks of the
+/// event before it set (`earlier`, one set for each, in run order). The hook of the overlay
+/// `identity` also gets its `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE` (when it
+/// has one); every hook gets `AOS_HOOK_EVENT`. A `pre-env` hook runs before any declaration: it
+/// gets the base, the root and state variables and the output of the `pre-env` hooks before it in
+/// composition order, which for a user's or a project's own hook (`identity` `None`) is every
+/// overlay's.
 ///
 /// # Errors
 ///
@@ -61,86 +143,62 @@ pub fn hook_environment(
     base: &Environment,
     pre_env: &BTreeMap<String, HookRun>,
     identity: Option<&str>,
+    earlier: &[EnvSet],
 ) -> Result<Environment, Error> {
-    let with_roots = || {
-        let mut env = base.clone();
-        for (_, facts) in active {
-            env.set(&root_variable(&facts.identity), facts.root.clone(), false);
-            if let Some(state) = &facts.state {
-                env.set(&state_variable(&facts.identity), state.clone(), false);
-            }
-        }
-        env
-    };
-    let Some(identity) = identity else {
-        let mut own = base.clone();
-        own.set("AOS_HOOK_EVENT", event.as_str().to_owned(), false);
-        return Ok(own);
-    };
-    let chosen = active
-        .iter()
-        .map(|(_, facts)| facts)
-        .find(|facts| facts.identity == identity)
-        .ok_or_else(|| Error::new(crate::Class::UnresolvedReference, identity))?;
-    let mut own = with_roots();
-    if event != HookEvent::PreEnv {
-        let mut session = with_roots();
-        let mut owned: BTreeMap<&str, Environment> = active
-            .iter()
-            .map(|(_, facts)| (facts.identity.as_str(), with_roots()))
-            .collect();
-        for (_, facts) in active {
-            let Some(run) = pre_env.get(&facts.identity) else {
-                continue;
-            };
-            let mut run = run.clone();
-            run.source.clone_from(&facts.identity);
-            let fired = fire_event(
-                HookEvent::PreEnv,
-                &[run],
-                None,
-                &facts.settings,
-                session.windows(),
-            );
-            let mine = owned
-                .get_mut(facts.identity.as_str())
-                .expect("an active overlay");
-            for (name, value) in fired.env {
-                match value {
-                    Some(value) => {
-                        session.set(&name, value.clone(), false);
-                        mine.set(&name, value, false);
-                    }
-                    None => {
-                        session.unset(&name);
-                        mine.unset(&name);
-                    }
-                }
-            }
-        }
-        for (manifest, facts) in active {
-            session.record();
-            let applied = apply_overlay(
-                &mut session,
-                manifest,
-                facts,
-                &mut Vec::new(),
-                &mut Vec::new(),
-            );
-            let writes = session.recorded();
-            applied?;
-            owned
-                .get_mut(facts.identity.as_str())
-                .expect("an active overlay")
-                .replay(writes);
-        }
-        own = owned.remove(identity).expect("an active overlay");
+    let own = identity
+        .map(|identity| chosen(active, identity))
+        .transpose()?;
+    let until = identity.filter(|_| event == HookEvent::PreEnv);
+    let mut env = session_environment(event, active, base, pre_env, until, None, earlier)?;
+    if let Some(own) = own {
+        own_variables(&mut env, own);
     }
-    own.set("AOS_OVERLAY_ROOT", chosen.root.clone(), false);
-    own.set("AOS_OVERLAY_NAME", normalize_name(&chosen.identity), false);
-    if let Some(state) = &chosen.state {
-        own.set("AOS_OVERLAY_STATE", state.clone(), false);
-    }
-    own.set("AOS_HOOK_EVENT", event.as_str().to_owned(), false);
-    Ok(own)
+    env.set("AOS_HOOK_EVENT", event.as_str().to_owned(), false);
+    Ok(env)
+}
+
+/// A process one overlay runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OverlayProcess {
+    /// Its setup.
+    Setup,
+    /// One of its MCP servers.
+    Server,
+    /// One of its commands.
+    Command,
+    /// One of its env scripts, which runs while the environment is being built.
+    EnvScript,
+}
+
+/// The environment a process of the overlay `identity` runs with.
+///
+/// A setup, a server or a command gets the session's, whole; an env script gets it as it stands
+/// when the script runs: every earlier overlay's declarations and its own, no later overlay's.
+/// Each also gets the overlay's `AOS_OVERLAY_*` variables. Arguments are as for
+/// [`hook_environment`].
+///
+/// # Errors
+///
+/// As [`hook_environment`].
+pub fn process_environment(
+    process: OverlayProcess,
+    active: &[(&Document, Facts)],
+    base: &Environment,
+    pre_env: &BTreeMap<String, HookRun>,
+    identity: &str,
+) -> Result<Environment, Error> {
+    let own = chosen(active, identity)?;
+    let through = (process == OverlayProcess::EnvScript).then_some(identity);
+    let mut env = session_environment(
+        HookEvent::SessionStart,
+        active,
+        base,
+        pre_env,
+        None,
+        through,
+        &[],
+    )?;
+    own_variables(&mut env, own);
+    Ok(env)
 }

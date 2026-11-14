@@ -53,19 +53,6 @@ impl NonDefaultSetting {
     }
 }
 
-/// A path addition made to a variable: the separator, what it put first and last, and every
-/// component it covers.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Join {
-    separator: char,
-    prepend: Vec<String>,
-    seen: BTreeSet<String>,
-    append: Vec<String>,
-}
-
-/// One `set` of an environment, with the path addition it made, if it was one.
-pub(crate) type Write = (String, String, bool, Option<Join>);
-
 /// An environment being built: names compare without regard to ASCII case on Windows, and a
 /// variable whose value came from a secret reference is never read by a placeholder. Its
 /// `Debug` shows names only.
@@ -78,8 +65,6 @@ pub struct Environment {
     secret: BTreeSet<String>,
     extra: Vec<(String, String)>,
     settings: Settings,
-    // Every set since `record`, so one overlay's writes can be made onto another environment.
-    log: Option<Vec<Write>>,
 }
 
 impl fmt::Debug for Environment {
@@ -148,50 +133,14 @@ impl Environment {
 
     /// Sets `name`, keeping the name already there under another case on Windows.
     pub fn set(&mut self, name: &str, value: String, secret: bool) {
-        self.put(name, value, secret, None);
+        self.put(name, value, secret);
     }
 
     pub(crate) fn windows(&self) -> bool {
         self.windows
     }
 
-    /// Starts keeping what is set, from here.
-    pub(crate) fn record(&mut self) {
-        self.log = Some(Vec::new());
-    }
-
-    /// What was set since `record`, which stops.
-    pub(crate) fn recorded(&mut self) -> Vec<Write> {
-        self.log.take().unwrap_or_default()
-    }
-
-    /// Makes what another environment recorded: a plain set as it was, a path addition onto this
-    /// environment's own value.
-    pub(crate) fn replay(&mut self, writes: Vec<Write>) {
-        for (name, value, secret, join) in writes {
-            let Some(join) = join else {
-                self.set(&name, value, secret);
-                continue;
-            };
-            let current = self.get(&name).unwrap_or_default().to_owned();
-            let kept = current
-                .split(join.separator)
-                .filter(|part| !part.is_empty() && !join.seen.contains(*part))
-                .map(str::to_owned);
-            let joined: Vec<String> = join
-                .prepend
-                .into_iter()
-                .chain(kept)
-                .chain(join.append)
-                .collect();
-            self.set(&name, joined.join(&join.separator.to_string()), false);
-        }
-    }
-
-    fn put(&mut self, name: &str, value: String, secret: bool, join: Option<Join>) {
-        if let Some(log) = &mut self.log {
-            log.push((name.to_owned(), value.clone(), secret, join));
-        }
+    fn put(&mut self, name: &str, value: String, secret: bool) {
         let key = match self.key(name) {
             Some(index) => {
                 self.values[index].1 = value;
@@ -555,18 +504,7 @@ fn apply_paths(
             .chain(append.iter().cloned())
             .collect();
         let secret = env.is_secret(variable);
-        let join = Join {
-            separator,
-            prepend,
-            seen,
-            append,
-        };
-        env.put(
-            variable,
-            joined.join(&separator.to_string()),
-            secret,
-            Some(join),
-        );
+        env.put(variable, joined.join(&separator.to_string()), secret);
     }
 }
 

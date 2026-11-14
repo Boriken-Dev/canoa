@@ -226,5 +226,6 @@ pub fn hook_run(value: &Value) -> crate::HookRun {
     hook.timed_out = value["timed_out"].as_bool().unwrap_or(false);
     hook.exit = i32::try_from(value["exit"].as_i64().unwrap_or(0)).expect("an exit status");
     hook.sets = strings(&value["sets"]);
+    hook.select = value.get("match").map(strings);
     hook
 }
