@@ -522,6 +522,7 @@ fn the_host_index_lists_the_entries_it_was_given() {
         serde_json::json!({
             "peer": PEER,
             "method": "noise",
+            "os": std::env::consts::OS,
             "entries": [
                 {"name": "echo", "kind": "agent", "url": "ws://127.0.0.1:7801", "harness": "claude", "title": "Claude for review"},
                 {"name": "py", "kind": "provider", "url": "ws://127.0.0.1:7802"},
