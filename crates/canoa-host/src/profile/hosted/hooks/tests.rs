@@ -290,7 +290,8 @@ fn a_hook_is_given_its_event_and_its_roots_copy_and_nothing_of_the_hosts_environ
         .find_map(|line| line.trim().strip_prefix("envprobe="))
         .expect("the root variable");
     assert!(
-        Path::new(root).starts_with(std::env::temp_dir()) && !Path::new(root).starts_with(&temp.0),
+        Path::new(root).starts_with(super::super::private::base())
+            && !Path::new(root).starts_with(&temp.0),
         "a copy of the verified files, not the installed directory: {root}"
     );
 }
@@ -603,7 +604,7 @@ fn a_hook_gets_its_overlays_declarations_name_and_root_and_a_pre_env_hook_does_n
     prompt(&connection, "hello");
     let root = probed(&temp);
     assert!(
-        root.len() == 1 && Path::new(&root[0]).starts_with(std::env::temp_dir()),
+        root.len() == 1 && Path::new(&root[0]).starts_with(super::super::private::base()),
         "{root:?}"
     );
     // A pre-env hook runs before any declaration is applied: only the base, the roots and its own.
