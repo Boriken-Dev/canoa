@@ -7,6 +7,7 @@
     reason = "tests name what they use from std"
 )]
 
+mod linked;
 mod support;
 
 use std::process::Command;
@@ -177,4 +178,37 @@ fn an_endpoint_the_provider_cannot_read_is_refused_naming_the_entry() {
         agent("")
     ));
     assert!(refused.contains("host entry fixture"), "{refused}");
+}
+
+/// A host run in this process: stopping it ends the transport's listener, whose endpoint is then free for another host.
+#[test]
+fn stopping_the_host_closes_a_transports_listener_and_frees_its_endpoint() {
+    let scratch = Scratch::new();
+    let listen = pipe_in(&scratch);
+    let config = format!(
+        "[host.agents.fixture]\n{}transport = \"pipe\"\nlisten = {}\n",
+        agent(""),
+        quoted(&listen)
+    );
+    let host = linked::Hosted::start_in(scratch, &config, &[]);
+    let endpoint = host
+        .line_of("fixture")
+        .expect("serve says where it listens")["url"]
+        .as_str()
+        .expect("a url")
+        .to_owned();
+    // A peer is accepted by the transport, before any proof.
+    let peer = pipe_channel(&endpoint);
+    peer.close();
+    host.stop();
+    assert!(host.ended.join().expect("no panic").is_ok());
+    let gone = PipeDriver::dial(
+        &PipeSettings::default(),
+        &endpoint,
+        std::time::Duration::from_millis(500),
+    );
+    assert!(gone.is_err(), "nobody listens after the host stopped");
+    let again = linked::Hosted::start(&config);
+    again.stop();
+    assert!(again.ended.join().expect("no panic").is_ok());
 }

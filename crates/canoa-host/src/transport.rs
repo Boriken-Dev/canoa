@@ -20,6 +20,7 @@ use core::time::Duration;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Mutex, PoisonError};
 use std::thread;
+use std::time::Instant;
 
 use coqui_agentic_peer::auth;
 use coqui_transport::{Channel, Failure};
@@ -41,6 +42,8 @@ pub const BUILT_IN_TRANSPORTS: &[&str] = &["pipe", "websocket"];
 const QUEUED: usize = 64;
 /// Peers a listener has handed over that the accept loop has not taken yet; past it a peer is turned away.
 const WAITING: usize = 16;
+/// How long stopping waits for a provider to say it has stopped listening.
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
 /// How often a provider blocked on a full queue looks up to see whether the host has stopped taking messages.
 const POLL: Duration = Duration::from_millis(20);
 
@@ -407,8 +410,21 @@ impl Listening {
         }
     }
 
-    /// Stops listening.
+    /// Stops listening, and returns once the provider says it has stopped, which is when its endpoint is free, or after
+    /// [`CLOSE_WAIT`]. A peer that arrived meanwhile is turned away.
     pub(crate) fn close(&self) {
         self.listener.close(u32::from(Status::GUATIAO_OK), "");
+        let until = Instant::now() + CLOSE_WAIT;
+        loop {
+            let left = until.saturating_duration_since(Instant::now());
+            match self.told.recv_timeout(left) {
+                Ok(Told::Peer(..)) => {}
+                Ok(Told::Closed(..)) | Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) => {
+                    tracing::warn!("a transport did not say it had stopped listening");
+                    return;
+                }
+            }
+        }
     }
 }
