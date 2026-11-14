@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 
 import 'tab_bridge.dart';
 
-@JS('canoaBridge.tabs')
-external JSObject? get _tabs;
+@JS('canoaBridge')
+external JSObject? get _canoaBridge;
+
+/// The extension's tabs bridge; null in any page the extension did not make, which has no `canoaBridge` at all.
+JSObject? get _tabs => _canoaBridge?.getProperty<JSObject?>('tabs'.toJS);
 
 @JS('canoaBridge.tabs.call')
 external JSPromise<JSString> _call(JSString name, JSString args);

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:math' show Random;
 
 import 'package:coqui_acp_chat/experimental.dart' show ChatViewLink;
@@ -113,8 +114,11 @@ external JSPromise<JSString> _popoutCall(JSString name, JSString args);
 @JS('canoaBridge.popout.watch')
 external void _popoutWatch(JSFunction callback);
 
-@JS('canoaBridge.popout')
-external JSObject? get _popoutBridge;
+@JS('canoaBridge')
+external JSObject? get _canoaBridge;
+
+/// The extension's pop-out bridge; null in any page the extension did not make, which has no `canoaBridge` at all.
+JSObject? get _popoutBridge => _canoaBridge?.getProperty<JSObject?>('popout'.toJS);
 
 /// The extension's worker, as the panel reaches it (bindings/browser/chromium/bridge.js).
 final class _WebPopoutBridge implements PopoutBridge {
