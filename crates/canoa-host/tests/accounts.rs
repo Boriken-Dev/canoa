@@ -618,3 +618,92 @@ fn signing_in_again_replaces_the_stored_login() {
     assert!(again.status.success(), "{}", text(&again.stderr));
     assert_eq!(fixture.account()["revision"], 2);
 }
+
+/// A fixture whose entry offers one account made by `method` (a pasted code for `subscription`, a typed key for `api-key`),
+/// with `extra` lines in the entry.
+fn offering(method: &str, input: &str, extra: &str) -> Fixture {
+    let fixture = Fixture::bare();
+    let added = fixture.canoa(
+        &[
+            "accounts",
+            "add",
+            "one",
+            "--harness",
+            "claude",
+            "--method",
+            method,
+        ],
+        Some(input),
+    );
+    assert!(added.status.success(), "{}", text(&added.stderr));
+    let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    std::fs::write(
+        &fixture.config,
+        cfg.replace(
+            "settings = { renew_poll_ms = 100 }",
+            &format!("accounts = [\"one\"]\n{extra}settings = {{ renew_poll_ms = 100 }}"),
+        ),
+    )
+    .expect("the entry offers the account");
+    fixture
+}
+
+/// The `--setting-sources` argument each start of the stand-in was given, after one session on the account `one`.
+fn setting_sources_of(fixture: Fixture) -> Vec<String> {
+    let (host, _log, record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        rpc.request(
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {ACCOUNT_META: "one"}}),
+        )
+        .expect("initialized on the account");
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+    })
+    .expect("served");
+    waits_for("the stand-in started", || !records(&record).is_empty());
+    records(&record)
+        .iter()
+        .filter_map(|each| each["args"].as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|arg| arg.starts_with("--setting-sources"))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn an_entry_offering_an_api_key_loads_no_settings_file_so_a_repository_cannot_move_the_key() {
+    let sources = setting_sources_of(offering("api-key", "sk-test-key-0000\n", ""));
+    assert!(!sources.is_empty());
+    assert!(
+        sources.iter().all(|arg| arg == "--setting-sources="),
+        "{sources:?}"
+    );
+}
+
+#[test]
+fn an_entry_offering_a_login_keeps_the_providers_own_choice_of_settings() {
+    let sources = setting_sources_of(offering("subscription", "123456\n", ""));
+    assert!(
+        sources.iter().all(|arg| arg != "--setting-sources="),
+        "{sources:?}"
+    );
+}
+
+#[test]
+fn an_entrys_own_setting_sources_win_over_that_default() {
+    let sources = setting_sources_of(offering(
+        "api-key",
+        "sk-test-key-0000\n",
+        "setting_sources = [\"project\"]\n",
+    ));
+    assert!(
+        sources.iter().all(|arg| arg == "--setting-sources=project"),
+        "{sources:?}"
+    );
+    assert!(!sources.is_empty());
+}

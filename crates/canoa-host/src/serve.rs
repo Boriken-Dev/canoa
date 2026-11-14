@@ -733,7 +733,7 @@ impl Local {
         entry: &str,
         context: Option<delegate::ChildContext>,
     ) -> Result<Link, LocalError> {
-        if entry == control::NAME {
+        if reaches_control(entry, context.as_ref()) {
             return self.open_control();
         }
         let served = self
@@ -757,6 +757,12 @@ impl Local {
             .map_err(|_| LocalError::Thread)?;
         Ok(client)
     }
+}
+
+/// Whether `entry` names the control channel for a caller that may have it: this process's own link, never a task's connection,
+/// which is bounded by the context it was opened with and so gets no entry of that name.
+fn reaches_control(entry: &str, context: Option<&delegate::ChildContext>) -> bool {
+    entry == control::NAME && context.is_none()
 }
 
 impl Local {
@@ -1179,35 +1185,64 @@ impl Serving {
                         kind::registry(origin.as_ref())
                             .map_err(|error| refused(error.to_string()))?,
                     );
-                    let roots = entry
+                    let roots: Vec<String> = entry
                         .working_roots
                         .iter()
                         .map(|root| root.to_string_lossy().into_owned())
                         .collect();
-                    let provider = kind::Harness::new(
-                        &registry,
-                        harness,
-                        &configured,
-                        !profiles.is_empty() || local_profile.is_some(),
-                        roots,
-                    )
-                    .map_err(|error| refused(error.to_string()))?
-                    .with_lifetime(asks.cache_lifetime)
-                    .with_entry(&entry.name);
+                    let build = |settings: &Settings| {
+                        kind::Harness::new(
+                            &registry,
+                            harness,
+                            settings,
+                            !profiles.is_empty() || local_profile.is_some(),
+                            roots.clone(),
+                        )
+                        .map(|built| {
+                            built
+                                .with_lifetime(asks.cache_lifetime)
+                                .with_entry(&entry.name)
+                        })
+                        .map_err(|error| refused(error.to_string()))
+                    };
+                    let mut provider = build(&configured)?;
+                    let listed = match &accounts {
+                        Some(_) if !offered.is_empty() => Some(
+                            offered_accounts(config, harness, offered, &provider)
+                                .map_err(refused)?,
+                        ),
+                        _ => None,
+                    };
+                    // A cloned repository's own settings can set the endpoint a key is sent to, so an entry that offers an
+                    // account whose credential is in the environment loads no settings files unless it says which.
+                    if let Some(listed) = &listed
+                        && harness == "claude"
+                        && keeps_key_in_environment(listed)
+                    {
+                        let named = asks.setting_sources.is_some()
+                            || settings
+                                .as_ref()
+                                .is_some_and(|own| own.as_map().contains_key("setting_sources"));
+                        if named {
+                            tracing::warn!(
+                                "host.agents.{}.setting_sources is set and the entry offers an account whose key is in the environment: a repository's settings can change the address the key is sent to",
+                                entry.name
+                            );
+                        } else {
+                            let mut map = configured.as_map().clone();
+                            map.insert("setting_sources".to_owned(), serde_json::json!([]));
+                            provider = build(&Settings::new(map))?;
+                        }
+                    }
                     for (setting, value, default) in provider.non_defaults() {
                         tracing::info!(
                             "non-default: host.agents.{}: {setting} is {value}, default {default}",
                             entry.name
                         );
                     }
-                    let provider = match &accounts {
-                        Some(host) if !offered.is_empty() => {
-                            let listed = offered_accounts(config, harness, offered, &provider)
-                                .map_err(refused)?;
-                            provider.offering(host, listed)
-                        }
-                        _ => provider,
-                    };
+                    if let (Some(host), Some(listed)) = (&accounts, listed) {
+                        provider = provider.offering(host, listed);
+                    }
                     let provider = Arc::new(provider);
                     movers.insert(entry.name.clone(), Arc::clone(&provider));
                     (
@@ -2146,6 +2181,18 @@ pub(crate) fn harness_settings(
     Settings::new(map)
 }
 
+/// Whether an offered account's credential reaches the agent in its environment, for a kind that names the model's address:
+/// the login kinds keep theirs in a file, and every other kind with an address is a key or a token.
+fn keeps_key_in_environment(listed: &[kind::Offered]) -> bool {
+    listed.iter().any(|(_, _, info)| {
+        !info.state_dir
+            && info
+                .endpoints
+                .iter()
+                .any(|slot| slot.purpose == "model_api" && slot.key.is_some())
+    })
+}
+
 /// The accounts an entry of `harness` offers, each with its kind in the provider's catalog, once canoa.cfg's settings for
 /// it are checked against that kind's schema.
 fn offered_accounts(
@@ -2345,6 +2392,18 @@ fn home_from_environment() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tasks_connection_cannot_open_the_control_channel_and_this_process_can() {
+        let task = delegate::ChildContext {
+            principal: delegate::Principal::Owner,
+            roots: Vec::new(),
+            depth: 1,
+        };
+        assert!(reaches_control(control::NAME, None));
+        assert!(!reaches_control(control::NAME, Some(&task)));
+        assert!(!reaches_control("Claude", None));
+    }
 
     #[test]
     fn a_built_in_harness_keeps_the_request_limit_the_host_always_had_unless_the_entry_sets_one() {
