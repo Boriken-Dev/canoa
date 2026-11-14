@@ -167,6 +167,13 @@ final class _RemoteTree implements FetchedTree {
   Future<TreeFile?> file(String path, {required int maxBytes}) async => (await readFiles([path], maxBytes: maxBytes))[path];
 
   @override
+  Future<List<String>?> directories(String path) async {
+    final answer = await _manager._call('catalog/read', {'label': _label, 'commit': commit, 'paths': const <String>[], 'list': path});
+    final listed = answer['directories'];
+    return listed is List<Object?> ? [for (final name in listed) '$name'] : null;
+  }
+
+  @override
   Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes}) async {
     final answer = await _manager._call('catalog/read', {'label': _label, 'commit': commit, 'paths': paths, 'maxBytes': maxBytes});
     final files = answer['files'] as Map<Object?, Object?>? ?? const {};

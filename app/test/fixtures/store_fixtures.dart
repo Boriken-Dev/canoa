@@ -159,6 +159,14 @@ final class MemoryTree implements FetchedTree {
   }
 
   @override
+  Future<List<String>?> directories(String path) async {
+    final prefix = path.isEmpty ? '' : '$path/';
+    final inside = [for (final name in files.keys) if (name.startsWith(prefix)) name.substring(prefix.length)];
+    if (inside.isEmpty) return null;
+    return {for (final name in inside) if (name.contains('/')) name.substring(0, name.indexOf('/'))}.toList();
+  }
+
+  @override
   Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes}) async {
     batches.add(paths);
     return {for (final path in paths) path: await file(path, maxBytes: maxBytes)};

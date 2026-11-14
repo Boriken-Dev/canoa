@@ -504,8 +504,9 @@ impl Overlays {
         Ok(json!({"commit": commit}))
     }
 
-    /// `catalog/read` `{"label", "commit", "paths", "maxBytes"}` -> `{"files": {path: {"size", "data"?}|null}}`: regular files of
-    /// a fetched catalog at `commit`, looked up literally; `data` (base64) only for one of at most `maxBytes`.
+    /// `catalog/read` `{"label", "commit", "paths", "maxBytes", "list"?}` -> `{"files": {path: {"size", "data"?}|null},
+    /// "directories"?}`: regular files of a fetched catalog at `commit`, looked up literally; `data` (base64) only for one of
+    /// at most `maxBytes`. `list` is a directory whose subdirectories' names come back as `directories`, null for no directory.
     pub(crate) fn catalog_read(&self, params: &Value) -> Outcome {
         let label =
             checked_name(text_param(params, "label")?.ok_or_else(|| bad("label is needed"))?)?;
@@ -603,7 +604,61 @@ impl Overlays {
             };
             files.insert((*path).to_owned(), entry);
         }
-        Ok(json!({"files": files}))
+        let mut answer = json!({"files": files});
+        if let Some(list) = text_param(params, "list")? {
+            answer["directories"] = self.catalog_directories(&cache, commit, list)?;
+        }
+        Ok(answer)
+    }
+
+    /// The names of the subdirectories of the directory `list` at `commit` (the root for none), or null when there is no
+    /// directory there. A link or a submodule is none.
+    fn catalog_directories(
+        &self,
+        cache: &Path,
+        commit: &str,
+        list: &str,
+    ) -> Result<Value, (i32, String)> {
+        let folder = list.trim_end_matches('/');
+        if !folder.is_empty() && !valid_relative_path(folder) {
+            return Ok(Value::Null);
+        }
+        let prefix = if folder.is_empty() {
+            String::new()
+        } else {
+            format!("{folder}/")
+        };
+        let mut args: Vec<OsString> = vec![
+            format!("--git-dir={}", cache.display()).into(),
+            "ls-tree".into(),
+            "-z".into(),
+            "--full-tree".into(),
+            commit.into(),
+        ];
+        if !folder.is_empty() {
+            args.push("--".into());
+            args.push(prefix.clone().into());
+        }
+        let out = self.run(&args, None, None, 4 * 1024 * 1024)?;
+        let mut any = false;
+        let mut names = Vec::new();
+        for record in String::from_utf8_lossy(&out).split('\0') {
+            let Some((head, path)) = record.split_once('\t') else {
+                continue;
+            };
+            let Some(name) = path.strip_prefix(prefix.as_str()) else {
+                continue;
+            };
+            any = true;
+            if head.split(' ').next() == Some("040000") && !name.contains('/') {
+                names.push(Value::String(name.to_owned()));
+            }
+        }
+        Ok(if any {
+            Value::Array(names)
+        } else {
+            Value::Null
+        })
     }
 
     /// `catalog/remove` `{"label"}`.

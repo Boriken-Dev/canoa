@@ -152,6 +152,35 @@ void main() {
       expect(store.installed('review'), isNull, reason: 'listing installs nothing');
     });
 
+    test('a directory of overlays is a catalog: its subdirectories are the entries, and one installs', () async {
+      final repo = Repo(temp.path.replaceAll(r'\', '/'), 'dirs')
+        ..write('overlays/alpha/overlay.cfg', '[env]\nALPHA = "one"\n')
+        ..write('overlays/Beta_Two/overlay.cfg', '[about]\nsummary = "Beta."\n')
+        ..write('overlays/.hidden/overlay.cfg', '')
+        ..write('overlays/README.md', 'a stray file')
+        ..write('docs/guide.md', 'a directory with no overlays')
+        ..commit('overlays');
+      GitOverlay at(String path) => OverlaySource.parseGit('${repo.location}@main#$path');
+
+      final loaded = await loadCatalog(store, 'dirs', at('overlays'), const StoreSettings());
+      expect(loaded.problem, isNull);
+      expect(loaded.catalog!.entries.keys, ['Beta_Two', 'alpha']);
+      expect(loaded.catalog!.refused, [('.hidden', 'invalid-name')]);
+      final entry = StoreListing([loaded]).choose('alpha').entry;
+      expect(displaySource(entry.source), '${repo.location}@main#overlays/alpha');
+      final preview = await previewOverlay(store, installName(entry), installSource(entry), os: 'linux', shared: const {});
+      final changed = await installPreview(store, config, preview, catalog: 'dirs');
+      expect(changed.overlays.keys, ['alpha']);
+      expect(store.installed('alpha')!.catalog, 'dirs');
+
+      expect((await loadCatalog(store, 'dirs', at('overlays/'), const StoreSettings())).catalog!.entries.keys,
+          ['Beta_Two', 'alpha'], reason: 'a trailing slash names the same directory');
+      expect((await loadCatalog(store, 'dirs', at('docs'), const StoreSettings())).problem,
+          'It is a directory with no overlays at that commit');
+      expect((await loadCatalog(store, 'dirs', at('nothing'), const StoreSettings())).problem,
+          'It has no file nothing at that commit');
+    });
+
     test('a refused icon shows no image: SVG under a PNG name, and a header past the limits', () async {
       final team = (await listing()).catalogs.firstWhere((catalog) => catalog.label == 'team');
       expect(team.icons['docs-tools']!.bytes, isNotNull);

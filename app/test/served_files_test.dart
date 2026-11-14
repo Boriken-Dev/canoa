@@ -23,6 +23,7 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/ledger/host_ledger_backend.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/profile/profile.dart' show GitOverlay;
 import 'package:canoa/profile/report.dart';
 import 'package:canoa/served/control_overlays.dart';
 import 'package:canoa/served/host_config.dart';
@@ -282,6 +283,23 @@ own_profile = true
     final reopened = await again.reopenSession(opened.id, cwd: kept.cwd!);
     expect(reopened.id, opened.id);
     await again.close();
+  }, skip: skip);
+
+  test('a directory of overlays is a catalog through the host, as it is from git directly', () async {
+    final overlays = ControlOverlayManager(control());
+    GitOverlay at(String path) => CanoaConfig.parse('[catalogs]\ndirs = "${team.location}@main#$path"\n').catalogs['dirs']!;
+    final source = at('overlays');
+    final loaded = await loadCatalog(overlays, 'dirs', source, const StoreSettings());
+    expect(loaded.problem, isNull);
+    expect(loaded.catalog!.entries.keys, ['docs-tools']);
+    expect(displaySource(loaded.catalog!.entries['docs-tools']!.source), '${team.location}@main#overlays/docs-tools');
+    final preview = await previewOverlay(overlays, 'docs-tools', installSource(loaded.catalog!.entries['docs-tools']!),
+        os: 'linux', shared: const {});
+    expect(preview.update.added, ['overlay.cfg']);
+    await overlays.discard('docs-tools');
+    expect((await loadCatalog(overlays, 'dirs', at('icons'), const StoreSettings())).problem,
+        'It has no file icons at that commit');
+    await overlays.removeCatalog('dirs');
   }, skip: skip);
 
   test('an overlay is installed from a local catalog through the store, selected, and reaches the next session', () async {

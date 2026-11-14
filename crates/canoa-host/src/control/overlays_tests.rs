@@ -627,6 +627,56 @@ fn a_catalog_is_fetched_and_its_files_read_literally_within_a_size() {
 }
 
 #[test]
+fn a_directory_of_overlays_lists_its_subdirectories() {
+    let s = setup(None, OverlayLimits::default());
+    let upstream = repo(
+        &s.tmp,
+        "dir",
+        &[
+            ("overlays/alpha/OVERLAY.md", "a"),
+            ("overlays/beta/overlay.cfg", "name = \"beta\""),
+            ("overlays/README.md", "stray"),
+            ("lonely.txt", "x"),
+        ],
+    );
+    let who = Caller::Owner;
+    let fetched = ask(
+        &s.control,
+        &who,
+        "catalog/fetch",
+        plus(json!({"label": "main"}), source(&upstream, "overlays")),
+    );
+    let commit = fetched["result"]["commit"]
+        .as_str()
+        .expect("a commit")
+        .to_owned();
+    let listed = |path: &str| {
+        let read = ask(
+            &s.control,
+            &who,
+            "catalog/read",
+            json!({"label": "main", "commit": commit, "paths": [], "list": path}),
+        );
+        read["result"]["directories"].clone()
+    };
+    assert_eq!(listed("overlays"), json!(["alpha", "beta"]));
+    assert_eq!(listed("overlays/"), json!(["alpha", "beta"]));
+    assert_eq!(listed(""), json!(["overlays"]));
+    assert_eq!(listed("lonely.txt"), Value::Null, "a file is no directory");
+    assert_eq!(listed("missing"), Value::Null);
+    assert_eq!(listed("../x"), Value::Null);
+    // Nothing is asked for: no `directories` key.
+    let plain = ask(
+        &s.control,
+        &who,
+        "catalog/read",
+        json!({"label": "main", "commit": commit, "paths": []}),
+    );
+    assert!(plain["result"].get("directories").is_none(), "{plain}");
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+#[test]
 fn a_check_that_was_not_installed_is_discarded_and_an_install_is_kept() {
     let s = setup(None, OverlayLimits::default());
     let upstream = repo(&s.tmp, "up", &[("OVERLAY.md", "x\n")]);

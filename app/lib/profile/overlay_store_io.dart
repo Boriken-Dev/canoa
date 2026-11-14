@@ -657,6 +657,28 @@ final class _GitTree implements FetchedTree {
     return (size: size, bytes: bytes.length > maxBytes ? null : bytes);
   }
 
+  @override
+  Future<List<String>?> directories(String path) async {
+    final folder = path.replaceAll(RegExp(r'/+$'), '');
+    if (folder.isNotEmpty && !aos.validRelativePath(folder)) return null;
+    final listed = await _store._run([
+      '--git-dir=$_cache', 'ls-tree', '-z', '--full-tree', commit,
+      if (folder.isNotEmpty) ...['--', '$folder/'],
+    ], binary: true);
+    if (listed.exitCode != 0) throw const OverlayException('git ls-tree failed');
+    final prefix = folder.isEmpty ? '' : '$folder/';
+    final names = <String>[];
+    var any = false;
+    for (final record in utf8.decode(listed.stdout as List<int>, allowMalformed: true).split('\u0000')) {
+      final tab = record.indexOf('\t');
+      if (tab < 0 || !record.substring(tab + 1).startsWith(prefix)) continue;
+      any = true;
+      final name = record.substring(tab + 1 + prefix.length);
+      if (record.substring(0, tab).split(' ').first == '040000' && !name.contains('/')) names.add(name);
+    }
+    return any ? names : null;
+  }
+
   /// The most characters of paths one `ls-tree` is given: Windows ends a command line at 32767 characters.
   static const _pathBudget = 8000;
 

@@ -152,6 +152,10 @@ abstract interface class FetchedTree {
   /// link or a submodule is none). Its bytes are read only when it holds at most [maxBytes].
   Future<TreeFile?> file(String path, {required int maxBytes});
 
+  /// The names of the subdirectories of the directory at [path] (the repository's root for none), or null when there is
+  /// no directory there: git keeps none that is empty. A link or a submodule is no subdirectory.
+  Future<List<String>?> directories(String path);
+
   /// [file] for each of [paths], in as few reads as the transport allows: a map holding every path asked, null where
   /// there is no regular file.
   Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes});

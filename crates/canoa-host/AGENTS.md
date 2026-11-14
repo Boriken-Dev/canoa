@@ -623,9 +623,10 @@ in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`
   the store installed it from, kept for a later apply of the same source.
 - `overlay/installed` `{"name"?}` -> `{"overlays": {name: record}}`; `overlay/remove` `{"name"}` deletes folder, record and history;
   `overlay/discard` `{"name"}` deletes what a check fetched for an overlay that is not installed.
-- `catalog/fetch` `{"label", "repo", "ref", "path"?}` -> `{"commit"}`; `catalog/read` `{"label", "commit" (whole id), "paths", "maxBytes"?}` -> `{"files":
-  {path: {"size", "data"?: base64} | null}}` reads regular files at that commit by their literal paths, with no data past `maxBytes`
-  (at most 8 MiB) and null for a path that is not a regular file or not a relative path; `catalog/remove` `{"label"}`.
+- `catalog/fetch` `{"label", "repo", "ref", "path"?}` -> `{"commit"}`; `catalog/read` `{"label", "commit" (whole id), "paths", "maxBytes"?, "list"?}` -> `{"files":
+  {path: {"size", "data"?: base64} | null}, "directories"?}` reads regular files at that commit by their literal paths, with no data past `maxBytes`
+  (at most 8 MiB) and null for a path that is not a regular file or not a relative path; `list`, a directory's path (`""` the root), adds
+  `directories`, the names of its subdirectories (a link or submodule is none) or null when it is no directory, which is how a store reads a directory of overlays as a catalog; `catalog/remove` `{"label"}`.
 - **Git** runs as this user from an absolute directory of `PATH` with every `GIT_` variable of the host's removed, `protocol.allow=never` and
   only `https`, `http`, `ssh`, `git` and `file` allowed, no hooks, no fsmonitor, no prompts, 5 minutes at most, and a fetch ended once its
   cache holds 256 MiB. A source on this computer (`file://` or a path) is named by a key only with the `folders` grant, under a working root of an
