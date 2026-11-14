@@ -414,6 +414,10 @@ repository, the commit and digest it is pinned to), and everything is shown befo
   remote over plain `http` and anything else Canoa does not run is refused with the reason. An installed server is
   written to `[profile.mcp.NAME]`, noted in `[loadout.mcp.NAME]` (`registry`, `server`, `version`, `digest`) and turned
   off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
+  A team's own servers can be listed by another registry that serves the same API, added by its `https` address (or
+  `http` on the loopback address), or by a git repository holding a JSON file in the API's list shape, added as
+  `<repository>@<ref>#<file>`; they are kept in `[loadout] registries` and chosen beside the official one in Discover.
+  A git list is fetched at its ref like a catalog and read as one page.
 - **Applying a change.** The host reads canoa.cfg's layers again when each session of its own sources starts, so a
   change to `[overlays]`, `[profile]` or `[agents.*.mcp]` reaches the next session and ends none that is open. A file
   that no longer parses is refused and the profile stays as the last good file gave it.
@@ -422,6 +426,7 @@ repository, the commit and digest it is pinned to), and everything is shown befo
 [loadout]
 off = ["review"]              # overlays new sessions start without
 skills = ["audit"]            # skills you chose that new sessions start with
+registries = ["https://registry.team.example", "https://git.team.example/lists.git@main#servers.json"]
 
 [loadout.mcp.files]           # where an MCP server the store installed came from
 registry = "https://registry.modelcontextprotocol.io"

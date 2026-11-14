@@ -11,10 +11,51 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../config/canoa_config.dart' show McpOrigin;
-import '../profile/profile.dart' show isEntryName, isEnvName;
+import '../profile/aos_support.dart' show holdsPassword;
+import '../profile/profile.dart' show GitOverlay, OverlaySource, ProfileException, isEntryName, isEnvName;
 
 /// The official registry, which a person may use or leave: any registry that serves the same API can be added beside it.
 const officialRegistry = 'https://registry.modelcontextprotocol.io';
+
+/// Whether [address] names a git source (`<repository>@<ref>#<file>`) rather than a registry served over HTTP.
+bool isGitRegistry(String address) => address.contains('@') || address.contains('#');
+
+/// The git source a git registry [address] names: a repository at a ref and the JSON file in the list shape of the registry's
+/// API, with no password in the repository's address. Throws [RegistryRefusal] for anything else.
+GitOverlay gitRegistrySource(String address) {
+  final GitOverlay source;
+  try {
+    source = OverlaySource.parseGit(address);
+  } on ProfileException {
+    throw const RegistryRefusal('A git registry is <repository>@<ref>#<file>, a source git may fetch');
+  }
+  if (source.path.isEmpty) throw const RegistryRefusal('A git registry names its file after #');
+  if (holdsPassword(source.repo)) throw const RegistryRefusal("A registry's address may not hold a password; use a credential helper");
+  return source;
+}
+
+/// The label a git registry's checkout is kept under, beside the catalogs': fixed by its address.
+String gitRegistryLabel(String address) => 'registry-${sha256.convert(utf8.encode(address)).toString().substring(0, 16)}';
+
+/// Why [address] cannot be a registry, or null when it can: a git source of a list file, or an HTTP registry's address.
+String? registryProblemOf(String address) {
+  try {
+    if (isGitRegistry(address)) {
+      gitRegistrySource(address);
+    } else {
+      listUri(address);
+    }
+    return null;
+  } on RegistryRefusal catch (error) {
+    return error.message;
+  }
+}
+
+/// How a registry is named to the person: its host, or the whole address when it has none.
+String registryShown(String address) {
+  final host = Uri.tryParse(address)?.host ?? '';
+  return host.isEmpty ? address : host;
+}
 
 /// The most a listing body may hold, so a registry cannot make the app read without end.
 const maxRegistryBytes = 4 * 1024 * 1024;

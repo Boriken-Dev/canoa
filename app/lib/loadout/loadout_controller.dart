@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
+import '../profile/overlays.dart' show FetchedTree, OverlayException;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
@@ -74,6 +76,7 @@ class LoadoutController extends ChangeNotifier {
 
   /// The agents the app offers, which an MCP server is allowed or turned off for.
   final List<String> agents;
+  /// The official registry, which is always offered first.
   final String registry;
   final RegistryFetch? fetch;
   final FindProgram? findProgram;
@@ -90,6 +93,12 @@ class LoadoutController extends ChangeNotifier {
 
   /// Each installed overlay's layer and why one is missing.
   ProfileLayers? layers;
+
+  /// The registry the Discover list reads: [registry] or one the person added.
+  late String selectedRegistry = registry;
+
+  /// The registries offered: the official one, then those `[loadout] registries` names.
+  List<String> get registries => [registry, ...config.loadoutRegistries.where((address) => address != registry)];
 
   List<McpRegistryEntry> registryEntries = const [];
   String? registryNext, registryProblem;
@@ -290,13 +299,57 @@ class LoadoutController extends ChangeNotifier {
   Future<CanoaConfig?> installMcp(McpRegistryEntry entry, McpOption option, String name) {
     final definition = option.definition;
     if (definition == null || option.refusal != null) throw StateError('That option is refused: ${option.refusal}');
-    return apply(config.withInstalledMcp(name, definition, entry.origin(registry), agents: agents));
+    return apply(config.withInstalledMcp(name, definition, entry.origin(selectedRegistry), agents: agents));
+  }
+
+  /// Reads [address] from now on, after adding it to `[loadout] registries`. Gives why it cannot be one, or null.
+  Future<String?> addRegistry(String address) async {
+    address = address.trim();
+    if (registryProblemOf(address) case final why?) return why;
+    if (registries.contains(address)) return 'That registry is already here';
+    if (registries.length >= 17) return 'Canoa keeps at most 16 registries beside the official one';
+    await apply(config.withLoadoutRegistries([...config.loadoutRegistries, address]));
+    await selectRegistry(address);
+    return null;
+  }
+
+  /// Forgets a registry the person added; the official one stays.
+  Future<void> removeRegistry(String address) async {
+    if (!config.loadoutRegistries.contains(address)) return;
+    await apply(config.withLoadoutRegistries([...config.loadoutRegistries]..remove(address)));
+    if (isGitRegistry(address)) await home?.overlays.removeCatalog(gitRegistryLabel(address));
+    if (selectedRegistry == address) await selectRegistry(registry);
+  }
+
+  /// Lists [address]'s servers in Discover.
+  Future<void> selectRegistry(String address) {
+    selectedRegistry = address;
+    return loadRegistry();
+  }
+
+  /// A git registry's one page: the list file at the ref's commit.
+  Future<McpRegistryPage> _readGitRegistry(String address) async {
+    final home = this.home;
+    if (home == null) throw const RegistryRefusal('A git registry is read by the desktop app');
+    final source = gitRegistrySource(address);
+    final FetchedTree tree;
+    try {
+      tree = await home.overlays.fetchCatalog(gitRegistryLabel(address), source);
+    } on OverlayException catch (error) {
+      throw RegistryRefusal('It cannot be fetched: $error');
+    }
+    final file = await tree.file(source.path, maxBytes: maxRegistryBytes);
+    if (file == null) throw RegistryRefusal('It has no file ${source.path} at that commit');
+    final bytes = file.bytes;
+    if (bytes == null) throw const RegistryRefusal("The registry's file is larger than Canoa reads");
+    return parseRegistryPage(utf8.decode(bytes, allowMalformed: true));
   }
 
   /// Reads the registry's first page for [search], or the next page of the last search.
   Future<void> loadRegistry({String? search, bool more = false}) async {
     final read = fetch;
-    if (read == null) {
+    final git = isGitRegistry(selectedRegistry);
+    if (read == null && !git) {
       registryProblem = 'Registries are read by the desktop app';
       registryRead = true;
       notifyListeners();
@@ -311,7 +364,9 @@ class LoadoutController extends ChangeNotifier {
     registryProblem = null;
     notifyListeners();
     try {
-      final page = parseRegistryPage(await read(listUri(registry, search: _registryQuery, cursor: more ? registryNext : null)));
+      final page = git
+          ? await _readGitRegistry(selectedRegistry)
+          : parseRegistryPage(await read!(listUri(selectedRegistry, search: _registryQuery, cursor: more ? registryNext : null)));
       // A search the registry does not take is narrowed here, so a registry that ignores `search` still answers it.
       final words = _registryQuery.toLowerCase().split(RegExp(r'\s+')).where((word) => word.isNotEmpty);
       registryEntries = [

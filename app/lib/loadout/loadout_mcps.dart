@@ -35,6 +35,7 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
   @override
   void dispose() {
     query.dispose();
+    address.dispose();
     super.dispose();
   }
 
@@ -107,7 +108,7 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
           allowed == 0 ? 'Off for every agent' : 'Allowed for $allowed of $total agents',
       ],
       provenance: origin != null
-          ? 'from the registry ${Uri.tryParse(origin.registry)?.host ?? origin.registry} · ${origin.server} ${origin.version} · ${_short(origin.digest)}'
+          ? 'from the registry ${registryShown(origin.registry)} · ${origin.server} ${origin.version} · ${_short(origin.digest)}'
           : server.fromOverlay ? 'comes with the overlay ${server.layer.substring(8)}' : 'written in canoa.cfg by hand',
       trailing: server.fromOverlay || total == 0
           ? null
@@ -135,8 +136,9 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
   static String _short(String digest) => digest.length > 19 ? '${digest.substring(0, 19)}…' : digest;
 
   List<Widget> _discover(BuildContext context) {
-    final host = Uri.tryParse(c.registry)?.host ?? c.registry;
+    final host = registryShown(c.selectedRegistry);
     return [
+      _registryRow(context),
       Row(children: [
         Expanded(
           child: TextField(
@@ -167,6 +169,59 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
     ];
   }
 
+  final address = TextEditingController();
+  String? addressProblem;
+
+  /// Which registry Discover lists, and a field to add one: an address that serves the registry's API, or a git source of a file in
+  /// its list shape.
+  Widget _registryRow(BuildContext context) {
+    final added = c.config.loadoutRegistries;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        for (final each in c.registries)
+          ChoiceChip(
+            key: Key('mcps-registry-${registryShown(each)}'),
+            label: Text(registryShown(each)),
+            selected: each == c.selectedRegistry,
+            onSelected: c.loadingRegistry ? null : (_) => unawaited(c.selectRegistry(each)),
+          ),
+        if (added.contains(c.selectedRegistry))
+          TextButton(
+            key: const Key('mcps-registry-remove'),
+            onPressed: c.busy != null ? null : () => unawaited(c.removeRegistry(c.selectedRegistry)),
+            child: const Text('Remove this registry'),
+          ),
+      ]),
+      const SizedBox(height: 8),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: TextField(
+            key: const Key('mcps-registry-address'),
+            controller: address,
+            decoration: InputDecoration(
+              labelText: 'Add a registry',
+              hintText: 'https://registry.example  or  <git repository>@main#servers.json',
+              errorText: addressProblem,
+            ),
+            onSubmitted: (_) => unawaited(_addRegistry()),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.tonal(key: const Key('mcps-registry-add'), onPressed: () => unawaited(_addRegistry()), child: const Text('Add')),
+      ]),
+      const SizedBox(height: 12),
+    ]);
+  }
+
+  Future<void> _addRegistry() async {
+    final problem = await c.addRegistry(address.text);
+    if (!mounted) return;
+    setState(() {
+      addressProblem = problem;
+      if (problem == null) address.clear();
+    });
+  }
+
   Widget _entryCard(BuildContext context, McpRegistryEntry entry, String host) {
     final installed = c.installedMcp().any((server) => server.origin?.server == entry.name);
     return LoadoutCard(
@@ -194,7 +249,7 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
         entry: entry,
         options: options,
         runtimeFound: found,
-        registry: Uri.tryParse(c.registry)?.host ?? c.registry,
+        registry: registryShown(c.selectedRegistry),
         taken: {...c.config.profile.mcp.keys},
         agents: c.agents,
       ),

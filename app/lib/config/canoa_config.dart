@@ -423,10 +423,23 @@ final class CanoaConfig {
     });
   }
 
-  static ({Set<String> off, Map<String, McpOrigin> mcp, Set<String> skills}) _loadout(Object? raw) {
-    if (raw == null) return (off: const {}, mcp: const {}, skills: const {});
-    if (raw is! Map || raw.keys.any((key) => key != 'off' && key != 'mcp' && key != 'skills')) {
-      throw const FormatException('canoa.cfg: loadout is a table with the keys off, mcp and skills');
+  /// `[loadout] registries`: the MCP registries the person added beside the official one, in the order added. Each is the address of
+  /// a registry that serves the MCP Registry's API, or a git source (`<repository>@<ref>#<file>`) of a file in that API's list
+  /// shape. Whether an address can be read is for the page to say when it is used.
+  List<String> get loadoutRegistries => _loadout(tables['loadout']).registries;
+
+  static ({Set<String> off, Map<String, McpOrigin> mcp, Set<String> skills, List<String> registries}) _loadout(Object? raw) {
+    if (raw == null) return (off: const {}, mcp: const {}, skills: const {}, registries: const []);
+    if (raw is! Map || raw.keys.any((key) => key != 'off' && key != 'mcp' && key != 'skills' && key != 'registries')) {
+      throw const FormatException('canoa.cfg: loadout is a table with the keys off, mcp, skills and registries');
+    }
+    final registries = raw['registries'];
+    if (registries != null &&
+        (registries is! List ||
+            registries.length > 16 ||
+            registries.toSet().length != registries.length ||
+            registries.any((address) => address is! String || address.isEmpty || address.runes.any((rune) => rune <= 0x20 || rune == 0x7f)))) {
+      throw const FormatException('canoa.cfg: loadout.registries is a list of at most 16 different registry addresses');
     }
     final skills = raw['skills'];
     if (skills != null && (skills is! List || skills.any((name) => name is! String || !validSkillName(name)))) {
@@ -450,13 +463,15 @@ final class CanoaConfig {
       off: {for (final name in (off as List?) ?? const []) name as String},
       mcp: mcp,
       skills: {for (final name in (skills as List?) ?? const []) name as String},
+      registries: [for (final address in (registries as List?) ?? const []) address as String],
     );
   }
 
-  CanoaConfig _withLoadout({Set<String>? off, Map<String, McpOrigin>? mcp, Set<String>? skills}) {
+  CanoaConfig _withLoadout({Set<String>? off, Map<String, McpOrigin>? mcp, Set<String>? skills, List<String>? registries}) {
     final now = _loadout(tables['loadout']);
-    final offNow = off ?? now.off, mcpNow = mcp ?? now.mcp, skillsNow = skills ?? now.skills;
+    final offNow = off ?? now.off, mcpNow = mcp ?? now.mcp, skillsNow = skills ?? now.skills, registriesNow = registries ?? now.registries;
     return _withTable('loadout', {
+      if (registriesNow.isNotEmpty) 'registries': registriesNow,
       if (offNow.isNotEmpty) 'off': offNow.toList()..sort(),
       if (skillsNow.isNotEmpty) 'skills': skillsNow.toList()..sort(),
       if (mcpNow.isNotEmpty) 'mcp': {for (final MapEntry(:key, :value) in mcpNow.entries) key: value.toMap()},
@@ -485,6 +500,9 @@ final class CanoaConfig {
     }
     return out;
   }
+
+  /// This configuration with [registries] as `[loadout] registries`, in the order given.
+  CanoaConfig withLoadoutRegistries(List<String> registries) => _withLoadout(registries: registries);
 
   /// This configuration with [skills] as `[loadout] skills`, sorted so the file does not churn.
   CanoaConfig withLoadoutSkills(Set<String> skills) => _withLoadout(skills: skills);

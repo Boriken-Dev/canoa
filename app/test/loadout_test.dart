@@ -312,6 +312,39 @@ void main() {
       expect(tester.widget<FilledButton>(find.byKey(const Key('mcp-install-confirm'))).onPressed, isNull);
     });
 
+    testWidgets('a registry added in Discover is listed beside the official one, read by its own address, and can be taken away', (tester) async {
+      final asked = <Uri>[];
+      await open(tester, fetch: (uri) async {
+        asked.add(uri);
+        return uri.host == 'registry.team.test'
+            ? page([{'name': 'dev.team/tracker', 'description': 'The team tracker.', 'version': '2.0.0'}])
+            : registryAnswer;
+      });
+      await openTab(tester, 'mcps');
+      await tapKey(tester, 'mcps-discover');
+      expect(find.byKey(const Key('mcps-registry-registry.modelcontextprotocol.io')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('mcps-registry-address')), 'http://registry.team.test');
+      await tapKey(tester, 'mcps-registry-add');
+      expect(find.textContaining('https address'), findsOneWidget, reason: 'plain http to another computer is refused, with why');
+      expect(saved, isEmpty);
+
+      await tester.enterText(find.byKey(const Key('mcps-registry-address')), 'https://registry.team.test');
+      await tapKey(tester, 'mcps-registry-add');
+      expect(saved.last.loadoutRegistries, ['https://registry.team.test']);
+      expect(asked.last.host, 'registry.team.test');
+      expect(find.byKey(const Key('mcp-entry-dev.team/tracker')), findsOneWidget);
+      expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsNothing);
+      expect(find.textContaining('Listed by registry.team.test'), findsOneWidget);
+
+      await tapKey(tester, 'mcps-registry-registry.modelcontextprotocol.io');
+      expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
+      await tapKey(tester, 'mcps-registry-registry.team.test');
+      await tapKey(tester, 'mcps-registry-remove');
+      expect(saved.last.loadoutRegistries, isEmpty);
+      expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget, reason: 'back to the official registry');
+    });
+
     testWidgets('a registry that cannot be reached is a line, not an exception', (tester) async {
       await open(tester, fetch: (uri) async => throw const RegistryRefusal('The registry did not answer in time'));
       await openTab(tester, 'mcps');
