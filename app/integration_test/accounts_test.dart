@@ -148,6 +148,10 @@ bypass = true
     await add('metered', 'api-key');
     await typeSealed('api_key', _canary);
     await done('metered');
+    // The entry now offers it, written before the host is restarted to serve that: the next sign-in waits for the host.
+    await until(() => controller.offeredBy('Claude').isNotEmpty, 'the entry to offer the account');
+    await tester.pump(const Duration(seconds: 1));
+    await until(() => host.phase == HostPhase.running && host.served.isNotEmpty, 'the host to serve again');
 
     // A scripted login: the stand-in's `claude auth login` takes a pasted code.
     await add('work', 'subscription');
@@ -158,7 +162,7 @@ bypass = true
     await controller.refresh();
     expect(controller.accounts.map((each) => each.name), containsAll(['metered', 'work']));
     expect(controller.accounts.every((each) => each.status == AccountStatus.signedIn), isTrue);
-    expect(controller.offeredBy('claude-accounts').length, 2);
+    expect(controller.offeredBy('Claude').length, 2);
 
     // A turn on each: the entry serves it, the session names the account it runs on, and no credential is in what the app was told.
     await until(() => host.phase == HostPhase.running && host.served.isNotEmpty, 'the host to serve the entry again');
@@ -169,7 +173,7 @@ bypass = true
         chatEndpoints(webSocket: entry.url),
         expectedPeerId: host.peerId!,
         verifyPeer: (channel, expected) => provePeer(browser, channel, expected, method: method),
-        decider: (request) async => const AcpAllow(),
+        decider: (request, from) => Future<AcpDecision>.value(const AcpAllow()),
         initializeMeta: {accountMeta: account},
       );
       try {
