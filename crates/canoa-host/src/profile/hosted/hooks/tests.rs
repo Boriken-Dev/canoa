@@ -751,14 +751,14 @@ fn what_a_killed_host_left_in_the_temporary_directory_is_removed_when_old_and_on
 }
 
 #[test]
-fn the_directory_of_a_host_that_runs_is_not_swept_however_old() {
+fn the_directory_of_a_host_that_runs_is_not_swept_when_it_is_old_but_not_a_day_old() {
     let temp = Temp::new();
     let live = super::super::private::Private::under(&temp.0, "canoa-profile");
     live.ensure().expect("made");
     std::fs::write(live.path().join("channel.json"), b"x").expect("written");
     age(
         live.path(),
-        std::time::SystemTime::now() - Duration::from_secs(48 * 3600),
+        std::time::SystemTime::now() - Duration::from_secs(3 * 3600),
     );
     remove_stale(&temp.0);
     assert!(
