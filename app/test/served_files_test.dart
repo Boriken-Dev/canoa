@@ -23,8 +23,6 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/ledger/host_ledger_backend.dart';
 import 'package:canoa/ledger/session_ledger.dart';
-import 'package:canoa/profile/overlays.dart';
-import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/report.dart';
 import 'package:canoa/served/control_overlays.dart';
 import 'package:canoa/served/host_config.dart';

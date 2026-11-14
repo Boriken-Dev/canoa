@@ -32,6 +32,21 @@ void main() {
     expect([for (final entry in host.entries) (entry.harness, entry.title)], [('claude', 'Claude for review'), (null, null)]);
   });
 
+  test('the control channel is told apart from the agents', () {
+    final text = jsonEncode({
+      'peer': _peer,
+      'method': 'noise',
+      'entries': [
+        {'name': 'claude', 'kind': 'agent', 'url': 'ws://127.0.0.1:7801'},
+        {'name': '@control', 'kind': 'control', 'url': 'ws://127.0.0.1:7803'},
+      ],
+    });
+    final host = ServedHost.parse(text)!;
+    expect([for (final entry in host.entries) entry.name], ['claude'], reason: 'it is no agent for the connect dialog to offer');
+    expect(host.control?.url, 'ws://127.0.0.1:7803');
+    expect(ServedHost.parse(_listed())!.control, isNull, reason: 'a host that listens for none lists none');
+  });
+
   test('anything else is no list', () {
     for (final text in [
       '<!doctype html><title>Canoa</title>',
