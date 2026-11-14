@@ -63,6 +63,56 @@ pub fn uid_of(user: &str) -> std::io::Result<u32> {
         .ok_or_else(|| std::io::Error::other("no such account in /etc/passwd"))
 }
 
+/// Refuses to run a host for a portal as an account the portal must never start one for: root, a user id below `min_uid`, an
+/// account whose name (`USER`, which systemd sets for `User=`) is not the last part of `dir`, or a `dir` this account does not
+/// own. The unit's `User=%i` and `/run/canoa/%i` are what make the last two agree; a portal asked to start a host for
+/// another account's name would otherwise run it as that account in someone else's folder.
+///
+/// # Errors
+///
+/// A message saying which rule was broken.
+pub fn check_account(dir: &Path, min_uid: u32) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let uid = rustix::process::geteuid().as_raw();
+        let owner = std::fs::metadata(dir).map(|meta| meta.uid()).ok();
+        let name = std::env::var("USER").ok();
+        check_account_of(uid, name.as_deref(), dir, owner, min_uid)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (dir, min_uid);
+        Err("--portal is Unix only".to_owned())
+    }
+}
+
+#[cfg(unix)]
+fn check_account_of(
+    uid: u32,
+    name: Option<&str>,
+    dir: &Path,
+    owner: Option<u32>,
+    min_uid: u32,
+) -> Result<(), String> {
+    if uid == 0 {
+        return Err("--portal: this host must not run as root".to_owned());
+    }
+    if uid < min_uid {
+        return Err(format!(
+            "--portal: user id {uid} is below --portal-min-uid {min_uid}"
+        ));
+    }
+    let base = dir.file_name().and_then(|part| part.to_str());
+    if name.is_none() || name != base {
+        return Err("--portal: the account's name (USER) is not the last part of DIR".to_owned());
+    }
+    if owner != Some(uid) {
+        return Err("--portal: DIR is not there or is not owned by this account".to_owned());
+    }
+    Ok(())
+}
+
 /// Whether the system says `stream`'s peer runs as user `uid`.
 pub(crate) fn from_user(stream: &Stream, uid: u32) -> bool {
     stream
@@ -252,5 +302,42 @@ fn respond(request: &[u8], store: &TrustStore, index: &str) -> String {
             Err(error) => serde_json::json!({"error": error.to_string()}).to_string(),
         },
         _ => serde_json::json!({"error": "not an operation"}).to_string(),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::path::Path;
+
+    use super::check_account_of;
+
+    #[test]
+    fn a_host_runs_for_a_portal_only_as_the_account_whose_folder_it_is() {
+        let dir = Path::new("/run/canoa/alice");
+        assert!(check_account_of(1001, Some("alice"), dir, Some(1001), 1000).is_ok());
+        for (uid, name, owner, min) in [
+            (0, Some("alice"), Some(0), 1000),
+            (0, Some("root"), Some(0), 0),
+            (999, Some("alice"), Some(999), 1000),
+            (1001, Some("bob"), Some(1001), 1000),
+            (1001, None, Some(1001), 1000),
+            (1001, Some("alice"), Some(1002), 1000),
+            (1001, Some("alice"), None, 1000),
+        ] {
+            assert!(
+                check_account_of(uid, name, dir, owner, min).is_err(),
+                "{uid} {name:?} {owner:?}"
+            );
+        }
+        assert!(
+            check_account_of(
+                1001,
+                Some("alice"),
+                Path::new("/run/canoa/alice/"),
+                Some(1001),
+                1000
+            )
+            .is_ok()
+        );
     }
 }

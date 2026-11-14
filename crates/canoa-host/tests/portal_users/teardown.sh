@@ -6,9 +6,9 @@ set -u
 for person in canoatesta canoatestb; do
     systemctl stop "canoatest@$person.service" 2>/dev/null
 done
-rm -f /etc/systemd/system/canoatest@.service /etc/sudoers.d/canoatest /etc/pam.d/canoatest
+rm -f /etc/systemd/system/canoatest@.service /etc/systemd/system/canoatest.slice /etc/sudoers.d/canoatest /etc/pam.d/canoatest
 systemctl daemon-reload
-rm -rf /opt/canoatest /etc/canoatest /run/canoatest /var/tmp/canoatest-pam-count
+rm -rf /opt/canoatest /etc/canoatest /run/canoatest /run/canoatest-portal /var/tmp/canoatest-pam-count
 for name in canoatesta canoatestb canoatestportal; do
     if id "$name" >/dev/null 2>&1; then
         userdel --remove "$name" 2>/dev/null || userdel "$name"

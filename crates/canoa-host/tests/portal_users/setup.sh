@@ -1,16 +1,20 @@
 #!/bin/sh
 # Makes what tests/portal_users.rs needs on a Linux machine with systemd, as root: three throwaway accounts (canoatestportal for
-# the portal, canoatesta and canoatestb for the two people), a PAM service that checks a password file of its own, the template
-# unit, a sudoers rule that lets the portal start and stop the two test units, and a copy of the built programs.
+# the portal, canoatesta and canoatestb for the two people), a PAM service that checks a password file of its own, a slice and
+# the template unit, the root helper and a sudoers rule that lets the portal run only it, and a copy of the built programs.
 #
 #   sudo sh setup.sh TARGET_DIR      # TARGET_DIR holds canoa and examples/stdio_agent, such as target/debug
 #   sudo sh teardown.sh              # removes all of it
 #
-# Every name starts with canoatest. Nothing here touches another account, sssd, or the real PAM services.
+# Every name starts with canoatest. Nothing here touches another account, sssd, or the real PAM services. The proxy's socket is
+# for the group of the user who ran sudo, so the test can stand in for the proxy.
 set -eu
 
 target=${1:?"usage: setup.sh TARGET_DIR"}
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+tester=${SUDO_USER:?"run through sudo, so the test can reach the proxy's socket"}
+tester_group=$(id -gn "$tester")
+here=$(dirname "$0")
 
 for name in canoatestportal canoatesta canoatestb; do
     if id "$name" >/dev/null 2>&1; then
@@ -23,13 +27,19 @@ useradd --system --no-create-home --shell /usr/sbin/nologin canoatestportal
 useradd --create-home --shell /usr/sbin/nologin canoatesta
 useradd --create-home --shell /usr/sbin/nologin canoatestb
 chmod 0700 /home/canoatesta /home/canoatestb
+# The portal may make the proxy's socket for the tester's group.
+usermod -aG "$tester_group" canoatestportal
 
 install -d -m 0755 /opt/canoatest /opt/canoatest/site /etc/canoatest
 install -m 0755 "$target/canoa" /opt/canoatest/canoa
 install -m 0755 "$target/examples/stdio_agent" /opt/canoatest/stdio_agent
 echo '<!doctype html>the app' > /opt/canoatest/site/index.html
 # What the test runs as one account to reach another's sockets, from where every account can read it.
-install -m 0644 "$(dirname "$0")/uds.py" /opt/canoatest/uds.py
+install -m 0644 "$here/uds.py" /opt/canoatest/uds.py
+# The root helper, for units named canoatest@NAME.service.
+sed 's/^PREFIX=canoa$/PREFIX=canoatest/' "$here/../../dist/canoa-instance" > /opt/canoatest/canoa-instance
+chmod 0755 /opt/canoatest/canoa-instance
+chown root:root /opt/canoatest/canoa-instance
 
 # The host's entries, in the layer beside the program; each person's own canoa.cfg goes over it.
 cat > /opt/canoatest/canoa.cfg <<'EOF'
@@ -37,18 +47,21 @@ cat > /opt/canoatest/canoa.cfg <<'EOF'
 program = "/opt/canoatest/stdio_agent"
 EOF
 
-cat > /opt/canoatest/portal.toml <<'EOF'
-listen = "127.0.0.1:7890"
+cat > /opt/canoatest/portal.toml <<EOF
+socket = "/run/canoatest-portal/portal.sock"
+socket_group = "$tester_group"
 site = "/opt/canoatest/site"
 socket_dir = "/run/canoatest"
 unit = "canoatest@{user}.service"
 elevate = ["sudo", "-n"]
+systemctl = "/opt/canoatest/canoa-instance"
 pam_service = "canoatest"
 min_uid = 1000
 idle_seconds = 4
 start_seconds = 20
 pair_seconds = 8
-max_failures_per_address = 3
+max_failures_per_pair = 3
+failure_floor_seconds = 1
 EOF
 
 # The passwords of the test accounts, and the PAM service that checks them and counts how often it was asked.
@@ -74,35 +87,41 @@ auth     required  pam_permit.so
 account  required  pam_permit.so
 EOF
 
-# One host per person, as that person, with its sockets in a folder only that person (and root) can write.
+# The proxy's socket lives here, made for the portal.
+mkdir -p /run/canoatest-portal
+chown canoatestportal:"$tester_group" /run/canoatest-portal
+chmod 0755 /run/canoatest-portal
+
+cat > /etc/systemd/system/canoatest.slice <<'EOF'
+[Slice]
+MemoryMax=4G
+TasksMax=2048
+EOF
+
+# One host per person, as that person, with its sockets in a folder only that person and the portal's group can reach.
 cat > /etc/systemd/system/canoatest@.service <<'EOF'
 [Unit]
 Description=Canoa test host for %i
 
 [Service]
+Slice=canoatest.slice
 User=%i
 WorkingDirectory=~
-ExecStartPre=+/usr/bin/install -d -m 0755 /run/canoatest
-ExecStartPre=+/usr/bin/install -d -o %i -m 0755 /run/canoatest/%i
+ExecStartPre=+/usr/bin/install -d -m 0711 /run/canoatest
+ExecStartPre=+/usr/bin/install -d -o %i -g canoatestportal -m 0710 /run/canoatest/%i
 ExecStart=/opt/canoatest/canoa serve --portal /run/canoatest/%i --portal-user canoatestportal --supervised
 Restart=on-failure
 RestartForceExitStatus=75
+MemoryMax=1G
+TasksMax=512
+CPUQuota=200%
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 EOF
 systemctl daemon-reload
 
-systemctl_path=$(command -v systemctl)
-{
-    printf 'canoatestportal ALL=(root) NOPASSWD:'
-    sep=' '
-    for person in canoatesta canoatestb; do
-        printf '%s%s start canoatest@%s.service, %s stop canoatest@%s.service' "$sep" "$systemctl_path" "$person" "$systemctl_path" "$person"
-        sep=', '
-    done
-    printf '\n'
-} > /etc/sudoers.d/canoatest
+printf 'canoatestportal ALL=(root) NOPASSWD: /opt/canoatest/canoa-instance\n' > /etc/sudoers.d/canoatest
 chmod 0440 /etc/sudoers.d/canoatest
 visudo -cf /etc/sudoers.d/canoatest
 

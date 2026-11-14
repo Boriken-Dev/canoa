@@ -569,6 +569,9 @@ struct ServeArgs {
     /// The portal's user, a name in /etc/passwd or a number: the only user whose processes may use those sockets.
     #[arg(long, value_name = "USER", requires = "portal")]
     portal_user: Option<String>,
+    /// The lowest user id a host run for a portal may have; root never may.
+    #[arg(long, value_name = "UID", default_value_t = 1000, requires = "portal")]
+    portal_min_uid: u32,
     /// Serve the host's own sources too (Claude, Codex, Antigravity, Grok, Pi), to this process only: they have no address,
     /// and each line says what a source is missing.
     #[arg(long)]
@@ -772,9 +775,13 @@ struct PortalArgs {
     /// The web app's build to serve, in place of the file's `site`.
     #[arg(long, value_name = "DIR")]
     site: Option<PathBuf>,
-    /// Where to take browsers, in place of the file's `listen`; loopback only.
+    /// A loopback TCP address to listen on too, in place of the file's `listen`: for development, since any local user can reach
+    /// it and what it says of the browser's address is not believed.
     #[arg(long, value_name = "ADDRESS")]
     listen: Option<SocketAddr>,
+    /// The Unix socket a proxy reaches the portal at, in place of the file's `socket`.
+    #[arg(long, value_name = "PATH")]
+    socket: Option<PathBuf>,
 }
 
 #[cfg(all(unix, feature = "portal"))]
@@ -792,8 +799,12 @@ fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
         settings.site = Some(site.clone());
     }
     if let Some(listen) = args.listen {
-        settings.listen = listen;
+        settings.listen = Some(listen);
     }
+    if let Some(socket) = &args.socket {
+        settings.socket = Some(socket.clone());
+    }
+    let (socket, tcp) = (settings.socket.clone(), settings.listen);
     let accounts =
         crate::portal::System::new(&settings.pam_service, settings.min_uid, &settings.groups)
             .map_err(Failed::usage)?;
@@ -810,16 +821,22 @@ fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
         crate::portal::PortalError::Listen(_) => Failed::run(error),
         _ => Failed::usage(error),
     })?;
-    let address = portal.local_addr().map_err(Failed::run)?;
-    print(
-        front,
-        &serde_json::json!({"portal": format!("http://{address}")}).to_string(),
-    )?;
+    let line = serde_json::json!({
+        "portal": {
+            "socket": socket,
+            "listen": portal.local_addr().or(tcp).map(|address| address.to_string()),
+        }
+    });
+    print(front, &line.to_string())?;
     portal.run();
     Ok(())
 }
 
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
+    // Before anything of the home is touched: a host for a portal runs only as the account whose folder it is.
+    if let Some(dir) = &args.portal {
+        crate::portal_link::check_account(dir, args.portal_min_uid).map_err(Failed::usage)?;
+    }
     let (config, layers) = load_for_serving(args, front)?;
     let home = home_of(front)?;
     let web = web_config(&config, args, &home, front)?;

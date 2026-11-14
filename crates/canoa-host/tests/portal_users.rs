@@ -46,6 +46,9 @@ impl Answer {
     }
 }
 
+/// Where the proxy reaches the portal: the browser's address in `X-Forwarded-For` is believed there, and nowhere else.
+const PROXY_SOCKET: &str = "/run/canoatest-portal/portal.sock";
+
 fn call(
     addr: SocketAddr,
     method: &str,
@@ -53,11 +56,31 @@ fn call(
     extra: &[(&str, String)],
     body: &str,
 ) -> Answer {
-    let mut stream = TcpStream::connect(addr).expect("the portal answers");
+    let stream = TcpStream::connect(addr).expect("the portal answers");
     stream
         .set_read_timeout(Some(Duration::from_secs(60)))
         .expect("a timeout");
-    let mut text = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    call_on(stream, &addr.to_string(), method, path, extra, body)
+}
+
+fn call_unix(method: &str, path: &str, extra: &[(&str, String)], body: &str) -> Answer {
+    let stream =
+        std::os::unix::net::UnixStream::connect(PROXY_SOCKET).expect("the proxy's socket answers");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .expect("a timeout");
+    call_on(stream, "localhost", method, path, extra, body)
+}
+
+fn call_on<S: Read + Write>(
+    mut stream: S,
+    host: &str,
+    method: &str,
+    path: &str,
+    extra: &[(&str, String)],
+    body: &str,
+) -> Answer {
+    let mut text = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
     for (name, value) in extra {
         text.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -91,13 +114,13 @@ fn origin(addr: SocketAddr) -> String {
     format!("http://{addr}")
 }
 
-fn sign_in(addr: SocketAddr, user: &str, password: &str, from: &str) -> Answer {
-    call(
-        addr,
+/// A sign-in as the proxy makes it, the browser at `from`.
+fn sign_in(user: &str, password: &str, from: &str) -> Answer {
+    call_unix(
         "POST",
         "/portal/login",
         &[
-            ("Origin", origin(addr)),
+            ("Origin", "http://localhost".to_owned()),
             (
                 "Content-Type",
                 "application/x-www-form-urlencoded".to_owned(),
@@ -232,8 +255,20 @@ struct Browser {
 }
 
 impl Browser {
-    fn sign_in(addr: SocketAddr, person: &str, password: &str, from: &str) -> Self {
-        let answer = sign_in(addr, person, password, from);
+    fn sign_in(addr: SocketAddr, person: &str, password: &str) -> Self {
+        let answer = call(
+            addr,
+            "POST",
+            "/portal/login",
+            &[
+                ("Origin", origin(addr)),
+                (
+                    "Content-Type",
+                    "application/x-www-form-urlencoded".to_owned(),
+                ),
+            ],
+            &format!("user={person}&password={password}"),
+        );
         assert_eq!(answer.status, 303, "{}", answer.body);
         let cookie = answer.cookie().expect("a cookie");
         let index = call(
@@ -324,25 +359,36 @@ fn two_people_each_get_their_own_host_as_themselves_and_reach_nothing_of_the_oth
     // A wrong password is refused, and past the limit nothing reaches the accounts, the right password included.
     let before = pam_asked();
     for _ in 0..3 {
-        let refused = sign_in(addr, "canoatesta", "not-the-password", "203.0.113.50");
+        let refused = sign_in("canoatesta", "not-the-password", "203.0.113.50");
         assert_eq!(refused.status, 401);
         assert!(refused.cookie().is_none());
     }
     assert_eq!(pam_asked() - before, 3);
-    let blocked = sign_in(addr, "canoatesta", "pw-a-test", "203.0.113.50");
+    let blocked = sign_in("canoatesta", "pw-a-test", "203.0.113.50");
     assert_eq!(blocked.status, 429);
     assert_eq!(pam_asked() - before, 3, "a blocked sign-in reached PAM");
     // A name that is no account is refused the same way, and an account below the lowest user id is not admitted at all.
     assert_eq!(
-        sign_in(addr, "no-such-canoa-account", "x", "203.0.113.51").status,
+        sign_in("no-such-canoa-account", "x", "203.0.113.51").status,
         401
     );
-    assert_eq!(sign_in(addr, "root", "x", "203.0.113.52").status, 401);
+    assert_eq!(sign_in("root", "x", "203.0.113.52").status, 401);
+    // The block is for that address and that account alone: another browser behind the proxy is not held to it.
+    assert_eq!(
+        sign_in("canoatesta", "pw-a-test", "203.0.113.50").status,
+        429,
+        "still blocked"
+    );
+    assert_eq!(
+        sign_in("canoatesta", "pw-a-test", "203.0.113.99").status,
+        303,
+        "another browser is not"
+    );
     assert!(!active("canoatesta"), "a refused sign-in started a host");
 
     // Each signs in and gets a host that is theirs.
-    let a = Browser::sign_in(addr, PEOPLE[0].0, PEOPLE[0].1, "198.51.100.1");
-    let b = Browser::sign_in(addr, PEOPLE[1].0, PEOPLE[1].1, "198.51.100.2");
+    let a = Browser::sign_in(addr, PEOPLE[0].0, PEOPLE[0].1);
+    let b = Browser::sign_in(addr, PEOPLE[1].0, PEOPLE[1].1);
     let (pid_a, pid_b) = (main_pid("canoatesta"), main_pid("canoatestb"));
     assert!(pid_a > 0 && pid_b > 0 && pid_a != pid_b);
     assert_eq!(process_uid(pid_a), uid_of("canoatesta"));
@@ -445,6 +491,90 @@ fn two_people_each_get_their_own_host_as_themselves_and_reach_nothing_of_the_oth
         !own_file("canoatestb").status.success(),
         "a's setting is not in b's home"
     );
+
+    // The folders are as the guide says: no one lists /run/canoatest, and each person's is theirs, group the portal's, no one else's.
+    let stat = |path: &str| {
+        let out = Command::new("stat")
+            .args(["-c", "%a %U %G", path])
+            .output()
+            .expect("stat runs");
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    assert_eq!(stat("/run/canoatest"), "711 root root");
+    assert_eq!(
+        stat("/run/canoatest/canoatesta"),
+        "710 canoatesta canoatestportal"
+    );
+    assert_eq!(
+        stat(PROXY_SOCKET).split(' ').next(),
+        Some("660"),
+        "the proxy's socket is for its group only"
+    );
+    assert!(
+        !sudo_as("canoatesta", &["ls", "/run/canoatest"])
+            .status
+            .success(),
+        "a person lists /run/canoatest"
+    );
+    assert!(
+        !sudo_as("canoatestb", &["ls", "/run/canoatest/canoatesta"])
+            .status
+            .success()
+    );
+    // The units are bounded, in the slice that bounds them all.
+    assert_eq!(
+        systemctl(&["show", &unit("canoatesta"), "-p", "Slice", "--value"]),
+        "canoatest.slice"
+    );
+    assert_eq!(
+        systemctl(&["show", &unit("canoatesta"), "-p", "TasksMax", "--value"]),
+        "512"
+    );
+    assert_ne!(
+        systemctl(&["show", &unit("canoatesta"), "-p", "MemoryMax", "--value"]),
+        "infinity"
+    );
+    // A host will not run as another account's name or in another's folder, nor as root.
+    for (who, dir) in [
+        ("canoatesta", "/run/canoatest/canoatestb"),
+        ("canoatestb", "/run/canoatest/canoatesta"),
+    ] {
+        let out = sudo_as(
+            who,
+            &[
+                "/opt/canoatest/canoa",
+                "serve",
+                "--allow-empty",
+                "--portal",
+                dir,
+                "--portal-user",
+                PORTAL_USER,
+            ],
+        );
+        assert_eq!(out.status.code(), Some(2), "{who} ran a host in {dir}");
+    }
+    // The root helper takes only the units of real people.
+    for unit in [
+        "canoatest@root.service",
+        "canoatest@1000.service",
+        "canoatest@daemon.service",
+        "canoatest@a@b.service",
+    ] {
+        let out = Command::new("sudo")
+            .args([
+                "-n",
+                "-u",
+                PORTAL_USER,
+                "sudo",
+                "-n",
+                "/opt/canoatest/canoa-instance",
+                "start",
+                unit,
+            ])
+            .output()
+            .expect("sudo runs");
+        assert_eq!(out.status.code(), Some(2), "the helper started {unit}");
+    }
 
     // Neither can reach the other's sockets or files.
     for (from, to) in [("canoatesta", "canoatestb"), ("canoatestb", "canoatesta")] {

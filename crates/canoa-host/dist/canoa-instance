@@ -1,0 +1,36 @@
+#!/bin/sh
+# The only thing the portal's service account may ask root for: `canoa-instance start|stop [--no-ask-password] canoa@NAME.service`.
+#
+# Install as /usr/libexec/canoa-instance (root, mode 0755) and allow it in sudoers with no password and no argument pattern:
+#
+#     canoa ALL=(root) NOPASSWD: /usr/libexec/canoa-instance
+#
+# and set the portal's `elevate = ["sudo", "-n"]` and `systemctl = "/usr/libexec/canoa-instance"`. The checks are here, in root's
+# own code, so a sudoers wildcard is never needed. NAME must match
+#
+# [A-Za-z_][A-Za-z0-9._-]{0,31}
+#
+# (the pattern the portal and the polkit rule use: a name that begins with a digit is a user id to systemd), and must be an
+# account with a user id of MIN_UID or more: root and the machine's service accounts never get a host.
+set -eu
+
+MIN_UID=1000
+PREFIX=canoa
+
+[ $# -ge 2 ] || exit 2
+verb=$1
+shift
+if [ "${1:-}" = --no-ask-password ]; then shift; fi
+[ $# -eq 1 ] || exit 2
+unit=$1
+case $verb in start | stop) ;; *) exit 2 ;; esac
+case $unit in "$PREFIX"@*.service) ;; *) exit 2 ;; esac
+name=${unit#"$PREFIX"@}
+name=${name%.service}
+case $name in
+''|[!A-Za-z_]*|*[!A-Za-z0-9._-]*) exit 2 ;;
+esac
+[ "${#name}" -le 32 ] || exit 2
+uid=$(id -u -- "$name" 2>/dev/null) || exit 2
+[ "$uid" -ge "$MIN_UID" ] || exit 2
+exec /usr/bin/systemctl "$verb" --no-ask-password "$unit"

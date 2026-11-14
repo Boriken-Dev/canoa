@@ -1,7 +1,7 @@
 //! Signed-in browsers and the count of failed sign-ins.
 
 use alloc::collections::BTreeMap;
-use core::net::IpAddr;
+use core::net::{IpAddr, Ipv6Addr};
 use core::time::Duration;
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -37,6 +37,7 @@ struct Kept {
 pub struct Sessions {
     lifetime: Duration,
     limit: usize,
+    per_user: usize,
     state: Mutex<(u64, HashMap<[u8; 32], Kept>)>,
 }
 
@@ -51,17 +52,19 @@ fn digest(token: &str) -> [u8; 32] {
 }
 
 impl Sessions {
-    /// Sessions that last `lifetime`, `limit` at once.
+    /// Sessions that last `lifetime`, `limit` at once and `per_user` for one account.
     #[must_use]
-    pub fn new(lifetime: Duration, limit: usize) -> Self {
+    pub fn new(lifetime: Duration, limit: usize, per_user: usize) -> Self {
         Self {
             lifetime,
             limit,
+            per_user: per_user.max(1),
             state: Mutex::new((0, HashMap::new())),
         }
     }
 
-    /// A new session for `user`, and the token the browser keeps. `None` when the limit is reached and nothing has expired.
+    /// A new session for `user`, and the token the browser keeps. An account that holds its share already loses its oldest
+    /// session, so one account cannot fill the table. `None` when the whole table is full of live sessions of others.
     pub fn open(&self, user: &str, uid: u32) -> Option<(String, Session)> {
         let mut bytes = [0_u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes).ok()?;
@@ -69,11 +72,21 @@ impl Sessions {
         let now = Instant::now();
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let (next, map) = &mut *state;
-        if map.len() >= self.limit {
-            map.retain(|_, kept| kept.until > now);
-            if map.len() >= self.limit {
-                return None;
+        map.retain(|_, kept| kept.until > now);
+        let mine: Vec<([u8; 32], u64)> = map
+            .iter()
+            .filter(|(_, kept)| kept.user == user)
+            .map(|(key, kept)| (*key, kept.id))
+            .collect();
+        if mine.len() >= self.per_user {
+            let mut oldest = mine;
+            oldest.sort_by_key(|(_, id)| *id);
+            for (key, _) in oldest.iter().take(oldest.len() + 1 - self.per_user) {
+                map.remove(key);
             }
+        }
+        if map.len() >= self.limit {
+            return None;
         }
         *next += 1;
         let id = *next;
@@ -131,18 +144,27 @@ impl Sessions {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.1.remove(&digest(token));
     }
+
+    /// Ends every session of `user`.
+    pub fn close_user(&self, user: &str) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.1.retain(|_, kept| kept.user != user);
+    }
 }
 
-/// The failed sign-ins inside a window, by address and by name.
+/// The failed sign-ins inside a window, by address with account, by address and by account.
 pub struct Throttle {
     window: Duration,
+    per_pair: usize,
     per_address: usize,
-    per_user: usize,
+    slow_after: usize,
+    slow: Duration,
     state: Mutex<Counts>,
 }
 
 #[derive(Default)]
 struct Counts {
+    pairs: BTreeMap<(String, IpAddr), Vec<Instant>>,
     addresses: BTreeMap<IpAddr, Vec<Instant>>,
     users: BTreeMap<String, Vec<Instant>>,
 }
@@ -150,6 +172,30 @@ struct Counts {
 impl core::fmt::Debug for Throttle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Throttle").finish_non_exhaustive()
+    }
+}
+
+/// A try that was let through, and counts as a failure until [`Throttle::succeeded`] says it was not.
+#[derive(Debug)]
+#[must_use]
+pub struct Attempt {
+    pair: (String, IpAddr),
+    address: IpAddr,
+    user: String,
+    at: Instant,
+    /// How long the try waits before the accounts are asked: the account's failures, from anywhere, make it slower.
+    pub wait: Duration,
+}
+
+/// An IPv6 address is the whole /64 it sits in, since one browser has all of it.
+fn key_of(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(v6) => {
+            let mut octets = v6.octets();
+            octets[8..].fill(0);
+            IpAddr::V6(Ipv6Addr::from(octets))
+        }
+        other => other,
     }
 }
 
@@ -176,41 +222,84 @@ fn trim<K: Ord + Clone>(map: &mut BTreeMap<K, Vec<Instant>>, window: Duration, n
 }
 
 impl Throttle {
-    /// Refuses a sign-in from an address after `per_address` failures in `window`, and for a name after `per_user`.
+    /// Refuses a try after `per_pair` failures of one address for one account in `window`, or `per_address` of one address for
+    /// any, and slows each try for an account by `slow` for every failure past `slow_after`, from anywhere.
     #[must_use]
-    pub fn new(window: Duration, per_address: usize, per_user: usize) -> Self {
+    pub fn new(
+        window: Duration,
+        per_pair: usize,
+        per_address: usize,
+        slow_after: usize,
+        slow: Duration,
+    ) -> Self {
         Self {
             window,
+            per_pair,
             per_address,
-            per_user,
+            slow_after,
+            slow,
             state: Mutex::new(Counts::default()),
         }
     }
 
-    /// Whether a sign-in from `address` for `user` may be tried now. Asked before the system's accounts are, so a refused
-    /// attempt costs the directory nothing, and can lock nobody out there.
-    pub fn allows(&self, address: IpAddr, user: &str) -> bool {
+    /// Lets a try from `address` for `user` through, or not. The try is counted as a failure at once, in the same step that
+    /// checked the limits, so that tries made together cannot all pass the check before any is counted; a success takes its
+    /// count back. Asked before the accounts are, so a refused try costs the directory nothing.
+    pub fn begin(&self, address: IpAddr, user: &str) -> Option<Attempt> {
         let now = Instant::now();
+        let address = key_of(address);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let pair_key = (user.to_owned(), address);
+        let by_pair = state
+            .pairs
+            .get_mut(&pair_key)
+            .map_or(0, |times| recent(times, self.window, now));
         let by_address = state
             .addresses
             .get_mut(&address)
-            .is_none_or(|times| recent(times, self.window, now) < self.per_address);
+            .map_or(0, |times| recent(times, self.window, now));
+        if by_pair >= self.per_pair || by_address >= self.per_address {
+            return None;
+        }
         let by_user = state
             .users
             .get_mut(user)
-            .is_none_or(|times| recent(times, self.window, now) < self.per_user);
-        by_address && by_user
-    }
-
-    /// Counts a failed sign-in. Neither count is cleared by a success, so a login that works cannot buy more guesses.
-    pub fn failed(&self, address: IpAddr, user: &str) {
-        let now = Instant::now();
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            .map_or(0, |times| recent(times, self.window, now));
+        let over = by_user.saturating_sub(self.slow_after).min(30);
+        state.pairs.entry(pair_key.clone()).or_default().push(now);
         state.addresses.entry(address).or_default().push(now);
         state.users.entry(user.to_owned()).or_default().push(now);
+        trim(&mut state.pairs, self.window, now);
         trim(&mut state.addresses, self.window, now);
         trim(&mut state.users, self.window, now);
+        Some(Attempt {
+            pair: pair_key,
+            address,
+            user: user.to_owned(),
+            at: now,
+            wait: self.slow * u32::try_from(over).unwrap_or(30),
+        })
+    }
+
+    /// The try did not fail: its count is taken back, so a login that works does not use up its address's tries.
+    pub fn succeeded(&self, attempt: Attempt) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let Attempt {
+            pair,
+            address,
+            user,
+            at,
+            ..
+        } = attempt;
+        if let Some(times) = state.pairs.get_mut(&pair) {
+            times.retain(|each| *each != at);
+        }
+        if let Some(times) = state.addresses.get_mut(&address) {
+            times.retain(|each| *each != at);
+        }
+        if let Some(times) = state.users.get_mut(&user) {
+            times.retain(|each| *each != at);
+        }
     }
 }
 
@@ -220,7 +309,7 @@ mod tests {
 
     #[test]
     fn a_session_is_found_by_its_token_and_not_after_it_closes() {
-        let sessions = Sessions::new(Duration::from_secs(60), 4);
+        let sessions = Sessions::new(Duration::from_secs(60), 4, 2);
         let (token, session) = sessions.open("canoatesta", 1001).unwrap();
         assert_eq!(sessions.get(&token), Some(session.clone()));
         assert!(sessions.alive(session.id));
@@ -232,7 +321,7 @@ mod tests {
 
     #[test]
     fn a_session_ends_when_its_lifetime_does_and_the_limit_counts_only_live_ones() {
-        let sessions = Sessions::new(Duration::from_millis(30), 1);
+        let sessions = Sessions::new(Duration::from_millis(30), 1, 1);
         let (token, _) = sessions.open("a", 1).unwrap();
         assert!(sessions.open("b", 2).is_none());
         std::thread::sleep(Duration::from_millis(60));
@@ -242,7 +331,7 @@ mod tests {
 
     #[test]
     fn two_tokens_are_never_alike() {
-        let sessions = Sessions::new(Duration::from_secs(60), 4);
+        let sessions = Sessions::new(Duration::from_secs(60), 4, 4);
         let (one, _) = sessions.open("a", 1).unwrap();
         let (two, _) = sessions.open("a", 1).unwrap();
         assert_ne!(one, two);
@@ -250,18 +339,102 @@ mod tests {
     }
 
     #[test]
-    fn failures_by_address_and_by_name_stop_a_try_until_the_window_passes() {
-        let throttle = Throttle::new(Duration::from_millis(80), 2, 2);
-        let one: IpAddr = "192.0.2.1".parse().unwrap();
-        let two: IpAddr = "192.0.2.2".parse().unwrap();
-        assert!(throttle.allows(one, "a"));
-        throttle.failed(one, "a");
-        throttle.failed(one, "b");
-        assert!(!throttle.allows(one, "c"), "the address is at its limit");
-        assert!(throttle.allows(two, "c"), "another address is not");
-        throttle.failed(two, "a");
-        assert!(!throttle.allows(two, "a"), "the name is at its limit");
-        std::thread::sleep(Duration::from_millis(120));
-        assert!(throttle.allows(one, "a"));
+    fn an_account_that_holds_its_share_loses_its_oldest_session_and_nobody_elses() {
+        let sessions = Sessions::new(Duration::from_secs(60), 100, 2);
+        let (other, _) = sessions.open("b", 2).unwrap();
+        let (first, _) = sessions.open("a", 1).unwrap();
+        let (second, _) = sessions.open("a", 1).unwrap();
+        let (third, _) = sessions.open("a", 1).unwrap();
+        assert_eq!(sessions.get(&first), None, "the oldest went");
+        assert!(sessions.get(&second).is_some() && sessions.get(&third).is_some());
+        assert!(
+            sessions.get(&other).is_some(),
+            "another account's is not touched"
+        );
+    }
+
+    fn throttle(per_pair: usize, per_address: usize, slow_after: usize) -> Throttle {
+        Throttle::new(
+            Duration::from_millis(200),
+            per_pair,
+            per_address,
+            slow_after,
+            Duration::from_millis(10),
+        )
+    }
+
+    #[test]
+    fn a_try_is_counted_as_it_is_let_through_so_tries_made_together_cannot_all_pass() {
+        let throttle = alloc::sync::Arc::new(throttle(3, 100, 100));
+        let address: IpAddr = "192.0.2.1".parse().unwrap();
+        let passed = alloc::sync::Arc::new(core::sync::atomic::AtomicUsize::new(0));
+        let threads: Vec<_> = (0..32)
+            .map(|_| {
+                let (throttle, passed) = (throttle.clone(), passed.clone());
+                std::thread::spawn(move || {
+                    if let Some(attempt) = throttle.begin(address, "a") {
+                        passed.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+                        core::mem::forget(attempt);
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(passed.load(core::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn a_success_takes_its_count_back_and_a_failure_keeps_it() {
+        let throttle = throttle(2, 100, 100);
+        let address: IpAddr = "192.0.2.1".parse().unwrap();
+        for _ in 0..5 {
+            throttle.succeeded(throttle.begin(address, "a").unwrap());
+        }
+        let _kept = throttle.begin(address, "a").unwrap();
+        let _kept = throttle.begin(address, "a").unwrap();
+        assert!(throttle.begin(address, "a").is_none());
+    }
+
+    #[test]
+    fn the_limit_is_for_an_address_and_an_account_together_and_an_account_is_only_slowed() {
+        let throttle = throttle(2, 4, 1);
+        let (one, two): (IpAddr, IpAddr) =
+            ("192.0.2.1".parse().unwrap(), "192.0.2.2".parse().unwrap());
+        let _a = throttle.begin(one, "a").unwrap();
+        let _b = throttle.begin(one, "a").unwrap();
+        assert!(
+            throttle.begin(one, "a").is_none(),
+            "this address for this account is at its limit"
+        );
+        assert!(
+            throttle.begin(one, "b").is_some(),
+            "another account from there is not"
+        );
+        assert!(throttle.begin(one, "c").is_some());
+        assert!(
+            throttle.begin(one, "d").is_none(),
+            "the address is at its own limit"
+        );
+        // Another address is never refused for an account, only made to wait once the account has many failures.
+        let slowed = throttle.begin(two, "a").unwrap();
+        assert!(slowed.wait > Duration::ZERO, "{:?}", slowed.wait);
+        let fresh = throttle.begin(two, "z").unwrap();
+        assert_eq!(fresh.wait, Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(260));
+        assert!(throttle.begin(one, "a").is_some(), "the window passed");
+    }
+
+    #[test]
+    fn an_ipv6_address_is_counted_by_its_64() {
+        let throttle = throttle(100, 2, 100);
+        let one: IpAddr = "2001:db8:1:2::1".parse().unwrap();
+        let same: IpAddr = "2001:db8:1:2:ffff::9".parse().unwrap();
+        let other: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        let _a = throttle.begin(one, "a").unwrap();
+        let _b = throttle.begin(same, "b").unwrap();
+        assert!(throttle.begin(one, "c").is_none());
+        assert!(throttle.begin(other, "c").is_some());
     }
 }

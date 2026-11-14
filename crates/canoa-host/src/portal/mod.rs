@@ -6,6 +6,7 @@
 //! `canoa@USER.service`, introduces the browser's own key to it and relays the browser's channel to its sockets. The browser and
 //! the host still prove their keys to each other through the relay.
 
+mod conn;
 mod instance;
 mod relay;
 mod session;
@@ -13,20 +14,23 @@ mod settings;
 mod signin;
 
 use alloc::sync::Arc;
-use core::net::{IpAddr, SocketAddr};
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Instant, SystemTime};
 
+use coqui_transport_pipe::{PipeName, SocketGroup};
+
+pub use conn::Conn;
 pub use instance::{Controller, Instances, Lease, Systemd};
-pub use session::{Session, Sessions, Throttle};
+pub use session::{Attempt, Session, Sessions, Throttle};
 pub use settings::Settings;
-pub use signin::{Accounts, MAX_PASSWORD, SignIn, System, valid_user};
+pub use signin::{Accounts, MAX_PASSWORD, NAME_PATTERN, SignIn, System, valid_user};
 
 use crate::pipe::PipeChannel;
 use crate::web::{self, Body, Lookup};
@@ -49,7 +53,7 @@ pub enum PortalError {
     Settings(String),
     /// The site is missing or has no `index.html`.
     Site(String),
-    /// The address could not be bound.
+    /// The address or socket could not be bound.
     Listen(io::Error),
 }
 
@@ -58,7 +62,7 @@ impl core::fmt::Display for PortalError {
         match self {
             Self::Settings(what) => write!(f, "portal setting {what}"),
             Self::Site(what) => write!(f, "portal site: {what}"),
-            Self::Listen(error) => write!(f, "the portal's address could not be bound: {error}"),
+            Self::Listen(error) => write!(f, "the portal could not listen: {error}"),
         }
     }
 }
@@ -80,7 +84,8 @@ struct Inner {
 /// The portal, bound and not yet serving.
 pub struct Portal {
     inner: Arc<Inner>,
-    listener: TcpListener,
+    tcp: Option<TcpListener>,
+    socket: Option<coqui_transport_pipe::Listener>,
 }
 
 impl core::fmt::Debug for Portal {
@@ -94,19 +99,23 @@ impl core::fmt::Debug for Portal {
 pub struct Stopper(Arc<AtomicBool>);
 
 impl Stopper {
-    /// Ends the accept loop and every relay; each ends within a second.
+    /// Ends the accept loops and every relay; each ends within a second.
     pub fn stop(&self) {
         self.0.store(true, Ordering::SeqCst);
     }
 }
 
+fn listen_error(error: impl core::fmt::Display) -> PortalError {
+    PortalError::Listen(io::Error::other(error.to_string()))
+}
+
 impl Portal {
-    /// Binds the portal on `settings.listen`, signing people in through `accounts` and running their hosts through
-    /// `controller`.
+    /// Binds the portal on `settings.socket` and `settings.listen`, signing people in through `accounts` and running their
+    /// hosts through `controller`.
     ///
     /// # Errors
     ///
-    /// For settings that do not work, a site that cannot be served, or an address that cannot be bound.
+    /// For settings that do not work, a site that cannot be served, or an address or socket that cannot be bound.
     pub fn bind(
         settings: Settings,
         accounts: Arc<dyn Accounts>,
@@ -119,24 +128,53 @@ impl Portal {
             .ok_or_else(|| PortalError::Site("`site` names no directory".to_owned()))?;
         let root =
             web::site_root(site, &[]).map_err(|error| PortalError::Site(error.to_string()))?;
-        let listener = TcpListener::bind(settings.listen).map_err(PortalError::Listen)?;
-        listener
-            .set_nonblocking(true)
-            .map_err(PortalError::Listen)?;
+        let socket = match &settings.socket {
+            Some(path) => {
+                let mut builder = coqui_transport_pipe::Listener::builder()
+                    .name(PipeName::at(path).map_err(listen_error)?)
+                    .socket_mode(0o660);
+                if let Some(group) = &settings.socket_group {
+                    builder = builder.socket_group(
+                        group
+                            .parse::<SocketGroup>()
+                            .map_err(|_| PortalError::Settings("socket_group".to_owned()))?,
+                    );
+                }
+                Some(builder.build().map_err(listen_error)?)
+            }
+            None => None,
+        };
+        let tcp = match settings.listen {
+            Some(address) => {
+                let listener = TcpListener::bind(address).map_err(PortalError::Listen)?;
+                listener
+                    .set_nonblocking(true)
+                    .map_err(PortalError::Listen)?;
+                Some(listener)
+            }
+            None => None,
+        };
         let instances = Instances::new(
             controller,
             settings.socket_dir.clone(),
             settings.idle,
             settings.start,
             settings.max_relays_per_user,
+            settings.max_hosts,
         );
         instances.adopt();
         let inner = Inner {
-            sessions: Sessions::new(settings.session, settings.max_sessions),
+            sessions: Sessions::new(
+                settings.session,
+                settings.max_sessions,
+                settings.max_sessions_per_user,
+            ),
             throttle: Throttle::new(
                 settings.failure_window,
+                settings.max_failures_per_pair,
                 settings.max_failures_per_address,
-                settings.max_failures_per_user,
+                settings.slow_after_user_failures,
+                settings.slow,
             ),
             root,
             instances,
@@ -148,17 +186,15 @@ impl Portal {
         };
         Ok(Self {
             inner: Arc::new(inner),
-            listener,
+            tcp,
+            socket,
         })
     }
 
-    /// The address taken.
-    ///
-    /// # Errors
-    ///
-    /// When the system cannot say.
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
+    /// The loopback address taken, when `listen` asked for one.
+    #[must_use]
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.tcp.as_ref().and_then(|tcp| tcp.local_addr().ok())
     }
 
     /// For another thread to end [`Portal::run`].
@@ -189,30 +225,33 @@ impl Portal {
                     }
                 })
         };
-        while !inner.stopped.load(Ordering::SeqCst) {
-            match self.listener.accept() {
-                Ok((stream, peer)) => {
-                    if inner.connections.fetch_add(1, Ordering::SeqCst)
-                        >= inner.settings.max_connections
-                    {
-                        inner.connections.fetch_sub(1, Ordering::SeqCst);
-                        continue;
-                    }
-                    let inner = Arc::clone(&inner);
-                    let spawned = thread::Builder::new()
-                        .name("canoa-portal".to_owned())
-                        .spawn({
-                            let inner = Arc::clone(&inner);
-                            move || {
-                                let _ = stream.set_nonblocking(false);
-                                let _ = stream.set_nodelay(true);
-                                serve_connection(&inner, stream, peer.ip());
-                                inner.connections.fetch_sub(1, Ordering::SeqCst);
+        let socket_loop = self.socket.map(|socket| {
+            let inner = Arc::clone(&inner);
+            thread::Builder::new()
+                .name("canoa-portal-socket".to_owned())
+                .spawn(move || {
+                    while !inner.stopped.load(Ordering::SeqCst) {
+                        match socket.accept_timeout(Some(REST)) {
+                            Ok(stream) => spawn_connection(&inner, Conn::Pipe(Arc::new(stream))),
+                            Err(coqui_transport_pipe::Error::TimedOut) => {}
+                            Err(error) => {
+                                tracing::warn!("a connection failed: {error}");
+                                thread::sleep(REST);
                             }
-                        });
-                    if spawned.is_err() {
-                        inner.connections.fetch_sub(1, Ordering::SeqCst);
+                        }
                     }
+                })
+        });
+        while !inner.stopped.load(Ordering::SeqCst) {
+            let Some(tcp) = &self.tcp else {
+                thread::sleep(REST);
+                continue;
+            };
+            match tcp.accept() {
+                Ok((stream, _)) => {
+                    let _ = stream.set_nonblocking(false);
+                    let _ = stream.set_nodelay(true);
+                    spawn_connection(&inner, Conn::Tcp(Arc::new(stream)));
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(REST),
                 Err(error) => {
@@ -221,9 +260,34 @@ impl Portal {
                 }
             }
         }
-        if let Ok(sweeper) = sweeper {
-            let _ = sweeper.join();
+        for thread in [sweeper.ok(), socket_loop.and_then(Result::ok)]
+            .into_iter()
+            .flatten()
+        {
+            let _ = thread.join();
         }
+    }
+}
+
+fn spawn_connection(inner: &Arc<Inner>, conn: Conn) {
+    if inner.connections.fetch_add(1, Ordering::SeqCst) >= inner.settings.max_connections {
+        inner.connections.fetch_sub(1, Ordering::SeqCst);
+        conn.shutdown();
+        return;
+    }
+    let spawned = thread::Builder::new()
+        .name("canoa-portal".to_owned())
+        .spawn({
+            let inner = Arc::clone(inner);
+            let conn = conn.clone();
+            move || {
+                serve_connection(&inner, conn);
+                inner.connections.fetch_sub(1, Ordering::SeqCst);
+            }
+        });
+    if spawned.is_err() {
+        inner.connections.fetch_sub(1, Ordering::SeqCst);
+        conn.shutdown();
     }
 }
 
@@ -283,7 +347,7 @@ enum Unread {
 }
 
 fn read_request(
-    stream: &mut TcpStream,
+    conn: &mut Conn,
     buffer: &mut Vec<u8>,
     inner: &Inner,
     first: bool,
@@ -328,8 +392,8 @@ fn read_request(
         if wait.is_zero() {
             return Err(Unread::Refuse(408));
         }
-        let _ = stream.set_read_timeout(Some(wait));
-        match stream.read(&mut chunk) {
+        let _ = conn.set_read_timeout(Some(wait));
+        match conn.read(&mut chunk) {
             Ok(0) => return Err(Unread::Gone),
             Ok(read) => buffer.extend_from_slice(&chunk[..read]),
             Err(error)
@@ -362,14 +426,14 @@ fn read_request(
         return Err(Unread::Refuse(413));
     }
     while buffer.len() < wanted {
-        let _ = stream.set_read_timeout(Some(
+        let _ = conn.set_read_timeout(Some(
             inner
                 .settings
                 .request
                 .saturating_sub(started.elapsed())
                 .max(REST),
         ));
-        match stream.read(&mut chunk) {
+        match conn.read(&mut chunk) {
             Ok(0) | Err(_) => return Err(Unread::Refuse(408)),
             Ok(read) => buffer.extend_from_slice(&chunk[..read]),
         }
@@ -446,13 +510,9 @@ impl Response {
     }
 }
 
-fn http_date() -> String {
-    web::http_date(SystemTime::now())
-}
-
 fn write_response(
     inner: &Inner,
-    stream: &mut TcpStream,
+    conn: &mut Conn,
     response: Response,
     head: bool,
     keep: bool,
@@ -461,34 +521,31 @@ fn write_response(
         Payload::Bytes(bytes) => bytes.len() as u64,
         Payload::File(_, length) => *length,
     };
-    let policy = if response
-        .headers
-        .iter()
-        .any(|(name, _)| *name == "Content-Security-Policy")
-    {
-        None
-    } else {
-        Some(web::policy(&[]))
-    };
+    let has = |name: &str| response.headers.iter().any(|(each, _)| *each == name);
     let mut text = format!(
         "HTTP/1.1 {} {}\r\nDate: {}\r\nContent-Length: {length}\r\n",
         response.status,
         reason(response.status),
-        http_date()
+        web::http_date(SystemTime::now())
     );
+    if !has("Content-Security-Policy") {
+        text.push_str(&format!(
+            "Content-Security-Policy: {}\r\n",
+            web::policy(&[])
+        ));
+    }
     let common = [
         ("X-Content-Type-Options", "nosniff"),
+        // A page may send a same-origin form its own origin, which a browser otherwise reports as `null`; the login page says so.
         ("Referrer-Policy", "no-referrer"),
         ("X-Frame-Options", "DENY"),
         ("Cross-Origin-Opener-Policy", "same-origin"),
         ("Cross-Origin-Resource-Policy", "same-origin"),
         ("Connection", if keep { "keep-alive" } else { "close" }),
     ];
-    if let Some(policy) = &policy {
-        text.push_str(&format!("Content-Security-Policy: {policy}\r\n"));
-    }
     for (name, value) in common
         .iter()
+        .filter(|(name, _)| !has(name))
         .map(|(name, value)| (*name, (*value).to_owned()))
         .chain(
             response
@@ -504,21 +561,23 @@ fn write_response(
         text.push_str(&format!("{name}: {value}\r\n"));
     }
     text.push_str("\r\n");
-    let _ = stream.set_write_timeout(Some(inner.settings.request.max(Duration::from_secs(30))));
-    stream.write_all(text.as_bytes())?;
+    let _ = conn.set_write_timeout(Some(inner.settings.request.max(Duration::from_secs(30))));
+    conn.write_all(text.as_bytes())?;
     if head {
         return Ok(());
     }
     match response.payload {
-        Payload::Bytes(bytes) => stream.write_all(&bytes),
-        Payload::File(file, length) => io::copy(&mut file.take(length), stream).map(drop),
+        Payload::Bytes(bytes) => conn.write_all(&bytes),
+        Payload::File(file, length) => io::copy(&mut file.take(length), conn).map(drop),
     }
 }
 
-/// The browser's address: the connection's, or what a trusted proxy says it is.
-fn client_of(inner: &Inner, request: &Request, peer: IpAddr) -> IpAddr {
-    if !inner.settings.trusted_proxies.contains(&peer) {
-        return peer;
+/// The browser's address: a TCP connection's own, which is all that is believed of one anyone local can make; or, on the proxy's
+/// socket, the last address in the header the proxy sets that is not one of ours. A proxy that says nothing usable counts all
+/// such browsers as one address.
+fn client_of(inner: &Inner, request: &Request, conn: &Conn) -> IpAddr {
+    if !conn.from_proxy() {
+        return conn.peer_ip().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     }
     request
         .header(&inner.settings.client_address_header)
@@ -527,7 +586,7 @@ fn client_of(inner: &Inner, request: &Request, peer: IpAddr) -> IpAddr {
                 .filter_map(|part| part.trim().parse::<IpAddr>().ok())
                 .find(|address| !inner.settings.trusted_proxies.contains(address))
         })
-        .unwrap_or(peer)
+        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
 }
 
 fn host_ok(inner: &Inner, request: &Request) -> bool {
@@ -537,25 +596,9 @@ fn host_ok(inner: &Inner, request: &Request) -> bool {
             .is_some_and(|host| web::host_allowed(host, &inner.settings.hosts))
 }
 
-/// Whether a request that changes something comes from this site's own page: `Origin` names this host, and a browser that says
-/// the request crossed sites is believed.
-fn from_own_page(request: &Request) -> bool {
-    if request
-        .header("sec-fetch-site")
-        .is_some_and(|site| site != "same-origin")
-    {
-        return false;
-    }
-    let (Some(origin), Some(host)) = (request.header("origin"), request.header("host")) else {
-        return false;
-    };
-    origin.split_once("://").is_some_and(|(scheme, authority)| {
-        matches!(scheme, "http" | "https") && authority.eq_ignore_ascii_case(host)
-    })
-}
-
-/// `scheme://host`: what the page uses for the addresses of the channels.
-fn public_origin(inner: &Inner, request: &Request, peer: IpAddr) -> String {
+/// `https` when the proxy says so, or the host is not `localhost` or an address on this machine; else `http`: what the page's
+/// own origin is.
+fn scheme_of(request: &Request, conn: &Conn) -> &'static str {
     let host = request.header("host").unwrap_or("localhost");
     let name = host.rsplit_once(':').map_or(host, |(name, port)| {
         if port.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -565,11 +608,33 @@ fn public_origin(inner: &Inner, request: &Request, peer: IpAddr) -> String {
         }
     });
     let local = matches!(name, "localhost" | "127.0.0.1" | "[::1]");
-    let proxied = inner.settings.trusted_proxies.contains(&peer)
+    let https = conn.from_proxy()
         && request
             .header("x-forwarded-proto")
             .is_some_and(|proto| proto.eq_ignore_ascii_case("https"));
-    format!("{}://{host}", if proxied || !local { "wss" } else { "ws" })
+    if https || !local { "https" } else { "http" }
+}
+
+/// Whether the browser says the request is no cross-site one. A browser that sends nothing is believed: `Origin` decides.
+fn same_site(request: &Request) -> bool {
+    request
+        .header("sec-fetch-site")
+        .is_none_or(|site| site == "same-origin" || site == "none")
+}
+
+/// Whether a request that changes something comes from this site's own page: `Origin` is the site's own scheme and host
+/// (`null` is nobody's), and a browser that says the request crossed sites is believed.
+fn from_own_page(request: &Request, conn: &Conn) -> bool {
+    if request
+        .header("sec-fetch-site")
+        .is_some_and(|site| site != "same-origin")
+    {
+        return false;
+    }
+    let (Some(origin), Some(host)) = (request.header("origin"), request.header("host")) else {
+        return false;
+    };
+    origin.eq_ignore_ascii_case(&format!("{}://{host}", scheme_of(request, conn)))
 }
 
 fn login_page(message: &str) -> Vec<u8> {
@@ -586,20 +651,23 @@ fn login_page(message: &str) -> Vec<u8> {
 
 const LOGIN_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
+/// The sign-in page. Its policy is `same-origin`, not `no-referrer`: a browser sends `Origin: null` with a form posted from a
+/// page that sends no referrer, and the sign-in checks `Origin`.
 fn login_response(status: u16, message: &str) -> Response {
     Response::text(status, "text/html; charset=utf-8", login_page(message))
         .with("Content-Security-Policy", LOGIN_POLICY.to_owned())
+        .with("Referrer-Policy", "same-origin".to_owned())
 }
 
-fn serve_connection(inner: &Inner, mut stream: TcpStream, peer: IpAddr) {
+fn serve_connection(inner: &Inner, mut conn: Conn) {
     let mut buffer = Vec::new();
     let mut served = 0_usize;
     while !inner.stopped.load(Ordering::SeqCst) {
-        let request = match read_request(&mut stream, &mut buffer, inner, served == 0) {
+        let request = match read_request(&mut conn, &mut buffer, inner, served == 0) {
             Ok(request) => request,
             Err(Unread::Gone) => return,
             Err(Unread::Refuse(status)) => {
-                let _ = write_response(inner, &mut stream, Response::refusal(status), false, false);
+                let _ = write_response(inner, &mut conn, Response::refusal(status), false, false);
                 return;
             }
         };
@@ -609,17 +677,17 @@ fn serve_connection(inner: &Inner, mut stream: TcpStream, peer: IpAddr) {
             .header("upgrade")
             .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
         {
-            upgrade(inner, &mut stream, &request, peer);
+            upgrade(inner, &mut conn, &request);
             return;
         }
-        let response = answer(inner, &request, peer);
+        let response = answer(inner, &request, &conn);
         let keep = request.version == 1
             && served < inner.settings.max_requests
             && !request
                 .header("connection")
                 .is_some_and(|value| value.to_ascii_lowercase().contains("close"))
             && response.status != 408;
-        if write_response(inner, &mut stream, response, head, keep).is_err() || !keep {
+        if write_response(inner, &mut conn, response, head, keep).is_err() || !keep {
             return;
         }
     }
@@ -629,7 +697,28 @@ fn authed(inner: &Inner, request: &Request) -> Option<Session> {
     inner.sessions.get(&request.token()?)
 }
 
-fn answer(inner: &Inner, request: &Request, peer: IpAddr) -> Response {
+/// A host for the signed-in person, started if it must be: or the answer to give instead. An account that is no longer the one
+/// that signed in ends its sessions here.
+fn host_for(inner: &Inner, session: &Session) -> Result<Lease, Response> {
+    if !inner.accounts.still(&session.user, session.uid) {
+        inner.sessions.close_user(&session.user);
+        tracing::info!(
+            "{} is no longer an account: its sessions ended",
+            session.user
+        );
+        return Err(Response::refusal(401));
+    }
+    inner
+        .instances
+        .acquire(&session.user, session.uid)
+        .map_err(|error| {
+            tracing::warn!("{}'s host is not there: {error}", session.user);
+            Response::refusal(503)
+        })
+}
+
+fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
+    let started = Instant::now();
     if !host_ok(inner, request) || !request.target.starts_with('/') {
         return Response::refusal(421);
     }
@@ -643,9 +732,9 @@ fn answer(inner: &Inner, request: &Request, peer: IpAddr) -> Response {
             };
             login_response(200, message)
         }
-        ("POST", LOGIN) => sign_in(inner, request, peer),
+        ("POST", LOGIN) => sign_in(inner, request, conn, started),
         ("POST", "/portal/logout") => {
-            if !from_own_page(request) {
+            if !from_own_page(request, conn) {
                 return Response::refusal(403);
             }
             if let Some(token) = request.token() {
@@ -661,11 +750,13 @@ fn answer(inner: &Inner, request: &Request, peer: IpAddr) -> Response {
             None => Response::refusal(401),
         },
         ("GET" | "HEAD", web::HOST_INDEX) => match authed(inner, request) {
-            Some(session) => index(inner, request, peer, &session),
+            // It starts the person's host, so only the site's own page may ask for it.
+            Some(_) if !same_site(request) => Response::refusal(403),
+            Some(session) => index(inner, request, conn, &session),
             None => Response::refusal(401),
         },
         ("POST", "/portal/pair") => match authed(inner, request) {
-            Some(session) if from_own_page(request) => pair(inner, request, &session),
+            Some(session) if from_own_page(request, conn) => pair(inner, request, &session),
             Some(_) => Response::refusal(403),
             None => Response::refusal(401),
         },
@@ -684,8 +775,21 @@ fn form_field(body: &[u8], name: &str) -> Option<String> {
         .map(|(_, value)| value.into_owned())
 }
 
-fn sign_in(inner: &Inner, request: &Request, peer: IpAddr) -> Response {
-    if !from_own_page(request) {
+/// Answers a failed sign-in no sooner than `failure_floor` after the request began, so that how long it took says nothing of
+/// whether the account exists.
+fn after_floor(inner: &Inner, started: Instant, response: Response) -> Response {
+    let left = inner
+        .settings
+        .failure_floor
+        .saturating_sub(started.elapsed());
+    if !left.is_zero() {
+        thread::sleep(left);
+    }
+    response
+}
+
+fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> Response {
+    if !from_own_page(request, conn) {
         return Response::refusal(403);
     }
     if !request
@@ -700,27 +804,39 @@ fn sign_in(inner: &Inner, request: &Request, peer: IpAddr) -> Response {
     ) else {
         return Response::refusal(400);
     };
-    let address = client_of(inner, request, peer);
+    let address = client_of(inner, request, conn);
     let key: String = user.trim().to_ascii_lowercase().chars().take(64).collect();
-    // Asked before the accounts are, so that a refused try never reaches the directory, where it could lock an account.
-    if !inner.throttle.allows(address, &key) {
+    // Counted as a failure as it is let through, before the accounts are asked, so that tries made together cannot all pass the
+    // limit and a refused try never reaches the directory, where it could lock an account.
+    let Some(attempt) = inner.throttle.begin(address, &key) else {
         tracing::info!("a sign-in from {address} was refused for its failures");
-        return login_response(429, "Too many failed attempts. Try again later.").with(
-            "Retry-After",
-            inner.settings.failure_window.as_secs().to_string(),
+        return after_floor(
+            inner,
+            started,
+            login_response(429, "Too many failed attempts. Try again later.").with(
+                "Retry-After",
+                inner.settings.failure_window.as_secs().to_string(),
+            ),
         );
+    };
+    if !attempt.wait.is_zero() {
+        thread::sleep(attempt.wait);
     }
     if inner.signing_in.fetch_add(1, Ordering::SeqCst) >= inner.settings.max_sign_ins {
         inner.signing_in.fetch_sub(1, Ordering::SeqCst);
+        // Nothing was asked of the accounts, so nothing counts against the address.
+        inner.throttle.succeeded(attempt);
         return login_response(503, "Busy. Try again in a moment.");
     }
     let result = inner.accounts.sign_in(user.trim(), &password);
     inner.signing_in.fetch_sub(1, Ordering::SeqCst);
     match result {
-        SignIn::Admitted { user, uid } => {
+        SignIn::Admitted { user, uid } if uid != 0 && uid >= inner.settings.min_uid => {
             let Some((token, _)) = inner.sessions.open(&user, uid) else {
+                inner.throttle.succeeded(attempt);
                 return login_response(503, "Busy. Try again in a moment.");
             };
+            inner.throttle.succeeded(attempt);
             tracing::info!("{user} signed in from {address}");
             Response::redirect("/").with(
                 "Set-Cookie",
@@ -730,26 +846,27 @@ fn sign_in(inner: &Inner, request: &Request, peer: IpAddr) -> Response {
                 ),
             )
         }
-        SignIn::Refused => {
-            inner.throttle.failed(address, &key);
+        // An account the accounts admit that the portal does not (root, or below the lowest user id) is refused as any other.
+        SignIn::Admitted { .. } | SignIn::Refused => {
             tracing::info!("a sign-in from {address} failed");
-            login_response(401, "Sign-in failed.")
+            after_floor(inner, started, login_response(401, "Sign-in failed."))
         }
         SignIn::Failed(why) => {
             tracing::warn!("the accounts could not be asked: {why}");
-            login_response(503, "Sign-in is not available.")
+            after_floor(
+                inner,
+                started,
+                login_response(503, "Sign-in is not available."),
+            )
         }
     }
 }
 
 /// `/canoa.json` for this user: their host's id, method and entries, each with the address of a channel through the portal.
-fn index(inner: &Inner, request: &Request, peer: IpAddr, session: &Session) -> Response {
-    let lease = match inner.instances.acquire(&session.user, session.uid) {
+fn index(inner: &Inner, request: &Request, conn: &Conn, session: &Session) -> Response {
+    let lease = match host_for(inner, session) {
         Ok(lease) => lease,
-        Err(error) => {
-            tracing::warn!("{}'s host did not start: {error}", session.user);
-            return Response::refusal(503);
-        }
+        Err(response) => return response,
     };
     let asked = inner
         .instances
@@ -758,7 +875,15 @@ fn index(inner: &Inner, request: &Request, peer: IpAddr, session: &Session) -> R
     let Ok(mut index) = asked else {
         return Response::refusal(503);
     };
-    let origin = public_origin(inner, request, peer);
+    let origin = format!(
+        "{}://{}",
+        if scheme_of(request, conn) == "https" {
+            "wss"
+        } else {
+            "ws"
+        },
+        request.header("host").unwrap_or("localhost")
+    );
     if let Some(entries) = index
         .get_mut("entries")
         .and_then(serde_json::Value::as_array_mut)
@@ -799,8 +924,9 @@ fn pair(inner: &Inner, request: &Request, session: &Session) -> Response {
     else {
         return Response::refusal(400);
     };
-    let Ok(lease) = inner.instances.acquire(&session.user, session.uid) else {
-        return Response::refusal(503);
+    let lease = match host_for(inner, session) {
+        Ok(lease) => lease,
+        Err(response) => return response,
     };
     let ask = serde_json::json!({"op": "accept", "peer": peer}).to_string();
     let until = Instant::now() + inner.settings.pair;
@@ -808,6 +934,10 @@ fn pair(inner: &Inner, request: &Request, session: &Session) -> Response {
         match inner.instances.ask(&session.user, session.uid, &ask) {
             Ok(answer) if answer.get("ok") == Some(&serde_json::Value::Bool(true)) => {
                 break Response::json(200, &serde_json::json!({"ok": true}));
+            }
+            // A host that is not the person's, or that cannot be dialed for good, is not waited on.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                break Response::refusal(503);
             }
             Ok(_) | Err(_) if Instant::now() < until => thread::sleep(Duration::from_millis(250)),
             _ => {
@@ -857,20 +987,20 @@ fn site(inner: &Inner, request: &Request) -> Response {
 }
 
 /// A channel to the user's host: only for the one signed in, only from the site's own page, only to one of that user's own
-/// sockets, whose path is made from the session's name and a name checked here, never from anything else the browser says.
-fn upgrade(inner: &Inner, stream: &mut TcpStream, request: &Request, peer: IpAddr) {
-    let refuse = |stream: &mut TcpStream, status: u16| {
-        let _ = write_response(inner, stream, Response::refusal(status), false, false);
+/// sockets, whose path is made from the session's account name and a name checked here, never from anything else the browser
+/// says.
+fn upgrade(inner: &Inner, conn: &mut Conn, request: &Request) {
+    let refuse = |conn: &mut Conn, status: u16| {
+        let _ = write_response(inner, conn, Response::refusal(status), false, false);
     };
-    let _ = peer;
     if !host_ok(inner, request) {
-        return refuse(stream, 421);
+        return refuse(conn, 421);
     }
     let Some(session) = authed(inner, request) else {
-        return refuse(stream, 401);
+        return refuse(conn, 401);
     };
-    if request.method != "GET" || !from_own_page(request) {
-        return refuse(stream, 403);
+    if request.method != "GET" || !from_own_page(request, conn) {
+        return refuse(conn, 403);
     }
     let name = match request.path() {
         "/portal/ws/control" => None,
@@ -884,24 +1014,21 @@ fn upgrade(inner: &Inner, stream: &mut TcpStream, request: &Request, peer: IpAdd
             {
                 Some(name.to_owned())
             }
-            _ => return refuse(stream, 404),
+            _ => return refuse(conn, 404),
         },
     };
     let Some(key) = request
         .header("sec-websocket-key")
         .filter(|key| key.len() <= 64)
     else {
-        return refuse(stream, 400);
+        return refuse(conn, 400);
     };
     if request.header("sec-websocket-version") != Some("13") {
-        return refuse(stream, 400);
+        return refuse(conn, 400);
     }
-    let lease = match inner.instances.acquire(&session.user, session.uid) {
+    let lease = match host_for(inner, &session) {
         Ok(lease) => lease,
-        Err(error) => {
-            tracing::warn!("{}'s host is not there: {error}", session.user);
-            return refuse(stream, 503);
-        }
+        Err(response) => return refuse(conn, response.status),
     };
     let path = match &name {
         Some(name) => inner.instances.entry_socket(&session.user, name),
@@ -911,16 +1038,17 @@ fn upgrade(inner: &Inner, stream: &mut TcpStream, request: &Request, peer: IpAdd
             .join(crate::portal_link::CONTROL),
     };
     // The socket is dialed for this person and must have been made by this person's own process.
-    let channel = instance::dial(&path, session.uid)
-        .map(|socket| PipeChannel::new(socket, relay::MAX_MESSAGE));
+    let max_message = inner.settings.max_message;
+    let channel =
+        instance::dial(&path, session.uid).map(|socket| PipeChannel::new(socket, max_message));
     let channel = match channel {
         Ok(channel) => channel,
         Err(error) => {
             tracing::warn!("{} was not given a channel: {error}", session.user);
-            return refuse(stream, 404);
+            return refuse(conn, 404);
         }
     };
-    if stream
+    if conn
         .write_all(relay::upgrade_answer(key).as_bytes())
         .is_err()
     {
@@ -928,10 +1056,11 @@ fn upgrade(inner: &Inner, stream: &mut TcpStream, request: &Request, peer: IpAdd
     }
     let id = session.id;
     relay::run(
-        stream,
+        conn,
         channel,
         &|| inner.sessions.alive(id),
         &inner.stopped,
+        max_message,
     );
     drop(lease);
 }

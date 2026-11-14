@@ -1,27 +1,30 @@
 //! One host per user: started when a user signs in and uses it, stopped when nobody has for a while.
+//!
+//! Each user's host has a state of its own, and no lock is held across a call to the system or a socket for longer than that
+//! user's own start or stop: one user's slow host never delays another's.
 
 use alloc::sync::Arc;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Instant;
 
-use coqui_transport_pipe::{PipeName, ReadTimeout, Stream};
+use coqui_transport_pipe::{PipeName, ReadTimeout, Stream, WriteTimeout};
 
 use super::signin::valid_user;
 use crate::portal_link::{INTRODUCTION, entry_socket};
 use crate::spawn::{Command, Stdio};
 
 /// The longest answer the introduction socket is read for.
-const MAX_ANSWER: u64 = 64 * 1024;
+const MAX_ANSWER: usize = 64 * 1024;
 /// How long a started host is asked again for its socket.
 const POLL: Duration = Duration::from_millis(100);
-/// How long a request to the introduction socket may take.
+/// How long one request to the introduction socket may take in all, however its answer arrives.
 const CALL_TIME: Duration = Duration::from_secs(5);
 
 /// Starts and stops one user's host. The portal calls it with names `valid_user` took, and a controller refuses any other.
@@ -47,8 +50,9 @@ pub trait Controller: Send + Sync {
 }
 
 /// systemd's template unit, `canoa@USER.service`, started and stopped with `systemctl`. The portal runs as a service user with
-/// no rights of its own, so `start` and `stop` are what a polkit rule allows it for `canoa@*.service` and nothing more
-/// (`elevate` is the other way: a command that runs `systemctl` as root, such as `sudo -n`).
+/// no rights of its own, so `start` and `stop` are what a polkit rule or a root helper allows it for those units and nothing
+/// more (`elevate` puts a command, such as `sudo -n`, before `systemctl`; `systemctl` may then be the helper, which takes
+/// the same words).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Systemd {
     /// The `systemctl` program.
@@ -80,17 +84,13 @@ impl Systemd {
         Ok(self.unit.replace("{user}", user))
     }
 
-    fn run(&self, verb: &str, unit: &str, elevated: bool) -> io::Result<()> {
-        let mut words = if elevated {
-            self.elevate.clone()
-        } else {
-            Vec::new()
-        };
+    fn run(&self, verb: &str, unit: &str) -> io::Result<()> {
+        let mut words = self.elevate.clone();
         words.push(self.systemctl.clone().into_os_string());
         let mut command = Command::new(&words[0]);
         command
             .args(&words[1..])
-            .args([verb, unit])
+            .args([verb, "--no-ask-password", unit])
             .env("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
             .stdin(Stdio::Null)
             .stdout(Stdio::Null)
@@ -114,11 +114,11 @@ impl Default for Systemd {
 
 impl Controller for Systemd {
     fn start(&self, user: &str) -> io::Result<()> {
-        self.run("start", &self.unit_of(user)?, true)
+        self.run("start", &self.unit_of(user)?)
     }
 
     fn stop(&self, user: &str) -> io::Result<()> {
-        self.run("stop", &self.unit_of(user)?, true)
+        self.run("stop", &self.unit_of(user)?)
     }
 
     fn running(&self) -> io::Result<Vec<String>> {
@@ -139,30 +139,6 @@ impl Controller for Systemd {
                 valid_user(user).then(|| user.to_owned())
             })
             .collect())
-    }
-}
-
-#[derive(Default)]
-struct Slot {
-    relays: usize,
-    last: Option<Instant>,
-}
-
-/// What the portal knows of each user's host: who is using it, and since when nobody has.
-pub struct Instances {
-    controller: Arc<dyn Controller>,
-    dir: PathBuf,
-    idle: Duration,
-    start_wait: Duration,
-    max_relays: usize,
-    slots: Mutex<HashMap<String, Slot>>,
-    /// Held while a user's host is started, so that two requests start it once.
-    starting: Mutex<()>,
-}
-
-impl core::fmt::Debug for Instances {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Instances").finish_non_exhaustive()
     }
 }
 
@@ -189,30 +165,60 @@ pub fn dial(path: &Path, uid: u32) -> io::Result<Stream> {
     Ok(stream)
 }
 
+/// What the portal knows of one user's host.
+#[derive(Default)]
+struct Slot {
+    relays: AtomicUsize,
+    /// Whether the host is up, as far as the portal knows: counted against `max_hosts`.
+    up: AtomicBool,
+    last: Mutex<Option<Instant>>,
+    /// Held while this user's host is started or stopped, and nowhere else.
+    op: Mutex<()>,
+}
+
+/// What the portal knows of each user's host: who is using it, and since when nobody has.
+pub struct Instances {
+    controller: Arc<dyn Controller>,
+    dir: PathBuf,
+    idle: Duration,
+    start_wait: Duration,
+    max_relays: usize,
+    max_hosts: usize,
+    slots: Mutex<HashMap<String, Arc<Slot>>>,
+}
+
+impl core::fmt::Debug for Instances {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Instances").finish_non_exhaustive()
+    }
+}
+
 /// A user's host in use: the instance is not stopped for being idle while one lives.
 #[derive(Debug)]
 pub struct Lease {
-    instances: Arc<Instances>,
-    user: String,
+    slot: Arc<Slot>,
+}
+
+impl core::fmt::Debug for Slot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Slot").finish_non_exhaustive()
+    }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        let mut slots = self
-            .instances
-            .slots
+        self.slot.relays.fetch_sub(1, Ordering::SeqCst);
+        *self
+            .slot
+            .last
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if let Some(slot) = slots.get_mut(&self.user) {
-            slot.relays = slot.relays.saturating_sub(1);
-            slot.last = Some(Instant::now());
-        }
+            .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
     }
 }
 
 impl Instances {
     /// Hosts started by `controller` whose sockets are under `dir/USER`, stopped after `idle` with nobody using them, given
-    /// `start_wait` to start, at most `max_relays` open for a user.
+    /// `start_wait` to start, at most `max_relays` open for a user and `max_hosts` running.
     #[must_use]
     pub fn new(
         controller: Arc<dyn Controller>,
@@ -220,6 +226,7 @@ impl Instances {
         idle: Duration,
         start_wait: Duration,
         max_relays: usize,
+        max_hosts: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             controller,
@@ -227,8 +234,8 @@ impl Instances {
             idle,
             start_wait,
             max_relays,
+            max_hosts,
             slots: Mutex::new(HashMap::new()),
-            starting: Mutex::new(()),
         })
     }
 
@@ -244,15 +251,29 @@ impl Instances {
         entry_socket(&self.dir_of(user), name)
     }
 
+    fn slot(&self, user: &str) -> Arc<Slot> {
+        let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(slots.entry(user.to_owned()).or_default())
+    }
+
     /// The hosts that already run are counted as used just now, so a portal that started again stops them in time.
     pub fn adopt(&self) {
         let Ok(users) = self.controller.running() else {
             return;
         };
-        let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
         for user in users {
-            slots.entry(user).or_default().last = Some(Instant::now());
+            let slot = self.slot(&user);
+            slot.up.store(true, Ordering::SeqCst);
+            *slot.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
         }
+    }
+
+    fn running(&self) -> usize {
+        let slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
+        slots
+            .values()
+            .filter(|slot| slot.up.load(Ordering::SeqCst))
+            .count()
     }
 
     /// Makes sure `user`'s host runs and answers, starting it when it does not, and counts one more use of it until the lease
@@ -260,49 +281,54 @@ impl Instances {
     ///
     /// # Errors
     ///
-    /// When the user has too many open already, or the host could not be started or did not answer in time.
-    pub fn acquire(self: &Arc<Self>, user: &str, uid: u32) -> io::Result<Lease> {
+    /// When the user has too many open already, too many hosts run, or the host could not be started or did not answer in time.
+    pub fn acquire(&self, user: &str, uid: u32) -> io::Result<Lease> {
         if !valid_user(user) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "not a user name",
             ));
         }
-        {
-            let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
-            let slot = slots.entry(user.to_owned()).or_default();
-            if slot.relays >= self.max_relays {
-                return Err(io::Error::other("too many connections open for this user"));
-            }
-            slot.relays += 1;
+        let slot = self.slot(user);
+        if slot.relays.fetch_add(1, Ordering::SeqCst) >= self.max_relays {
+            slot.relays.fetch_sub(1, Ordering::SeqCst);
+            return Err(io::Error::other("too many connections open for this user"));
         }
         let lease = Lease {
-            instances: Arc::clone(self),
-            user: user.to_owned(),
+            slot: Arc::clone(&slot),
         };
-        self.ready(user, uid)?;
+        self.ready(user, uid, &slot)?;
         Ok(lease)
     }
 
     /// Counts a use of `user`'s host that is over in a moment, so that it is not stopped for being idle yet.
     pub fn touch(&self, user: &str) {
-        let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
-        slots.entry(user.to_owned()).or_default().last = Some(Instant::now());
+        *self
+            .slot(user)
+            .last
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
     }
 
-    fn ready(&self, user: &str, uid: u32) -> io::Result<()> {
+    fn ready(&self, user: &str, uid: u32, slot: &Slot) -> io::Result<()> {
         let index = r#"{"op":"index"}"#;
+        // Only this user's own start or stop waits on this.
+        let _own = slot.op.lock().unwrap_or_else(PoisonError::into_inner);
+        // Taken before the first question, so a stop that is under way ends before this user is told the host is there.
         match self.ask(user, uid, index) {
-            Ok(_) => return Ok(()),
+            Ok(_) => {
+                slot.up.store(true, Ordering::SeqCst);
+                return Ok(());
+            }
             // A socket another user made is not a host to start over.
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => return Err(error),
             Err(_) => {}
         }
-        let _starting = self.starting.lock().unwrap_or_else(PoisonError::into_inner);
-        if self.ask(user, uid, index).is_ok() {
-            return Ok(());
+        if !slot.up.load(Ordering::SeqCst) && self.running() >= self.max_hosts {
+            return Err(io::Error::other("too many hosts are running"));
         }
         self.controller.start(user)?;
+        slot.up.store(true, Ordering::SeqCst);
         let until = Instant::now() + self.start_wait;
         loop {
             match self.ask(user, uid, index) {
@@ -320,48 +346,80 @@ impl Instances {
         }
     }
 
-    /// One request to `user`'s introduction socket: a line of JSON, answered with a line of JSON.
+    /// One request to `user`'s introduction socket: a line of JSON, answered with a line of JSON, all within a few seconds
+    /// however the other end paces its bytes.
     ///
     /// # Errors
     ///
-    /// When the socket cannot be reached, was made by another user, or does not answer with JSON.
+    /// When the socket cannot be reached, was made by another user, or does not answer with JSON in time.
     pub fn ask(&self, user: &str, uid: u32, request: &str) -> io::Result<serde_json::Value> {
         let stream = dial(&self.dir_of(user).join(INTRODUCTION), uid)?;
+        let deadline = Instant::now() + CALL_TIME;
         let mut stream = &stream;
-        stream.set_read_timeout(Some(CALL_TIME))?;
+        stream.set_write_timeout(Some(CALL_TIME))?;
         stream.write_all(request.as_bytes())?;
         stream.write_all(b"\n")?;
         let mut answer = Vec::new();
-        stream.take(MAX_ANSWER).read_to_end(&mut answer)?;
+        let mut chunk = [0_u8; 4096];
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the host answered too slowly",
+                ));
+            }
+            stream.set_read_timeout(Some(left))?;
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => {
+                    answer.extend_from_slice(&chunk[..read]);
+                    if answer.len() > MAX_ANSWER {
+                        return Err(io::Error::other("the host's answer is too long"));
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
         serde_json::from_slice(&answer).map_err(io::Error::other)
     }
 
     /// Stops each host nobody has used for `idle`; returns who was stopped.
     pub fn sweep(&self) -> Vec<String> {
         let now = Instant::now();
-        let due: Vec<String> = {
+        let candidates: Vec<(String, Arc<Slot>)> = {
             let slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
             slots
                 .iter()
-                .filter(|(_, slot)| {
-                    slot.relays == 0
-                        && slot
-                            .last
-                            .is_some_and(|last| now.duration_since(last) >= self.idle)
-                })
-                .map(|(user, _)| user.clone())
+                .map(|(user, slot)| (user.clone(), Arc::clone(slot)))
                 .collect()
         };
         let mut stopped = Vec::new();
-        for user in due {
+        for (user, slot) in candidates {
+            let idle = |slot: &Slot| {
+                slot.relays.load(Ordering::SeqCst) == 0
+                    && slot
+                        .last
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .is_some_and(|last| now.duration_since(last) >= self.idle)
+            };
+            if !idle(&slot) {
+                continue;
+            }
+            // A user whose host is being started or stopped is not idle; the system is asked with no lock but this user's.
+            let Ok(_own) = slot.op.try_lock() else {
+                continue;
+            };
             // A relay that came while this one was deciding keeps the host.
-            let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
-            if slots.get(&user).is_some_and(|slot| slot.relays > 0) {
+            if !idle(&slot) {
                 continue;
             }
             match self.controller.stop(&user) {
                 Ok(()) => {
-                    slots.remove(&user);
+                    slot.up.store(false, Ordering::SeqCst);
+                    *slot.last.lock().unwrap_or_else(PoisonError::into_inner) = None;
                     stopped.push(user);
                 }
                 Err(error) => {
@@ -370,11 +428,5 @@ impl Instances {
             }
         }
         stopped
-    }
-
-    /// The directory of the sockets, for a log line.
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.dir
     }
 }

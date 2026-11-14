@@ -5,7 +5,6 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpStream};
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 
@@ -13,18 +12,19 @@ use coqui_transport::{Channel, Failure};
 use tungstenite::protocol::{Role, WebSocketConfig};
 use tungstenite::{Error, Message, WebSocket};
 
+use super::conn::Conn;
 use crate::pipe::PipeChannel;
 
-/// The largest message either way: the sealed session's largest record and a little over.
-pub const MAX_MESSAGE: usize = 17 * 1024 * 1024;
 /// How often the reader looks at whether the session still stands.
 const TICK: Duration = Duration::from_millis(500);
 /// How long the pump waits for the host before looking at whether the relay ended.
 const PUMP_WAIT: Duration = Duration::from_millis(250);
+/// How long a write to the browser may make no progress before the channel ends.
+const WRITE_STALL: Duration = Duration::from_secs(30);
 
 /// A socket read by one thread and written by another: this half only reads, and what the WebSocket would write through it
 /// (a pong, a close) goes nowhere, since the writing half sends them under its own lock.
-struct ReadHalf(TcpStream);
+struct ReadHalf(Conn);
 
 impl Read for ReadHalf {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
@@ -51,38 +51,36 @@ pub fn upgrade_answer(key: &str) -> String {
     )
 }
 
-/// Carries messages between the browser's WebSocket, already upgraded, and `channel` until either ends, the session `alive`
-/// no longer stands, or `stopped` is set. Returns when both directions have ended.
+/// Carries messages, at most `max_message` bytes each, between the browser's WebSocket, already upgraded, and `channel` until
+/// either ends, the session `alive` no longer stands, or `stopped` is set. Returns when both directions have ended.
 pub fn run(
-    stream: &TcpStream,
+    conn: &Conn,
     channel: PipeChannel,
     alive: &(dyn Fn() -> bool + Sync),
     stopped: &AtomicBool,
+    max_message: usize,
 ) {
-    let Ok(write_side) = stream.try_clone() else {
-        return;
-    };
-    let Ok(read_side) = stream.try_clone() else {
-        return;
-    };
     let config = WebSocketConfig::default()
-        .max_message_size(Some(MAX_MESSAGE))
-        .max_frame_size(Some(MAX_MESSAGE));
-    if stream.set_read_timeout(Some(TICK)).is_err() {
+        .max_message_size(Some(max_message))
+        .max_frame_size(Some(max_message));
+    // A browser that stops reading ends the channel instead of holding the writer's lock.
+    if conn.set_read_timeout(Some(TICK)).is_err()
+        || conn.set_write_timeout(Some(WRITE_STALL)).is_err()
+    {
         return;
     }
     let writer = Arc::new(Mutex::new(WebSocket::from_raw_socket(
-        write_side,
+        conn.clone(),
         Role::Server,
         Some(config),
     )));
-    let mut reader = WebSocket::from_raw_socket(ReadHalf(read_side), Role::Server, Some(config));
+    let mut reader = WebSocket::from_raw_socket(ReadHalf(conn.clone()), Role::Server, Some(config));
     let channel = Arc::new(channel);
     let done = Arc::new(AtomicBool::new(false));
     let pump = {
         let (writer, channel, done) =
             (Arc::clone(&writer), Arc::clone(&channel), Arc::clone(&done));
-        let stream = stream.try_clone();
+        let conn = conn.clone();
         thread::Builder::new()
             .name("canoa-relay".to_owned())
             .spawn(move || {
@@ -103,9 +101,7 @@ pub fn run(
                 }
                 done.store(true, Ordering::SeqCst);
                 // Wakes the reader, which is waiting on the browser.
-                if let Ok(stream) = stream {
-                    let _ = stream.shutdown(Shutdown::Both);
-                }
+                conn.shutdown();
             })
     };
     let Ok(pump) = pump else {
@@ -119,10 +115,9 @@ pub fn run(
                 }
             }
             Ok(Message::Ping(payload)) => {
-                let _ = writer
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .send(Message::Pong(payload));
+                if let Ok(mut writer) = writer.try_lock() {
+                    let _ = writer.send(Message::Pong(payload));
+                }
             }
             // The host's protocol is binary alone, and a close is the browser's end.
             Ok(Message::Text(_) | Message::Close(_)) => break,
@@ -137,10 +132,10 @@ pub fn run(
     }
     done.store(true, Ordering::SeqCst);
     channel.close();
-    let _ = writer
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .close(None);
-    let _ = stream.shutdown(Shutdown::Both);
+    // A polite close only when the writer is free, and the socket is shut either way, so a stuck writer ends and releases it.
+    if let Ok(mut writer) = writer.try_lock() {
+        let _ = writer.close(None);
+    }
+    conn.shutdown();
     let _ = pump.join();
 }

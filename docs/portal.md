@@ -7,29 +7,46 @@ theirs alone. Nothing of one person's is reachable from another's.
 It is built with the `portal` feature (Unix only; it links the system's PAM library) and runs behind a proxy that speaks TLS.
 
 ```text
-browser ──HTTPS──> proxy ──HTTP, loopback──> canoa portal ──socket──> canoa serve --portal   (as the person, in their home)
+browser ──HTTPS──> proxy ──HTTP over a Unix socket──> canoa portal ──socket──> canoa serve --portal   (as the person, in their home)
 ```
 
 ## What the portal does
 
 - **Signs people in** with the operating system's accounts, through coqui-access's `system` provider: PAM checks the password
-  under a service of its own and NSS says who the account is, so accounts from SSSD or LDAP are there too. A name that is not a
-  plain account name (`a@b`, `a/b`, a leading dot or hyphen) is refused before anything is asked.
-- **Counts failed sign-ins** by the browser's address, which the proxy puts in `X-Forwarded-For` (only a header from a
-  `trusted_proxies` address is believed, and the last address in it that is not a proxy is the browser's), and by account
-  name. Past the limit a sign-in is refused before PAM is asked, so a guessing browser cannot lock an account in a directory.
-  Successful sign-ins do not clear the counts.
+  under a service of its own and NSS says who the account is, so accounts from SSSD or LDAP are there too. A name that does
+  not match `[A-Za-z_][A-Za-z0-9._-]{0,31}` is refused before anything is asked, and so are root and any account below
+  `min_uid`. **Name the groups** that may sign in (`groups`): with none, every account on the machine that has a password can
+  ask for a host, and a host is a process that runs as that account.
+- **Limits failed sign-ins** before PAM is asked, in one step that also counts the try, so tries made together cannot all pass.
+  An address (an IPv6 one by its /64) may fail `max_failures_per_pair` times for one account and `max_failures_per_address`
+  times in all inside `failure_window_seconds`; past either, the try is refused with 429. An account that has failed more than
+  `slow_after_user_failures` times from anywhere makes each further try wait `slow_seconds` longer, but is never shut out. A
+  failure of the accounts themselves (the directory is down) counts too; a success takes its own count back. Every failed
+  sign-in is answered no sooner than `failure_floor_seconds` after it began, so its time does not tell an account that exists
+  from one that does not.
 - **Keeps the browser signed in** with one cookie, `__Host-canoa`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, no
-  `Domain`. The token is never in a page's script or a response body, and only its digest is kept. A sign-in, a sign-out and a
-  channel need the request's `Origin` to be this site's own.
-- **Starts the person's host** as the template unit `canoa@NAME.service` when they first use it, through `systemctl`, which a
-  polkit rule lets the portal's service user run for those units and nothing else, and **stops it** after `idle_seconds`
-  with no channel open. A host the portal finds running when it starts is counted as just used.
+  `Domain`. The token is never in a page's script or a response body, and only its digest is kept. An account keeps at most
+  `max_sessions_per_user` sessions; the oldest goes. A sign-in, a sign-out, a pairing and a channel need the request's `Origin`
+  to be this site's own scheme and host, and `/canoa.json`, which starts a host, refuses a browser that says it is a
+  cross-site request. The sign-in page sends `Referrer-Policy: same-origin`, since a browser posts `Origin: null` from a page
+  that sends no referrer.
+- **Starts the person's host** as the template unit `canoa@NAME.service` when they first use it, and **stops it** after
+  `idle_seconds` with no channel open. At most `max_hosts` run at once. The account is looked up again each time a host is
+  wanted: one that was removed or renamed since the sign-in loses its sessions. A host that is slow to answer delays only its
+  own person.
 - **Introduces the browser's own key to that host.** The host still proves itself to the browser and the browser to the host by
-  key, through the portal, which relays each message without opening it: a sign-in is not a pairing.
+  key, through the portal, which relays each message (at most `max_message_bytes`) without opening it: a sign-in is not a
+  pairing.
 - **Serves the web app** from `site` to signed-in browsers only.
 
 The portal runs as a service user that owns nothing of anyone's: it never reads a person's files and holds no key of theirs.
+
+### What the limits do and do not protect
+
+The limits keep one browser from guessing quickly. They do not keep an account from being locked in the directory: guesses from
+many addresses add up in the directory's own count. Size `max_failures_per_pair`, `slow_after_user_failures` and the window below
+the directory's lockout threshold and observation window (on a domain, read them from its password policy before turning the
+portal on), and watch the log for sign-ins refused for their failures.
 
 ## The person's host: `canoa serve --portal`
 
@@ -42,37 +59,80 @@ canoa.cfg says of an address, and the web app is not served from it. `portal.soc
 answered with a line of JSON: `{"op":"index"}` (the host's id, method and entries), `{"op":"accept","peer":ID}` (accepts a key
 that connected and is waiting, as `canoa accept` does) and `{"op":"revoke","peer":ID}`.
 
+The host **refuses to run** as root, as a user id below `--portal-min-uid` (default 1000), as an account whose name (`USER`,
+which systemd sets for `User=`) is not the last part of the directory, or with a directory its account does not own. The unit
+below makes those agree; a portal asked to start a host for another name would otherwise run it as that account.
+
 The sockets' mode lets any local user connect. What keeps another account out is the host: it asks the system whose process is
-at the other end of each connection and closes any that is not `--portal-user`, before reading a byte. The directory is made
-by the unit, as root, under a `/run/canoa` only root can write, so only the person and root can put a socket in it. Every key
-the portal introduces is the person's own browser, so each holds every page grant on the control channel (see
-[the host](host.md)) without being named in canoa.cfg.
+at the other end of each connection and closes any that is not `--portal-user`, before reading a byte. The portal does the same
+in the other direction: it dials a person's socket for that person's user id and turns away a socket whose maker is anyone
+else, so a link in the person's own folder to another person's socket leads nowhere. Every key the portal introduces is the
+person's own browser, so each holds every page grant on the control channel (see [the host](host.md)) without being named in
+canoa.cfg.
 
 ## Setting it up
 
 The portal's settings are a TOML file; every key is optional.
 
 ```toml
-listen = "127.0.0.1:7890"              # loopback only
+socket = "/run/canoa-portal/portal.sock"   # what the proxy reaches the portal at
+socket_group = "canoa"                      # the group that may connect to it (the proxy's user is in it)
 site = "/opt/canoa/site"               # the web app's build (flutter build web --csp --no-web-resources-cdn)
 socket_dir = "/run/canoa"
 unit = "canoa@{user}.service"
 pam_service = "canoa"
-min_uid = 1000                         # the lowest user id that may sign in
-groups = []                            # when any are named, an account must be in one
+min_uid = 1000                         # the lowest user id that may sign in; root never may
+groups = ["canoa-users"]               # the groups an account must be in: name them
 hosts = ["canoa.example"]              # Host names a request may carry, besides localhost and addresses
-trusted_proxies = ["127.0.0.1", "::1"]
+trusted_proxies = []                   # proxies of ours that may appear in X-Forwarded-For before the browser's address
 client_address_header = "x-forwarded-for"
 session_seconds = 28800
+max_sessions_per_user = 8
 idle_seconds = 1800
-max_failures_per_address = 5
-max_failures_per_user = 10
+max_hosts = 64
+max_message_bytes = 4194304
+max_failures_per_pair = 3
+max_failures_per_address = 10
+slow_after_user_failures = 4
+slow_seconds = 2
 failure_window_seconds = 900
+failure_floor_seconds = 2
 ```
 
-`elevate = ["sudo", "-n"]` puts a command before `systemctl` for `start` and `stop`, for a machine with no polkit; give it one
-sudoers line per unit (a wildcard in a unit name is a hole). Every other limit (`max_connections`, `max_sessions`,
-`max_relays_per_user`, `request_seconds` and the rest) is a key of the same name with a default.
+`listen = "127.0.0.1:7890"` opens a loopback TCP address as well, for development: any local user can connect to it, or bind
+it first while the portal is down, so what a client says there about the browser's address is never believed and passwords
+must not cross it. Behind a proxy, use `socket` alone. The browser's address is believed only on `socket`.
+
+**The root helper** that lets the portal's account start and stop the person units, with no sudoers wildcard: install
+`crates/canoa-host/dist/canoa-instance` as `/usr/libexec/canoa-instance` (root, `0755`), add
+
+```text
+canoa ALL=(root) NOPASSWD: /usr/libexec/canoa-instance
+```
+
+to a sudoers file, and set `elevate = ["sudo", "-n"]` and `systemctl = "/usr/libexec/canoa-instance"`. It takes
+`start|stop canoa@NAME.service` and nothing else, checks NAME against the pattern above, and refuses any account with a user id
+below 1000. It needs the portal's unit to leave out `NoNewPrivileges` and `CapabilityBoundingSet` (see below).
+
+**Or a polkit rule**, which needs neither, in `/etc/polkit-1/rules.d/50-canoa.rules` (set `elevate` and `systemctl` to nothing
+and the portal runs plain `systemctl`):
+
+```js
+polkit.addRule(function (action, subject) {
+  if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "canoa") {
+    var unit = action.lookup("unit");
+    var verb = action.lookup("verb");
+    if ((verb == "start" || verb == "stop") &&
+        /^canoa@[A-Za-z_][A-Za-z0-9._-]{0,31}\.service$/.test(unit)) {
+      return polkit.Result.YES;
+    }
+  }
+});
+```
+
+A rule cannot look at user ids: the host's own refusal of root and of ids below `--portal-min-uid` is what stops a unit for
+`postgres`, and the helper checks it too. Keep the rule's regex and the helper's pattern identical to the validator's; a test
+reads this page for it.
 
 **The PAM service**, `/etc/pam.d/canoa`, for SSSD:
 
@@ -83,6 +143,14 @@ account required pam_sss.so
 
 Without a file, PAM falls back to `other`, which refuses everyone.
 
+**The slice** that bounds all the people's hosts together, `/etc/systemd/system/canoa.slice`:
+
+```ini
+[Slice]
+MemoryMax=24G
+TasksMax=8192
+```
+
 **The person's unit**, `/etc/systemd/system/canoa@.service`:
 
 ```ini
@@ -90,42 +158,72 @@ Without a file, PAM falls back to `other`, which refuses everyone.
 Description=Canoa host for %i
 
 [Service]
+Slice=canoa.slice
 User=%i
 WorkingDirectory=~
-ExecStartPre=+/usr/bin/install -d -m 0755 /run/canoa
-ExecStartPre=+/usr/bin/install -d -o %i -m 0755 /run/canoa/%i
+ExecStartPre=+/usr/bin/install -d -m 0711 /run/canoa
+ExecStartPre=+/usr/bin/install -d -o %i -g canoa -m 0710 /run/canoa/%i
 ExecStart=/opt/canoa/canoa serve --portal /run/canoa/%i --portal-user canoa --supervised
 Restart=on-failure
 RestartForceExitStatus=75
+MemoryMax=2G
+TasksMax=512
+CPUQuota=200%
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ```
 
-The entries every person's host offers go in a canoa.cfg beside the program (`/opt/canoa/canoa.cfg`); each person's own
-`~/.config/Canoa/canoa.cfg` goes over it, and is what their settings are written to. `--supervised` and `Restart=` let a page
-ask the host to restart itself.
+`/run/canoa` is `0711`, so no one can list it, and each person's folder is `0710`, owned by them with the group `canoa`: the
+portal's account (and no one else) can reach the sockets in it. Size the limits to the machine and what a person runs; a
+person's agents run inside them. `--supervised` and `Restart=` let a page ask the host to restart itself. The entries every
+person's host offers go in a canoa.cfg beside the program (`/opt/canoa/canoa.cfg`); each person's own `~/.config/Canoa/canoa.cfg`
+goes over it, and is what their settings are written to.
 
-**The portal's unit** runs as a service user, for example `canoa`, with `ProtectHome=yes`, `ProtectSystem=strict` and
-`NoNewPrivileges=yes`: it needs no home and no write access.
+**The portal's account and unit.** The account is a system account with no shell, no password and no scheduled jobs; it
+owns nothing:
 
-**The polkit rule** that lets that user start and stop the person units and nothing else, in
-`/etc/polkit-1/rules.d/50-canoa.rules`:
-
-```js
-polkit.addRule(function (action, subject) {
-  if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "canoa") {
-    var unit = action.lookup("unit");
-    var verb = action.lookup("verb");
-    if ((verb == "start" || verb == "stop") &&
-        /^canoa@[A-Za-z0-9_][A-Za-z0-9._-]{0,31}\.service$/.test(unit)) {
-      return polkit.Result.YES;
-    }
-  }
-});
+```sh
+useradd --system --no-create-home --shell /usr/sbin/nologin canoa
+passwd -l canoa
+# and leave it out of /etc/cron.allow and /etc/at.allow, or name it in cron.deny and at.deny
 ```
 
-**The proxy** passes the browser's address and the upgrade:
+`/etc/systemd/system/canoa-portal.service`:
+
+```ini
+[Service]
+User=canoa
+Group=canoa
+RuntimeDirectory=canoa-portal
+RuntimeDirectoryMode=0750
+ExecStart=/opt/canoa/canoa portal --config /etc/canoa/portal.toml
+UMask=077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+```
+
+With the sudo helper, leave out `NoNewPrivileges` and `CapabilityBoundingSet=`, which stop `sudo` from working; the polkit rule
+needs neither change. Set `kernel.yama.ptrace_scope` to 1 or more so no account can read another's memory with ptrace. Add the
+proxy's user to the group `canoa`, which is what lets it into `/run/canoa-portal`.
+
+**The proxy** passes the browser's address and the upgrade, over the socket:
 
 ```nginx
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
@@ -133,7 +231,7 @@ server {
     server_name canoa.example;
     # ... TLS ...
     location / {
-        proxy_pass http://127.0.0.1:7890;
+        proxy_pass http://unix:/run/canoa-portal/portal.sock:;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;   # replaces what the browser sent
@@ -164,6 +262,7 @@ pairing. The bundled web app does not make these calls yet.
 
 - A host nobody has a channel open to stops after `idle_seconds`, and so does what it was running: a long task in an agent
   ends with it. Keep a page open, or raise the setting.
-- Hosts are started one at a time, each given `start_seconds` to answer.
+- A person's host is started once, however many requests come together, and given `start_seconds` to answer.
 - Kerberos tickets for the person's processes are not provided by the portal.
 - The control channel can change a person's own canoa.cfg sections and uploads; it is the person's own account that does it.
+- The portal opens no PAM session, so nothing makes a home directory: it must exist before the person's first sign-in.

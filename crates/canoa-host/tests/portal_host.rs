@@ -27,6 +27,7 @@ fn my_uid() -> u32 {
 fn portal_host(uid: u32) -> (Host, std::path::PathBuf) {
     let scratch = Scratch::new();
     let dir = scratch.0.join("run");
+    std::fs::create_dir_all(&dir).expect("the folder the unit makes");
     let config = format!(
         "[host.agents.fixture]\nprogram = {}\nlisten = \"127.0.0.1:0\"\n",
         quoted(&example("stdio_agent", false).to_string_lossy()),
@@ -39,7 +40,8 @@ fn portal_host(uid: u32) -> (Host, std::path::PathBuf) {
         &uid,
     ];
     // One line for the entry and one for the control channel.
-    let host = Host::start_in_with(scratch, &config, 2, &args, &[]);
+    // The account's name is the last part of the folder, as the unit makes it.
+    let host = Host::start_in_with(scratch, &config, 2, &args, &[("USER", "run".into())]);
     (host, dir)
 }
 
@@ -163,6 +165,42 @@ fn a_connection_from_any_user_but_the_portals_is_closed_before_a_byte_is_read() 
     // And what that user did not ask for is not done: the key never became waiting, so it could not have been accepted.
     let listed = host.command(&["peers", "--format", "json"]);
     assert!(!String::from_utf8_lossy(&listed.stdout).contains(&key.peer_id().to_string()));
+}
+
+/// Runs `serve --portal` on a folder the test made, with the given `USER` and extra arguments; the status it ends with.
+fn refused_portal(user: &str, extra: &[&str]) -> (Option<i32>, bool) {
+    let scratch = Scratch::new();
+    let dir = scratch.0.join("run");
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(&config, "").expect("a file");
+    let uid = my_uid().to_string();
+    let output = Command::new(host_binary())
+        .args(["serve", "--allow-empty", "--config"])
+        .arg(&config)
+        .arg("--portal")
+        .arg(&dir)
+        .args(["--portal-user", &uid])
+        .args(extra)
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .env("USER", user)
+        .stdin(Stdio::null())
+        .output()
+        .expect("runs");
+    (output.status.code(), dir.join("portal.sock").exists())
+}
+
+#[test]
+fn a_host_for_a_portal_refuses_an_account_that_is_not_the_one_whose_folder_it_is() {
+    // Another name than the folder's, and a user id below the lowest one allowed: nothing is bound.
+    assert_eq!(refused_portal("someone-else", &[]), (Some(2), false));
+    assert_eq!(
+        refused_portal("run", &["--portal-min-uid", "4000000"]),
+        (Some(2), false)
+    );
+    if my_uid() == 0 {
+        assert_eq!(refused_portal("run", &[]), (Some(2), false), "root");
+    }
 }
 
 #[test]
