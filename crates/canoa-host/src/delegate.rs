@@ -20,6 +20,7 @@ mod child;
 pub(crate) mod privilege;
 mod remote;
 mod server;
+pub(crate) use server::ours;
 mod tools;
 
 use std::collections::{HashMap, VecDeque};

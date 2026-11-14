@@ -75,6 +75,7 @@ pub const APPROVE_META: &str = "dev.boriken.canoa/approve";
 const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
 mod hooks;
+mod private;
 pub(crate) use hooks::forward as forward_hook;
 mod template;
 
@@ -328,8 +329,9 @@ pub(crate) struct Connection {
     notes: Vec<Item>,
     env: Vec<(String, Secret)>,
     env_items: Vec<Item>,
-    /// The directory every skill directory of this connection is written under, so the provider can be told to work in it.
-    skills: PathBuf,
+    /// The directory every skill directory and every plugin of this connection is written under, so the provider can be told
+    /// to work in it: made once, when something is first written, and removed with the connection.
+    skills: private::Private,
     /// Whether the client is this process's own link, the only one the host asks to approve servers.
     in_process: bool,
     /// The host's own program and what goes before its subcommand: how a harness's hooks run the forwarder.
@@ -466,15 +468,7 @@ impl Connection {
                 ));
             }
         }
-        let mut random = [0_u8; 16];
-        getrandom::fill(&mut random).map_err(|error| error.to_string())?;
-        let skills = std::env::temp_dir().join(format!(
-            "canoa-profile-{}",
-            random
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        ));
+        let skills = private::Private::new("canoa-profile");
         Ok(Self {
             name: name.clone(),
             entry: entry.to_owned(),
@@ -499,9 +493,19 @@ impl Connection {
         self
     }
 
-    /// The directory the connection's skills are written under: created when the first is written, removed with the last.
+    /// Where the connection's skills and plugins are written under: made when the first is written, removed with the
+    /// connection.
     pub(crate) fn skills(&self) -> &Path {
-        &self.skills
+        self.skills.path()
+    }
+
+    /// The directory of [`Self::skills`], made if it is not yet.
+    ///
+    /// # Errors
+    ///
+    /// When a directory is already there (it is never taken, whoever made it) or cannot be made private.
+    pub(crate) fn private(&self) -> std::io::Result<&Path> {
+        self.skills.ensure()
     }
 
     /// The profile's environment, resolved: what the agent's process is given.
@@ -923,7 +927,7 @@ fn skills_not_taken(harness: Option<&str>) -> &'static str {
     }
 }
 
-/// A private directory a connection's skills are written to, removed with it.
+/// A private directory in a connection's own, removed with it; `under` is that directory, which is never made here.
 #[derive(Debug)]
 struct Written(PathBuf);
 
@@ -933,11 +937,9 @@ impl Written {
         getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
         let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         let root = under.join(name);
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
         #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        builder.create(&root)?;
+        private::check(under)?;
+        private::make_inside(&root)?;
         let written = Self(root);
         for (path, bytes) in files {
             let mut target = written.0.clone();
@@ -996,11 +998,8 @@ impl Written {
 
 impl Drop for Written {
     fn drop(&mut self) {
+        // The connection's directory is not touched: it goes when the connection does.
         let _ = std::fs::remove_dir_all(&self.0);
-        // The connection's directory goes with its last skills, if nothing else is in it.
-        if let Some(under) = self.0.parent() {
-            let _ = std::fs::remove_dir(under);
-        }
     }
 }
 
@@ -1571,7 +1570,10 @@ fn parts_for(
                         .unwrap_or_default(),
                     );
                 }
-                match Written::create(connection.skills(), &written_files) {
+                match connection
+                    .private()
+                    .and_then(|under| Written::create(under, &written_files))
+                {
                     Ok(done) => {
                         for (name, layer, _) in &usable {
                             let how = if claude {

@@ -28,6 +28,7 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use serde_json::{Map, Value, json};
+use sha2::{Digest as _, Sha256};
 
 use super::super::Written;
 
@@ -42,8 +43,8 @@ const MAX_ANSWER: usize = 1024;
 /// The longest a payload from the harness is read, and the longest each field kept from it.
 const MAX_PAYLOAD: u64 = 1024 * 1024;
 const MAX_FIELD: usize = 2048;
-/// How long a request may take to arrive, once connected.
-const READ_LIMIT: Duration = Duration::from_secs(3);
+/// How long a request may take to arrive, once connected: the forwarder writes its line as soon as it has connected.
+const READ_LIMIT: Duration = Duration::from_millis(250);
 /// How long a hook may take to answer: an event's hooks may run for [`coqui_aos::Settings`]' bound, and a margin.
 pub(super) const ANSWER_LIMIT: Duration = Duration::from_secs(130);
 /// How long the forwarder waits to connect.
@@ -56,7 +57,7 @@ pub(super) const MAX_SECRETS: usize = 256;
 /// Requests a secret may make in a window: more than a person's compactions and sessions' starts can come to.
 const RATE: usize = 30;
 const WINDOW: Duration = Duration::from_secs(10);
-/// Refused attempts in a window before each further one waits, and how long.
+/// Refused attempts in a window before the next connection waits to be accepted, and how long.
 const BAD_FREE: usize = 20;
 const BAD_WAIT: Duration = Duration::from_secs(1);
 /// How often the accepting thread looks for a connection or for its stop.
@@ -132,7 +133,8 @@ struct Shared {
 
 struct Holder {
     session: String,
-    recent: VecDeque<Instant>,
+    /// When recent requests came, for each kind: one kind's traffic does not use up another's.
+    recent: BTreeMap<&'static str, VecDeque<Instant>>,
 }
 
 /// The host's end of the channel: a loopback listener, and the secrets of the sessions it speaks for.
@@ -190,14 +192,9 @@ impl Forward {
         })
     }
 
-    /// Gives `session` a secret and the file that holds it: `fail` says, by [`Kind`], whether a forwarder that is not
-    /// answered is to stop what the harness was about to do. The secret is good until [`Self::revoke`] or the end of the
-    /// connection.
-    pub(super) fn enroll(
-        &self,
-        session: &str,
-        fail: &BTreeMap<&'static str, bool>,
-    ) -> std::io::Result<Vec<u8>> {
+    /// Gives `session` a secret and the file that holds it, with the secret. The secret is good until [`Self::revoke`] or
+    /// [`Self::revoke_secret`], or the end of the connection.
+    pub(super) fn enroll(&self, session: &str) -> std::io::Result<(String, Vec<u8>)> {
         let mut secrets = lock(&self.shared.secrets);
         if secrets.len() >= MAX_SECRETS {
             return Err(std::io::Error::other("too many sessions have a channel"));
@@ -207,15 +204,19 @@ impl Forward {
             secret.clone(),
             Holder {
                 session: session.to_owned(),
-                recent: VecDeque::new(),
+                recent: BTreeMap::new(),
             },
         );
-        let file = json!({
-            "addr": self.addr.to_string(),
-            "secret": &secret,
-            "refuse": fail.iter().filter(|(_, refuse)| **refuse).map(|(kind, _)| *kind).collect::<Vec<_>>(),
-        });
-        Ok(file.to_string().into_bytes())
+        let file = json!({"addr": self.addr.to_string(), "secret": &secret});
+        Ok((secret, file.to_string().into_bytes()))
+    }
+
+    /// Ends one secret.
+    pub(super) fn revoke_secret(&self, secret: &str) {
+        let gone = lock(&self.shared.secrets).remove(secret);
+        if let Some(gone) = gone {
+            lock(&self.shared.queue).retain(|each| each.session != gone.session);
+        }
     }
 
     /// Ends every secret `session` holds.
@@ -246,16 +247,28 @@ impl Drop for Forward {
 /// The accepting thread: one handler thread for each connection, up to a bound, until `stop`.
 fn accept(listener: &TcpListener, shared: &Arc<Shared>, stop: &AtomicBool) {
     while !stop.load(Ordering::SeqCst) {
+        // Under a run of refused attempts the next connection waits, here and not in a handler: waiting holds no slot.
+        if recently_refused(shared) {
+            let until = Instant::now() + BAD_WAIT;
+            while Instant::now() < until && !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(POLL);
+            }
+        }
         match listener.accept() {
             Ok((stream, from)) => {
-                // A connection past the bound is dropped, not queued: its forwarder fails as its fail mode says.
+                // Only this user's own processes are heard: a connection from another user is dropped unread.
+                let Ok(local) = stream.local_addr() else {
+                    continue;
+                };
                 if !from.ip().is_loopback()
+                    || !crate::delegate::ours(from, local)
                     || stream.set_nonblocking(false).is_err()
-                    || shared.handlers.fetch_add(1, Ordering::SeqCst) >= MAX_HANDLERS
                 {
-                    if from.ip().is_loopback() {
-                        shared.handlers.fetch_sub(1, Ordering::SeqCst);
-                    }
+                    continue;
+                }
+                // A connection past the bound is dropped, not queued: its forwarder fails as its fail mode says.
+                if shared.handlers.fetch_add(1, Ordering::SeqCst) >= MAX_HANDLERS {
+                    shared.handlers.fetch_sub(1, Ordering::SeqCst);
                     continue;
                 }
                 let own = Arc::clone(shared);
@@ -274,27 +287,27 @@ fn accept(listener: &TcpListener, shared: &Arc<Shared>, stop: &AtomicBool) {
     }
 }
 
-/// A refused attempt: past [`BAD_FREE`] in a window, each one waits before it is dropped, so a guesser makes no more than
-/// a few attempts a second whatever it opens.
+/// Records a refused attempt.
 fn note_refused(shared: &Shared) {
-    let wait = {
-        let mut refused = lock(&shared.refused);
-        let now = Instant::now();
-        while refused
-            .front()
-            .is_some_and(|at| now.duration_since(*at) > WINDOW)
-        {
-            refused.pop_front();
-        }
-        refused.push_back(now);
-        if refused.len() > 4 * BAD_FREE {
-            refused.pop_front();
-        }
-        refused.len() > BAD_FREE
-    };
-    if wait {
-        std::thread::sleep(BAD_WAIT);
+    let mut refused = lock(&shared.refused);
+    refused.push_back(Instant::now());
+    if refused.len() > 4 * BAD_FREE {
+        refused.pop_front();
     }
+}
+
+/// Whether more than [`BAD_FREE`] attempts were refused in the last window: a guesser makes no more than a connection a
+/// second then, whatever it opens.
+fn recently_refused(shared: &Shared) -> bool {
+    let mut refused = lock(&shared.refused);
+    let now = Instant::now();
+    while refused
+        .front()
+        .is_some_and(|at| now.duration_since(*at) > WINDOW)
+    {
+        refused.pop_front();
+    }
+    refused.len() > BAD_FREE
 }
 
 /// One request. Anything that is not exactly one well-formed request with a good secret is dropped with no answer.
@@ -340,17 +353,17 @@ fn handle(stream: &TcpStream, shared: &Shared) {
             return note_refused(shared);
         };
         let now = Instant::now();
-        while holder
-            .recent
+        let recent = holder.recent.entry(kind.as_str()).or_default();
+        while recent
             .front()
             .is_some_and(|at| now.duration_since(*at) > WINDOW)
         {
-            holder.recent.pop_front();
+            recent.pop_front();
         }
-        if holder.recent.len() >= RATE {
+        if recent.len() >= RATE {
             return;
         }
-        holder.recent.push_back(now);
+        recent.push_back(now);
         let (sender, receiver) = channel();
         let session = holder.session.clone();
         let mut queue = lock(&shared.queue);
@@ -369,7 +382,8 @@ fn handle(stream: &TcpStream, shared: &Shared) {
     let Ok(verdict) = receiver.recv_timeout(ANSWER_LIMIT) else {
         return;
     };
-    let answer = json!({"nonce": nonce, "block": verdict.block});
+    let answer =
+        json!({"nonce": nonce, "block": verdict.block, "mac": mac(secret, nonce, verdict.block)});
     let mut out = answer.to_string().into_bytes();
     out.push(b'\n');
     let mut writer = stream;
@@ -378,9 +392,9 @@ fn handle(stream: &TcpStream, shared: &Shared) {
 
 /// The characters a path may hold to be put inside double quotes in a command Claude Code runs through a shell.
 fn quotable(text: &str) -> bool {
-    !text.chars().any(|c| {
-        c.is_control() || matches!(c, '"' | '$' | '`' | '\\' | '!' | '%' | '\'' | '&' | ';')
-    })
+    !text
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '"' | '$' | '`' | '\\' | '!' | '%'))
 }
 
 /// `program [before] hook-forward --channel FILE KIND`, quoted for a shell: `None` when a path holds a character that
@@ -390,6 +404,7 @@ pub(super) fn command_for(
     before: &[String],
     channel: &Path,
     kind: Kind,
+    refuse: bool,
 ) -> Option<String> {
     let slashed = |text: &str| text.replace('\\', "/");
     let mut parts = Vec::new();
@@ -407,6 +422,10 @@ pub(super) fn command_for(
         return None;
     }
     parts.push(format!("\"{channel}\""));
+    if refuse {
+        // Not a secret: a forwarder that cannot read its channel still knows to stop what a guard guards.
+        parts.push("--refuse".to_owned());
+    }
     parts.push(kind.as_str().to_owned());
     Some(parts.join(" "))
 }
@@ -424,6 +443,7 @@ pub(super) fn hooks_json(commands: &[(Kind, String)]) -> Value {
             event(*kind).to_owned(),
             json!([{"hooks": [{
                 "type": "command",
+                "shell": "bash",
                 "command": command,
                 "timeout": ANSWER_LIMIT.as_secs() + 5,
             }]}]),
@@ -438,7 +458,7 @@ pub(super) fn write_plugin(
     under: &Path,
     program: &str,
     before: &[String],
-    kinds: &[Kind],
+    kinds: &[(Kind, bool)],
     channel: Vec<u8>,
 ) -> std::io::Result<Option<Written>> {
     let mut files = BTreeMap::new();
@@ -455,8 +475,8 @@ pub(super) fn write_plugin(
     let written = Written::create(under, &files)?;
     let at = written.root().join(CHANNEL_FILE);
     let mut commands = Vec::new();
-    for kind in kinds {
-        let Some(command) = command_for(program, before, &at, *kind) else {
+    for (kind, refuse) in kinds {
+        let Some(command) = command_for(program, before, &at, *kind, *refuse) else {
             return Ok(None);
         };
         commands.push((*kind, command));
@@ -478,28 +498,12 @@ pub(super) fn write_plugin(
 pub(crate) fn forward(
     kind: &str,
     channel: &Path,
+    refuse: bool,
     mut payload: impl std::io::Read,
 ) -> Result<bool, String> {
     let Some(kind) = Kind::named(kind) else {
         return Err("an event this forwarder does not know".to_owned());
     };
-    let read = std::fs::metadata(channel)
-        .ok()
-        .filter(|meta| meta.len() <= 4096)
-        .and_then(|_| std::fs::read(channel).ok())
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-    // A session whose directory is gone has ended: there is nobody to answer and nothing to stop.
-    let Some(read) = read else {
-        return Ok(false);
-    };
-    let refuse = read
-        .get("refuse")
-        .and_then(Value::as_array)
-        .is_some_and(|kinds| {
-            kinds
-                .iter()
-                .any(|each| each.as_str() == Some(kind.as_str()))
-        });
     let stop = |why: &str| {
         if refuse {
             Err(format!(
@@ -508,6 +512,15 @@ pub(crate) fn forward(
         } else {
             Ok(false)
         }
+    };
+    let read = std::fs::metadata(channel)
+        .ok()
+        .filter(|meta| meta.len() <= 4096)
+        .and_then(|_| std::fs::read(channel).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    // A channel that cannot be read stops what a guard guards, as no answer does: whoever removed it is not the host.
+    let Some(read) = read else {
+        return stop("it was stopped");
     };
     let (Some(addr), Some(secret)) = (
         read.get("addr")
@@ -534,15 +547,43 @@ pub(crate) fn forward(
     let nonce = random_hex().map_err(|error| error.to_string())?;
     let request =
         json!({"secret": secret, "nonce": nonce, "kind": kind.as_str(), "fields": fields});
-    let answered = ask(addr, &request, &nonce);
+    let answered = ask(addr, &request, &nonce, secret);
     match answered {
-        Some(verdict) => Ok(verdict.block),
+        // Only a compaction can be stopped.
+        Some(verdict) => Ok(verdict.block && kind == Kind::PreCompact),
         None => stop("it was stopped"),
     }
 }
 
-/// The host's answer to `request`, when it came, was one line within bounds and echoed `nonce`.
-fn ask(addr: SocketAddr, request: &Value, nonce: &str) -> Option<Verdict> {
+/// The HMAC-SHA-256 of `message` under `key`.
+fn hmac(key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut block = [0_u8; 64];
+    if key.len() > 64 {
+        block[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let pad = |byte: u8| block.map(|each| each ^ byte);
+    let mut inner = Sha256::new();
+    inner.update(pad(0x36));
+    inner.update(message);
+    let mut outer = Sha256::new();
+    outer.update(pad(0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+/// What the host signs an answer with: the secret only it and the session's harness hold, over the request's nonce and
+/// what it answers, so a nonce echoed by another process does not pass for the host's answer.
+fn mac(secret: &str, nonce: &str, block: bool) -> String {
+    hmac(secret.as_bytes(), format!("{nonce}:{block}").as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The host's answer to `request`, when it came, was one line within bounds and was signed for `nonce` with `secret`.
+fn ask(addr: SocketAddr, request: &Value, nonce: &str, secret: &str) -> Option<Verdict> {
     let mut stream = TcpStream::connect_timeout(&addr, CONNECT_LIMIT).ok()?;
     stream
         .set_read_timeout(Some(ANSWER_LIMIT + CONNECT_LIMIT))
@@ -560,12 +601,13 @@ fn ask(addr: SocketAddr, request: &Value, nonce: &str) -> Option<Verdict> {
         return None;
     }
     let answer: Value = serde_json::from_slice(&answer).ok()?;
-    if answer.get("nonce")?.as_str()? != nonce {
+    let block = answer.get("block")?.as_bool()?;
+    if answer.get("nonce")?.as_str()? != nonce
+        || !same(answer.get("mac")?.as_str()?, &mac(secret, nonce, block))
+    {
         return None;
     }
-    Some(Verdict {
-        block: answer.get("block")?.as_bool()?,
-    })
+    Some(Verdict { block })
 }
 
 #[cfg(test)]

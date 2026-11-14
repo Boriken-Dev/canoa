@@ -700,19 +700,59 @@ fn age(dir: &Path, old: std::time::SystemTime) {
 }
 
 #[test]
-fn copies_a_killed_host_left_in_the_temporary_directory_are_removed_when_old_and_only_those() {
+fn what_a_killed_host_left_in_the_temporary_directory_is_removed_when_old_and_only_that() {
     let temp = Temp::new();
-    for name in ["canoa-hooks-old", "canoa-hooks-new", "other-old"] {
+    let me = std::process::id();
+    let names = [
+        "canoa-hooks-old",
+        "canoa-hooks-new",
+        "canoa-profile-old",
+        "canoa-profile-4194999-ab",
+        &format!("canoa-profile-{me}-ab"),
+        "other-old",
+    ];
+    for name in names {
         std::fs::create_dir_all(temp.0.join(name)).expect("a directory");
     }
-    let old = std::time::SystemTime::now() - Duration::from_secs(2 * 3600);
-    for name in ["canoa-hooks-old", "other-old"] {
+    let old = std::time::SystemTime::now() - Duration::from_secs(48 * 3600);
+    for name in names.into_iter().filter(|name| *name != "canoa-hooks-new") {
         age(&temp.0.join(name), old);
     }
     remove_stale(&temp.0);
     assert!(!temp.0.join("canoa-hooks-old").exists());
+    assert!(
+        !temp.0.join("canoa-profile-old").exists(),
+        "plugins and skills too"
+    );
+    assert!(!temp.0.join("canoa-profile-4194999-ab").exists());
     assert!(temp.0.join("canoa-hooks-new").exists());
-    assert!(temp.0.join("other-old").exists(), "only copies are removed");
+    assert!(
+        temp.0.join("other-old").exists(),
+        "only a host's own are removed"
+    );
+    // A host that runs is not swept: by its process id where the system can say, by the file it holds open on Windows.
+    #[cfg(unix)]
+    assert!(temp.0.join(format!("canoa-profile-{me}-ab")).exists());
+}
+
+#[test]
+fn the_directory_of_a_host_that_runs_is_not_swept_however_old() {
+    let temp = Temp::new();
+    let live = super::super::private::Private::under(&temp.0, "canoa-profile");
+    live.ensure().expect("made");
+    std::fs::write(live.path().join("channel.json"), b"x").expect("written");
+    age(
+        live.path(),
+        std::time::SystemTime::now() - Duration::from_secs(48 * 3600),
+    );
+    remove_stale(&temp.0);
+    assert!(
+        live.path().join("channel.json").exists(),
+        "a live host's files stay"
+    );
+    let path = live.path().to_owned();
+    drop(live);
+    assert!(!path.exists());
 }
 
 #[test]
@@ -956,6 +996,7 @@ mod native {
                 forward(
                     kind,
                     &channel,
+                    false,
                     Cursor::new(payload.to_string().into_bytes()),
                 )
             });
@@ -1270,6 +1311,7 @@ mod native {
                 let heard = forward(
                     "batch",
                     &channel,
+                    false,
                     Cursor::new(br#"{"cwd":"/elsewhere"}"#.to_vec()),
                 );
                 assert_eq!(heard, Ok(false));
@@ -1277,5 +1319,195 @@ mod native {
                 assert_eq!(payload_of(temp, "cd").len(), 1);
             },
         );
+    }
+
+    /// A session request as far as the agent: what the host sends on, and the plugin it carries.
+    fn begin<'a>(
+        hosted: &Hosted<'a, Client>,
+        client: &Client,
+        harness: &str,
+    ) -> (Value, Option<PathBuf>) {
+        send(
+            client,
+            1,
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}}),
+        );
+        hosted
+            .receive(Some(Duration::from_millis(10)))
+            .expect("read");
+        let answer = json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1,
+            "agentCapabilities": {}, "agentInfo": {"name": harness}}});
+        hosted
+            .send(&serde_json::to_vec(&answer).expect("JSON"))
+            .expect("sent");
+        send(
+            client,
+            2,
+            "session/new",
+            json!({"cwd": "/work", "mcpServers": []}),
+        );
+        // A request the host refuses is read as a timeout, as the relay reads it.
+        let request = hosted
+            .receive(Some(Duration::from_millis(10)))
+            .ok()
+            .flatten();
+        let request: Value = request.map_or(Value::Null, |bytes| {
+            serde_json::from_slice(&bytes).expect("JSON")
+        });
+        let plugin = request
+            .pointer("/params/_meta/claudeCode/options/plugins")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|plugin| plugin["path"].as_str())
+            .map(PathBuf::from)
+            .find(|path| path.join("hooks").join("hooks.json").exists());
+        (request, plugin)
+    }
+
+    /// What the client was last told.
+    fn last_to(client: &Client) -> Value {
+        let to = client.to.lock().expect("lock");
+        serde_json::from_slice(to.last().expect("a message")).expect("JSON")
+    }
+
+    #[test]
+    fn a_connection_directory_someone_made_first_is_never_used_and_a_guard_refuses_the_session() {
+        for (manifest, guarded) in [
+            ("[hooks]\ncd = {}\n", false),
+            ("[hooks]\npre-compact = { on_failure = \"refuse\" }\n", true),
+        ] {
+            let temp = Temp::new();
+            let digest = temp.install(manifest, &[]);
+            let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+            // Another user made the path first (it could not be guessed, but it could be read from a listing).
+            std::fs::create_dir_all(connection.skills()).expect("made first");
+            let client = Client::default();
+            let scope = Scope::new(Vec::new());
+            let hosted = Hosted::in_process(&client, &scope, &connection);
+            let (request, plugin) = begin(&hosted, &client, CLAUDE);
+            assert!(
+                plugin.is_none(),
+                "nothing is written under a directory that was not made here"
+            );
+            assert!(
+                std::fs::read_dir(connection.skills())
+                    .expect("read")
+                    .next()
+                    .is_none(),
+                "nothing was written into it"
+            );
+            if guarded {
+                assert_eq!(request, Value::Null, "the session request goes no further");
+                assert_eq!(
+                    last_to(&client)["error"]["code"],
+                    -32000,
+                    "{}",
+                    last_to(&client)
+                );
+            } else {
+                let answer = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}});
+                hosted
+                    .send(&serde_json::to_vec(&answer).expect("JSON"))
+                    .expect("sent");
+                let told = last_to(&client);
+                let cd = told["result"]["_meta"]["dev.boriken.canoa/profile"]["items"]
+                    .as_array()
+                    .and_then(|items| items.iter().find(|item| item["key"] == "hooks.team.cd"))
+                    .expect("cd is reported")
+                    .clone();
+                assert_eq!(cd["state"], "refused", "{cd}");
+                assert!(
+                    cd["how"]
+                        .as_str()
+                        .is_some_and(|how| how.contains("hook-failed")),
+                    "{cd}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_guard_that_needs_a_plugin_the_host_cannot_write_refuses_for_a_path_it_cannot_quote() {
+        let temp = Temp::new();
+        let digest = temp.install("[hooks]\npre-compact = { on_failure = \"refuse\" }\n", &[]);
+        let mut connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        connection.launcher = "/opt/$HOME/canoa".into();
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        let hosted = Hosted::in_process(&client, &scope, &connection);
+        let (request, plugin) = begin(&hosted, &client, CLAUDE);
+        assert!(plugin.is_none());
+        assert_eq!(request, Value::Null);
+        assert_eq!(last_to(&client)["error"]["code"], -32000);
+    }
+
+    #[test]
+    fn a_request_the_agent_answers_with_an_error_ends_its_channel_and_its_plugin() {
+        let temp = Temp::new();
+        let digest = temp.install("[hooks]\ncd = {}\n", &[]);
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        let hosted = Hosted::in_process(&client, &scope, &connection);
+        let (_, plugin) = begin(&hosted, &client, CLAUDE);
+        let plugin = plugin.expect("a plugin");
+        let copy = temp.0.join("channel-copy.json");
+        std::fs::copy(plugin.join("channel.json"), &copy).expect("copied");
+        let failed = json!({"jsonrpc": "2.0", "id": 2, "error": {"code": -32000, "message": "no"}});
+        hosted
+            .send(&serde_json::to_vec(&failed).expect("JSON"))
+            .expect("sent");
+        assert!(!plugin.exists(), "the plugin went with the request");
+        // Its secret is not good any more: the forwarder is not answered.
+        assert!(forward("batch", &copy, true, Cursor::new(Vec::new())).is_err());
+    }
+
+    #[test]
+    fn a_request_that_is_answered_keeps_its_plugin_until_the_session_ends() {
+        run("[hooks]\ncd = {}\n", &[], CLAUDE, "/work", |_, session| {
+            let plugin = session.plugin.clone().expect("a plugin");
+            assert!(plugin.exists());
+            send(
+                session.client,
+                9,
+                "session/close",
+                json!({"sessionId": "s1"}),
+            );
+            session
+                .hosted
+                .receive(Some(Duration::from_millis(10)))
+                .expect("read");
+            assert!(!plugin.exists());
+        });
+    }
+
+    #[test]
+    fn the_connection_directory_is_made_once_private_and_goes_with_the_connection() {
+        let temp = Temp::new();
+        let digest = temp.install("[hooks]\ncd = {}\n", &[]);
+        let connection = connect(&temp, Some(&digest), &real).expect("prepared");
+        let dir = connection.skills().to_owned();
+        assert!(!dir.exists(), "nothing is made until something is written");
+        assert_eq!(connection.private().expect("made"), dir);
+        assert_eq!(connection.private().expect("again"), dir);
+        let client = Client::default();
+        let scope = Scope::new(Vec::new());
+        {
+            let hosted = Hosted::in_process(&client, &scope, &connection);
+            let (_, plugin) = begin(&hosted, &client, CLAUDE);
+            assert!(plugin.expect("a plugin").starts_with(&dir));
+            let answer = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}});
+            hosted
+                .send(&serde_json::to_vec(&answer).expect("JSON"))
+                .expect("sent");
+        }
+        assert!(
+            dir.exists(),
+            "a session's end does not take the connection's directory"
+        );
+        drop(connection);
+        assert!(!dir.exists());
     }
 }

@@ -12,8 +12,8 @@ use serde_json::{Map, Value, json};
 use super::super::forward::{Forward, Forwarded, Kind, Verdict, write_plugin};
 use super::super::native::is_claude;
 use super::SessionHooks;
-use crate::profile::hosted::Hosted;
 use crate::profile::hosted::hooks::report_item;
+use crate::profile::hosted::{Hosted, Written};
 
 /// A directory compared as the harness and the client may each have spelled it: separators and, on Windows, case.
 fn plain(dir: &str) -> String {
@@ -27,48 +27,73 @@ fn plain(dir: &str) -> String {
     plain
 }
 
+/// The channel and plugin made for one session request.
+#[derive(Debug)]
+pub(super) struct Enrolled {
+    pub(super) secret: String,
+    pub(super) written: Written,
+}
+
+/// What came of giving a session a plugin of the harness's own hooks.
+pub(super) enum Plugin {
+    /// No overlay listens for what the harness's hooks show, or the harness is not Claude Code.
+    Nothing,
+    Added(Enrolled),
+    /// One was needed and could not be made; `guarded` when an overlay's hook that needs it fails closed.
+    Failed {
+        why: String,
+        guarded: bool,
+    },
+}
+
 impl<C: Channel + ?Sized> Hosted<'_, C> {
     /// Gives a session a plugin of Claude Code hooks that report to this host, when an overlay listens for what only
-    /// they show, and adds it to the session request's plugins. A session that gets none still runs: its hooks for these
-    /// events are not run, and the report says so.
+    /// they show, and adds it to the session request's plugins. When one is needed and cannot be made the answer says why,
+    /// and whether an overlay's guard needs it, which the caller must not let fail open.
     pub(super) fn native_plugin(
         &self,
         params: &mut Map<String, Value>,
         session: &SessionHooks,
-    ) -> bool {
+    ) -> Plugin {
         if !is_claude(Some(&self.harness_label())) {
-            return false;
+            return Plugin::Nothing;
         }
-        let (kinds, refuse) = self.connection.hooks.native(&session.allowed);
+        let (kinds, guarded) = self.connection.hooks.native(&session.allowed);
         if kinds.is_empty() {
-            return false;
+            return Plugin::Nothing;
         }
+        let failed = |why: String| {
+            tracing::warn!(
+                entry = self.connection.entry,
+                "a harness's own hooks report nothing for a session: {why}"
+            );
+            Plugin::Failed { why, guarded }
+        };
         let mut hold = self.hold();
         if hold.book.forward.is_none() {
             match Forward::open() {
                 Ok(open) => hold.book.forward = Some(open),
-                Err(error) => {
-                    tracing::warn!(
-                        entry = self.connection.entry,
-                        "the hook channel could not be opened, so a harness's own hooks report nothing: {error}"
-                    );
-                    return false;
-                }
+                Err(error) => return failed(format!("the channel could not be opened ({error})")),
             }
         }
         let Some(forward) = hold.book.forward.as_ref() else {
-            return false;
+            return failed("the channel is not open".to_owned());
         };
-        let made = forward.enroll(&session.id, &refuse).and_then(|channel| {
+        let (secret, channel) = match forward.enroll(&session.id) {
+            Ok(enrolled) => enrolled,
+            Err(error) => return failed(format!("no channel for the session ({error})")),
+        };
+        let before: Vec<String> = self
+            .connection
+            .before
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let made = self.connection.private().and_then(|under| {
             write_plugin(
-                self.connection.skills(),
+                under,
                 &self.connection.launcher.to_string_lossy(),
-                &self
-                    .connection
-                    .before
-                    .iter()
-                    .map(|arg| arg.to_string_lossy().into_owned())
-                    .collect::<Vec<_>>(),
+                &before,
                 &kinds,
                 channel,
             )
@@ -76,28 +101,17 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         let written = match made {
             Ok(Some(written)) => written,
             Ok(None) => {
-                forward.revoke(&session.id);
-                tracing::warn!(
-                    entry = self.connection.entry,
-                    "the host's program is at a path a hook command cannot quote, so a harness's own hooks report nothing"
+                forward.revoke_secret(&secret);
+                return failed(
+                    "the host's program is at a path a hook command cannot quote".to_owned(),
                 );
-                return false;
             }
             Err(error) => {
-                forward.revoke(&session.id);
-                tracing::warn!(
-                    entry = self.connection.entry,
-                    "the hooks' plugin could not be written: {error}"
-                );
-                return false;
+                forward.revoke_secret(&secret);
+                return failed(format!("the plugin could not be written ({error})"));
             }
         };
         let path = written.root().to_string_lossy().into_owned();
-        hold.book
-            .plugins
-            .entry(session.id.clone())
-            .or_default()
-            .push(written);
         drop(hold);
         let meta = params.entry("_meta").or_insert_with(|| json!({}));
         if !meta.is_object() {
@@ -118,7 +132,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         if let Some(plugins) = plugins.as_array_mut() {
             plugins.push(json!({"type": "local", "path": path}));
         }
-        true
+        Plugin::Added(Enrolled { secret, written })
     }
 
     /// Ends the channel and the plugins of a session.

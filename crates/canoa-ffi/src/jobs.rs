@@ -299,7 +299,7 @@ fn run_command(args: &[String], front: &JobFront) -> i32 {
         // They change the process they run in: its directory, its standard input, its end.
         Ok(parsed) if parsed.is_a_hosts_own() => {
             front.say(&format!(
-                "canoa: provider, tool, agent, launch, mcp-bridge and spawner run only as a process of their own, through {CHILD_FLAG}"
+                "canoa: provider, tool, agent, launch, mcp-bridge, hook-forward and spawner run only as a process of their own, through {CHILD_FLAG}"
             ));
             return STATUS_USAGE;
         }
@@ -423,7 +423,7 @@ pub(crate) fn child_main() -> i32 {
         Ok(parsed) if parsed.is_a_hosts_own() => parsed,
         Ok(_) => {
             eprintln!(
-                "canoa: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge or spawner"
+                "canoa: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge, hook-forward or spawner"
             );
             return STATUS_USAGE;
         }

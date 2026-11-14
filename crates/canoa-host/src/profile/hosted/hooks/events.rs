@@ -45,6 +45,9 @@ pub(in crate::profile::hosted) struct SessionHooks {
 #[derive(Debug)]
 struct Opening {
     hooks: SessionHooks,
+    /// The channel and plugin of the harness's own hooks made for this request: the session's once it is answered, else
+    /// ended with the request.
+    native: Option<native::Enrolled>,
     /// The agent's id for it when the request names it (load and resume).
     named: Option<String>,
     notes: Vec<Item>,
@@ -410,21 +413,48 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 }
             }
         }
-        notes.extend(
-            self.connection
-                .hooks
-                .items(allowed, Some(&self.harness_label())),
-        );
-        changed |= self.native_plugin(params, &session);
+        let plugin = self.native_plugin(params, &session);
+        let (native, failed) = match plugin {
+            native::Plugin::Nothing => (None, None),
+            native::Plugin::Added(enrolled) => {
+                changed = true;
+                (Some(enrolled), None)
+            }
+            native::Plugin::Failed { why, guarded } => {
+                if guarded {
+                    tracing::info!(
+                        entry = self.connection.entry,
+                        "a session was refused: the hooks of its harness that an overlay's guard needs could not be written: {why}"
+                    );
+                    return Err(error(
+                        id,
+                        SERVER_ERROR,
+                        "an overlay's hook that guards this session could not be given to its harness, so the session did not open",
+                    ));
+                }
+                (None, Some(why))
+            }
+        };
+        notes.extend(self.connection.hooks.items_with(
+            allowed,
+            Some(&self.harness_label()),
+            failed.as_deref(),
+        ));
         let mut hold = self.hold();
-        // A request the agent never answers is not kept for ever.
+        // A request the agent never answers is not kept for ever, nor is the channel it was given.
         if hold.book.opening.len() >= MAX_TRACKED {
-            hold.book.opening.clear();
+            let dropped = core::mem::take(&mut hold.book.opening);
+            for each in dropped.into_values() {
+                if let (Some(forward), Some(native)) = (&hold.book.forward, &each.native) {
+                    forward.revoke_secret(&native.secret);
+                }
+            }
             hold.book.notes.clear();
         }
         hold.book.opening.insert(
             id.to_string(),
             Opening {
+                native,
                 hooks: session,
                 named,
                 notes,
@@ -584,13 +614,31 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             });
+            let mut keep = None;
             if value.get("error").is_none()
                 && let Some(agent) = agent
             {
                 // A session already held keeps its record: loading it again does not replace it.
                 if hold.book.sessions.len() < MAX_TRACKED || hold.book.sessions.contains_key(&agent)
                 {
+                    keep = Some(opening.hooks.id.clone());
                     hold.book.sessions.entry(agent).or_insert(opening.hooks);
+                }
+            }
+            // A request that ended in an error, or whose session the table has no room for, ends its channel and plugin.
+            if let Some(native) = opening.native {
+                match keep {
+                    Some(id) => hold
+                        .book
+                        .plugins
+                        .entry(id)
+                        .or_default()
+                        .push(native.written),
+                    None => {
+                        if let Some(forward) = &hold.book.forward {
+                            forward.revoke_secret(&native.secret);
+                        }
+                    }
                 }
             }
             hold.book.notes.insert(key, opening.notes);

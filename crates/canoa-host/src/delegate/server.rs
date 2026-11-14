@@ -108,7 +108,7 @@ fn accept(listener: &TcpListener, engine: &Arc<Engine>, stop: &AtomicBool, port:
 /// Whether the process at `peer`, which connected to `local`, runs as the user this host does. A bearer an agent's command line
 /// shows to other users would otherwise be good for any of them. Only Linux can say: elsewhere every user is taken as this one,
 /// and a connection it cannot place there is refused.
-fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
+pub(crate) fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
     #[cfg(target_os = "linux")]
     {
         let table = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();

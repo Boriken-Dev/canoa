@@ -24,10 +24,9 @@ impl Drop for Dir {
 }
 
 /// A host's end with one session enrolled, and the channel file its forwarder reads.
-fn opened(dir: &Dir, refuse: &[&'static str]) -> (Forward, PathBuf) {
+fn opened(dir: &Dir) -> (Forward, PathBuf) {
     let forward = Forward::open().expect("a listener");
-    let fail = refuse.iter().map(|kind| (*kind, true)).collect();
-    let file = forward.enroll("s1", &fail).expect("enrolled");
+    let (_, file) = forward.enroll("s1").expect("enrolled");
     let path = dir.0.join(CHANNEL_FILE);
     std::fs::write(&path, file).expect("written");
     (forward, path)
@@ -36,7 +35,7 @@ fn opened(dir: &Dir, refuse: &[&'static str]) -> (Forward, PathBuf) {
 /// Runs the forwarder for `kind` in a thread, with `payload` as what the harness sends it.
 fn forwarding(kind: &'static str, path: &Path, payload: &str) -> JoinHandle<Result<bool, String>> {
     let (path, payload) = (path.to_owned(), payload.to_owned());
-    std::thread::spawn(move || forward(kind, &path, Cursor::new(payload.into_bytes())))
+    std::thread::spawn(move || forward(kind, &path, false, Cursor::new(payload.into_bytes())))
 }
 
 /// Everything reported, once at least `count` reports are there.
@@ -66,10 +65,13 @@ fn addr_of(path: &Path) -> SocketAddr {
 
 /// One raw request to the host's port: what an outside process that knows the address could send.
 fn raw(addr: SocketAddr, bytes: &[u8]) -> Option<Vec<u8>> {
+    raw_for(addr, bytes, Duration::from_millis(600))
+}
+
+/// As [`raw`], waiting up to `wait` for the answer.
+fn raw_for(addr: SocketAddr, bytes: &[u8], wait: Duration) -> Option<Vec<u8>> {
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
-    stream
-        .set_read_timeout(Some(Duration::from_millis(600)))
-        .ok()?;
+    stream.set_read_timeout(Some(wait)).ok()?;
     let _ = stream.write_all(bytes);
     let mut answer = Vec::new();
     let _ = stream.read_to_end(&mut answer);
@@ -79,7 +81,7 @@ fn raw(addr: SocketAddr, bytes: &[u8]) -> Option<Vec<u8>> {
 #[test]
 fn a_report_is_queued_answered_with_its_nonce_and_carries_only_the_fields_the_host_names() {
     let dir = Dir::new("report");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let payload = json!({
         "cwd": "/work/sub", "trigger": "manual", "source": "compact",
         "tool_input": {"command": "cat ~/.ssh/id"}, "transcript_path": "/x", "prompt": "secret words",
@@ -104,7 +106,7 @@ fn a_report_is_queued_answered_with_its_nonce_and_carries_only_the_fields_the_ho
 #[test]
 fn a_request_with_a_secret_that_is_not_held_is_dropped_with_no_answer_and_queues_nothing() {
     let dir = Dir::new("secret");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let addr = addr_of(&path);
     let wrong = "0".repeat(secret_of(&path).len());
     let line = format!(
@@ -129,7 +131,7 @@ fn a_request_with_a_secret_that_is_not_held_is_dropped_with_no_answer_and_queues
 #[test]
 fn a_secret_ends_with_its_session_and_with_the_connection() {
     let dir = Dir::new("revoke");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let secret = secret_of(&path);
     host.revoke("s1");
     let line = format!(
@@ -148,7 +150,7 @@ fn a_secret_ends_with_its_session_and_with_the_connection() {
 #[test]
 fn a_request_past_the_size_bound_or_not_one_request_is_dropped() {
     let dir = Dir::new("size");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let addr = addr_of(&path);
     let secret = secret_of(&path);
     let big = "x".repeat(MAX_REQUEST + 100);
@@ -174,7 +176,7 @@ fn a_request_past_the_size_bound_or_not_one_request_is_dropped() {
 #[test]
 fn a_session_may_report_only_so_often() {
     let dir = Dir::new("rate");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let addr = addr_of(&path);
     let secret = secret_of(&path);
     let line = format!("{{\"secret\":\"{secret}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"batch\",\"fields\":{{}}}}
@@ -204,7 +206,7 @@ fn a_session_may_report_only_so_often() {
 #[test]
 fn many_wrong_secrets_in_a_row_are_slowed_and_the_right_one_is_still_heard() {
     let dir = Dir::new("guess");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let addr = addr_of(&path);
     let started = Instant::now();
     for guess in 0..BAD_FREE + 3 {
@@ -220,7 +222,8 @@ fn many_wrong_secrets_in_a_row_are_slowed_and_the_right_one_is_still_heard() {
     let right = secret_of(&path);
     let line = format!("{{\"secret\":\"{right}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"batch\",\"fields\":{{}}}}
 ");
-    let answered = std::thread::spawn(move || raw(addr, line.as_bytes()));
+    let answered =
+        std::thread::spawn(move || raw_for(addr, line.as_bytes(), Duration::from_secs(5)));
     let mut taken = reported(&host, 1);
     assert_eq!(
         taken.len(),
@@ -238,24 +241,20 @@ fn a_forwarder_that_is_not_answered_fails_as_its_fail_mode_says() {
     let silent = TcpListener::bind("127.0.0.1:0").expect("bound");
     let addr = silent.local_addr().expect("address");
     let hold = std::thread::spawn(move || {
-        for _ in 0..3 {
+        for _ in 0..2 {
             if let Ok((stream, _)) = silent.accept() {
                 drop(stream);
             }
         }
     });
-    let write = |refuse: bool| {
-        let path = dir.0.join(format!("channel-{refuse}.json"));
-        std::fs::write(
-            &path,
-            json!({"addr": addr.to_string(), "secret": "s", "refuse": if refuse { vec!["pre-compact"] } else { Vec::new() }}).to_string(),
-        )
-        .expect("written");
-        path
-    };
-    let (refusing, passing) = (write(true), write(false));
-    let a = forward("pre-compact", &refusing, Cursor::new(b"{}".to_vec()));
-    let b = forward("pre-compact", &passing, Cursor::new(b"{}".to_vec()));
+    let path = dir.0.join("channel.json");
+    std::fs::write(
+        &path,
+        json!({"addr": addr.to_string(), "secret": "s"}).to_string(),
+    )
+    .expect("written");
+    let a = forward("pre-compact", &path, true, Cursor::new(b"{}".to_vec()));
+    let b = forward("pre-compact", &path, false, Cursor::new(b"{}".to_vec()));
     assert!(
         a.is_err(),
         "a guard that cannot be asked stops what it guards: {a:?}"
@@ -265,78 +264,238 @@ fn a_forwarder_that_is_not_answered_fails_as_its_fail_mode_says() {
         Ok(false),
         "any other hook that cannot be asked lets the harness go on"
     );
-    // Another kind is not stopped by a mode that names pre-compact.
-    assert_eq!(
-        forward("batch", &refusing, Cursor::new(b"{}".to_vec())),
-        Ok(false)
-    );
     let _ = hold.join();
     // A host that has gone: its port is closed.
     let gone = TcpListener::bind("127.0.0.1:0").expect("bound");
     let port = gone.local_addr().expect("address");
     drop(gone);
-    let path = dir.0.join("channel-gone.json");
     std::fs::write(
         &path,
-        json!({"addr": port.to_string(), "secret": "s", "refuse": ["pre-compact"]}).to_string(),
+        json!({"addr": port.to_string(), "secret": "s"}).to_string(),
     )
     .expect("written");
-    assert!(forward("pre-compact", &path, Cursor::new(b"{}".to_vec())).is_err());
+    assert!(forward("pre-compact", &path, true, Cursor::new(b"{}".to_vec())).is_err());
     assert_eq!(
-        forward("start", &path, Cursor::new(b"{}".to_vec())),
+        forward("start", &path, false, Cursor::new(b"{}".to_vec())),
         Ok(false)
     );
 }
 
 #[test]
-fn a_channel_that_is_gone_or_not_on_loopback_stops_nothing_and_asks_nobody() {
+fn a_channel_that_is_missing_or_unreadable_fails_closed_for_a_guard_and_open_for_the_rest() {
     let dir = Dir::new("gone");
     let missing = dir.0.join("none.json");
+    assert!(forward("pre-compact", &missing, true, Cursor::new(Vec::new())).is_err());
     assert_eq!(
-        forward("pre-compact", &missing, Cursor::new(Vec::new())),
+        forward("pre-compact", &missing, false, Cursor::new(Vec::new())),
         Ok(false)
     );
+    let garbled = dir.0.join("garbled.json");
+    std::fs::write(&garbled, b"not json").expect("written");
+    assert!(forward("pre-compact", &garbled, true, Cursor::new(Vec::new())).is_err());
     // A file that names an address off this computer is not dialled.
     let path = dir.0.join("channel.json");
     std::fs::write(
         &path,
-        json!({"addr": "10.1.2.3:9", "secret": "s", "refuse": ["pre-compact"]}).to_string(),
+        json!({"addr": "10.1.2.3:9", "secret": "s"}).to_string(),
     )
     .expect("written");
     let started = Instant::now();
-    assert!(forward("pre-compact", &path, Cursor::new(Vec::new())).is_err());
+    assert!(forward("pre-compact", &path, true, Cursor::new(Vec::new())).is_err());
     assert!(
         started.elapsed() < Duration::from_secs(1),
         "nothing was dialled"
     );
 }
 
-#[test]
-fn an_answer_that_does_not_echo_the_nonce_is_no_answer() {
-    let dir = Dir::new("nonce");
-    let liar = TcpListener::bind("127.0.0.1:0").expect("bound");
-    let addr = liar.local_addr().expect("address");
+/// A stand-in for the host that answers one request with `answer(nonce)`.
+fn answering(answer: impl FnOnce(&str) -> String + Send + 'static) -> (SocketAddr, JoinHandle<()>) {
+    let host = TcpListener::bind("127.0.0.1:0").expect("bound");
+    let addr = host.local_addr().expect("address");
     let serving = std::thread::spawn(move || {
-        let (mut stream, _) = liar.accept().expect("a request");
+        let (mut stream, _) = host.accept().expect("a request");
         let mut line = Vec::new();
         std::io::BufReader::new(&stream)
             .read_until(b'\n', &mut line)
             .expect("read");
+        let request: Value = serde_json::from_slice(&line).expect("JSON");
+        let nonce = request["nonce"].as_str().expect("a nonce").to_owned();
         stream
-            .write_all(b"{\"nonce\":\"not-the-one\",\"block\":false}\n")
+            .write_all((answer(&nonce) + "\n").as_bytes())
             .expect("answered");
     });
+    (addr, serving)
+}
+
+fn channel_to(dir: &Dir, addr: SocketAddr) -> PathBuf {
     let path = dir.0.join("channel.json");
     std::fs::write(
         &path,
-        json!({"addr": addr.to_string(), "secret": "s", "refuse": ["pre-compact"]}).to_string(),
+        json!({"addr": addr.to_string(), "secret": "the-secret"}).to_string(),
     )
     .expect("written");
-    assert!(
-        forward("pre-compact", &path, Cursor::new(Vec::new())).is_err(),
-        "a stranger's answer does not pass for the host's"
+    path
+}
+
+#[test]
+fn an_answer_that_is_not_signed_for_its_nonce_by_the_secret_is_no_answer() {
+    let dir = Dir::new("nonce");
+    type Answer = Box<dyn FnOnce(&str) -> String + Send>;
+    let cases: [(&str, Answer); 4] = [
+        (
+            "another nonce",
+            Box::new(|_| json!({"nonce": "not-the-one", "block": false, "mac": "x"}).to_string()),
+        ),
+        (
+            "no mac",
+            Box::new(|nonce| json!({"nonce": nonce, "block": false}).to_string()),
+        ),
+        (
+            "a mac of another secret",
+            Box::new(|nonce| {
+                json!({"nonce": nonce, "block": false, "mac": mac("other", nonce, false)})
+                    .to_string()
+            }),
+        ),
+        (
+            "a mac of another verdict",
+            Box::new(|nonce| {
+                json!({"nonce": nonce, "block": true, "mac": mac("the-secret", nonce, false)})
+                    .to_string()
+            }),
+        ),
+    ];
+    for (what, answer) in cases {
+        let (addr, serving) = answering(answer);
+        let path = channel_to(&dir, addr);
+        assert!(
+            forward("pre-compact", &path, true, Cursor::new(Vec::new())).is_err(),
+            "{what} does not pass for the host's"
+        );
+        serving.join().expect("ran");
+    }
+    // What the host signs is taken.
+    let (addr, serving) = answering(|nonce| {
+        json!({"nonce": nonce, "block": true, "mac": mac("the-secret", nonce, true)}).to_string()
+    });
+    let path = channel_to(&dir, addr);
+    assert_eq!(
+        forward("pre-compact", &path, true, Cursor::new(Vec::new())),
+        Ok(true)
     );
     serving.join().expect("ran");
+}
+
+#[test]
+fn a_block_stops_only_a_compaction() {
+    let dir = Dir::new("kinds");
+    for kind in ["start", "batch"] {
+        let (addr, serving) = answering(|nonce| {
+            json!({"nonce": nonce, "block": true, "mac": mac("the-secret", nonce, true)})
+                .to_string()
+        });
+        let path = channel_to(&dir, addr);
+        assert_eq!(
+            forward(kind, &path, false, Cursor::new(Vec::new())),
+            Ok(false),
+            "{kind}"
+        );
+        serving.join().expect("ran");
+    }
+}
+
+#[test]
+fn the_mac_is_hmac_sha256() {
+    // RFC 4231 test case 2.
+    let tag: String = hmac(b"Jefe", b"what do ya want for nothing?")
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(
+        tag,
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    );
+    let long: String = hmac(
+        &[0xaa; 131],
+        b"Test Using Larger Than Block-Size Key - Hash Key First",
+    )
+    .iter()
+    .map(|b| format!("{b:02x}"))
+    .collect();
+    assert_eq!(
+        long,
+        "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+    );
+}
+
+#[test]
+fn idle_connections_do_not_keep_a_report_from_being_heard() {
+    let dir = Dir::new("idle");
+    let (host, path) = opened(&dir);
+    let addr = addr_of(&path);
+    // More idle connections than there are handlers, as another user could hold open.
+    let idle: Vec<TcpStream> = (0..MAX_HANDLERS * 3)
+        .filter_map(|_| TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok())
+        .collect();
+    std::thread::sleep(READ_LIMIT * 3);
+    let run = forwarding("batch", &path, "{\"cwd\":\"/x\"}");
+    let mut taken = reported(&host, 1);
+    assert_eq!(
+        taken.len(),
+        1,
+        "the idle connections gave up their places within the read limit"
+    );
+    taken.remove(0).answer(Verdict::default());
+    assert_eq!(run.join().expect("ran"), Ok(false));
+    drop(idle);
+}
+
+#[test]
+fn each_kind_has_a_rate_of_its_own() {
+    let dir = Dir::new("kinds-rate");
+    let (host, path) = opened(&dir);
+    let addr = addr_of(&path);
+    let secret = secret_of(&path);
+    let send = |kind: &str| {
+        let line = format!(
+            "{{\"secret\":\"{secret}\",\"nonce\":\"abcdefgh12345678\",\"kind\":\"{kind}\",\"fields\":{{}}}}\n"
+        );
+        let asked = std::thread::spawn(move || raw(addr, line.as_bytes()));
+        let until = Instant::now() + Duration::from_millis(400);
+        let mut got = Vec::new();
+        while got.is_empty() && Instant::now() < until {
+            got = host.take();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let heard = got.len();
+        for each in got {
+            each.answer(Verdict::default());
+        }
+        let _ = asked.join();
+        heard
+    };
+    let batches: usize = (0..RATE + 5).map(|_| send("batch")).sum();
+    assert_eq!(batches, RATE);
+    assert_eq!(
+        send("pre-compact"),
+        1,
+        "a busy kind does not use up a compaction's"
+    );
+}
+
+#[test]
+fn a_session_has_a_limited_number_of_secrets_and_each_ends_alone() {
+    let host = Forward::open().expect("a listener");
+    let mut secrets = Vec::new();
+    for at in 0..MAX_SECRETS {
+        secrets.push(host.enroll(&format!("s{at}")).expect("enrolled").0);
+    }
+    assert!(host.enroll("one-more").is_err());
+    host.revoke_secret(&secrets[0]);
+    assert!(
+        host.enroll("one-more").is_ok(),
+        "an ended secret leaves room"
+    );
 }
 
 #[test]
@@ -347,7 +506,13 @@ fn a_command_is_written_only_for_paths_that_quote_safely() {
         "/opt/canoa/canoa"
     };
     let channel = Path::new("C:/tmp/canoa-profile-1/ab/channel.json");
-    let command = command_for(program, &[], channel, Kind::PreCompact).expect("quotable");
+    let command = command_for(program, &[], channel, Kind::PreCompact, false).expect("quotable");
+    let guard = command_for(program, &[], channel, Kind::PreCompact, true).expect("quotable");
+    assert!(
+        guard.ends_with("\" --refuse pre-compact"),
+        "the fail mode is on the command line: {guard}"
+    );
+    assert!(!command.contains("--refuse"));
     assert!(
         command.ends_with(
             "hook-forward --channel \"C:/tmp/canoa-profile-1/ab/channel.json\" pre-compact"
@@ -356,25 +521,41 @@ fn a_command_is_written_only_for_paths_that_quote_safely() {
     );
     assert!(!command.contains('\\'), "{command}");
     for bad in [
-        "/opt/it's/canoa",
         "/opt/$HOME/canoa",
         "/opt/a\"b/canoa",
         "/opt/a`b/canoa",
-        "/opt/a;b/canoa",
         "/opt/a%b/canoa",
+        "/opt/a!b/canoa",
     ] {
-        assert_eq!(command_for(bad, &[], channel, Kind::Start), None, "{bad}");
+        assert_eq!(
+            command_for(bad, &[], channel, Kind::Start, false),
+            None,
+            "{bad}"
+        );
+    }
+    // A name inside double quotes is one word for bash and PowerShell, and these are no more than letters there.
+    for fine in ["/opt/O'Brien/canoa", "/opt/R&D/canoa", "/opt/a;b/canoa"] {
+        let each = command_for(fine, &[], channel, Kind::Start, false).expect(fine);
+        assert!(
+            each.starts_with(&format!("\"{fine}\" hook-forward")),
+            "{each}"
+        );
     }
     assert_eq!(
-        command_for(program, &["--x\n".to_owned()], channel, Kind::Start),
+        command_for(program, &["--x\n".to_owned()], channel, Kind::Start, false),
         None
+    );
+    let hooks = hooks_json(&[(Kind::PreCompact, command.clone())]);
+    assert_eq!(
+        hooks["hooks"]["PreCompact"][0]["hooks"][0]["shell"], "bash",
+        "the command is written for bash"
     );
     // The secret is not in what the command line shows.
     let dir = Dir::new("cmd");
-    let (host, path) = opened(&dir, &[]);
+    let (host, path) = opened(&dir);
     let secret = secret_of(&path);
     assert!(
-        !command_for(program, &[], &path, Kind::Start)
+        !command_for(program, &[], &path, Kind::Start, false)
             .expect("quotable")
             .contains(&secret)
     );

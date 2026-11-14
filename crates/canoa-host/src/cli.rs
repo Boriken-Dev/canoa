@@ -245,6 +245,9 @@ enum Command {
         /// The file that holds the channel's address and secret.
         #[arg(long)]
         channel: PathBuf,
+        /// Stop what the harness was about to do when the host cannot be asked: an overlay's hook that guards it is on.
+        #[arg(long)]
+        refuse: bool,
         /// What the harness reports: `start`, `pre-compact` or `batch`.
         kind: String,
     },
@@ -1235,13 +1238,15 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         }
         Command::Accounts { command } => accounts(command, front),
         Command::McpBridge => mcp_bridge(),
-        Command::HookForward { channel, kind } => {
-            match crate::profile::forward_hook(&kind, &channel, std::io::stdin()) {
-                Ok(false) => Ok(()),
-                Ok(true) => Err(Failed::usage("an overlay's hook stopped this")),
-                Err(why) => Err(Failed::usage(why)),
-            }
-        }
+        Command::HookForward {
+            channel,
+            refuse,
+            kind,
+        } => match crate::profile::forward_hook(&kind, &channel, refuse, std::io::stdin()) {
+            Ok(false) => Ok(()),
+            Ok(true) => Err(Failed::usage("an overlay's hook stopped this")),
+            Err(why) => Err(Failed::usage(why)),
+        },
         #[cfg(unix)]
         Command::Spawner => crate::spawn::serve().map_err(Failed::run),
         Command::Launch { program, args } => {

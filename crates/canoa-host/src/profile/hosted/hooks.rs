@@ -149,33 +149,10 @@ fn plan(
     (!plan.hooks.is_empty()).then_some(plan)
 }
 
-/// What a host that was killed mid-connection left in `dir`: copies of overlays' files (`canoa-hooks-*`) older than this are
-/// removed when a connection starts, so the temporary directory does not fill.
-const STALE: Duration = Duration::from_secs(3600);
-
-/// Removes the `canoa-hooks-*` entries of `dir` older than [`STALE`].
+/// Removes what a host that was killed mid-connection left in `dir`: copies of overlays' files (`canoa-hooks-*`) and the
+/// plugins and skills written for a connection (`canoa-profile-*`), those this user owns and no running host holds.
 pub(super) fn remove_stale(dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("canoa-hooks-")
-        {
-            continue;
-        }
-        let old = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|made| made.elapsed().ok())
-            .is_some_and(|age| age > STALE);
-        if old {
-            let _ = std::fs::remove_dir_all(entry.path());
-        }
-    }
+    super::private::sweep(dir, &["canoa-hooks", "canoa-profile"]);
 }
 
 /// The hooks of a connection's overlays and the means to run them.
@@ -192,7 +169,7 @@ pub(super) struct Hooks {
     /// The manifests by normalized identity, which the order of hooks is taken from.
     manifests: BTreeMap<String, Document>,
     /// Where the copies of the overlays' files are made, removed with the connection.
-    under: PathBuf,
+    under: super::private::Private,
     copies: Mutex<BTreeMap<String, Written>>,
 }
 
@@ -203,7 +180,6 @@ impl Drop for Hooks {
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
-        let _ = std::fs::remove_dir(&self.under);
     }
 }
 
@@ -280,9 +256,9 @@ impl Hooks {
             });
         }
         remove_stale(&std::env::temp_dir());
-        let mut random = [0_u8; 16];
-        let _ = getrandom::fill(&mut random);
-        let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        if super::private::base() != std::env::temp_dir() {
+            remove_stale(&super::private::base());
+        }
         Self {
             overlays: planned,
             settings: Settings::default(),
@@ -296,7 +272,7 @@ impl Hooks {
                 .iter()
                 .map(|layer| (aos::normalize_name(&layer.identity), layer.manifest.clone()))
                 .collect(),
-            under: std::env::temp_dir().join(format!("canoa-hooks-{name}")),
+            under: super::private::Private::new("canoa-hooks"),
             copies: Mutex::new(BTreeMap::new()),
         }
     }
@@ -311,9 +287,9 @@ impl Hooks {
     pub(in crate::profile::hosted::hooks) fn native(
         &self,
         person: &BTreeSet<String>,
-    ) -> (Vec<forward::Kind>, BTreeMap<&'static str, bool>) {
+    ) -> (Vec<(forward::Kind, bool)>, bool) {
         let (mut start, mut pre, mut batch) = (false, false, false);
-        let mut refuse = BTreeMap::new();
+        let (mut refuse, mut guarded) = (false, false);
         for overlay in self
             .overlays
             .iter()
@@ -324,11 +300,13 @@ impl Hooks {
                     HookEvent::Cd => {
                         start = true;
                         batch = true;
+                        guarded |= hook.on_failure == OnFailure::Refuse;
                     }
                     HookEvent::PreCompact => {
                         pre = true;
                         if hook.on_failure == OnFailure::Refuse {
-                            refuse.insert(forward::Kind::PreCompact.as_str(), true);
+                            refuse = true;
+                            guarded = true;
                         }
                     }
                     HookEvent::SessionStart => {
@@ -338,20 +316,22 @@ impl Hooks {
                                 .any(|reason| reason == "compact" || reason == "clear")
                         });
                         start |= compacts;
+                        guarded |= compacts && hook.on_failure == OnFailure::Refuse;
                     }
                     _ => {}
                 }
             }
         }
+        // Only a compaction can be stopped, so only its forwarder is told to stop when the host cannot be asked.
         let kinds = [
-            (start, forward::Kind::Start),
-            (pre, forward::Kind::PreCompact),
-            (batch, forward::Kind::Batch),
+            (start, forward::Kind::Start, false),
+            (pre, forward::Kind::PreCompact, refuse),
+            (batch, forward::Kind::Batch, false),
         ]
         .into_iter()
-        .filter_map(|(wanted, kind)| wanted.then_some(kind))
+        .filter_map(|(wanted, kind, stops)| wanted.then_some((kind, stops)))
         .collect();
-        (kinds, refuse)
+        (kinds, guarded)
     }
 
     /// Whether an event has a hook that is on for `person`'s allowances plus canoa.cfg's.
@@ -417,6 +397,17 @@ impl Hooks {
 
     /// What the report says of each overlay's hooks.
     pub(super) fn items(&self, person: &BTreeSet<String>, harness: Option<&str>) -> Vec<Item> {
+        self.items_with(person, harness, None)
+    }
+
+    /// As [`Self::items`], for a session whose harness's own hooks could not be written for the reason `failed` gives: the
+    /// events that need them are reported failed, not applied.
+    pub(super) fn items_with(
+        &self,
+        person: &BTreeSet<String>,
+        harness: Option<&str>,
+        failed: Option<&str>,
+    ) -> Vec<Item> {
         let mut items = Vec::new();
         for overlay in &self.overlays {
             let layer = LayerId::new(LayerKind::Overlay, overlay.identity.clone());
@@ -468,6 +459,15 @@ impl Hooks {
                     )
                 } else if let Some(support) = native {
                     match support {
+                        Ok(_) if failed.is_some() => Item::new(
+                            key,
+                            &layer,
+                            State::Refused,
+                            format!(
+                                "hook-failed: the harness's own hooks could not be written ({}), so this hook never runs",
+                                failed.unwrap_or_default()
+                            ),
+                        ),
                         Ok(how) => Item::new(key, &layer, State::Applied, how),
                         Err(why) => Item::new(
                             key,
@@ -532,7 +532,7 @@ impl Hooks {
             .paths()
             .filter_map(|path| Some((path.to_owned(), overlay.tree.bytes(path)?.to_vec())))
             .collect();
-        let made = Written::create(&self.under, &files).ok()?;
+        let made = Written::create(self.under.ensure().ok()?, &files).ok()?;
         let root = made.0.clone();
         copies.insert(identity.to_owned(), made);
         Some(root)
