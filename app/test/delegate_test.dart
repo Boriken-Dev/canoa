@@ -301,6 +301,27 @@ void main() {
       expect(session.pendingPermissions, hasLength(1), reason: 'an input Canoa cannot read is not the one allowed');
     });
 
+    test('a question of a task on another machine is the person\'s even in Bypass, and no allowance or rule answers it', () async {
+      final store = SessionStore();
+      final host = DelegateHost();
+      final session = await host.start(store);
+      host.say(taskNotice('far', taskEvent('far', 'WORKING', source: 'far', remote: true)));
+      await _settle();
+      await store.chooseMode(session, ModeEntry(ownBypass, 'Bypass', own: true));
+      expect(session.bypass, isTrue);
+      host.ask(10, 'Edit a.txt', task: 'far');
+      await _settle();
+      expect(session.pendingPermissions, hasLength(1), reason: 'Bypass does not answer for another machine');
+      expect(host.answerTo(10), isNull);
+      final question = session.pendingPermissions.single;
+      expect(question.subject, isNull, reason: 'it offers no remembered rule');
+      store.choosePermission(session, question.options.firstWhere((option) => option.kind == 'allow_always'));
+      await _settle();
+      host.ask(11, 'Edit a.txt', task: 'far');
+      await _settle();
+      expect(session.pendingPermissions, hasLength(1), reason: 'an "allow for the session" does not cover the next one');
+    });
+
     test('a task that ends takes its waiting card with it', () async {
       final (host, session, _) = await start();
       host.ask(10, 'Edit a.txt', task: 't1');

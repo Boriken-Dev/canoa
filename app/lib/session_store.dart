@@ -1102,7 +1102,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (request.toolCall != null && task == null) _applyTool(target, request.toolCall!);
     final title = shortLine(request.title) ?? shortLine(request.kind) ?? 'A tool';
     final byTask = task == null ? '' : ' for ${task.title}';
-    final forPerson = _isForPerson(request);
+    // A question from an agent on another machine is the person's alone, as a plan is: Bypass, a remembered rule and a task's
+    // allowance were each given for agents this person chose to run here.
+    final forPerson = _isForPerson(request) || (task?.remote ?? false);
     if (target.bypass && !forPerson) {
       final allow = bypassAnswer(request.options, onceOnly: bypassOnceOnly);
       if (allow != null) {

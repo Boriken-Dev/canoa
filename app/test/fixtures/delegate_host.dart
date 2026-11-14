@@ -14,11 +14,18 @@ Map<String, Object?> taskNotice(String task, Map<String, Object?> event) => {
   'params': {'sessionId': 's1', 'taskId': task, 'event': event},
 };
 
-Map<String, Object?> taskEvent(String id, String state, {String title = 'Fix the tests', String source = 'codex', String? at}) => {
+Map<String, Object?> taskEvent(
+  String id,
+  String state, {
+  String title = 'Fix the tests',
+  String source = 'codex',
+  String? at,
+  bool remote = false,
+}) => {
   'task': {
     'id': id,
     'status': {'state': 'TASK_STATE_$state', 'timestamp': ?at},
-    'metadata': {'title': title, 'source': source, 'folder': '/work'},
+    'metadata': {'title': title, 'source': source, 'folder': '/work', if (remote) 'remote': true},
   },
 };
 

@@ -57,6 +57,10 @@ final class DelegateTask {
   String title = '';
   String source = '';
   String? folder;
+
+  /// Whether the task runs on another machine, whose agent's questions are the person's alone: no remembered rule, allowance or
+  /// Bypass answers for it, since none of them was written with that agent in mind.
+  bool remote = false;
   TaskPhase phase = TaskPhase.submitted;
 
   /// When the host first recorded it, and when it ended; null when the host sent no time, or the task has not ended.
@@ -157,6 +161,7 @@ final class DelegateTasks {
         task.title = _text(metadata['title'], 80) ?? task.title;
         task.source = _text(metadata['source']) ?? task.source;
         task.folder = _text(metadata['folder'], 1000) ?? task.folder;
+        if (metadata['remote'] == true) task.remote = true;
       }
       _status(task, whole['status']);
       if (whole['artifacts'] is List) {
