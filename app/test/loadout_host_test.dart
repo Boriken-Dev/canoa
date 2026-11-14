@@ -68,9 +68,7 @@ void main() {
       expect(installed.overlays.keys, ['review']);
       expect(installed.defaultOverlays, ['review']);
       await File('${config.path}/canoa.cfg').writeAsString(installed.encode());
-      // The host reads the profile when it starts, so it starts again to apply the change.
-      await host.apply(configPath: '${config.path}/canoa.cfg');
-      await _until(() => host!.phase == HostPhase.idle, 'the host to start again');
+      // No restart: the host reads canoa.cfg again when a session starts, so the one opened next has the overlay.
 
       Future<ProfileReport> reportChoosing(Map<String, Object?> meta) async {
         final link = host!.openLink('Profiled');

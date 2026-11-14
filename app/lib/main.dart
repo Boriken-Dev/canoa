@@ -1,6 +1,5 @@
 import 'attention/notifier.dart';
 import 'dart:async';
-import 'dart:convert' show jsonEncode;
 import 'config/canoa_config.dart';
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
@@ -320,18 +319,11 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<CanoaConfig> _applySettings(CanoaConfig fromPage) async {
     var changed = fromPage.withHost(config.host);
     // The host serves a source from the moment it starts, so adding or removing one restarts it, which ends the sessions open
-    // on any of its sources; it reads the profile tables when it starts too.
-    final agentsChanged = !_sameAgents(changed.agents, config.agents);
-    var restart = widget.host != null && (agentsChanged || !_sameProfiles(changed, config));
-    if (restart && _openOnHost() > 0) {
-      if (agentsChanged) {
-        if (!await _confirmRestart()) {
-          changed = changed.copyWith(agents: config.agents);
-          restart = false;
-        }
-      } else if (!await _confirmApplyProfile()) {
-        restart = false;
-      }
+    // on any of its sources. The profile tables are read again at each session, so changing them restarts nothing.
+    var restart = widget.host != null && !_sameAgents(changed.agents, config.agents);
+    if (restart && _openOnHost() > 0 && !await _confirmRestart()) {
+      changed = changed.copyWith(agents: config.agents);
+      restart = false;
     }
     if (!mounted) return changed;
     setState(() => config = changed);
@@ -349,10 +341,6 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     return changed;
   }
-
-  /// Whether `[profile]`, `[overlays]` and the `[agents]` tables (a profile and MCP choices live in them) read the same.
-  static bool _sameProfiles(CanoaConfig a, CanoaConfig b) =>
-      const ['profile', 'overlays', 'agents'].every((key) => jsonEncode(a.tables[key]) == jsonEncode(b.tables[key]));
 
   static bool _sameAgents(List<AgentCommand> a, List<AgentCommand> b) =>
       a.length == b.length &&
@@ -413,36 +401,12 @@ class _CanoaAppState extends State<CanoaApp> {
     _settingsKey.currentState?.controller.adopt(config);
   }
 
-  /// Saves what Loadout changed. The host reads the profile when it starts, so a change to it is applied by starting the host
-  /// again, which ends the sessions open on it: with some open, the person is asked, and may leave it for the next start.
+  /// Saves what Loadout changed. The host reads the profile again when each session starts, so nothing is restarted and no open
+  /// session ends: the change reaches the next one.
   Future<CanoaConfig?> _saveLoadout(CanoaConfig changed) async {
-    var restart = widget.host != null && _configPath != null && !_sameProfiles(changed, config);
-    if (restart && _openOnHost() > 0 && !await _confirmApplyProfile()) restart = false;
     await _write(changed);
     if (mounted) setState(() => config = changed);
-    if (restart) await widget.host!.apply(configPath: _configPath);
     return changed;
-  }
-
-  Future<bool> _confirmApplyProfile() async {
-    final above = _navigator.currentContext;
-    if (above == null || !above.mounted) return false;
-    final count = _openOnHost();
-    final ok = await showSelectableDialog<bool>(
-      context: above,
-      builder: (context) => AlertDialog(
-        key: const Key('apply-profile'),
-        title: const Text('Apply it now?'),
-        content: Text('A new session starts with the change once the host starts again, and that ends the '
-            '${count == 1 ? 'session' : '$count sessions'} open on this computer. Their conversations stay in the list to open '
-            'again. Or leave it: it is saved, and applies the next time the host starts.'),
-        actions: [
-          TextButton(key: const Key('apply-profile-later'), onPressed: () => Navigator.pop(context, false), child: const Text('Leave it for now')),
-          FilledButton(key: const Key('apply-profile-now'), onPressed: () => Navigator.pop(context, true), child: const Text('Apply now')),
-        ],
-      ),
-    );
-    return ok ?? false;
   }
 
   /// What the conversation shown offers the keyboard and the palette.

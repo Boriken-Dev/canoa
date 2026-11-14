@@ -90,7 +90,7 @@ class _ProfileApprovalDialogState extends State<ProfileApprovalDialog> {
           CheckboxListTile(
             key: const Key('approve-remember'),
             title: Text('Keep these choices for ${widget.agent}'),
-            subtitle: const Text('Written to canoa.cfg, and used the next time the host starts; a server whose definition changes asks again.'),
+            subtitle: const Text('Written to canoa.cfg, and used by the next session; a server whose definition changes asks again.'),
             value: _remember,
             onChanged: (value) => setState(() => _remember = value ?? false),
           ),
