@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/client.dart';
+import 'package:canoa/chat/agent_events.dart' show chatLimits;
 import 'package:canoa/chat/modes.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/main.dart';
@@ -261,13 +262,13 @@ void main() {
 
     testWidgets('questions past the most a conversation holds are cancelled and said', (tester) async {
       final (agent, session, _) = await _shown(tester);
-      for (var id = 100; id < 100 + maxPendingPermissions + 2; id++) {
+      for (var id = 100; id < 100 + chatLimits.pendingPermissions + 2; id++) {
         agent.ask(id, 'Edit a.txt', _all);
       }
       await _settle(tester);
-      expect(session.pendingPermissions, hasLength(maxPendingPermissions));
-      expect(agent.answerTo(100 + maxPendingPermissions)?['result'], {'outcome': {'outcome': 'cancelled'}});
-      expect(session.messages.where((message) => message.text.contains('more questions than')), isNotEmpty);
+      expect(session.pendingPermissions, hasLength(chatLimits.pendingPermissions));
+      expect(agent.answerTo(100 + chatLimits.pendingPermissions)?['result'], {'outcome': {'outcome': 'cancelled'}});
+      expect(session.messages.where((message) => message.text.contains('more requests than')), isNotEmpty);
     });
   });
 

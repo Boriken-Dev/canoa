@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
+import 'fixtures/session_setup.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 /// A folder on disk with files in it, and one file beside it that is not in it.
@@ -180,6 +181,8 @@ void main() {
     expect(prompt.map((block) => block['type']), ['text', 'resource_link']);
     expect(prompt[1]['uri'], Uri.file('${tree.folder.path}${Platform.pathSeparator}src${Platform.pathSeparator}main.dart').toString());
     expect(prompt[1]['name'], 'src/main.dart');
+    // The conversation takes what was sent from the composer when it has handed it over, a frame after the agent has it.
+    await settle(tester);
     expect(store.selected!.attachments, isEmpty);
     await finish(tester);
   });
@@ -210,7 +213,7 @@ void main() {
 
   testWidgets('/ lists the agent\'s commands and Canoa\'s actions in two groups, and an action sends nothing', (tester) async {
     final (store, agent, _) = await _started(tester);
-    store.selected!.commands = const [AgentCommandInfo('compact', 'Make room')];
+    store.selected!.offerCommands(const [AgentCommandInfo('compact', 'Make room')]);
     store.markViewed(store.selected!, 'x', null);
     await tester.pump();
     final before = agent.methods.where((method) => method == 'session/prompt').length;
@@ -228,7 +231,7 @@ void main() {
 
   testWidgets('+ has Slash commands, which opens the list', (tester) async {
     final (store, _, _) = await _started(tester);
-    store.selected!.commands = const [AgentCommandInfo('compact', 'Make room')];
+    store.selected!.offerCommands(const [AgentCommandInfo('compact', 'Make room')]);
     store.markViewed(store.selected!, 'x', null);
     await tester.pump();
     await tester.tap(find.byKey(const Key('composer-plus')));
@@ -253,7 +256,7 @@ void main() {
 
     testWidgets('the / list in two groups draws at $label width', (tester) async {
       final (store, _, _) = await _started(tester, size: size);
-      store.selected!.commands = const [AgentCommandInfo('compact', 'Make room'), AgentCommandInfo('review', 'Review the changes')];
+      store.selected!.offerCommands(const [AgentCommandInfo('compact', 'Make room'), AgentCommandInfo('review', 'Review the changes')]);
       store.markViewed(store.selected!, 'x', null);
       await tester.pump();
       await _type(tester, '/');

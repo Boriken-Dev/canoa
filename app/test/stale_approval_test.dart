@@ -52,7 +52,7 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('after the conversation was connected to another agent is not shown, its line is stopped, and no answer is sent',
+    testWidgets('after the conversation was connected to another agent is not shown, its line is stopped, and the agent that asked is told it was cancelled, once',
         (tester) async {
       final agent = OptionsAgent();
       final store = _store();
@@ -74,7 +74,8 @@ void main() {
       store.answerPermission(session, allow: true);
       store.choosePermission(session, option);
       await settle(tester);
-      expect(agent.answers, isEmpty);
+      expect(agent.answers.keys, [12], reason: 'the agent that asked is not left waiting, and is answered once');
+      expect(agent.answers[12]!['result'], {'outcome': {'outcome': 'cancelled'}});
       await finish(tester);
     });
 

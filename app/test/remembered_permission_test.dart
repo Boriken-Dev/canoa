@@ -266,7 +266,7 @@ void raceTests() {
       final (s, backend) = await gated(tester);
       s.agent.run(1, 'npm test');
       await _settle(tester);
-      s.session.bypass = true;
+      s.session.chat.presetBypass(true);
       await done(tester, s, backend);
       expect(s.agent.chose(1), 'allow-once');
       expect(s.rules.rules.single.fired, 0, reason: 'Bypass answered it');
@@ -556,12 +556,12 @@ void main() {
     testWidgets('applies none in Canoa\'s own Bypass, in a mode it does not know, or before the agent has said', (tester) async {
       final s = await _shown(tester);
       _add(s, type: RuleType.command, value: 'npm test');
-      s.session.bypass = true;
+      s.session.chat.presetBypass(true);
       s.agent.run(1, 'npm test', options: _noAllow);
       await _settle(tester);
       expect(s.agent.answerTo(1), isNull);
       s.store.cancelPermission(s.session);
-      s.session.bypass = false;
+      s.session.chat.presetBypass(false);
       s.agent.setMode('accept_edits');
       await _settle(tester);
       s.agent.run(2, 'npm test');

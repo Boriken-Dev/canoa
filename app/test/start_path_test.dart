@@ -2,7 +2,7 @@
 // and coming back while it starts, a message the agent cannot be given, the folder changed after choosing Worktree, quitting
 // or closing while it starts, a draft whose source is gone, and what is remembered for a source.
 import 'dart:async';
-import 'dart:io' show Directory;
+import 'dart:io' show Directory, FileSystemException;
 
 import 'package:canoa/chat/session_options.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -163,7 +163,7 @@ void main() {
     await finish(tester);
   });
 
-  test('a queued message that cannot be sent stays in the queue, held', () async {
+  test('a message to queue whose file cannot be read is not queued, and stays in the composer with what goes with it', () async {
     final agent = OptionsAgent()..holdTurns = true;
     final store = SessionStore();
     store.starter = (draft) async {
@@ -178,15 +178,11 @@ void main() {
     }
     expect(session.status, SessionStatus.working);
     store.addFile(session, 'gone.txt', '${Directory.systemTemp.path}/canoa-no-such-file.txt', 5);
-    await store.sendText('Second');
-    expect(session.queue.single.text, 'Second');
+    // Each file is read as the message is handed to the conversation, which queues it while the turn runs.
+    await expectLater(store.sendText('Second'), throwsA(isA<FileSystemException>()));
+    expect(session.queue, isEmpty);
+    expect(session.attachments.map((item) => item.name), ['gone.txt']);
     agent.finishTurn();
-    for (var i = 0; i < 50 && session.queueHeld == null; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(session.queue.map((message) => message.text), ['Second']);
-    expect(session.queue.single.attachments.map((item) => item.name), ['gone.txt']);
-    expect(session.queueHeld, isNotNull);
   });
 
   testWidgets('Worktree chosen for a repository, then a folder outside any, makes no worktree', (tester) async {

@@ -56,6 +56,9 @@ void main() {
       expect(store.inBypass(store.selected!), isFalse, reason: 'not yet in effect');
       expect(store.selected!.pendingPermissions, hasLength(1), reason: 'the request waiting stays the person\'s');
       expect(agent.answers[12], isNull);
+      // The held turn ends in the test, not as the app closes.
+      agent.finishTurn();
+      await settle(tester);
       await finish(tester);
     });
 

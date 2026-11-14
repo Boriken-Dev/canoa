@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/delegation_scene.dart';
+import 'fixtures/session_setup.dart';
 import 'fixtures/task_agent.dart';
 
 const _desktop = Size(1280, 800);
@@ -39,9 +40,9 @@ void main() {
   group('the environment', () {
     testWidgets('a local session shows this computer, its folder and its mode, and no worktree', (tester) async {
       final (_, session, _) = await showTask(tester, _desktop);
-      session.options = [
+      session.offer([
         ConfigOption(id: 'mode', label: 'Mode', current: 'accept_edits', category: 'mode', choices: [Choice('manual', 'Manual'), Choice('accept_edits', 'Accept edits')]),
-      ];
+      ]);
       await tester.pump();
       await _openInspector(tester);
       expect(_factText(tester, 'Machine'), 'Machine|This computer');
@@ -450,9 +451,9 @@ void main() {
         const worktree = SessionWorktree(path: '/work/proj.worktrees/fix-a1b2c3', branch: 'canoa/fix-a1b2c3', repo: '/work/proj');
         final git = FakeGit()..current = _disk([('src/calc.js', 4, 1), ('README.md', 3, 0), ('test/calc_test.js', 12, 2)], branch: 'canoa/fix-a1b2c3');
         final (agent, session, store) = await showTask(tester, size, git: git, cwd: '/work/proj.worktrees/fix-a1b2c3', worktree: worktree);
-        session.options = [
+        session.offer([
           ConfigOption(id: 'mode', label: 'Mode', current: 'accept_edits', category: 'mode', choices: [Choice('manual', 'Manual'), Choice('accept_edits', 'Accept edits')]),
-        ];
+        ]);
         agent.usage(62000, 200000);
         await tester.runAsync(() => store.refreshGit(session));
         await settle(tester);

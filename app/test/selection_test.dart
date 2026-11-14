@@ -31,7 +31,7 @@ Future<SessionStore> _conversation(WidgetTester tester) async {
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await send(tester, 'First question');
-  store.selected!.messages.add(ChatMessage(role: MessageRole.agent, text: 'Here:\n\n```\nfinal x = 1;\nfinal y = 2;\n```\n', at: DateTime.now()));
+  store.selected!.chat.addMessage(MessageRole.agent, 'Here:\n\n```\nfinal x = 1;\nfinal y = 2;\n```\n');
   await send(tester, 'Second question');
   return store;
 }

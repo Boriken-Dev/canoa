@@ -131,7 +131,7 @@ void main() {
     before.addAttachment(draft, 'shot.png', [137, 80, 78, 71]);
     before.addText(draft, 'line\n' * 3);
     before.addFolder(draft, 'repo', '/work/repo');
-    draft.pending['model'] = const PendingChoice('model', OptionRole.model, 'opus');
+    draft.chat.holdChoice(const PendingChoice('model', OptionRole.model, 'opus'));
     before.updateDraft(draft, overlays: {'team'});
     await before.drafts!.flush();
 
@@ -180,7 +180,7 @@ void main() {
       store.bindDraft(draft, client, await client.openSession(cwd: '/w'), cwd: '/w');
     };
     final draft = store.createDraft(source: _source, cwd: '/w');
-    draft.pending['model'] = const PendingChoice('model', OptionRole.model, 'gone');
+    draft.chat.holdChoice(const PendingChoice('model', OptionRole.model, 'gone'));
     await store.sendText('hello');
     expect(agent.methods, isNot(contains('session/set_config_option')));
     expect(draft.messages.any((message) => message.text == 'The agent offers no model of gone now, so it was not set.'), isTrue);

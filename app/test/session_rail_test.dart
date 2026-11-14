@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
+import 'fixtures/session_setup.dart';
 
 final _now = DateTime.utc(2026, 11, 12, 12);
 
@@ -23,7 +24,7 @@ ChatSession _open(SessionStore store, String title, {String? cwd, Duration ago =
     title: title, agent: 'Claude Code', peerId: 'local:claude', remoteSessionId: 'r-$title', cwd: cwd,
   )
     ..status = SessionStatus.connected;
-  session.messages.add(ChatMessage(role: MessageRole.agent, text: 'hello', at: _now.subtract(ago)));
+  session.chat.addMessage(MessageRole.agent, 'hello', at: _now.subtract(ago));
   return session;
 }
 
@@ -91,7 +92,7 @@ void main() {
   group('a row per state', () {
     // The state, how to put a session in it, and the word it shows.
     final states = <(String, void Function(SessionStore, ChatSession), String)>[
-      ('Asks', (store, session) => session.pendingPermissions.add(PermissionQuestion('Edit a.txt', 'edit')), 'Needs you'),
+      ('Asks', (store, session) => session.asking(), 'Needs you'),
       ('Runs', (store, session) => session.status = SessionStatus.working, 'Working'),
       ('Broke', (store, session) => session.failed = true, 'Failed'),
       ('Ended', (store, session) => session.unread = true, 'Done'),
@@ -130,7 +131,7 @@ void main() {
 
     testWidgets('marks keep their tooltips: Needs you, Working and New since you looked', (tester) async {
       final store = SessionStore();
-      _open(store, 'Asks').pendingPermissions.add(PermissionQuestion('Edit a.txt', 'edit'));
+      _open(store, 'Asks').asking();
       _open(store, 'Runs').status = SessionStatus.working;
       _open(store, 'Ended').unread = true;
       store.createDraft(title: 'Draft');
@@ -172,7 +173,7 @@ void main() {
       _open(store, 'Quiet one');
       _open(store, 'Quiet two');
       _open(store, 'Runs').status = SessionStatus.working;
-      _open(store, 'Asks').pendingPermissions.add(PermissionQuestion('Edit a.txt', 'edit'));
+      _open(store, 'Asks').asking();
       _open(store, 'Ended').unread = true;
       store.createDraft(title: 'Draft');
       await _show(tester, store);
@@ -286,7 +287,7 @@ void main() {
       store.createDraft(title: 'Draft');
       await _show(tester, store);
       expect(find.text('Archived 1'), findsOneWidget);
-      first.pendingPermissions.add(PermissionQuestion('Edit a.txt', 'edit'));
+      first.asking();
       store.setArchived(first, true);
       await tester.pump();
       expect(find.textContaining('Archived'), findsNothing);
@@ -464,8 +465,7 @@ void main() {
         ..worktree = const SessionWorktree(path: '/w/canoa-wt', branch: 'canoa/worktrees', repo: '/home/ana/devel/canoa')
         ..status = SessionStatus.working;
       _open(store, 'Review the diff', cwd: '/home/ana/devel/canoa', ago: const Duration(minutes: 1))
-          .pendingPermissions
-          .add(PermissionQuestion('Edit a.txt', 'edit'));
+          .asking();
       store.createDraft(title: 'Draft', cwd: '/home/ana/devel/canoa');
       store.select(pinned.id);
       return store;

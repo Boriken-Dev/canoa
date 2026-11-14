@@ -377,7 +377,7 @@ void main() {
     testWidgets('names lose what could disguise them, and nothing grows without limit', (tester) async {
       final (agent, session, _) = await _fed(tester);
       agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'a', 'title': 'safe\u202Etxt.exe\nsecond line'});
-      final huge = 'x' * (maxMessageText + 10);
+      final huge = 'x' * (chatLimits.messageText + 10);
       agent.update({'sessionUpdate': 'agent_message_chunk', 'messageId': 'big', 'content': {'type': 'text', 'text': huge}});
       agent.update({'sessionUpdate': 'terminal_update', 'terminalId': 't', 'output': {'data': base64Encode(utf8.encode('y' * (chatLimits.terminalOutput * 2)))}});
       for (var i = 0; i < 20; i++) {
@@ -385,16 +385,16 @@ void main() {
       }
       await _settle(tester);
       expect(session.messages.first.tool!.title, 'safe txt.exe second line');
-      expect(session.messages[1].text.length, lessThan(maxMessageText + 8));
+      expect(session.messages[1].text.length, lessThan(chatLimits.messageText + 8));
       expect(session.terminals['t']!.output.length, chatLimits.terminalOutput);
       expect(session.terminals['t']!.output.endsWith('z'), isTrue, reason: 'the end is where a failure says why');
 
-      for (var i = 0; i < maxEntries + 50; i++) {
+      for (var i = 0; i < chatLimits.entries + 50; i++) {
         agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': 'n$i', 'title': 'x'});
       }
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 500)));
-      expect(session.messages.length, lessThanOrEqualTo(maxEntries));
-      expect(session.toolEntries.length, lessThanOrEqualTo(maxEntries));
+      expect(session.messages.length, lessThanOrEqualTo(chatLimits.entries));
+      expect(session.toolEntries.length, lessThanOrEqualTo(chatLimits.entries));
     });
 
     testWidgets('an agent names a conversation only until a person has', (tester) async {

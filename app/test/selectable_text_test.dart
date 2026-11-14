@@ -1,8 +1,8 @@
 // Any text in the app can be selected with the mouse and copied: in a message, in a tool call, in the side list, in a
 // dialog, in a page over the screen, and the controls beside that text still work.
-import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/session_store.dart';
+import 'package:coqui_acp/coqui_acp.dart' show AcpSessionUpdate;
 import 'package:canoa/loadout/loadout_page.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -62,15 +62,14 @@ void main() {
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
     await send(tester, 'What does the build say');
-    final tool = ToolCall('t1')
-      ..apply({
-        'sessionUpdate': 'tool_call',
-        'title': 'Run the build',
-        'content': [
-          {'type': 'content', 'content': {'type': 'text', 'text': 'compiled 12 files'}},
-        ],
-      }, chatLimits);
-    store.selected!.messages.add(ChatMessage(role: MessageRole.tool, text: '', at: DateTime.now(), tool: tool));
+    store.selected!.chat.apply(AcpSessionUpdate(store.selected!.remoteSessionId!, {
+      'sessionUpdate': 'tool_call',
+      'toolCallId': 't1',
+      'title': 'Run the build',
+      'content': [
+        {'type': 'content', 'content': {'type': 'text', 'text': 'compiled 12 files'}},
+      ],
+    }));
     await send(tester, 'Next question');
     return store;
   }

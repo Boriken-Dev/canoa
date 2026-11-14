@@ -153,6 +153,8 @@ final class TaskAgent {
 Future<void> settle(WidgetTester tester) async {
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
   await tester.pump();
+  // A v1 prompt is handed over after a zero-length timer, which only an elapsed pump runs.
+  await tester.pump(Duration.zero);
 }
 
 /// The app showing a session on a [TaskAgent] at [size], with [git] reading its repository when given.

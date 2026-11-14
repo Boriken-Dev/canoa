@@ -66,7 +66,9 @@ final class _Agent {
 
 Future<void> _settle(WidgetTester tester) async {
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+  // A v1 prompt is handed over after a zero-length timer, which only an elapsed pump runs.
   await tester.pump();
+  await tester.pump(Duration.zero);
 }
 
 Finder get _field => find.byType(TextField).last;
