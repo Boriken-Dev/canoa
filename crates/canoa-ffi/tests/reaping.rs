@@ -83,18 +83,12 @@ fn the_host_reads_how_its_children_ended_while_the_application_collects_every_ch
                 .args(["-c", "sleep 0.2; exit 5"])
                 .spawn()
                 .expect("it starts");
-            // Asked a little after it ended, as the host does while it waits on one.
-            let until = Instant::now() + Duration::from_secs(10);
-            let lost = loop {
-                match own.try_wait() {
-                    Err(lost) => break lost,
-                    Ok(Some(status)) => {
-                        panic!("not collected by the application's handler: {status}")
-                    }
-                    Ok(None) => assert!(Instant::now() < until, "it ended"),
-                }
-                thread::sleep(Duration::from_millis(10));
-            };
+            // Asked once, long after it ended: the handler has had hundreds of its own turns, so there is no race between it and
+            // this call over who collects the child.
+            thread::sleep(Duration::from_secs(1));
+            let lost = own
+                .try_wait()
+                .expect_err("collected by the application's handler");
             assert_eq!(lost.raw_os_error(), Some(libc::ECHILD), "{lost}");
 
             // Through the host: how it ended is read, and the output is read to its end.

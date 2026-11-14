@@ -693,9 +693,6 @@ struct Book {
     next: u32,
     pending: HashMap<u32, Reply>,
     children: HashMap<u32, Arc<Fate>>,
-    /// An end heard of a child the host has not heard started, while a spawn is waiting: applied when it is. The starter sends
-    /// the start first, so this is a second guard, and it never holds an end for a child nobody is waiting to hear of.
-    early: HashMap<u32, State>,
     ended: bool,
 }
 
@@ -728,7 +725,6 @@ impl Link {
                 next: 0,
                 pending: HashMap::new(),
                 children: HashMap::new(),
-                early: HashMap::new(),
                 ended: false,
             }),
             wait,
@@ -801,11 +797,7 @@ impl Link {
                             changed: Condvar::new(),
                         });
                         // Before the caller has the id, so that an end heard at once is not lost.
-                        let mut book = lock(&self.book);
-                        book.children.insert(pid, Arc::clone(&fate));
-                        if let Some(state) = book.early.remove(&pid) {
-                            *lock(&fate.state) = state;
-                        }
+                        lock(&self.book).children.insert(pid, Arc::clone(&fate));
                         (pid, fate)
                     })
                 } else {
@@ -820,11 +812,6 @@ impl Link {
                         io::Error::from_raw_os_error(code)
                     }
                 }));
-                let mut book = lock(&self.book);
-                if book.pending.is_empty() {
-                    // Nobody waits to hear of a child: no end held for one is anyone's.
-                    book.early.clear();
-                }
             }
             EXITED => {
                 if let (Some(pid), Some(status)) = (fields.number(), fields.signed()) {
@@ -833,13 +820,11 @@ impl Link {
                     } else {
                         State::Exited(status)
                     };
-                    let mut book = lock(&self.book);
-                    let fate = book.children.get(&pid).cloned();
+                    // The starter sends a child's start before its end, so a child not in the book is one the host has let go of:
+                    // its end is nobody's, and is never kept for a later child that has its id.
+                    let fate = lock(&self.book).children.get(&pid).cloned();
                     if let Some(fate) = fate {
-                        drop(book);
                         fate.set(state);
-                    } else if !book.pending.is_empty() {
-                        book.early.insert(pid, state);
                     }
                 }
             }
@@ -882,6 +867,29 @@ impl Link {
         send(&lock(&self.writer), kind, &pid.to_le_bytes(), &[])
     }
 
+    /// The wait for the answer to spawn `request` is over: only this request fails, and what the starter holds of other
+    /// children is still reachable. A child it starts for it late is ended, by the starter if it hears so first and by this
+    /// side when it hears of the child; one whose start landed just after the wait is taken from the answer and ended here.
+    fn give_up(
+        &self,
+        request: u32,
+        answer: &mpsc::Receiver<io::Result<(u32, Arc<Fate>)>>,
+    ) -> io::Error {
+        let pending = lock(&self.book).pending.remove(&request).is_some();
+        if !pending && let Ok(Ok((pid, _))) = answer.recv_timeout(Duration::from_secs(5)) {
+            // Heard of between the end of the wait and now: no `Child` will ever hold it.
+            lock(&self.book).children.remove(&pid);
+            for kind in [KILL_GROUP, KILL, COLLECT] {
+                let _ = self.ask(kind, pid);
+            }
+        }
+        let _ = send(&lock(&self.writer), ABANDON, &request.to_le_bytes(), &[]);
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the host's process starter did not answer in time",
+        )
+    }
+
     /// Starts `command` in the starter.
     pub(super) fn spawn(self: &Arc<Self>, command: &Command) -> io::Result<Child> {
         let plumbing = Plumbing::of(command)?;
@@ -920,16 +928,7 @@ impl Link {
         }
         let (pid, fate) = match answer.recv_timeout(self.wait) {
             Ok(answer) => answer?,
-            Err(_) => {
-                // Only this request fails: what the starter holds of other children is still reachable. A child it starts for
-                // it late is ended, by the starter if it hears so first and by this side when it hears of the child.
-                lock(&self.book).pending.remove(&request);
-                let _ = send(&lock(&self.writer), ABANDON, &request.to_le_bytes(), &[]);
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "the host's process starter did not answer in time",
-                ));
-            }
+            Err(_) => return Err(self.give_up(request, &answer)),
         };
         Ok(Child {
             stdin,

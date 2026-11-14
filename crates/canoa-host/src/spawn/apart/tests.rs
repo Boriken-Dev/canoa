@@ -550,3 +550,74 @@ fn children_that_end_at_once_are_always_heard_of_in_bounded_time() {
         assert!(ended, "a worker saw a wrong status");
     }
 }
+
+fn frame(kind: u8, numbers: &[u32]) -> Frame {
+    let mut body = Vec::new();
+    for number in numbers {
+        body.extend_from_slice(&number.to_le_bytes());
+    }
+    Frame {
+        kind,
+        body,
+        fds: Vec::new(),
+    }
+}
+
+#[test]
+fn an_end_heard_of_a_child_the_host_let_go_of_is_not_kept_for_a_later_child_with_its_id() {
+    let (host, _starter) = UnixStream::pair().expect("a socket pair");
+    let link = Link::over(host, None).expect("a link");
+    // A spawn is waiting, as when a child whose handle was dropped has its end sent late.
+    let (reply, answer) = mpsc::sync_channel(1);
+    lock(&link.book).pending.insert(1, reply);
+    link.heard(&frame(EXITED, &[4242, 0]));
+    // Later a child that has the same id (the ids went round) is started and is running.
+    link.heard(&frame(SPAWNED, &[1, 4242]));
+    let (pid, fate) = answer
+        .recv_timeout(Duration::from_secs(5))
+        .expect("answered")
+        .expect("started");
+    assert_eq!(pid, 4242);
+    assert!(
+        matches!(*lock(&fate.state), State::Running),
+        "the new child reads as running, not as ended by an end that was another's"
+    );
+}
+
+#[test]
+fn a_start_that_lands_just_after_the_wait_is_ended_and_not_left_without_a_handle() {
+    let (host, starter) = UnixStream::pair().expect("a socket pair");
+    starter
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("a bound");
+    let link = Link::over(host, None).expect("a link");
+    // The answer was heard (its child recorded, its reply sent) between the end of the wait and the call that gives up on it.
+    let (reply, answer) = mpsc::sync_channel(1);
+    let fate = Arc::new(Fate {
+        state: Mutex::new(State::Running),
+        changed: Condvar::new(),
+    });
+    lock(&link.book).children.insert(31_000, Arc::clone(&fate));
+    reply.send(Ok((31_000, fate))).expect("answered");
+    let error = link.give_up(7, &answer);
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert!(
+        !lock(&link.book).children.contains_key(&31_000),
+        "no handle will ever hold it"
+    );
+    // The starter is asked to end and collect it, and to forget the request.
+    let mut asked = Vec::new();
+    for _ in 0..4 {
+        let heard = receive(&starter).expect("a frame").expect("not the end");
+        asked.push((heard.kind, Fields(&heard.body).number()));
+    }
+    assert_eq!(
+        asked,
+        [
+            (KILL_GROUP, Some(31_000)),
+            (KILL, Some(31_000)),
+            (COLLECT, Some(31_000)),
+            (ABANDON, Some(7)),
+        ]
+    );
+}
