@@ -22,7 +22,7 @@ const _maxActive = 16;
 
 Uint8List _needs(Uint8List? received) => received ?? (throw const PeerFailure('Unexpected step without a message'));
 
-typedef _RunStep = ({List<Uint8List> send, String? peerId, PeerSession? session, String? failure});
+typedef _RunStep = ({List<Uint8List> send, String? peerId, Uint8List? peerKey, PeerSession? session, String? failure});
 
 /// One proof or pairing, advanced a message at a time.
 abstract interface class _Run {
@@ -41,13 +41,13 @@ final class _WebCryptoRun implements _Run {
   Future<_RunStep> step(Uint8List? received) async {
     switch (_stage++) {
       case 0:
-        return (send: [Uint8List.fromList(utf8.encode(_started.hello()))], peerId: null, session: null, failure: null);
+        return (send: [Uint8List.fromList(utf8.encode(_started.hello()))], peerId: null, peerKey: null, session: null, failure: null);
       case 1:
         final answer = await _started.answer(_needs(received));
-        return (send: [Uint8List.fromList(utf8.encode(answer))], peerId: null, session: null, failure: null);
+        return (send: [Uint8List.fromList(utf8.encode(answer))], peerId: null, peerKey: null, session: null, failure: null);
       case 2:
         final done = await _started.finish(_needs(received));
-        return (send: const <Uint8List>[], peerId: done.peerId, session: done.session, failure: null);
+        return (send: const <Uint8List>[], peerId: done.peerId, peerKey: null, session: done.session, failure: null);
       default:
         throw const PeerFailure('Unexpected message after the proof');
     }
@@ -67,7 +67,7 @@ final class _NoiseRunStep implements _Run {
   @override
   Future<_RunStep> step(Uint8List? received) async {
     final step = await _run.step(received);
-    return (send: step.send, peerId: step.peerId, session: step.session, failure: step.failure);
+    return (send: step.send, peerId: step.peerId, peerKey: step.peerKey, session: step.session, failure: step.failure);
   }
 
   @override
@@ -131,6 +131,15 @@ final class WebPeerBridge implements PeerBridge {
     return (spki: identity.spki, sign: identity.signSecretStatement);
   }
 
+  /// This page's Noise key as what a secret binding agrees with: its SubjectPublicKeyInfo and the X25519 of the private key, which stays
+  /// in WebCrypto, with a point.
+  @override
+  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement() async {
+    await _reachable(PeerMethod.noise);
+    final identity = await _noiseIdentity;
+    return (spki: identity.spki, agree: identity.agreeSecret);
+  }
+
   @override
   Future<String> localId(PeerMethod method) async {
     await _reachable(method);
@@ -189,7 +198,7 @@ final class WebPeerBridge implements PeerBridge {
       final sealing = randomToken(24);
       _sessions[sealing] = session;
       _active.remove(token)?.run.abort();
-      return PeerStep(send: done.send, peerId: done.peerId, session: sealing);
+      return PeerStep(send: done.send, peerId: done.peerId, peerKey: done.peerKey, session: sealing);
     } catch (_) {
       _active.remove(token)?.run.abort();
       rethrow;

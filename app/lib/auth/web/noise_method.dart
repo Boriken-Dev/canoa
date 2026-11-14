@@ -37,6 +37,7 @@ extension type _NoiseRun._(JSObject _) implements JSObject {
   external JSUint8Array? get pendingDh;
   external JSArray<JSUint8Array> provideDh(JSUint8Array shared);
   external String? get peerId;
+  external JSUint8Array? get peerKey;
   external String? get failure;
   external _NoiseSession? takeSession();
   external void free();
@@ -111,6 +112,9 @@ final class NoiseIdentity {
   final web.CryptoKey privateKey;
 
   String get peerId => _key.peerId;
+
+  /// This identity's SubjectPublicKeyInfo: the public half only.
+  Uint8List get spki => Uint8List.fromList(_spki);
 
   static T _wrap<T>(T Function() call) {
     try {
@@ -214,6 +218,10 @@ final class NoiseIdentity {
     }
   }
 
+  /// X25519 of the private key with the one point of a secret binding's other end, which the caller has already checked is the host
+  /// the connection proved. The key stays in WebCrypto.
+  Future<Uint8List> agreeSecret(Uint8List point) => _agree(point);
+
   /// A proof of the agent [expectedPeerId], and no other.
   Future<NoiseRun> prove(String expectedPeerId, {Uri? base}) async {
     final module = await loadNoise(base: base);
@@ -233,9 +241,10 @@ final class NoiseIdentity {
   void dispose() => _key.free();
 }
 
-/// What a step gives: the messages to send now, and once the run is over the id it proved or learned and, for a proof, the
+/// What a step gives: the messages to send now, and once the run is over the id it proved or learned and, for a proof, the peer's static
+/// public key (SubjectPublicKeyInfo) and the
 /// session. A [failure] is a pairing refused: the messages are the refusal to send first, then the run is over.
-typedef NoiseStep = ({List<Uint8List> send, String? peerId, PeerSession? session, String? failure});
+typedef NoiseStep = ({List<Uint8List> send, String? peerId, Uint8List? peerKey, PeerSession? session, String? failure});
 
 /// A proof or a pairing, a step at a time.
 final class NoiseRun {
@@ -264,6 +273,7 @@ final class NoiseRun {
       return (
         send: sent,
         peerId: peer,
+        peerKey: peer == null ? null : _run.peerKey?.toDart,
         session: session == null ? null : NoiseSessionHandle._(session),
         failure: _run.failure,
       );

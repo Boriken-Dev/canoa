@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:coqui_web/coqui_web.dart';
 
 import '../acp/client.dart';
+import '../acp/noise_secret.dart';
+import '../acp/secret_wire.dart' show SecretIdentity;
 import '../acp/sealed_channel.dart';
 import 'web/peer_session.dart' show PeerFailure;
 
@@ -39,9 +41,12 @@ final class MethodUnavailable implements Exception {
 /// One step of a proof or a pairing: what to send now, and once it is over, the peer it proved and, for a proof, the
 /// session that seals everything after it.
 final class PeerStep {
-  const PeerStep({this.send = const [], this.peerId, this.session, this.failure});
+  const PeerStep({this.send = const [], this.peerId, this.peerKey, this.session, this.failure});
   final List<Uint8List> send;
   final String? peerId;
+
+  /// The static public key of the peer a Noise proof proved, as its SubjectPublicKeyInfo.
+  final Uint8List? peerKey;
   final String? session;
 
   /// Why the exchange ended in a refusal. [send] is then the last thing to tell the peer, and nothing follows.
@@ -53,6 +58,10 @@ final class PeerStep {
 abstract interface class PeerBridge {
   /// Why this runtime cannot prove by [method], or null. It asks the local runtime only, so nothing on a network can change it.
   Future<String?> unreachable(PeerMethod method);
+
+  /// This runtime's Noise key as what a secret binding agrees with: its SubjectPublicKeyInfo and X25519 of its private key, which is
+  /// never handed over, with a point. Throws where Noise is unavailable.
+  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement();
 
   /// This runtime's own peer id under [method]: each method has a key of its own.
   Future<String> localId(PeerMethod method);
@@ -105,6 +114,17 @@ Future<PeerStep> _exchange(
   }
 }
 
+/// What a Noise proof lets this connection bind secret answers with: this key agreeing with the host's static key, which the proof gave, or
+/// none when the proof gave no key whose digest is the pinned id. Never throws: no identity is no secret prompts.
+Future<SecretIdentity?> _noiseSecrets(PeerBridge bridge, PeerStep proof) async {
+  try {
+    final own = await bridge.noiseAgreement();
+    return noiseSecretIdentity(hostId: proof.peerId!, hostSpki: proof.peerKey, spki: own.spki, agree: own.agree);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Proves [expectedPeerId] by [method] on [channel] through [bridge], and answers with the channel every later message must
 /// use. A method this runtime cannot run fails before anything is sent, and no other method is tried.
 Future<VerifiedPeer> provePeer(
@@ -130,16 +150,15 @@ Future<VerifiedPeer> provePeer(
     );
     final session = done.session;
     if (session == null) throw const FormatException('A proof ended with no session');
-    return VerifiedPeer(
-      done.peerId!,
-      SealedChannel(
-        channel,
-        seal: (message) => bridge.seal(session, message),
-        open: (record) => bridge.open(session, record),
-        closeRecord: () => bridge.closeRecord(session),
-        release: () => bridge.closeSession(session),
-      ),
+    final sealed = SealedChannel(
+      channel,
+      seal: (message) => bridge.seal(session, message),
+      open: (record) => bridge.open(session, record),
+      closeRecord: () => bridge.closeRecord(session),
+      release: () => bridge.closeSession(session),
     );
+    if (method == PeerMethod.noise) noiseSecretsOf[sealed] = (identity: await _noiseSecrets(bridge, done));
+    return VerifiedPeer(done.peerId!, sealed);
   } finally {
     if (token != null) bridge.abort(token);
   }

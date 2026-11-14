@@ -57,6 +57,11 @@ final class WebPeerBridge implements PeerBridge {
   @override
   Future<String?> unreachable(PeerMethod method) async => await _call('unreachable', [method.id]) as String?;
   @override
+  Future<({Uint8List spki, Future<Uint8List> Function(Uint8List point) agree})> noiseAgreement() async => (
+    spki: _bytes(await _call('noiseSpki', const [])),
+    agree: (point) async => _bytes(await _call('noiseAgree', [base64Encode(point)])),
+  );
+  @override
   Future<String> localId(PeerMethod method) async => await _call('localId', [method.id]) as String;
   @override
   Future<String> begin(PeerMethod method, String expectedPeerId) async =>
@@ -69,6 +74,7 @@ final class WebPeerBridge implements PeerBridge {
     return PeerStep(
       send: [for (final message in step['send'] as List<dynamic>) _bytes(message)],
       peerId: step['peerId'] as String?,
+      peerKey: step['peerKey'] == null ? null : _bytes(step['peerKey']),
       session: step['session'] as String?,
     );
   }

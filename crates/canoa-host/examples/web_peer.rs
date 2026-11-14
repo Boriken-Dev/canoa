@@ -82,6 +82,8 @@ struct Step {
     send: Vec<Vec<u8>>,
     peer: Option<String>,
     session: Option<String>,
+    /// The static public key a Noise proof proved, as its SubjectPublicKeyInfo.
+    peer_key: Option<Vec<u8>>,
 }
 
 fn drive<H: Handshake>(
@@ -177,7 +179,7 @@ impl Peer {
     }
 
     fn advance(&mut self, token: &str, received: Option<&[u8]>) -> Result<Step, Failure> {
-        let mut proved = None;
+        let mut proved: Option<(String, Session, Option<Vec<u8>>)> = None;
         let step = match self
             .runs
             .get_mut(token)
@@ -191,12 +193,14 @@ impl Peer {
                     proved = Some((
                         established.peer.to_string(),
                         Session::WebCrypto(established.session),
+                        None,
                     ));
                 }
                 Step {
                     send,
                     peer: None,
                     session: None,
+                    peer_key: None,
                 }
             }
             Run::Noise(slot) => {
@@ -207,28 +211,46 @@ impl Peer {
                     proved = Some((
                         established.peer.to_string(),
                         Session::Noise(established.session),
+                        established.key.map(|key| key.bytes),
                     ));
                 }
                 Step {
                     send,
                     peer: None,
                     session: None,
+                    peer_key: None,
                 }
             }
             Run::Pair(pair) => return step_pair(pair, received),
         };
         match proved {
-            Some((peer, session)) => {
+            Some((peer, session, peer_key)) => {
                 let sealing = self.token("s");
                 self.sessions.insert(sealing.clone(), session);
                 Ok(Step {
                     peer: Some(peer),
                     session: Some(sealing),
+                    peer_key,
                     ..step
                 })
             }
             None => Ok(step),
         }
+    }
+
+    /// X25519 of this process's Noise static key with `point`: the one operation the page's non-extractable key does.
+    fn noise_agree(&self, point: &[u8; 32]) -> Result<[u8; 32], Failure> {
+        let pem = self.noise.to_pkcs8_pem().map_err(failed)?;
+        let der = coqui_peer::pem::decode(&pem)
+            .ok_or("the key is not PEM")?
+            .bytes;
+        let secret = der
+            .get(der.len().saturating_sub(32)..)
+            .filter(|_| der.len() == 48)
+            .ok_or("an X25519 key")?;
+        let (_, agree) =
+            coqui_acp::secret::unprotected::x25519_agreement(secret).map_err(failed)?;
+        agree(point).map_err(failed)
     }
 
     fn session(&mut self, token: &str) -> Result<&mut Session, Failure> {
@@ -249,6 +271,7 @@ fn step_pair(pair: &mut Pair, received: Option<&[u8]>) -> Result<Step, Failure> 
                 send: drive(handshake, None)?,
                 peer: None,
                 session: None,
+                peer_key: None,
             });
         }
         1 => {
@@ -298,6 +321,7 @@ fn step_pair(pair: &mut Pair, received: Option<&[u8]>) -> Result<Step, Failure> 
                     send,
                     peer: None,
                     session: None,
+                    peer_key: None,
                 });
             }
             Ok(Event::Done(Ok(peer))) => {
@@ -305,6 +329,7 @@ fn step_pair(pair: &mut Pair, received: Option<&[u8]>) -> Result<Step, Failure> 
                     send,
                     peer: Some(peer),
                     session: None,
+                    peer_key: None,
                 });
             }
             Ok(Event::Done(Err(error))) => return Err(format!("The pairing was refused: {error}")),
@@ -342,7 +367,15 @@ fn call(peer: &mut Peer, op: &str, args: &[Value]) -> Result<Value, Failure> {
                 "send": step.send.iter().map(|message| text(message)).collect::<Vec<_>>(),
                 "peerId": step.peer,
                 "session": step.session,
+                "peerKey": step.peer_key.as_deref().map(text),
             }))
+        }
+        "noiseSpki" => Ok(text(peer.noise.spki_der())),
+        "noiseAgree" => {
+            let point: [u8; 32] = message(0)?
+                .try_into()
+                .map_err(|_| "a point is 32 bytes".to_owned())?;
+            Ok(text(&peer.noise_agree(&point)?))
         }
         "abort" => {
             peer.runs.remove(string(0));

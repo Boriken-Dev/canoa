@@ -103,6 +103,8 @@ pub struct NoiseRun {
     /// result, 3 and on the rest.
     stage: u8,
     peer: Option<String>,
+    /// The static public key of the peer a proof proved, as its SubjectPublicKeyInfo.
+    peer_key: Option<Vec<u8>>,
     failure: Option<String>,
 }
 
@@ -129,6 +131,7 @@ impl NoiseRun {
             },
             stage: 0,
             peer: None,
+            peer_key: None,
             failure: None,
         })
     }
@@ -150,6 +153,7 @@ impl NoiseRun {
             },
             stage: 0,
             peer: None,
+            peer_key: None,
             failure: None,
         })
     }
@@ -210,6 +214,7 @@ impl NoiseRun {
                     .finish()
                     .map_err(failed)?;
                 self.peer = Some(established.peer.to_string());
+                self.peer_key = established.key.map(|key| key.bytes);
                 *session = Some(NoiseSession {
                     inner: established.session,
                 });
@@ -247,6 +252,13 @@ impl NoiseRun {
     #[wasm_bindgen(getter, js_name = peerId)]
     pub fn peer_id(&self) -> Option<String> {
         self.peer.clone()
+    }
+
+    /// The peer's static public key (its 44-byte SubjectPublicKeyInfo) once a proof has proved it: the key whose digest is
+    /// [`peer_id`](NoiseRun::peer_id), so the page can make a Diffie-Hellman with it. Never a private key.
+    #[wasm_bindgen(getter, js_name = peerKey)]
+    pub fn peer_key(&self) -> Option<Vec<u8>> {
+        self.peer_key.clone()
     }
 
     /// Why a pairing ended in a refusal. The messages its step gave are the refusal to send the

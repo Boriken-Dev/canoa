@@ -7,6 +7,7 @@ import 'package:coqui_web/coqui_web.dart';
 import '../chat/agent_events.dart';
 import 'delegate.dart';
 import 'link_secret.dart';
+import 'noise_secret.dart';
 import 'secret_wire.dart';
 import 'usage_wire.dart';
 
@@ -105,7 +106,7 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets})
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets, this.noiseSecrets})
       : _delegate = delegate {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
@@ -122,6 +123,10 @@ final class VerifiedAgent {
   /// What binds this app's secret answers on the in-process link, and the host's identity on it: set only for a link to the host in
   /// this process, which the host binds by a secret it minted. Null for any other connection.
   final LinkSecretIdentity? linkSecrets;
+
+  /// What binds this app's secret answers on a connection its own Noise key proved, and the host's identity on it (the peer id it proved):
+  /// set only for such a connection, by the Diffie-Hellman of the two static keys. Null for any other connection.
+  final SecretIdentity? noiseSecrets;
 
   /// What the agent said about itself when it was initialized.
   final AgentIdentity identity;
@@ -174,8 +179,13 @@ final class VerifiedAgent {
       // A person who can answer permission requests can answer a task's, which come the same way.
       final delegate = DelegateWire(proven.send, optIn: decider != null);
       // Only a host whose peer id was proven can ask for a secret: the answer is bound to that identity, and a program this app
-      // started, or a provider, has none.
-      final secretWire = secrets == null ? null : SecretWire(proven.send, secrets);
+      // started, or a provider, has none. A connection this app's own Noise key proved binds by the two static keys alone and offers
+      // nothing else; one whose proof gave no usable key of the host's offers nothing at all.
+      final noise = noiseSecretsOf[proven];
+      final noiseIdentity = noise?.identity;
+      final secretWire = secrets == null || (noise != null && noiseIdentity == null)
+          ? null
+          : SecretWire(proven.send, secrets, offer: noiseIdentity?.offer);
       final client = VerifiedAgent._(
         (decider, elicitor) => AcpClient(
           incoming: proven.messages
@@ -195,6 +205,7 @@ final class VerifiedAgent {
         decider,
         elicitor: elicitor,
         delegate: delegate,
+        noiseSecrets: secretWire == null ? null : noiseIdentity,
       );
       secretWire?.agent = client;
       return client;
