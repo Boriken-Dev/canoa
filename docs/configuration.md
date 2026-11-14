@@ -441,7 +441,9 @@ Loadout, Overlays, Discover lists the overlays of the catalogs `[catalogs]` name
 install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
 a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
 source, with a summary, an icon, tags and the like for each. Canoa fetches it as it fetches an overlay (git objects at
-the ref named, one commit deep, never checked out, with the same limits), and reads YAML in neither.
+the ref named, one commit deep, never checked out, with the same limits), and reads YAML in neither. A `#path` that is
+a directory of the repository is a catalog too: each subdirectory is an overlay of that name, as `dotagents` reads a
+repository of overlays (`https://github.com/example/overlays.git@main#overlays`).
 
 ```toml
 [catalogs]
