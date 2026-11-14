@@ -875,10 +875,10 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 mod files;
 #[cfg(test)]
 mod files_tests;
+pub(crate) mod accounts;
 mod import;
 #[cfg(test)]
 mod import_tests;
-pub(crate) mod accounts;
 mod moves;
 mod overlays;
 #[cfg(test)]

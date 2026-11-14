@@ -95,7 +95,11 @@ impl Hosted {
     }
 
     /// Both of those: a `scratch` already holding things, and a configuration made from it.
-    pub fn start_in_setup(scratch: Scratch, setup: impl FnOnce(&std::path::Path) -> String, more: &[&str]) -> Self {
+    pub fn start_in_setup(
+        scratch: Scratch,
+        setup: impl FnOnce(&std::path::Path) -> String,
+        more: &[&str],
+    ) -> Self {
         let config = scratch.0.join("canoa.cfg");
         std::fs::write(&config, setup(&scratch.0)).expect("written");
         let (sender, receiver) = mpsc::channel();

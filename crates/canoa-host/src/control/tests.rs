@@ -625,3 +625,50 @@ fn a_key_manages_no_account_whatever_it_is_granted() {
     let owner = ask(&control, &Caller::Owner, "accounts/list", json!({}));
     assert_eq!(owner["error"]["code"], REFUSED, "{owner}");
 }
+
+#[test]
+fn a_key_on_a_connection_is_refused_a_sign_in_whatever_it_is_granted() {
+    let control = memory();
+    let key = peer(
+        "sha256:abc",
+        &[
+            Grant::LedgerRead,
+            Grant::LedgerWrite,
+            Grant::Worktree,
+            Grant::StoreRead,
+        ],
+    );
+    let stopped = alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false));
+    let (client, host) = crate::local::pair(MAX_REQUEST, stopped);
+    let answers = std::thread::scope(|scope| {
+        scope.spawn(|| serve(&control, &key, &host));
+        let mut answers = Vec::new();
+        for (id, method, params) in [
+            (
+                1,
+                "accounts/add",
+                json!({"name": "x", "harness": "claude", "method": "api-key"}),
+            ),
+            (2, "accounts/login", json!({"name": "x"})),
+        ] {
+            client
+                .send(
+                    &serde_json::to_vec(
+                        &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+                    )
+                    .expect("encodes"),
+                )
+                .expect("sent");
+            let answer = client
+                .receive(Some(Duration::from_secs(5)))
+                .expect("answered")
+                .expect("a message");
+            answers.push(serde_json::from_slice::<Value>(&answer).expect("JSON"));
+        }
+        client.close();
+        answers
+    });
+    for answer in &answers {
+        assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    }
+}
