@@ -112,7 +112,7 @@ Future<String> _first(String options) async {
     report['at'] = 'session with the overlay';
     final withOverlay = await _connect(app, asked['entry']! as String, meta: {overlaysMeta: [asked['overlay']]});
     final second = await withOverlay.openSession(cwd: at);
-    final profile = hostProfileOf((second.raw['_meta'] as Map<String, dynamic>)[hostProfileMeta], fallback: asked['entry']! as String);
+    final profile = hostProfileOf((second.raw['_meta'] as Map<String, dynamic>?)?[hostProfileMeta], fallback: asked['entry']! as String);
     report['profileItems'] = [for (final item in profile?.report.items ?? const []) item.key];
     await withOverlay.close();
     report['ok'] = true;
