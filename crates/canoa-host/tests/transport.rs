@@ -212,3 +212,100 @@ fn stopping_the_host_closes_a_transports_listener_and_frees_its_endpoint() {
     again.stop();
     assert!(again.ended.join().expect("no panic").is_ok());
 }
+
+/// What a raw WebSocket upgrade to `address` with `origin` is answered: the status line.
+fn upgrade_status(address: &str, origin: Option<&str>) -> String {
+    use std::io::{Read as _, Write as _};
+    let authority = address.trim_start_matches("ws://");
+    let mut stream = std::net::TcpStream::connect(authority).expect("connects");
+    stream
+        .set_read_timeout(Some(support::WAIT))
+        .expect("a timeout");
+    let origin = origin.map_or_else(String::new, |origin| format!("Origin: {origin}\r\n"));
+    write!(
+        stream,
+        "GET / HTTP/1.1\r\nHost: {authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n{origin}\r\n"
+    )
+    .expect("written");
+    let mut answer = [0_u8; 64];
+    let read = stream.read(&mut answer).unwrap_or(0);
+    String::from_utf8_lossy(&answer[..read])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// `[host] origins` is the browser-origin check of every entry, an address listener's and a websocket transport's alike, unless
+/// the entry lists its own.
+#[test]
+fn the_hosts_origins_reach_a_websocket_transport_that_lists_none() {
+    let entry = |name: &str, extra: &str| {
+        format!(
+            "[host.agents.{name}]\n{}transport = \"websocket\"\nlisten = \"ws://127.0.0.1:0\"\n{extra}",
+            agent("")
+        )
+    };
+    let config = format!(
+        "[host]\norigins = [\"https://canoa.example\"]\n{}{}",
+        entry("host_origins", ""),
+        entry(
+            "own_origins",
+            "transport_settings = { listen = { origins = [\"https://other.example\"] } }\n"
+        )
+    );
+    let (host, log) = Host::start_logged_with(Scratch::new(), &config, 2, &[]);
+    let inherited = host.url("host_origins").to_owned();
+    assert!(
+        upgrade_status(&inherited, Some("https://canoa.example")).contains("101"),
+        "the listed origin is let in"
+    );
+    assert!(
+        !upgrade_status(&inherited, Some("https://evil.example")).contains("101"),
+        "another origin is refused"
+    );
+    assert!(
+        upgrade_status(&inherited, None).contains("101"),
+        "a client that is not a browser sends none"
+    );
+    // The entry's own list replaces the host's.
+    let own = host.url("own_origins").to_owned();
+    assert!(!upgrade_status(&own, Some("https://canoa.example")).contains("101"));
+    assert!(upgrade_status(&own, Some("https://other.example")).contains("101"));
+    let said = support::log_holding(&log, &["listen.origins from [host] origins"]);
+    assert!(
+        said.contains("host.agents.host_origins.transport"),
+        "{said}"
+    );
+    assert!(!said.contains("host.agents.own_origins.transport has listen.origins from"));
+}
+
+/// A peer that connects to a websocket transport and says nothing holds one handshake of its own: another peer is served at once.
+#[test]
+fn an_idle_connection_to_a_websocket_transport_delays_no_other_peer() {
+    let config = format!(
+        "[host.agents.fixture]\n{}transport = \"websocket\"\nlisten = \"ws://127.0.0.1:0\"\n\
+         transport_settings = {{ listen = {{ frames = \"binary\" }} }}\n",
+        agent("")
+    );
+    let host = Host::start(&config, 1);
+    let endpoint = host.url("fixture").to_owned();
+    let _idle =
+        std::net::TcpStream::connect(endpoint.trim_start_matches("ws://")).expect("connects");
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    let started = std::time::Instant::now();
+    let text = with_channel(websocket_channel(&endpoint), &client, host.peer, |rpc| {
+        turn(rpc, &dir)
+    })
+    .expect("a paired key is served")
+    .expect("the turn ends");
+    assert_eq!(text, "echo: hello");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "a turn took {:?} behind an idle connection",
+        started.elapsed()
+    );
+}

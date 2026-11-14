@@ -549,6 +549,16 @@ impl Listen {
             .map_err(|_| "listen is not an address and port, pipe:NAME or unix:PATH".to_owned())
     }
 
+    /// Whether two entries listening here and there are listening in one place: the same address, pipe or socket, or the same
+    /// endpoint of providers (the transport and its settings do not make another place).
+    fn same_place(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Transport(a), Self::Transport(b)) => a.endpoint == b.endpoint,
+            (Self::Transport(_), _) | (_, Self::Transport(_)) => false,
+            _ => self == other,
+        }
+    }
+
     /// The address, for a listener a browser can reach; `None` for a pipe.
     #[must_use]
     pub const fn address(&self) -> Option<SocketAddr> {
@@ -559,10 +569,13 @@ impl Listen {
     }
 
     /// Whether this names a place that is one entry's alone: a pipe, or an address with a port.
-    const fn is_fixed(&self) -> bool {
+    fn is_fixed(&self) -> bool {
         match self {
             Self::Address(address) => address.port() != 0,
-            Self::Pipe(_) | Self::Transport(_) => true,
+            Self::Pipe(_) => true,
+            // A provider's endpoint is its own text; one that asks for port 0 takes whatever is free.
+            Self::Transport(transport) => !url::Url::parse(&transport.endpoint)
+                .is_ok_and(|endpoint| endpoint.port() == Some(0)),
         }
     }
 }
@@ -2893,7 +2906,7 @@ fn check_unique(entries: &[Entry]) -> Result<(), ConfigError> {
             if earlier.name == entry.name {
                 return Err(invalid(&entry.name, "two entries share this name"));
             }
-            if entry.listen.is_fixed() && earlier.listen == entry.listen {
+            if entry.listen.is_fixed() && earlier.listen.same_place(&entry.listen) {
                 return Err(invalid(
                     &entry.name,
                     "another entry listens on the same address",

@@ -1002,10 +1002,11 @@ fn bind_listen(
             Ok((Bound::Pipe(listener), pipe_name.to_string()))
         }
         Listen::Transport(spec) => {
+            let with_origins = settings_with_origins(spec, origins, name, table);
             let listening = transport::Listening::start(
                 &spec.id,
                 spec.origin.as_ref(),
-                spec.settings.as_ref(),
+                with_origins.as_ref().or(spec.settings.as_ref()),
                 &spec.endpoint,
             )
             .map_err(|what| ServeError::Transport {
@@ -2148,26 +2149,69 @@ const fn table_of(kind: &EntryKind) -> &'static str {
     }
 }
 
-/// What loading `origin` for `entry` departs from the defaults in, said as configuration where the file asked for it, and as
-/// a warning where the host fell back.
-/// What loading an outside transport weakens, said at every start: its code runs in the host's own process.
-fn say_transport_origin(name: &str, table: &str, origin: &Origin) {
-    match origin {
-        Origin::Library(_) => {
-            tracing::info!(
-                "host.{table}.{name}.transport_library loads an outside transport provider into the host's process"
-            );
-        }
-        Origin::Source { import_search, .. } => {
-            tracing::info!(
-                "host.{table}.{name}.transport_source loads an outside transport provider into the host's process, import_search {}",
-                import_search.as_str()
-            );
-        }
+/// The settings of a built-in `websocket` transport with `[host] origins` as its `listen.origins`, when the host names origins and
+/// the entry's settings list none: the browser-origin check an address listener has applies here too. `None` leaves the entry's
+/// settings as they are.
+fn settings_with_origins(
+    spec: &crate::config::TransportListen,
+    origins: &[String],
+    name: &str,
+    table: &str,
+) -> Option<Settings> {
+    if origins.is_empty() || spec.id != "websocket" || spec.origin.is_some() {
+        return None;
     }
+    let mut map = spec
+        .settings
+        .as_ref()
+        .map(|settings| settings.as_map().clone())
+        .unwrap_or_default();
+    let serde_json::Value::Object(listen) = map
+        .entry("listen".to_owned())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+    else {
+        return None;
+    };
+    let listed = match listen.get("origins") {
+        None => false,
+        Some(serde_json::Value::Array(listed)) => !listed.is_empty(),
+        Some(_) => true,
+    };
+    if listed {
+        return None;
+    }
+    listen.insert(
+        "origins".to_owned(),
+        serde_json::Value::from(origins.to_vec()),
+    );
+    tracing::info!(
+        "non-default: host.{table}.{name}.transport has listen.origins from [host] origins: {}",
+        origins.join(", ")
+    );
+    Some(Settings::new(map))
 }
 
+/// What loading `origin` for `entry` departs from the defaults in, said as configuration where the file asked for it, and as
+/// a warning where the host fell back.
 fn say_origin(entry: &Entry, origin: &Origin) {
+    say_origin_of(&entry.name, table_of(&entry.kind), "", origin);
+}
+
+/// [`say_origin`] for the origin an entry's `transport` loads: `prefix` is what its keys start with (`transport_`), and the
+/// outside code running in the host's own process is said as well.
+fn say_transport_origin(name: &str, table: &str, origin: &Origin) {
+    tracing::info!(
+        "host.{table}.{name}.transport_{} loads an outside transport provider into the host's process",
+        if matches!(origin, Origin::Library(_)) {
+            "library"
+        } else {
+            "source"
+        }
+    );
+    say_origin_of(name, table, "transport_", origin);
+}
+
+fn say_origin_of(name: &str, table: &str, prefix: &str, origin: &Origin) {
     let Origin::Source {
         settings,
         import_search,
@@ -2177,18 +2221,15 @@ fn say_origin(entry: &Entry, origin: &Origin) {
     else {
         return;
     };
-    let table = table_of(&entry.kind);
     if cfg!(windows) && *import_search == ImportSearch::Path {
         if *import_search_named {
             tracing::info!(
-                "non-default: host.{table}.{}.import_search is path, default library: python3.dll                  and what else the source imports itself may come from the working directory or PATH",
-                entry.name
+                "non-default: host.{table}.{name}.{prefix}import_search is path, default library: python3.dll                  and what else the source imports itself may come from the working directory or PATH"
             );
         } else {
             // The file does not say it: import_dirs names no directory, so the host fell back.
             tracing::warn!(
-                "host.{table}.{}.import_search is path, because import_dirs names no directory:                  python3.dll and what else the source imports itself may come from the working                  directory or PATH; set import_dirs to where it is, or import_search = \"library\"",
-                entry.name
+                "host.{table}.{name}.{prefix}import_search is path, because import_dirs names no directory:                  python3.dll and what else the source imports itself may come from the working                  directory or PATH; set import_dirs to where it is, or {prefix}import_search = \"library\""
             );
         }
     }
@@ -2200,8 +2241,7 @@ fn say_origin(entry: &Entry, origin: &Origin) {
         == Some("inherit")
     {
         tracing::info!(
-            "non-default: host.{table}.{}.source_settings.isolation is inherit, default shipped",
-            entry.name
+            "non-default: host.{table}.{name}.{prefix}source_settings.isolation is inherit, default shipped"
         );
     }
 }

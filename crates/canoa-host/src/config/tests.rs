@@ -1748,3 +1748,38 @@ fn two_entries_cannot_listen_on_one_transport_endpoint() {
     let refused = parse(text).expect_err("refused");
     assert!(refused.to_string().contains("same address"), "{refused}");
 }
+
+#[test]
+fn transport_entries_conflict_by_endpoint_and_two_asking_for_port_zero_do_not() {
+    let entry = |name: &str, id: &str, listen: &str, extra: &str| {
+        format!(
+            "[host.agents.{name}]\nprogram = \"x\"\ntransport = \"{id}\"\nlisten = \"{listen}\"\n{extra}"
+        )
+    };
+    // Port 0 takes whatever is free, so two entries may both ask for it.
+    let both = format!(
+        "{}{}",
+        entry("a", "websocket", "ws://127.0.0.1:0", ""),
+        entry("b", "websocket", "ws://127.0.0.1:0/", "")
+    );
+    assert!(parse(&both).is_ok());
+    // One endpoint is one place, whatever else the entries set.
+    let same = format!(
+        "{}{}",
+        entry("a", "websocket", "ws://127.0.0.1:7801", ""),
+        entry(
+            "b",
+            "websocket",
+            "ws://127.0.0.1:7801",
+            "transport_settings = { listen = { frames = \"binary\" } }\n"
+        )
+    );
+    let refused = parse(&same).expect_err("one endpoint, two entries");
+    assert!(refused.to_string().contains("same address"), "{refused}");
+    let pipes = format!(
+        "{}{}",
+        entry("a", "pipe", "pipe:t", ""),
+        entry("b", "pipe", "pipe:t", "")
+    );
+    assert!(parse(&pipes).is_err());
+}

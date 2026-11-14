@@ -541,8 +541,8 @@ dirs = ["transports"]
 The proof is the same as on an address, and so is everything after it. What the provider decides is the wire: how messages
 are framed (the built-in `pipe` frames with a big-endian length, the entry's own `pipe:NAME` with a little-endian one, so a
 client of one does not talk to the other), who can reach it, and whether plain WebSocket may leave loopback (only with
-`listen.plain_beyond_loopback` in `transport_settings`, which the host logs). The host's `[host] origins` check belongs to
-the address listener and does not apply; give a provider that checks them its own list. An outside provider is code that runs
+`listen.plain_beyond_loopback` in `transport_settings`, which the host logs). The host's `[host] origins` are passed to a built-in `websocket` as its `listen.origins` (logged) unless the entry lists its own; the built-ins also cap a message at 1 MiB, raised in `transport_settings` (`channel.max_message` of `pipe`, `listen.limits.max_message` of `websocket`). An outside provider checks origins by its own settings, if at all.
+An outside provider is code that runs
 in the host's process, and the host logs that at every start. The web app never lists such an entry. Dialling through a
 provider, `wss://` and WebTransport are not offered yet.
 
