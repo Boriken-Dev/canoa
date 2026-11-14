@@ -31,6 +31,8 @@ class SessionRail extends StatefulWidget {
     required this.onClose,
     this.onHosting,
     this.onLoadout,
+    this.account,
+    this.onSignOut,
     this.onReopen,
     this.now = DateTime.now,
     this.touch,
@@ -51,6 +53,10 @@ class SessionRail extends StatefulWidget {
 
   /// Opens Loadout: overlays, skills and MCP servers.
   final VoidCallback? onLoadout;
+
+  /// The account a portal signed this page in as, shown beside [onSignOut], which ends that sign-in; both null elsewhere.
+  final String? account;
+  final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
 
   /// The time ages are counted from.
@@ -139,6 +145,15 @@ class _SessionRailState extends State<SessionRail> {
             if (widget.onLoadout != null) _NavEntry(icon: Icons.tune, label: 'Loadout', tooltip: 'Overlays, skills and MCP servers', onTap: widget.onLoadout!),
             if (widget.onHosting != null) _NavEntry(icon: Icons.dns_outlined, label: 'Hosting', onTap: widget.onHosting!),
             _NavEntry(icon: Icons.settings_outlined, label: 'Settings', tooltip: 'Canoa settings', onTap: widget.onSettings),
+            if (widget.onSignOut != null)
+              _NavEntry(
+                key: const ValueKey('sign-out'),
+                icon: Icons.logout_rounded,
+                label: 'Sign out',
+                hint: widget.account,
+                tooltip: widget.account == null ? 'Sign out' : 'Signed in as ${widget.account}. Sign out',
+                onTap: () => unawaited(widget.onSignOut!()),
+              ),
           ]),
         ),
       ]),
@@ -195,7 +210,7 @@ class _SessionRailState extends State<SessionRail> {
 String chordLabel(String key) => defaultTargetPlatform == TargetPlatform.macOS ? '⌘$key' : 'Ctrl+$key';
 
 class _NavEntry extends StatelessWidget {
-  const _NavEntry({required this.icon, required this.label, required this.onTap, this.hint, this.tooltip});
+  const _NavEntry({super.key, required this.icon, required this.label, required this.onTap, this.hint, this.tooltip});
 
   final IconData icon;
   final String label;

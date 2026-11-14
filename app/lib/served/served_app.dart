@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:http/http.dart' as http;
 
+import '../auth/peer_proof.dart' show PeerMethod;
 import '../acp/served_host.dart';
 import '../config/canoa_config.dart';
 import '../desktop/host_control.dart';
@@ -15,6 +17,7 @@ import '../profile/project_trust.dart';
 import 'control_overlays.dart';
 import 'host_config.dart';
 import 'host_files.dart';
+import 'portal_session.dart';
 import 'served_control.dart';
 
 /// The entries of the host that served this page as the app's sources: each agent entry it lists, reached by its address after the
@@ -104,22 +107,38 @@ final class ServedProfileHome implements ProfileHome {
 /// uploads, canoa.cfg and the overlay store. The control channel is the one the host lists; a key it has no grant for gets the
 /// host's own refusal for that request, and nothing else is lost.
 final class ServedApp {
-  ServedApp._(this.host, this.control)
+  ServedApp._(this.host, this.control, this.portal)
       : supervisor = ServedSupervisor(host),
         overlays = ControlOverlayManager(control),
         ledger = HostLedgerBackend.over(control);
 
-  /// The page's host as `canoa.json` lists it, with a control channel of the page's own when the host listens for one.
-  ServedApp.over(ServedHost host, HostControl control) : this._(host, control);
+  /// The page's host as `canoa.json` lists it, with a control channel of the page's own when the host listens for one; [portal]
+  /// when `canoa portal` served the page.
+  ServedApp.over(ServedHost host, HostControl control, {PortalSession? portal}) : this._(host, control, portal);
 
-  /// Reads `canoa.json` beside this page (or beside [base]): null where the page was not served by a `canoa`.
-  static Future<ServedApp?> discover({HostControl Function(ServedHost host)? control, Uri? base}) async {
-    final host = await loadServedHost(base: base);
+  /// Reads `canoa.json` beside this page (or beside [base]): null where the page was not served by a `canoa`, and, behind a
+  /// portal, where nobody is signed in (the browser is sent to sign in).
+  static Future<ServedApp?> discover({
+    HostControl Function(ServedHost host)? control,
+    Uri? base,
+    http.Client? client,
+    void Function(Uri login)? signedOut,
+    void Function(Uri address)? navigate,
+    Future<String> Function(PeerMethod method)? localPeer,
+  }) async {
+    final host = await loadServedHost(base: base, client: client, signedOut: signedOut);
     if (host == null) return null;
-    return ServedApp.over(host, (control ?? servedControl)(host));
+    final user = host.user;
+    final portal = user == null
+        ? null
+        : PortalSession(user: user, base: base ?? Uri.base, client: client, navigate: navigate, localPeer: localPeer);
+    return ServedApp.over(host, (control ?? (host) => servedControl(host, failed: portal?.active))(host), portal: portal);
   }
 
   final ServedHost host;
+
+  /// The sign-in the portal that served this page keeps, or null for a page served by anything else.
+  final PortalSession? portal;
   final HostControl control;
   final ServedSupervisor supervisor;
   late final HostFiles files = HostFiles(control);
@@ -154,10 +173,14 @@ final class ServedApp {
       problem = 'This host listens for no control channel, so the page keeps its sessions in this browser only.';
       return;
     }
+    // A key the host has not accepted, or has granted nothing, is turned away after the proof: only a request shows it.
+    Future<void> ask() async => (await control.ready()).call('ledger/list', {'limit': 1}).timeout(within);
     try {
-      // A key the host has not accepted, or has granted nothing, is turned away after the proof: only a request shows it.
-      await (await control.ready()).call('ledger/list', {'limit': 1}).timeout(within);
+      // Behind a portal the page introduces its own key after the first refusal, then asks again.
+      await (portal == null ? ask() : portal!.connect(host.method, ask));
       problem = null;
+    } on PortalSignedOut {
+      problem = 'You are signed out: going to the sign-in page.';
     } on Object catch (error) {
       detail = '$error';
       debugPrint('Canoa: the host\'s control channel cannot be used: $error');

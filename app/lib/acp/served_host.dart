@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
 import '../auth/peer_proof.dart';
+import '../served/navigate.dart';
 
 /// Whether this is a web page; Flutter's own `kIsWeb` would keep the peer test page, which `dart compile js` builds, from
 /// compiling.
@@ -31,7 +33,10 @@ final class ServedEntry {
 /// connect dialog: connecting still proves the host holds [peer]'s key, and the host still turns this browser away until
 /// its key is accepted there.
 final class ServedHost {
-  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os});
+  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os, this.user});
+
+  /// The account signed in to the `canoa portal` that served this page; null for any other server.
+  final String? user;
 
   /// The host's peer id.
   final String peer;
@@ -82,6 +87,7 @@ final class ServedHost {
       return ServedHost(
         peer: peer, method: PeerMethod.parse(method), entries: served, control: control,
         os: value['os'] is String ? value['os'] as String : null,
+        user: value['user'] is String && (value['user'] as String).isNotEmpty ? value['user'] as String : null,
       );
     } on FormatException {
       return null;
@@ -92,12 +98,24 @@ final class ServedHost {
 }
 
 /// Reads `canoa.json` beside this page, as `canoa serve --web` serves it: null where the app is no web page or
-/// the page came from anything else.
-Future<ServedHost?> loadServedHost({http.Client? client, Uri? base}) async {
+/// the page came from anything else. A `401` is a portal saying nobody is signed in: [signedOut] is told the sign-in address
+/// (in a page, by default, the browser goes there and this never answers, since the page is leaving), and the answer is null.
+Future<ServedHost?> loadServedHost({http.Client? client, Uri? base, void Function(Uri login)? signedOut}) async {
   if (!_inPage && base == null) return null;
   final ask = client ?? http.Client();
   try {
-    final response = await ask.get((base ?? Uri.base).resolve('canoa.json'));
+    final page = base ?? Uri.base;
+    final response = await ask.get(page.resolve('canoa.json'));
+    if (response.statusCode == 401) {
+      final login = page.resolve('/portal/login');
+      if (signedOut != null) {
+        signedOut(login);
+      } else if (_inPage) {
+        navigateTo(login);
+        await Completer<void>().future;
+      }
+      return null;
+    }
     return response.statusCode == 200 ? ServedHost.parse(response.body) : null;
   } catch (_) {
     return null;

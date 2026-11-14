@@ -67,5 +67,20 @@ Future<HostLink> dialServedControl(
 
 /// The control channel of the host that served this page, shared by whatever needs it: the session list, folders, uploads,
 /// canoa.cfg and overlays.
-HostControl servedControl(ServedHost host, {VerifyAcpPeer? verify, Duration timeout = const Duration(seconds: 10)}) =>
-    HostControl.dialing(() => dialServedControl(host, verify: verify, timeout: timeout), wait: timeout * 2);
+///
+/// [failed] runs after a dial that did not succeed, before the failure goes on: a portal's page uses it to find out whether the
+/// session is over.
+HostControl servedControl(
+  ServedHost host, {
+  VerifyAcpPeer? verify,
+  Duration timeout = const Duration(seconds: 10),
+  Future<void> Function()? failed,
+}) =>
+    HostControl.dialing(() async {
+      try {
+        return await dialServedControl(host, verify: verify, timeout: timeout);
+      } on Object {
+        await failed?.call();
+        rethrow;
+      }
+    }, wait: timeout * 2);

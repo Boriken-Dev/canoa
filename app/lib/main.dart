@@ -1568,6 +1568,7 @@ class _CanoaAppState extends State<CanoaApp> {
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
           onHosting: widget.host == null || widget.served != null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
+          account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           conversation: _conversation,
           kit: _kit,
           renderers: widget.renderers,
@@ -1584,7 +1585,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
-    this.onHosting, this.onLoadout, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
+    this.onHosting, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome,
   });
 
@@ -1600,6 +1601,8 @@ class _CanoaHome extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback? onHosting;
   final VoidCallback? onLoadout;
+  final String? account;
+  final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
   final _ConversationHandle conversation;
 
@@ -1635,7 +1638,7 @@ class _CanoaHome extends StatelessWidget {
   /// The rail as the window shows it: beside the conversation, or in the drawer.
   Widget _rail(BuildContext context) => SessionRail(
     store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession,
-    onSettings: onSettings, onHosting: onHosting, onLoadout: onLoadout, onReopen: onReopen,
+    onSettings: onSettings, onHosting: onHosting, onLoadout: onLoadout, account: account, onSignOut: onSignOut, onReopen: onReopen,
     onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
     onClose: conversation.close ?? store.close,
   );

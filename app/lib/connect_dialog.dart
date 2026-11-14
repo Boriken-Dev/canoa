@@ -96,9 +96,12 @@ class _ServedEntries extends StatelessWidget {
           ),
       ]),
       Text(
-        'The pinned id below is what this page says: compare it with the one canoa id prints, or Hosting shows. '
-        'Connecting then proves the host holds it. Until this browser\'s key is accepted there, the host turns it away: '
-        'run canoa accept with your id above.',
+        host.user != null
+            ? 'Signed in as ${host.user}. This page introduces this browser\'s key to your host itself; connecting then proves '
+                'the host holds the pinned id below.'
+            : 'The pinned id below is what this page says: compare it with the one canoa id prints, or Hosting shows. '
+                'Connecting then proves the host holds it. Until this browser\'s key is accepted there, the host turns it away: '
+                'run canoa accept with your id above.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     ]),

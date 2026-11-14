@@ -1,0 +1,1 @@
+void navigateTo(Uri address) {}
