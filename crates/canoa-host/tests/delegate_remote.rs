@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use canoa_host::{Link, LinkError};
-use coqui_a2a::model::{Message, Role, SendMessageRequest};
+use coqui_a2a::model::{
+    GetTaskRequest, Message, Role, SendMessageConfiguration, SendMessageRequest,
+    SendMessageResponse, StreamResponse, TaskState,
+};
 use coqui_a2a::{Client, ClientError};
 use coqui_agentic_peer::auth::{self, Identity, Proof, Sealed, Trust};
 use coqui_agentic_peer::home::identity_file;
@@ -80,23 +83,38 @@ struct Far {
     marker: PathBuf,
     id: PeerId,
     url: String,
+    /// The address of a tool entry of the same host.
+    tool_url: String,
 }
 
 fn far(granted: &Identity, other: &Identity, paired: &[&Identity]) -> Far {
+    far_with(granted, other, paired, "")
+}
+
+/// Host B: `shared` lists the granted key; `open` lists none and `bare` has no working root, so neither is the key's; `hidden`
+/// lists only `other`; `tool` is a tool entry. `more` goes under `[host.delegate]`.
+fn far_with(granted: &Identity, other: &Identity, paired: &[&Identity], more: &str) -> Far {
     let (scratch, identity) = scratch_with_identity();
     for key in paired {
         pair(&scratch, key);
     }
     let root = directory(&scratch.0, "root");
     let marker = scratch.0.join("far.pids");
+    let roots = format!("working_roots = [{}]", toml_path(&root));
     let config = format!(
-        "{}{}[host.delegate]\na2a = [\"{}\"]\n",
+        "{}{}{}{}{}[host.delegate]\na2a = [\"{}\"]\n{more}\n",
         agent(
             "shared",
             &marker_arg(&marker),
-            &format!("working_roots = [{}]", toml_path(&root))
+            &format!("{roots}\npeers = [\"{}\"]", granted.peer_id())
         ),
+        agent("open", "", &roots),
+        agent("bare", "", &format!("peers = [\"{}\"]", granted.peer_id())),
         agent("hidden", "", &format!("peers = [\"{}\"]", other.peer_id())),
+        format_args!(
+            "[host.tools.tool]\nprogram = {}\nruns = \"message\"\nunasked = \"everything it does\"\nlisten = \"127.0.0.1:0\"\n",
+            quoted(&example("jsonl_tool", false).to_string_lossy())
+        ),
         granted.peer_id()
     );
     let host = Hosted::start_in(scratch, &config, &[]);
@@ -104,6 +122,10 @@ fn far(granted: &Identity, other: &Identity, paired: &[&Identity]) -> Far {
     Far {
         id: identity.peer_id(),
         url: line["url"].as_str().expect("a url").to_owned(),
+        tool_url: host.line_of("tool").expect("the tool is listening")["url"]
+            .as_str()
+            .expect("a url")
+            .to_owned(),
         host,
         root,
         marker,
@@ -161,6 +183,7 @@ struct Convo<'a> {
     next: u64,
     requests: Vec<Value>,
     updates: Vec<Value>,
+    events: Vec<Value>,
 }
 
 impl<'a> Convo<'a> {
@@ -170,6 +193,7 @@ impl<'a> Convo<'a> {
             next: 0,
             requests: Vec::new(),
             updates: Vec::new(),
+            events: Vec::new(),
         }
     }
 
@@ -209,6 +233,8 @@ impl<'a> Convo<'a> {
             if message.get("method").is_some() {
                 if message.get("id").is_some() {
                     self.requests.push(message);
+                } else if message["method"] == "_canoa/delegate/event" {
+                    self.events.push(message["params"].clone());
                 } else {
                     self.updates.push(message);
                 }
@@ -324,7 +350,11 @@ fn the_far_hosts_card_lists_the_sources_the_key_may_use_and_no_other() {
         Client::new(mux).agent_card().expect("a card")
     });
     let ids: Vec<&str> = card.skills.iter().map(|skill| skill.id.as_str()).collect();
-    assert_eq!(ids, ["shared"], "hidden lists only `other`");
+    assert_eq!(
+        ids,
+        ["shared"],
+        "`hidden` lists only `other`, `open` lists no key and `bare` has no working root"
+    );
     drop(near_scratch);
     far.host.stop();
 }
@@ -354,16 +384,19 @@ fn a_key_without_the_a2a_grant_is_refused_the_protocol_whatever_else_it_may_do()
     let (_scratch, granted) = scratch_with_identity();
     let paired = Identity::generate(method()).expect("a key");
     let far = far(&granted, &paired, &[&granted, &paired]);
-    let refused = over_link(&far.url, far.id, &paired, |mux| {
+    // `hidden` lists the paired key, so its address is one the key may reach; the grant is what it lacks.
+    let url = far.host.line_of("hidden").expect("listening")["url"]
+        .as_str()
+        .expect("a url")
+        .to_owned();
+    let refused = over_link(&url, far.id, &paired, |mux| {
         Client::new(mux).send_message(&text_request("Say hi", "shared"))
     });
     assert!(
         matches!(refused, Err(ClientError::NotGranted(_))),
         "{refused:?}"
     );
-    let card = over_link(&far.url, far.id, &paired, |mux| {
-        Client::new(mux).agent_card()
-    });
+    let card = over_link(&url, far.id, &paired, |mux| Client::new(mux).agent_card());
     assert!(matches!(card, Err(ClientError::NotGranted(_))), "{card:?}");
     far.host.stop();
 }
@@ -408,7 +441,8 @@ fn a_remote_question_reaches_the_person_on_the_parent_and_the_answer_reaches_the
     assert!(
         asked["params"]["options"]
             .as_array()
-            .is_some_and(|options| options.len() == 4)
+            .is_some_and(|options| options.len() == 3),
+        "the far side offers a key no always"
     );
     assert_eq!(convo.status(&session, &task, 0)["state"], "input_required");
     convo.send(&json!({"jsonrpc": "2.0", "id": asked["id"], "result": {"outcome": {"outcome": "selected", "optionId": "yes"}}}));
@@ -554,4 +588,133 @@ fn a_task_can_name_no_far_source_when_the_far_host_is_unreachable_and_ends_faile
     assert_eq!(status["state"], "failed", "{status}");
     drop(link);
     near.stop();
+}
+
+#[test]
+fn a_task_started_without_a_stream_is_cancelled_when_its_keys_link_ends() {
+    let (_scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    over_link(&far.url, far.id, &key, |mux| {
+        let mut request = text_request("Wait", "shared");
+        request.configuration = Some(SendMessageConfiguration {
+            return_immediately: Some(true),
+            ..SendMessageConfiguration::default()
+        });
+        let answered = Client::new(mux).send_message(&request).expect("a task");
+        assert!(matches!(answered, SendMessageResponse::Task(_)));
+        until("it started", || pids(&far.marker).len() == 1);
+    });
+    let pid = pids(&far.marker)[0];
+    until("the child of a key that left ended", || !running(pid));
+    far.host.stop();
+}
+
+#[test]
+fn a_tool_entrys_address_does_not_serve_the_stream_link() {
+    let (_scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    let card = over_link(&far.tool_url, far.id, &key, |mux| {
+        Client::new(mux).agent_card()
+    });
+    assert!(card.is_err(), "a tool address served A2A: {card:?}");
+    far.host.stop();
+}
+
+#[test]
+fn a_key_sees_no_path_of_the_far_host_and_is_offered_no_always() {
+    let (_scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    let root = far.root.to_string_lossy().to_lowercase();
+    let seen = over_link(&far.url, far.id, &key, |mux| {
+        let client = Client::new(mux);
+        let mut events = client
+            .send_streaming_message(&text_request("Please edit src/report.js", "shared"))
+            .expect("streaming");
+        let mut seen = Vec::new();
+        for event in events.by_ref() {
+            match event.expect("an event") {
+                StreamResponse::Task(task) => {
+                    seen.push(serde_json::to_string(&task).expect("JSON"));
+                    let again = client
+                        .get_task(&GetTaskRequest {
+                            id: task.id.clone(),
+                            ..GetTaskRequest::default()
+                        })
+                        .expect("the task");
+                    seen.push(serde_json::to_string(&again).expect("JSON"));
+                }
+                StreamResponse::StatusUpdate(update)
+                    if update.status.state == TaskState::InputRequired =>
+                {
+                    let data = update
+                        .status
+                        .message
+                        .and_then(|message| message.parts.into_iter().find_map(|part| part.data))
+                        .expect("the question");
+                    let kinds: Vec<String> = data["options"]
+                        .as_array()
+                        .expect("options")
+                        .iter()
+                        .map(|option| option["kind"].as_str().unwrap_or("").to_owned())
+                        .collect();
+                    assert_eq!(kinds, ["allow_once", "reject_once", "reject_always"]);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        seen
+    });
+    let escaped = root.replace('\\', "\\\\");
+    for task in &seen {
+        let task = task.to_lowercase();
+        assert!(!task.contains("folder"), "{task}");
+        assert!(!task.contains(&escaped) && !task.contains(&root), "{task}");
+    }
+    far.host.stop();
+}
+
+#[test]
+fn keys_from_other_machines_leave_one_of_max_running_for_the_person() {
+    let (_scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far_with(&key, &other, &[&key], "max_running = 2");
+    over_link(&far.url, far.id, &key, |mux| {
+        let client = Client::new(mux);
+        let mut first = client
+            .send_streaming_message(&text_request("Wait", "shared"))
+            .expect("the first");
+        let _ = first.next();
+        let refused = client.send_streaming_message(&text_request("Wait", "shared"));
+        assert!(
+            matches!(&refused, Err(ClientError::Remote(error)) if error.message.contains("max_running")),
+            "{:?}",
+            refused.err()
+        );
+    });
+    far.host.stop();
+}
+
+#[test]
+fn a_task_for_another_machine_is_marked_so_in_the_events_the_client_gets() {
+    let (scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    let work = directory(&scratch.0, "work");
+    let near = near(scratch, &far, "sources = [\"far\"]");
+    let link = near.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(&work);
+    let task = convo.delegate(&session, "far", "Verbatim x");
+    let _ = convo.status(&session, &task, 20_000);
+    let marked = convo.events.iter().any(|event| {
+        event["taskId"] == task.as_str() && event["event"]["task"]["metadata"]["remote"] == true
+    });
+    assert!(marked, "{:?}", convo.events);
+    drop(link);
+    near.stop();
+    far.host.stop();
 }

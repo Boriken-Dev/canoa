@@ -682,6 +682,7 @@ impl delegate::Host for DelegationHost {
         match who {
             Principal::Owner => true,
             Principal::Key(peer) => shared.allows(peer, served),
+            Principal::Remote(peer) => shared.lists(peer, served),
         }
     }
 
@@ -1487,6 +1488,12 @@ fn accept_pipe_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &pipe:
 }
 
 impl Shared {
+    /// Whether the entry names `peer` in its `peers`: an entry that lists no key is open to every paired key, which is not
+    /// enough for a key that came to run tasks here.
+    fn lists(&self, peer: &PeerId, served: &Served) -> bool {
+        served.restricted && self.allows(peer, served)
+    }
+
     /// Whether `peer`, whose key the store accepts, may use this entry.
     fn allows(&self, peer: &PeerId, served: &Served) -> bool {
         !served.restricted
@@ -1578,11 +1585,7 @@ fn serve_proven<C: Channel>(
         // A link of streams carries A2A and nothing else, over an agent entry's address, and only the delegation decides who
         // may open it (`[host.delegate] a2a`).
         Ok(Some(first)) if mux::starts_mux(&first) => {
-            match shared
-                .delegation
-                .as_ref()
-                .filter(|_| matches!(served.run, Run::Agent { .. }))
-            {
+            match shared.delegation.as_ref().filter(|_| served.delegable) {
                 Some(delegation) => {
                     tracing::info!(entry = served.name, %peer, "a link of streams");
                     delegation.serve_link(sealed, first, &peer.to_string(), MAX_LINE);

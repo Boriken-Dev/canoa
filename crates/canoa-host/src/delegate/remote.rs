@@ -35,6 +35,10 @@ const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 const HEARTBEAT: (Duration, u32) = (Duration::from_secs(15), 3);
 /// How often a stop is looked for while the other host's events are awaited.
 const POLL: Duration = Duration::from_millis(50);
+/// The most a question from another machine may weigh (its tool call and options as JSON), and how many options it may offer:
+/// the card shows what it is given, so an unbounded one would be unbounded on the person's screen.
+const MAX_QUESTION_BYTES: usize = 16 * 1024;
+const MAX_OPTIONS: usize = 8;
 /// The most of the other host's words a status carries: they are another machine's, and shown as they are.
 const NOTE_BYTES: usize = 4096;
 
@@ -322,7 +326,14 @@ impl<C: Channel> Mirrored<'_, '_, '_, C> {
         // Only the two members the card shows are taken from what the other host sent.
         let asked = message
             .and_then(|message| message.parts.iter().find_map(|part| part.data.as_ref()))
-            .filter(|data| data["toolCall"].is_object() && data["options"].is_array())
+            .filter(|data| {
+                data["toolCall"].is_object()
+                    && data["options"]
+                        .as_array()
+                        .is_some_and(|options| options.len() <= MAX_OPTIONS)
+                    && data["toolCall"].to_string().len() + data["options"].to_string().len()
+                        <= MAX_QUESTION_BYTES
+            })
             .map(|data| json!({"toolCall": data["toolCall"], "options": data["options"]}));
         let answer = match (asked, self.session.conn(), self.session.session_id()) {
             (Some(params), Some(conn), Some(session)) => {

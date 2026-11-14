@@ -69,8 +69,11 @@ const MAX_PENDING: usize = 64;
 pub(crate) enum Principal {
     /// This process's own link: every source.
     Owner,
-    /// A paired key: the entries that list it.
+    /// A paired key: the entries that list it, or every entry when an entry lists no key.
     Key(PeerId),
+    /// A key granted A2A: only the entries that list it by name, since a grant reaches this host's sources from the address of
+    /// any entry the key may use, and an entry that lists no key would open its source to every key.
+    Remote(PeerId),
 }
 
 /// A source the host can run a task on.
@@ -204,6 +207,10 @@ struct State {
     running: usize,
     /// The connection each remote caller's session answers to, kept for as long as the session.
     remote_conns: Vec<Arc<Conn>>,
+    /// Tasks of keys from other machines running, across the host: at most `max_running` less one, so the person always has a place.
+    remote_running: usize,
+    /// The links each key granted A2A has open now.
+    links: HashMap<String, usize>,
 }
 
 /// The delegation of one host.
@@ -271,7 +278,7 @@ impl Engine {
             return Ok(session);
         }
         let conn = self.connect(ConnInfo {
-            principal: Principal::Key(key),
+            principal: Principal::Remote(key),
             entry: String::new(),
             roots: Vec::new(),
             depth: 0,
@@ -303,6 +310,15 @@ impl Engine {
                 ),
             ));
         }
+        if session.is_remote() && state.remote_running + 1 >= self.config.max_running {
+            return Err(limit(
+                "max_running",
+                format!(
+                    "tasks from other machines already take {} of this host's {} places (max_running keeps one for the person)",
+                    state.remote_running, self.config.max_running
+                ),
+            ));
+        }
         if session.live.load(Ordering::SeqCst) >= self.config.max_children {
             return Err(limit(
                 "max_children",
@@ -313,11 +329,73 @@ impl Engine {
             ));
         }
         state.running += 1;
+        state.remote_running += usize::from(session.is_remote());
         session.live.fetch_add(1, Ordering::SeqCst);
         Ok(Reservation {
             engine: Arc::clone(self),
             session: Arc::clone(session),
         })
+    }
+
+    /// A link of `peer` opened.
+    fn link_up(&self, peer: &str) {
+        *lock(&self.state).links.entry(peer.to_owned()).or_insert(0) += 1;
+    }
+
+    /// A link of `peer` ended. With no other left, the key's tasks are cancelled and its session dropped: nobody is left to read
+    /// what they make or answer what they ask, whichever call started them and whether the link went or the key was unpaired.
+    fn link_down(&self, peer: &str) {
+        let session = {
+            let mut state = lock(&self.state);
+            let left = state.links.get_mut(peer).map_or(0, |count| {
+                *count = count.saturating_sub(1);
+                *count
+            });
+            if left > 0 {
+                return;
+            }
+            state.links.remove(peer);
+            let session = state.sessions.remove(peer);
+            if let Some(session) = &session
+                && let Some(conn) = session.conn()
+            {
+                state.remote_conns.retain(|held| !Arc::ptr_eq(held, &conn));
+            }
+            session
+        };
+        let Some(session) = session else { return };
+        let tasks: Vec<String> = lock(&session.children).keys().cloned().collect();
+        if tasks.is_empty() {
+            return;
+        }
+        tracing::info!(
+            key = peer,
+            tasks = tasks.len(),
+            "a key's link ended: its tasks are cancelled"
+        );
+        let peer = peer.to_owned();
+        let spawned = std::thread::Builder::new()
+            .name("canoa-delegate-orphans".to_owned())
+            .spawn(move || {
+                let who = Who::new(peer);
+                std::thread::scope(|scope| {
+                    for id in &tasks {
+                        let (session, who) = (&session, &who);
+                        scope.spawn(move || {
+                            let _ = session.store.cancel(
+                                &who.caller(),
+                                &coqui_a2a::model::CancelTaskRequest {
+                                    id: id.clone(),
+                                    ..coqui_a2a::model::CancelTaskRequest::default()
+                                },
+                            );
+                        });
+                    }
+                });
+            });
+        if let Err(error) = spawned {
+            tracing::warn!("delegation: a key's tasks could not be cancelled: {error}");
+        }
     }
 
     /// Ends the delegation: no bearer is valid after, and every task ends.
@@ -383,6 +461,9 @@ impl Drop for Reservation {
     fn drop(&mut self) {
         let mut state = lock(&self.engine.state);
         state.running = state.running.saturating_sub(1);
+        if self.session.is_remote() {
+            state.remote_running = state.remote_running.saturating_sub(1);
+        }
         drop(state);
         self.session.live.fetch_sub(1, Ordering::SeqCst);
     }
@@ -1210,6 +1291,12 @@ impl Delegation {
                 sources.join(", ")
             );
         }
+        if !config.a2a.is_empty() {
+            tracing::info!(
+                "non-default: host.delegate.a2a grants A2A to {} key(s), default none",
+                config.a2a.len()
+            );
+        }
         let engine = Engine::new(config.clone());
         let _ = engine.bridge.set(bridge);
         match server::Listener::start(&engine) {
@@ -1243,6 +1330,7 @@ impl Delegation {
         peer: &str,
         max_message: usize,
     ) {
+        self.engine.link_up(peer);
         let services = self.engine.a2a.clone().serving(Services::default());
         let grants = Grants(
             self.engine
@@ -1261,6 +1349,7 @@ impl Delegation {
             events: &NoEvents,
         };
         link::serve(channel, Side::Answered, options, Some(first), peer, &host);
+        self.engine.link_down(peer);
     }
 
     /// A connection that may delegate.

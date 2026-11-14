@@ -240,6 +240,19 @@ fn run(job: Job) {
         link.close();
     }
     settle(&session, &child, outcome);
+    if let Some(key) = session.peer().filter(|_| session.is_remote()) {
+        let state = session
+            .store
+            .snapshot(&child.task)
+            .map(|task| task.status.state.to_string());
+        tracing::info!(
+            key,
+            source = child.source,
+            task = child.task,
+            state = state.as_deref().unwrap_or("unknown"),
+            "a task from another machine ended"
+        );
+    }
     lock(&session.children).remove(&child.task);
     {
         let mut ended = lock(&session.ended);
@@ -250,6 +263,23 @@ fn run(job: Job) {
     }
     drop(reservation);
     child.finish();
+}
+
+/// The options a key may choose among: the one-time allow and the refusals of `options`.
+fn once_options(options: &Value) -> Value {
+    Value::Array(
+        options
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|option| {
+                option["kind"]
+                    .as_str()
+                    .is_some_and(|kind| kind == "allow_once" || kind.starts_with("reject"))
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 /// What the agent is told of a key's answer to its question: the option the key chose when the agent offered it, else a cancel.
@@ -563,9 +593,11 @@ impl Work<'_> {
             format!("question-{}", self.next),
             format!("waiting for the caller: {}", self.child.title),
         );
-        asked.parts.push(Part::data(
-            json!({"toolCall": params["toolCall"], "options": params["options"]}),
-        ));
+        // The key is offered a single allow and the refusals, never an "always": that is written into the person's settings by
+        // some agents, and no key may widen what this host's person has set.
+        let offered = once_options(&params["options"]);
+        let params = &json!({"toolCall": params["toolCall"], "options": offered});
+        asked.parts.push(Part::data(params.clone()));
         let store = &self.session.store;
         let _ = store.update_status(&self.child.task, TaskState::InputRequired, Some(asked));
         let (child, engine) = (self.child, self.engine);

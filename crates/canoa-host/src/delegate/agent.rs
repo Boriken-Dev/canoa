@@ -59,6 +59,8 @@ impl DelegationAgent {
         };
         privilege::sources(host.as_ref(), &engine.config, conn.principal())
             .into_iter()
+            // A key from another machine is shown only what it can run: a source with no working root has no place for its task.
+            .filter(|source| !session.is_remote() || !source.roots.is_empty())
             .map(|source| AgentSkill {
                 name: source.title.clone().unwrap_or_else(|| source.name.clone()),
                 description: if source.remote.is_some() {
@@ -212,8 +214,15 @@ impl DelegationAgent {
         let mut metadata = Map::new();
         metadata.insert("title".to_owned(), json!(title));
         metadata.insert("source".to_owned(), json!(source));
-        if let Some(folder) = &folder {
+        // A path of this host is its own business: a key from another machine is told none.
+        if let Some(folder) = folder.as_ref().filter(|_| !session.is_remote()) {
             metadata.insert("folder".to_owned(), json!(folder.to_string_lossy()));
+        }
+        if to_remote {
+            metadata.insert("remote".to_owned(), json!(true));
+        }
+        if session.is_remote() {
+            tracing::info!(key = caller.peer, %source, "a task from another machine started");
         }
         request.metadata = Some(metadata);
         request.tenant = Some(source.clone());

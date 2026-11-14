@@ -141,7 +141,7 @@ fn owned_by(table: &str, peer: SocketAddr, local: SocketAddr) -> Option<u32> {
     let hex = |addr: std::net::SocketAddrV4| {
         format!(
             "{:08X}:{:04X}",
-            u32::from_le_bytes(addr.ip().octets()),
+            u32::from_ne_bytes(addr.ip().octets()),
             addr.port()
         )
     };
