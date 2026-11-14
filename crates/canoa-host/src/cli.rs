@@ -550,6 +550,10 @@ struct ServeArgs {
     /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
     #[arg(long)]
     until_stdin_closes: bool,
+    /// Say that a supervisor starts this host again when it ends with status 75, which is what lets a paired key ask for
+    /// `host/restart`; without it that request is refused.
+    #[arg(long)]
+    supervised: bool,
     /// With no entry in canoa.cfg, or no canoa.cfg at all, keep running with nothing to serve, rather than ending with
     /// status 2.
     #[arg(long)]
@@ -766,6 +770,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         .with_rekey(!args.no_rekey)
         .with_nothing_to_serve(args.allow_empty)
         .with_local_sources(args.local_sources)
+        .with_supervised(args.supervised)
         .with_layers(layers)
         .with_state_dir(home.dir());
     if let Ok(layers) = layers_of(&args.config, front, false) {

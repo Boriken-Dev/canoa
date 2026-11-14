@@ -41,6 +41,10 @@ const GIT_TIME: Duration = Duration::from_secs(5 * 60);
 const PLAN_TIME: Duration = Duration::from_secs(15 * 60);
 /// The plans one caller may hold; the oldest goes first.
 const MAX_PLANS: usize = 16;
+/// The overlay caches, and the catalogs, this host keeps at once.
+const MAX_CACHES: usize = 64;
+/// What the overlays folder may hold in all, installed overlays and fetched history together.
+const MAX_FOLDER_BYTES: u64 = 1024 * 1024 * 1024;
 /// The most bytes of file contents one answer carries.
 pub const MAX_READ_BYTES: u64 = 8 * 1024 * 1024;
 /// The files one `catalog/read` may ask for.
@@ -91,7 +95,7 @@ pub(crate) struct Overlays {
     limits: OverlayLimits,
     plans: Mutex<Vec<Plan>>,
     /// One install or removal at a time.
-    changing: Mutex<()>,
+    gates: Mutex<BTreeMap<String, std::sync::Arc<Mutex<()>>>>,
     git: OnceLock<Result<PathBuf, String>>,
 }
 
@@ -120,6 +124,33 @@ impl Overlays {
             .as_ref()
             .map(PathBuf::as_path)
             .map_err(|why| refused(why.clone()))
+    }
+
+    /// The lock of one overlay or catalog: its fetch, install and removal take turns, and nobody else waits on them.
+    fn gate(&self, name: &str) -> std::sync::Arc<Mutex<()>> {
+        let mut gates = self.gates.lock().unwrap_or_else(PoisonError::into_inner);
+        std::sync::Arc::clone(gates.entry(name.to_owned()).or_default())
+    }
+
+    /// Drops the plans that have expired, and the history fetched for an overlay that none holds and nothing installed.
+    fn expire(&self, plans: &mut Vec<Plan>) {
+        let (kept, gone): (Vec<Plan>, Vec<Plan>) = std::mem::take(plans)
+            .into_iter()
+            .partition(|plan| plan.at.elapsed() < PLAN_TIME);
+        *plans = kept;
+        for plan in gone {
+            let held = plans.iter().any(|other| other.name == plan.name);
+            let installed = self
+                .root
+                .as_deref()
+                .is_some_and(|root| record_of(root, &plan.name).is_some());
+            if !held
+                && !installed
+                && let Ok(cache) = self.cache(&plan.name)
+            {
+                let _ = fs::remove_dir_all(cache);
+            }
+        }
     }
 
     fn plans(&self) -> std::sync::MutexGuard<'_, Vec<Plan>> {
@@ -176,7 +207,8 @@ impl Overlays {
                 "a source on this computer must be in a folder this key may browse",
             ));
         }
-        let _one = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+        let gate = self.gate(name);
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         let cache = self.cache(name)?;
         self.init_cache(&cache)?;
         let commit = self.fetch(&cache, &repo, &reference)?;
@@ -240,7 +272,7 @@ impl Overlays {
             "manifest": manifest,
         });
         let mut plans = self.plans();
-        plans.retain(|plan| plan.at.elapsed() < PLAN_TIME);
+        self.expire(&mut plans);
         let owner = caller.owner().to_owned();
         while plans.iter().filter(|plan| plan.owner == owner).count() >= MAX_PLANS {
             if let Some(oldest) = plans.iter().position(|plan| plan.owner == owner) {
@@ -266,7 +298,7 @@ impl Overlays {
     fn plan(&self, caller: &Caller, params: &Value, take: bool) -> Result<Plan, (i32, String)> {
         let token = text_param(params, "token")?.ok_or_else(|| bad("token is needed"))?;
         let mut plans = self.plans();
-        plans.retain(|plan| plan.at.elapsed() < PLAN_TIME);
+        self.expire(&mut plans);
         let at = plans
             .iter()
             .position(|plan| plan.token == token && plan.owner == caller.owner())
@@ -322,7 +354,8 @@ impl Overlays {
             checked_name(label)?;
         }
         let root = self.root()?;
-        let _one = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+        let gate = self.gate(&plan.name);
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         let name = checked_name(&plan.name)?;
         let before = record_of(root, name);
         let label: Option<String> = catalog.map(str::to_owned).or_else(|| {
@@ -431,7 +464,8 @@ impl Overlays {
     pub(crate) fn remove(&self, params: &Value) -> Outcome {
         let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
         let root = self.root()?;
-        let _one = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+        let gate = self.gate(name);
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         for dir in [root.join(name), self.cache(name)?] {
             if dir.exists() {
                 fs::remove_dir_all(&dir).map_err(|error| {
@@ -451,7 +485,8 @@ impl Overlays {
     pub(crate) fn discard(&self, params: &Value) -> Outcome {
         let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
         let root = self.root()?;
-        let _one = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+        let gate = self.gate(name);
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         if record_of(root, name).is_none() {
             let cache = self.cache(name)?;
             if cache.exists() {
@@ -471,7 +506,8 @@ impl Overlays {
                 "a source on this computer must be in a folder this key may browse",
             ));
         }
-        let _one = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+        let gate = self.gate(&format!("catalog:{label}"));
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         let cache = self.catalog_cache(label)?;
         self.init_cache(&cache)?;
         let commit = self.fetch(&cache, &repo, &reference)?;
@@ -585,7 +621,8 @@ impl Overlays {
         let label =
             checked_name(text_param(params, "label")?.ok_or_else(|| bad("label is needed"))?)?;
         let cache = self.catalog_cache(label)?;
-        let _one = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+        let gate = self.gate(&format!("catalog:{label}"));
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         if cache.exists() {
             fs::remove_dir_all(cache)
                 .map_err(|error| refused(format!("the catalog could not be removed: {error}")))?;
@@ -596,6 +633,15 @@ impl Overlays {
     fn init_cache(&self, cache: &Path) -> Result<(), (i32, String)> {
         if cache.exists() {
             return Ok(());
+        }
+        let kept = cache
+            .parent()
+            .and_then(|dir| fs::read_dir(dir).ok())
+            .map_or(0, |reader| reader.count());
+        if kept >= MAX_CACHES || folder_size(self.root()?) > MAX_FOLDER_BYTES {
+            return Err(refused(
+                "this host holds as many fetched sources as it keeps: remove some",
+            ));
         }
         fs::create_dir_all(cache)
             .map_err(|error| refused(format!("the cache could not be made: {error}")))?;
@@ -945,6 +991,10 @@ impl Overlays {
         ceiling: usize,
     ) -> Result<Vec<u8>, (i32, String)> {
         let git = self.git()?;
+        // Run from the overlays folder, under a ceiling, so a repository around the host's own directory supplies no configuration.
+        let root = self.root()?;
+        fs::create_dir_all(root)
+            .map_err(|error| refused(format!("the overlays folder could not be made: {error}")))?;
         let no_hooks = if cfg!(windows) {
             "core.hooksPath=NUL"
         } else {
@@ -974,6 +1024,8 @@ impl Overlays {
                 "credential.interactive=never",
             ])
             .args(args)
+            .current_dir(root)
+            .env("GIT_CEILING_DIRECTORIES", root)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")
             .env("SSH_ASKPASS_REQUIRE", "never")

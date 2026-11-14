@@ -101,6 +101,8 @@ pub struct ServeOptions {
     pub config_file: Option<PathBuf>,
     /// The user's home, which a key granted `folders` may browse; the environment's when `None`.
     pub home_dir: Option<PathBuf>,
+    /// Whether a supervisor starts the host again when it ends with `cli::STATUS_RESTART`; only then is `host/restart` offered.
+    pub supervised: bool,
 }
 
 impl ServeOptions {
@@ -119,6 +121,7 @@ impl ServeOptions {
             layers: None,
             config_file: None,
             home_dir: None,
+            supervised: false,
         }
     }
 
@@ -151,6 +154,13 @@ impl ServeOptions {
     #[must_use]
     pub fn with_config_file(mut self, file: impl Into<PathBuf>) -> Self {
         self.config_file = Some(file.into());
+        self
+    }
+
+    /// Says that a supervisor restarts the host when it ends with `cli::STATUS_RESTART`, which offers `host/restart`.
+    #[must_use]
+    pub const fn with_supervised(mut self, supervised: bool) -> Self {
+        self.supervised = supervised;
         self
     }
 
@@ -1357,8 +1367,12 @@ impl Serving {
                             .collect(),
                     )
                     .map_err(ServeError::Control)?;
+                    let kept = if options.supervised {
+                        kept.with_stop(Arc::clone(&stopped))
+                    } else {
+                        kept
+                    };
                     let kept = kept
-                        .with_stop(Arc::clone(&stopped))
                         .with_overlays(control::Overlays::new(
                             options
                                 .config_file

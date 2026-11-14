@@ -123,10 +123,11 @@ fn a_page_browses_uploads_edits_a_section_and_restarts_the_host_as_far_as_its_gr
     let scratch = support::Scratch::new();
     let user = scratch.0.join("user");
     std::fs::create_dir_all(user.join("projects")).expect("a home");
-    let mut host = Host::start_in(
+    let mut host = Host::start_in_with(
         scratch,
         &config,
         1,
+        &["--supervised"],
         &[
             ("HOME", user.clone().into_os_string()),
             ("USERPROFILE", user.clone().into_os_string()),

@@ -89,6 +89,15 @@ struct Setup {
 }
 
 fn setup(grants_home: Option<&Path>, limits: OverlayLimits) -> Setup {
+    setup_with(grants_home, Vec::new(), None, limits)
+}
+
+fn setup_with(
+    grants_home: Option<&Path>,
+    roots: Vec<EntryRoots>,
+    config: Option<PathBuf>,
+    limits: OverlayLimits,
+) -> Setup {
     let tmp = dir("setup");
     let overlays = tmp.join("cfg").join("overlays");
     let control = Control::open(
@@ -100,8 +109,8 @@ fn setup(grants_home: Option<&Path>, limits: OverlayLimits) -> Setup {
     .expect("opens")
     .with_files(Files::new(
         grants_home.map(Path::to_path_buf),
-        Vec::new(),
-        None,
+        roots,
+        config,
         None,
         UploadLimits::default(),
     ))
@@ -463,29 +472,77 @@ fn a_plan_is_its_keys_alone_and_each_method_needs_its_grant() {
 }
 
 #[test]
-fn a_key_names_a_source_on_this_computer_only_under_the_places_it_may_browse() {
+fn a_key_names_a_source_on_this_computer_only_under_a_working_root_and_with_the_folders_grant() {
     let tmp = dir("places");
     let home = tmp.join("home");
-    fs::create_dir_all(&home).expect("home");
-    let inside = repo(&home, "mine", &[("OVERLAY.md", "x\n")]);
+    let work = home.join("work");
+    fs::create_dir_all(&work).expect("work");
+    let inside = repo(&work, "mine", &[("OVERLAY.md", "x\n")]);
+    let in_home = repo(&home, "elsewhere", &[("OVERLAY.md", "secret\n")]);
     let outside = repo(&tmp, "private", &[("OVERLAY.md", "secret\n")]);
-    let s = setup(Some(&home), OverlayLimits::default());
-    let who = key("sha256:aa", &BOTH);
+    let cfg = home.join("cfg");
+    let kept = repo(&cfg, "overlays", &[("OVERLAY.md", "kept\n")]);
+    let roots = vec![EntryRoots {
+        peers: None,
+        roots: vec![work.clone(), cfg.clone()],
+    }];
+    let s = setup_with(
+        Some(&home),
+        roots,
+        Some(cfg.join("canoa.cfg")),
+        OverlayLimits::default(),
+    );
+    let who = key(
+        "sha256:aa",
+        &[Grant::OverlayRead, Grant::OverlayWrite, Grant::Folders],
+    );
     let allowed = check(&s, &who, "mine", &source(&inside, ""));
     assert!(allowed["result"]["token"].is_string(), "{allowed}");
-    let denied = check(&s, &who, "private", &source(&outside, ""));
-    assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
-    assert!(
-        denied["error"]["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("must be in a folder"))
-    );
+    // Not the home, though it may be browsed; not outside; not the folder the host keeps its overlays in, even as a working root.
+    for (name, repo) in [("home", &in_home), ("private", &outside), ("kept", &kept)] {
+        let denied = check(&s, &who, name, &source(repo, ""));
+        assert_eq!(denied["error"]["code"], REFUSED, "{name}: {denied}");
+        assert!(
+            denied["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("must be in a folder"))
+        );
+    }
     let denied = ask(
         &s.control,
         &who,
         "catalog/fetch",
-        plus(json!({"label": "c"}), source(&outside, "")),
+        plus(json!({"label": "c"}), source(&in_home, "")),
     );
+    assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
+    // Without the folders grant, a working root is not enough.
+    let blind = key("sha256:bb", &BOTH);
+    let denied = check(&s, &blind, "mine2", &source(&inside, ""));
+    assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
+    // A network share, however it is written, is refused by its text.
+    for repo in [
+        "file:////attacker/share/x",
+        "file://///attacker/share",
+        "//attacker/share",
+        "\\\\attacker\\share",
+    ] {
+        let denied = check(
+            &s,
+            &who,
+            "unc",
+            &json!({"repo": repo, "ref": "main", "path": ""}),
+        );
+        assert!(denied["error"].is_object(), "{repo}: {denied}");
+    }
+    // A working tree whose `.git` is a file points elsewhere, so it is no source.
+    let linked = repo(&work, "linked", &[("OVERLAY.md", "x\n")]);
+    fs::remove_dir_all(linked.join(".git")).expect("no git dir");
+    fs::write(
+        linked.join(".git"),
+        format!("gitdir: {}\n", in_home.join(".git").display()),
+    )
+    .expect("a gitfile");
+    let denied = check(&s, &who, "linked", &source(&linked, ""));
     assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
     // The person running the host names any.
     let owner = check(&s, &Caller::Owner, "private", &source(&outside, ""));

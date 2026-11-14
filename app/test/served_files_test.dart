@@ -42,7 +42,7 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
 };
 
 const _grants = [
-  'ledger.read', 'ledger.write', 'folders', 'config.read', 'config.write', 'upload', 'host.restart', 'overlay.read', 'overlay.write',
+  'ledger.read', 'ledger.write', 'folders', 'config.read', 'config.write', 'config.write.sessions', 'upload', 'host.restart', 'overlay.read', 'overlay.write',
 ];
 
 /// `canoa serve` as a supervisor runs it: started again, on the same configuration and home, when it ends with the status a

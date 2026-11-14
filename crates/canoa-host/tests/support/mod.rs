@@ -180,6 +180,17 @@ impl Host {
         Self::launch(scratch, config, entries, &[], env, Stdio::inherit())
     }
 
+    /// As [`Host::start_in`], with more arguments to `serve`.
+    pub fn start_in_with(
+        scratch: Scratch,
+        config: &str,
+        entries: usize,
+        args: &[&str],
+        env: &[(&str, std::ffi::OsString)],
+    ) -> Self {
+        Self::launch(scratch, config, entries, args, env, Stdio::inherit())
+    }
+
     fn launch(
         scratch: Scratch,
         config: &str,

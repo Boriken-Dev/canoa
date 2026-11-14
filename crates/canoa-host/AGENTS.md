@@ -29,7 +29,7 @@ account_store = "os"                  # optional: where accounts keep their cred
 program = "gemini"                    # this or harness, one of the two; found as the OS finds a command
 args = ["--acp"]
 profiles = ["review", "plain"]        # optional: [host.profiles] a client may choose among, the first by default
-own_profile = false                    # optional: canoa.cfg's top level (`[profile]`, `[overlays]`, `[agents.NAME]`) is this entry's profile too, as it is the host's own sources': the person's own layer and the overlays they installed; never with `profiles`; set it for an entry only this person's keys reach (`peers`)
+own_profile = false                    # optional: canoa.cfg's top level (`[profile]`, `[overlays]`, `[agents.NAME]`) is this entry's profile too, as it is the host's own sources': the person's own layer and the overlays they installed; never with `profiles`, and `peers` is required: the keys that reach the entry get the person's own layer
 usage = "antigravity"                 # optional, with program: read the agent's quota too; only "antigravity" (agy acp); see Usage
 title = "Claude for review"             # optional: what a client shows for this entry instead of its name; 1 to 64 characters, not blank, no control characters (MAX_TITLE)
 
@@ -543,7 +543,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "upload", "host.restart", "overlay.read", "overlay.write"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 max_upload_bytes = 8388608                          # one uploaded file, sent in chunks of at most 512 KiB
@@ -559,7 +559,8 @@ max_uploads = 256                                   # files one key may keep upl
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
 | `folders` | `fs/list` |
 | `config.read` | `config/get` |
-| `config.write` | `config/set` |
+| `config.write` | `config/set` of the preference sections |
+| `config.write.sessions` | `config/set` of `overlays`, `loadout` and `permissions`, which change what an agent may do or is given (the permission mode, protected paths, the overlays and skills every `own_profile` session starts with): as much as access to the agent |
 | `upload` | `upload/put`, `upload/remove` |
 | `host.restart` | `host/restart` |
 | `overlay.read` | `overlay/installed`, `overlay/read`, `catalog/read` |
@@ -583,7 +584,7 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   (`appearance assets attachments catalogs loadout network notifications overlays permissions sessions store usage`); any other, `host`,
   `agents`, `profile`, `desktop` and `skill_pins` among them, is `-32001`, since those name programs to run or what may run. `value` is
   an object of at most `MAX_SECTION_BYTES` (256 KiB) or null, which removes the table. The text that would result is read by the host's
-  own loader first, and a file it would refuse is not written (`-32002`); the write is beside the file first, then renamed. `restart` is
+  own loader first, and a file it would refuse is not written (`-32002`); the text is read back and no other table may differ; the write is beside the file first, then renamed, and through the link when canoa.cfg is one. `restart` is
   true for the sections the host itself reads at start (`permissions usage`): they apply after `host/restart`; `[overlays]`, `[profile]` and `[loadout]` reach the next session of an entry that is the host's own or sets `own_profile`, with no restart. A host not
   started with a canoa.cfg refuses both (`-32002`).
 - `upload/put` `{"name", "data": base64, "done"?: bool}` -> `{"id", "path", "name", "size", "done"}` keeps a file in
@@ -591,12 +592,12 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   component and to 100 bytes with anything but letters, digits and `.-_ ` made `_`. A chunk is at most `MAX_CHUNK` (512 KiB), since a
   page's transport carries no message over a mebibyte: a larger file starts with `done: false`, which answers an `id`, and goes on
   with `{"id", "offset": the size so far, "data", "done"?}` until `done` is true or absent; an `offset` that is not where the upload
-  stands, or an `id` that is not this key's, is `-32002`. Until it is done the file is `<name>.part`. `max_upload_bytes` (one file;
+  stands, or an `id` that is not this key's, is `-32002`. Until it is done the file is in the folder `.partial`, so a file called `x.part` is only a name. One upload step runs at a time, so the limits are checked and spent together. `max_upload_bytes` (one file;
   past it the upload ends and what was kept goes), `max_upload_total_bytes` and `max_uploads` hold per key (the owner has its own
   folder), past one it is `-32002`; a bad base64 string is `-32602`. An unfinished upload nobody continues for an hour is removed
   when the key next starts one. `upload/remove` `{"path"}` or `{"id"}` -> `{"removed"}` removes a file in the caller's own folder,
   and what is left of an unfinished one, and nothing else.
-- `host/restart` `{}` -> `{"restarting": true}` ends the host 300 ms later with status `cli::STATUS_RESTART` (75) and stops the web
+- `host/restart` `{}` -> `{"restarting": true}` is offered only when `serve` was started with `--supervised` (`ServeOptions::with_supervised`), which says a supervisor starts it again; otherwise it is `-32002`, "restart is not available". It ends the host 300 ms later with status `cli::STATUS_RESTART` (75) and stops the web
   server, for a supervisor to start it again: canoa.cfg is read at start. Without a supervisor it is an end.
 
 **Overlays for a page** (`overlay/*`, `catalog/*`) are the git half of the overlay store, for a page that cannot run git. The store's
@@ -625,8 +626,12 @@ in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`
   (at most 8 MiB) and null for a path that is not a regular file or not a relative path; `catalog/remove` `{"label"}`.
 - **Git** runs as this user from an absolute directory of `PATH` with every `GIT_` variable of the host's removed, `protocol.allow=never` and
   only `https`, `http`, `ssh`, `git` and `file` allowed, no hooks, no fsmonitor, no prompts, 5 minutes at most, and a fetch ended once its
-  cache holds 256 MiB. A source on this computer (`file://` or a path) is named by a key only when it is under a place the key may
-  browse (`fs/list`); the owner names any. A failure says git's first 300 characters, controls made spaces.
+  cache holds 256 MiB. A source on this computer (`file://` or a path) is named by a key only with the `folders` grant, under a working root of an
+  entry the key may use (not the home), never in the host's own folders (canoa.cfg's, the overlays', the home it keeps state in) and
+  only a repository whose `.git` is a folder; the owner names any. A path or source naming a network share (`\\`, `//`), a verbatim or
+  a device path is refused by its text before any file is opened. Git runs from the overlays folder with `GIT_CEILING_DIRECTORIES`
+  set to it. At most 64 fetched caches, and 1 GiB in the overlays folder; the history fetched for a check whose plan expired with
+  nothing installed is removed. A fetch locks its own overlay or catalog only. A failure says git's first 300 characters, controls made spaces.
 - Skills fetched from elsewhere are not part of this: a page gets none, and an overlay that names one reports it as not delivered.
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)

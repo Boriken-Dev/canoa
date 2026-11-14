@@ -79,6 +79,8 @@ pub enum Grant {
     ConfigRead,
     /// `config/set`: a named section of canoa.cfg, the app's own tables only; never `host`, `agents` or `profile`.
     ConfigWrite,
+    /// `config/set` of `overlays`, `loadout` and `permissions`, which change what an agent may do or is given: as much as access to the agent.
+    ConfigWriteSessions,
     /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
     Upload,
     /// `overlay/installed`, `overlay/read` and `catalog/read`: what is installed and what a check or a catalog fetch holds. The
@@ -103,6 +105,7 @@ impl Grant {
             Self::Folders => "folders",
             Self::ConfigRead => "config.read",
             Self::ConfigWrite => "config.write",
+            Self::ConfigWriteSessions => "config.write.sessions",
             Self::Upload => "upload",
             Self::HostRestart => "host.restart",
             Self::OverlayRead => "overlay.read",
@@ -121,6 +124,7 @@ impl Grant {
             Self::Folders,
             Self::ConfigRead,
             Self::ConfigWrite,
+            Self::ConfigWriteSessions,
             Self::Upload,
             Self::HostRestart,
             Self::OverlayRead,
@@ -394,9 +398,10 @@ impl Control {
                 Some("config/get") => {
                     allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
                 }
-                Some("config/set") => {
-                    allow(caller, Grant::ConfigWrite).and_then(|()| self.files.config_set(&params))
-                }
+                Some("config/set") => allow(caller, Grant::ConfigWrite).and_then(|()| {
+                    self.files
+                        .config_set(&params, caller.may(Grant::ConfigWriteSessions))
+                }),
                 Some("upload/put") => allow(caller, Grant::Upload)
                     .and_then(|()| self.files.upload_put(caller, &params)),
                 Some("upload/remove") => allow(caller, Grant::Upload)
@@ -838,7 +843,7 @@ impl Control {
         let Some(stop) = &self.stop else {
             return Err((
                 REFUSED,
-                "this host cannot be restarted from here".to_owned(),
+                "restart is not available: no supervisor starts this host again".to_owned(),
             ));
         };
         self.restart.store(true, Ordering::SeqCst);

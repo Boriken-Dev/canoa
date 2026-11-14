@@ -242,7 +242,14 @@ fn editing(file: &str, text: &str) -> (PathBuf, Control, Caller) {
     (
         path,
         control,
-        key("sha256:aa", &[Grant::ConfigRead, Grant::ConfigWrite]),
+        key(
+            "sha256:aa",
+            &[
+                Grant::ConfigRead,
+                Grant::ConfigWrite,
+                Grant::ConfigWriteSessions,
+            ],
+        ),
     )
 }
 
@@ -616,7 +623,12 @@ fn a_large_file_is_sent_in_chunks_in_order_and_is_whole_only_when_done() {
     assert_eq!(first["result"]["size"], 10);
     let path = PathBuf::from(first["result"]["path"].as_str().expect("a path"));
     assert!(!path.exists(), "not whole yet");
-    assert!(PathBuf::from(format!("{}.part", path.display())).exists());
+    let partial = path
+        .parent()
+        .expect("dir")
+        .join(".partial")
+        .join(path.file_name().expect("name"));
+    assert!(partial.exists());
 
     // A chunk is accepted only where the upload stands.
     for offset in [0, 9, 11] {
@@ -644,7 +656,7 @@ fn a_large_file_is_sent_in_chunks_in_order_and_is_whole_only_when_done() {
     );
     assert_eq!(theirs["error"]["code"], REFUSED, "{theirs}");
     // A name that is not one this host made is no id.
-    for bad_id in ["../x", "a", "0123456789ab-x.part", "0123456789ab-../x"] {
+    for bad_id in ["../x", "a", "0123456789ab-../x"] {
         let wrong = ask(
             &control,
             &a,
@@ -669,7 +681,7 @@ fn a_large_file_is_sent_in_chunks_in_order_and_is_whole_only_when_done() {
     );
     assert_eq!(last["result"]["done"], true, "{last}");
     assert_eq!(fs::read(&path).expect("whole"), b"0123456789ABCDEFGHIJabc");
-    assert!(!PathBuf::from(format!("{}.part", path.display())).exists());
+    assert!(!partial.exists());
 
     // Past the file limit mid-way, what was kept goes and the upload ends.
     let start = ask(
@@ -738,5 +750,120 @@ fn a_chunk_is_at_most_what_a_page_can_carry() {
         json!({"name": "f", "data": encoded(&exact)}),
     );
     assert_eq!(kept["result"]["size"], super::files::MAX_CHUNK, "{kept}");
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn the_safety_sections_need_their_own_grant_and_a_part_file_name_is_just_a_name() {
+    let (path, control, _) = editing("canoa.cfg", "[desktop]\nstart_hidden = true\n");
+    let plain = key("sha256:aa", &[Grant::ConfigRead, Grant::ConfigWrite]);
+    for section in ["permissions", "overlays", "loadout"] {
+        let answer = ask(
+            &control,
+            &plain,
+            "config/set",
+            json!({"section": section, "value": {}}),
+        );
+        assert_eq!(answer["error"]["code"], DENIED, "{section}: {answer}");
+    }
+    // Preferences stay with config.write, and any section can be read.
+    let ok = ask(
+        &control,
+        &plain,
+        "config/set",
+        json!({"section": "sessions", "value": {"keep": 1}}),
+    );
+    assert!(ok["result"].is_object(), "{ok}");
+    let read = ask(
+        &control,
+        &plain,
+        "config/get",
+        json!({"section": "permissions"}),
+    );
+    assert!(read["result"].is_object(), "{read}");
+    let _ = fs::remove_dir_all(path.parent().expect("dir"));
+
+    // A file called x.part is not swept for being one, and an unfinished upload is kept apart.
+    let (tmp, control) = uploading(UploadLimits::default());
+    let a = key("sha256:aa", &[Grant::Upload]);
+    let kept = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "x.part", "data": encoded(b"mine")}),
+    );
+    let path = PathBuf::from(kept["result"]["path"].as_str().expect("a path"));
+    assert!(path.exists(), "{kept}");
+    let started = ask(
+        &control,
+        &a,
+        "upload/put",
+        json!({"name": "y", "data": encoded(b"1"), "done": false}),
+    );
+    assert_eq!(started["result"]["done"], false);
+    assert!(path.exists());
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_canoa_cfg_that_is_a_link_is_written_through_to_its_target() {
+    let tmp = dir("linked-cfg");
+    let target = tmp.join("real.cfg");
+    fs::write(&target, "[desktop]\nstart_hidden = true\n").expect("target");
+    let link = tmp.join("canoa.cfg");
+    std::os::unix::fs::symlink(&target, &link).expect("link");
+    let control = control(Files::new(
+        Some(tmp.clone()),
+        Vec::new(),
+        Some(link.clone()),
+        None,
+        UploadLimits::default(),
+    ));
+    let who = key("sha256:aa", &[Grant::ConfigWrite]);
+    let set = ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "sessions", "value": {"keep": 2}}),
+    );
+    assert!(set["result"].is_object(), "{set}");
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("meta")
+            .file_type()
+            .is_symlink(),
+        "still a link"
+    );
+    assert!(
+        fs::read_to_string(&target)
+            .expect("target")
+            .contains("keep")
+    );
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn a_network_or_device_path_is_refused_by_its_text() {
+    let tmp = dir("unc");
+    let control = control(Files::new(
+        Some(tmp.clone()),
+        Vec::new(),
+        None,
+        None,
+        UploadLimits::default(),
+    ));
+    let who = key("sha256:aa", &[Grant::Folders]);
+    for path in [
+        "\\\\attacker\\share",
+        "//attacker/share",
+        "\\\\?\\C:\\",
+        "\\\\.\\pipe\\x",
+        "/etc",
+        "C:\\Windows",
+    ] {
+        let answer = ask(&control, &who, "fs/list", json!({"path": path}));
+        assert_eq!(answer["error"]["code"], NOT_FOUND, "{path}: {answer}");
+    }
     let _ = fs::remove_dir_all(tmp);
 }

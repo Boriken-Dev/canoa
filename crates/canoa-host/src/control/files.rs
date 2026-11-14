@@ -28,6 +28,8 @@ pub const DEFAULT_MAX_UPLOAD_TOTAL: u64 = 256 * 1024 * 1024;
 pub const DEFAULT_MAX_UPLOADS: usize = 256;
 /// The most raw bytes one `upload/put` carries: a page's transport takes no message over a mebibyte, base64 and sealing included.
 pub const MAX_CHUNK: usize = 512 * 1024;
+/// Where an upload not yet done is kept, apart from the files a name could collide with.
+const PARTIAL: &str = ".partial";
 /// The most of a file's name that is kept.
 const MAX_NAME: usize = 100;
 /// The largest section `config/set` writes, in bytes of JSON.
@@ -49,6 +51,11 @@ pub const SECTIONS: &[&str] = &[
     "store",
     "usage",
 ];
+
+/// The tables that change what an agent may do or is given (the permission mode and protected paths, the overlays and skills
+/// every `own_profile` session starts with): writing them takes the grant `config.write.sessions`, which is as much as access to
+/// the agent.
+pub const GUARDED_SECTIONS: &[&str] = &["loadout", "overlays", "permissions"];
 
 /// The sections the host itself reads, which it takes up when it next starts.
 const READ_AT_START: &[&str] = &["permissions", "usage"];
@@ -85,6 +92,8 @@ pub(crate) struct Files {
     limits: UploadLimits,
     /// One write of canoa.cfg at a time.
     writing: Mutex<()>,
+    /// One upload step at a time, so the limits are checked and spent together.
+    uploading: Mutex<()>,
 }
 
 impl Files {
@@ -102,17 +111,19 @@ impl Files {
             uploads,
             limits,
             writing: Mutex::new(()),
+            uploading: Mutex::new(()),
         }
     }
 
     /// The places `caller` may browse: the whole machine for the owner, else the home and the working roots of the entries
     /// the key may use, each resolved and no longer than they are.
-    fn roots_of(&self, caller: &Caller) -> Vec<PathBuf> {
+    fn roots_of(&self, caller: &Caller, with_home: bool) -> Vec<PathBuf> {
         let wanted: Vec<PathBuf> = match caller {
             Caller::Owner => whole_machine(),
             Caller::Peer { id, .. } => self
                 .home
                 .iter()
+                .filter(|_| with_home)
                 .cloned()
                 .chain(
                     self.roots
@@ -139,16 +150,36 @@ impl Files {
         roots
     }
 
-    /// Whether `caller` may name the place on this computer `repo` stands for: it must be under a place the caller may browse.
+    /// Whether `caller` may name the place on this computer `repo` stands for as a source: it needs the `folders` grant, and the
+    /// place must be under a working root of an entry it may use (not the whole home), not a folder this host keeps for itself,
+    /// and a repository whose `.git` is a folder, not a file that points elsewhere.
     pub(crate) fn may_read_source(&self, caller: &Caller, repo: &str) -> bool {
+        if !caller.may(super::Grant::Folders) {
+            return false;
+        }
         let path = super::overlays::local_path(repo);
-        let roots = self.roots_of(caller);
-        confined(&path.to_string_lossy(), &roots).is_ok()
+        let Ok(resolved) = confined(&path.to_string_lossy(), &self.roots_of(caller, false)) else {
+            return false;
+        };
+        let kept = self
+            .config
+            .iter()
+            .filter_map(|file| file.parent())
+            .chain(
+                self.uploads
+                    .iter()
+                    .filter_map(|dir| dir.parent().and_then(Path::parent)),
+            )
+            .filter_map(|dir| fs::canonicalize(dir).ok().map(plain));
+        if kept.into_iter().any(|dir| resolved.starts_with(dir)) {
+            return false;
+        }
+        !fs::symlink_metadata(resolved.join(".git")).is_ok_and(|meta| !meta.is_dir())
     }
 
     /// `fs/list`: the folders in `path`, or the places to start from when it names none.
     pub(crate) fn list(&self, caller: &Caller, params: &Value) -> Outcome {
-        let roots = self.roots_of(caller);
+        let roots = self.roots_of(caller, true);
         let hidden = params.get("hidden") == Some(&Value::Bool(true));
         let files = params.get("files") == Some(&Value::Bool(true));
         let Some(asked) = text_param(params, "path")? else {
@@ -238,8 +269,14 @@ impl Files {
 
     /// `config/set`: replaces one named section of the person's own canoa.cfg with an object, or removes it with null. The file
     /// is written in the format it is in, after the host has read what it would hold.
-    pub(crate) fn config_set(&self, params: &Value) -> Outcome {
+    pub(crate) fn config_set(&self, params: &Value, guarded: bool) -> Outcome {
         let section = section_of(params)?;
+        if GUARDED_SECTIONS.contains(&section) && !guarded {
+            return Err((
+                super::DENIED,
+                format!("{section} takes the grant config.write.sessions"),
+            ));
+        }
         let path = self.config_path()?;
         let value = params.get("value").unwrap_or(&Value::Null);
         if !(value.is_null() || value.is_object()) {
@@ -259,6 +296,7 @@ impl Files {
             .unwrap_or("canoa.cfg");
         let formats = crate::format::formats();
         let mut document = parse(path, &text)?;
+        let before = document.clone();
         match toml_value(value) {
             Some(toml::Value::Table(table)) => {
                 document.insert(section.to_owned(), toml::Value::Table(table));
@@ -291,7 +329,19 @@ impl Files {
             path.parent().unwrap_or_else(|| Path::new(".")),
         )
         .map_err(|error| refused(&format!("that would leave canoa.cfg refused: {error}")))?;
-        write_beside(path, written.as_bytes())
+        // Nothing but the named table may differ once the text is read back.
+        let mut reread = parse(path, &written)?;
+        let mut kept = before;
+        reread.remove(section);
+        kept.remove(section);
+        if reread != kept {
+            return Err(refused(
+                "that would change a table other than the one named",
+            ));
+        }
+        // A canoa.cfg that is a link is written through to its target.
+        let target = fs::canonicalize(path).map_or_else(|_| path.to_path_buf(), plain);
+        write_beside(&target, written.as_bytes())
             .map_err(|error| refused(&format!("canoa.cfg could not be written: {error}")))?;
         Ok(json!({"section": section, "restart": READ_AT_START.contains(&section)}))
     }
@@ -299,9 +349,13 @@ impl Files {
     /// `upload/put`: keeps a file a page sends, in a folder of this caller's, and answers where. A file travels in chunks of at most
     /// [`MAX_CHUNK`] bytes, since the transport a page uses carries no larger message: the first call (`name`, `data`) names the file
     /// and, with `done: false`, answers an `id` to continue with (`id`, `offset` the size so far, `data`); the call with `done`
-    /// true or absent ends it. A file sent in one chunk needs no `id`. A file is kept as `<id>.part` until it is done.
+    /// true or absent ends it. A file sent in one chunk needs no `id`. A file is kept in the folder `.partial` until it is done.
     pub(crate) fn upload_put(&self, caller: &Caller, params: &Value) -> Outcome {
         let dir = self.owner_dir(caller)?;
+        let _one = self
+            .uploading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let data = text_param(params, "data")?.ok_or_else(|| bad("data is needed"))?;
         // Before decoding, so a page cannot make the host hold more than it would keep.
         if data.len() > MAX_CHUNK / 3 * 4 + 8 {
@@ -320,7 +374,7 @@ impl Files {
             if !stored_name(id) {
                 return Err(bad("id is what upload/put answered"));
             }
-            let part = dir.join(format!("{id}.part"));
+            let part = dir.join(PARTIAL).join(id);
             let so_far = fs::metadata(&part)
                 .map(|meta| meta.len())
                 .map_err(|_| refused("that upload is not under way: start it again"))?;
@@ -337,7 +391,7 @@ impl Files {
                     "this caller has no room for another upload: remove some",
                 ));
             }
-            private_dir(&dir)
+            private_dir(&dir.join(PARTIAL))
                 .map_err(|error| refused(&format!("uploads could not be kept: {error}")))?;
             forget_stale(&dir);
             let mut tag = [0_u8; 6];
@@ -347,7 +401,7 @@ impl Files {
                 data_encoding::HEXLOWER.encode(&tag),
                 file_name_of(name)
             );
-            let part = dir.join(format!("{stored}.part"));
+            let part = dir.join(PARTIAL).join(&stored);
             (stored, part, 0)
         };
         if so_far + added > self.limits.file_bytes {
@@ -391,6 +445,10 @@ impl Files {
     /// `upload/remove`: deletes a file this caller uploaded, by its `path` or its `id`, and what is left of one not finished.
     pub(crate) fn upload_remove(&self, caller: &Caller, params: &Value) -> Outcome {
         let dir = self.owner_dir(caller)?;
+        let _one = self
+            .uploading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let Ok(base) = fs::canonicalize(&dir).map(plain) else {
             return Ok(json!({"removed": false}));
         };
@@ -410,13 +468,13 @@ impl Files {
             let Some(named) = named else {
                 return Ok(json!({"removed": false}));
             };
-            named.strip_suffix(".part").unwrap_or(named).to_owned()
+            named.to_owned()
         };
         if !stored_name(&name) {
             return Ok(json!({"removed": false}));
         }
         let mut removed = false;
-        for target in [base.join(&name), base.join(format!("{name}.part"))] {
+        for target in [base.join(&name), base.join(PARTIAL).join(&name)] {
             if fs::symlink_metadata(&target).is_ok_and(|meta| meta.is_file()) {
                 fs::remove_file(&target).map_err(|error| {
                     refused(&format!("the upload could not be removed: {error}"))
@@ -447,22 +505,20 @@ fn stored_name(name: &str) -> bool {
         && !name.contains(['/', '\\', ':'])
         && !name.contains("..")
         && !name.chars().any(char::is_control)
-        && !name.ends_with(".part")
 }
 
 /// Takes away the unfinished uploads nobody has continued for an hour.
 fn forget_stale(dir: &Path) {
-    let Ok(reader) = fs::read_dir(dir) else {
+    let Ok(reader) = fs::read_dir(dir.join(PARTIAL)) else {
         return;
     };
     for entry in reader.flatten() {
-        let stale = entry.file_name().to_string_lossy().ends_with(".part")
-            && entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|at| at.elapsed().ok())
-                .is_some_and(|age| age > std::time::Duration::from_secs(3600));
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age > std::time::Duration::from_secs(3600));
         if stale {
             let _ = fs::remove_file(entry.path());
         }
@@ -497,13 +553,15 @@ fn section_of(params: &Value) -> Result<&str, (i32, String)> {
 fn usage(dir: &Path) -> (usize, u64) {
     let mut count = 0;
     let mut bytes = 0;
-    if let Ok(reader) = fs::read_dir(dir) {
-        for entry in reader.flatten() {
-            if let Ok(meta) = entry.metadata()
-                && meta.is_file()
-            {
-                count += 1;
-                bytes += meta.len();
+    for place in [dir.to_path_buf(), dir.join(PARTIAL)] {
+        if let Ok(reader) = fs::read_dir(place) {
+            for entry in reader.flatten() {
+                if let Ok(meta) = entry.metadata()
+                    && meta.is_file()
+                {
+                    count += 1;
+                    bytes += meta.len();
+                }
             }
         }
     }
@@ -545,6 +603,12 @@ fn listable(name: &str) -> bool {
 /// `asked` resolved, when it is plain and under one of `roots`.
 fn confined(asked: &str, roots: &[PathBuf]) -> Result<PathBuf, (i32, String)> {
     let path = Path::new(asked);
+    // A network share, a verbatim or a device path is refused by its text, before anything opens it.
+    if asked.replace('/', "\\").starts_with("\\\\")
+        || !roots.iter().any(|root| text_under(asked, root))
+    {
+        return Err(not_found());
+    }
     if !path.is_absolute()
         || path
             .components()
@@ -561,6 +625,21 @@ fn confined(asked: &str, roots: &[PathBuf]) -> Result<PathBuf, (i32, String)> {
         // Not saying whether it exists.
         Err(not_found())
     }
+}
+
+/// Whether the text `path` names `root` or something below it, compared as text with no filesystem call.
+fn text_under(path: &str, root: &Path) -> bool {
+    let fold = |text: &str| {
+        let text = text.replace('\\', "/");
+        let text = text.trim_end_matches('/').to_owned();
+        if cfg!(windows) {
+            text.to_lowercase()
+        } else {
+            text
+        }
+    };
+    let (path, root) = (fold(path), fold(&root.to_string_lossy()));
+    path == root || path.starts_with(&format!("{root}/"))
 }
 
 fn shown_name(path: &Path) -> String {

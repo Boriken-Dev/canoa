@@ -1246,6 +1246,12 @@ impl Config {
             check_name(&name)?;
             let offered = agent.profiles.unwrap_or_default();
             let own_profile = agent.own_profile.unwrap_or(false);
+            if own_profile && agent.peers.is_none() {
+                return Err(invalid(
+                    &name,
+                    "own_profile gives the person's own layer to the keys that reach this entry: name them in peers",
+                ));
+            }
             if own_profile && !offered.is_empty() {
                 return Err(invalid(
                     &name,
