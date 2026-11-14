@@ -12,6 +12,7 @@ import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../store/store.dart';
 import '../store/store_icon.dart';
+import 'overlay_options.dart';
 import '../store/overlay_page.dart' show OverlayPage, SaveConfig, oneLine, shownTags;
 import 'loadout_controller.dart';
 import 'loadout_mcps.dart';
@@ -335,6 +336,7 @@ class _OverlaysSectionState extends State<OverlaysSection> with AutomaticKeepAli
         if (profile.contexts.isNotEmpty) 'context',
       ],
     ];
+    final options = aosLayer == null ? const <DeclaredOption>[] : declaredOptions(aosLayer.manifest);
     final notApplied = report?.notApplied ?? const <String>[];
     final left = layer == null ? c.leftOutBecause(name) : null;
     final fromStore = record?.catalog != null;
@@ -362,7 +364,30 @@ class _OverlaysSectionState extends State<OverlaysSection> with AutomaticKeepAli
         Text(on ? 'On for new sessions' : 'Off for new sessions',
             key: Key('overlay-default-label-$name'), style: Theme.of(context).textTheme.labelSmall),
       ]),
-      footer: Wrap(spacing: 8, children: [
+      footer: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (options.isNotEmpty)
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              key: Key('overlay-options-$name'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(top: 8, bottom: 8),
+              expandedCrossAxisAlignment: CrossAxisAlignment.start,
+              title: Text('Options (${options.length})', style: Theme.of(context).textTheme.labelLarge),
+              children: [
+                OverlayOptionsForm(
+                  overlay: name,
+                  options: options,
+                  saved: c.config.overlayOptions(name),
+                  busy: c.busy != null,
+                  onSave: (values) async {
+                    await c.apply(c.config.withOverlayOptions(name, values));
+                  },
+                ),
+              ],
+            ),
+          ),
+        Wrap(spacing: 8, children: [
         if (source is GitOverlay && c.home != null)
           TextButton(
             key: Key('overlay-update-$name'),
@@ -375,6 +400,7 @@ class _OverlaysSectionState extends State<OverlaysSection> with AutomaticKeepAli
             onPressed: c.busy != null ? null : () => unawaited(_remove(name, source)),
             child: const Text('Remove…'),
           ),
+        ]),
       ]),
     );
   }
