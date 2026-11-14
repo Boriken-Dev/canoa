@@ -23,6 +23,7 @@ pub use files::{
 pub(crate) use files::{Files, UploadLimits};
 pub(crate) use import::{Homes, IMPORT_KEY};
 pub(crate) use moves::Moves;
+pub(crate) use overlays::{OverlayLimits, Overlays};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 pub(crate) use stores::Stores;
@@ -80,6 +81,12 @@ pub enum Grant {
     ConfigWrite,
     /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
     Upload,
+    /// `overlay/installed`, `overlay/read` and `catalog/read`: what is installed and what a check or a catalog fetch holds. The
+    /// host fetches nothing for these.
+    OverlayRead,
+    /// `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch` and `catalog/remove`: fetch sources with
+    /// git as this user and install what AOS digests, under the overlays folder beside canoa.cfg. Nothing is run.
+    OverlayWrite,
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
     HostRestart,
 }
@@ -98,6 +105,8 @@ impl Grant {
             Self::ConfigWrite => "config.write",
             Self::Upload => "upload",
             Self::HostRestart => "host.restart",
+            Self::OverlayRead => "overlay.read",
+            Self::OverlayWrite => "overlay.write",
         }
     }
 
@@ -114,6 +123,8 @@ impl Grant {
             Self::ConfigWrite,
             Self::Upload,
             Self::HostRestart,
+            Self::OverlayRead,
+            Self::OverlayWrite,
         ]
         .into_iter()
         .find(|grant| grant.as_str() == name)
@@ -190,6 +201,7 @@ pub(crate) struct Control {
     entries: Vec<EntryRoots>,
     /// What a page may do with this computer's files.
     files: Files,
+    overlays: Overlays,
     /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
     restart: Arc<AtomicBool>,
     stop: Option<Arc<AtomicBool>>,
@@ -280,6 +292,7 @@ impl Control {
             history: None,
             entries,
             files: Files::default(),
+            overlays: Overlays::default(),
             restart: Arc::new(AtomicBool::new(false)),
             stop: None,
             path,
@@ -300,6 +313,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_files(mut self, files: Files) -> Self {
         self.files = files;
+        self
+    }
+
+    /// Offers `overlay/*` and `catalog/*` over these overlays.
+    #[must_use]
+    pub(crate) fn with_overlays(mut self, overlays: Overlays) -> Self {
+        self.overlays = overlays;
         self
     }
 
@@ -362,62 +382,87 @@ impl Control {
         };
         let id = request.get("id")?.clone();
         let params = request.get("params").cloned().unwrap_or(Value::Null);
-        let outcome = match request.get("method").and_then(Value::as_str) {
-            Some("ledger/list") => self.list(caller, &params),
-            Some("ledger/put") => self.put(caller, &params),
-            Some("ledger/remove") => self.remove(caller, &params),
-            Some("ledger/clear") => self.clear(caller),
-            Some("fs/list") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
-            }
-            Some("config/get") => {
-                allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
-            }
-            Some("config/set") => {
-                allow(caller, Grant::ConfigWrite).and_then(|()| self.files.config_set(&params))
-            }
-            Some("upload/put") => {
-                allow(caller, Grant::Upload).and_then(|()| self.files.upload_put(caller, &params))
-            }
-            Some("upload/remove") => allow(caller, Grant::Upload)
-                .and_then(|()| self.files.upload_remove(caller, &params)),
-            Some("host/restart") => {
-                allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
-            }
-            Some(
-                method @ ("worktree/new" | "worktree/status" | "worktree/remove" | "worktree/diff"),
-            ) => {
-                return Some(self.worktree(caller, method, &request, &id));
-            }
-            Some(method @ ("store/list" | "store/report" | "store/latest" | "store/plan")) => {
-                // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
-                let runs = method == "store/report"
-                    && (params
-                        .get("probe")
-                        .is_some_and(|probe| probe != &Value::Bool(false))
-                        || params.get("pick").is_some_and(|pick| !pick.is_null()));
-                allow(caller, Grant::StoreRead)
-                    .and_then(|()| if runs { owner_only(caller) } else { Ok(()) })
+        let outcome =
+            match request.get("method").and_then(Value::as_str) {
+                Some("ledger/list") => self.list(caller, &params),
+                Some("ledger/put") => self.put(caller, &params),
+                Some("ledger/remove") => self.remove(caller, &params),
+                Some("ledger/clear") => self.clear(caller),
+                Some("fs/list") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
+                }
+                Some("config/get") => {
+                    allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
+                }
+                Some("config/set") => {
+                    allow(caller, Grant::ConfigWrite).and_then(|()| self.files.config_set(&params))
+                }
+                Some("upload/put") => allow(caller, Grant::Upload)
+                    .and_then(|()| self.files.upload_put(caller, &params)),
+                Some("upload/remove") => allow(caller, Grant::Upload)
+                    .and_then(|()| self.files.upload_remove(caller, &params)),
+                Some("overlay/installed") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.installed(&params)),
+                Some("overlay/read") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.read(caller, &params)),
+                Some("catalog/read") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.catalog_read(&params)),
+                Some("overlay/check") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .check(caller, &params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("overlay/apply") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.apply(caller, &params)),
+                Some("overlay/remove") => {
+                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.remove(&params))
+                }
+                Some("overlay/discard") => {
+                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.discard(&params))
+                }
+                Some("catalog/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .catalog_fetch(&params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.catalog_remove(&params)),
+                Some("host/restart") => {
+                    allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
+                }
+                Some(
+                    method @ ("worktree/new" | "worktree/status" | "worktree/remove"
+                    | "worktree/diff"),
+                ) => {
+                    return Some(self.worktree(caller, method, &request, &id));
+                }
+                Some(method @ ("store/list" | "store/report" | "store/latest" | "store/plan")) => {
+                    // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
+                    let runs = method == "store/report"
+                        && (params
+                            .get("probe")
+                            .is_some_and(|probe| probe != &Value::Bool(false))
+                            || params.get("pick").is_some_and(|pick| !pick.is_null()));
+                    allow(caller, Grant::StoreRead)
+                        .and_then(|()| if runs { owner_only(caller) } else { Ok(()) })
+                        .and_then(|()| self.stores())
+                        .and_then(|stores| {
+                            stores.read(method, &params, matches!(caller, Caller::Owner))
+                        })
+                }
+                Some(method @ ("store/rollback" | "store/remove")) => owner_only(caller)
                     .and_then(|()| self.stores())
-                    .and_then(|stores| {
-                        stores.read(method, &params, matches!(caller, Caller::Owner))
-                    })
-            }
-            Some(method @ ("store/rollback" | "store/remove")) => owner_only(caller)
-                .and_then(|()| self.stores())
-                .and_then(|stores| stores.change(method, &params)),
-            Some(method @ ("history/export" | "history/move")) => {
-                owner_only_history(caller).and_then(|()| self.history_call(method, &params))
-            }
-            Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
-                owner_only_history(caller).and_then(|()| self.import_call(method, &params))
-            }
-            Some("store/apply") => Err((
-                REFUSED,
-                "an apply needs a link that can carry its progress".to_owned(),
-            )),
-            _ => Err((NO_METHOD, "this host has no such method".to_owned())),
-        };
+                    .and_then(|stores| stores.change(method, &params)),
+                Some(method @ ("history/export" | "history/move")) => {
+                    owner_only_history(caller).and_then(|()| self.history_call(method, &params))
+                }
+                Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
+                    owner_only_history(caller).and_then(|()| self.import_call(method, &params))
+                }
+                Some("store/apply") => Err((
+                    REFUSED,
+                    "an apply needs a link that can carry its progress".to_owned(),
+                )),
+                _ => Err((NO_METHOD, "this host has no such method".to_owned())),
+            };
         Some(match outcome {
             Ok(result) => {
                 serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
@@ -779,6 +824,9 @@ mod import;
 #[cfg(test)]
 mod import_tests;
 mod moves;
+mod overlays;
+#[cfg(test)]
+mod overlays_tests;
 mod stores;
 
 #[cfg(test)]
@@ -801,5 +849,12 @@ impl Control {
             stop.store(true, Ordering::SeqCst);
         });
         Ok(json!({"restarting": true}))
+    }
+}
+
+impl Control {
+    /// Whether `caller` may name the place on this computer that `repo` stands for.
+    fn may_read_source(&self, caller: &Caller, repo: &str) -> bool {
+        self.files.may_read_source(caller, repo)
     }
 }

@@ -542,7 +542,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "upload", "host.restart"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "upload", "host.restart", "overlay.read", "overlay.write"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 max_upload_bytes = 8388608                          # one upload (at most about 12 MiB: it travels in base64 inside a request of at most 16 MiB)
@@ -561,6 +561,8 @@ max_uploads = 256                                   # files one key may keep upl
 | `config.write` | `config/set` |
 | `upload` | `upload/put`, `upload/remove` |
 | `host.restart` | `host/restart` |
+| `overlay.read` | `overlay/installed`, `overlay/read`, `catalog/read` |
+| `overlay.write` | `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove` |
 | *(none)* | `store/apply`, `store/rollback`, `store/remove`: **owner only**; `[host.control]` refuses `store.write` as a grant |
 | *(none)* | `history/export`, `history/move`, `history/importable`, `history/import`, `history/imported`: **owner only**; no grant names them |
 
@@ -590,6 +592,36 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   the caller's own folder and nothing else.
 - `host/restart` `{}` -> `{"restarting": true}` ends the host 300 ms later with status `cli::STATUS_RESTART` (75) and stops the web
   server, for a supervisor to start it again: canoa.cfg is read at start. Without a supervisor it is an end.
+
+**Overlays for a page** (`overlay/*`, `catalog/*`) are the git half of the overlay store, for a page that cannot run git. The store's
+own logic (reading a catalog, listing it, showing what an overlay would do) stays in the app over these primitives. Installed
+overlays are kept where the host already reads them: `overlays/<name>/` (the files), `overlays/<name>.json` (the record: `source`,
+`commit`, `digest`, `files` by blob id, `skipped`, `installed`, `catalog`?) beside the person's own canoa.cfg, and the fetched history
+in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`). A name is a valid AOS overlay name of 1 to 64 letters, digits, `-` or `_`.
+
+- `overlay/check` `{"name", "source": "git+<repository>@<ref>[#<path>]", "pin"?: "sha256:…"}` fetches the source (one commit deep; a whole
+  commit id is that object and nothing else; a branch or tag by `ls-remote`) and lists the tree at that commit as git does, never checking
+  anything out: a link, a submodule, a name that is not a relative path or two names equal without ASCII case refuse the overlay; entries
+  under an excluded name (`.git`, `node_modules`, `__pycache__`, `*.pyc`, …) are left out and reported as `skipped`; more than
+  4096 files, 64 MiB, or 16384 entries is refused. The tree digest is AOS's and must equal `pin` when one is given (`-32002`, nothing
+  installed). It answers `{"token", "name", "from", "fromSource", "fromDigest", "commit", "digest", "files": {path: blob id},
+  "skipped", "added", "changed", "removed", "manifest"}` and changes nothing installed; the host keeps the plan under `token` for
+  its caller, good for 15 minutes, 16 at most.
+- `overlay/read` `{"token"}` -> `{"files": {path: base64}}` gives the files a check holds, to show what the overlay would do; more than 8 MiB is `-32002`.
+- `overlay/apply` `{"token", "catalog"?}` installs exactly that plan, never a client's list: the files are read from git's object store by id, written
+  exclusively into `overlays/.staging-<name>`, digested again as written, and only then does the folder replace the old one whole and
+  the record get written beside and renamed. A plan is spent by its first apply and is its key's alone. `catalog` is the label
+  the store installed it from, kept for a later apply of the same source.
+- `overlay/installed` `{"name"?}` -> `{"overlays": {name: record}}`; `overlay/remove` `{"name"}` deletes folder, record and history;
+  `overlay/discard` `{"name"}` deletes what a check fetched for an overlay that is not installed.
+- `catalog/fetch` `{"label", "source"}` -> `{"commit"}`; `catalog/read` `{"label", "commit" (whole id), "paths", "maxBytes"?}` -> `{"files":
+  {path: {"size", "data"?: base64} | null}}` reads regular files at that commit by their literal paths, with no data past `maxBytes`
+  (at most 8 MiB) and null for a path that is not a regular file or not a relative path; `catalog/remove` `{"label"}`.
+- **Git** runs as this user from an absolute directory of `PATH` with every `GIT_` variable of the host's removed, `protocol.allow=never` and
+  only `https`, `http`, `ssh`, `git` and `file` allowed, no hooks, no fsmonitor, no prompts, 5 minutes at most, and a fetch ended once its
+  cache holds 256 MiB. A source on this computer (`file://` or a path) is named by a key only when it is under a place the key may
+  browse (`fs/list`); the owner names any. A failure says git's first 300 characters, controls made spaces.
+- Skills fetched from elsewhere are not part of this: a page gets none, and an overlay that names one reports it as not delivered.
 
 **The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
 as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
@@ -680,7 +712,7 @@ The params and results are the JSON of `canoa::store`'s models:
 - `store/list`, `store/report`, `store/latest` and `store/plan` need `store.read`; `store/report` with `probe` or `pick`, which runs a program of the user's, is the owner's, and a plan a key asks for is not kept. `store/apply`, `store/rollback` and
   `store/remove` are **the owner's alone**: there is no `store.write` grant and `[host.control]` refuses the name, since an install
   runs code as the user. A store that is not one of the host's is `-32003`; a plan or install the host refuses `-32002`.
-- The overlay store (AOS overlays) follows as `overlay/*` under the same two grants; it is not built.
+- The overlay store's git half is `overlay/*` and `catalog/*` (see "Overlays for a page" above).
 
 ## Worktrees
 

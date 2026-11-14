@@ -136,6 +136,13 @@ impl Files {
         roots
     }
 
+    /// Whether `caller` may name the place on this computer `repo` stands for: it must be under a place the caller may browse.
+    pub(crate) fn may_read_source(&self, caller: &Caller, repo: &str) -> bool {
+        let path = super::overlays::local_path(repo);
+        let roots = self.roots_of(caller);
+        confined(&path.to_string_lossy(), &roots).is_ok()
+    }
+
     /// `fs/list`: the folders in `path`, or the places to start from when it names none.
     pub(crate) fn list(&self, caller: &Caller, params: &Value) -> Outcome {
         let roots = self.roots_of(caller);
