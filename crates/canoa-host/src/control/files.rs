@@ -40,6 +40,7 @@ pub const SECTIONS: &[&str] = &[
     "assets",
     "attachments",
     "catalogs",
+    "loadout",
     "network",
     "notifications",
     "overlays",
@@ -50,7 +51,7 @@ pub const SECTIONS: &[&str] = &[
 ];
 
 /// The sections the host itself reads, which it takes up when it next starts.
-const READ_AT_START: &[&str] = &["overlays", "permissions", "usage"];
+const READ_AT_START: &[&str] = &["permissions", "usage"];
 
 /// The limits of uploads.
 #[derive(Clone, Copy, Debug)]

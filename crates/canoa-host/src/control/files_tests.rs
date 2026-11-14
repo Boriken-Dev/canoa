@@ -333,14 +333,21 @@ fn only_the_apps_own_sections_are_written() {
             assert!(answer["error"].is_object(), "{method} {section}: {answer}");
         }
     }
-    // The sections the host reads say they take effect on its next start.
+    // `overlays` is read again for each connection; `permissions` and `usage` at the host's next start.
     let overlays = ask(
         &control,
         &who,
         "config/set",
         json!({"section": "overlays", "value": {"team": {}}}),
     );
-    assert_eq!(overlays["result"]["restart"], true, "{overlays}");
+    assert_eq!(overlays["result"]["restart"], false, "{overlays}");
+    let permissions = ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "permissions", "value": {}}),
+    );
+    assert_eq!(permissions["result"]["restart"], true, "{permissions}");
     let other = fs::read_to_string(&path).expect("canoa.cfg");
     assert!(
         other.contains("start_hidden") && other.contains("team"),

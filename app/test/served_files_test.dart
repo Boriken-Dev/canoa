@@ -307,13 +307,10 @@ own_profile = true
     // What the host wrote is what the host reads: the folder, with the digest the preview showed.
     expect(File('${host.config.parent.path}/overlays/docs-tools/overlay.cfg').readAsStringSync(), contains('DOCS'));
 
-    // Selecting it is canoa.cfg's [overlays], written by table; the host reads it when it starts.
-    expect(await config.save(current), isTrue, reason: 'the host takes [overlays] up at its next start');
+    // Selecting it is canoa.cfg's [overlays], written by table; the host reads it again for the next session, with no restart.
+    expect(await config.save(current), isFalse, reason: 'no restart is needed for [overlays]');
     expect(File(host.config.path).readAsStringSync(), contains('docs-tools'));
     expect(File(host.config.path).readAsStringSync(), contains('[host.control]'), reason: 'the tables it does not edit stay');
-    await files.restart();
-    expect(await host.restarted(), 75);
-    await files.awaitHost();
 
     // The overlays folder is the host's: a page that loads afterwards reads what is installed and what is selected.
     final after = ControlOverlayManager(control());

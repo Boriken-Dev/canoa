@@ -533,14 +533,17 @@ impl Shared {
 
 /// How an agent started only to read its usage is started: recorded with the others, so that stopping the host ends it and
 /// none starts while it stops. The second part of what it hands back forgets the agent once it has ended.
-/// What re-reads an entry's profile at each connection: only an entry of the host's own, when the options hold canoa.cfg's files.
+/// What re-reads an entry's profile at each connection: only an entry of the host's own or one with `own_profile`, when the options hold canoa.cfg's files.
 fn refresh_of(
     entry: &Entry,
     names: &[String],
     config: &Config,
     options: &ServeOptions,
 ) -> Option<Refresh> {
-    let layers = options.layers.clone().filter(|_| entry.local)?;
+    let layers = options
+        .layers
+        .clone()
+        .filter(|_| entry.local || entry.own_profile)?;
     let launcher = options.provider_program.as_os_str().to_owned();
     let before = options.program_args.clone();
     let local = config.local_profiles.for_agent(&entry.name);
