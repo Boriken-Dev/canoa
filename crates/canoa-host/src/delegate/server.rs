@@ -80,10 +80,7 @@ fn accept(listener: &TcpListener, engine: &Arc<Engine>, stop: &AtomicBool, port:
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, peer)) => {
-                if !peer.ip().is_loopback()
-                    || live.load(Ordering::SeqCst) >= MAX_CONNECTIONS
-                    || !ours(peer, SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
-                {
+                if !peer.ip().is_loopback() || live.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
                     continue;
                 }
                 live.fetch_add(1, Ordering::SeqCst);
@@ -92,6 +89,10 @@ fn accept(listener: &TcpListener, engine: &Arc<Engine>, stop: &AtomicBool, port:
                 let spawned = std::thread::Builder::new()
                     .name("canoa-delegate-request".to_owned())
                     .spawn(move || {
+                        // Checked here, not in the accept loop: reading the kernel's table must not slow the next accept.
+                        if !ours(peer, SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)) {
+                            return;
+                        }
                         let _ = stream.set_nonblocking(false);
                         serve(stream, &engine, port, slot);
                     });
@@ -112,7 +113,8 @@ fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
     {
         let table = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();
         let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-        owned_by(&table, peer, local) == own_uid(&status) && owned_by(&table, peer, local).is_some()
+        let owner = owned_by(&table, peer, local);
+        owner.is_some() && owner == own_uid(&status)
     }
     #[cfg(not(target_os = "linux"))]
     {
