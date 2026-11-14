@@ -286,7 +286,13 @@ server {
 
 A page connects to an entry once, which the host turns away and remembers as waiting, asks `/portal/pair` to accept its key,
 and connects again. The key stays paired in the person's home: the next visit, and a restart after an idle stop, need no new
-pairing. The bundled web app does not make these calls yet.
+pairing.
+
+The bundled web app makes these calls itself. It reads `/canoa.json`, sees `user` and knows it is behind a portal. A `401` from that
+request, from `/portal/session` or from `/portal/pair` sends the browser to `/portal/login`. Its first connection to the control
+channel is turned away, so it checks `GET /portal/session` (still signed in), posts `{"peer": ID}` to `/portal/pair` with its own key
+and connects again. The rail shows the account and a **Sign out**, which posts `/portal/logout` and returns to the sign-in form. No
+token is in the page: the cookie is `HttpOnly`, and `fetch` and the WebSocket send it by themselves.
 
 ## What to know
 
