@@ -1,6 +1,9 @@
 import 'attention/notifier.dart';
 import 'dart:async';
 import 'dart:convert' show jsonEncode;
+import 'served/folder_dialog.dart';
+import 'served/served_app.dart';
+import 'desktop/control_client.dart' show ControlFailed;
 import 'config/canoa_config.dart';
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
@@ -61,6 +64,7 @@ import 'popout/popout_hub.dart';
 import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
+import 'profile/profile_home.dart' show ProfileHome;
 import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
@@ -104,19 +108,30 @@ Future<void> main(List<String> args) async {
   final popped = popout_platform.popoutLaunch(args);
   if (popped != null) return runPopout(popped);
   WidgetsFlutterBinding.ensureInitialized();
-  final config = await loadConfig();
+  // A page a `canoa` served uses that host for what a desktop does on its own computer; the probe says at once whether this
+  // browser's key is accepted there, and a page that cannot reach its host's control channel keeps its sessions in the browser.
+  final served = kIsWeb ? await ServedApp.discover() : null;
+  await served?.probe();
+  final hostCfg = served != null && served.reachable ? await served.loadConfig() : null;
+  if (hostCfg != null) await served?.refreshOverlays();
+  final config = hostCfg ?? await loadConfig();
   final shell = createDesktopShell();
-  final host = shell.isDesktop
-      ? HostSupervisor(findHostTool(), off: !config.localHost || args.contains('--no-local-host'))
-      : null;
+  final host = served?.supervisor ??
+      (shell.isDesktop ? HostSupervisor(findHostTool(), off: !config.localHost || args.contains('--no-local-host')) : null);
   // The host starts first: it keeps the session list, which it answers once it is up.
   final hosting = host?.apply(configPath: desktopConfigPath());
-  // In the host's home on a desktop that runs one, else beside canoa.cfg, or in this origin's IndexedDB on the web.
+  // In the host's home on a desktop that runs one or on the host that served the page, else beside canoa.cfg, or in this
+  // origin's IndexedDB on the web.
   final keptByHost = host != null && host.phase != HostPhase.off && host.phase != HostPhase.absent;
-  final ledger = SessionLedger(
-    keptByHost ? HostLedgerBackend(host) : platformLedgerBackend(configPath: desktopConfigPath()),
-    settings: config.sessions,
-  );
+  final LedgerBackend ledgerBackend;
+  if (served != null && served.reachable) {
+    ledgerBackend = served.ledger;
+  } else if (served == null && keptByHost) {
+    ledgerBackend = HostLedgerBackend(host);
+  } else {
+    ledgerBackend = platformLedgerBackend(configPath: desktopConfigPath());
+  }
+  final ledger = SessionLedger(ledgerBackend, settings: config.sessions);
   await ledger.load();
   final configFile = desktopConfigPath();
   final rules = PermissionRules(
@@ -137,11 +152,11 @@ Future<void> main(List<String> args) async {
   await shell.initialize(
     config,
     onSettings: () => settingsSignal.value++,
-    onHosting: host == null ? null : () => hostingSignal.value++,
+    onHosting: host == null || served != null ? null : () => hostingSignal.value++,
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
-    host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts,
+    host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts, served: served,
   ));
   await hosting;
 }
@@ -155,8 +170,12 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.browserProvider, this.gitReader, this.accountsHost,
+    this.tabBridge, this.browserProvider, this.gitReader, this.accountsHost, this.served,
   });
+
+  /// The host that served this page, when one did: where its sources, session list, folders, uploads, canoa.cfg and overlays are,
+  /// over the control channel. Null on a desktop, whose host runs in its own process, and for a page nothing served.
+  final ServedApp? served;
 
   /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
   final PopoutWindows? popoutWindows;
@@ -249,7 +268,47 @@ class _CanoaAppState extends State<CanoaApp> {
   });
 
   String? get _configPath => widget.configPath ?? desktopConfigPath();
-  Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? saveConfig)(changed);
+  Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? (widget.served == null ? saveConfig : _writeToHost))(changed);
+
+  /// Writes the tables of canoa.cfg that changed to the host that served this page, which refuses a table or a file it cannot take
+  /// in its own words. A table the host reads only at start applies after the host restarts, which the person is offered.
+  Future<void> _writeToHost(CanoaConfig changed) async {
+    final served = widget.served!;
+    try {
+      if (await served.configStore.save(changed)) _offerRestart();
+    } on ControlFailed catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('The host did not save that: ${error.message}')));
+    } on Object catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('The host could not be reached to save that: $error')));
+    }
+  }
+
+  void _offerRestart() => _messenger.currentState?.showSnackBar(SnackBar(
+    duration: const Duration(seconds: 20),
+    content: const Text('The host reads that setting when it starts.'),
+    action: SnackBarAction(label: 'Restart the host', onPressed: () => unawaited(_restartHost())),
+  ));
+
+  /// Has the host that served this page end and start again, which a host run with `--supervised` does, and waits for it: the
+  /// sessions open on it end, and the control channel is dialled again by the next request.
+  Future<void> _restartHost() async {
+    final served = widget.served;
+    if (served == null) return;
+    final messenger = _messenger.currentState;
+    try {
+      if (_openOnHost() > 0 && !await _confirmRestart()) return;
+      await served.files.restart().onError<Object>((error, stack) {
+        // The link ends with the host, which may be before its answer arrives; only a refusal is a failure.
+        if (error is ControlFailed) throw error;
+      });
+      await served.files.awaitHost();
+      messenger?.showSnackBar(const SnackBar(content: Text('The host restarted.')));
+    } on ControlFailed catch (error) {
+      messenger?.showSnackBar(SnackBar(content: Text('The host would not restart: ${error.message}')));
+    } on Object catch (error) {
+      messenger?.showSnackBar(SnackBar(content: Text('The host did not come back: $error')));
+    }
+  }
 
   // One at a time: a second copy would hold a configuration the first one changes.
   bool _settingsOpen = false;
@@ -282,6 +341,8 @@ class _CanoaAppState extends State<CanoaApp> {
     if (above == null || _settingsOpen) return;
     _settingsOpen = true;
     try {
+      if (widget.served case final served?) await served.refreshOverlays();
+      if (!above.mounted) return;
       await showSettings(
         above,
         SettingsPage(
@@ -303,7 +364,7 @@ class _CanoaAppState extends State<CanoaApp> {
           checkSource: _check,
           programs: _programs,
           profileAgents: _profileAgents,
-          home: platformProfileHome(configPath: _configPath),
+          home: _home,
           onPin: (name, digest) async {
             final changed = config.withOverlayPin(name, digest);
             await _write(changed);
@@ -312,7 +373,7 @@ class _CanoaAppState extends State<CanoaApp> {
             return changed;
           },
           onLoadout: _showLoadout,
-          supervisor: widget.host,
+          supervisor: widget.served == null ? widget.host : null,
           accounts: _accounts,
           saveHosting: _saveHosting,
           version: const String.fromEnvironment('CANOA_VERSION'),
@@ -329,7 +390,7 @@ class _CanoaAppState extends State<CanoaApp> {
     var changed = fromPage.withHost(config.host);
     // The host serves a source from the moment it starts, so adding or removing one restarts it, which ends the sessions open
     // on any of its sources. The profile tables are read again at each session, so changing them restarts nothing.
-    var restart = widget.host != null && !_sameAgents(changed.agents, config.agents);
+    var restart = widget.host != null && widget.served == null && !_sameAgents(changed.agents, config.agents);
     if (restart && _openOnHost() > 0 && !await _confirmRestart()) {
       changed = changed.copyWith(agents: config.agents);
       restart = false;
@@ -361,7 +422,10 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// How many sessions are open on this computer's own host, which restarting it ends.
   int _openOnHost() => store.sessions
-      .where((session) => session.place == SessionPlace.local && session.status != SessionStatus.draft && session.status != SessionStatus.disconnected)
+      .where((session) =>
+          session.place == (widget.served == null ? SessionPlace.local : SessionPlace.host) &&
+          session.status != SessionStatus.draft &&
+          session.status != SessionStatus.disconnected)
       .length;
 
   Future<bool> _confirmRestart() async {
@@ -373,11 +437,14 @@ class _CanoaAppState extends State<CanoaApp> {
       builder: (context) => AlertDialog(
         key: const Key('restart-host'),
         title: const Text('Restart the host?'),
-        content: Text('A source added or removed takes effect when Canoa\'s host restarts, and that ends the '
-            '${count == 1 ? 'session' : '$count sessions'} open on this computer now. Their conversations stay in the list '
-            'to open again.'),
+        content: Text(widget.served == null
+            ? 'A source added or removed takes effect when Canoa\'s host restarts, and that ends the '
+                '${count == 1 ? 'session' : '$count sessions'} open on this computer now. Their conversations stay in the list '
+                'to open again.'
+            : 'Restarting the host ends the ${count == 1 ? 'session' : '$count sessions'} open on it now. Their conversations '
+                'stay in the list to open again.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep the sources as they were')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(widget.served == null ? 'Keep the sources as they were' : 'Not now')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restart')),
         ],
       ),
@@ -392,14 +459,20 @@ class _CanoaAppState extends State<CanoaApp> {
     ...config.agentProfiles.keys,
   }.toList();
 
+  /// Where overlays install and catalogs are fetched: the host that served this page, else beside canoa.cfg.
+  ProfileHome? get _home => widget.served?.home ?? platformProfileHome(configPath: _configPath);
+
   /// Loadout: overlays, skills and MCP servers, installed and to discover.
   Future<void> _showLoadout() async {
     final above = _navigator.currentContext;
     if (above == null) return;
+    // What the host has installed changes without this page, and the store shows it from what was last read.
+    if (widget.served case final served?) await served.refreshOverlays();
+    if (!above.mounted) return;
     final left = await showLoadout(
       above,
       config: config,
-      home: platformProfileHome(configPath: _configPath),
+      home: _home,
       onSave: _saveLoadout,
       agents: _profileAgents,
       programs: _programs,
@@ -541,7 +614,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Whether canoa.cfg sets any profile, so an agent given none of it says so.
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
-  late final HostControl? _control = widget.host == null ? null : HostControl(widget.host!);
+  late final HostControl? _control = widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!));
 
   Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
 
@@ -741,7 +814,8 @@ class _CanoaAppState extends State<CanoaApp> {
 
   AccountsController? _buildAccounts() {
     final control = _control;
-    final host = widget.accountsHost ?? (control == null ? null : ControlAccountsHost(control));
+    // The account methods are the owner's alone: a page the host served is a paired peer and is given none, so it shows none.
+    final host = widget.accountsHost ?? (control == null || widget.served != null ? null : ControlAccountsHost(control));
     if (host == null) return null;
     return AccountsController(
       host: host,
@@ -823,7 +897,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// The programs the host's Store keeps. Nothing is asked of the host until a page that shows them, or a source's readiness,
   /// needs it; an install runs only when the person confirms its plan.
-  late final ProgramStores? _programs = _control == null
+  late final ProgramStores? _programs = _control == null || widget.served != null
       ? null
       : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open)..addListener(_programsChanged));
 
@@ -985,6 +1059,16 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _cacheMeta(({CacheLifetime lifetime, bool chosen}) asked) =>
       {cacheLifetimeMeta: cacheLifetimeRequest(asked.lifetime, chosen: asked.chosen)};
 
+  /// What `initialize` carries to an entry of the host that served this page: the cache lifetime and, as for the host's own
+  /// sources, the overlays the session starts with, which an entry with `own_profile` narrows its own layer to.
+  Map<String, Object?> _startMeta(ChatSession draft) {
+    final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)};
+    if (widget.served == null || config.overlays.isEmpty) return cache;
+    final chosen = draft.overlays?.where(config.overlays.containsKey).toSet() ?? config.defaultOverlays.toSet();
+    draft.overlays = chosen;
+    return {...cache, overlaysMeta: _overlaysNamed(chosen)};
+  }
+
   Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
@@ -1014,14 +1098,14 @@ class _CanoaAppState extends State<CanoaApp> {
               listening.url, pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-              initializeMeta: {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)},
+              initializeMeta: _startMeta(draft),
             )
           : await connectBrowserAcp(
               chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
               pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-              initializeMeta: {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)},
+              initializeMeta: _startMeta(draft),
             );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
@@ -1172,10 +1256,14 @@ class _CanoaAppState extends State<CanoaApp> {
         final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
         if (endpoint == null || method == null) throw StateError('Canoa did not note how to reach that peer');
         final overWebTransport = endpoint.scheme == 'https';
-        final cacheMeta = _cacheMeta((
-          lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
-          chosen: entry.cacheLifetime != null,
-        ));
+        final cacheMeta = {
+          ..._cacheMeta((
+            lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
+            chosen: entry.cacheLifetime != null,
+          )),
+          if (widget.served != null)
+            if (entry.overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
+        };
         client = isPipeUrl(endpoint.toString())
             ? await connectBrowserAcpOverPipe(
                 endpoint.toString(), pinnedPeerId: entry.peerId, method: method,
@@ -1327,6 +1415,11 @@ class _CanoaAppState extends State<CanoaApp> {
     store.addListener(_showWaiting);
     // The welcome page, which a window with no session shows, lists each source with what it needs.
     scheduleMicrotask(_noteLast);
+    if (widget.served?.problem case final problem?) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _messenger.currentState?.showSnackBar(SnackBar(duration: const Duration(seconds: 30), content: Text(problem)));
+      });
+    }
     unawaited(_claimContext());
     final bridge = widget.tabBridge;
     _tabs = bridge == null ? TabsComposerExtension.platform(store) : TabsComposerExtension(TabShares(bridge), store: store);
@@ -1380,16 +1473,31 @@ class _CanoaAppState extends State<CanoaApp> {
     return id == null ? null : scratchFolder(config.sessions.workspace, id, source: session.source, now: session.created, documents: widget.documents);
   }
 
+  /// Asks which folder of the host's computer a new session works in, from the places the host lets this page's key browse.
+  Future<String?> _pickHostFolder() async {
+    final above = _navigator.currentContext;
+    final served = widget.served;
+    if (above == null || served == null) return null;
+    return pickHostFolder(above, (path) => served.files.listFolders(path: path), start: _lastFolder);
+  }
+
+  /// Keeps a file the person attached on the host's computer, where the agent reads it.
+  Future<({String path, int size})> _upload(String name, List<int> bytes) async {
+    final kept = await widget.served!.files.upload(name, bytes);
+    return (path: kept.path, size: kept.size);
+  }
+
   /// What the composer offers, from this app's sources, folders, files and clipboard.
   ComposerKit get _kit => ComposerKit(
     sources: _sources,
     checks: _checks,
     recentFolders: _recentFolders,
     inGitRepository: widget.isGitRepository ?? inGitRepository,
-    pickFolder: widget.pickFolder ?? (canRunLocalAgents ? () => getDirectoryPath() : null),
+    pickFolder: widget.pickFolder ?? (widget.served != null ? _pickHostFolder : canRunLocalAgents ? () => getDirectoryPath() : null),
     scratchFolder: hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
+    uploadFile: widget.served == null ? null : _upload,
     listFolder: canRunLocalAgents ? listFolderEntries : null,
     resolveInside: canRunLocalAgents ? resolveInside : null,
     clipboard: widget.clipboard ?? const SystemClipboard(),
@@ -1446,7 +1554,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
-          onHosting: widget.host == null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
+          onHosting: widget.host == null || widget.served != null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
           conversation: _conversation,
           kit: _kit,
           renderers: widget.renderers,

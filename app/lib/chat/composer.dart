@@ -36,6 +36,7 @@ final class ComposerKit {
     this.scratchFolder,
     this.pickFiles,
     this.statFile,
+    this.uploadFile,
     this.listFolder,
     this.resolveInside,
     this.clipboard = const TextClipboard(),
@@ -78,6 +79,11 @@ final class ComposerKit {
 
   /// A file's size in bytes, or null where it cannot be read.
   final Future<int?> Function(String path)? statFile;
+
+  /// Keeps a picked file on the computer the agent runs on and says where, for a page that has no path to give: anything but a
+  /// small image then goes as that file, where it would otherwise have to be text embedded in the message. Null where a picked
+  /// file is read as it is.
+  final Future<({String path, int size})> Function(String name, List<int> bytes)? uploadFile;
   final ClipboardReader clipboard;
 
   /// The files and folders under a folder on this computer, as paths relative to it, and the file or folder one names when it is
@@ -171,8 +177,24 @@ final class SessionAttachments implements ComposerAttachments {
       if (file.path.isNotEmpty && kit.statFile != null) {
         problems.addAll(await _addPaths(store, session, [file.path], kit));
       } else {
-        final problem = store.addAttachment(session, file.name, await file.read(), mimeType: file.mimeType);
-        if (problem != null) problems.add(problem);
+        try {
+          final bytes = await file.read();
+          final upload = kit.uploadFile;
+          final String? problem;
+          if (upload != null && !(imageTypeOf(file.name, file.mimeType) != null && bytes.length <= maxAttachedImage)) {
+            if (bytes.isEmpty) {
+              problem = '${file.name} is empty.';
+            } else {
+              final kept = await upload(file.name, bytes);
+              problem = store.addFile(session, file.name, kept.path, kept.size, mimeType: file.mimeType);
+            }
+          } else {
+            problem = store.addAttachment(session, file.name, bytes, mimeType: file.mimeType);
+          }
+          if (problem != null) problems.add(problem);
+        } on Object catch (error) {
+          problems.add('${file.name}: $error');
+        }
       }
     }
     return problems;
