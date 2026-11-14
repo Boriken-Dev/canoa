@@ -558,6 +558,13 @@ struct ServeArgs {
     /// status 2.
     #[arg(long)]
     allow_empty: bool,
+    /// Run for a portal: every entry and the control channel listen on a socket under DIR, which only `--portal-user`'s
+    /// processes may use, and the web app is not served. For `canoa portal`'s per-user service.
+    #[arg(long, value_name = "DIR")]
+    portal: Option<PathBuf>,
+    /// The portal's user, a name in /etc/passwd or a number: the only user whose processes may use those sockets.
+    #[arg(long, value_name = "USER", requires = "portal")]
+    portal_user: Option<String>,
     /// Serve the host's own sources too (Claude, Codex, Antigravity, Grok, Pi), to this process only: they have no address,
     /// and each line says what a source is missing.
     #[arg(long)]
@@ -710,6 +717,9 @@ fn web_config(
     home: &Home,
     front: &dyn Front,
 ) -> Result<Option<WebConfig>, Failed> {
+    if args.portal.is_some() {
+        return Ok(None);
+    }
     let mut web = config.web.clone();
     if let Some(dir) = &args.web {
         let web = web.get_or_insert_with(WebConfig::new);
@@ -778,6 +788,15 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     }
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);
+    }
+    if let Some(dir) = &args.portal {
+        let user = args
+            .portal_user
+            .as_deref()
+            .ok_or_else(|| Failed::usage("--portal needs --portal-user"))?;
+        let uid = crate::portal_link::uid_of(user)
+            .map_err(|error| Failed::usage(format!("--portal-user: {error}")))?;
+        options = options.with_portal(crate::portal_link::PortalSockets::new(dir, uid));
     }
     if let Ok(layers) = layers_of(&args.config, front, false) {
         options = options.with_account_layers(layers);

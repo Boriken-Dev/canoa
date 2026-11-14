@@ -19,6 +19,7 @@ mod local;
 pub mod options;
 pub mod peers;
 pub mod pipe;
+pub mod portal_link;
 pub mod profile;
 pub mod provider;
 mod scope;

@@ -94,6 +94,25 @@ pub enum Grant {
 }
 
 impl Grant {
+    /// Every grant: what a user's own browser holds on a host run for a portal.
+    #[must_use]
+    pub fn all() -> [Self; 12] {
+        [
+            Self::LedgerRead,
+            Self::LedgerWrite,
+            Self::Worktree,
+            Self::StoreRead,
+            Self::Folders,
+            Self::ConfigRead,
+            Self::ConfigWrite,
+            Self::ConfigWriteSessions,
+            Self::Upload,
+            Self::HostRestart,
+            Self::OverlayRead,
+            Self::OverlayWrite,
+        ]
+    }
+
     /// Its name in canoa.cfg.
     #[must_use]
     pub const fn as_str(self) -> &'static str {

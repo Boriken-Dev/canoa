@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 
+use crate::portal_link::PortalSockets;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
@@ -107,6 +108,9 @@ pub struct ServeOptions {
     /// The canoa.cfg files the control channel's `accounts/*` methods read and write; with the state directory, which is the
     /// home they keep accounts in. Without it the host manages no accounts over the control channel.
     pub account_layers: Option<crate::config::Layers>,
+    /// Where a host run for a portal listens: every entry and the control channel on a socket in a directory a group may
+    /// reach, and a socket that introduces a browser's key. Unix only.
+    pub portal: Option<crate::portal_link::PortalSockets>,
 }
 
 impl ServeOptions {
@@ -127,7 +131,18 @@ impl ServeOptions {
             home_dir: None,
             supervised: false,
             account_layers: None,
+
+            portal: None,
         }
+    }
+
+    /// Runs the host for a portal: see [`crate::portal_link::PortalSockets`]. Every entry's address is replaced by a socket, the
+    /// web app is not served, and every key the portal introduces is the user's own browser, so each gets the control
+    /// channel's page grants.
+    #[must_use]
+    pub fn with_portal(mut self, sockets: crate::portal_link::PortalSockets) -> Self {
+        self.portal = Some(sockets);
+        self
     }
 
     /// Reads canoa.cfg's profile again from `layers` at each connection to one of the host's own sources.
@@ -418,6 +433,8 @@ enum Run {
     /// The control channel, for the keys `[host.control]` grants.
     Control {
         grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
+        /// A host run for a portal: every paired key is the user's own browser and gets every page grant.
+        everyone: bool,
     },
 }
 
@@ -484,6 +501,8 @@ struct Shared {
     /// Set by [`Stopper::stop`]: every listener and link ends.
     stopped: Arc<AtomicBool>,
     program_args: Vec<OsString>,
+    /// A host run for a portal: the only user a connection on a socket may be from.
+    portal_uid: Option<u32>,
     /// The ledger and the rest of what belongs to no entry.
     control: Arc<control::Control>,
     /// What lets an agent session hand a task to another source; `None` when `[host.delegate]` is off.
@@ -953,12 +972,17 @@ fn tool_args(before: &[OsString], name: &str, spec: &crate::tool::ToolSpec) -> V
     args
 }
 
+fn portal_of(options: &ServeOptions) -> Option<&PortalSockets> {
+    options.portal.as_ref()
+}
+
 /// Binds one entry's address or pipe, listing what is not the default of it in the log.
 fn bind_listen(
     name: &str,
     table: &str,
     listen: &Listen,
     origins: &[String],
+    shared: Option<&PortalSockets>,
 ) -> Result<(Bound, String), ServeError> {
     match listen {
         Listen::Address(address) => {
@@ -985,7 +1009,11 @@ fn bind_listen(
         }
         Listen::Pipe(pipe_name) => {
             // Every setting is the crate's default, the access control included; a receive sets its own read timeout.
-            let listener = pipe::Listener::bind(pipe_name).map_err(|error| ServeError::Pipe {
+            let bound = match shared {
+                Some(sockets) => sockets.bind(pipe_name),
+                None => pipe::Listener::bind(pipe_name),
+            };
+            let listener = bound.map_err(|error| ServeError::Pipe {
                 entry: name.to_owned(),
                 error,
             })?;
@@ -1047,6 +1075,15 @@ impl Serving {
         store: TrustStore,
         options: &ServeOptions,
     ) -> Result<Self, ServeError> {
+        let adapted;
+
+        let config = match &options.portal {
+            Some(sockets) => {
+                adapted = crate::portal_link::adapt(config, sockets)?;
+                &adapted
+            }
+            None => config,
+        };
         let sources = if options.local_sources {
             sources::entries(config)
         } else {
@@ -1131,6 +1168,7 @@ impl Serving {
                     table_of(&entry.kind),
                     &entry.listen,
                     &config.origins,
+                    portal_of(options),
                 )?;
                 (Some(bound), url)
             };
@@ -1383,7 +1421,13 @@ impl Serving {
         if let Some(settings) = &config.control
             && let Some(listen) = &settings.listen
         {
-            let (bound, url) = bind_listen(control::NAME, "control", listen, &config.origins)?;
+            let (bound, url) = bind_listen(
+                control::NAME,
+                "control",
+                listen,
+                &config.origins,
+                portal_of(options),
+            )?;
             let id = ServiceId::new(control::NAME.to_owned());
             registry.register(
                 Service::new(id.clone(), control::NAME.to_owned(), "control", url.clone())
@@ -1409,10 +1453,11 @@ impl Serving {
             listeners.push((
                 Arc::new(Served {
                     name: control::NAME.to_owned(),
-                    restricted: true,
+                    restricted: portal_of(options).is_none(),
                     delegable: false,
                     run: Run::Control {
                         grants: settings.grants.clone(),
+                        everyone: portal_of(options).is_some(),
                     },
                     running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
                 }),
@@ -1440,6 +1485,7 @@ impl Serving {
                 ending: Mutex::new(()),
                 stopped: Arc::clone(&stopped),
                 program_args: options.program_args.clone(),
+                portal_uid: options.portal.as_ref().map(|sockets| sockets.uid),
                 control: Arc::new({
                     let kept = control::Control::open(
                         options
@@ -1546,6 +1592,18 @@ impl Serving {
             listening,
         };
         serving.attach_delegation(&config.remote_agents, dialer);
+
+        if let Some(sockets) = &options.portal {
+            let peer = serving.shared.method.peer_id().to_string();
+            let method_name = serving.method().name();
+            let index = crate::portal_link::index_of(&peer, method_name, &serving.listening);
+            crate::portal_link::introduce(
+                sockets,
+                Arc::clone(&serving.shared.store),
+                index,
+                Arc::clone(&serving.shared.stopped),
+            )?;
+        }
         Ok(serving)
     }
 
@@ -1799,6 +1857,15 @@ fn accept_pipe_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &pipe:
             );
             continue;
         };
+        if let Some(uid) = shared.portal_uid
+            && !crate::portal_link::from_user(&stream, uid)
+        {
+            tracing::warn!(
+                entry = served.name,
+                "a connection from a user other than the portal's was refused"
+            );
+            continue;
+        }
         // Information for the log: the key proof is what admits a peer.
         match stream.peer() {
             Ok(peer) => tracing::debug!(entry = served.name, ?peer, "a connection on a pipe"),
@@ -1962,12 +2029,16 @@ fn give_agent<C: Channel>(
             args,
             line,
         } => return give_provider(shared, served, channel, peer, (program, args), line),
-        Run::Control { grants } => {
-            let grants = grants
-                .iter()
-                .find(|(key, _)| *key == peer)
-                .map(|(_, grants)| grants.clone())
-                .unwrap_or_default();
+        Run::Control { grants, everyone } => {
+            let grants = if *everyone {
+                control::Grant::all().into_iter().collect()
+            } else {
+                grants
+                    .iter()
+                    .find(|(key, _)| *key == peer)
+                    .map(|(_, grants)| grants.clone())
+                    .unwrap_or_default()
+            };
             let caller = control::Caller::Peer {
                 id: peer.to_string(),
                 grants,
