@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
@@ -20,6 +21,9 @@ external JSPromise<JSString> _pair(JSString pin);
 @JS('canoaBridge.host.unpair')
 external JSPromise<JSString> _unpair();
 
+@JS('canoaBridge.host.control')
+external JSPromise<JSString> _control(JSString method, JSString params);
+
 /// The extension's bridge to the local Canoa; null in any page the extension did not make, which has no `canoaBridge` at all.
 LocalHostBridge? platformLocalHostBridge() => _host == null ? null : _WebLocalHostBridge();
 
@@ -37,4 +41,10 @@ final class _WebLocalHostBridge implements LocalHostBridge {
 
   @override
   Future<LocalHostView> unpair() => _view(_unpair());
+
+  @override
+  Future<Object?> control(String method, Map<String, Object?> params) async {
+    final said = jsonDecode((await _control(method.toJS, jsonEncode(params).toJS).toDart).toDart) as Map<String, Object?>;
+    return said['result'];
+  }
 }

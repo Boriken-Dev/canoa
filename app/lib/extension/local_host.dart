@@ -89,6 +89,10 @@ abstract interface class LocalHostBridge {
 
   /// Forgets the pairing.
   Future<LocalHostView> unpair();
+
+  /// The result of a control method of the host (`ledger/list`), run by the worker over a link it proves; a refusal is an
+  /// exception. Only what the host grants a browser key is answered.
+  Future<Object?> control(String method, Map<String, Object?> params);
 }
 
 /// The extension's own bridge, or null where this app is not running as the extension.

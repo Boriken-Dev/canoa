@@ -14,6 +14,7 @@ import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
 import 'extension/local_host_banner.dart';
+import 'extension/local_host_control.dart';
 import 'extension/site_sessions.dart';
 import 'extension/tab_bridge.dart' show TabBridge;
 import 'extension/tab_shares.dart' show TabShares;
@@ -102,6 +103,18 @@ String? _parentFolder(String? file) {
   return cut <= 0 ? null : text.substring(0, cut);
 }
 
+/// Whether this browser's extension is paired with a Canoa on this computer that answers now: then the session list is that
+/// Canoa's. Asked first, with a bound, so a worker that is slow to answer costs a start the wait and no more.
+Future<bool> _localHostKeepsSessions(LocalHostBridge? bridge) async {
+  if (bridge == null) return false;
+  try {
+    final view = await bridge.status().timeout(const Duration(seconds: 8));
+    return view.state == LocalHostState.running && view.paired;
+  } on Object {
+    return false;
+  }
+}
+
 /// This desktop's own host. Let the browser extension reach this app too: the app registers itself as the extension's native
 /// messaging host, so the extension's Start button starts the app.
 HostSupervisor _desktopSupervisor(CanoaConfig config, List<String> args) {
@@ -136,9 +149,13 @@ Future<void> main(List<String> args) async {
   // In the host's home on a desktop that runs one or on the host that served the page, else beside canoa.cfg, or in this
   // origin's IndexedDB on the web.
   final keptByHost = host != null && host.phase != HostPhase.off && host.phase != HostPhase.absent;
+  // The extension's panel uses the Canoa on this computer by default, once its key is paired with it.
+  final localHost = served == null && !keptByHost ? platformLocalHostBridge() : null;
   final LedgerBackend ledgerBackend;
   if (served != null && served.reachable) {
     ledgerBackend = served.ledger;
+  } else if (localHost != null && await _localHostKeepsSessions(localHost)) {
+    ledgerBackend = HostLedgerBackend.over(localHostControl(localHost));
   } else if (served == null && keptByHost) {
     ledgerBackend = HostLedgerBackend(host);
   } else {
@@ -170,6 +187,7 @@ Future<void> main(List<String> args) async {
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
     host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts, served: served,
+    localHost: localHost,
   ));
   await hosting;
 }

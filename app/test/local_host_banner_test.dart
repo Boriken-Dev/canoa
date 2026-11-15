@@ -51,6 +51,9 @@ final class _Bridge implements LocalHostBridge {
   }
 
   @override
+  Future<Object?> control(String method, Map<String, Object?> params) async => {'method': method, 'params': params};
+
+  @override
   Future<LocalHostView> unpair() async {
     calls.add('unpair');
     return next = _view({'state': 'running', 'paired': false, 'canPin': true, 'host': {'name': 'Canoa', 'peer': _peer, 'entries': []}});
