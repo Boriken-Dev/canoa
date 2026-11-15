@@ -168,6 +168,14 @@ impl AgentOptions {
         let mut launch = ClaudeLaunch::new(".");
         if let Some(executable) = &self.executable {
             launch.executable.clone_from(executable);
+        } else if let Some((path, environment)) = crate::sources::managed_program("claude") {
+            // Nothing names the program: the one the Store installed runs, found each time a session starts.
+            launch.executable = path.into_os_string();
+            launch.env.extend(
+                environment
+                    .into_iter()
+                    .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            );
         }
         launch.model.clone_from(&self.model);
         launch.effort.clone_from(&self.effort);
@@ -198,6 +206,13 @@ impl AgentOptions {
         let mut launch = CodexLaunch::new(".");
         if let Some(executable) = &self.executable {
             launch.executable.clone_from(executable);
+        } else if let Some((path, environment)) = crate::sources::managed_program("codex") {
+            launch.executable = path.into_os_string();
+            launch.env.extend(
+                environment
+                    .into_iter()
+                    .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            );
         }
         launch.model.clone_from(&self.model);
         launch.effort.clone_from(&self.effort);

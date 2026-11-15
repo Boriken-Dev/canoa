@@ -537,3 +537,96 @@ fn the_list_reads_canoa_cfg_again_so_an_account_the_command_line_added_shows() {
     assert_eq!(listed["accounts"][0]["name"], "late", "{listed}");
     host.stop();
 }
+
+#[test]
+fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_start_again() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    let (_, added) = app.drive(
+        &link,
+        1,
+        "accounts/add",
+        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    added.expect("the account is added");
+    let entries = plain_call(&link, 2, "accounts/entries", json!({})).expect("entries");
+    let names: Vec<(&str, &str)> = entries["entries"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|each| {
+            (
+                each["name"].as_str().expect("a name"),
+                each["harness"].as_str().expect("a harness"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        names,
+        [("Claude", "claude"), ("Codex", "codex")],
+        "the entry canoa.cfg has, then the built-in source it has not named"
+    );
+    assert_eq!(entries["entries"][0]["accounts"], json!([]));
+
+    let offered = plain_call(
+        &link,
+        3,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["work"]}),
+    )
+    .expect("offered");
+    assert_eq!(offered["restart"], true);
+    let cfg = config_text(&host);
+    assert!(cfg.contains("accounts = [\"work\"]"), "{cfg}");
+    let entries = plain_call(&link, 4, "accounts/entries", json!({})).expect("entries");
+    assert_eq!(entries["entries"][0]["accounts"], json!(["work"]));
+
+    // A built-in source takes the name once it offers an account, and canoa.cfg then has an entry of that name.
+    let codex = plain_call(
+        &link,
+        5,
+        "accounts/offer",
+        json!({"entry": "Codex", "accounts": ["work"]}),
+    )
+    .expect_err("an account of another provider");
+    assert!(codex.contains("-32002"), "{codex}");
+    let unknown = plain_call(
+        &link,
+        6,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["nobody"]}),
+    )
+    .expect_err("no such account");
+    assert!(unknown.contains("-32003"), "{unknown}");
+    let nowhere = plain_call(
+        &link,
+        7,
+        "accounts/offer",
+        json!({"entry": "Nothing", "accounts": []}),
+    )
+    .expect_err("no such entry");
+    assert!(nowhere.contains("-32003"), "{nowhere}");
+    let twice = plain_call(
+        &link,
+        8,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["work", "work"]}),
+    )
+    .expect_err("listed twice");
+    assert!(twice.contains("-32602"), "{twice}");
+
+    // The host will not forget an account an entry offers; taking it off the entry first lets it.
+    let held = plain_call(&link, 9, "accounts/remove", json!({"name": "work"})).expect_err("held");
+    assert!(held.contains("offers work"), "{held}");
+    plain_call(
+        &link,
+        10,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": []}),
+    )
+    .expect("taken off");
+    plain_call(&link, 11, "accounts/remove", json!({"name": "work"})).expect("removed");
+    host.stop();
+}

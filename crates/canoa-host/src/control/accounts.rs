@@ -23,7 +23,7 @@ use serde_json::{Map, Value, json};
 use super::{BAD_PARAMS, NOT_FOUND, POLL, REFUSED, error_line};
 use crate::accounts::commands::{self, Cfg, Event, Relay};
 use crate::cli::Failed;
-use crate::config::{Config, Layers, Settings};
+use crate::config::{Config, EntryKind, Layers, Settings};
 use crate::home::Home;
 use crate::provider::map_of;
 use crate::secrets::Hub;
@@ -45,6 +45,91 @@ impl core::fmt::Debug for Accounts {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Accounts").finish_non_exhaustive()
     }
+}
+
+/// A harness the host serves as a source of its own when canoa.cfg has no entry of that name: an entry that offers accounts
+/// takes the name, and the source with it.
+const BUILT_IN_SOURCES: [(&str, &str); 2] = [("Claude", "claude"), ("Codex", "codex")];
+
+/// The entries that run a built-in provider: those canoa.cfg has, then the built-in sources it has not named.
+fn entries_of(config: &Config) -> Vec<Value> {
+    let mut entries: Vec<Value> = config
+        .entries
+        .iter()
+        .filter_map(|entry| match &entry.kind {
+            EntryKind::Harness {
+                harness, accounts, ..
+            } => Some(json!({
+                "name": entry.name,
+                "harness": harness,
+                "accounts": accounts,
+                "open": entry.peers.is_none(),
+            })),
+            _ => None,
+        })
+        .collect();
+    for (name, harness) in BUILT_IN_SOURCES {
+        if config.entries.iter().all(|entry| entry.name != name) {
+            entries.push(json!({
+                "name": name, "harness": harness, "accounts": [], "open": true,
+            }));
+        }
+    }
+    entries
+}
+
+/// `accounts/offer` `{"entry", "accounts"}`: the entry offers exactly those accounts, in that order, which canoa.cfg then says. The
+/// host reads an entry's offer when it starts, so the answer says it has to start again.
+fn offer(own: &std::path::Path, config: &Config, params: &Value) -> Result<Value, Refusal> {
+    let entry = text(params, "entry")?;
+    let names: Vec<String> = match params.get("accounts") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().map(str::to_owned))
+            .collect::<Option<_>>()
+            .ok_or((BAD_PARAMS, "accounts is a list of names".to_owned()))?,
+        _ => return Err((BAD_PARAMS, "accounts is a list of names".to_owned())),
+    };
+    let known = entries_of(config);
+    let harness = known
+        .iter()
+        .find(|each| each["name"] == entry)
+        .and_then(|each| each["harness"].as_str())
+        .ok_or((
+            NOT_FOUND,
+            format!("this host has no entry {entry} that runs an account's provider"),
+        ))?;
+    if entry.is_empty()
+        || entry.len() > 64
+        || !entry
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err((
+            BAD_PARAMS,
+            "an entry's name is 1 to 64 letters, digits, - or _".to_owned(),
+        ));
+    }
+    for (index, name) in names.iter().enumerate() {
+        let account = config
+            .accounts
+            .get(name)
+            .ok_or((NOT_FOUND, format!("no account called {name}")))?;
+        if account.harness != harness {
+            return Err((
+                REFUSED,
+                format!(
+                    "{name} signs in to {}, and {entry} runs {harness}",
+                    account.harness
+                ),
+            ));
+        }
+        if names[..index].contains(name) {
+            return Err((BAD_PARAMS, format!("{name} is listed twice")));
+        }
+    }
+    commands::set_offered(own, entry, harness, &names).map_err(|failed| refusal(&failed))?;
+    Ok(json!({"entry": entry, "accounts": names, "restart": true}))
 }
 
 /// Which sign-in a long request asks for.
@@ -154,6 +239,8 @@ impl Accounts {
                     .map_err(|failed| refusal(&failed))?;
                 Ok(json!({"removed": true}))
             }
+            "accounts/entries" => Ok(json!({"entries": entries_of(&config)})),
+            "accounts/offer" => offer(&self.layers.own, &config, params),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
     }

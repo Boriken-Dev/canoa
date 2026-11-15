@@ -683,6 +683,11 @@ fn a_key_manages_accounts_only_with_the_accounts_grant() {
         ("accounts/catalog", json!({"harness": "claude"})),
         ("accounts/list", json!({})),
         ("accounts/remove", json!({"name": "work"})),
+        ("accounts/entries", json!({})),
+        (
+            "accounts/offer",
+            json!({"entry": "Claude", "accounts": ["work"]}),
+        ),
     ] {
         let answer = ask(&control, &key, method, params.clone());
         assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");

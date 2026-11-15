@@ -917,6 +917,118 @@ fn append_account(path: &Path, name: &str, account: &AccountConfig) -> Result<()
     write_cfg(path, &text)
 }
 
+/// Makes the agent entry `entry`, which runs `harness`, offer exactly `accounts` in the file at `path`, in the file's own format: an
+/// entry the file does not have yet is written with its `harness`, and none left takes the key out.
+pub(crate) fn set_offered(
+    path: &Path,
+    entry: &str,
+    harness: &str,
+    accounts: &[String],
+) -> Result<(), Failed> {
+    let mut text = read_cfg(path)?;
+    let format = format_of(path, &text)?;
+    if format != "toml" {
+        let edited = edit_document(path, &text, &format, |table| {
+            let agents = table
+                .entry("host")
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| Failed::run("[host] is not a table".to_owned()))?
+                .entry("agents")
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| Failed::run("[host.agents] is not a table".to_owned()))?;
+            let made = !agents.contains_key(entry);
+            if made && accounts.is_empty() {
+                return Ok(());
+            }
+            let one = agents
+                .entry(entry.to_owned())
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| Failed::run(format!("[host.agents.{entry}] is not a table")))?;
+            if made {
+                one.insert("harness".into(), toml::Value::String(harness.to_owned()));
+            }
+            if accounts.is_empty() {
+                one.remove("accounts");
+            } else {
+                one.insert(
+                    "accounts".into(),
+                    toml::Value::Array(
+                        accounts
+                            .iter()
+                            .map(|name| toml::Value::String(name.clone()))
+                            .collect(),
+                    ),
+                );
+            }
+            Ok(())
+        })?;
+        return write_cfg(path, &edited);
+    }
+    let line = format!(
+        "accounts = [{}]\n",
+        accounts
+            .iter()
+            .map(|name| quote(name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let header = format!("[host.agents.{entry}]");
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let Some(start) = lines.iter().position(|each| each.trim() == header) else {
+        if accounts.is_empty() {
+            return Ok(());
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&format!("{header}\nharness = {}\n{line}", quote(harness)));
+        return write_cfg(path, &text);
+    };
+    let end = lines[start + 1..]
+        .iter()
+        .position(|each| each.trim_start().starts_with('['))
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    let at = lines[start + 1..end].iter().position(|each| {
+        each.trim_start()
+            .strip_prefix("accounts")
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    });
+    let mut kept: Vec<String> = lines.iter().map(|each| (*each).to_owned()).collect();
+    match at.map(|offset| start + 1 + offset) {
+        Some(index) => {
+            let value = kept[index].split_once('=').map_or("", |(_, value)| value);
+            if value.matches('[').count() != value.matches(']').count() {
+                return Err(Failed::usage(format!(
+                    "canoa.cfg spells {header}'s accounts over several lines: change it by hand"
+                )));
+            }
+            if accounts.is_empty() {
+                kept.remove(index);
+            } else {
+                kept[index] = line;
+            }
+        }
+        None if !accounts.is_empty() => {
+            let mut after = start + 1;
+            if !kept[start].ends_with('\n') {
+                kept[start].push('\n');
+            }
+            if after > kept.len() {
+                after = kept.len();
+            }
+            kept.insert(after, line);
+        }
+        None => {}
+    }
+    write_cfg(path, &kept.concat())
+}
+
 /// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.
 fn remove_account(path: &Path, name: &str) -> Result<(), Failed> {
     let text = read_cfg(path)?;
@@ -1006,6 +1118,76 @@ mod format_tests {
             let after = fs::read_to_string(&path).expect("read");
             assert!(!after.contains("work"), "{name}: {after}");
             assert!(after.contains("start_hidden"), "{name}: {after}");
+        }
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// An entry's offered accounts are set in a TOML, YAML or JSON file in that file's own format, whether the entry is there or not.
+    #[cfg(all(feature = "yaml", feature = "json"))]
+    #[test]
+    fn the_accounts_an_entry_offers_are_set_in_the_files_own_format() {
+        let dir = std::env::temp_dir().join(format!("canoa-offer-format-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("directory");
+        let offered = |text: &str, name: &str| {
+            let config = Config::from_str_named(text, name, Path::new(".")).expect(name);
+            let entry = config.entries.iter().find(|each| each.name == "Claude");
+            match entry.map(|each| &each.kind) {
+                Some(EntryKind::Harness {
+                    harness, accounts, ..
+                }) => Some((harness.clone(), accounts.clone())),
+                _ => None,
+            }
+        };
+        for (name, text) in [
+            ("a.cfg", "#!yaml\ndesktop:\n  start_hidden: true\n"),
+            ("b.cfg", "#!json\n{\"desktop\": {\"start_hidden\": true}}\n"),
+            ("c.yaml", "desktop:\n  start_hidden: true\n"),
+            ("e.cfg", "[desktop]\nstart_hidden = true\n"),
+            (
+                "f.cfg",
+                "[host.agents.Claude]\n# the person's own\nharness = \"claude\"\ntitle = \"Mine\"\n\n[desktop]\nstart_hidden = true\n",
+            ),
+            (
+                "g.cfg",
+                "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"work\"]\n\n[desktop]\nstart_hidden = true\n",
+            ),
+        ] {
+            let path = dir.join(name);
+            fs::write(&path, text).expect("write");
+            for who in ["work", "other"] {
+                let mut made = account();
+                made.id = format!("id-{who}");
+                append_account(&path, who, &made).expect(name);
+            }
+            let both = vec!["other".to_owned(), "work".to_owned()];
+            set_offered(&path, "Claude", "claude", &both).expect(name);
+            let written = fs::read_to_string(&path).expect("read");
+            assert_eq!(
+                offered(&written, name),
+                Some(("claude".to_owned(), both.clone())),
+                "{name}: {written}"
+            );
+            assert!(
+                written.contains("start_hidden"),
+                "{name}: other tables stay"
+            );
+            if name == "f.cfg" {
+                assert!(written.contains("# the person's own") && written.contains("Mine"));
+            }
+            set_offered(&path, "Claude", "claude", &["work".to_owned()]).expect(name);
+            let written = fs::read_to_string(&path).expect("read");
+            assert_eq!(
+                offered(&written, name).map(|each| each.1),
+                Some(vec!["work".to_owned()]),
+                "{name}: {written}"
+            );
+            set_offered(&path, "Claude", "claude", &[]).expect(name);
+            let written = fs::read_to_string(&path).expect("read");
+            assert_eq!(
+                offered(&written, name).map(|each| each.1),
+                Some(Vec::new()),
+                "{name}: {written}"
+            );
         }
         fs::remove_dir_all(dir).expect("cleanup");
     }

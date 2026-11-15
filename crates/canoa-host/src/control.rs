@@ -544,11 +544,12 @@ impl Control {
                 Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
                     owner_only_history(caller).and_then(|()| self.import_call(method, &params))
                 }
-                Some(method @ ("accounts/catalog" | "accounts/list" | "accounts/remove")) => {
-                    allow(caller, Grant::Accounts)
-                        .and_then(|()| self.accounts())
-                        .and_then(|accounts| accounts.call(method, &params))
-                }
+                Some(
+                    method @ ("accounts/catalog" | "accounts/list" | "accounts/remove"
+                    | "accounts/entries" | "accounts/offer"),
+                ) => allow(caller, Grant::Accounts)
+                    .and_then(|()| self.accounts())
+                    .and_then(|accounts| accounts.call(method, &params)),
                 Some("host/grants") => Ok(caller.grants_json()),
                 Some("store/apply" | "accounts/add" | "accounts/login") => Err((
                     REFUSED,

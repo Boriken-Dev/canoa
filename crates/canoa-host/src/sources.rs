@@ -138,6 +138,37 @@ fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedPi> {
     (inside(&node) && inside(&script)).then_some(ManagedPi { node, script })
 }
 
+/// The program the Store installed under the name `program` on `shelf`, to run in place of one found on the computer: the copy's
+/// own launch path, when `current.json` is the one this host wrote and every file of the copy is as it was installed.
+pub(crate) fn managed_program_in(
+    shelf: &Shelf,
+    program: &str,
+) -> Option<(PathBuf, Vec<(String, String)>)> {
+    let dir = shelf.program(program).ok()?;
+    let current = dir.current_checked().ok()??;
+    dir.verify(&current).ok()?;
+    let path = PathBuf::from(&current.launch.path);
+    let inside = path.is_absolute()
+        && path.is_file()
+        && crate::store::exec::normalize(&path)
+            .zip(crate::store::exec::normalize(Path::new(&current.dir)))
+            .is_some_and(|(path, root)| path.starts_with(root));
+    inside.then(|| {
+        let environment = current
+            .launch
+            .environment
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        (path, environment)
+    })
+}
+
+/// [`managed_program_in`] over this user's programs folder.
+pub(crate) fn managed_program(program: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
+    Shelf::default_root().and_then(|root| managed_program_in(&Shelf::unchecked(root), program))
+}
+
 fn sources_in(
     config: &Config,
     find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>,
@@ -643,6 +674,52 @@ mod tests {
             .expect("committed");
         drop(locked);
         (shelf, script)
+    }
+
+    /// A shelf holding `name` as one file, launched by its path, as the Store's single-binary extensions record it.
+    fn shelf_with_binary(root: &Path, name: &str) -> (Shelf, PathBuf) {
+        use crate::store::shelf::MadeBy;
+        let shelf = Shelf::unchecked(root);
+        let program = shelf.program(name).expect("a name");
+        let locked = program.lock().expect("locked");
+        let staging = locked.stage("2.0.0").expect("staged");
+        let binary = staging.join(name);
+        std::fs::write(&binary, b"binary").expect("written");
+        let mut launch = canoa::store::Launch::new(binary.to_string_lossy().into_owned());
+        launch
+            .environment
+            .insert("DISABLE_AUTOUPDATER".to_owned(), "1".to_owned());
+        let mut files = Vec::new();
+        crate::store::shelf::record_tree(&staging, &mut files).expect("recorded");
+        locked
+            .commit(
+                &staging,
+                "2.0.0",
+                &launch,
+                files,
+                MadeBy {
+                    provider: format!("{name}_store"),
+                    version: "0".to_owned(),
+                },
+            )
+            .expect("committed");
+        drop(locked);
+        (shelf, binary)
+    }
+
+    #[test]
+    fn a_program_the_store_installed_runs_from_its_copy_and_a_changed_copy_runs_nowhere() {
+        let root = scratch("managed-claude");
+        let (shelf, binary) = shelf_with_binary(&root, "claude");
+        let (path, environment) = managed_program_in(&shelf, "claude").expect("a managed copy");
+        assert_eq!(path, binary);
+        assert_eq!(
+            environment,
+            vec![("DISABLE_AUTOUPDATER".to_owned(), "1".to_owned())]
+        );
+        assert_eq!(managed_program_in(&shelf, "codex"), None);
+        std::fs::write(&binary, b"changed since the install").expect("written");
+        assert_eq!(managed_program_in(&shelf, "claude"), None);
     }
 
     #[test]
