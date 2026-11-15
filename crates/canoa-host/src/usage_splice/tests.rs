@@ -573,6 +573,7 @@ fn quota_entry(state_dir: Option<std::path::PathBuf>, private: bool) -> Quota {
         per_connection: false,
         starter: Some(plain_starter()),
     })
+    .with_settle(Duration::ZERO)
 }
 
 /// A starter that records nothing: the program is started as it is.
@@ -955,4 +956,261 @@ fn a_failed_turn_is_in_the_report_before_its_answer_reaches_the_client() {
         .expect("sent");
     let report = asked.into_inner().expect("the answer was sent");
     assert_eq!(report["buckets"][0]["id"], "inferred", "{report}");
+}
+
+/// A stand-in `agy`: this test binary run again as its own process, serving the recorded status on a loopback port of its
+/// own and printing a line for each request it answers, so a reading of that process finds the port and a count of the
+/// requests is not mixed with any other test's.
+struct StandIn {
+    child: std::process::Child,
+    requests: Arc<Mutex<Vec<std::time::Instant>>>,
+}
+
+const STAND_IN: &str = "CANOA_TEST_STAND_IN_AGY";
+
+impl StandIn {
+    fn start() -> Self {
+        use std::io::BufRead as _;
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("the test binary"))
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "usage_splice::tests::stand_in_agy",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(STAND_IN, "1")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("the stand-in starts");
+        let output = child.stdout.take().expect("its output");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let (ready, listening) = std::sync::mpsc::channel();
+        let seen = Arc::clone(&requests);
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(output)
+                .lines()
+                .map_while(Result::ok)
+            {
+                // The test harness may have printed its own words ahead of the first of ours on the line.
+                if line.ends_with("STAND-IN listening") {
+                    let _ = ready.send(());
+                } else if line.ends_with("STAND-IN request") {
+                    lock(&seen).push(std::time::Instant::now());
+                }
+            }
+        });
+        listening
+            .recv_timeout(PATIENCE)
+            .expect("the stand-in listens");
+        Self { child, requests }
+    }
+
+    fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn requests(&self) -> usize {
+        lock(&self.requests).len()
+    }
+
+    fn wait_for_requests(&self, count: usize) -> bool {
+        let until = std::time::Instant::now() + PATIENCE;
+        while self.requests() < count && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        self.requests() >= count
+    }
+}
+
+impl Drop for StandIn {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// The stand-in's own process: run only by [`StandIn::start`].
+#[test]
+#[ignore = "the stand-in agy, run by the tests that read it"]
+fn stand_in_agy() {
+    use std::io::{Read as _, Write as _};
+    if std::env::var_os(STAND_IN).is_none() {
+        return;
+    }
+    let body = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/agy/getuserstatus.json"
+    ))
+    .expect("the fixture");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    println!("STAND-IN listening");
+    let _ = std::io::stdout().flush();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let body = body.clone();
+            std::thread::spawn(move || {
+                let mut request = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !request.ends_with(b"\r\n\r\n")
+                    && stream.read(&mut byte).is_ok_and(|read| read == 1)
+                {
+                    request.push(byte[0]);
+                }
+                println!("STAND-IN request");
+                let _ = std::io::stdout().flush();
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                let mut rest = [0_u8; 256];
+                while stream.read(&mut rest).is_ok_and(|read| read > 0) {}
+            });
+        }
+    });
+    // Lives until the test that started it ends it.
+    let mut held = Vec::new();
+    let _ = std::io::stdin().read_to_end(&mut held);
+}
+
+/// A splice whose entry reads the stand-in's quota, with a session opened on it: `settle` is the entry's wait.
+fn opened_on(stand_in: &StandIn, settle: Duration) -> Splice {
+    let quota = quota_entry(None, false).with_settle(settle);
+    let inference = Arc::new(Inference::new(None).with_quota(quota));
+    let splice = Splice::new(inference, Some("work".to_owned())).agent(stand_in.pid());
+    initialize(&splice, true, plain_answer());
+    assert!(
+        read_client(
+            &splice,
+            &json!({"id": 5, "method": "session/new", "params": {"cwd": "/work"}})
+        )
+        .is_none()
+    );
+    from_agent(
+        &splice,
+        &json!({"id": 5, "result": {"sessionId": "s", "models": {"availableModels": [
+            {"modelId": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)"}]}}}),
+    );
+    splice
+}
+
+/// Lets the connection run for `time`, as its owner's ticks do.
+fn run_for(splice: &Splice, time: Duration) {
+    let until = std::time::Instant::now() + time;
+    while std::time::Instant::now() < until {
+        splice.tick(|_| Ok(()));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn an_idle_session_just_opened_is_not_read_at_once() {
+    let stand_in = StandIn::start();
+    assert_eq!(agy::SETTLE, Duration::from_secs(10));
+    let splice = opened_on(&stand_in, agy::SETTLE);
+    run_for(&splice, Duration::from_millis(2500));
+    assert_eq!(
+        stand_in.requests(),
+        0,
+        "the agent is starting: nothing asks it for figures"
+    );
+}
+
+#[test]
+fn an_idle_session_is_read_once_it_has_settled() {
+    let stand_in = StandIn::start();
+    let settle = Duration::from_millis(1500);
+    let opened = std::time::Instant::now();
+    let splice = opened_on(&stand_in, settle);
+    run_for(&splice, Duration::from_millis(1000));
+    assert_eq!(stand_in.requests(), 0, "still settling");
+    assert!(stand_in.wait_for_requests(1), "it is read after the wait");
+    assert!(opened.elapsed() >= settle);
+}
+
+#[test]
+fn a_first_turn_ending_reads_the_quota_before_the_settle_time() {
+    let stand_in = StandIn::start();
+    let splice = opened_on(&stand_in, Duration::from_secs(3600));
+    prompt(&splice, 7, "s");
+    run_for(&splice, Duration::from_millis(1000));
+    assert_eq!(stand_in.requests(), 0, "not while the turn runs");
+    from_agent(
+        &splice,
+        &json!({"id": 7, "result": {"stopReason": "end_turn"}}),
+    );
+    assert!(stand_in.wait_for_requests(1), "the turn's end reads it");
+}
+
+#[test]
+fn a_turn_still_running_when_the_settle_time_ends_holds_the_reading_until_it_ends() {
+    let stand_in = StandIn::start();
+    let splice = opened_on(&stand_in, Duration::from_millis(300));
+    prompt(&splice, 7, "s");
+    run_for(&splice, Duration::from_millis(1500));
+    assert_eq!(stand_in.requests(), 0, "the turn is running");
+    from_agent(
+        &splice,
+        &json!({"id": 7, "result": {"stopReason": "end_turn"}}),
+    );
+    assert!(stand_in.wait_for_requests(1));
+}
+
+#[test]
+fn a_client_asking_for_figures_does_not_wait_for_the_session_to_settle() {
+    let stand_in = StandIn::start();
+    let splice = opened_on(&stand_in, Duration::from_secs(3600));
+    let report = report_of(&splice);
+    assert!(
+        report["buckets"].as_array().is_some_and(|b| !b.is_empty()),
+        "{report}"
+    );
+    assert!(stand_in.requests() >= 1);
+}
+
+#[test]
+fn no_private_agent_starts_while_a_session_of_the_entry_is_opening() {
+    let state = std::env::temp_dir().join(format!("canoa-opening-test-{}", std::process::id()));
+    let inference =
+        Arc::new(Inference::new(None).with_quota(quota_entry(Some(state.clone()), true)));
+    let quota = inference.quota.clone().expect("a quota");
+    let splice =
+        Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(std::process::id());
+    initialize(&splice, false, plain_answer());
+    assert!(
+        read_client(
+            &splice,
+            &json!({"id": 5, "method": "session/new", "params": {"cwd": "/work"}})
+        )
+        .is_none()
+    );
+    let (ended, waited) = std::sync::mpsc::channel();
+    let done = {
+        let ended = ended.clone();
+        move || {
+            let _ = ended.send(());
+        }
+    };
+    assert!(
+        !quota.read_privately(done.clone()),
+        "a session of the entry is opening: the figures as they stand answer"
+    );
+    from_agent(
+        &splice,
+        &json!({"id": 5, "error": {"code": -32603, "message": "no"}}),
+    );
+    assert!(
+        quota.read_privately(done),
+        "the opening ended, so a private agent may read"
+    );
+    waited
+        .recv_timeout(PATIENCE)
+        .expect("the private reading ends");
+    let _ = std::fs::remove_dir_all(&state);
 }

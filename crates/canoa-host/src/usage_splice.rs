@@ -440,12 +440,18 @@ impl Splice {
                     // What the agent said in an earlier turn of this session is not this turn's.
                     conn.said.remove(&session);
                     conn.prompts.insert(key, session);
+                    if let Some(reading) = &self.reading {
+                        reading.turn_began();
+                    }
                 }
                 None
             }
             "session/new" | "session/load" if conn.stand == Stand::Host && self.quota.is_some() => {
                 if conn.opens.len() < MAX_OPEN {
                     conn.opens.insert(key);
+                    if let Some(reading) = &self.reading {
+                        reading.starting();
+                    }
                 }
                 None
             }
@@ -697,9 +703,13 @@ impl Splice {
                 conn.opens.remove(&id);
                 if ok {
                     conn.opened = true;
-                    drop(conn);
-                    if let Some(reading) = &self.reading {
+                }
+                drop(conn);
+                if let Some(reading) = &self.reading {
+                    if ok {
                         reading.opened(models);
+                    } else {
+                        reading.started();
                     }
                 }
             }

@@ -1,7 +1,9 @@
 //! Antigravity's quota for the usage splice. `agy acp` serves its own language server on loopback once a session is open, and
 //! `coqui_acp_harness::antigravity` reads the account's remaining fraction and reset time for each model from it. This module
-//! decides when: after a session opens (with retries, since the port comes up a moment later), after each prompt, and when a
-//! client asks and the last reading is old. With no session open it starts an `agy acp` of its own, opens an empty session,
+//! decides when: once a session has been open for [`SETTLE`] with no turn running, or when its first turn ends (with retries,
+//! since the port comes up a moment later), after each prompt, and when a client asks and the last reading is old. Nothing
+//! is read while the session is starting or a first turn runs: the agent is busy with its own start then. The port that
+//! answered is kept for the agent's life and asked again without listing any ports. With no session open it starts an `agy acp` of its own, opens an empty session,
 //! reads and ends it.
 //!
 //! A reading never runs on the relay thread: it lists sockets and the process table, which take a while. A worker thread
@@ -11,7 +13,7 @@
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -34,6 +36,8 @@ use super::{Inference, answer_of, lock, unix_now};
 /// How long a reading counts as current: a request younger than this is answered from it, and no private agent is started
 /// more often.
 pub(crate) const CACHE: Duration = Duration::from_secs(15);
+/// How long a session is open with no turn running before its quota is read: the agent's own start and first turn go first.
+pub(crate) const SETTLE: Duration = Duration::from_secs(10);
 /// How long after a session opens each further try waits, while the agent has no port yet.
 const RETRIES: [Duration; 4] = [
     Duration::from_secs(2),
@@ -124,6 +128,10 @@ pub(crate) struct Quota {
     tracker: Mutex<UsageTracker>,
     read_at: Mutex<Option<Instant>>,
     private: Mutex<Private>,
+    /// How long an open session with no turn waits before its first reading.
+    settle: Duration,
+    /// How many connections of this entry are opening a session.
+    starting: AtomicUsize,
 }
 
 impl Quota {
@@ -136,7 +144,16 @@ impl Quota {
             tracker: Mutex::new(UsageTracker::new(support, None)),
             read_at: Mutex::new(None),
             private: Mutex::new(Private::default()),
+            settle: SETTLE,
+            starting: AtomicUsize::new(0),
         }
+    }
+
+    /// As [`Quota::new`], with the wait before the first reading of an idle session set.
+    #[cfg(test)]
+    pub(crate) fn with_settle(mut self, settle: Duration) -> Self {
+        self.settle = settle;
+        self
     }
 
     fn tracker(&self) -> MutexGuard<'_, UsageTracker> {
@@ -166,8 +183,9 @@ impl Quota {
 
     /// Reads with a private agent on a thread of its own and runs `done` after, unless that is not allowed now: no
     /// directory to work in or no way to start it through the host, an entry that gives its agent an environment, or one
-    /// started less than [`CACHE`] ago. A request that comes while one is reading waits for it. `false` says nothing was
-    /// started and `done` will not run.
+    /// started less than [`CACHE`] ago, or while a session of this entry is starting (the figures as they stand answer
+    /// then). A request that comes while one is reading waits for it. `false` says nothing was started and `done` will
+    /// not run.
     pub(crate) fn read_privately(self: &Arc<Self>, done: impl FnOnce() + Send + 'static) -> bool {
         let Some(directory) = self
             .command
@@ -178,6 +196,9 @@ impl Quota {
         else {
             return false;
         };
+        if self.starting.load(Ordering::SeqCst) > 0 {
+            return false;
+        }
         {
             let mut private = lock(&self.private);
             if private.busy {
@@ -437,6 +458,18 @@ pub(crate) struct Reading {
     busy: AtomicBool,
     /// Usage requests waiting for the reading under way, answered after it.
     waiters: Mutex<Vec<Value>>,
+    /// Whether this connection is counted in its entry's sessions that are starting.
+    starting: AtomicBool,
+    /// How many turns of this connection are running.
+    running: AtomicUsize,
+    /// Whether a turn has ended since the session opened.
+    turned: AtomicBool,
+}
+
+impl Drop for Reading {
+    fn drop(&mut self) {
+        self.started();
+    }
 }
 
 impl Reading {
@@ -458,7 +491,29 @@ impl Reading {
             wide: AtomicBool::new(false),
             busy: AtomicBool::new(false),
             waiters: Mutex::new(Vec::new()),
+            starting: AtomicBool::new(false),
+            running: AtomicUsize::new(0),
+            turned: AtomicBool::new(false),
         }
+    }
+
+    /// A session of this connection is being opened: the entry reads nothing privately until it is.
+    pub(crate) fn starting(&self) {
+        if !self.starting.swap(true, Ordering::SeqCst) {
+            self.quota.starting.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// The session's opening ended, well or not.
+    pub(crate) fn started(&self) {
+        if self.starting.swap(false, Ordering::SeqCst) {
+            self.quota.starting.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// A turn of this connection began.
+    pub(crate) fn turn_began(&self) {
+        self.running.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Runs `job` on a thread of its own unless a reading of this connection is under way.
@@ -495,6 +550,11 @@ impl Reading {
     fn read_now(&self) -> Result<(), ReadError> {
         let models = lock(&self.models).clone();
         let mut reader = lock(&self.reader);
+        // The agent keeps its port for its life: ports are listed for the first reading and after a failure.
+        if let Some(buckets) = reader.read_remembered(&models) {
+            self.quota.apply(buckets);
+            return Ok(());
+        }
         let wide = self.wide.load(Ordering::SeqCst);
         let mut read = reader.read(
             &if wide {
@@ -531,12 +591,17 @@ impl Reading {
         }
     }
 
-    /// A session opened: reads, again after 2, 4, 8 and 16 seconds while the agent has no port or does not answer in time.
+    /// A session opened: once its first turn has ended, or it has been idle for the entry's settle time, reads, and again
+    /// after 2, 4, 8 and 16 seconds while the agent has no port or does not answer in time.
     pub(crate) fn opened(self: &Arc<Self>, models: Vec<AcpModel>) {
+        self.started();
         if !models.is_empty() {
             *lock(&self.models) = models;
         }
         self.spawn(|me| {
+            if !me.settle() {
+                return;
+            }
             let delays: Vec<Duration> = [Duration::ZERO].into_iter().chain(RETRIES).collect();
             for (index, wait) in delays.iter().enumerate() {
                 if !me.pause(*wait) {
@@ -554,6 +619,25 @@ impl Reading {
                 }
             }
         });
+    }
+
+    /// Waits until a turn has ended or the session has been open for the settle time with none running, or a client asks
+    /// for figures; `false` when the connection ended meanwhile.
+    fn settle(&self) -> bool {
+        let begun = Instant::now();
+        loop {
+            if self.link.closed() {
+                return false;
+            }
+            if self.turned.load(Ordering::SeqCst)
+                || !lock(&self.waiters).is_empty()
+                || (begun.elapsed() >= self.quota.settle
+                    && self.running.load(Ordering::SeqCst) == 0)
+            {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// Waits `wait`; `false` when the connection ended meanwhile.
@@ -576,6 +660,12 @@ impl Reading {
 
     /// A prompt was answered, which may have spent some of the quota.
     pub(crate) fn prompted(self: &Arc<Self>) {
+        let _ = self
+            .running
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+                held.checked_sub(1)
+            });
+        self.turned.store(true, Ordering::SeqCst);
         self.spawn(Self::read_quietly);
     }
 
