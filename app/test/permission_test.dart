@@ -156,7 +156,7 @@ void main() {
       agent.ask(1, 'Edit a.txt', _all);
       await _settle(tester);
       expect(find.byKey(const Key('permission-card')), findsOneWidget);
-      expect(find.byKey(const Key('bypass-banner')), findsNothing);
+      expect(find.byKey(const Key('bypass-mark')), findsNothing);
     });
 
     testWidgets('chosen in the mode control asks nothing, and answers allow once with no card', (tester) async {
@@ -167,7 +167,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
       expect(session.bypass, isTrue);
-      expect(find.byKey(const Key('bypass-banner')), findsOneWidget);
+      expect(find.byKey(const Key('bypass-banner')), findsNothing);
+      expect(find.byKey(const Key('bypass-mark')), findsOneWidget);
       expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Bypass')), findsOneWidget,
           reason: 'the session row says so too');
 
@@ -228,13 +229,17 @@ void main() {
       expect(session.pendingPermissions, hasLength(1));
     });
 
-    testWidgets('is left in one action, and the next request shows', (tester) async {
+    testWidgets('is left by choosing it again in the mode control, and the next request shows', (tester) async {
       final (agent, session, store) = await _shown(tester);
       await store.chooseMode(session, bypass);
       await tester.pump();
-      await tester.tap(find.descendant(of: find.byKey(const Key('bypass-banner')), matching: find.text('Leave Bypass')));
-      await tester.pump();
+      expect(find.byKey(const Key('bypass-mark')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('option-mode')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bypass').last);
+      await tester.pumpAndSettle();
       expect(session.bypass, isFalse);
+      expect(find.byKey(const Key('bypass-mark')), findsNothing);
       expect(find.byKey(const Key('bypass-banner')), findsNothing);
       expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Bypass')), findsNothing);
       agent.ask(9, 'Edit a.txt', _all);

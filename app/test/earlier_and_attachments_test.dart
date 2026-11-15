@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/chat/agent_events.dart';
+import 'package:canoa/profile/report.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +23,9 @@ final class _Agent {
   List<Map<String, Object?>> listed = const [];
   bool refuseList = false;
   bool refuseOpen = false;
+
+  /// What the host reports of a profile in its answer to `session/load`.
+  Map<String, Object?>? profileMeta;
 
   void update(String session, Map<String, Object?> update) => toClient.add(jsonEncode({
     'jsonrpc': '2.0',
@@ -56,7 +60,7 @@ final class _Agent {
         final session = message['params']['sessionId'] as String;
         update(session, {'sessionUpdate': 'user_message_chunk', 'content': {'type': 'text', 'text': 'asked before'}});
         update(session, {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'said before'}});
-        answer(<String, Object?>{});
+        answer(<String, Object?>{if (profileMeta != null) '_meta': {hostProfileMeta: profileMeta}});
       case 'session/prompt':
         answer({'stopReason': 'end_turn'});
     }
@@ -129,6 +133,28 @@ void main() {
       expect(session.messages, isEmpty, reason: 'what is replayed belongs to the one it is about');
       await store.sendText('more');
       expect(agent.received.last['params']['sessionId'], 'old');
+    });
+
+    test('the profile the host reports for it is the one it has, and nothing is left unread', () async {
+      final (store, session, agent, _) = await _open();
+      expect(session.profile, isNull);
+      agent.profileMeta = {
+        'name': 'default',
+        'harness': 'claude-code',
+        'items': [
+          {'key': 'context', 'layer': 'user', 'state': 'applied', 'how': 'a file'},
+        ],
+      };
+      final opened = await store.openEarlier(session, _earlier);
+      expect(opened.profile?.items.map((item) => item.key), ['context']);
+      expect(opened.hostReport, isNull, reason: 'taken, not kept for nobody');
+    });
+
+    test('with no report of its own it has the profile of the conversation it was opened beside', () async {
+      final (store, session, _, _) = await _open();
+      session.profile = const ProfileReport('claude-code', [ProfileItem('context', 'user', ItemState.applied, 'a file')]);
+      final opened = await store.openEarlier(session, _earlier);
+      expect(opened.profile?.items.map((item) => item.key), ['context']);
     });
 
     test('one already open is selected, not opened twice', () async {

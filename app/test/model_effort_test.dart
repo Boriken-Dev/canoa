@@ -227,4 +227,24 @@ void main() {
       await finish(tester);
     });
   });
+
+  group('Bypass', () {
+    for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
+      testWidgets('shows in the header and the mode control, and takes no height of the conversation, at $label width', (tester) async {
+        final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
+        await pumpApp(tester, _store(), linked: agent.openLink, size: size);
+        await newSession(tester);
+        await chooseSource(tester, 'Claude');
+        await openFolder(tester);
+        await send(tester, 'Say hello');
+        expect(find.byKey(const Key('bypass-mark')), findsNothing);
+        await pick(tester, 'option-mode', 'Bypass');
+        expect(find.byKey(const Key('bypass-mark')), findsOneWidget);
+        expect(find.byKey(const Key('bypass-banner')), findsNothing);
+        expect(tester.takeException(), isNull);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/bypass_$label.png'));
+        await finish(tester);
+      });
+    }
+  });
 }

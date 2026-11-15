@@ -136,18 +136,16 @@ void main() {
       await frames(tester);
       expect(find.byType(AlertDialog), findsNothing, reason: 'nothing is asked');
       expect(agent.mode, 'bypass');
-      expect(find.byKey(const Key('bypass-banner')), findsOneWidget);
+      expect(find.byKey(const Key('bypass-banner')), findsNothing, reason: 'no banner takes the height of the conversation');
+      expect(find.byKey(const Key('bypass-mark')), findsOneWidget, reason: 'the header says so');
       final scheme = Theme.of(tester.element(find.byKey(const Key('option-mode')))).colorScheme;
       final label = tester.widget<Text>(find.descendant(of: find.byKey(const Key('option-mode')), matching: find.text('Bypass')));
       expect(label.style?.color, scheme.tertiary);
       expect(label.style?.color, isNot(scheme.error));
-      final banner = tester.widget<Material>(find.byKey(const Key('bypass-banner')));
-      expect(banner.color, scheme.tertiaryContainer);
-      // Leaving it is one action, into the mode that asks the most.
-      await tester.tap(find.text('Leave Bypass'));
-      await settle(tester);
+      // Leaving it is a choice of another mode in the same control.
+      await pick(tester, 'option-mode', 'Manual');
       expect(agent.mode, 'manual');
-      expect(find.byKey(const Key('bypass-banner')), findsNothing);
+      expect(find.byKey(const Key('bypass-mark')), findsNothing);
       await finish(tester);
     });
 

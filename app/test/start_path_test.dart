@@ -4,6 +4,8 @@
 import 'dart:async';
 import 'dart:io' show Directory, FileSystemException;
 
+import 'package:canoa/chat/git_changes.dart';
+import 'package:canoa/chat/modes.dart';
 import 'package:canoa/chat/session_options.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
@@ -21,6 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/fake_host.dart';
 import 'fixtures/options_agent.dart';
+import 'fixtures/task_agent.dart' show FakeGit, gitState;
 
 const _source = AgentSource.hosted('Scripted', local: true);
 
@@ -381,4 +384,118 @@ void main() {
     await again.restoreDrafts((label) => label == 'Scripted' ? _source : null);
     expect((again.sessions.single.source, again.sessions.single.draftText), (_source, 'still here'));
   });
+
+  group('while a session connects', () {
+    /// A store whose starter waits on [gate], then starts [agent] as the app does.
+    SessionStore connecting(OptionsAgent agent, Completer<void> gate, {GitReader? git}) {
+      final store = _remembering();
+      store.gitReader = (_) => git;
+      store.starter = (draft) async {
+        await gate.future;
+        final client = await agent.start(scripted);
+        store.bindDraft(draft, client, await client.openSession(cwd: '/w'), cwd: '/w');
+      };
+      return store;
+    }
+
+    Future<void> connectingNow(ChatSession draft) async {
+      for (var i = 0; i < 20 && draft.status != SessionStatus.connecting; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(draft.status, SessionStatus.connecting);
+    }
+
+    ModeEntry entryFor(SessionStore store, ChatSession session, String value) =>
+        modeEntries(modeOptionIn(store.optionsOf(session))).firstWhere((entry) => entry.value == value);
+
+    test('a mode chosen meanwhile is held for the agent that comes, and goes to no other session', () async {
+      final agent = OptionsAgent();
+      final gate = Completer<void>();
+      final store = connecting(agent, gate);
+      final draft = store.createDraft(source: _source, cwd: '/w');
+      final bystander = store.createDraft(source: _source, cwd: '/w');
+      final sent = store.sendTextTo(draft, 'Go');
+      await connectingNow(draft);
+      expect(store.optionsOf(draft), isNotEmpty);
+      await store.chooseMode(draft, entryFor(store, draft, 'edits'));
+      expect(store.modeOf(draft), 'edits', reason: 'shown at once');
+      gate.complete();
+      await sent;
+      expect(agent.mode, 'edits');
+      expect(store.modeOf(draft), 'edits');
+      expect(store.modeOf(bystander), isNot('edits'));
+      expect(bystander.pending, isEmpty);
+    });
+
+    test('closing the tab silences the delivery: no error, no message sent', () async {
+      final agent = OptionsAgent();
+      final gate = Completer<void>();
+      final store = connecting(agent, gate);
+      final draft = store.createDraft(source: _source, cwd: '/w');
+      final sent = store.sendTextTo(draft, 'Go');
+      await connectingNow(draft);
+      await store.close(draft);
+      gate.complete();
+      await sent;
+      expect(_prompts(agent), 0);
+      expect(store.sessions, isNot(contains(draft)));
+    });
+
+    test('closing the tab silences the delivery of a start that bound nothing', () async {
+      final gate = Completer<void>();
+      final store = _remembering();
+      store.starter = (draft) => gate.future;
+      final draft = store.createDraft(source: _source, cwd: '/w');
+      final sent = store.sendTextTo(draft, 'Go');
+      await connectingNow(draft);
+      await store.close(draft);
+      gate.complete();
+      await sent;
+    });
+
+    test('the first message and the bind read the repository once between them', () async {
+      final agent = OptionsAgent()..holdTurns = true;
+      final gate = Completer<void>(), read = Completer<void>();
+      final git = _SlowGit(read.future)..current = gitState([('a.txt', 1, 0)]);
+      final store = connecting(agent, gate, git: git);
+      final draft = store.createDraft(source: _source, cwd: '/w');
+      final sent = store.sendTextTo(draft, 'Go');
+      await connectingNow(draft);
+      gate.complete();
+      // A v1 prompt answers when its turn ends, which the agent holds: the turn-end read is not in play.
+      await until2(() => draft.status == SessionStatus.working);
+      expect(git.reads, hasLength(1), reason: 'the prompt is out, and the first read is still the only one');
+      read.complete();
+      await until2(() => draft.git.turnStart != null);
+      expect(git.reads, hasLength(1), reason: 'a turn that begins while the session\'s first read is out waits for it');
+      expect(draft.git.turnStart, {'a.txt': 'a.txt 1 0'});
+      agent.finishTurn();
+      await sent;
+    });
+  });
+}
+
+/// Waits, as a test does for a thing that happens in the background.
+Future<void> until2(bool Function() done) async {
+  for (var i = 0; i < 100 && !done(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  expect(done(), isTrue);
+}
+
+/// Git whose every read waits until [release].
+final class _SlowGit implements GitReader {
+  _SlowGit(this.release);
+  final Future<void> release;
+  final git = FakeGit();
+
+  set current(GitState? state) => git.current = state;
+  List<(String, String?)> get reads => git.reads;
+
+  @override
+  Future<GitState?> read(String folder, {String? base}) async {
+    final state = await git.read(folder, base: base);
+    await release;
+    return state;
+  }
 }

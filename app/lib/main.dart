@@ -2021,6 +2021,7 @@ class _ConversationState extends State<_Conversation> {
             )),
             if (session != null && !session.isDraft)
               if (changeTotals(session) case (final added, final removed)) _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
+            if (session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
             ..._headerActions(session),
             if (session != null)
               IconButton(
@@ -2046,8 +2047,6 @@ class _ConversationState extends State<_Conversation> {
           ]),
         ),
       ),
-      if (session != null && widget.store.inBypass(session))
-        chat.BypassBanner(onLeave: () => unawaited(widget.store.leaveBypass(session))),
       if (session == null)
         Expanded(child: widget.welcome)
       else if (session.isDraft)
@@ -2192,6 +2191,37 @@ class _ChangesChip extends StatelessWidget {
             Text('−$removed', style: mono.copyWith(color: look.danger)),
           ]),
         ),
+      ),
+    );
+  }
+}
+
+/// Says in the header that the session is in Bypass, which the mode control in the composer also shows. Leaving it is a choice of
+/// another mode there.
+class _BypassMark extends StatelessWidget {
+  const _BypassMark({required this.narrow});
+
+  final bool narrow;
+
+  static const message = 'Bypass: each request that offers to allow is allowed without asking you.';
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: message,
+      child: Padding(
+        key: const Key('bypass-mark'),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: narrow
+            ? Icon(Icons.fast_forward_outlined, size: 18, color: scheme.tertiary)
+            : Chip(
+                avatar: Icon(Icons.fast_forward_outlined, size: 16, color: scheme.onTertiaryContainer),
+                label: Text('Bypass', style: TextStyle(color: scheme.onTertiaryContainer)),
+                backgroundColor: scheme.tertiaryContainer,
+                side: BorderSide.none,
+                visualDensity: VisualDensity.compact,
+              ),
       ),
     );
   }

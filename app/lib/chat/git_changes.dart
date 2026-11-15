@@ -143,8 +143,20 @@ final class SessionGit {
   /// Whether any read has said the folder is a repository.
   bool get known => whole != null;
 
+  Future<bool>? _reading;
+  String? _readingFolder;
+
   /// Reads [folder] with [reader]; a read that another overtook is dropped. Returns whether anything changed.
-  Future<bool> refresh(GitReader reader, String folder) async {
+  Future<bool> refresh(GitReader reader, String folder) {
+    final reading = _read(reader, folder);
+    _reading = reading;
+    _readingFolder = folder;
+    return reading.whenComplete(() {
+      if (identical(_reading, reading)) _reading = null;
+    });
+  }
+
+  Future<bool> _read(GitReader reader, String folder) async {
     final turn = ++_reads;
     try {
       final first = await reader.read(folder, base: base);
@@ -169,9 +181,11 @@ final class SessionGit {
     return true;
   }
 
-  /// A turn begins: what the disk holds now is what the turn is measured from.
+  /// A turn begins: what the disk holds now is what the turn is measured from. A read of the same folder already out is waited
+  /// for, not repeated.
   Future<void> beginTurn(GitReader reader, String folder) async {
-    await refresh(reader, folder);
+    final reading = _reading;
+    await (reading != null && _readingFolder == folder ? reading : refresh(reader, folder));
     turnStart = {for (final file in whole?.files ?? const <GitFile>[]) file.path: file.print};
   }
 

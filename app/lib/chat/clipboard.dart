@@ -1,16 +1,46 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ClipboardReader;
 
+/// Whether [bytes] is a Windows bitmap file, which is how the clipboard hands over a screenshot there.
+bool isBitmap(Uint8List bytes) => bytes.length > 2 && bytes[0] == 0x42 && bytes[1] == 0x4d;
+
+/// [bytes] as PNG when they are a bitmap, which is uncompressed and so often larger than an image can be here; anything else
+/// as it is. Null when a bitmap cannot be decoded.
+Future<Uint8List?> pngFromClipboard(Uint8List bytes) async {
+  if (!isBitmap(bytes)) return bytes;
+  try {
+    final codec = await ui.instantiateImageCodec(bytes);
+    try {
+      final frame = await codec.getNextFrame();
+      final data = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+      frame.image.dispose();
+      return data?.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    } finally {
+      codec.dispose();
+    }
+  } on Object {
+    return null;
+  }
+}
+
 /// The system's clipboard: an image as PNG bytes, files by their paths, and text.
 final class SystemClipboard implements ClipboardReader {
-  const SystemClipboard();
+  const SystemClipboard({this.readImage = _pasteboardImage});
+
+  /// Where the clipboard's image comes from, as its platform gives it.
+  final Future<Uint8List?> Function() readImage;
+
+  static Future<Uint8List?> _pasteboardImage() => Pasteboard.image;
 
   @override
   Future<Uint8List?> image() async {
     try {
-      return await Pasteboard.image;
+      final raw = await readImage();
+      return raw == null ? null : await pngFromClipboard(raw);
     } on Object {
       // A platform that cannot say has no image to give.
       return null;

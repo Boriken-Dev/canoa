@@ -242,7 +242,8 @@ class ModeChooser extends StatelessWidget {
       enabled: store.canChangeMode(session) || session.isDraft,
       onSelected: (value) {
         if (value is ModeEntry) {
-          unawaited(store.chooseMode(session, value));
+          // Canoa's Bypass is a switch: chosen while it is on, it goes off.
+          unawaited(value.own && session.bypass ? store.leaveBypass(session) : store.chooseMode(session, value));
         } else if (value == null) {
           store.clearMode(session);
         }

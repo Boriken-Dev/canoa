@@ -1051,8 +1051,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           debugPrint('Canoa: ${session.source?.label ?? 'an agent'} was not started: ${reasonOf(error)}');
           if (_sessions.contains(session)) session.chat.note('Not started: ${reasonOf(error)}');
         }
+        // A tab closed while it connected has nobody to tell.
+        if (!_sessions.contains(session)) return;
         rethrow;
       }
+      if (!_sessions.contains(session)) return;
       if (_clients[session.id] == null) throw StateError('The agent did not start');
       await _send(session, text, List.of(session.attachments), onSent: () {
         // Sent: what follows is queued or sent as usual, even while a v1 agent's first turn runs.
@@ -1880,7 +1883,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     try {
       final opened = await session.chat.reopen(() => client.reopenSession(earlier.id, cwd: cwd, setup: from.setup));
       _takeHostReport(session, opened);
-      if (from.profile case final profile?) session.chat.note(profile.summary);
+      // The profile the host reports for this session, else the one of the conversation it opens beside, on the same agent.
+      await applyHostProfile(session);
+      if (from.profile case final profile? when identical(session.profile, profile)) session.chat.note(profile.summary);
       _record(session, client);
       notifyListeners();
       return session;
