@@ -2,23 +2,30 @@
 //! process table. Antigravity may sit below a launcher (`canoa launch` with a profile), so its listening port is
 //! owned by a grandchild of the process the host started.
 //!
-//! The host forbids `unsafe`, and the table is read by the system's own tool instead: PowerShell's CIM query on Windows,
-//! `ps` elsewhere. Both run on a worker thread, bounded in time and size. A snapshot that cannot be had leaves the agent's
-//! own process alone, which is the answer for an agent that is not below anything.
+//! The table is read by Windows' Toolhelp snapshot in this process, and by `ps` elsewhere, which runs on a worker thread
+//! bounded in time and size. A snapshot that cannot be had leaves the agent's own process alone, which is the answer for an
+//! agent that is not below anything.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+#[cfg(not(windows))]
 use core::time::Duration;
+#[cfg(not(windows))]
 use std::io::Read as _;
+#[cfg(not(windows))]
 use std::thread;
+#[cfg(not(windows))]
 use std::time::Instant;
 
+#[cfg(not(windows))]
 use crate::spawn::{Command, Stdio};
 
-/// The longest the table's tool may run.
+/// The longest `ps` may run.
+#[cfg(not(windows))]
 const LIMIT: Duration = Duration::from_secs(5);
 /// The most of its output that is read.
+#[cfg(not(windows))]
 const MAX_LISTING: u64 = 4 * 1024 * 1024;
 
 /// `root` and the processes below it, by parent, plus on Unix the ones in its process group (the agent leads a group of
@@ -90,26 +97,15 @@ struct Row {
 }
 
 #[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "the system's process table is read through its own calls"
+)]
+mod win32;
+
+#[cfg(windows)]
 fn snapshot() -> Option<String> {
-    /// `CREATE_NO_WINDOW`: no console window flashes up for a program started from a GUI.
-    const NO_WINDOW: u32 = 0x0800_0000;
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let shell = std::path::Path::new(&root)
-        .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe");
-    let mut command = Command::new(shell);
-    command
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate | \
-             ForEach-Object { if ($_.CreationDate) { '{0} {1} - {2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToFileTimeUtc() } }",
-        ])
-        .creation_flags(NO_WINDOW);
-    run(&mut command)
+    win32::listing()
 }
 
 #[cfg(not(windows))]
@@ -118,6 +114,7 @@ fn snapshot() -> Option<String> {
 }
 
 /// What `command` writes to its standard output, if it ended well within [`LIMIT`].
+#[cfg(not(windows))]
 fn run(command: &mut Command) -> Option<String> {
     let mut child = command
         .stdin(Stdio::Null)
@@ -149,6 +146,9 @@ fn run(command: &mut Command) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::time::Duration;
+
+    use crate::spawn::{Command, Stdio};
 
     #[test]
     fn the_members_are_the_root_and_what_is_below_it() {
@@ -204,5 +204,53 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         assert!(found.contains(&child.id()), "{found:?}");
+    }
+
+    #[test]
+    fn a_grandchild_is_a_member_too() {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "ping -n 30 127.0.0.1"]);
+            command
+        } else {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 30; true"]);
+            command
+        };
+        let mut child = command
+            .stdout(Stdio::Null)
+            .spawn()
+            .expect("a child that starts one");
+        let own = std::process::id();
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        // The grandchild appears once the shell has started it.
+        let found = loop {
+            let found = members(own);
+            if found.len() >= 3 || std::time::Instant::now() >= until {
+                break found;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            found.contains(&own) && found.contains(&child.id()),
+            "{found:?}"
+        );
+        assert!(found.len() >= 3, "{found:?}");
+    }
+
+    #[test]
+    fn the_process_table_is_read_without_starting_a_program() {
+        // A program started for the table costs hundreds of milliseconds; reading it in process costs a few.
+        let started = std::time::Instant::now();
+        for _ in 0..5 {
+            assert!(members(std::process::id()).contains(&std::process::id()));
+        }
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "five reads took {:?}",
+            started.elapsed()
+        );
     }
 }

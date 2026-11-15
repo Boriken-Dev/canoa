@@ -116,6 +116,8 @@ windows-native-keyring-store.workspace = true
 windows-registry.workspace = true
 # Whether this process runs elevated, through a safe call: the host forbids unsafe code. Small and old (winapi); one function.
 is_elevated.workspace = true
+# The process table, from a Toolhelp snapshot; the one module that is unsafe, and only for these calls. Already in the graph.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
