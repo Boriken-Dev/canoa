@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
-import '../acp/delegate.dart';
 import '../sources/source_icons.dart';
 import 'delegation_view.dart';
 
@@ -58,12 +57,28 @@ class _TickingState extends State<Ticking> {
 String subagents(int count) => '$count subagent${count == 1 ? '' : 's'}';
 
 /// A task's state in the look's colours: what failed reads as an error, what waits for the person as a warning.
-Color stateColor(ChatLook look, ChildView child) => switch (child.phase) {
-  _ when child.failed => look.danger,
-  _ when child.phase.waitingOnPerson => look.warning,
-  _ when child.phase == TaskPhase.completed => look.success,
+Color stateColor(ChatLook look, ChildView child) => stateColorOf(look, child.state);
+
+/// The colour of [state]: the same one for a child, for a count of them and for the lineage.
+Color stateColorOf(ChatLook look, ChildState state) => switch (state) {
+  ChildState.failed => look.danger,
+  ChildState.waitingForInput => look.warning,
+  ChildState.completed => look.success,
   _ => look.muted,
 };
+
+/// The time of day [at] was, as "10:32".
+String timeLabel(DateTime at) {
+  final local = at.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+}
+
+/// What a child's line says of time: how long it ran, or for one whose connection went away, when it was last heard of.
+String? timeWord(ChildView child, DateTime now) {
+  if (child.unknown) return child.updated == null ? null : 'last update ${timeLabel(child.updated!)}';
+  final elapsed = child.elapsedAt(now);
+  return elapsed == null ? null : spanLabel(elapsed);
+}
 
 /// The source marks of a card, overlapped, and how many more sources there are than it draws.
 class _Marks extends StatelessWidget {
@@ -128,8 +143,9 @@ class _DelegationRowState extends State<DelegationRow> {
       if (!providers.contains(child.provider)) providers.add(child.provider);
     }
     final small = TextStyle(color: look.muted, fontSize: 13);
+    final baseDepth = view.children.isEmpty ? 0 : view.children.map((child) => child.depth).reduce((a, b) => a < b ? a : b);
     return Ticking(
-      active: view.working > 0,
+      active: view.live > 0,
       builder: (context) {
         final elapsed = view.elapsedAt(widget.now());
         return Container(
@@ -152,10 +168,7 @@ class _DelegationRowState extends State<DelegationRow> {
                   Expanded(
                     child: Wrap(spacing: 10, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       Text(subagents(view.children.length), style: TextStyle(color: look.text, fontWeight: FontWeight.w600, fontSize: 14)),
-                      if (view.working > 0) Text('${view.working} working', style: small),
-                      if (view.working == 0 && view.failed == 0 && view.stopped == 0) Text('all done', style: small.copyWith(color: look.success)),
-                      if (view.failed > 0) Text('${view.failed} failed', style: small.copyWith(color: look.danger)),
-                      if (view.stopped > 0) Text('${view.stopped} stopped', style: small),
+                      for (final (text, state) in view.parts) Text(text, style: small.copyWith(color: stateColorOf(look, state))),
                     ]),
                   ),
                   if (elapsed != null) ...[const SizedBox(width: 8), Text(spanLabel(elapsed), style: small)],
@@ -163,9 +176,12 @@ class _DelegationRowState extends State<DelegationRow> {
                 ]),
               ),
             ),
+            if (!_open)
+              for (final child in view.children)
+                if (child.asking) _Asks(child: child, onOpen: widget.onOpen),
             if (_open)
               for (final child in view.children)
-                _ChildLine(child: child, elapsed: child.elapsedAt(widget.now()), onOpen: widget.onOpen),
+                _ChildLine(child: child, indent: child.depth - baseDepth, now: widget.now(), onOpen: widget.onOpen),
             if (_open) const SizedBox(height: 4),
           ]),
         );
@@ -174,22 +190,53 @@ class _DelegationRowState extends State<DelegationRow> {
   }
 }
 
-class _ChildLine extends StatelessWidget {
-  const _ChildLine({required this.child, required this.elapsed, required this.onOpen});
+/// A child's question or approval, on the card even when the card is closed. It opens the child, where the person answers.
+class _Asks extends StatelessWidget {
+  const _Asks({required this.child, required this.onOpen});
 
   final ChildView child;
-  final Duration? elapsed;
+  final void Function(String taskId)? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.chatLook;
+    return InkWell(
+      key: Key('child-asks-${child.id}'),
+      onTap: onOpen == null ? null : () => onOpen!(child.id),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+        child: Row(children: [
+          Icon(Icons.front_hand_outlined, size: 14, color: look.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('${child.title} asks: ${child.asks}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: look.warning, fontSize: 13)),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ChildLine extends StatelessWidget {
+  const _ChildLine({required this.child, required this.indent, required this.now, required this.onOpen});
+
+  final ChildView child;
+
+  /// How many steps in from the card's edge it stands, for a task a task of the card started.
+  final int indent;
+  final DateTime now;
   final void Function(String taskId)? onOpen;
 
   @override
   Widget build(BuildContext context) {
     final look = context.chatLook;
     final color = stateColor(look, child);
+    final elapsed = timeWord(child, now);
     return InkWell(
       key: Key('child-${child.id}'),
       onTap: onOpen == null ? null : () => onOpen!(child.id),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: EdgeInsets.fromLTRB(12 + 16.0 * indent.clamp(0, 4), 6, 12, 6),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             SizedBox.square(dimension: 18, child: Center(child: SourceMark.provider(child.provider, size: 14))),
@@ -197,9 +244,26 @@ class _ChildLine extends StatelessWidget {
             Expanded(child: Text(child.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: look.text, fontSize: 14))),
             const SizedBox(width: 8),
             if (child.failed) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(Icons.error_outline, size: 14, color: color)),
-            Text(child.word, style: TextStyle(color: color, fontSize: 13)),
-            if (elapsed != null) Padding(padding: const EdgeInsets.only(left: 8), child: Text(spanLabel(elapsed!), style: TextStyle(color: look.muted, fontSize: 13))),
+            // The state and the time share at most half the line, so a long word shortens instead of overflowing.
+            Flexible(
+              flex: 0,
+              child: LayoutBuilder(
+                builder: (context, _) => ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: (MediaQuery.sizeOf(context).width * 0.4).clamp(120.0, 260.0)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(child: Text(child.word, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: color, fontSize: 13))),
+                    if (elapsed != null)
+                      Flexible(child: Padding(padding: const EdgeInsets.only(left: 8), child: Text(elapsed, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: look.muted, fontSize: 13)))),
+                  ]),
+                ),
+              ),
+            ),
           ]),
+          if (child.asking)
+            Padding(
+              padding: const EdgeInsets.only(left: 28, top: 2),
+              child: Text('Asks: ${child.asks}', maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: look.warning, fontSize: 12)),
+            ),
           if (child.failed && child.message != null)
             Padding(
               padding: const EdgeInsets.only(left: 28, top: 2),
@@ -247,7 +311,7 @@ class DelegationWaiting extends StatelessWidget {
           key: const Key('delegation-stop'),
           onPressed: onStop,
           icon: const Icon(Icons.stop_circle_outlined, size: 18),
-          label: const Text('Stop'),
+          label: const Text('Stop all'),
         ),
       ]),
     );

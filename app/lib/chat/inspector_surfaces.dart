@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../session_store.dart';
 import '../shell/surface.dart';
+import '../surfaces/subagents_surface.dart';
 import 'inspector.dart';
 
 /// The session's facts in the work panel: where it runs, its workspace and mode, its context, its lineage and running commands, and
@@ -71,4 +72,4 @@ class ChangesSurface extends WorkSurface {
 }
 
 /// The surfaces every window has.
-List<WorkSurface> builtInSurfaces() => const [DetailsSurface(), ChangesSurface()];
+List<WorkSurface> builtInSurfaces() => const [DetailsSurface(), ChangesSurface(), SubagentsSurface()];

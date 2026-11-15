@@ -30,6 +30,12 @@ final class ChildView {
     this.ended,
     this.message,
     this.native = false,
+    this.parent,
+    this.depth = 0,
+    this.waitingForTask = false,
+    this.lost = false,
+    this.asks,
+    this.updated,
   });
 
   final String id;
@@ -46,6 +52,24 @@ final class ChildView {
   /// Whether the conversation's own agent started it, not the host's delegation tools: it cannot be stopped from here.
   final bool native;
 
+  /// The task that started it, when one did.
+  final String? parent;
+
+  /// How many tasks stand above it in the lineage.
+  final int depth;
+
+  /// Whether it is waiting on a task of its own to end.
+  final bool waitingForTask;
+
+  /// Whether its connection ended while it ran, so how it ended is not known.
+  final bool lost;
+
+  /// What its agent asks of the person, when it waits for an answer; null otherwise.
+  final String? asks;
+
+  /// When the app last heard of it.
+  final DateTime? updated;
+
   /// The provider whose mark stands for the source.
   String get provider => source.toLowerCase();
 
@@ -55,17 +79,33 @@ final class ChildView {
   /// Whether it ended without its reply: it failed or was refused.
   bool get failed => phase == TaskPhase.failed || phase == TaskPhase.rejected;
 
+  /// Whether nothing is known of how it ended: its connection went with it running.
+  bool get unknown => lost && phase == TaskPhase.canceled;
+
+  /// The state, in the words the lineage uses.
+  ChildState get state {
+    if (unknown) return ChildState.unknown;
+    if (asking) return ChildState.waitingForInput;
+    return switch (phase) {
+      TaskPhase.submitted => ChildState.starting,
+      TaskPhase.working => waitingForTask ? ChildState.waitingForTask : ChildState.working,
+      TaskPhase.inputRequired || TaskPhase.authRequired => ChildState.waitingForInput,
+      TaskPhase.completed => ChildState.completed,
+      TaskPhase.failed || TaskPhase.rejected => ChildState.failed,
+      TaskPhase.canceled => ChildState.cancelled,
+    };
+  }
+
   /// The state as one word.
   String get word => switch (phase) {
-    TaskPhase.submitted => 'Starting',
-    TaskPhase.working => 'Working',
-    TaskPhase.inputRequired => 'Needs you',
+    _ when unknown => 'Unknown',
     TaskPhase.authRequired => 'Needs a sign-in',
-    TaskPhase.completed => 'Done',
-    TaskPhase.failed => 'Failed',
     TaskPhase.rejected => 'Refused',
-    TaskPhase.canceled => 'Stopped',
+    _ => state.word,
   };
+
+  /// Whether its question or approval waits for the person: the thing a collapsed row has to show.
+  bool get asking => live && asks != null;
 
   /// How long it ran, or has run at [now]; null when the host never said when it started.
   Duration? elapsedAt(DateTime now) {
@@ -75,9 +115,25 @@ final class ChildView {
     return span.isNegative ? Duration.zero : span;
   }
 
-  static ChildView of(DelegateTask task) => ChildView(
+  static ChildView of(DelegateTask task, {String? parent, int depth = 0, bool waitingForTask = false, String? asks}) => ChildView(
     id: task.id, title: task.title, source: task.source, phase: task.phase, started: task.started, ended: task.ended, message: task.message, native: task.native,
+    parent: parent, depth: depth, waitingForTask: waitingForTask, lost: task.lost, asks: asks, updated: task.updated ?? task.ended ?? task.started,
   );
+}
+
+/// Where a subagent is, as the lineage names it.
+enum ChildState {
+  starting('Starting'),
+  working('Working'),
+  waitingForInput('Waiting for input'),
+  waitingForTask('Waiting for a task'),
+  completed('Completed'),
+  failed('Failed'),
+  cancelled('Cancelled'),
+  unknown('Unknown');
+
+  const ChildState(this.word);
+  final String word;
 }
 
 /// The children one card stands for.
@@ -86,9 +142,34 @@ final class DelegationView {
 
   final List<ChildView> children;
 
-  int get working => children.where((child) => child.live).length;
-  int get failed => children.where((child) => child.failed).length;
-  int get stopped => children.where((child) => child.phase == TaskPhase.canceled).length;
+  /// How many children are in [state].
+  int count(ChildState state) => children.where((child) => child.state == state).length;
+
+  /// The children that have not ended.
+  int get live => children.where((child) => child.live).length;
+  int get failed => count(ChildState.failed);
+  int get stopped => count(ChildState.cancelled);
+
+  /// The children that wait for the person.
+  int get needInput => count(ChildState.waitingForInput);
+
+  /// The counts as parts of a line, each child in exactly one: "2 working", "1 needs input", "1 done". Starting and waiting for a
+  /// task count as working. A state no child is in has no part.
+  List<(String, ChildState)> get parts {
+    int n(Iterable<ChildState> states) => children.where((child) => states.contains(child.state)).length;
+    final counts = [
+      (n(const [ChildState.starting, ChildState.working, ChildState.waitingForTask]), 'working', ChildState.working),
+      (needInput, 'needs input', ChildState.waitingForInput),
+      (count(ChildState.completed), 'done', ChildState.completed),
+      (failed, 'failed', ChildState.failed),
+      (stopped, 'cancelled', ChildState.cancelled),
+      (count(ChildState.unknown), 'unknown', ChildState.unknown),
+    ];
+    return [for (final (number, word, state) in counts) if (number > 0) ('$number $word', state)];
+  }
+
+  /// "4 subagents · 2 working · 1 needs input · 1 done".
+  String get summary => [subagents(children.length), for (final (text, _) in parts) text].join(' · ');
 
   /// How long the children have been at it: from the first start to now, or to the last end once none runs; null when none has a
   /// start.
@@ -97,16 +178,65 @@ final class DelegationView {
     if (starts.isEmpty) return null;
     final first = starts.reduce((a, b) => a.isBefore(b) ? a : b);
     final ends = [for (final child in children) ?child.ended];
-    final last = working == 0 && ends.isNotEmpty ? ends.reduce((a, b) => a.isAfter(b) ? a : b) : now;
+    final last = live == 0 && ends.isNotEmpty ? ends.reduce((a, b) => a.isAfter(b) ? a : b) : now;
     final span = last.difference(first);
     return span.isNegative ? Duration.zero : span;
   }
 }
 
-/// The rows the session inspector's Lineage list draws: one per task of [session], in the order they were first heard of. Each has
+/// Every task of [session] as the views show it, each with its parent, its depth and what it waits on. A task whose own task is
+/// still running waits for it; the questions the conversation holds for a task are on that task's view.
+final class Lineage {
+  Lineage._(this.views, this._byId);
+
+  factory Lineage.of(ChatSession session) {
+    final tasks = session.tasks;
+    final asking = <String, String>{};
+    for (final question in session.pendingPermissions) {
+      if (question.task case final task?) asking.putIfAbsent(task.id, () => question.title);
+    }
+    final all = tasks.all;
+    final byParent = <String?, List<DelegateTask>>{};
+    for (final task in all) {
+      byParent.putIfAbsent(tasks.parentOf(task)?.id, () => []).add(task);
+    }
+    final views = <ChildView>[];
+    final placed = <String>{};
+    void place(DelegateTask task, String? parent, int depth) {
+      if (!placed.add(task.id)) return;
+      final below = byParent[task.id] ?? const [];
+      views.add(ChildView.of(
+        task,
+        parent: parent,
+        depth: depth,
+        waitingForTask: below.any((child) => !child.phase.ended),
+        asks: asking[task.id] ?? (task.phase.waitingOnPerson ? task.message : null),
+      ));
+      for (final child in below) {
+        place(child, task.id, depth + 1);
+      }
+    }
+    for (final task in byParent[null] ?? const <DelegateTask>[]) {
+      place(task, null, 0);
+    }
+    // A cycle among parents would leave tasks unplaced; they still show, as roots.
+    for (final task in all) {
+      place(task, null, 0);
+    }
+    return Lineage._(views, {for (final view in views) view.id: view});
+  }
+
+  /// The tasks, each followed by the tasks it started.
+  final List<ChildView> views;
+  final Map<String, ChildView> _byId;
+
+  ChildView? operator [](String id) => _byId[id];
+}
+
+/// The rows the session inspector's Lineage list draws: one per task of [session], each task followed by those it started. Each has
 /// its source's mark ([ChildView.provider]), title, state and elapsed time ([ChildView.elapsedAt]); [SessionStore.openChild] opens
 /// its thread.
-List<ChildView> lineage(ChatSession session) => [for (final task in session.tasks.all) ChildView.of(task)];
+List<ChildView> lineage(ChatSession session) => Lineage.of(session).views;
 
 /// The entry of a transcript that stands for a turn's delegation tool calls: one row for all its children.
 final class DelegationEntry implements ChatEntryData {
@@ -127,8 +257,7 @@ final class DelegationEntry implements ChatEntryData {
 
   @override
   String get text {
-    final count = view.children.length;
-    return '$count subagent${count == 1 ? '' : 's'}: ${[for (final child in view.children) '${child.title} (${child.word})'].join(', ')}';
+    return '${subagents(view.children.length)}: ${[for (final child in view.children) '${child.title} (${child.word})'].join(', ')}';
   }
 
   @override
@@ -171,6 +300,7 @@ List<ChatEntryData> delegationEntries(ChatSession session, {required void Functi
   final unnamed = [for (final task in session.tasks.all) if (!task.native && !claimed.contains(task.id)) task.id];
   if (unnamed.isNotEmpty) (named[turns.keys.last] ??= []).addAll(unnamed);
 
+  final tree = Lineage.of(session);
   final folded = <int>{};
   final out = <ChatEntryData>[];
   for (var i = 0; i < entries.length; i++) {
@@ -188,7 +318,7 @@ List<ChatEntryData> delegationEntries(ChatSession session, {required void Functi
     }
     if (!folded.add(mine)) continue;
     out.add(DelegationEntry(
-      view: DelegationView([for (final id in ids) ChildView.of(session.tasks[id]!)]),
+      view: DelegationView([for (final id in ids) ?tree[id]]),
       at: entries[i].at,
       now: now,
       onOpen: onOpen,

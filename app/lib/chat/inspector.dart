@@ -6,7 +6,7 @@ import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../session_store.dart';
 import '../sources/source_icons.dart' show SourceMark;
 import '../theme/look.dart';
-import 'delegation_row.dart' show Ticking, stateColor;
+import 'delegation_row.dart' show Ticking, stateColor, timeWord;
 import 'delegation_view.dart' show ChildView, lineage;
 import 'git_changes.dart';
 import 'git_changes_pane.dart';
@@ -242,15 +242,15 @@ class _Lineage extends StatelessWidget {
             borderRadius: BorderRadius.circular(look.radius / 2),
             onTap: onOpen == null ? null : () => onOpen!(child.id),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
+              padding: EdgeInsets.fromLTRB(16.0 * child.depth.clamp(0, 4), 6, 0, 6),
               child: Row(children: [
                 SizedBox.square(dimension: 18, child: Center(child: SourceMark.provider(child.provider, size: 14))),
                 const SizedBox(width: 8),
                 Expanded(child: Text(child.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
                 const SizedBox(width: 8),
                 Text(child.word, style: TextStyle(color: stateColor(look, child), fontSize: 12)),
-                if (child.elapsedAt(now()) case final elapsed?)
-                  Padding(padding: const EdgeInsets.only(left: 8), child: Text(spanLabel(elapsed), style: TextStyle(color: look.muted, fontSize: 12))),
+                if (timeWord(child, now()) case final elapsed?)
+                  Padding(padding: const EdgeInsets.only(left: 8), child: Text(elapsed, style: TextStyle(color: look.muted, fontSize: 12))),
               ]),
             ),
           ),

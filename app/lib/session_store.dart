@@ -1514,7 +1514,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   void _taskEvent(ChatSession session, DelegateNotice notice) {
-    if (notice['sessionId'] != session.remoteSessionId || !session.tasks.apply(notice)) return;
+    if (notice['sessionId'] != session.remoteSessionId || !session.tasks.apply(notice, at: clock())) return;
     final ended = [for (final task in session.tasks.all) if (task.phase.ended) task.id];
     for (final id in ended) {
       session.taskAllowances.remove(id);
@@ -2118,9 +2118,15 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (task == null) return;
     session.openChild = taskId;
     notifyListeners();
+    loadChildHistory(session, taskId);
+  }
+
+  /// Asks the host for what it kept of [session]'s task [taskId], when the app heard nothing of it.
+  void loadChildHistory(ChatSession session, String taskId) {
+    final task = session.tasks[taskId];
     final client = _clients[session.id];
     final remote = session.remoteSessionId;
-    if (task.updates.isEmpty && client != null && remote != null) {
+    if (task != null && task.updates.isEmpty && client != null && remote != null) {
       unawaited(client.taskHistory(remote, taskId).then((kept) {
         if (kept != null && session.tasks.backfill(taskId, kept)) notifyListeners();
       }, onError: (Object _) {}));

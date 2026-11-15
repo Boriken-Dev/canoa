@@ -93,6 +93,19 @@ final class DelegateTask {
 
   /// How many updates the task has had, those forgotten for the bound included, so a reader that applied some knows how many are new.
   int updatesSeen = 0;
+
+  /// The task that started this one, when the host names it in the task's metadata. A task a task's own delegation call answered
+  /// for is nested under it as well ([DelegateTasks.parentOf]).
+  String? parent;
+
+  /// The ids this task's own delegation calls named in their results.
+  final Set<String> nested = {};
+
+  /// When the task last changed or said something, as far as the app heard.
+  DateTime? updated;
+
+  /// Whether the connection that carried the task ended while it ran: how it ended is not known.
+  bool lost = false;
 }
 
 /// The most updates a task keeps, which the host bounds in bytes as well.
@@ -117,6 +130,36 @@ final class DelegateTasks {
 
   /// The tasks the host runs and has not ended: what Stop all asks the host to stop.
   List<DelegateTask> get hostLive => [for (final task in live) if (!task.native) task];
+
+  /// The task that started [task]: the one the host's metadata names, else the first whose own delegation call named it.
+  DelegateTask? parentOf(DelegateTask task) {
+    final named = task.parent;
+    if (named != null && named != task.id && _byId[named] != null) return _byId[named];
+    for (final other in _byId.values) {
+      if (other.id != task.id && other.nested.contains(task.id)) return other;
+    }
+    return null;
+  }
+
+  /// The tasks [id] started itself, in the order they were first heard of.
+  List<DelegateTask> childrenOf(String id) => [
+    for (final task in all) if (parentOf(task)?.id == id) task,
+  ];
+
+  /// Every task below [id], deepest first, so stopping them in order never leaves one running under a stopped parent.
+  List<DelegateTask> descendantsOf(String id) {
+    final out = <DelegateTask>[];
+    final seen = <String>{id};
+    void walk(String at) {
+      for (final child in childrenOf(at)) {
+        if (!seen.add(child.id)) continue;
+        walk(child.id);
+        out.add(child);
+      }
+    }
+    walk(id);
+    return out;
+  }
 
   /// The native task started by the agent's tool call [call], or null.
   DelegateTask? nativeOf(String call) {
@@ -168,6 +211,7 @@ final class DelegateTasks {
       };
       if (phase != null && phase != task.phase && !task.phase.ended) {
         task.phase = phase;
+        task.updated = now;
         if (phase.ended) {
           task.ended = now;
           final span = child.usage?.durationMs;
@@ -183,6 +227,7 @@ final class DelegateTasks {
         final meta = raw['_meta'];
         if (meta is Map) raw['_meta'] = {for (final entry in meta.entries) if (entry.key != pkg.childMetaKey) entry.key: entry.value};
         task.updates.add(raw);
+        task.updated = now;
         task.updatesSeen++;
         task.nativeApplied++;
         if (task.updates.length > maxTaskUpdates) task.updates.removeAt(0);
@@ -232,8 +277,22 @@ final class DelegateTasks {
     if (said != null) task.message = said;
   }
 
-  /// Takes the params of one `_canoa/delegate/event`. Whether the list changed.
-  bool apply(Object? params) {
+  static final _namedTask = RegExp(r'\\?"taskId\\?"\s*:\s*\\?"([^"\\]{1,200})');
+
+  /// Notes the tasks a tool call's content of [task] names, which are the ones it started.
+  static void _noteNested(DelegateTask task, Map<String, Object?> update) {
+    final kind = update['sessionUpdate'];
+    if ((kind != 'tool_call' && kind != 'tool_call_update') || task.nested.length >= maxTasks) return;
+    final content = update['content'] ?? update['rawOutput'];
+    if (content == null) return;
+    for (final match in _namedTask.allMatches(jsonEncode(content))) {
+      final id = match.group(1)!;
+      if (id != task.id) task.nested.add(id);
+    }
+  }
+
+  /// Takes the params of one `_canoa/delegate/event`, heard at [at] when the caller keeps a clock. Whether the list changed.
+  bool apply(Object? params, {DateTime? at}) {
     if (params is! Map) return false;
     final id = params['taskId'];
     if (id is! String || id.isEmpty || id.length > 200) return false;
@@ -242,6 +301,8 @@ final class DelegateTasks {
       final task = _task(id);
       if (task == null) return false;
       task.updates.add(Map<String, Object?>.from(update));
+      _noteNested(task, task.updates.last);
+      task.updated = at ?? task.updated;
       task.updatesSeen++;
       if (task.updates.length > maxTaskUpdates) task.updates.removeAt(0);
       return true;
@@ -250,6 +311,7 @@ final class DelegateTasks {
     if (event is! Map) return false;
     final task = _task(id);
     if (task == null) return false;
+    task.updated = at ?? task.updated;
     final whole = event['task'];
     if (whole is Map) {
       final metadata = whole['metadata'];
@@ -258,6 +320,7 @@ final class DelegateTasks {
         task.source = _text(metadata['source']) ?? task.source;
         task.folder = _text(metadata['folder'], 1000) ?? task.folder;
         if (metadata['remote'] == true) task.remote = true;
+        task.parent = _text(metadata['parentTaskId']) ?? task.parent;
       }
       _status(task, whole['status']);
       if (whole['artifacts'] is List) {
@@ -285,6 +348,9 @@ final class DelegateTasks {
     if (task == null || task.updates.isNotEmpty || updates.isEmpty) return false;
     final kept = updates.length > maxTaskUpdates ? updates.sublist(updates.length - maxTaskUpdates) : updates;
     task.updates.addAll(kept);
+    for (final update in kept) {
+      _noteNested(task, update);
+    }
     task.updatesSeen += kept.length;
     return true;
   }
@@ -305,6 +371,8 @@ final class DelegateTasks {
     for (final task in _byId.values) {
       if (task.phase.ended || (task.native && !native)) continue;
       task.phase = TaskPhase.canceled;
+      // Stopped by the host, it ended as it was told to; with the connection gone, how it ended is not known.
+      task.lost = native;
       task.ended ??= at;
       changed = true;
     }

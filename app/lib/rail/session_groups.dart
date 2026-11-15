@@ -23,9 +23,16 @@ enum RowState {
   bool get settled => this == idle;
 }
 
+/// How many of [session]'s subagents wait for the person: a question or approval of theirs, or a state that asks for input. The
+/// conversation is then in Needs you, whatever the conversation's own agent is doing.
+int subagentsNeedingYou(ChatSession session) {
+  final asking = {for (final question in session.pendingPermissions) ?question.task?.id};
+  return session.tasks.live.where((task) => task.phase.waitingOnPerson || asking.contains(task.id)).length;
+}
+
 /// The state [session] shows in the list.
 RowState rowStateOf(ChatSession session) {
-  if (session.needsYou) return RowState.needsYou;
+  if (session.needsYou || subagentsNeedingYou(session) > 0) return RowState.needsYou;
   // A turn that runs while a subagent works is waiting on it.
   if (session.status == SessionStatus.working && session.tasks.live.isNotEmpty) return RowState.waiting;
   if (session.status == SessionStatus.working) return RowState.working;
