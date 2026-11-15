@@ -8,6 +8,7 @@ pub mod engine;
 pub mod exec;
 pub mod extensions;
 pub mod footprint;
+pub(crate) mod index;
 pub mod programs;
 pub mod protect;
 pub mod registry;

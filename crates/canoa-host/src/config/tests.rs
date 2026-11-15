@@ -1836,3 +1836,16 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
         assert!(said.contains(what), "{text}: {said}");
     }
 }
+
+#[test]
+fn the_store_index_takes_a_ttl_in_seconds_and_a_byte_budget() {
+    let none = parse("[host.store]\nprotected = []\n").expect("parses");
+    assert_eq!(
+        (none.store.index_ttl, none.store.index_cache_bytes),
+        (None, None)
+    );
+    let set = parse("[host.store]\nindex_ttl = 0\nindex_cache_bytes = 1024\n").expect("parses");
+    assert_eq!(set.store.index_ttl, Some(0));
+    assert_eq!(set.store.index_cache_bytes, Some(1024));
+    assert!(parse("[host.store]\nindex_ttl = \"5m\"\n").is_err());
+}

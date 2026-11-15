@@ -97,6 +97,8 @@ pub(crate) struct Overlays {
     /// One install or removal at a time.
     gates: Mutex<BTreeMap<String, std::sync::Arc<Mutex<()>>>>,
     git: OnceLock<Result<PathBuf, String>>,
+    /// The git processes this host has started, so a caller can tell an answer from a cache apart from one that went to git.
+    git_runs: std::sync::atomic::AtomicUsize,
 }
 
 fn refused(what: impl Into<String>) -> (i32, String) {
@@ -110,6 +112,51 @@ impl Overlays {
             limits,
             ..Self::default()
         }
+    }
+
+    /// How many git processes this host has started.
+    #[cfg(test)]
+    pub(crate) fn git_runs(&self) -> usize {
+        self.git_runs.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The commit `reference` names at `repo` now, from one `ls-remote` and no fetch; a whole commit id is itself.
+    pub(crate) fn remote_revision(
+        &self,
+        repo: &str,
+        reference: &str,
+    ) -> Result<String, (i32, String)> {
+        refuse_network_source(repo)?;
+        if full_commit_id(reference) {
+            return Ok(reference.to_owned());
+        }
+        let listed = self.run(
+            &[
+                "ls-remote".into(),
+                "--heads".into(),
+                "--tags".into(),
+                "--".into(),
+                repo.into(),
+                format!("refs/heads/{reference}").into(),
+                format!("refs/tags/{reference}").into(),
+                format!("refs/tags/{reference}^{{}}").into(),
+            ],
+            None,
+            None,
+            1024 * 1024,
+        )?;
+        let text = String::from_utf8_lossy(&listed).into_owned();
+        // A branch wins over a tag of the name, as the fetch decides; an annotated tag lists its commit on the peeled line.
+        let find = |name: &str| {
+            text.lines()
+                .filter_map(|line| line.split_once('\t'))
+                .find(|(_, listed)| *listed == name)
+                .map(|(id, _)| id.to_owned())
+        };
+        find(&format!("refs/heads/{reference}"))
+            .or_else(|| find(&format!("refs/tags/{reference}^{{}}")))
+            .or_else(|| find(&format!("refs/tags/{reference}")))
+            .ok_or_else(|| refused("The source has no branch or tag of that name"))
     }
 
     fn root(&self) -> Result<&Path, (i32, String)> {
@@ -1065,6 +1112,8 @@ impl Overlays {
         } else {
             "core.hooksPath=/dev/null"
         };
+        self.git_runs
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut command = Command::new(git);
         for (name, _) in std::env::vars_os() {
             if name

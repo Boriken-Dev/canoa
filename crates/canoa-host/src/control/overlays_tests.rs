@@ -5,7 +5,7 @@ use super::files::{Files, UploadLimits};
 use super::overlays::{OverlayLimits, Overlays};
 use super::*;
 
-fn dir(name: &str) -> PathBuf {
+pub(super) fn dir(name: &str) -> PathBuf {
     static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("canoa-ov-{name}-{}-{n}", std::process::id()));
@@ -20,7 +20,7 @@ fn dir(name: &str) -> PathBuf {
         .expect("resolves")
 }
 
-fn git(repo: &Path, args: &[&str]) -> String {
+pub(super) fn git(repo: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -45,7 +45,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 /// A repository on `main` holding `files`, committed.
-fn repo(root: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
+pub(super) fn repo(root: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
     let repo = root.join(name);
     fs::create_dir_all(&repo).expect("repo");
     git(&repo, &["init", "--quiet", "-b", "main"]);
@@ -53,7 +53,7 @@ fn repo(root: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
     repo
 }
 
-fn change(repo: &Path, files: &[(&str, &str)], message: &str) {
+pub(super) fn change(repo: &Path, files: &[(&str, &str)], message: &str) {
     for (path, text) in files {
         let file = repo.join(path);
         fs::create_dir_all(file.parent().expect("parent")).expect("dirs");
@@ -64,7 +64,7 @@ fn change(repo: &Path, files: &[(&str, &str)], message: &str) {
 }
 
 /// The source for `repo`'s `main`, naming the folder `path` in it: what `overlay/check` and `catalog/fetch` are given.
-fn source(repo: &Path, path: &str) -> Value {
+pub(super) fn source(repo: &Path, path: &str) -> Value {
     let text = repo.to_string_lossy().replace('\\', "/");
     let url = if text.starts_with('/') {
         format!("file://{text}")
@@ -122,14 +122,14 @@ fn setup_with(
     }
 }
 
-fn ask(control: &Control, caller: &Caller, method: &str, params: Value) -> Value {
+pub(super) fn ask(control: &Control, caller: &Caller, method: &str, params: Value) -> Value {
     let line =
         serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
             .expect("encodes");
     serde_json::from_slice(&control.handle(caller, &line).expect("answered")).expect("JSON")
 }
 
-fn key(id: &str, grants: &[Grant]) -> Caller {
+pub(super) fn key(id: &str, grants: &[Grant]) -> Caller {
     Caller::Peer {
         id: id.to_owned(),
         grants: grants.iter().copied().collect(),

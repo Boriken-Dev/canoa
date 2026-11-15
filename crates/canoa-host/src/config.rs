@@ -282,6 +282,11 @@ pub struct StoreConfig {
     pub protected: Option<Vec<String>>,
     /// `credential_variables`: the variables an install is never given, matched against a name, in the same form.
     pub credential_variables: Option<Vec<String>>,
+    /// `index_ttl`: seconds the catalog index answers with no network (default 300); past it the stale index is served at once
+    /// and refreshed in the background. 0 refreshes on every request.
+    pub index_ttl: Option<u64>,
+    /// `index_cache_bytes`: what the index's cached icons may take in all (default 64 MiB).
+    pub index_cache_bytes: Option<u64>,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
@@ -413,6 +418,8 @@ impl RawLines {
 struct RawStore {
     protected: Option<RawLines>,
     credential_variables: Option<RawLines>,
+    index_ttl: Option<u64>,
+    index_cache_bytes: Option<u64>,
 }
 
 /// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
@@ -1325,6 +1332,8 @@ impl Config {
             .map_or_else(StoreConfig::default, |raw| StoreConfig {
                 protected: raw.protected.map(RawLines::lines),
                 credential_variables: raw.credential_variables.map(RawLines::lines),
+                index_ttl: raw.index_ttl,
+                index_cache_bytes: raw.index_cache_bytes,
             });
         let delegate = host
             .delegate

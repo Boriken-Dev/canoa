@@ -1543,6 +1543,20 @@ impl Serving {
                         kept
                     };
                     let kept = kept
+                        .with_index(crate::store::index::StoreIndex::new(
+                            options
+                                .state_dir
+                                .as_ref()
+                                .map(|dir| dir.join("cache").join("store")),
+                            config.store.index_ttl.map_or(
+                                crate::store::index::DEFAULT_TTL,
+                                core::time::Duration::from_secs,
+                            ),
+                            config
+                                .store
+                                .index_cache_bytes
+                                .unwrap_or(crate::store::index::DEFAULT_CACHE_BYTES),
+                        ))
                         .with_overlays(control::Overlays::new(
                             options
                                 .config_file

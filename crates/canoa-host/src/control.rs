@@ -241,7 +241,9 @@ pub(crate) struct Control {
     entries: Vec<EntryRoots>,
     /// What a page may do with this computer's files.
     files: Files,
-    overlays: Overlays,
+    overlays: Arc<Overlays>,
+    /// The catalogs and programs, indexed for `store/index`.
+    index: Arc<crate::store::index::StoreIndex>,
     /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
     restart: Arc<AtomicBool>,
     stop: Option<Arc<AtomicBool>>,
@@ -336,7 +338,8 @@ impl Control {
             trust: None,
             entries,
             files: Files::default(),
-            overlays: Overlays::default(),
+            overlays: Arc::new(Overlays::default()),
+            index: Arc::new(crate::store::index::StoreIndex::default()),
             restart: Arc::new(AtomicBool::new(false)),
             stop: None,
             restart_due: AtomicBool::new(false),
@@ -364,7 +367,14 @@ impl Control {
     /// Offers `overlay/*` and `catalog/*` over these overlays.
     #[must_use]
     pub(crate) fn with_overlays(mut self, overlays: Overlays) -> Self {
-        self.overlays = overlays;
+        self.overlays = Arc::new(overlays);
+        self
+    }
+
+    /// Keeps the index `store/index` answers from in this cache, instead of in memory.
+    #[must_use]
+    pub(crate) fn with_index(mut self, index: crate::store::index::StoreIndex) -> Self {
+        self.index = Arc::new(index);
         self
     }
 
@@ -544,6 +554,7 @@ impl Control {
                             )
                         })
                 }
+                Some("store/index") => self.store_index(caller, &params),
                 Some(method @ ("store/rollback" | "store/remove")) => {
                     allow(caller, Grant::StorePrograms)
                         .and_then(|()| self.stores())
@@ -949,6 +960,9 @@ mod files_tests;
 mod import;
 #[cfg(test)]
 mod import_tests;
+mod index;
+#[cfg(test)]
+mod index_tests;
 mod moves;
 mod overlays;
 #[cfg(test)]
