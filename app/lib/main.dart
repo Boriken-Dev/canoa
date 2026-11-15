@@ -538,6 +538,9 @@ class _CanoaAppState extends State<CanoaApp> {
   /// What the conversation shown offers the keyboard and the palette.
   final _conversation = _ConversationHandle();
 
+  /// How the rail groups the sessions, which the keyboard's order follows.
+  final ValueNotifier<SessionGrouping> _grouping = ValueNotifier(SessionGrouping.status);
+
   /// The conversations shown in a window of their own.
   late final PopoutHub _popout = PopoutHub(store, widget.popoutWindows ?? popout_platform.createPopoutWindows());
 
@@ -604,7 +607,7 @@ class _CanoaAppState extends State<CanoaApp> {
       // A site's session works in a folder the agent's host makes and names in its answer; the page names none.
       final opened = await client.openSession(cwd: cwd, setup: site == null ? AcpSessionSetup.none : siteSetup(site));
       final made = site == null ? null : madeFolder(opened.raw);
-      if (site != null && made == null) throw StateError('The host did not say which folder it made for this session');
+      if (site != null && made == null) throw StateError('The host did not say which workspace it made for this session');
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? agent.label : title,
@@ -1139,13 +1142,13 @@ class _CanoaAppState extends State<CanoaApp> {
     // With none chosen the session works in its scratch folder, which is made now and not before.
     final scratch = draft.cwd == null || draft.cwd!.isEmpty;
     final folder = scratch ? _scratchOf(draft) : draft.cwd;
-    if (folder == null) throw StateError('Choose its folder first');
+    if (folder == null) throw StateError('Choose its workspace first');
     var madeFolder = false;
     if (scratch) {
       try {
         madeFolder = await makeFolder(folder);
       } on Object catch (error) {
-        throw StateError('Cannot make its folder $folder: ${reasonOf(error)}');
+        throw StateError('Cannot make its workspace $folder: ${reasonOf(error)}');
       }
     }
     // Worktree shows, and applies, only for a folder in a git repository.
@@ -1577,6 +1580,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
+    _grouping.dispose();
     _popout.dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
@@ -1696,6 +1700,7 @@ class _CanoaAppState extends State<CanoaApp> {
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           conversation: _conversation,
           localHost: _localHost,
+          grouping: _grouping,
           kit: _kit,
           renderers: widget.renderers,
           welcome: _withSite(WelcomeView(
@@ -1712,11 +1717,13 @@ class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
     this.onHosting, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
-    this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost,
+    this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
   final LocalHostBridge? localHost;
+
+  final ValueNotifier<SessionGrouping> grouping;
 
   final SessionStore store;
   final Widget welcome;
@@ -1744,7 +1751,7 @@ class _CanoaHome extends StatelessWidget {
 
   /// The session [step] places from the one chosen, going round the list.
   void _step(int step) {
-    final sessions = listOrder(store.sessions);
+    final sessions = listOrder(store.sessions, grouping.value);
     if (sessions.isEmpty) return;
     final at = sessions.indexWhere((session) => session.id == store.selectedId);
     store.select(sessions[(at + step) % sessions.length].id);
@@ -1767,7 +1774,7 @@ class _CanoaHome extends StatelessWidget {
   /// The rail as the window shows it: beside the conversation, or in the drawer.
   Widget _rail(BuildContext context) => SessionRail(
     store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession,
-    onSettings: onSettings, onHosting: onHosting, onLoadout: onLoadout, account: account, onSignOut: onSignOut, onReopen: onReopen,
+    onSettings: onSettings, onHosting: onHosting, onLoadout: onLoadout, account: account, onSignOut: onSignOut, onReopen: onReopen, grouping: grouping,
     onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
     onClose: conversation.close ?? store.close,
   );
@@ -1777,7 +1784,7 @@ class _CanoaHome extends StatelessWidget {
     return showSelectableDialog<void>(
       context: context,
       builder: (_) => CommandPalette(items: sessionsOnly ? [
-        for (final other in listOrder(store.sessions))
+        for (final other in listOrder(store.sessions, grouping.value))
           PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
       ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
@@ -1810,7 +1817,7 @@ class _CanoaHome extends StatelessWidget {
       LogicalKeyboardKey.digit7, LogicalKeyboardKey.digit8, LogicalKeyboardKey.digit9,
     ].indexed)
       chord(key): () {
-        final ordered = listOrder(store.sessions);
+        final ordered = listOrder(store.sessions, grouping.value);
         if (index < ordered.length) store.select(ordered[index].id);
       },
     chord(LogicalKeyboardKey.tab): () => _step(1),

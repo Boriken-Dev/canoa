@@ -220,6 +220,79 @@ void main() {
       store.dispose();
     });
 
+    testWidgets('Needs you is a group of its own above Working, with the sessions that ask in it and only those', (tester) async {
+      final store = SessionStore();
+      _open(store, 'Runs').status = SessionStatus.working;
+      _open(store, 'Asks').asking();
+      _open(store, 'Asks too').asking();
+      store.createDraft(title: 'Draft');
+      await _show(tester, store);
+      final needs = find.byKey(const ValueKey('group needsYou'));
+      final working = find.byKey(const ValueKey('group working'));
+      expect(find.descendant(of: needs, matching: find.text('Needs you')), findsOneWidget);
+      expect(tester.getTopLeft(needs).dy, lessThan(tester.getTopLeft(working).dy));
+      expect(_top(tester, 'Asks'), greaterThan(tester.getTopLeft(needs).dy));
+      expect(_top(tester, 'Asks too'), lessThan(tester.getTopLeft(working).dy));
+      expect(_top(tester, 'Runs'), greaterThan(tester.getTopLeft(working).dy));
+      store.dispose();
+    });
+
+    test('a pinned session that asks stays under Pinned, and one that is archived comes back to Needs you', () async {
+      final store = SessionStore();
+      final pinned = _open(store, 'Pinned asks')..pinned = true;
+      pinned.asking();
+      final archived = _open(store, 'Archived asks')..archived = true;
+      archived.asking();
+      await Future<void>.delayed(Duration.zero);
+      expect(groupOf(pinned), SessionGroup.pinned);
+      expect(groupOf(archived), SessionGroup.needsYou);
+      expect(groupSessions(store.sessions).keys.toList(), [SessionGroup.needsYou, SessionGroup.pinned]);
+      store.dispose();
+    });
+
+    testWidgets('the grouping menu offers status and workspace, and workspace puts each session under its directory', (tester) async {
+      final store = SessionStore();
+      _open(store, 'In canoa', cwd: '/home/ana/devel/canoa');
+      _open(store, 'Asks in canoa', cwd: '/home/ana/devel/canoa').asking();
+      _open(store, 'In coqui', cwd: '/home/ana/devel/coqui-acp');
+      _open(store, 'Nowhere');
+      store.createDraft(title: 'Draft');
+      await _show(tester, store, unfold: true);
+      expect(find.byKey(const ValueKey('group sessions')), findsOneWidget);
+      await tester.tap(find.byTooltip('Group sessions'));
+      await tester.pumpAndSettle();
+      expect(find.text('By status'), findsOneWidget);
+      await tester.tap(find.text('By workspace'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('group sessions')), findsNothing);
+      final canoa = find.byKey(const ValueKey('workspace /home/ana/devel/canoa'));
+      final coqui = find.byKey(const ValueKey('workspace /home/ana/devel/coqui-acp'));
+      expect(find.descendant(of: canoa, matching: find.text('canoa')), findsOneWidget);
+      expect(find.descendant(of: coqui, matching: find.text('coqui-acp')), findsOneWidget);
+      expect(find.byKey(const ValueKey('workspace none')), findsOneWidget);
+      final none = tester.getTopLeft(find.byKey(const ValueKey('workspace none'))).dy;
+      expect(tester.getTopLeft(canoa).dy, lessThan(_top(tester, 'Asks in canoa')));
+      expect(_top(tester, 'Asks in canoa'), lessThan(_top(tester, 'In canoa')), reason: 'a request first inside its workspace');
+      expect(tester.getTopLeft(coqui).dy, lessThan(_top(tester, 'In coqui')));
+      expect(_top(tester, 'In canoa'), lessThan(none));
+      expect(_top(tester, 'In coqui'), lessThan(none), reason: 'sessions with no workspace come last');
+      await tester.tap(find.byTooltip('Group sessions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('By status'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('group sessions')), findsOneWidget);
+      store.dispose();
+    });
+
+    testWidgets('listOrder follows the grouping the list shows', (tester) async {
+      final store = SessionStore();
+      final a = _open(store, 'A', cwd: '/w/one');
+      final b = _open(store, 'B', cwd: '/w/two');
+      final c = _open(store, 'C', cwd: '/w/one');
+      expect(listOrder(store.sessions, SessionGrouping.workspace).map((s) => s.id), [c.id, a.id, b.id], reason: 'newest first, a workspace at its newest session');
+      store.dispose();
+    });
+
     test('the order Ctrl+1 to Ctrl+9 count in is the list\'s, folded groups included', () {
       final store = SessionStore();
       final quiet = _open(store, 'Quiet');
@@ -325,6 +398,18 @@ void main() {
         final item = find.ancestor(of: find.text(label), matching: find.byType(MenuItemButton)).first;
         expect(find.descendant(of: item, matching: find.text(key)), findsOneWidget, reason: '$label has the key $key');
       }
+      store.dispose();
+    });
+
+    testWidgets('the menu names the workspace by its whole path and the agent, which the row keeps short', (tester) async {
+      final store = SessionStore();
+      final first = _open(store, 'First', cwd: '/home/ana/devel/canoa');
+      store.select(first.id);
+      await _show(tester, store);
+      expect(find.text('/home/ana/devel/canoa'), findsNothing);
+      await _openMenu(tester, 'First');
+      expect(find.text('/home/ana/devel/canoa'), findsOneWidget);
+      expect(find.textContaining('Workspace'), findsWidgets);
       store.dispose();
     });
 

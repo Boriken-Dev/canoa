@@ -351,6 +351,8 @@ void main() {
 
     testWidgets('groups by harness, filters by one, and says which cannot be reopened', (tester) async {
       await shown(tester);
+      expect(find.text('Earlier conversations'), findsOneWidget);
+      expect(find.textContaining('by harness'), findsNothing);
       for (final harness in ['Claude Code', 'Pi', 'Plain']) {
         expect(find.byKey(ValueKey('harness $harness')), findsOneWidget);
       }

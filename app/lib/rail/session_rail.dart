@@ -34,6 +34,7 @@ class SessionRail extends StatefulWidget {
     this.account,
     this.onSignOut,
     this.onReopen,
+    this.grouping,
     this.now = DateTime.now,
     this.touch,
   });
@@ -59,6 +60,9 @@ class SessionRail extends StatefulWidget {
   final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
 
+  /// How the sessions are grouped; the rail keeps its own when null.
+  final ValueNotifier<SessionGrouping>? grouping;
+
   /// The time ages are counted from.
   final DateTime Function() now;
 
@@ -72,8 +76,17 @@ class SessionRail extends StatefulWidget {
 bool get _touchPlatform => defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
 
 class _SessionRailState extends State<SessionRail> {
-  /// The folded groups the person opened.
-  final Set<SessionGroup> _opened = {};
+  /// The folded groups the person opened, by key.
+  final Set<String> _opened = {};
+
+  late final ValueNotifier<SessionGrouping> _own = ValueNotifier(SessionGrouping.status);
+  ValueNotifier<SessionGrouping> get _grouping => widget.grouping ?? _own;
+
+  @override
+  void dispose() {
+    _own.dispose();
+    super.dispose();
+  }
 
   void _closeDrawer(BuildContext context) {
     if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) Navigator.pop(context);
@@ -123,7 +136,7 @@ class _SessionRailState extends State<SessionRail> {
         const Divider(height: 1),
         Expanded(
           child: ListenableBuilder(
-            listenable: store,
+            listenable: Listenable.merge([store, _grouping]),
             builder: (context, _) => _list(context),
           ),
         ),
@@ -162,25 +175,38 @@ class _SessionRailState extends State<SessionRail> {
 
   Widget _list(BuildContext context) {
     final store = widget.store;
-    final groups = groupSessions(store.sessions);
+    final grouping = _grouping.value;
     final selected = store.selected;
     final now = widget.now();
+    // The groups to show, each with its key, label, sessions and whether it folds.
+    final groups = switch (grouping) {
+      SessionGrouping.status => [
+        for (final MapEntry(key: group, value: sessions) in groupSessions(store.sessions).entries)
+          (key: group.name, label: group.label, sessions: sessions, folds: group.folds, header: 'group ${group.name}'),
+      ],
+      SessionGrouping.workspace => [
+        for (final group in groupByWorkspace(store.sessions))
+          (key: group.key, label: group.label, sessions: group.sessions, folds: group.folds, header: 'workspace ${group.key}'),
+      ],
+    };
     return ListView(
       padding: const EdgeInsets.only(top: 4, bottom: 8),
       children: [
-        for (final MapEntry(key: group, value: sessions) in groups.entries) ...[
+        _GroupingBar(grouping: _grouping),
+        for (final group in groups) ...[
           // A folded group opens by itself for the session the person is in, so it is never out of sight.
           if (group.folds)
             _FoldHeader(
-              group: group,
-              count: sessions.length,
-              open: _opened.contains(group) || (selected != null && sessions.contains(selected)),
-              onTap: () => setState(() => _opened.contains(group) ? _opened.remove(group) : _opened.add(group)),
+              id: group.key,
+              label: group.label,
+              count: group.sessions.length,
+              open: _opened.contains(group.key) || (selected != null && group.sessions.contains(selected)),
+              onTap: () => setState(() => _opened.contains(group.key) ? _opened.remove(group.key) : _opened.add(group.key)),
             )
           else
-            _GroupHeader(label: group.label, count: sessions.length),
-          if (!group.folds || _opened.contains(group) || (selected != null && sessions.contains(selected)))
-            for (final session in sessions)
+            _GroupHeader(key: ValueKey(group.header), label: group.label, count: group.sessions.length),
+          if (!group.folds || _opened.contains(group.key) || (selected != null && group.sessions.contains(selected)))
+            for (final session in group.sessions)
               _SessionRow(
                 key: ValueKey('row ${session.id}'),
                 store: store,
@@ -204,6 +230,34 @@ class _SessionRailState extends State<SessionRail> {
       ],
     );
   }
+}
+
+/// The line above the list: the menu that chooses how the sessions are grouped.
+class _GroupingBar extends StatelessWidget {
+  const _GroupingBar({required this.grouping});
+
+  final ValueNotifier<SessionGrouping> grouping;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(18, 0, 8, 0),
+    child: Row(children: [
+      const Spacer(),
+      PopupMenuButton<SessionGrouping>(
+        tooltip: 'Group sessions',
+        icon: const Icon(Icons.filter_list, size: 18),
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        constraints: const BoxConstraints(minWidth: 160),
+        initialValue: grouping.value,
+        onSelected: (value) => grouping.value = value,
+        itemBuilder: (_) => [
+          for (final value in SessionGrouping.values)
+            CheckedPopupMenuItem(value: value, checked: value == grouping.value, child: Text(value.label)),
+        ],
+      ),
+    ]),
+  );
 }
 
 /// A shortcut as the person reads it on this platform: "Ctrl+N", or "⌘N" on a Mac.
@@ -240,7 +294,7 @@ class _NavEntry extends StatelessWidget {
 }
 
 class _GroupHeader extends StatelessWidget {
-  const _GroupHeader({required this.label, required this.count});
+  const _GroupHeader({super.key, required this.label, required this.count});
 
   final String label;
   final int count;
@@ -257,22 +311,22 @@ class _GroupHeader extends StatelessWidget {
 
 /// A group folded away, as "Settled 3 ›": it opens on a tap.
 class _FoldHeader extends StatelessWidget {
-  const _FoldHeader({required this.group, required this.count, required this.open, required this.onTap});
+  const _FoldHeader({required this.id, required this.label, required this.count, required this.open, required this.onTap});
 
-  final SessionGroup group;
+  final String id, label;
   final int count;
   final bool open;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => InkWell(
-    key: ValueKey('fold ${group.name}'),
+    key: ValueKey('fold $id'),
     onTap: onTap,
     child: Padding(
       padding: const EdgeInsets.fromLTRB(18, 10, 12, 4),
       child: Row(children: [
         Text(
-          '${group.label} $count',
+          '$label $count',
           style: TextStyle(color: context.chatLook.muted, fontSize: 12, fontWeight: FontWeight.w600),
         ),
         const SizedBox(width: 2),
@@ -282,7 +336,7 @@ class _FoldHeader extends StatelessWidget {
   );
 }
 
-/// One session: its title on a line; under it its state as an icon and a word, then its branch or folder, its agent and how
+/// One session: its title on a line; under it its state as an icon and a word, then its branch or workspace, its agent and how
 /// long ago it was last active. A menu holds what can be done to it.
 class _SessionRow extends StatefulWidget {
   const _SessionRow({
@@ -344,6 +398,7 @@ class _SessionRowState extends State<_SessionRow> {
               },
           },
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (session.cwd case final cwd? when cwd.isNotEmpty) _MenuFact(label: 'Workspace', value: cwd),
             for (final (label, icon, key, action) in actions)
               MenuItemButton(
                 leadingIcon: Icon(icon, size: 18),
@@ -443,6 +498,25 @@ class _SessionRowState extends State<_SessionRow> {
       ),
     );
   }
+}
+
+/// A fact about the session at the top of its menu, which the row is too narrow to show whole.
+class _MenuFact extends StatelessWidget {
+  const _MenuFact({required this.label, required this.value});
+
+  final String label, value;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 300),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text(label, style: TextStyle(color: context.chatLook.muted, fontSize: 11)),
+        Text(value, style: const TextStyle(fontSize: 12), softWrap: true),
+      ]),
+    ),
+  );
 }
 
 /// Takes the keyboard focus while the row's menu is open, and runs the action of the key pressed.

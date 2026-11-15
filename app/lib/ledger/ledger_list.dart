@@ -7,7 +7,7 @@ import '../session_store.dart';
 import 'session_ledger.dart';
 import '../selectable.dart';
 
-/// The ledger's sessions that are not open now, grouped by harness, with a filter by harness. Each opens again where its agent
+/// The ledger's sessions that are not open now, listed under Earlier conversations, with a filter by agent. Each opens again where its agent
 /// offers that, says why where it does not, and can be removed from the list, which never deletes the agent's own session.
 class LedgerList extends StatefulWidget {
   const LedgerList({super.key, required this.ledger, required this.store, this.onReopen});
@@ -82,7 +82,7 @@ class _LedgerListState extends State<LedgerList> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Sessions by harness', style: Theme.of(context).textTheme.titleSmall),
+            Text('Earlier conversations', style: Theme.of(context).textTheme.titleSmall),
             Text(
               'Removing one here never deletes the agent\'s own session.',
               style: TextStyle(color: look.muted, fontSize: 11),
@@ -93,7 +93,7 @@ class _LedgerListState extends State<LedgerList> {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Sessions you open are kept here, by harness, to open again.',
+                  'Sessions you open are kept here, to open again.',
                   style: TextStyle(color: look.muted, fontSize: 12),
                 ),
               )
