@@ -101,6 +101,8 @@ final class FakeStoreHost {
   FakeStore store(String provider) => stores.firstWhere((each) => each.provider == provider);
 
   Object? _answer(String method, Map<String, Object?> given) {
+    // What the host grants this key is not a store request, so it is not in [calls].
+    if (method == 'host/grants') return {'grants': ['store.read', 'store.programs']};
     final provider = given['provider'] as String?;
     final key = '$method ${provider ?? ''}'.trim();
     calls.add(key);
