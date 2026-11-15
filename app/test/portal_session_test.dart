@@ -10,10 +10,10 @@ import 'package:canoa/acp/served_host.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool.dart';
-import 'package:canoa/rail/session_rail.dart';
+import 'package:canoa/shell/section_rail.dart';
+import 'package:canoa/shell/sections.dart';
 import 'package:canoa/served/portal_session.dart';
 import 'package:canoa/served/served_app.dart';
-import 'package:canoa/session_store.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -244,43 +244,37 @@ void main() {
     });
   });
 
-  group('the rail', () {
+  group('the section selector', () {
     Future<void> show(WidgetTester tester, {String? account, Future<void> Function()? onSignOut}) async {
       await tester.binding.setSurfaceSize(const Size(260, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
         theme: themeFor(LookId.canoa, Brightness.dark),
         home: Scaffold(
-          body: SessionRail(
-            store: SessionStore(),
-            onConnect: (_) async {},
-            onUseBrowserAgents: (_, {required cwd, required title}) async {},
-            onNewSession: () {},
-            onSettings: () {},
-            onSearch: () {},
-            onClose: (_) async {},
+          body: SectionRail(
+            sections: const [AppSection(id: 'conversations', label: 'Conversations', icon: Icons.chat_bubble_outline, main: SizedBox())],
+            selected: 'conversations',
+            onSelect: (_) {},
             account: account,
             onSignOut: onSignOut,
-            touch: false,
           ),
         ),
       ));
       await tester.pump();
     }
 
-    testWidgets('behind a portal it shows the account and a Sign out that signs out', (tester) async {
+    testWidgets('behind a portal it names the account and has a Sign out that signs out', (tester) async {
       var signedOut = 0;
       await show(tester, account: 'canoatesta', onSignOut: () async => signedOut++);
-      expect(find.text('Sign out'), findsOneWidget);
-      expect(find.text('canoatesta'), findsOneWidget);
-      await tester.tap(find.text('Sign out'));
+      expect(find.byTooltip('Signed in as canoatesta. Sign out'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sign-out')));
       await tester.pump();
       expect(signedOut, 1);
     });
 
     testWidgets('elsewhere it shows neither', (tester) async {
       await show(tester);
-      expect(find.text('Sign out'), findsNothing);
+      expect(find.byKey(const ValueKey('sign-out')), findsNothing);
     });
   });
 }

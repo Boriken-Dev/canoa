@@ -363,7 +363,7 @@ void main() {
     Finder inRow(String id, String text) => find.descendant(of: find.byKey(ValueKey('lineage $id')), matching: find.text(text));
 
     testWidgets('each child is a row with its state and elapsed time, and the heading counts those running', (tester) async {
-      final scene = await openScene(tester);
+      final scene = await openScene(tester, size: const Size(1160, 900));
       await scene.fourChildren();
       await details(tester);
       expect(find.text('Lineage · 4 running'), findsOneWidget);
@@ -381,14 +381,14 @@ void main() {
     });
 
     testWidgets('a session that handed nothing out has no lineage', (tester) async {
-      await openScene(tester);
+      await openScene(tester, size: const Size(1160, 900));
       await details(tester);
       expect(find.textContaining('Lineage'), findsNothing);
       expect(find.text('Environment'), findsOneWidget);
     });
 
     testWidgets('a child appears while the inspector is open, and a tap opens its thread', (tester) async {
-      final scene = await openScene(tester);
+      final scene = await openScene(tester, size: const Size(1160, 900));
       await details(tester);
       expect(find.textContaining('Lineage'), findsNothing);
       await scene.fourChildren();
@@ -400,7 +400,7 @@ void main() {
     });
 
     testWidgets('a command still running is listed, and leaves the list when it ends', (tester) async {
-      final scene = await openScene(tester);
+      final scene = await openScene(tester, size: const Size(1160, 900));
       await details(tester);
       expect(find.textContaining('Running commands'), findsNothing);
       await scene.say(terminal('t1', command: 'npm run dev'));

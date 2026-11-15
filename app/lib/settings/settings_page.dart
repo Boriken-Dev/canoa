@@ -15,6 +15,7 @@ import '../sources/sources.dart';
 import '../store/programs.dart';
 import 'agent_sections.dart';
 import 'app_sections.dart';
+import '../shell/shell.dart' show ShellScope;
 import 'overlay_sections.dart';
 import 'setting_layers.dart';
 import 'settings_controller.dart';
@@ -150,6 +151,11 @@ class SettingsPageState extends State<SettingsPage> {
     if (mounted) setState(() {});
   }
 
+  /// Shows the section [id], as when the page is already open and something sends the person to it.
+  void show(String id) {
+    if (_available.any((section) => section.id == id)) setState(() => _selected = id);
+  }
+
   @override
   void dispose() {
     controller
@@ -282,6 +288,7 @@ class SettingsPageState extends State<SettingsPage> {
         child: Scaffold(
           appBar: AppBar(
             title: Text(inSection ? current.title : 'Settings'),
+            automaticallyImplyLeading: false,
             leading: inSection
                 ? IconButton(
                     key: const Key('settings-back'),
@@ -289,7 +296,7 @@ class SettingsPageState extends State<SettingsPage> {
                     tooltip: 'Back to the list',
                     onPressed: () => setState(() => _selected = null),
                   )
-                : null,
+                : ShellScope.menuButton(context),
           ),
           body: wide
               ? Row(children: [
@@ -305,7 +312,3 @@ class SettingsPageState extends State<SettingsPage> {
     );
   });
 }
-
-/// Opens Settings as a page over the app.
-Future<void> showSettings(BuildContext context, SettingsPage page) =>
-    Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => page));

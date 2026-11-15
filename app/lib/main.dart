@@ -75,6 +75,10 @@ import 'profile/approval_dialog.dart';
 import 'profile/report.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
+import 'shell/layout_backend.dart';
+import 'shell/layout_state.dart';
+import 'shell/sections.dart';
+import 'shell/shell.dart';
 import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
@@ -178,6 +182,8 @@ Future<void> main(List<String> args) async {
   );
   await rules.load();
   final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
+  final layout = ShellLayout(backend: platformLayoutBackend(configPath: desktopConfigPath()));
+  await layout.load();
   final settingsSignal = ValueNotifier<int>(0);
   final hostingSignal = ValueNotifier<int>(0);
   await shell.initialize(
@@ -187,7 +193,7 @@ Future<void> main(List<String> args) async {
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
-    host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts, served: served,
+    host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts, served: served, layout: layout,
     localHost: localHost,
   ));
   await hosting;
@@ -202,8 +208,11 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served, this.layout,
   });
+
+  /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
+  final ShellLayout? layout;
 
   /// The host that served this page, when one did: where its sources, session list, folders, uploads, canoa.cfg and overlays are,
   /// over the control channel. Null on a desktop, whose host runs in its own process, and for a page nothing served.
@@ -354,9 +363,13 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  // One at a time: a second copy would hold a configuration the first one changes.
-  bool _settingsOpen = false;
   final _settingsKey = GlobalKey<SettingsPageState>();
+  final _loadoutKey = GlobalKey<LoadoutPageState>();
+
+  /// The section Settings opens at when it is first shown.
+  String? _settingsFirst;
+
+  late final ShellLayout _layout = widget.layout ?? ShellLayout();
 
   /// Hosting is a section of Settings.
   Future<void> _showHosting() => _showSettings(section: 'hosting');
@@ -380,53 +393,52 @@ class _CanoaAppState extends State<CanoaApp> {
     return null;
   }
 
+  /// Shows Settings, at [section] when one is named.
   Future<void> _showSettings({String? section}) async {
-    final above = _navigator.currentContext;
-    if (above == null || _settingsOpen) return;
-    _settingsOpen = true;
-    try {
-      if (widget.served case final served?) await served.refreshOverlays();
-      if (!above.mounted) return;
-      await showSettings(
-        above,
-        SettingsPage(
-          key: _settingsKey,
-          config: config,
-          apply: _applySettings,
-          section: section,
-          ledger: store.ledger,
-          rules: store.rules,
-          workspacePreview: hasWorkspaceFolders && canRunLocalAgents
-              ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
-              : null,
-          onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
-          presets: [
-            for (final source in _hostedSources)
-              if (source.local && !config.agents.any((agent) => agent.label == source.label)) source,
-          ],
-          hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
-          checkSource: _check,
-          programs: _programs,
-          profileAgents: _profileAgents,
-          home: _home,
-          onPin: (name, digest) async {
-            final changed = config.withOverlayPin(name, digest);
-            await _write(changed);
-            if (mounted) setState(() => config = changed);
-            _settingsKey.currentState?.controller.adopt(changed);
-            return changed;
-          },
-          onLoadout: _showLoadout,
-          supervisor: widget.served == null ? widget.host : null,
-          accounts: _accounts,
-          saveHosting: _saveHosting,
-          version: const String.fromEnvironment('CANOA_VERSION'),
-        ),
-      );
-    } finally {
-      _settingsOpen = false;
+    if (widget.served case final served?) await served.refreshOverlays();
+    if (!mounted) return;
+    if (section != null) {
+      // The page is built from what the app holds when it is first shown, so it is built again with the section to open at.
+      setState(() => _settingsFirst = section);
+      _settingsKey.currentState?.show(section);
     }
+    _layout.select('settings');
   }
+
+  /// Settings as the section shows it.
+  Widget _settingsPage() => SettingsPage(
+      key: _settingsKey,
+      config: config,
+      apply: _applySettings,
+      section: _settingsFirst,
+      ledger: store.ledger,
+      rules: store.rules,
+      workspacePreview: hasWorkspaceFolders && canRunLocalAgents
+          ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
+          : null,
+      onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
+      presets: [
+        for (final source in _hostedSources)
+          if (source.local && !config.agents.any((agent) => agent.label == source.label)) source,
+      ],
+      hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
+      checkSource: _check,
+      programs: _programs,
+      profileAgents: _profileAgents,
+      home: _home,
+      onPin: (name, digest) async {
+        final changed = config.withOverlayPin(name, digest);
+        await _write(changed);
+        if (mounted) setState(() => config = changed);
+        _settingsKey.currentState?.controller.adopt(changed);
+        return changed;
+      },
+      onLoadout: _showLoadout,
+      supervisor: widget.served == null ? widget.host : null,
+      accounts: _accounts,
+      saveHosting: _saveHosting,
+      version: const String.fromEnvironment('CANOA_VERSION'),
+    );
 
   /// Applies and writes what Settings changed, as it is changed, and gives back what the app now holds.
   /// [host] stays as the app has it: Hosting writes it on its own.
@@ -506,26 +518,27 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Where overlays install and catalogs are fetched: the host that served this page, else beside canoa.cfg.
   ProfileHome? get _home => widget.served?.home ?? platformProfileHome(configPath: _configPath);
 
-  /// Loadout: overlays, skills and MCP servers, installed and to discover.
+  /// Shows Loadout: overlays, skills and MCP servers, installed and to discover.
   Future<void> _showLoadout() async {
-    final above = _navigator.currentContext;
-    if (above == null) return;
     // What the host has installed changes without this page, and the store shows it from what was last read.
     if (widget.served case final served?) await served.refreshOverlays();
-    if (!above.mounted) return;
-    final left = await showLoadout(
-      above,
-      config: config,
-      home: _home,
-      onSave: _saveLoadout,
-      agents: _profileAgents,
-      programs: _programs,
-      fetchRegistry: kIsWeb ? null : fetchRegistry,
-      findProgram: findProgram,
-    );
-    if (left != null && mounted) setState(() => config = left);
-    _settingsKey.currentState?.controller.adopt(config);
+    if (!mounted) return;
+    _layout.select('loadouts');
+    if (_loadoutKey.currentState case final page?) unawaited(page.controller.adopt(config));
   }
+
+  /// Loadout as the section shows it.
+  Widget _loadoutPage() => LoadoutPage(
+    key: _loadoutKey,
+    embedded: true,
+    config: config,
+    home: _home,
+    onSave: _saveLoadout,
+    agents: _profileAgents,
+    programs: _programs,
+    fetchRegistry: kIsWeb ? null : fetchRegistry,
+    findProgram: findProgram,
+  );
 
   /// Saves what Loadout changed. The host reads the profile again when each session starts, so nothing is restarted and no open
   /// session ends: the change reaches the next one.
@@ -1546,6 +1559,10 @@ class _CanoaAppState extends State<CanoaApp> {
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
+    final kept = _layout.of(ShellLayout.conversations).item;
+    if (kept != null && store.selectedId != kept && store.sessions.any((session) => session.id == kept)) store.select(kept);
+    _keepSelection();
+    store.addListener(_keepSelection);
     // The welcome page, which a window with no session shows, lists each source with what it needs.
     scheduleMicrotask(_noteLast);
     if (widget.served?.problem ?? widget.served?.configProblem case final problem?) {
@@ -1561,6 +1578,9 @@ class _CanoaAppState extends State<CanoaApp> {
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
   }
+
+  /// Writes down which conversation is shown, for the next run.
+  void _keepSelection() => _layout.setItem(ShellLayout.conversations, store.selectedId);
 
   /// The identity secret prompts are bound with, once this page's own key can be used: until then a host is offered nothing.
   Future<void> _loadSecretIdentity() async {
@@ -1580,6 +1600,8 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
+    store.removeListener(_keepSelection);
+    if (widget.layout == null) _layout.dispose();
     _grouping.dispose();
     _popout.dispose();
     _tabs?.dispose();
@@ -1698,6 +1720,7 @@ class _CanoaAppState extends State<CanoaApp> {
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
           onHosting: widget.host == null || widget.served != null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
+          layout: _layout, settings: _settingsPage(), loadout: _loadoutPage(),
           conversation: _conversation,
           localHost: _localHost,
           grouping: _grouping,
@@ -1718,12 +1741,17 @@ class _CanoaHome extends StatelessWidget {
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
     this.onHosting, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
+    required this.layout, required this.settings, required this.loadout,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
   final LocalHostBridge? localHost;
 
   final ValueNotifier<SessionGrouping> grouping;
+  final ShellLayout layout;
+
+  /// The main views of the Settings and Loadouts sections.
+  final Widget settings, loadout;
 
   final SessionStore store;
   final Widget welcome;
@@ -1774,7 +1802,12 @@ class _CanoaHome extends StatelessWidget {
   /// The rail as the window shows it: beside the conversation, or in the drawer.
   Widget _rail(BuildContext context) => SessionRail(
     store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession,
-    onSettings: onSettings, onHosting: onHosting, onLoadout: onLoadout, account: account, onSignOut: onSignOut, onReopen: onReopen, grouping: grouping,
+    onHosting: onHosting, onReopen: onReopen, grouping: grouping,
+    initialScroll: layout.of(ShellLayout.conversations).scroll,
+    onScroll: (offset, {required end}) {
+      layout.setScroll(ShellLayout.conversations, offset);
+      if (end) unawaited(layout.flush());
+    },
     onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
     onClose: conversation.close ?? store.close,
   );
@@ -1810,6 +1843,10 @@ class _CanoaHome extends StatelessWidget {
   Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
     chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
     chord(LogicalKeyboardKey.keyN): onNewSession,
+    // The shell hears it too when focus is inside it; this is for focus above, where nothing in the shell is.
+    chord(LogicalKeyboardKey.keyB): () {
+      if (layout.section == ShellLayout.conversations) layout.toggleIndex(layout.section);
+    },
     chord(LogicalKeyboardKey.comma): onSettings,
     for (final (index, key) in const [
       LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3,
@@ -1840,42 +1877,34 @@ class _CanoaHome extends StatelessWidget {
 
   Widget _layout(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
-      final narrow = constraints.maxWidth < 730 ||
+      final narrow = AppShell.isNarrow(constraints.maxWidth) ||
           Uri.base.queryParameters['view'] == 'panel';
-
-      return Selectable(child: Scaffold(
-        drawer: narrow
-            ? Drawer(child: SafeArea(child: _rail(context)))
-            : null,
-        body: SafeArea(
-          child: Column(
-            children: [
-              if (localHost case final bridge?) LocalHostBanner(bridge: bridge),
-              Expanded(
-                child: Row(
-                  children: [
-                    if (!narrow)
-                      SizedBox(
-                        width: context.look.railWidth,
-                        child: _rail(context),
-                      ),
-                    Expanded(
-                      child: _Conversation(
-                        key: ValueKey(store.selectedId ?? 'empty'),
-                        store: store,
-                        narrow: narrow,
-                        handle: conversation,
-                        kit: kit,
-                        renderers: renderers,
-                        welcome: welcome,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+      return Selectable(child: AppShell(
+        layout: layout,
+        narrow: narrow,
+        account: account,
+        onSignOut: onSignOut,
+        indexWidth: context.look.railWidth,
+        banner: localHost == null ? null : LocalHostBanner(bridge: localHost!),
+        sections: [
+          AppSection(
+            id: ShellLayout.conversations,
+            label: 'Conversations',
+            icon: Icons.chat_bubble_outline,
+            index: _rail(context),
+            main: _Conversation(
+              key: ValueKey(store.selectedId ?? 'empty'),
+              store: store,
+              narrow: narrow,
+              handle: conversation,
+              kit: kit,
+              renderers: renderers,
+              welcome: welcome,
+            ),
           ),
-        ),
+          AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.tune, main: loadout),
+          AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
+        ],
       ));
     });
   }

@@ -87,7 +87,7 @@ void main() {
     await tester.tap(find.byKey(const Key('source-add')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('source-row Mine')), findsOneWidget);
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
     final mine = written.last.agents.single;
     expect([mine.label, mine.program, ...mine.args], ['Mine', 'my-agent', '--acp', 'a b']);
@@ -103,7 +103,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('source-offered Antigravity')));
     await tester.pumpAndSettle();
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
     expect(written.last.hiddenSources, {'Antigravity'});
     await newSession(tester);
@@ -123,7 +123,7 @@ void main() {
     expect(find.text('Needs claude'), findsOneWidget, reason: 'the list says what it lacks in a line');
     expect(find.text('Claude needs claude on PATH: claude was not found. '
         'Install what is missing, or start Canoa where PATH finds it.'), findsOneWidget);
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
 
     await newSession(tester);

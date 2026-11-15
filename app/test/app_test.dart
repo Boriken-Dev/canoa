@@ -186,12 +186,12 @@ void main() {
     expect(find.byKey(const Key('settings-nav-general')), findsOneWidget);
     expect(find.text('Quit Canoa'), findsNothing, reason: 'the tray and the menu quit, not Settings');
     expect(find.text('Save'), findsNothing);
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Hosting'));
     await tester.pumpAndSettle();
     expect(find.text('Agents this computer hosts'), findsOneWidget, reason: 'Hosting is a section of Settings');
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
 
     await host.apply(configPath: '/c/canoa.cfg');

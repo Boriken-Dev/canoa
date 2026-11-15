@@ -270,7 +270,7 @@ void main() {
     final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/'), provider: provider);
     await _tap(tester, const Key('site-new'));
     await until(tester, () => find.byKey(const Key('site-failed')).evaluate().isNotEmpty, 'the failure');
-    expect(find.textContaining('did not say which folder'), findsOneWidget);
+    expect(find.textContaining('did not say which workspace'), findsOneWidget);
     expect(store.sessions, isEmpty);
     expect(ledger.entries, isEmpty);
   });

@@ -49,7 +49,7 @@ void main() {
   testWidgets('what was chosen is there when Settings is opened again', (tester) async {
     await _open(tester);
     await _choose(tester, 'settings-look', 'Terminal');
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await frames(tester);
     await tester.tap(find.byTooltip('Canoa settings'));
     await frames(tester);

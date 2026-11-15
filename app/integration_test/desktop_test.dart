@@ -203,7 +203,7 @@ void main() {
       expect(find.textContaining(url), findsOneWidget);
       expect(find.text(browserId), findsOneWidget, reason: 'the paired key, listed');
       expect(find.text(host.peerId!), findsOneWidget, reason: 'the id a browser pins');
-      await tester.pageBack();
+      await tester.tap(find.byTooltip('Conversations'));
       await tester.pumpAndSettle();
 
       await host.stop();

@@ -8,6 +8,7 @@ import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, visible;
 import '../selectable.dart';
+import '../shell/shell.dart' show ShellScope;
 import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../store/store.dart';
@@ -33,7 +34,11 @@ class LoadoutPage extends StatefulWidget {
     this.fetchRegistry,
     this.findProgram,
     this.registry = officialRegistry,
+    this.embedded = false,
   });
+
+  /// Whether the page is a section of the shell, which never pops: what it changes is saved as it is changed.
+  final bool embedded;
 
   final CanoaConfig config;
 
@@ -92,12 +97,14 @@ class LoadoutPageState extends State<LoadoutPage> with SingleTickerProviderState
     final skillsCount = controller.skills.length;
     final mcpCount = controller.installedMcp().length;
     return PopScope(
-      canPop: false,
+      canPop: widget.embedded,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) Navigator.of(context).pop(controller.config);
       },
       child: Scaffold(
         appBar: AppBar(
+          leading: widget.embedded ? ShellScope.menuButton(context) : null,
+          automaticallyImplyLeading: !widget.embedded,
           title: const Text('Loadout'),
           actions: [
             IconButton(

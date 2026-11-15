@@ -43,7 +43,6 @@ Future<List<String>> _show(WidgetTester tester, SessionStore store,
         onConnect: (_) async {},
         onUseBrowserAgents: (_, {required cwd, required title}) async {},
         onNewSession: () => asked.add('new'),
-        onSettings: () => asked.add('settings'),
         onHosting: () => asked.add('hosting'),
         onSearch: () => asked.add('search'),
         onClose: (session) async => asked.add('close ${session.title}'),
@@ -510,10 +509,10 @@ void main() {
   });
 
   group('the entries', () {
-    testWidgets('New session, Search, Connect, Hosting and Settings are named, with the keys of the first two', (tester) async {
+    testWidgets('New session, Search, Connect and Hosting are named, with the keys of the first two', (tester) async {
       final store = SessionStore();
       final asked = await _show(tester, store);
-      for (final label in const ['New session', 'Search', 'Connect', 'Hosting', 'Settings']) {
+      for (final label in const ['New session', 'Search', 'Connect', 'Hosting']) {
         expect(find.text(label), findsOneWidget);
       }
       expect(find.text('Ctrl+N'), findsOneWidget);
@@ -521,8 +520,9 @@ void main() {
       await tester.tap(find.text('New session'));
       await tester.tap(find.text('Search'));
       await tester.tap(find.text('Hosting'));
-      await tester.tap(find.text('Settings'));
-      expect(asked, ['new', 'search', 'hosting', 'settings']);
+      expect(asked, ['new', 'search', 'hosting']);
+      expect(find.text('Settings'), findsNothing, reason: 'Settings is a section of the selector');
+      expect(find.text('Loadout'), findsNothing);
       expect(find.text('Agents on other machines need a verified ACP peer.'), findsNothing, reason: 'that note is Connect\'s');
       store.dispose();
     });
@@ -530,7 +530,7 @@ void main() {
     testWidgets('the entries keep their tooltips', (tester) async {
       final store = SessionStore();
       await _show(tester, store);
-      for (final tip in const ['New session', 'Canoa settings', 'Hosting', 'Connect to verified agent']) {
+      for (final tip in const ['New session', 'Hosting', 'Connect to verified agent']) {
         expect(find.byTooltip(tip), findsOneWidget);
       }
       store.dispose();

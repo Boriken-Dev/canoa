@@ -21,7 +21,7 @@ SessionStore _store() => SessionStore(ledger: SessionLedger(MemoryLedgerBackend(
 
 /// Opens Settings at Accounts and offers `metered` from the entry: the change that restarts the host.
 Future<void> _offerMetered(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('Settings').evaluate().isNotEmpty ? find.byTooltip('Settings') : find.text('Settings').first);
+  await tester.tap(find.byTooltip('Canoa settings'));
   await frames(tester);
   await tester.tap(find.byKey(const Key('settings-nav-accounts')));
   await frames(tester);

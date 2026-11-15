@@ -17,8 +17,8 @@ import 'session_groups.dart';
 
 import 'package:coqui_acp/page.dart' show findAcp;
 
-/// The left column: the wordmark, labelled entries for what the person starts or opens, the sessions grouped by what they have
-/// for the person, and the conversations the ledger keeps. On a phone it is the drawer.
+/// The Conversations index: the wordmark, entries for what the person starts or opens, the sessions grouped by what they have
+/// for the person, and the conversations the ledger keeps. On a phone it is in the drawer, beside the section selector.
 class SessionRail extends StatefulWidget {
   const SessionRail({
     super.key,
@@ -26,15 +26,13 @@ class SessionRail extends StatefulWidget {
     required this.onConnect,
     required this.onUseBrowserAgents,
     required this.onNewSession,
-    required this.onSettings,
     required this.onSearch,
     required this.onClose,
     this.onHosting,
-    this.onLoadout,
-    this.account,
-    this.onSignOut,
     this.onReopen,
     this.grouping,
+    this.initialScroll = 0,
+    this.onScroll,
     this.now = DateTime.now,
     this.touch,
   });
@@ -43,7 +41,6 @@ class SessionRail extends StatefulWidget {
   final Future<void> Function(ConnectTarget) onConnect;
   final UseBrowserAgents onUseBrowserAgents;
   final VoidCallback onNewSession;
-  final VoidCallback onSettings;
 
   /// Opens the palette on the sessions.
   final VoidCallback onSearch;
@@ -51,14 +48,11 @@ class SessionRail extends StatefulWidget {
   /// Ends a conversation here, asking first about anything it made.
   final Future<void> Function(ChatSession) onClose;
   final VoidCallback? onHosting;
-
-  /// Opens Loadout: overlays, skills and MCP servers.
-  final VoidCallback? onLoadout;
-
-  /// The account a portal signed this page in as, shown beside [onSignOut], which ends that sign-in; both null elsewhere.
-  final String? account;
-  final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
+
+  /// Where the list starts, and what hears it scroll: the offset, and whether the scrolling has ended.
+  final double initialScroll;
+  final void Function(double offset, {required bool end})? onScroll;
 
   /// How the sessions are grouped; the rail keeps its own when null.
   final ValueNotifier<SessionGrouping>? grouping;
@@ -79,11 +73,14 @@ class _SessionRailState extends State<SessionRail> {
   /// The folded groups the person opened, by key.
   final Set<String> _opened = {};
 
+  late final ScrollController _scroll = ScrollController(initialScrollOffset: widget.initialScroll)
+    ..addListener(() => widget.onScroll?.call(_scroll.offset, end: false));
   late final ValueNotifier<SessionGrouping> _own = ValueNotifier(SessionGrouping.status);
   ValueNotifier<SessionGrouping> get _grouping => widget.grouping ?? _own;
 
   @override
   void dispose() {
+    _scroll.dispose();
     _own.dispose();
     super.dispose();
   }
@@ -155,18 +152,7 @@ class _SessionRailState extends State<SessionRail> {
                 onUseBrowserAgents: widget.onUseBrowserAgents,
               ),
             ),
-            if (widget.onLoadout != null) _NavEntry(icon: Icons.tune, label: 'Loadout', tooltip: 'Overlays, skills and MCP servers', onTap: widget.onLoadout!),
             if (widget.onHosting != null) _NavEntry(icon: Icons.dns_outlined, label: 'Hosting', onTap: widget.onHosting!),
-            _NavEntry(icon: Icons.settings_outlined, label: 'Settings', tooltip: 'Canoa settings', onTap: widget.onSettings),
-            if (widget.onSignOut != null)
-              _NavEntry(
-                key: const ValueKey('sign-out'),
-                icon: Icons.logout_rounded,
-                label: 'Sign out',
-                hint: widget.account,
-                tooltip: widget.account == null ? 'Sign out' : 'Signed in as ${widget.account}. Sign out',
-                onTap: () => unawaited(widget.onSignOut!()),
-              ),
           ]),
         ),
       ]),
@@ -189,7 +175,13 @@ class _SessionRailState extends State<SessionRail> {
           (key: group.key, label: group.label, sessions: group.sessions, folds: group.folds, header: 'workspace ${group.key}'),
       ],
     };
-    return ListView(
+    return NotificationListener<ScrollEndNotification>(
+      onNotification: (_) {
+        if (_scroll.hasClients) widget.onScroll?.call(_scroll.offset, end: true);
+        return false;
+      },
+      child: ListView(
+      controller: _scroll,
       padding: const EdgeInsets.only(top: 4, bottom: 8),
       children: [
         _GroupingBar(grouping: _grouping),
@@ -228,7 +220,7 @@ class _SessionRailState extends State<SessionRail> {
         ],
         if (store.ledger != null) LedgerList(ledger: store.ledger!, store: store, onReopen: widget.onReopen),
       ],
-    );
+    ));
   }
 }
 
@@ -264,7 +256,7 @@ class _GroupingBar extends StatelessWidget {
 String chordLabel(String key) => defaultTargetPlatform == TargetPlatform.macOS ? '⌘$key' : 'Ctrl+$key';
 
 class _NavEntry extends StatelessWidget {
-  const _NavEntry({super.key, required this.icon, required this.label, required this.onTap, this.hint, this.tooltip});
+  const _NavEntry({required this.icon, required this.label, required this.onTap, this.hint, this.tooltip});
 
   final IconData icon;
   final String label;

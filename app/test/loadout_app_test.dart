@@ -77,13 +77,13 @@ void main() {
     final first = store.selected!;
     expect(first.overlays, {'a', 'b'});
 
-    await tester.tap(find.text('Loadout').first);
+    await tester.tap(find.byTooltip('Loadouts'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('overlay-default-b')));
     await tester.pumpAndSettle();
     expect(written.last.loadoutOff, {'b'});
     expect(written.last.overlays.keys, ['a', 'b'], reason: 'it stays installed');
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
 
     expect(first.overlays, {'a', 'b'}, reason: 'the session already started is not changed');
