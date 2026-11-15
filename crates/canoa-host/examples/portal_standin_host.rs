@@ -115,7 +115,7 @@ fn main() -> ExitCode {
     // that nothing of a developer's real shelf is replaced and no real entry of theirs starts the stand-in.
     if std::env::var_os("XDG_DATA_HOME").is_none_or(|value| value.is_empty()) {
         eprintln!(
-            "portal_standin_host: set XDG_DATA_HOME to a folder made for this run (the unit does: Environment=XDG_DATA_HOME=%h/standin-data)"
+            "portal_standin_host: set XDG_DATA_HOME to a folder made for this run (the unit does: Environment=XDG_DATA_HOME=/home/%i/standin-data)"
         );
         return ExitCode::from(2);
     }
