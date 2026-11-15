@@ -1,6 +1,8 @@
 // Delegation as the person sees it: one row for the children a turn handed out, the line that says what the turn waits on, the
 // session list's "Waiting", a child's thread to look at, and the rows the session inspector's Lineage list takes.
 
+import 'dart:convert';
+
 import 'package:canoa/acp/delegate.dart';
 import 'package:canoa/chat/delegation_view.dart';
 import 'package:canoa/rail/session_groups.dart';
@@ -228,5 +230,41 @@ void main() {
       expect(lineage(scene.session), isEmpty);
     });
   });
-}
 
+  group('the subagents the conversation agent starts itself', () {
+    testWidgets('two concurrent children are one row of two named subagents, drawn like delegated ones', (tester) async {
+      final scene = await openScene(tester);
+      await scene.nativeChildren('subagents');
+      expect(find.byKey(const Key('delegation-row')), findsOneWidget);
+      expect(find.text('2 subagents'), findsOneWidget);
+      expect(find.text('all done'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('delegation-toggle')));
+      await tester.pump();
+      expect(find.text('Alpha count'), findsOneWidget);
+      expect(find.text('Beta count'), findsOneWidget);
+      final rows = lineage(scene.session);
+      expect([for (final row in rows) row.word], ['Done', 'Done']);
+      expect(rows.every((row) => row.native && row.provider == scene.session.agent.toLowerCase()), isTrue);
+    });
+
+    testWidgets('a child whose progress was not reported says so, and has no Stop', (tester) async {
+      final scene = await openScene(tester);
+      await scene.nativeChildren('subagents');
+      scene.store.openChild(scene.session, lineage(scene.session).first.id);
+      await tester.pump();
+      expect(find.byKey(const Key('child-not-reported')), findsOneWidget);
+      expect(find.text('Live progress not reported'), findsOneWidget);
+      expect(find.byKey(const Key('child-stop')), findsNothing);
+    });
+
+    testWidgets('a child that reported its tool call has a thread, and a host Stop all leaves a working native child alone', (tester) async {
+      final scene = await openScene(tester);
+      await scene.nativeChildren('subagent_tool');
+      final task = scene.session.tasks.all.single;
+      expect(task.reportsProgress, isTrue);
+      expect(task.updates, isNotEmpty);
+      expect(task.updates.every((update) => !jsonEncode(update).contains('coqui.acp/child')), isTrue);
+      expect(scene.session.tasks.hostLive, isEmpty);
+    });
+  });
+}

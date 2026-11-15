@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' as pkg;
+
 /// The `_meta` key of `initialize` with which a client tells the host it can show a delegated task, answer what the task's agent
 /// asks of the person and stop it. Without it the host gives its agents no delegation tool.
 const delegateMeta = 'dev.boriken.canoa/delegate';
@@ -63,6 +65,23 @@ final class DelegateTask {
   bool remote = false;
   TaskPhase phase = TaskPhase.submitted;
 
+  /// Whether the agent of the conversation started it itself (a provider-native subagent) rather than through the host's delegation
+  /// tools. The host knows nothing of it: it cannot be stopped from here, and it has no time of its own.
+  bool native = false;
+
+  /// For a native task, the agent's tool call that started it; the transcript folds that call into the delegation row.
+  String? parentCall;
+
+  /// For a native task, whether the agent reports what the child does as it works. When false only [message], [result] and the task
+  /// the child was given are known.
+  bool reportsProgress = true;
+
+  /// What a native task was asked to do.
+  String? brief;
+
+  /// How many of the child's updates a native task has taken.
+  int nativeApplied = 0;
+
   /// When the host first recorded it, and when it ended; null when the host sent no time, or the task has not ended.
   DateTime? started, ended;
 
@@ -95,6 +114,83 @@ final class DelegateTasks {
   DelegateTask? operator [](String id) => _byId[id];
 
   bool get isEmpty => _byId.isEmpty;
+
+  /// The tasks the host runs and has not ended: what Stop all asks the host to stop.
+  List<DelegateTask> get hostLive => [for (final task in live) if (!task.native) task];
+
+  /// The native task started by the agent's tool call [call], or null.
+  DelegateTask? nativeOf(String call) {
+    for (final task in _byId.values) {
+      if (task.native && task.parentCall == call) return task;
+    }
+    return null;
+  }
+
+  /// Takes the subagents the conversation's agent named ([children] of the model's conversation) as tasks beside the host's own, so
+  /// one list and one view serve both. [agent] names the source they run on, and [now] stands for the time the agent did not say.
+  /// Whether anything changed.
+  bool syncNative(List<pkg.ChatChild> children, DateTime now, String agent) {
+    var changed = false;
+    for (final child in children) {
+      final id = 'native:${child.id}';
+      final held = _byId[id];
+      final task = held ?? _task(id);
+      if (task == null) continue;
+      if (held == null) {
+        task.native = true;
+        task.source = agent;
+        task.started = now;
+        changed = true;
+      }
+      task.parentCall = child.parentToolCallId;
+      task.reportsProgress = child.reportsProgress;
+      final title = child.title ?? (child.task == null ? null : _text(child.task!.split('\n').first, 80));
+      if (title != null && task.title != title) {
+        task.title = title;
+        changed = true;
+      }
+      if (task.title == id) task.title = 'Subagent';
+      if (task.brief != child.task) {
+        task.brief = child.task;
+        changed = true;
+      }
+      if (child.result != null && task.result != child.result) {
+        task.result = child.result;
+        changed = true;
+      }
+      final phase = switch (child.state) {
+        pkg.ChildState.starting => TaskPhase.submitted,
+        pkg.ChildState.working => TaskPhase.working,
+        pkg.ChildState.completed => TaskPhase.completed,
+        pkg.ChildState.failed => TaskPhase.failed,
+        pkg.ChildState.cancelled => TaskPhase.canceled,
+        null => null,
+      };
+      if (phase != null && phase != task.phase && !task.phase.ended) {
+        task.phase = phase;
+        if (phase.ended) {
+          task.ended = now;
+          final span = child.usage?.durationMs;
+          if (span != null) task.started = now.subtract(Duration(milliseconds: span));
+        }
+        if (phase == TaskPhase.failed) task.message = child.result;
+        changed = true;
+      }
+      final updates = child.updates;
+      while (task.nativeApplied < updates.length) {
+        final raw = Map<String, Object?>.from(updates[task.nativeApplied].raw);
+        // The mark belongs to the conversation that holds the children; a thread of its own would take it for a child's.
+        final meta = raw['_meta'];
+        if (meta is Map) raw['_meta'] = {for (final entry in meta.entries) if (entry.key != pkg.childMetaKey) entry.key: entry.value};
+        task.updates.add(raw);
+        task.updatesSeen++;
+        task.nativeApplied++;
+        if (task.updates.length > maxTaskUpdates) task.updates.removeAt(0);
+        changed = true;
+      }
+    }
+    return changed;
+  }
 
   int _next = 0;
 
@@ -203,10 +299,11 @@ final class DelegateTasks {
   }
 
   /// Ends every task that has not, as the connection that carried them is gone and so is each task's agent. Whether any changed.
-  bool cancelLive([DateTime? at]) {
+  /// A task the host stopped is not a native one, which the host never ran: [native] false leaves those as they are.
+  bool cancelLive([DateTime? at, bool native = true]) {
     var changed = false;
     for (final task in _byId.values) {
-      if (task.phase.ended) continue;
+      if (task.phase.ended || (task.native && !native)) continue;
       task.phase = TaskPhase.canceled;
       task.ended ??= at;
       changed = true;

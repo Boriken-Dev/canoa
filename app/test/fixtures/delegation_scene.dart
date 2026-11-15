@@ -2,6 +2,7 @@
 // and a clock the test moves.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:canoa/acp/delegate.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -74,6 +75,16 @@ final class Scene {
       final id = 'c$i';
       host.say(taskNotice(id, taskEvent(id, 'WORKING', title: title, source: const ['claude', 'codex', 'codex', 'grok'][i], at: sceneAt(0))));
       host.say(delegationCall('call$i', id));
+    }
+    await settle();
+  }
+
+  /// The updates a client receives for one of Claude Code's recorded subagent turns (`name`: `subagents` or `subagent_tool`), said as
+  /// the agent said them. coqui-acp-claude regenerates the file from the recordings and fails when it differs.
+  Future<void> nativeChildren(String name) async {
+    final recorded = jsonDecode(File('test/fixtures/claude_subagent_updates.json').readAsStringSync()) as Map<String, dynamic>;
+    for (final update in recorded[name] as List) {
+      host.say({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': 's1', 'update': update}});
     }
     await settle();
   }

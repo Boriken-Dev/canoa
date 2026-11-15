@@ -21,7 +21,16 @@ bool isDelegationCall(ToolCall tool) =>
 
 /// One task as the card, the waiting line and the lineage show it: plain data, with no widget and no session in it.
 final class ChildView {
-  const ChildView({required this.id, required this.title, required this.source, required this.phase, this.started, this.ended, this.message});
+  const ChildView({
+    required this.id,
+    required this.title,
+    required this.source,
+    required this.phase,
+    this.started,
+    this.ended,
+    this.message,
+    this.native = false,
+  });
 
   final String id;
   final String title;
@@ -33,6 +42,9 @@ final class ChildView {
 
   /// What the host last said of its state: a refusal's reason, what a failure was.
   final String? message;
+
+  /// Whether the conversation's own agent started it, not the host's delegation tools: it cannot be stopped from here.
+  final bool native;
 
   /// The provider whose mark stands for the source.
   String get provider => source.toLowerCase();
@@ -64,7 +76,7 @@ final class ChildView {
   }
 
   static ChildView of(DelegateTask task) => ChildView(
-    id: task.id, title: task.title, source: task.source, phase: task.phase, started: task.started, ended: task.ended, message: task.message,
+    id: task.id, title: task.title, source: task.source, phase: task.phase, started: task.started, ended: task.ended, message: task.message, native: task.native,
   );
 }
 
@@ -138,13 +150,15 @@ List<ChatEntryData> delegationEntries(ChatSession session, {required void Functi
   for (var i = 0; i < entries.length; i++) {
     if (entries[i].role == MessageRole.user) turn++;
     final tool = entries[i].tool;
-    if (tool != null && isDelegationCall(tool)) (turns[turn] ??= []).add(i);
+    if (tool != null && (isDelegationCall(tool) || session.tasks.nativeOf(tool.id) != null)) (turns[turn] ??= []).add(i);
   }
   if (turns.isEmpty) return entries;
   final named = <int, List<String>>{};
   final claimed = <String>{};
   for (final MapEntry(:key, :value) in turns.entries) {
     for (final i in value) {
+      final own = session.tasks.nativeOf(entries[i].tool!.id);
+      if (own != null && claimed.add(own.id)) (named[key] ??= []).add(own.id);
       for (final block in entries[i].tool!.blocks) {
         if (block is! ToolText) continue;
         for (final match in _taskId.allMatches(block.text)) {
@@ -154,14 +168,14 @@ List<ChatEntryData> delegationEntries(ChatSession session, {required void Functi
       }
     }
   }
-  final unnamed = [for (final task in session.tasks.all) if (!claimed.contains(task.id)) task.id];
+  final unnamed = [for (final task in session.tasks.all) if (!task.native && !claimed.contains(task.id)) task.id];
   if (unnamed.isNotEmpty) (named[turns.keys.last] ??= []).addAll(unnamed);
 
   final folded = <int>{};
   final out = <ChatEntryData>[];
   for (var i = 0; i < entries.length; i++) {
     final tool = entries[i].tool;
-    if (tool == null || !isDelegationCall(tool)) {
+    if (tool == null || !(isDelegationCall(tool) || session.tasks.nativeOf(tool.id) != null)) {
       out.add(entries[i]);
       continue;
     }

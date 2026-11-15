@@ -49,6 +49,24 @@ void main() {
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/delegation_ended_$label.png'));
     });
 
+    testWidgets('two subagents the conversation\'s own agent started, one row like the delegated ones, $label', (tester) async {
+      final scene = await openScene(tester, size: size);
+      await scene.turn();
+      await scene.say(_said('I will count both in parallel.'));
+      await scene.nativeChildren('subagents');
+      await tester.tap(find.byKey(const Key('delegation-toggle')));
+      await tester.pump();
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/delegation_native_$label.png'));
+    });
+
+    testWidgets('a subagent whose progress the agent does not report, $label', (tester) async {
+      final scene = await openScene(tester, size: size);
+      await scene.nativeChildren('subagents');
+      scene.store.openChild(scene.session, 'native:toolu_01QAJcVBP4hbXUuwAVxr6923');
+      await tester.pump();
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/child_thread_native_$label.png'));
+    });
+
     testWidgets('a child\'s thread with its pending approval and the way back, $label', (tester) async {
       final scene = await openScene(tester, size: size);
       await scene.fourChildren();

@@ -100,7 +100,7 @@ class _ChildThreadViewState extends State<ChildThreadView> {
                 ),
               ]),
             ),
-            if (child.live)
+            if (child.live && !task.native)
               TextButton.icon(
                 key: const Key('child-stop'),
                 onPressed: () => store.stopTask(session, task.id),
@@ -110,6 +110,7 @@ class _ChildThreadViewState extends State<ChildThreadView> {
           ]),
         ),
       ),
+      if (task.native && !task.reportsProgress) _NotReported(task: task),
       Expanded(
         child: ChatTranscript(
           key: ValueKey('thread-${task.id}'),
@@ -134,5 +135,36 @@ class _ChildThreadViewState extends State<ChildThreadView> {
           child: Text('It asks for your answer once the request ahead of it is answered.', style: TextStyle(color: look.muted, fontSize: 13)),
         ),
     ]);
+  }
+}
+
+/// What a subagent shows when its agent reports only the call and the result: the task it was given, what came back, and that its
+/// progress was not reported, which is different from there having been none.
+class _NotReported extends StatelessWidget {
+  const _NotReported({required this.task});
+
+  final DelegateTask task;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.chatLook;
+    final style = TextStyle(color: look.muted, fontSize: 13);
+    return Padding(
+      key: const Key('child-not-reported'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (task.brief != null) ...[
+          Text('Task', style: style.copyWith(fontWeight: FontWeight.w600)),
+          Text(task.brief!, maxLines: 6, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 8),
+        ],
+        if (task.result != null) ...[
+          Text('Result', style: style.copyWith(fontWeight: FontWeight.w600)),
+          Text(task.result!, maxLines: 12, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 8),
+        ],
+        Text('Live progress not reported', style: style),
+      ]),
+    );
   }
 }

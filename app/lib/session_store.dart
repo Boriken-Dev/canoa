@@ -726,6 +726,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// A conversation changed: when its connection ended, what Canoa held for that connection ends with it.
   void _changed(ChatSession session) {
+    session.tasks.syncNative(session.chat.children, clock(), session.chat.agent);
     if (_clients[session.id] != null && session.chat.connection == null) {
       _clients.remove(session.id);
       _strand(session);
@@ -2090,7 +2091,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   Future<void> stopTasks(ChatSession session) async {
     final client = _clients[session.id];
     final remote = session.remoteSessionId;
-    if (client == null || remote == null || session.tasks.live.isEmpty) return;
+    if (client == null || remote == null || session.tasks.hostLive.isEmpty) return;
     if (await client.stopTasks(remote)) _tasksStopped(session);
   }
 
@@ -2122,13 +2123,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final client = _clients[session.id];
     final remote = session.remoteSessionId;
     final task = session.tasks[taskId];
-    if (client == null || remote == null || task == null || task.phase.ended) return;
+    if (client == null || remote == null || task == null || task.native || task.phase.ended) return;
     if (await client.stopTasks(remote, taskId: taskId)) _tasksStopped(session, only: taskId);
   }
 
   void _tasksStopped(ChatSession session, {String? only}) {
     if (only == null) {
-      session.tasks.cancelLive(DateTime.now());
+      session.tasks.cancelLive(DateTime.now(), false);
       session.taskAllowances.clear();
     } else {
       session.tasks.cancelOne(only, DateTime.now());
