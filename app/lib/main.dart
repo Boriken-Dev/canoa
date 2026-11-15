@@ -35,7 +35,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import 'accounts/account_models.dart' show accountMeta;
+import 'accounts/account_models.dart' show AccountEntry, accountMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
@@ -897,11 +897,31 @@ class _CanoaAppState extends State<CanoaApp> {
   /// the person's file, so it is read again first: saving the copy this app held would take it out.
   Future<void> _changeAccounts(CanoaConfig Function(CanoaConfig config) edit) async {
     final path = _configPath;
-    final fresh = widget.writeConfig == null ? await loadConfig() : config;
-    final changed = edit(fresh);
+    final fresh = widget.writeConfig == null && widget.served == null ? await loadConfig() : config;
+    // What entries offer is the host's to say: the edit is made over the entries it lists, and a change to an entry it has is asked
+    // of it, which writes canoa.cfg. An entry the edit makes new (the app's own, for accounts nothing else offers) is written as before.
+    final entries = _accountsHeld?.hostEntries ?? const <AccountEntry>[];
+    final view = fresh.withHostEntries(entries);
+    final edited = edit(view);
+    final known = {for (final entry in entries) entry.name};
+    final offers = <String, List<String>>{
+      for (final entry in edited.hostEntries)
+        if (known.contains(entry.name) && !_sameList(edited.hostAccountsOf(entry.name), view.hostAccountsOf(entry.name)))
+          entry.name: edited.hostAccountsOf(entry.name),
+    };
+    final accountsHost = widget.accountsHost ?? (_control == null ? null : ControlAccountsHost(_control));
+    for (final MapEntry(:key, :value) in offers.entries) {
+      await accountsHost?.offer(key, value);
+    }
+    // The host's built-in sources are not in the file until an offer names them: they are not written from here.
+    var changed = edited;
+    for (final entry in entries) {
+      if (!fresh.hostEntries.any((each) => each.name == entry.name)) changed = changed.withoutHostEntry(entry.name);
+    }
     // The host serves what an entry offers from the moment it starts, so a change of the offers restarts it, which ends the
     // sessions open on it: the person is asked first, and says which. Declined, it is saved and applies when the host next starts.
-    var restart = widget.host != null && path != null && jsonEncode(changed.host) != jsonEncode(fresh.host);
+    final canRestart = widget.served != null || (widget.host != null && path != null);
+    var restart = canRestart && (offers.isNotEmpty || jsonEncode(changed.host) != jsonEncode(fresh.host));
     if (restart) {
       final ending = _endedByRestart();
       if (ending.isNotEmpty && !await _confirmAccountsRestart(ending)) restart = false;
@@ -910,7 +930,32 @@ class _CanoaAppState extends State<CanoaApp> {
     if (mounted) setState(() => config = changed);
     _settingsKey.currentState?.controller.adopt(changed);
     _accounts?.changed();
-    if (restart) await widget.host!.apply(configPath: path);
+    if (!restart) return;
+    if (widget.served != null) {
+      await _startHostAgain();
+    } else {
+      await widget.host!.apply(configPath: path);
+    }
+    await _accountsHeld?.refresh();
+  }
+
+  static bool _sameList(List<String> a, List<String> b) => a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((same) => same);
+
+  /// Has the host that served this page end and start again, and waits for it to answer: the offers just written apply from its start.
+  Future<void> _startHostAgain() async {
+    final served = widget.served;
+    if (served == null) return;
+    try {
+      await served.files.restart().onError<Object>((error, stack) {
+        // The link ends with the host, which may be before its answer arrives; only a refusal is a failure.
+        if (error is ControlFailed) throw error;
+      });
+      await served.files.awaitHost();
+    } on ControlFailed catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('The host would not restart, so that applies when it next starts: ${error.message}')));
+    } on Object catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('The host did not come back: $error')));
+    }
   }
 
   /// The titles of the sessions open on this computer's own host or on an entry it serves, which restarting the host ends.

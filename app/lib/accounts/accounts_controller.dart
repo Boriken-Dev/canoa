@@ -41,12 +41,19 @@ class AccountsController extends ChangeNotifier {
 
 
   List<AccountInfo> _accounts = const [];
+  List<AccountEntry> _entries = const [];
   final _catalogs = <String, AccountCatalog>{};
   String? _problem;
   bool _loading = false;
   bool _disposed = false;
 
   List<AccountInfo> get accounts => _accounts;
+
+  /// The agent entries the host lists, which a built-in source is one of before canoa.cfg names it.
+  List<AccountEntry> get hostEntries => _entries;
+
+  /// canoa.cfg as the host serves it: the entries the host lists, with what each offers, over the app's own configuration.
+  CanoaConfig get _view => config().withHostEntries(_entries);
   String? get problem => _problem;
   bool get loading => _loading;
 
@@ -61,19 +68,19 @@ class AccountsController extends ChangeNotifier {
   /// The accounts the agent entry [entry] offers a client, in the order it lists them, the first being the default. Empty when it
   /// offers none: its harness then runs on the login it has where it runs.
   List<AccountInfo> offeredBy(String entry) => [
-    for (final name in config().hostAccountsOf(entry)) ?named(name),
+    for (final name in _view.hostAccountsOf(entry)) ?named(name),
   ];
 
   /// The agent entries that run the provider [harness], which can offer its accounts.
-  List<String> entriesRunning(String harness) => config().hostEntriesRunning(harness);
+  List<String> entriesRunning(String harness) => _view.hostEntriesRunning(harness);
 
   /// Whether the entry [entry] is open to every paired key, so an account offered there reaches them all.
-  bool isOpen(String entry) => config().hostEntryIsOpen(entry);
+  bool isOpen(String entry) => _view.hostEntryIsOpen(entry);
 
   /// The entries that offer [account].
   List<String> offering(String account) => [
-    for (final entry in config().hostEntries)
-      if (config().hostAccountsOf(entry.name).contains(account)) entry.name,
+    for (final entry in _view.hostEntries)
+      if (_view.hostAccountsOf(entry.name).contains(account)) entry.name,
   ];
 
   /// What the host last said of each kind and sign-in method of [harness], asked once.
@@ -98,6 +105,11 @@ class AccountsController extends ChangeNotifier {
     _notify();
     try {
       _accounts = await host.list();
+      try {
+        _entries = await host.entries();
+      } on Object {
+        // A host with no list of its entries leaves what canoa.cfg names.
+      }
       _problem = null;
       for (final harness in {..._accounts.map((each) => each.harness)}) {
         try {
@@ -169,7 +181,7 @@ class AccountsController extends ChangeNotifier {
   /// it) is the host's words, thrown as they are, and the offers stay as they were.
   Future<void> remove(AccountInfo account) async {
     // What each entry offered, in its order, so a refusal puts back exactly that and not the account in another place.
-    final before = {for (final entry in offering(account.name)) entry: config().hostAccountsOf(entry)};
+    final before = {for (final entry in offering(account.name)) entry: _view.hostAccountsOf(entry)};
     await change((config) => config.withoutAccountOffered(account.name));
     try {
       await host.remove(account.name);

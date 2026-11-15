@@ -4,6 +4,7 @@ import 'package:coqui_aos/coqui_aos.dart' show normalizeName, validOverlayName;
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
+import '../accounts/account_models.dart' show AccountEntry;
 import '../acp/agent_commands.dart';
 import 'config_layers.dart';
 import '../chat/modes.dart' show modeOrder;
@@ -333,6 +334,24 @@ final class CanoaConfig {
 
   /// The name of the entry the app makes for the accounts it adds of the provider [harness].
   static String accountsEntryOf(String harness) => '$harness-accounts';
+
+  /// This configuration as the host sees its agent entries: [entries], the host's own list, name the entries that run a provider with
+  /// accounts, and what each offers is the host's to say. An entry canoa.cfg has keeps its other keys; one it has not (a built-in
+  /// source) is read as an open entry that runs the provider. Never written back whole: it holds what the host serves, not the file.
+  CanoaConfig withHostEntries(List<AccountEntry> entries) {
+    if (entries.isEmpty) return this;
+    final copy = _deepCopy(host ?? const {});
+    final table = (copy['agents'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+    for (final entry in entries) {
+      final one = table[entry.name] is Map ? Map<String, dynamic>.of((table[entry.name] as Map).cast<String, dynamic>()) : <String, dynamic>{};
+      one['harness'] = entry.harness;
+      entry.accounts.isEmpty ? one.remove('accounts') : one['accounts'] = List<String>.of(entry.accounts);
+      if (!entry.open) one['peers'] ??= <String>[];
+      table[entry.name] = one;
+    }
+    copy['agents'] = table;
+    return withHost(copy);
+  }
 
   /// This configuration with the account [account] offered by the agent entry [entry], or, with none named, by the entry the app
   /// keeps for [harness]'s accounts, which is made with `peers = []`: no paired key reaches it, and only this computer's own

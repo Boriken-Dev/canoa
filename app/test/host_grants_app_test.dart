@@ -28,6 +28,9 @@ final class _Control implements HostLink {
 
   final List<String> grants;
   final asked = <String>[];
+
+  /// The params of each request, by method.
+  final params = <String, List<Map<String, Object?>>>{};
   final _out = StreamController<String>();
 
   @override
@@ -38,9 +41,23 @@ final class _Control implements HostLink {
     final request = jsonDecode(message) as Map<String, Object?>;
     final method = request['method']! as String;
     asked.add(method);
+    params.putIfAbsent(method, () => []).add((request['params'] as Map?)?.cast<String, Object?>() ?? const {});
     final Object? result = switch (method) {
       'host/grants' => {'grants': grants},
-      'accounts/list' => {'accounts': <Object?>[]},
+      'accounts/list' => {
+        'accounts': [
+          {'name': 'work', 'harness': 'claude', 'kind': 'anthropic-api-key', 'id': 'id-work', 'state': 'signed in'},
+        ],
+      },
+      'accounts/entries' => {
+        'entries': [
+          {'name': 'Claude', 'harness': 'claude', 'accounts': <String>[], 'open': true},
+          {'name': 'Codex', 'harness': 'codex', 'accounts': <String>[], 'open': true},
+        ],
+      },
+      'accounts/offer' => {'restart': true},
+      'host/restart' => {'restarting': true},
+      'fs/list' => {'path': '', 'parent': null, 'entries': <Object?>[], 'more': false},
       'store/list' => {'stores': <Object?>[]},
       'ledger/list' => {'records': <Object?>[]},
       _ => null,
@@ -126,6 +143,31 @@ void main() {
       expect(old.known, isTrue);
       expect(old.may(HostGrants.programs) || old.may(HostGrants.accounts), isFalse);
     });
+  });
+
+  group('offering an account to an entry', () {
+    for (final (label, open) in [('on its own host', _desktop), ('on a host that served the page', _browser)]) {
+      testWidgets('$label asks the host to offer it, which has the host start again', (tester) async {
+        final control = _Control(_all);
+        await open(tester, control);
+        await _openSettings(tester);
+        await tester.tap(find.byKey(const Key('settings-nav-accounts')));
+        await frames(tester);
+        // The entries are the host's, built-in sources included: no canoa.cfg on the app's side names Claude.
+        await tester.tap(find.byKey(const Key('account-menu work')));
+        await frames(tester);
+        await tester.tap(find.byKey(const Key('account-offer work Claude')));
+        await frames(tester);
+        // An entry open to every paired key asks first.
+        await tester.tap(find.byKey(const Key('offer-open-entry-confirm')));
+        await frames(tester);
+        await tester.pump(const Duration(seconds: 1));
+        expect(control.params['accounts/offer'], [
+          {'entry': 'Claude', 'accounts': ['work']},
+        ]);
+        if (label.contains('served')) expect(control.asked, contains('host/restart'));
+      });
+    }
   });
 
   group('the app', () {

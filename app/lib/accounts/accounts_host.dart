@@ -130,6 +130,12 @@ abstract interface class AccountsHost {
   /// Forgets an account's stored credential and its place, and takes it out of canoa.cfg.
   Future<void> remove(String name);
 
+  /// The agent entries of the host that run a provider with accounts, and the accounts each offers.
+  Future<List<AccountEntry>> entries();
+
+  /// Makes the entry [entry] offer exactly [accounts], in that order, in the host's canoa.cfg. The host reads it when it starts.
+  Future<void> offer(String entry, List<String> accounts);
+
   /// Signs in by [method] and makes the account [name], or signs in again to it when [again].
   SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false});
 }
@@ -160,6 +166,18 @@ final class ControlAccountsHost implements AccountsHost {
   @override
   Future<void> remove(String name) async {
     await _call('accounts/remove', {'name': name});
+  }
+
+  @override
+  Future<List<AccountEntry>> entries() async {
+    final result = await _call('accounts/entries', const {});
+    final entries = result is Map ? result['entries'] : null;
+    return [if (entries is List) for (final each in entries) ?AccountEntry.parse(each)];
+  }
+
+  @override
+  Future<void> offer(String entry, List<String> accounts) async {
+    await _call('accounts/offer', {'entry': entry, 'accounts': accounts});
   }
 
   @override

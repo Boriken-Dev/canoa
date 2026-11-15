@@ -154,6 +154,33 @@ enum AccountStatus {
   unreadable,
 }
 
+/// An agent entry of the host that runs a provider with accounts, as the host lists it: what it offers a client is the host's to say,
+/// and a built-in source (Claude, Codex) is one before canoa.cfg names it.
+final class AccountEntry {
+  const AccountEntry({required this.name, required this.harness, this.accounts = const [], this.open = true});
+
+  /// One object of `accounts/entries`, or null when it is not one.
+  static AccountEntry? parse(Object? json) {
+    if (json is! Map) return null;
+    final [name, harness, accounts] = [json['name'], json['harness'], json['accounts']];
+    if (name is! String || harness is! String) return null;
+    return AccountEntry(
+      name: name,
+      harness: harness,
+      accounts: [if (accounts is List) for (final each in accounts) if (each is String) each],
+      open: json['open'] != false,
+    );
+  }
+
+  final String name, harness;
+
+  /// The accounts it offers, the first being the default.
+  final List<String> accounts;
+
+  /// Whether every paired key may use it.
+  final bool open;
+}
+
 /// One account of canoa.cfg's `[host.accounts]`, with what the host says of its credential.
 final class AccountInfo {
   const AccountInfo({

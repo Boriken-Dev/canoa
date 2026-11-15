@@ -89,6 +89,10 @@ final class FakeAccountsHost implements AccountsHost {
   final signIns = <SignIn>[];
   final inputsGiven = <Map<String, String>>[];
   final removed = <String>[];
+
+  /// The agent entries the host lists, and what it was asked to make each offer, in order.
+  final List<AccountEntry> hostEntries = [];
+  final offers = <(String, List<String>)>[];
   int cancelled = 0;
   String? removeRefusal;
 
@@ -97,6 +101,19 @@ final class FakeAccountsHost implements AccountsHost {
 
   @override
   Future<List<AccountInfo>> list() async => List.of(accounts);
+
+  @override
+  Future<List<AccountEntry>> entries() async => List.of(hostEntries);
+
+  @override
+  Future<void> offer(String entry, List<String> accounts) async {
+    offers.add((entry, List.of(accounts)));
+    final at = hostEntries.indexWhere((each) => each.name == entry);
+    if (at >= 0) {
+      final one = hostEntries[at];
+      hostEntries[at] = AccountEntry(name: one.name, harness: one.harness, accounts: List.of(accounts), open: one.open);
+    }
+  }
 
   @override
   Future<void> remove(String name) async {
