@@ -50,36 +50,36 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 # Reading overlays: the Agent Overlay Specification, one implementation shared with the other consumers. Not published yet.
 coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "5176974f30f664a4a9c382fdd467d4a1ab87765b" }
 # The stdio relay and the provider facade, on coqui-acp at one revision. Not published yet.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
-coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
+coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
 # Claude Code, Codex and Pi as ACP agents, run in this process with no Node: their translators and what they share.
-coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc", features = ["history"] }
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc", features = ["history"] }
+coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83", features = ["history"] }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83", features = ["history"] }
 # The session-history format: the recorder, the reader and the loss report.
-coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
+coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
 # The host side of secret prompts: the tools an agent is served and what the person is asked.
-coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
-coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc" }
-coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "4b7cf44ee1515156b1e14c1dcbc2a77d380177fc", features = ["antigravity", "kind"] }
+coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
+coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83", features = ["antigravity", "kind"] }
 # The revisions coqui-acp-bridge builds on at that commit, so the graph holds one of each.
-coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "916ca63524cbe6d994413a95da9c7c61c7302bce" }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5" }
 # Windows named pipes and Unix sockets, which a host entry may listen on; built on this tree's coqui-peer and coqui-builder.
-coqui-transport-pipe = { git = "https://github.com/Boriken-Dev/coqui-transport-pipe", rev = "1bf161f4d9349e9821d384859d3acdfb58aeae94" }
+coqui-transport-pipe = { git = "https://github.com/Boriken-Dev/coqui-transport-pipe", rev = "76d97671d87372be5d29263a98198a08fea5eaed" }
 # The `transport` kind: an entry may name a transport provider by id (built-in pipe and websocket, or one a library or source loads).
-coqui-transport-guatiao = { git = "https://github.com/Boriken-Dev/coqui-transport-guatiao", rev = "f09bf2dca4bba2555d4d97ee93f7b05a9a109702", features = ["pipe", "websocket"] }
+coqui-transport-guatiao = { git = "https://github.com/Boriken-Dev/coqui-transport-guatiao", rev = "7df18c14c1bffe752e6ddd98745545c598671a58", features = ["pipe", "websocket"] }
 coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681" }
 # The Noise method, for the example that plays the page's peer; the revision coqui-acp-bridge builds on.
 coqui-peer-noise = { git = "https://github.com/Boriken-Dev/coqui-peer-noise", rev = "3a5b30689780a6e6291af565ff6abbaae515973c", features = ["pin"] }
 # The error a listener's builder returns; the revision the transport crates build on.
 coqui-builder = { git = "https://github.com/Boriken-Dev/coqui-builder", rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad" }
-coqui-transport = { git = "https://github.com/Boriken-Dev/coqui-transport", rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a", default-features = false }
+coqui-transport = { git = "https://github.com/Boriken-Dev/coqui-transport", rev = "2601da58de9cac8f635060e4746864e9b238c6c5", default-features = false }
 # The WebSocket driver the host serves and dials with.
-coqui-transport-web = { git = "https://github.com/Boriken-Dev/coqui-transport-web", rev = "c8df84264ff8e60907f5cedf269104e91d5add22", default-features = false, features = ["websocket"] }
+coqui-transport-web = { git = "https://github.com/Boriken-Dev/coqui-transport-web", rev = "df5be67b3a18e23b2d0073eb0f795a49a4221c93", default-features = false, features = ["websocket"] }
 # A2A tasks on a link and in process: the host's delegation agent and its task store. On the revisions of coqui-agentic-peer and coqui-transport above.
-coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "0cacdb4aacd70f123f3711d787b254ae300aa9bb", default-features = false, features = ["tasks"] }
+coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "43050fc4d078fc0112e4b4a9e329ff028b91d32d", default-features = false, features = ["tasks"] }
 # Loading a provider library; the revision coqui-acp-provider's kinds are built on.
 guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", features = ["provider", "load"] }
 # A provider's settings, as JSON, made a Guatiao value: only the adapter, no text format.
