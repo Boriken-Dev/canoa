@@ -234,10 +234,13 @@ is enough alone, from anywhere.
 - **A valid credential is decided again.** Once a provider accepts it, the policy is asked once more with the account it named
   (its user id, name and groups) and the step passed. If that is enough, the session opens and records the steps; if it is not
   (a chain that needs more, or a rule for that account that does not allow the method), the answer, the count and the delay
-  are those of a wrong password, so nothing tells the two apart. A password retyped at `/portal/certificate` is a password
+  are those of a wrong password, so nothing tells the two apart. So is a policy that cannot decide at that point: it answers
+  as a refusal and the log says why. A password retyped at `/portal/certificate` is a password
   sent: the policy decides whether this connection may send one before anything is asked.
-- **A session is decided again when it is used.** `/canoa.json`, `/portal/pair` and each new channel decide with the steps the
-  session was opened with and the address the browser is at now. A session that is no longer enough ends (`401`; the app goes
+- **A session is decided again when it is used.** `/canoa.json`, `/portal/pair`, each new channel, `/portal/session` and
+  `/portal/certificate` decide with the steps the session was opened with, the account's groups now and the address the
+  browser is at now. When the directory cannot say which groups the account is in, that request answers `503` and the
+  session stands. A session that is no longer enough ends (`401`; the app goes
   back to the sign-in page): a password session carried out of 10.0.0.0/8 ends at its next use, and a laptop that moves from
   the office to elsewhere signs in again with its certificate. A certificate session stands wherever it is.
 - **The address** is the one the proxy reports: on `socket`, the last address in `client_address_header` that is not in
@@ -249,13 +252,20 @@ is enough alone, from anywhere.
   proxy_set_header X-Real-IP $remote_addr;      # with client_address_header = "x-real-ip"
   ```
 
-  When the header is missing, is not an address, or every address in it is a proxy of ours, the address is **unknown**: it
-  matches no network, and the policy is told so, never a placeholder. A proxy inside your network that drops the browser's
-  address therefore makes browsers look like nobody, not like they are inside.
+  When the header is missing, is not an address, or every address in it is in `trusted_proxies`, the address is **unknown**:
+  it matches no network, and the policy is told so, never a placeholder. Addresses are compared as the address they are
+  (`::ffff:10.0.0.1` is `10.0.0.1`). **List every proxy in front of the portal in `trusted_proxies`.** With HAProxy in front of
+  nginx, nginx puts the address it was connected from in the header, and that is HAProxy's own, inside your network, whenever
+  HAProxy did not add the browser's: unless HAProxy is listed, the portal takes it for the browser and every browser reads as
+  inside. Listed, a hop that carries no browser address reads as unknown, which is outside.
 - **A policy that cannot decide offers nothing.** The page, `/portal/methods` and the sign-in answer `503` and the log says
   why; the portal never falls back to allowing.
 - **A chain of more than one method** (`["password", "totp"]`) cannot be completed yet: the portal does not ask for a second
   step, so a sign-in by such a chain is refused like a wrong password. Keep chains of one method until it does.
+- **Providers are told apart by their id.** The policy names a provider by the id its `authenticators` entry has, so two
+  entries with the same id cannot be told apart: the first is asked, and naming the id never reaches the second.
+- The log says which policy is in force when the portal starts: `sign-in policy: 2 rules`, the provider's id, or `none: every
+  method from anywhere`.
 
 ## The person's host: `canoa serve --portal`
 
