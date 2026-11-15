@@ -90,6 +90,7 @@ import 'sources/sources.dart';
 import 'loadout/loadout_page.dart';
 import 'loadout/registry_fetch.dart';
 import 'store/programs.dart';
+import 'store/store_index.dart';
 import 'welcome/welcome_view.dart';
 import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
@@ -547,6 +548,7 @@ class _CanoaAppState extends State<CanoaApp> {
     programs: _programs,
     fetchRegistry: kIsWeb ? null : fetchRegistry,
     findProgram: findProgram,
+    index: ControlStoreIndex.over(_control)?.catalogs,
   );
 
   /// Saves what Loadout changed. The host reads the profile again when each session starts, so nothing is restarted and no open

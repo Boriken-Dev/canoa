@@ -13,6 +13,7 @@ import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../store/store.dart';
 import '../store/store_icon.dart';
+import '../store/store_index.dart';
 import 'overlay_options.dart';
 import '../store/overlay_page.dart' show OverlayPage, SaveConfig, oneLine, shownTags;
 import 'loadout_controller.dart';
@@ -35,6 +36,7 @@ class LoadoutPage extends StatefulWidget {
     this.findProgram,
     this.registry = officialRegistry,
     this.embedded = false,
+    this.index,
   });
 
   /// Whether the page is a section of the shell, which never pops: what it changes is saved as it is changed.
@@ -57,6 +59,9 @@ class LoadoutPage extends StatefulWidget {
   final FindProgram? findProgram;
   final String registry;
 
+  /// The host's catalog index; none where the app has no host, which leaves the catalogs empty.
+  final CatalogIndex? index;
+
   @override
   State<LoadoutPage> createState() => LoadoutPageState();
 }
@@ -70,6 +75,7 @@ class LoadoutPageState extends State<LoadoutPage> with SingleTickerProviderState
     registry: widget.registry,
     fetch: widget.fetchRegistry,
     findProgram: widget.findProgram,
+    index: widget.index,
   )..addListener(_changed);
   late final TabController tabs = TabController(length: 3, vsync: this);
 
@@ -110,7 +116,7 @@ class LoadoutPageState extends State<LoadoutPage> with SingleTickerProviderState
             IconButton(
               key: const Key('loadout-refresh'),
               tooltip: 'Fetch the catalogs again',
-              onPressed: controller.busy != null || widget.home == null ? null : controller.load,
+              onPressed: controller.busy != null || widget.home == null || widget.index == null ? null : () => controller.load(again: true),
               icon: const Icon(Icons.refresh),
             ),
             if (widget.programs case final programs?)
@@ -649,7 +655,8 @@ Future<CanoaConfig?> showLoadout(BuildContext context, {
   RegistryFetch? fetchRegistry,
   FindProgram? findProgram,
   String registry = officialRegistry,
+  CatalogIndex? index,
 }) => Navigator.of(context).push<CanoaConfig>(selectablePage(
   builder: (_) => LoadoutPage(config: config, home: home, onSave: onSave, agents: agents, programs: programs,
-      fetchRegistry: fetchRegistry, findProgram: findProgram, registry: registry),
+      fetchRegistry: fetchRegistry, findProgram: findProgram, registry: registry, index: index),
 ));

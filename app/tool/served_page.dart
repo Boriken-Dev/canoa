@@ -11,12 +11,11 @@ import 'package:canoa/acp/browser_connect.dart';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/auth/browser_peer.dart';
-import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/profile/report.dart';
 import 'package:canoa/served/served_app.dart';
 import 'package:canoa/store/store.dart';
-import 'package:canoa/store/store_settings.dart';
+import 'package:canoa/store/store_index.dart';
 
 Future<VerifiedAgent> _connect(ServedApp app, String entry, {Map<String, Object?> meta = const {}}) {
   final listed = app.host.entries.firstWhere((each) => each.name == entry);
@@ -94,11 +93,10 @@ Future<String> _first(String options) async {
     // The overlay: previewed from a local catalog, installed by the host, selected in canoa.cfg, and given to the next session.
     report['at'] = 'config';
     var current = (await app.loadConfig())!;
-    final catalogs = CanoaConfig.parse('[catalogs]\nteam = ${jsonEncode(asked['catalog'])}\n');
-    final listing = StoreListing([
-      for (final MapEntry(key: label, value: source) in catalogs.catalogs.entries)
-        await loadCatalog(app.overlays, label, source, const StoreSettings()),
-    ]);
+    // The host lists the catalogs canoa.cfg names, so the catalog is written there first.
+    current = current.withCatalog('team', asked['catalog']! as String);
+    await app.configStore.save(current);
+    final listing = StoreListing(await ControlStoreIndex.over(app.control)!.catalogs());
     report['at'] = 'catalog';
     report['catalogs'] = [for (final loaded in listing.catalogs) {'label': loaded.label, 'problem': loaded.problem, 'entries': loaded.catalog?.entries.keys.toList()}];
     final entry = listing.choose('team/${asked['overlay']}').entry;

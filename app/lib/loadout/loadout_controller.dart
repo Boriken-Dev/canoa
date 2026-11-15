@@ -19,6 +19,7 @@ import '../profile/skill_copies.dart';
 import '../store/overlay_page.dart' show SaveConfig;
 import '../store/skills.dart';
 import '../store/store.dart';
+import '../store/store_index.dart';
 import 'mcp_registry.dart';
 
 /// A program's absolute path as the machine's PATH finds it, or null.
@@ -69,10 +70,14 @@ class LoadoutController extends ChangeNotifier {
     this.registry = officialRegistry,
     this.fetch,
     this.findProgram,
+    this.index,
   }) : _config = config;
 
   final ProfileHome? home;
   final SaveConfig save;
+
+  /// The host's catalog index, which every catalog the store lists is read from; none where the app has no host.
+  final CatalogIndex? index;
 
   /// The agents the app offers, which an MCP server is allowed or turned off for.
   final List<String> agents;
@@ -119,15 +124,21 @@ class LoadoutController extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 
-  /// Reads everything the page shows: the catalogs, the skills here and each overlay's layer.
-  Future<void> load() async {
+  /// Reads everything the page shows: the catalogs from the host's index, the skills here and each overlay's layer.
+  /// [again] makes the host ask its sources before answering.
+  Future<void> load({bool again = false}) async {
     final home = this.home;
-    if (home == null) return;
+    final index = this.index;
+    if (home == null || index == null) return;
     loadingCatalogs = true;
     notifyListeners();
-    final found = <LoadedCatalog>[];
-    for (final MapEntry(key: name, value: from) in config.catalogs.entries) {
-      found.add(await loadCatalog(home.overlays, name, from, config.store));
+    var found = const <LoadedCatalog>[];
+    try {
+      found = await index(refresh: again);
+      problem = null;
+    } on Object catch (error) {
+      // The host not being there, or refusing, leaves the catalogs empty and says why; it never takes the page down.
+      problem = 'The catalogs could not be read: $error';
     }
     loaded = found;
     listing = StoreListing(found);

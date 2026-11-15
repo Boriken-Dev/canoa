@@ -5,6 +5,7 @@ import 'package:canoa/store/links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 
 void main() {
@@ -43,6 +44,7 @@ about = { summary = "Docs.", homepage = "https://example.org/docs", repository =
       home: LoadoutPage(
         config: CanoaConfig.parse('[catalogs]\nteam = "$repo@main#catalog.toml"\n'),
         home: MemoryHome(overlays),
+        index: standInIndex(overlays, () => CanoaConfig.parse('[catalogs]\nteam = "$repo@main#catalog.toml"\n')),
         onSave: (changed) async => changed,
       ),
     ));

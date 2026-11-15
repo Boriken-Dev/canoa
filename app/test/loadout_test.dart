@@ -11,6 +11,7 @@ import 'package:canoa/loadout/mcp_registry.dart' show RegistryRefusal;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 import 'mcp_registry_test.dart' show npmServer, page;
 import 'skills_from_source_test.dart' show pdfFiles, pinOf, skillsHost;
@@ -78,6 +79,7 @@ void main() {
       home: LoadoutPage(
         config: config,
         home: MemoryHome(overlays),
+        index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last),
         agents: agents,
         onSave: (changed) async {
           saved.add(changed);

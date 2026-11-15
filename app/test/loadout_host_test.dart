@@ -9,11 +9,13 @@ import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/report.dart';
 import 'package:canoa/store/store.dart';
+import 'package:canoa/store/store_index.dart';
 import 'package:canoa_native/canoa_native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -58,7 +60,8 @@ void main() {
 
       // Install it the way Loadout does: the catalog read, the overlay fetched and shown, then installed on a yes.
       final home = IoProfileHome(config.path);
-      final loaded = await loadCatalog(home.overlays, 'main', base.catalogs['main']!, base.store);
+      // The catalogs come from the host's own index, the way Loadout reads them; the app fetches none.
+      final loaded = (await ControlStoreIndex.over(HostControl(host))!.catalogs()).single;
       expect(loaded.problem, isNull);
       final entry = StoreListing([loaded]).entries.single.entry;
       final shown = await previewOverlay(home.overlays, installName(entry), installSource(entry), os: home.os, shared: const {},

@@ -33,6 +33,7 @@ import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart' show loadCatalog;
 import 'fixtures/examples.dart';
 import 'fixtures/store_fixtures.dart';
 import 'fixtures/web_peer_bridge.dart';

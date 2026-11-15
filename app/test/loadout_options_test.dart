@@ -9,6 +9,7 @@ import 'package:canoa/loadout/loadout_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 
 const catalogRepo = 'https://example.invalid/catalog.git';
@@ -73,12 +74,14 @@ void main() {
         await tester.binding.setSurfaceSize(Size(size.width, 3000));
         addTearDown(() => tester.binding.setSurfaceSize(null));
         var current = CanoaConfig.parse(withCatalog);
+        final overlays = world();
         await tester.pumpWidget(MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
           home: LoadoutPage(
             config: current,
-            home: MemoryHome(world()),
+            home: MemoryHome(overlays),
+            index: standInIndex(overlays, () => current),
             agents: const ['Claude', 'Codex'],
             onSave: (changed) async {
               saved.add(changed);

@@ -11,6 +11,7 @@ import 'package:canoa/loadout/loadout_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 import 'loadout_test.dart' show registryAnswer, world, withCatalog;
 
@@ -31,6 +32,7 @@ void main() {
           home: LoadoutPage(
             config: CanoaConfig.parse(text),
             home: MemoryHome(overlays),
+            index: standInIndex(overlays, () => CanoaConfig.parse(text)),
             agents: const ['Claude', 'Codex'],
             onSave: (changed) async => changed,
             fetchRegistry: (uri) async => registryAnswer,

@@ -25,6 +25,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 
 const skillsHost = 'https://skills.example.test';
@@ -375,6 +376,7 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
         home: LoadoutPage(
           config: CanoaConfig.parse('[catalogs]\nmain = "https://example.invalid/catalog.git@main#catalog.toml"\n'),
           home: MemoryHome(overlays),
+          index: standInIndex(overlays, () => CanoaConfig.parse('[catalogs]\nmain = "https://example.invalid/catalog.git@main#catalog.toml"\n')),
           onSave: (changed) async => changed,
         ),
       ));

@@ -25,6 +25,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 
 const reviewManifest = '''
@@ -517,7 +518,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: ThemeData(brightness: Brightness.dark),
-        home: LoadoutPage(config: config, home: MemoryHome(overlays), onSave: (changed) async {
+        home: LoadoutPage(config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
           saved.add(changed);
           return changed;
         }),
@@ -672,7 +673,7 @@ path = "s\u202Eh.sh"
       final byHand = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
           '[overlays]\ndocs-tools = "$teamRepo@main#overlays/docs-tools"\n');
       await tester.pumpWidget(MaterialApp(
-        home: LoadoutPage(config: byHand, home: MemoryHome(overlays), onSave: (changed) async => changed),
+        home: LoadoutPage(config: byHand, home: MemoryHome(overlays), index: standInIndex(overlays, () => byHand), onSave: (changed) async => changed),
       ));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('overlays-discover')));
