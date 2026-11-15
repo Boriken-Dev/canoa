@@ -656,3 +656,37 @@ fn each_host_mints_its_own_secret_and_keeps_it_for_its_life() {
     assert_ne!(*first, [0_u8; 32]);
     assert_ne!(*first, *b.link_secret().expect("b"));
 }
+
+#[test]
+fn the_host_asks_a_paired_key_a_form_of_its_own_and_asks_no_other() {
+    for method in [Method::WebCrypto, Method::Noise] {
+        let dir = Dir::new("asks");
+        let host = Identity::generate(method).expect("a key");
+        let store = Arc::new(TrustStore::open(&dir.0).expect("a trust store"));
+        let paired = Identity::generate(method).expect("a key");
+        store
+            .accept_key(&paired.key_material())
+            .expect("the client is paired");
+        let hub = Hub::new(
+            &host,
+            &store,
+            BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+        );
+        let asker = hub
+            .asker_for(&paired.peer_id().to_string())
+            .expect("a paired key is asked");
+        let schema = r#"{"type":"object","properties":{"api_key":{"type":"string","writeOnly":true}},"required":["api_key"]}"#;
+        let (params, _) = asker.ask("Anthropic API key", schema).expect("a form");
+        assert!(params.get("recipient").is_some(), "{method:?}: {params}");
+        let stranger = Identity::generate(method).expect("a key");
+        assert!(
+            hub.asker_for(&stranger.peer_id().to_string()).is_none(),
+            "{method:?}: a key the trust store does not hold"
+        );
+        assert!(
+            hub.asker_for(&host.peer_id().to_string()).is_none(),
+            "{method:?}: the host's own key"
+        );
+        assert!(hub.asker_for("not a peer").is_none());
+    }
+}

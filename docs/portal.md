@@ -467,6 +467,9 @@ token is in the page: the cookie is `HttpOnly`, and `fetch` and the WebSocket se
 - A person's host is started once, however many requests come together, and given `start_seconds` to answer.
 - Kerberos tickets for the person's processes are not provided by the portal.
 - The control channel can change a person's own canoa.cfg sections and uploads; it is the person's own account that does it.
+- The same browser key holds `store.programs` and `accounts`: from the app the person installs, updates and removes agent
+  programs in their own programs folder and signs in to providers, with the sign-in's typed answers sealed to the browser's
+  key. Both run code as that person, which is what their sign-in already allows; neither reaches another person's host.
 - The portal opens no PAM session, so nothing makes a home directory: it must exist before the person's first sign-in.
 
 ## Before turning it on
