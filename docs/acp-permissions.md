@@ -13,7 +13,7 @@ The browser extension may make its own decision to present a prompt, select an o
 5. On session cancellation, respond `{ "outcome": { "outcome": "cancelled" } }`. When denying by policy, select an offered reject option if there is one; otherwise cancel.
 6. The agent remains responsible for its own runtime enforcement and any agent-side remembered permissions. In ACP v2, an agent owns the remembered scope of `allow_always` or `reject_always`. Canoa's browser-side preferences are independent.
 
-Canoa's `acp-permissions.js` implements request-option validation and response construction. The approval UI and transport-side request handling are **not implemented** yet.
+Canoa's `acp-permissions.js` implements request-option validation and response construction. The chat's approval UI and the remembered-rule store (`app/lib/permissions/`) answer an agent's request with one of the options it offered.
 
 Do not treat permission text supplied by the agent as a trustworthy authorization rule. Unknown future option kinds must be displayed generically and never turned into an automatic allow by guessing their semantics.
 

@@ -15,7 +15,7 @@
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-> **Status: early development.** The Rust core has an in-memory registry and deny-by-default policies. The Flutter app is a multi-session chat: the desktop app hosts and runs agents (Claude, Codex, Pi, any ACP agent) itself, and the web app and extension connect to a host over a verified ACP v2 link; the Chromium extension has a side-panel scaffold, local browser tool handlers, permission tests and site-adapter validation. **Pairing, `canoa serve` and the desktop app's hosting work and are tested; see the [roadmap](docs/roadmap.md) for what is not yet available.** No packages have been released.
+> **Status: early development.** The Rust crates are a deny-by-default registry (`canoa`), the host that serves agents to paired keys (`canoa-host`, the `canoa` program), that host as a library behind a C ABI (`canoa-ffi`) and the Windows portable launcher (`canoa-launch`). The Flutter app is a multi-session chat: the desktop app hosts and runs agents (Claude, Codex, Pi, any ACP agent) itself, and the web app and extension connect to a host over a verified ACP link; the Chromium extension offers permission-gated browser tools to agents over that link and validates site-adapter manifests (running an adapter is planned). **Pairing, `canoa serve` and the desktop app's hosting work and are tested; see the [roadmap](docs/roadmap.md) for what is not yet available.** No packages have been released.
 
 ## Features and direction
 
@@ -25,14 +25,18 @@
 - **Bidirectional MCP:** agents can request approved DOM/browser tools and website-provided WebMCP; webpages can advertise MCP endpoints.
 - **Developer debugging:** explicit elevated Chromium CDP mode; Firefox and Safari require separate adapters.
 - **User site adapters:** attach JavaScript or Wasm tools to one or several exact website origins; manifest validation is implemented, runtime sandbox remains planned.
-- **Multi-session:** one workspace for multiple ACP sessions, with v2 create/resume/prompt and streamed transcript handling available after verified peer integration.
+- **Multi-session:** one workspace for multiple ACP sessions, with v1 and v2 create/resume/prompt and streamed transcript handling over a verified peer link.
 
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
-| `crates/canoa-host/` | `canoa-host`: the `canoa` program, which serves the agents and providers canoa.cfg names to paired keys, on loopback |
+| `crates/canoa-host/` | `canoa-host`: the `canoa` program, which serves the agents and providers canoa.cfg names to paired keys (loopback by default, or a pipe or socket), the web app, and `canoa portal` |
+| `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI |
+| `crates/canoa-launch/` | The portable `CanoaUI.exe` launcher and `canoa-pack` |
+| `app/native/` | The app's own plugin: builds `canoa-ffi` with the desktop runner |
+| `tools/` | Offline dependency mirroring |
 | `app/web_noise/` | `coqui-peer-noise` as WebAssembly for the web app's Noise method, built by `app/tool/build_noise.py` |
 | `app/` | Canonical Flutter chat, canoa.cfg settings and desktop tray UI |
 | `crates/canoa-host/examples/` | Test fixtures, built by `cargo build -p canoa-host --examples`: `stdio_agent` is an ACP agent to serve with `canoa serve` |

@@ -12,7 +12,7 @@ Review date: 2026-10-31. This is product research, not a claim that Canoa implem
 | Multi-tab work | Yes | Yes | Peer/session-scoped tab access and optional agent tab groups |
 | Developer troubleshooting | Full CDP in elevated developer mode | Browser debugger, DOM/console/network inspections, Claude Code integration | Explicit per-peer/session full-debug mode; CDP on Chromium |
 | Permission presets | Once/site/all-site, blocked-site list; separate history approval | Manual/automatic/skip; site grants and protected actions | Manual, site-scoped and trusted full-control modes with separate capabilities |
-| Desktop/web continuity | Side chat and desktop conversations are shared | Side panel and Claude client workflows | One Flutter multi-session state model; persistence and transport pending |
+| Desktop/web continuity | Side chat and desktop conversations are shared | Side panel and Claude client workflows | One Flutter multi-session state model; sessions are kept across runs |
 | Agent-agnostic ACP/peer compatibility | Not a public standard interface | Not a public standard interface | Required: independently implemented ACP WS/WSS + peer-auth profile |
 | Third-party site adapters | No corresponding user-script MCP feature established in reviewed docs | Recorded workflows available in some modes | User-installable JS/Wasm MCP tools for designated sites |
 

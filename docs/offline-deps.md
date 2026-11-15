@@ -2,7 +2,7 @@
 
 The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) keeps a pub/ and a cdn/ cache. Refreshing uses the [GitHub Actions workflow](https://github.com/Boriken-Dev/canoa/actions/workflows/deps.yml), which fetches resolved Dart hosted packages and versioned, SHA256-verified Unicode fallback fonts. CanvasKit stays local by using --no-web-resources-cdn.
 
-The initial branch is only a scaffold. A cache is ready when manifest.json reports status complete. The Flutter SDK, engine, native toolchains and deployment rewrites for font fallbacks are separate requirements.
+A cache is ready when manifest.json reports status complete. The Flutter SDK, engine, native toolchains and deployment rewrites for font fallbacks are separate requirements.
 
 The mirror carries only what compilation needs: each hosted package without its `test`, `tests`, `example`, `examples`, `benchmark`, `benchmarks`, `doc`, `docs` and `.github` directories, and without any remaining file a malware or archive scanner would refuse (archives, executables, key files, pack files, opaque data). `manifest.json` records what was dropped. Git dependencies, such as `coqui-acp` and `coqui-web`, are not mirrored (a bare clone is pack files): the manifest lists each one's URL and pinned revision from `app/pubspec.lock`, and pub fetches them from GitHub, so resolving them needs the network. Hosted packages resolve offline: create a git worktree for deps, point PUB_CACHE at its pub directory and run flutter pub get --offline. Never mirror tokens or private registry credentials.
 

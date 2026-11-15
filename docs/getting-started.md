@@ -2,11 +2,11 @@
 
 ## Requirements
 
-- Rust 1.89 or later to build the core.
+- Rust 1.89 or later to build the crates.
 - Node.js 22 or later to run Chromium extension policy tests.
 - Flutter SDK with Dart 3.9 or newer for the standalone application.
 
-## Rust core
+## Rust crates
 
 ```sh
 git clone https://github.com/Boriken-Dev/canoa.git
@@ -15,7 +15,7 @@ cargo test --workspace --all-features
 cargo doc --workspace --no-deps --all-features
 ```
 
-The Rust crate currently implements only an in-memory registry and explicit grants, not network identity verification.
+The workspace holds `canoa` (the registry of services and client grants), `canoa-host` (the `canoa` program: it serves agents to paired keys, the web app, and `canoa portal`), `canoa-ffi` (the host as a library behind a C ABI) and `canoa-launch` (the portable Windows launcher). Peer identity, pairing and transport come from the coqui crates the host builds on. `cargo build -p canoa-host --bin canoa` makes the program; see [the host](host.md).
 
 ## Desktop app
 
@@ -25,6 +25,7 @@ The desktop app is the whole product on one machine: it carries the host as a li
 python app/tool/build.py desktop          # builds, then prints the path of CanoaUI (CanoaUI.exe on Windows)
 python app/tool/build.py desktop --run    # runs it with flutter run instead
 python app/tool/build.py desktop --debug  # a debug build; --platform windows|linux|macos names the platform (default: this machine's)
+python app/tool/build.py desktop --portable   # one file: CanoaUI.exe on Windows, an AppImage on Linux; see [one file per platform](portable.md)
 ```
 
 The first run generates the platform's runner (`flutter create`) in `app/`, names the executable `CanoaUI` and, on Windows, gives it Canoa's icon; none of that is committed. `app/pubspec.lock` is put back if Flutter rewrites it. Closing the window leaves Canoa in the tray; see [the desktop section of the app's README](https://github.com/Boriken-Dev/canoa/blob/main/app/README.md#desktop-tray-and-canoacfg) and [the host](host.md#in-the-desktop-app) for hosting and pairing.
@@ -57,7 +58,7 @@ python app/tool/build.py chromium
 (cd bindings/browser/chromium && npm test)
 ```
 
-Load `bindings/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`; it does not yet connect a live ACP or MCP server. The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
+Load `bindings/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`. The extension connects the chat to a host over a proven link and offers an agent the browser's tools once a person grants them; see [browser integration](browser.md). The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
 
 See [browser integration](browser.md).
 

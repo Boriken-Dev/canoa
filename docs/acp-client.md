@@ -1,6 +1,6 @@
 # ACP v2 Flutter session controller
 
-The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and an explicit pinned-key connection dialog, using the experimental WebCrypto method from coqui-peer. The default PWA and extension chat start on a welcome page, and a new session with no agent source to run it is an offline preview. A remote connection works only when the agent endpoint implements the same method and ACP v2. There is no production pairing workflow or complete agent backend yet; see the [roadmap](roadmap.md).
+The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and an explicit pinned-key connection dialog, using the experimental WebCrypto method from coqui-peer. The default PWA and extension chat start on a welcome page. A remote connection works only when the agent endpoint implements the same method and speaks ACP v2 or v1. A person pairs a key on the host (`canoa accept`, the desktop app's Hosting section, or a PIN) and `canoa` serves the agents; see [the host](host.md) and the [roadmap](roadmap.md).
 
 ## Components
 
@@ -29,7 +29,7 @@ Every `sessionUpdate` kind in the v2 schema has a place on screen. A `plan_updat
 
 A verified transport must be produced by a callback that **cryptographically proves the expected peer identity** and answers with a channel tied to that proof, since a plain channel after a proof belongs to whoever carries it. A claimed `peerId` string, TLS hostname, or an unverified server hello is never sufficient. The ordinary ACP tests inject a fake verifier for protocol testing only. The browser method is now sourced from [coqui-peer](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto), bundled unchanged with a source-blob hash test, and driven via a transport-level staged message queue.
 
-Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The native Rust responder and JavaScript↔Rust handshake tests now live in coqui-peer, with Coqui TrustStore-based acceptance and revocation. `canoa serve` with the `stdio_agent` example exercises a real socket, Coqui proof and v2 session messages. Missing production work is agent-host pairing UI, persistent keys/sessions, production agent adapters and real remote MCP tools. The echo fixture does not execute or represent an AI agent.
+Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The native Rust responder and JavaScript↔Rust handshake tests now live in coqui-peer, with Coqui TrustStore-based acceptance and revocation. `canoa serve` with the `stdio_agent` example exercises a real socket, Coqui proof and v2 session messages. The echo fixture does not execute or represent an AI agent.
 
 The client negotiates: it requests v2 and accepts v1, whichever the agent selects.
 

@@ -38,7 +38,7 @@ Do not send long-lived tokens in URL query strings; they can leak through logs. 
 
 Implementations may discover endpoints through DNS-SD or manual pairing. Discovery is not a trust proof.
 
-A web page reaches a person's agents through [ACP in the browser](https://boriken-dev.github.io/coqui-acp/browser/), a draft contract in coqui-acp that any provider can implement. Canoa's extension is one implementation of it, added by hand so far: discovery needs a native companion that is not built.
+A web page reaches a person's agents through [ACP in the browser](https://boriken-dev.github.io/coqui-acp/browser/), a draft contract in coqui-acp that any provider can implement. Canoa's extension is one implementation of it, discovery goes through the native companion of `coqui-acp-bridge`, and an endpoint can also be entered by hand.
 
 ## Conformance tests (planned)
 

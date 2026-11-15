@@ -42,7 +42,7 @@ Plain WS is fine where the link is sealed in-band, as Canoa's paired Noise or We
 | Native Flutter/Dart VM | Native backend pending; try fallback | Supported via web_socket_channel |
 | Chrome/Edge side panel | Same Flutter web transport selection | Same WebSocket fallback |
 
-The transport classes are in [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web), on the channel contract of [coqui-transport](https://github.com/Boriken-Dev/coqui-transport), including typed pre-auth fallback failures, testable dialers, and endpoint validation. A browser WebTransport endpoint must have an explicit port. The transport endpoints must share a host. A pinned certificate or protocol failure never silently downgrades to WebSocket. They establish a message channel **only**; an authenticated live ACP chat is not yet exposed until the versioned peer-authentication profile is implemented.
+The transport classes are in [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web), on the channel contract of [coqui-transport](https://github.com/Boriken-Dev/coqui-transport), including typed pre-auth fallback failures, testable dialers, and endpoint validation. A browser WebTransport endpoint must have an explicit port. The transport endpoints must share a host. A pinned certificate or protocol failure never silently downgrades to WebSocket. They establish a message channel **only**; the chat exposes an ACP session once the peer-authentication profile has proved the pinned peer on that channel. A host entry on this machine may instead listen on a Windows named pipe or a Unix socket (`pipe:NAME`, `unix:PATH`), which carries the same proof and ACP without a network address.
 
 ## References
 
