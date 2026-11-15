@@ -12,6 +12,8 @@ import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
+import 'extension/local_host.dart';
+import 'extension/local_host_banner.dart';
 import 'extension/site_sessions.dart';
 import 'extension/tab_bridge.dart' show TabBridge;
 import 'extension/tab_shares.dart' show TabShares;
@@ -100,6 +102,17 @@ String? _parentFolder(String? file) {
   return cut <= 0 ? null : text.substring(0, cut);
 }
 
+/// This desktop's own host. Let the browser extension reach this app too: the app registers itself as the extension's native
+/// messaging host, so the extension's Start button starts the app.
+HostSupervisor _desktopSupervisor(CanoaConfig config, List<String> args) {
+  final tool = findHostTool();
+  return HostSupervisor(
+    tool,
+    off: !config.localHost || args.contains('--no-local-host'),
+    browserLaunch: browserLaunch(tool),
+  );
+}
+
 Future<void> main(List<String> args) async {
   // The executable's own entry takes this before Flutter starts; reaching here means a runner built without it, which must
   // not answer a host's own command by opening another window.
@@ -117,7 +130,7 @@ Future<void> main(List<String> args) async {
   final config = hostCfg ?? await loadConfig();
   final shell = createDesktopShell();
   final host = served?.supervisor ??
-      (shell.isDesktop ? HostSupervisor(findHostTool(), off: !config.localHost || args.contains('--no-local-host')) : null);
+      (shell.isDesktop ? _desktopSupervisor(config, args) : null);
   // The host starts first: it keeps the session list, which it answers once it is up.
   final hosting = host?.apply(configPath: desktopConfigPath());
   // In the host's home on a desktop that runs one or on the host that served the page, else beside canoa.cfg, or in this
@@ -170,7 +183,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.browserProvider, this.gitReader, this.accountsHost, this.served,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served,
   });
 
   /// The host that served this page, when one did: where its sources, session list, folders, uploads, canoa.cfg and overlays are,
@@ -187,6 +200,10 @@ class CanoaApp extends StatefulWidget {
   /// The extension's tabs and the browser's provider of agents, by default the platform's; a test gives its own.
   @visibleForTesting
   final TabBridge? tabBridge;
+
+  /// The extension's bridge to the Canoa on this computer, by default the platform's; a test gives its own.
+  @visibleForTesting
+  final LocalHostBridge? localHost;
   @visibleForTesting
   final Future<AcpPage?>? browserProvider;
 
@@ -535,6 +552,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// The tabs the extension's panel shares with a session; null outside the extension.
   TabsComposerExtension? _tabs;
+  LocalHostBridge? _localHost;
 
   Future<AcpPage?> get _provider => widget.browserProvider ?? findAcp(timeout: const Duration(milliseconds: 300));
 
@@ -1427,6 +1445,7 @@ class _CanoaAppState extends State<CanoaApp> {
       });
     }
     unawaited(_claimContext());
+    _localHost = widget.localHost ?? platformLocalHostBridge();
     final bridge = widget.tabBridge;
     _tabs = bridge == null ? TabsComposerExtension.platform(store) : TabsComposerExtension(TabShares(bridge), store: store);
     _contextTimer = Timer.periodic(
@@ -1570,6 +1589,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onHosting: widget.host == null || widget.served != null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           conversation: _conversation,
+          localHost: _localHost,
           kit: _kit,
           renderers: widget.renderers,
           welcome: _withSite(WelcomeView(
@@ -1586,8 +1606,11 @@ class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
     this.onHosting, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
-    this.renderers = chat.ChatRenderers.none, required this.welcome,
+    this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost,
   });
+
+  /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
+  final LocalHostBridge? localHost;
 
   final SessionStore store;
   final Widget welcome;
@@ -1712,22 +1735,29 @@ class _CanoaHome extends StatelessWidget {
             ? Drawer(child: SafeArea(child: _rail(context)))
             : null,
         body: SafeArea(
-          child: Row(
+          child: Column(
             children: [
-              if (!narrow)
-                SizedBox(
-                  width: context.look.railWidth,
-                  child: _rail(context),
-                ),
+              if (localHost case final bridge?) LocalHostBanner(bridge: bridge),
               Expanded(
-                child: _Conversation(
-                  key: ValueKey(store.selectedId ?? 'empty'),
-                  store: store,
-                  narrow: narrow,
-                  handle: conversation,
-                  kit: kit,
-                  renderers: renderers,
-                  welcome: welcome,
+                child: Row(
+                  children: [
+                    if (!narrow)
+                      SizedBox(
+                        width: context.look.railWidth,
+                        child: _rail(context),
+                      ),
+                    Expanded(
+                      child: _Conversation(
+                        key: ValueKey(store.selectedId ?? 'empty'),
+                        store: store,
+                        narrow: narrow,
+                        handle: conversation,
+                        kit: kit,
+                        renderers: renderers,
+                        welcome: welcome,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

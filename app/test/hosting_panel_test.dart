@@ -203,6 +203,24 @@ void main() {
     expect(find.text('Paired:'), findsOneWidget);
   });
 
+  testWidgets('a PIN for the browser extension says where to type it and gives no address to dial', (tester) async {
+    final host = _Harness();
+    await host.show(tester);
+    await tester.tap(find.text('Pair the browser extension'));
+    await tester.pump();
+    expect(host.tool.started.single, ['pair', '--native', '--until-stdin-closes']);
+    host.tool.children.single.out.add('{"pin":"482913","peer":"sha256:host","method":"noise","native":true}');
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('482913'), findsOneWidget);
+    expect(find.text('Type it in the Canoa extension, in your browser'), findsOneWidget);
+    expect(find.textContaining('Dial '), findsNothing);
+    host.tool.children.single.out.add('{"paired":"$_paired"}');
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Paired:'), findsOneWidget);
+  });
+
   testWidgets('closing the dialog ends a PIN still showing', (tester) async {
     final host = _Harness();
     await host.show(tester);

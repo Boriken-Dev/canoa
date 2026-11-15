@@ -156,6 +156,9 @@ abstract interface class HostTool {
 /// web build has none.
 HostTool? findHostTool() => platform.findHostTool();
 
+/// What the browser extension's Start button runs for [tool]: this app, when the host is the library it carries; null otherwise.
+String? browserLaunch(HostTool? tool) => platform.browserLaunch(tool);
+
 /// A port on loopback that nothing listens on at this moment.
 Future<int> freeLoopbackPort() => platform.freeLoopbackPort();
 

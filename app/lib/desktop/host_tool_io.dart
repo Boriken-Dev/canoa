@@ -345,3 +345,7 @@ final class _Child implements HostChild {
   @override
   void kill() => _process.kill(ProcessSignal.sigkill);
 }
+
+/// What the browser extension's Start button runs: this app, when the host is the library it carries. A host named by `CANOA_HOST`
+/// is a program for tests, which no browser is told about.
+String? browserLaunch(HostTool? tool) => tool is LibraryHostTool ? Platform.resolvedExecutable : null;

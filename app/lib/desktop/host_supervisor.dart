@@ -47,7 +47,11 @@ final class HostCommandFailed implements Exception {
 
 /// `pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
 final class HostPairing {
-  HostPairing._(this._child, this.pin, this.hostId, this.method, this.url, this.paired);
+  HostPairing._(this._child, this.pin, this.hostId, this.method, this.url, this.paired, {this.native = false});
+
+  /// Whether this is the browser extension's pairing, which has no address to dial: the extension reaches it through its
+  /// native messaging host.
+  final bool native;
 
   final HostChild _child;
   final String pin;
@@ -100,7 +104,8 @@ final class HostPairing {
         throw const HostCommandFailed('canoa did not show a PIN');
       },
     );
-    final [pin, hostId, url] = [first['pin'], first['peer'], first['url']];
+    final native = first['native'] == true;
+    final [pin, hostId, url] = [first['pin'], first['peer'], native ? '' : first['url']];
     if (pin is! String || hostId is! String || url is! String) {
       child.kill();
       throw const HostCommandFailed('canoa showed no PIN');
@@ -108,7 +113,7 @@ final class HostPairing {
     // Nobody may be waiting on it when it is cancelled.
     unawaited(paired.future.then((_) {}, onError: (Object _) {}));
     final method = first['method'];
-    return HostPairing._(child, pin, hostId, method is String ? method : null, url, paired.future);
+    return HostPairing._(child, pin, hostId, method is String ? method : null, url, paired.future, native: native);
   }
 
   /// Ends the pairing; the PIN can no longer be used.
@@ -121,6 +126,7 @@ class HostSupervisor extends ChangeNotifier {
   HostSupervisor(
     this.tool, {
     this.off = false,
+    this.browserLaunch,
     this.firstPause = const Duration(seconds: 1),
     this.longestPause = const Duration(minutes: 1),
     this.steady = const Duration(seconds: 30),
@@ -133,6 +139,11 @@ class HostSupervisor extends ChangeNotifier {
 
   /// Whether the person left the host off: it never starts, though keys can still be managed.
   final bool off;
+
+  /// The program the browser extension's Start button runs, when this app should let the extension use it: the app registers
+  /// itself as the extension's native messaging host, once, when it first applies canoa.cfg. Null registers nothing.
+  final String? browserLaunch;
+  bool _registered = false;
 
   /// The pause after the first unplanned end, doubled for each one after, up to [longestPause].
   final Duration firstPause, longestPause;
@@ -194,6 +205,7 @@ class HostSupervisor extends ChangeNotifier {
   /// every change.
   Future<void> apply({required String? configPath}) async {
     _configPath = configPath;
+    unawaited(_registerForBrowser());
     await _end();
     _restarts = 0;
     _problem = null;
@@ -387,6 +399,27 @@ class HostSupervisor extends ChangeNotifier {
     if (tool == null) return 'this build carries no host';
     final checked = await tool.run(['check', '--config', configPath]);
     return checked.exitCode == 0 ? null : _said(checked);
+  }
+
+  /// Lets the browser extension find this app: the native messaging host is this program, and Start runs [browserLaunch]. A
+  /// computer with no Chrome, Chromium or Edge profile says so and nothing else is affected.
+  Future<void> _registerForBrowser() async {
+    final launch = browserLaunch;
+    final tool = this.tool;
+    if (launch == null || tool == null || _registered) return;
+    _registered = true;
+    try {
+      await tool.run(['native', 'install', '--launch', launch]);
+    } on Object {
+      // Not a reason to stop hosting.
+    }
+  }
+
+  /// Shows a PIN the browser extension on this computer pairs with, through its native messaging host.
+  Future<HostPairing> pairBrowser() async {
+    final tool = this.tool;
+    if (tool == null) throw const HostCommandFailed('this build carries no host');
+    return HostPairing._start(await tool.start(['pair', '--native', '--until-stdin-closes']));
   }
 
   /// Shows a PIN a native client pairs with. One wrong try ends it.

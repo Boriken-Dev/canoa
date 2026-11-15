@@ -304,6 +304,37 @@ void main() {
     await expectLater(cancelled.paired, throwsA(isA<HostCommandFailed>()));
   });
 
+  test('pairing a browser shows the PIN of the extension door, with no address to dial', () async {
+    final tool = FakeTool();
+    final supervisor = HostSupervisor(tool);
+    final starting = supervisor.pairBrowser();
+    await Future<void>.delayed(Duration.zero);
+    expect(tool.started.single, ['pair', '--native', '--until-stdin-closes']);
+    tool.children.single.out.add('{"pin":"123456","peer":"sha256:host","method":"noise","native":true}');
+    final pairing = await starting;
+    expect((pairing.pin, pairing.hostId, pairing.method, pairing.native), ('123456', 'sha256:host', 'noise', true));
+    tool.children.single.out.add('{"paired":"sha256:browser"}');
+    expect(await pairing.paired, 'sha256:browser');
+  });
+
+  test('the app registers its launch for the browser extension once, and a browser that is not there does not stop the host', () async {
+    final tool = FakeTool()..answer = (args) => args.first == 'native' ? const HostOutput(1, '', 'canoa: no Chrome, Chromium or Edge profile for this user') : const HostOutput(0, '', '');
+    final supervisor = HostSupervisor(tool, browserLaunch: '/app/CanoaUI');
+    await supervisor.apply(configPath: '/c/canoa.cfg');
+    await supervisor.apply(configPath: '/c/canoa.cfg');
+    expect(tool.ran.where((args) => args.first == 'native').toList(), [
+      ['native', 'install', '--launch', '/app/CanoaUI'],
+    ], reason: 'once, whatever the number of applies');
+    expect(tool.started, hasLength(2), reason: 'the host started both times');
+    expect(supervisor.problem, isNull);
+  });
+
+  test("a build that names no launch registers nothing", () async {
+    final tool = FakeTool();
+    await HostSupervisor(tool).apply(configPath: '/c/canoa.cfg');
+    expect(tool.ran, isEmpty);
+  });
+
   test("a host whose exit comes before its last words is reported in those words", () {
     fakeAsync((async) {
       final tool = FakeTool();

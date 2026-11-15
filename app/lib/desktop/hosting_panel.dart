@@ -141,11 +141,11 @@ class _HostingPanelState extends State<HostingPanel> {
     }
   }
 
-  Future<void> _showPin() async {
+  Future<void> _showPin({bool browser = false}) async {
     HostPairing? started;
     await _run(() async {
       pairing?.cancel();
-      started = await widget.supervisor.pair();
+      started = browser ? await widget.supervisor.pairBrowser() : await widget.supervisor.pair();
     });
     final running = started;
     if (running == null) return;
@@ -230,7 +230,7 @@ class _HostingPanelState extends State<HostingPanel> {
               ),
             ],
           ),
-          const Text('A browser pairs by connecting once: its key then waits here until you pair it.'),
+          const Text('A browser page pairs by connecting once: its key then waits here until you pair it.'),
           FutureBuilder<List<HostKey>>(
             future: keys,
             builder: (context, snapshot) {
@@ -246,7 +246,7 @@ class _HostingPanelState extends State<HostingPanel> {
           const Divider(height: 32),
           Text('Pair a program by PIN', style: text.titleSmall),
           const Text(
-            'For a program with a key of its own, such as coqui-acp-bridge pair-dial. A browser cannot pair by PIN.',
+            'For a program with a key of its own, or the Canoa browser extension on this computer, which you give the PIN. A web page cannot pair by PIN.',
           ),
           const SizedBox(height: 8),
           _pinPanel(text),
@@ -337,7 +337,7 @@ class _HostingPanelState extends State<HostingPanel> {
             running.pin,
             style: text.displaySmall?.copyWith(fontFamily: CanoaLook.monospaceFont, letterSpacing: 6),
           ),
-          SelectableText('Dial ${running.url}', style: text.bodySmall),
+          SelectableText(running.native ? 'Type it in the Canoa extension, in your browser' : 'Dial ${running.url}', style: text.bodySmall),
           const SizedBox(height: 4),
           const Text('The other side shows this host as:'),
           Row(
@@ -362,10 +362,21 @@ class _HostingPanelState extends State<HostingPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (paired != null) ...[const Text('Paired:'), _Id(paired!), const SizedBox(height: 8)],
-        OutlinedButton.icon(
-          onPressed: busy || widget.supervisor.tool == null ? null : _showPin,
-          icon: const Icon(Icons.pin_outlined),
-          label: const Text('Show a PIN'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: busy || widget.supervisor.tool == null ? null : _showPin,
+              icon: const Icon(Icons.pin_outlined),
+              label: const Text('Show a PIN'),
+            ),
+            OutlinedButton.icon(
+              onPressed: busy || widget.supervisor.tool == null ? null : () => _showPin(browser: true),
+              icon: const Icon(Icons.extension_outlined),
+              label: const Text('Pair the browser extension'),
+            ),
+          ],
         ),
       ],
     );
