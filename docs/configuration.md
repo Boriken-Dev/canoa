@@ -233,6 +233,10 @@ harness does not take is listed as not supported, with why: Gemini CLI, Pi, Open
 from their own directories when they start. What the dialog says is what Canoa expects; the conversation says what the
 agent itself advertised.
 
+Antigravity (`agy acp`) takes skills like Codex: it reads `.agents/skills` inside each directory a session gives it as
+`additionalDirectories`, so the skills go there. An Antigravity that does not advertise `additionalDirectories` is listed as
+not supported, with that reason.
+
 Skills and context are read once, when the session is prepared: an overlay's from the bytes its tree digest covered, never
 from its files again; a project's only inside its directory once links are resolved, and a skill directory holding a link
 is refused. Skills are written into a new directory under the system's temporary directory, private to you, removed when
