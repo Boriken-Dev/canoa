@@ -158,7 +158,7 @@ pub const fn Listen::address(&self) -> Option<SocketAddr>    // None for a pipe
 #[non_exhaustive] pub struct Entry { pub name: String, pub kind: EntryKind, pub listen: Listen, pub working_roots: Vec<PathBuf>, pub worktrees: bool, pub peers: Option<Vec<PeerId>>, pub max_peers: usize, pub title: Option<String>, pub local: bool }   // local: served over Local only, no address; only the host's own sources are
 #[non_exhaustive] pub enum EntryKind { Agent { program: OsString, args: Vec<OsString>, profiles: Vec<String>, usage: Option<UsageSource> }, Harness { harness: String, origin: Option<Origin>, executable: Option<OsString>, options: HarnessOptions, settings: Option<Settings>, profiles: Vec<String>, accounts: Vec<String> }, Provider { origin: Origin, provider: String, settings: Option<Settings>, directory: PathBuf, max_sessions: usize }, Tool { spec: ToolSpec } }
 #[non_exhaustive] pub struct AccountConfig { pub harness: String, pub kind: String, pub id: String, pub settings: Option<Settings> }   // Clone, Eq: one [host.accounts.NAME]
-#[non_exhaustive] pub struct StoreConfig { pub protected: Option<Vec<String>>, pub credential_variables: Option<Vec<String>> }   // Default, Clone, Eq: `[host.store]`; None is the recommended list
+#[non_exhaustive] pub struct StoreConfig { pub protected: Option<Vec<String>>, pub credential_variables: Option<Vec<String>>, pub index_ttl: Option<u64>, pub index_cache_bytes: Option<u64> }   // Default, Clone, Eq: `[host.store]`; None is the recommended list, or for the index its default
 #[non_exhaustive] pub enum AccountStore { Os, File }   // Copy, Default (Os), Eq: `[host] account_store`
 pub const CACHE_META: &str = "dev.boriken.canoa/cache_lifetime";   // the `_meta` key of `initialize`: {"lifetime": "default"|"short"|"long", "chosen"?: bool}; `chosen` (true when absent) says the person chose it for this session and it beats the entry's `cache_lifetime`; false is the client's default for its kind of session, which the entry's setting replaces; no key leaves the entry's, else the provider's default; any other value turns the client away (-32602)
 pub const SITE_META: &str = "dev.boriken.canoa/site";   // the `_meta` key of a webpage's `session/new`, `session/load` and `session/resume`, in the request ({"site": "<host name>"}) and in the answer to `session/new` ({"site", "id", "folder"}); see "A webpage's session folder"
@@ -189,7 +189,7 @@ pub const SETTING_SOURCES: &[&str];    // user, project, local
 pub const APPROVAL_POLICIES: &[&str];  // untrusted, on-failure, on-request, never
 pub const SANDBOXES: &[&str];          // read-only, workspace-write, danger-full-access
 ```
-- `[host.store]`: `protected` and `credential_variables`, each a string with a pattern a line or an array of such strings, in gitignore syntax (a leading `!` allows what an earlier line protected, the last matching line wins, `#` comments, `~/` the home, a drive or `/` the root, otherwise anywhere, a folder's pattern covers what is under it, names compare whatever their case). Absent, the recommended list applies (`store::protect::RECOMMENDED_PLACES`, `RECOMMENDED_VARIABLES`); a list written replaces it, an empty one protects nothing. `protected` is the places a program store's declared change may not be at, under or hold (`~/.ssh`, `~/.config/autostart`, ...) and the shared folders it may enter only by a place of its own (`~/.config` then `!~/.config/*`); `credential_variables` is the variable names an install is never given and a launch never sets (`*TOKEN`, `*_API_KEY`, `SSH_AUTH_SOCK`, ...). It is `[host.store]` and not `[permissions] protected` because the question differs: a state folder `~/.name` is a program's own place here, and the app's `.*` would protect it. Any other key is refused by name. `Options::from_config` applies both.
+- `[host.store]`: `protected` and `credential_variables`, each a string with a pattern a line or an array of such strings, in gitignore syntax (a leading `!` allows what an earlier line protected, the last matching line wins, `#` comments, `~/` the home, a drive or `/` the root, otherwise anywhere, a folder's pattern covers what is under it, names compare whatever their case). Absent, the recommended list applies (`store::protect::RECOMMENDED_PLACES`, `RECOMMENDED_VARIABLES`); a list written replaces it, an empty one protects nothing. `protected` is the places a program store's declared change may not be at, under or hold (`~/.ssh`, `~/.config/autostart`, ...) and the shared folders it may enter only by a place of its own (`~/.config` then `!~/.config/*`); `credential_variables` is the variable names an install is never given and a launch never sets (`*TOKEN`, `*_API_KEY`, `SSH_AUTH_SOCK`, ...). It is `[host.store]` and not `[permissions] protected` because the question differs: a state folder `~/.name` is a program's own place here, and the app's `.*` would protect it. `index_ttl` (seconds, default 300; 0 asks on every request) and `index_cache_bytes` (default 64 MiB) are the catalog index's ("The catalog index" below). Any other key is refused by name. `Options::from_config` applies the lists.
 - `[host.accounts.NAME]`: a name as an entry's, with `harness`, `kind` and `id` (1 to 128 bytes, no control character, another account's refused) required and `settings` optional. Any other key is refused by name (`api_key is not a key of an account`), never quoting its value: **a credential never goes in canoa.cfg**. `[host] account_store` is `os` or `file`. An agent entry's `accounts` names accounts the file holds, none twice; with `program` it is refused. When `serve` starts, each account an entry offers is checked against the provider's catalog: its harness is the entry's, its kind is listed, its `settings` fit the kind's schema (a key the kind marks as a credential is refused as one, naming the key) and an endpoint setting is an `https` address or an `http` one to this machine.
 - `[host.profiles.NAME]`: a name as an entry's; `overlays` valid AOS overlay names; `allow_mcp` and `allow_hooks` values `sha256:` and 64 lower-case hex digits (`allow_hooks` keys valid overlay names); the rest `Profile::from_table` as `LayerKind::User`, its relative paths from the file's directory. An agent's `profiles` must name profiles the file holds, each once. Errors say `profile NAME:` and a setting, never a value.
 - `[skill_pins]` (top level, read whether or not there is a `[host]`): each key a skill name (a letter or digit, then letters, digits, `_`, `.`, `-`; no device name), each value `sha256:` and 64 hex digits; two keys equal without regard to ASCII case, or anything else, refuse the file with `[skill_pins]` and what is wrong. Kept by lower-case name in `Config::skill_pins` and in each `HostProfile::skill_pins`.
@@ -600,6 +600,7 @@ max_uploads = 256                                   # files one key may keep upl
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove`, `worktree/diff` |
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
+| `overlay.read` / `store.programs` | `store/index`: the first reads the catalog entries, the second the program entries; a key holding either gets that half, none is refused; `refresh` also needs `overlay.write` |
 | `folders` | `fs/list` |
 | `config.read` | `config/get` |
 | `config.write` | `config/set` of the preference sections |
@@ -773,6 +774,27 @@ The params and results are the JSON of `canoa::store`'s models:
   `store/remove` need `store.programs` (the owner holds every grant): there is no `store.write` grant and `[host.control]` refuses the name, since an install
   runs code as the user. A store that is not one of the host's is `-32003`; a plan or install the host refuses `-32002`.
 - The overlay store's git half is `overlay/*` and `catalog/*` (see "Overlays for a page" above).
+
+**The catalog index** (`store/index`, `store::index`) lists every `[catalogs]` source of the host's canoa.cfg and every program store as
+one normalized list, so a client reads cards from one call and not one fetch an entry. `store/index` `{"refresh"?: bool, "icons"?: bool}`
+-> `{"schema": 1, "sources": [...], "entries": [...]}`. A source is `{"id": "catalog:LABEL" | "programs", "kind", "label"?, "spec"?,
+"commit"?, "checked" (ms), "stale", "refreshing", "name"?, "description"?, "problem"?, "entries"}`; an entry is `{"id", "kind": "overlay" |
+"skill" | "program", "catalog", "name", "summary", "source", "version", "tags", "requirements", "pin", "icon", "contents": {"skills",
+"hooks", "env_scripts", "mcp_servers"} | null, "problem"?}` plus `homepage`, `repository`, `license` and `authors` where the catalog
+says them (a program entry also carries `program`, `provider` and `channels`). The sources are canoa.cfg's, never a key's: a key names
+none, so the host fetches only places its owner chose. `contents` and `requirements` are read from the manifest of an entry that lives in
+the catalog's own repository; one elsewhere is the catalog's claim only. Nothing runs: no hook, setup or install.
+
+- Kept as `<home>/cache/store/s1-catalog-LABEL/<commit>/index.json` (and `icons/`), written beside and renamed; the `s1` is the form's
+  version, the label a valid overlay name, and only the newest commit of a source stays. A different `spec` for a label is another source.
+  A host without a state folder keeps the index in memory.
+- **Fresh** (checked less than `index_ttl` seconds ago): answered with no process started. **Stale**: answered at once, `stale: true`, and
+  refreshed on a thread (one per source): `git ls-remote` for the ref, and a fetch only when it moved. `refresh: true`, or a source with
+  no index yet, waits for that. A source that fails keeps its last index with `stale: true` and `problem`, and is tried again no sooner
+  than `index_ttl` later. An entry the catalog refused or whose manifest does not read is a card with `problem`; the others are listed.
+- `icons: true` adds the icon's bytes (`icon.data`, base64) for entries whose icon file passed AOS's checks and fit `index_cache_bytes`.
+- Programs come from `store/list`: no network, no cache.
+- Not indexed yet: `[loadout] registries` (MCP registries).
 
 ## Worktrees
 
