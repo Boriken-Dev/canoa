@@ -39,7 +39,7 @@ void main() {
       expect(find.descendant(of: find.byKey(const Key('child-c1')), matching: find.text('Failed')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('child-c1')), matching: find.byIcon(Icons.error_outline)), findsOneWidget);
       expect(find.text('the source would not start'), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const Key('child-c0')), matching: find.text('Done')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('child-c0')), matching: find.text('Completed')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('child-c0')), matching: find.text('20s')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('child-c2')), matching: find.text('Working')), findsOneWidget);
     });
@@ -50,7 +50,7 @@ void main() {
       for (final id in ['c0', 'c1', 'c2', 'c3']) {
         await scene.end(id, 'COMPLETED', at: 40);
       }
-      expect(find.text('all done'), findsOneWidget);
+      expect(find.text('4 done'), findsOneWidget);
       expect(find.text('40s'), findsOneWidget);
       scene.now = scene.now.add(const Duration(minutes: 5));
       await tester.pump(const Duration(seconds: 2));
@@ -115,7 +115,7 @@ void main() {
       expect(scene.host.sentOf(delegateStopMethod).single['params'], {'sessionId': 's1'});
       expect([for (final task in scene.session.tasks.all) task.phase], everyElement(TaskPhase.canceled));
       expect(find.byKey(const Key('delegation-waiting')), findsNothing);
-      expect(find.text('4 stopped'), findsOneWidget);
+      expect(find.text('4 cancelled'), findsOneWidget);
       expect(scene.host.sentOf('session/cancel'), isEmpty, reason: 'the turn itself goes on');
     });
 
@@ -212,7 +212,7 @@ void main() {
       final rows = lineage(scene.session);
       expect([for (final row in rows) row.title], childTitles);
       expect([for (final row in rows) row.provider], ['claude', 'codex', 'codex', 'grok']);
-      expect([for (final row in rows) row.word], ['Done', 'Working', 'Working', 'Failed']);
+      expect([for (final row in rows) row.word], ['Completed', 'Working', 'Working', 'Failed']);
       expect(rows[0].elapsedAt(scene.now), const Duration(seconds: 20));
       expect(rows[1].elapsedAt(scene.now), const Duration(seconds: 25));
       expect(rows.where((row) => row.live), hasLength(2), reason: 'Lineage · 2 running');
@@ -237,13 +237,13 @@ void main() {
       await scene.nativeChildren('subagents');
       expect(find.byKey(const Key('delegation-row')), findsOneWidget);
       expect(find.text('2 subagents'), findsOneWidget);
-      expect(find.text('all done'), findsOneWidget);
+      expect(find.text('2 done'), findsOneWidget);
       await tester.tap(find.byKey(const Key('delegation-toggle')));
       await tester.pump();
       expect(find.text('Alpha count'), findsOneWidget);
       expect(find.text('Beta count'), findsOneWidget);
       final rows = lineage(scene.session);
-      expect([for (final row in rows) row.word], ['Done', 'Done']);
+      expect([for (final row in rows) row.word], ['Completed', 'Completed']);
       expect(rows.every((row) => row.native && row.provider == scene.session.agent.toLowerCase()), isTrue);
     });
 

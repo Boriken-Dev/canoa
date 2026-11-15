@@ -5,6 +5,7 @@ import 'dart:io' show Directory;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/delegate_host.dart' show taskEvent, taskNotice;
 import 'fixtures/delegation_scene.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
@@ -16,6 +17,17 @@ Map<String, Object?> _said(String text) => {
     'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': text}},
   },
 };
+
+/// Opens the Subagents surface in the bottom panel.
+Future<void> _openSurface(WidgetTester tester) async {
+  final bottom = find.byKey(const ValueKey('layout-bottom'));
+  await tester.tap(bottom);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.tap(find.byKey(const ValueKey('launch subagents')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
 
 void main() {
   setUpAll(() {
@@ -85,6 +97,42 @@ void main() {
       scene.store.openChild(scene.session, 'c1');
       await tester.pump();
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/child_thread_$label.png'));
+    });
+
+    // A phone reaches the surface through Details and the panel's add menu.
+    if (label == 'desktop') testWidgets('the Subagents surface lists the lineage nested, with a child that asks and one that finished', (tester) async {
+      final scene = await openScene(tester, size: size);
+      await scene.turn();
+      await scene.fourChildren();
+      await scene.say(taskNotice('n0', taskEvent('n0', 'WORKING', title: 'Share link API tests', source: 'codex', at: sceneAt(5))));
+      await scene.say(childUpdate('c0', {
+        'sessionUpdate': 'tool_call', 'toolCallId': 'nest', 'title': 'canoa-delegate: delegate_task', 'kind': 'other', 'status': 'completed',
+        'content': [
+          {'type': 'content', 'content': {'type': 'text', 'text': '{"taskId":"n0","state":"working"}'}},
+        ],
+      }));
+      await scene.end('c3', 'COMPLETED', at: 21);
+      scene.host.ask(10, 'Edit src/share.ts', task: 'c1');
+      await scene.settle();
+      await _openSurface(tester);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/subagents_surface_$label.png'));
+    });
+
+    // A phone reaches the surface through Details and the panel's add menu.
+    if (label == 'desktop') testWidgets('a child read in the Subagents surface, with the tools it used and the way back', (tester) async {
+      final scene = await openScene(tester, size: size);
+      await scene.fourChildren();
+      await scene.say(childUpdate('c1', {
+        'sessionUpdate': 'agent_message_chunk',
+        'content': {'type': 'text', 'text': 'Reading the router before I add the endpoint.'},
+      }));
+      await scene.say(childUpdate('c1', {'sessionUpdate': 'tool_call', 'toolCallId': 'k1', 'title': 'Read src/router.ts', 'kind': 'read', 'status': 'completed'}));
+      await scene.say(childUpdate('c1', {'sessionUpdate': 'tool_call', 'toolCallId': 'k2', 'title': 'Edit src/share.ts', 'kind': 'edit', 'status': 'in_progress'}));
+      await _openSurface(tester);
+      await tester.tap(find.byKey(const Key('subagent-c1')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/subagents_surface_thread_$label.png'));
     });
   }
 }

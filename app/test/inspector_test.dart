@@ -376,7 +376,7 @@ void main() {
       await scene.end('c0', 'COMPLETED', at: 18);
       await scene.end('c1', 'FAILED', at: 21, note: 'No login for it.');
       expect(find.text('Lineage · 2 running'), findsOneWidget);
-      expect(inRow('c0', 'Done'), findsOneWidget);
+      expect(inRow('c0', 'Completed'), findsOneWidget);
       expect(inRow('c1', 'Failed'), findsOneWidget);
       expect(inRow('c0', '18s'), findsOneWidget);
     });
