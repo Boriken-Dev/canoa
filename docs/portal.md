@@ -12,12 +12,14 @@ browser ──HTTPS──> proxy ──HTTP over a Unix socket──> canoa port
 
 ## What the portal does
 
-- **Signs people in** with the operating system's accounts, through coqui-access's `system` provider: PAM checks the password
-  under a service of its own and NSS says who the account is, so accounts from SSSD or LDAP are there too. A name that does
-  not match `[A-Za-z_][A-Za-z0-9._-]{0,31}` is refused before anything is asked, and so are root and any account below
-  `min_uid`. **Name the groups** that may sign in (`groups`): with none, every account on the machine that has a password can
-  ask for a host, and a host is a process that runs as that account.
-- **Limits failed sign-ins** before PAM is asked, in one step that also counts the try, so tries made together cannot all pass.
+- **Signs people in** through an ordered list of coqui-access authenticators (`authenticators`, see [Signing in](#signing-in)).
+  By default that is the operating system's accounts alone, through the `system` provider: PAM checks the password under a
+  service of its own and NSS says who the account is, so accounts from SSSD or LDAP are there too. Whatever method signs
+  someone in, it ends at an account of the operating system, and that account must pass the same checks: a name that does not
+  match `[A-Za-z_][A-Za-z0-9._-]{0,31}` is refused before anything is asked, and so are root and any account below `min_uid`.
+  **Name the groups** that may sign in (`groups`): with none, every account on the machine that has a password can ask for a
+  host, and a host is a process that runs as that account. A method adds a way in, never a person.
+- **Limits failed sign-ins** before any provider is asked, for every method, in one step that also counts the try, so tries made together cannot all pass.
   An address (an IPv6 one by its /64) may fail `max_failures_per_pair` times for one account and `max_failures_per_address`
   times in all inside `failure_window_seconds`; past either, the try is refused with 429. An account that has failed more than
   `slow_after_user_failures` times from anywhere makes each further try wait `slow_seconds` longer, but is never shut out. A
@@ -51,6 +53,115 @@ The limits keep one browser from guessing quickly. They do not keep an account f
 many addresses add up in the directory's own count. Size `max_failures_per_pair`, `slow_after_user_failures` and the window below
 the directory's lockout threshold and observation window (on a domain, read them from its password policy before turning the
 portal on), and watch the log for sign-ins refused for their failures.
+
+## Signing in
+
+`authenticators` lists the providers, in order. Each is a coqui-access provider and the configuration it is built from, checked
+against the provider's own schema when the portal starts:
+
+```toml
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_password", library = "/opt/canoa/libcoqui_access_password_plugin.so",
+    config = { source = { file = { path = "/var/lib/canoa-portal/passwords.toml", format = "toml" } } } },
+  { provider = "coqui_access_mtls", library = "/opt/canoa/libcoqui_access_mtls_plugin.so", enrol = true,
+    config = { trust = "pinned", source = { file = { path = "/var/lib/canoa-portal/certificates.toml", format = "toml" } } } },
+]
+```
+
+- `coqui_access_system` is built in. For the keys it leaves out (`pam_service`, `min_uid`, `groups`) it takes the portal's own
+  settings, so the default list, `[{ provider = "coqui_access_system" }]`, signs in as the portal always has.
+- Any other provider is a Guatiao library, named by `library` (an absolute path; the portal's account must be able to read
+  it). The portal runs its code: only name libraries you built or checked. The providers of
+  [coqui-access](https://github.com/Boriken-Dev/coqui-access) are `coqui-access-password-plugin`, `coqui-access-mtls-plugin`
+  and the others there; build them with `cargo build --release -p coqui-access-mtls-plugin`.
+- Each credential goes to the providers that take it, in list order. A name and a password go to those that take a password:
+  a provider that answers `Unknown` passes the credential on, one that answers `Invalid` ends the try (so put a provider that
+  should override the system's passwords before it). A client certificate goes to those that take a request. A provider that
+  takes bearer keys (`coqui_access_key`) is left out with a note in the log: a key is not a sign-in for the page.
+- A provider answers with who the credential belongs to. The portal then asks the operating system's directory for that
+  account under `min_uid` and `groups`; a name no operating-system account has, or an account outside the groups, is refused
+  like a wrong password. A password file or a certificate table can therefore name an operating-system account and nothing else.
+- The throttle and the failure floor above apply to every method, and a wrong password, an unknown account and an account the
+  portal does not admit all read the same.
+
+`GET /portal/methods` (no cookie needed) answers `{"methods": ["password", "certificate"]}`: the ways in this portal accepts
+for this connection. The certificate method is listed only on the proxy's socket. The sign-in page is built from the same list:
+a password form, and a **Sign in with your certificate** button when the certificate method is on, each with its own error. A
+`429` carries `Retry-After` and the page counts it down and holds the buttons; the page's one script, `/portal/login.js`, does
+only that, and the page's policy allows scripts and styles from the portal itself and nothing inline. A single function in
+the portal decides whether a method is allowed for a request, given the client's address and the method; today it allows every
+method.
+
+### Signing in by certificate
+
+The browser's certificate reaches the portal only in a header the proxy sets, and only on the proxy's socket: `certificate_header`
+(default `x-client-cert`) carries it as base64 of the DER, leaf first, several certificates separated by commas, and a request
+with the header twice, a header over 16 KiB, bad base64 or more than eight certificates is refused. The portal hands the chain to
+the providers that take a request as a transport would after verifying the key, and the **provider** decides whether to trust
+it: `coqui_access_mtls` pins certificates by their SHA-256 fingerprint (`trust = "pinned"`), accepts those a CA signed
+(`"ca"`, which needs the chain, so the proxy must forward the intermediates) or either (`"pinned-or-ca"`). Then the account is
+looked up as for a password.
+
+`coqui_access_proxy` is not a certificate sign-in here: it trusts whatever the proxy forwarded and checks no CA, which is right
+behind a proxy that verified the certificate and wrong behind one that does not.
+
+**Enrolling a certificate.** With `enrol = true` on the certificate provider, a person who signed in **by password** and whose
+request carries a certificate that is pinned to no one is taken to `/portal/certificate`, which shows the certificate's subject
+and SHA-256 fingerprint and **Use this certificate to sign in**. Confirming pins the fingerprint to their account in the
+provider's own store (its account kind), under the portal's state directory, never in the person's home; after that the
+certificate alone signs them in. The same page shows whether a certificate is pinned to the account and **Remove it**. The rules:
+
+- Pinning needs a session opened by a password at most `enrol_seconds` ago (default 600). A session a certificate opened can
+  remove a pin and never add one.
+- A certificate pinned to another account cannot be enrolled.
+- An account has one pinned certificate: enrolling another replaces it, which is how a renewed card is re-enrolled. A key is
+  pinned only through the certificate's fingerprint (`coqui_access_mtls` offers no public-key pin), so a renewed certificate
+  with the same key has to be enrolled again.
+- Every unknown fingerprint a certificate sign-in presents is also written to the provider's waiting list (a file beside the
+  table, bounded by the provider's own limits), which an administrator can read and accept; unwanted entries do not sign
+  anyone in.
+- Pin only what the person confirmed on the page: the subject is whatever the certificate's maker wrote.
+
+**What the proxies must do** for the certificate method, when an HAProxy terminates the public TLS and nginx on the
+portal's machine forwards to the portal's socket:
+
+1. HAProxy **asks** for a client certificate and does not judge it. On the `bind` line of the frontend for the portal's name:
+   `ssl crt PUBLIC.pem ca-file ANY-CA.pem verify optional ca-ignore-err all crt-ignore-err all`. `ca-file` must exist for
+   `verify optional` to be accepted; its contents decide nothing here, since the portal pins certificates itself. HAProxy still
+   makes the browser prove it holds the certificate's key during the handshake, which is what the portal relies on. A browser
+   with no certificate connects normally and signs in by password.
+2. HAProxy sets the header on the forwarded request, and first removes any the browser sent:
+
+   ```text
+   http-request del-header X-Client-Cert
+   http-request set-header X-Client-Cert %[ssl_c_der,base64] if { ssl_c_used }
+   ```
+
+   `ssl_c_der` is the leaf only, as DER, and `base64` writes it on one line: that is the portal's encoding (`DER, base64,
+   leaf first`). No CA is named anywhere in HAProxy's decision; pinned trust therefore needs nothing else of it.
+3. nginx passes the header to the portal only from HAProxy, and drops it from anyone else, in the `http` context (a `conf.d`
+   file) and the portal's `location`:
+
+   ```nginx
+   map $realip_remote_addr $canoa_client_cert {
+       192.0.2.1  $http_x_client_cert;   # HAProxy
+       default    "";
+   }
+   # in the location that proxies to the portal:
+   proxy_set_header X-Client-Cert $canoa_client_cert;   # an empty value is not sent at all
+   ```
+
+   `$realip_remote_addr` is the address the connection came from before `set_real_ip_from 192.0.2.1; real_ip_header
+   X-Forwarded-For;` replaced `$remote_addr`, so a browser that reaches nginx directly cannot name itself HAProxy. A certificate
+   is about 1 to 3 KiB of base64; nginx's default header buffers (4 of 8 KiB) hold it.
+4. In the portal's settings, `certificate_header` is the same name (lower case in the file), `trusted_proxies` is as before, and
+   the certificate provider has `enrol = true` and `trust = "pinned"` (add `ca` only when the chain is forwarded). The portal's
+   unit gets `StateDirectory=canoa-portal`, since `ProtectSystem=strict` leaves nothing else writable, and the table lives there
+   (`/var/lib/canoa-portal`). Build the plugin library from coqui-access and install it where `library` says.
+
+The portal believes the header only because it arrived on `socket`. Anything that can write to that socket (the proxy's group)
+can sign in as anyone whose certificate is pinned, by sending the header itself.
 
 ## The person's host: `canoa serve --portal`
 
@@ -91,6 +202,9 @@ pam_service = "canoa"
 min_uid = 1000                         # the lowest user id that may sign in; root never may
 groups = ["canoa-users"]               # the groups an account must be in: name them
 hosts = ["canoa.example"]              # Host names a request may carry, besides localhost and addresses
+authenticators = [{ provider = "coqui_access_system" }]   # see "Signing in"
+certificate_header = "x-client-cert"   # where the proxy puts the browser's certificate (base64 DER)
+enrol_seconds = 600                    # how long after a password sign-in a certificate may be pinned
 trusted_proxies = []                   # proxies of ours that may appear in X-Forwarded-For before the browser's address
 client_address_header = "x-forwarded-for"
 session_seconds = 28800
@@ -277,7 +391,9 @@ server {
 
 | Request | Answer |
 | --- | --- |
-| `GET /portal/login`, `POST /portal/login` (`user`, `password` as a form) | the sign-in form; a right password is `303 /` with the cookie, a wrong one `401`, too many failures `429` |
+| `GET /portal/login`, `POST /portal/login` (`method` = `password` with `user` and `password`, or `certificate`, as a form) | the sign-in page; a right credential is `303 /` with the cookie (`303 /portal/certificate` for a password sign-in that carries a certificate to enrol), a wrong one `401`, a method this connection does not offer `400`, too many failures `429` |
+| `GET /portal/methods` | the ways in this connection may use, as JSON; no cookie |
+| `GET /portal/certificate`, `POST /portal/certificate` (`action` = `enrol` or `remove`) | the certificate the browser offers and the one pinned to the account; pin or remove (signed in) |
 | `POST /portal/logout` | ends the session and every channel it holds |
 | `GET /canoa.json` | the person's host: `peer`, `method`, `os`, `user` and each entry with a `url` through the portal (`/portal/ws/entry/NAME`, `/portal/ws/control`), starting the host if it is not running |
 | `GET /portal/ws/entry/NAME`, `GET /portal/ws/control` | a WebSocket to that entry or the control channel of the person's own host |
