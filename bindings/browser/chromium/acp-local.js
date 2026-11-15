@@ -40,10 +40,11 @@ export function readHello(reply) {
     version: clean(reply.version, 32),
     entries,
     control: reply.control === true,
-    // Where a session starts when the person chose no folder: a claim like the rest, which the host's own scope bounds.
-    home: typeof reply.home === "string" && reply.home !== "" ? clean(reply.home, 512) : null,
   };
 }
+
+/** The site the extension's own pages are to the host: its sessions work in a scratch folder the host makes for it. */
+export const LOCAL_SITE = "canoa-extension";
 
 const NOT_FOUND = /not found/i;
 const FORBIDDEN = /forbidden/i;
@@ -155,7 +156,7 @@ export function viewOf(state, pinned) {
     state: state.state,
     forbidden: state.forbidden === true,
     why: state.why,
-    host: host === undefined ? undefined : { name: host.name, version: host.version, peer: host.peer, method: host.method, entries: host.entries, control: host.control, home: host.home },
+    host: host === undefined ? undefined : { name: host.name, version: host.version, peer: host.peer, method: host.method, entries: host.entries, control: host.control },
     paired,
     // A key paired with another Canoa than the one that answers: nothing is trusted until the person pairs again.
     changed: host !== undefined && pinned !== null && pinned !== undefined && pinned.peer !== host.peer,
@@ -187,7 +188,9 @@ export function localGrants(origin, state, pinned) {
     origin,
     agent: agent.key,
     lifetime: "always",
-    cwd: view.host.home,
+    // The host makes the folder, as it does for a site (the gateway names the site); this is only what the scope needs to see.
+    cwd: "/",
+    site: LOCAL_SITE,
     permissions: true,
     mcpOrigins: [],
     sessions: [],

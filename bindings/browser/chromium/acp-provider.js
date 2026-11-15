@@ -97,7 +97,7 @@ const store = {
     if (origin !== OWN_ORIGIN) return held;
     // Canoa's own pages hold the local host's agents without asking, but keep their sessions in a grant like any other.
     const local = localGrants(origin, await lastLocal(), await pinnedHost());
-    const kept = held.map((grant) => (local.find((item) => item.agent === grant.agent) === undefined ? grant : { ...grant, cwd: local[0].cwd, permissions: true }));
+    const kept = held.map((grant) => (local.find((item) => item.agent === grant.agent) === undefined ? grant : { ...grant, cwd: local[0].cwd, site: local[0].site, permissions: true }));
     return [...kept, ...local.filter((grant) => !held.some((item) => item.agent === grant.agent))];
   },
   saveGrant: (grant) => oneAtATime(async () => {
@@ -196,7 +196,21 @@ function installLocalHost() {
           return view();
         });
     } else if (type === "canoa.host.unpair") {
-      answer = write("local", LOCAL_PIN, null).then(view);
+      // The host is asked to forget this key first, which is the real revoke; where it cannot be reached the pairing is forgotten
+      // here all the same, and the person is told the host still lists the key.
+      answer = (async () => {
+        let notice;
+        if ((await pinnedHost()) !== null) {
+          try {
+            await controlCall("peer/forget", {});
+          } catch (error) {
+            notice = `This browser forgot Canoa, but Canoa on this computer still lists its key (${String(error?.message ?? error)}). Remove it there with canoa revoke.`;
+          }
+        }
+        await write("local", LOCAL_PIN, null);
+        const after = await view();
+        return notice === undefined ? after : { ...after, notice };
+      })();
     } else if (type === "canoa.host.control") {
       answer = controlCall(message.method, message.params).then((result) => ({ result }));
     } else {

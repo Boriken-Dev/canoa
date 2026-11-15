@@ -31,6 +31,7 @@ final class LocalHostView {
     this.changed = false,
     this.canPin = true,
     this.entries = const [],
+    this.notice,
   });
 
   final LocalHostState state;
@@ -56,6 +57,9 @@ final class LocalHostView {
   /// The labels of the entries it serves, as it says them.
   final List<String> entries;
 
+  /// Something the person should read after the last request, such as the host still listing a key that was unpaired.
+  final String? notice;
+
   factory LocalHostView.fromJson(String text) {
     final map = jsonDecode(text) as Map<String, Object?>;
     final host = map['host'] as Map<String, Object?>?;
@@ -72,6 +76,7 @@ final class LocalHostView {
       paired: map['paired'] == true,
       changed: map['changed'] == true,
       canPin: map['canPin'] != false,
+      notice: map['notice'] is String ? map['notice'] as String : null,
       entries: [for (final entry in (host?['entries'] as List? ?? const [])) '${(entry as Map)['label'] ?? entry['name']}'],
     );
   }

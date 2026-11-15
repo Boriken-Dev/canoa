@@ -9,7 +9,7 @@
 // already registered, so a person's own registration is never replaced. Needs `npm install` in e2e/, for the ws package.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -77,7 +77,8 @@ writeFileSync(path.join(unpacked, "manifest.json"), JSON.stringify(manifest));
 mkdirSync(path.join(unpacked, "ui"));
 writeFileSync(path.join(unpacked, "ui", "own.html"), '<!doctype html><title>own</title><script src="../acp-page.js"></script><script src="../acp-content.js"></script><p>own</p>');
 
-const env = { ...process.env, COQUI_AGENTIC_PEER_HOME: home };
+// The folders the host makes for sessions of the extension's own pages go in the run's own Documents.
+const env = { ...process.env, COQUI_AGENTIC_PEER_HOME: home, XDG_DOCUMENTS_DIR: path.join(work, "documents") };
 const run = (args, options = {}) => execFileSync(canoa, args, { encoding: "utf8", env, ...options });
 
 let hostProcess;
@@ -264,6 +265,10 @@ try {
   await check("turn: a whole turn runs through the native host to the scripted entry, proven end to end", async () => {
     assert.deepEqual(await own.run(turn("Scripted")), { verified: true, stop: "end_turn", text: "echo: hello" });
   });
+  await check("folder: the host made the session's folder, in its own Documents, and the extension named none", async () => {
+    const scratch = path.join(work, "documents", "Canoa", "scratch", "canoa-extension");
+    assert.ok(existsSync(scratch) && readdirSync(scratch).length >= 1, scratch);
+  });
   await check("turn: and to the person's own agent command that has no address", async () => {
     assert.deepEqual(await own.run(turn("standin")), { verified: true, stop: "end_turn", text: "echo: hello" });
   });
@@ -302,6 +307,15 @@ try {
     }, exitCode: null };
     assert.equal(started.paired, true, "the same home, so the same pairing");
     assert.deepEqual(await own.run(turn("Scripted")), { verified: true, stop: "end_turn", text: "echo: hello" });
+  });
+
+  await check("unpair: the host forgets this browser's key, and it is refused until a PIN pairs it again", async () => {
+    const listed = () => run(["peers", "--format", "json"]).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    assert.ok(listed().some((peer) => peer.state === "accepted"), "the browser's key is paired before");
+    const view = await ask("canoa.host.unpair");
+    assert.equal(view.paired, false, JSON.stringify(view));
+    assert.equal(view.notice, undefined, JSON.stringify(view));
+    assert.ok(listed().every((peer) => peer.state !== "accepted"), JSON.stringify(listed()));
   });
 
   await check("unregistered: with the native host removed the extension says Canoa is not installed, and an agent added by hand still works", async () => {

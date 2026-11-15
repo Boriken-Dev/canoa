@@ -245,6 +245,18 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     if (notify) link.entry.port.postMessage({ conn: link.conn, closed: reason });
   }
 
+  /** A session of the person's own Canoa runs in a scratch folder the host makes for `site`, never in one this side names. */
+  function inSite(text, site) {
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return text;
+    }
+    if (!["session/new", "session/load", "session/resume"].includes(message?.method)) return text;
+    return JSON.stringify({ ...message, params: { ...message.params, _meta: { "dev.boriken.canoa/site": { site } } } });
+  }
+
   function fromPage(entry, message) {
     if (message === null || typeof message !== "object") return;
     if (message.conn !== undefined) {
@@ -254,7 +266,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
         finish(link, "page", false);
       } else if (typeof message.msg === "string") {
         const step = link.scope.fromPage(message.msg);
-        if (step.forward !== undefined) forward(link, step.forward);
+        if (step.forward !== undefined) forward(link, link.grant.site === undefined ? step.forward : inSite(step.forward, link.grant.site));
         if (step.reply !== undefined) entry.port.postMessage({ conn: link.conn, msg: step.reply });
       }
       return;

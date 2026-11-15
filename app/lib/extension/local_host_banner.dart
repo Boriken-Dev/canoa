@@ -106,6 +106,7 @@ class _LocalHostBannerState extends State<LocalHostBanner> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(said, style: text.bodySmall),
+            if (current.notice != null) Text(current.notice!, style: text.bodySmall),
             ...actions,
             if (problem != null) Text(problem!, style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error)),
           ],

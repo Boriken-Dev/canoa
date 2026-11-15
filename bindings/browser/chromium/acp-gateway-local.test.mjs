@@ -71,3 +71,46 @@ test("Canoa's own chat is offered them", async () => {
   const { agents: offered } = asked[0];
   assert.deepEqual(offered.map((agent) => agent.key), ["hand", "local:claude"]);
 });
+
+test("a session of a local agent is told to run in a folder the host makes, and a page's own meta does not reach it", async () => {
+  const sent = [];
+  const agents = [{ key: "local:claude", label: "Claude", source: "local", native: { entry: "claude" }, peer: "sha256:c", local: true }];
+  const grants = [{ origin: OWN, agent: "local:claude", lifetime: "always", cwd: "/", site: "canoa-extension", permissions: true, mcpOrigins: [], sessions: [] }];
+  const store = {
+    agents: async () => agents,
+    addAgent: async (agent) => agent,
+    markProven: async () => {},
+    grants: async (origin) => grants.filter((grant) => grant.origin === origin),
+    saveGrant: async () => {},
+    deleteGrant: async () => {},
+    secret: async () => "secret",
+  };
+  const gateway = createGateway({
+    store,
+    dial: async () => ({ proven: true, send: async (text) => sent.push(JSON.parse(text)), onMessage: () => {}, onClose: () => {}, close: () => {} }),
+    askPerson: async () => null,
+    askPermission: async () => null,
+    ownOrigin: OWN,
+  });
+  const received = [];
+  const listeners = [];
+  gateway.attach({
+    postMessage: (message) => received.push(message),
+    onMessage: { addListener: (listen) => listeners.push(listen) },
+    onDisconnect: { addListener: () => {} },
+  }, { origin: OWN, tabId: 1 });
+  const ask = async (id, op, args, extra = {}) => {
+    listeners.forEach((listen) => listen({ id, op, args, ...extra }));
+    for (let tries = 0; tries < 40 && !received.some((message) => message.id === id); tries += 1) await settle();
+    return received.find((message) => message.id === id);
+  };
+  const [agent] = (await ask(1, "agents", [])).result;
+  const opened = await ask(2, "connect", { id: agent.id });
+  const conn = opened.result.conn;
+  listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "session/new", _meta: { "dev.boriken.canoa/site": { site: "evil.example" } }, params: { cwd: "/etc", mcpServers: [], _meta: { x: 1 } } }) }));
+  for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
+  const made = sent.find((message) => message.method === "session/new");
+  assert.deepEqual(made.params._meta, { "dev.boriken.canoa/site": { site: "canoa-extension" } });
+  assert.equal(made._meta, undefined);
+  assert.equal(made.params.cwd, "/");
+});

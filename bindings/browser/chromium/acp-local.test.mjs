@@ -156,10 +156,11 @@ test("the host's agents are listed only once this browser's key is paired with t
   assert.equal(agents[0].source, "local");
 });
 
-test("Canoa's own pages hold those agents with the host's home as their folder, and nobody else's page is given any", () => {
+test("Canoa's own pages hold those agents with a folder the host makes, never one the host's hello names, and nobody else's page is given any", () => {
   const grants = localGrants("chrome-extension://me", running(), pinned);
   assert.equal(grants.length, 2);
-  assert.ok(grants.every((grant) => grant.origin === "chrome-extension://me" && grant.cwd === "/home/p" && grant.permissions === true));
+  assert.ok(grants.every((grant) => grant.origin === "chrome-extension://me" && grant.cwd === "/" && grant.site === "canoa-extension" && grant.permissions === true));
+  assert.equal(readHello(runningReply({ home: "/home/p" })).home, undefined, "a claim of a folder is not read");
   assert.deepEqual(localGrants("chrome-extension://me", running(), null), []);
 });
 
@@ -168,7 +169,7 @@ test("the view says what a panel needs and nothing else of the claim", () => {
   assert.equal(view.state, "running");
   assert.equal(view.paired, true);
   assert.equal(view.canPin, true);
-  assert.deepEqual(Object.keys(view.host).sort(), ["control", "entries", "home", "method", "name", "peer", "version"]);
+  assert.deepEqual(Object.keys(view.host).sort(), ["control", "entries", "method", "name", "peer", "version"]);
   assert.equal(viewOf({ state: "not-installed" }, pinned).paired, false);
   assert.equal(viewOf(running(), null).paired, false);
 });
