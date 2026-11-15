@@ -22,6 +22,12 @@ pub enum SignIn {
     },
     /// Not an account, a wrong password, or an account the system refuses now.
     Refused,
+    /// A certificate sign-in whose request carried no certificate: nothing was guessed, so nothing counts as a failure.
+    NoCertificate,
+    /// The certificate is outside its validity dates, whatever else is true of it.
+    Expired,
+    /// Every provider asked has never heard of the certificate: it is pinned to no one.
+    Unpinned,
     /// The accounts could not be asked; the reason is for the log, never for the browser.
     Failed(String),
 }
@@ -149,6 +155,13 @@ pub trait Accounts: Send + Sync {
     fn unpin(&self, user: &str) -> Result<bool, PinError> {
         let _ = user;
         Err(PinError::Unsupported)
+    }
+
+    /// Whether `headers` carry a forwarded certificate at all, readable or not. A certificate sign-in whose request carries none
+    /// is not a try the throttle counts and no provider is asked. The default says yes.
+    fn carries_certificate(&self, headers: &[(String, String)]) -> bool {
+        let _ = headers;
+        true
     }
 
     /// Checks the certificate the proxy forwarded in `headers` (the request's, in order, names in lower case) for a browser at

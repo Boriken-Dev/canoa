@@ -1025,6 +1025,22 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         );
         return Response::refusal(403);
     };
+    // A certificate try whose request carries no certificate is no guess: the browser chose none, and a person told to try again
+    // would be locked out by their own clicks. It is not counted and no provider is asked.
+    if method == Method::Certificate && !inner.accounts.carries_certificate(&presented(request)) {
+        tracing::info!(
+            "a certificate sign-in from {} carried no certificate",
+            shown(seen)
+        );
+        return login_response(
+            inner,
+            request,
+            conn,
+            401,
+            Some(page::Notice::NoCertificate),
+            None,
+        );
+    }
     let providers = offer.providers.clone();
     let (user, password, key) = match method {
         Method::Certificate => (String::new(), String::new(), String::new()),
@@ -1159,6 +1175,34 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
                 ),
             )
         }
+        // Counted like any failed try; the log says which kind it was, and never the certificate.
+        SignIn::NoCertificate => certificate_failure(
+            inner,
+            request,
+            conn,
+            started,
+            address,
+            "absent",
+            page::Notice::NoCertificate,
+        ),
+        SignIn::Expired => certificate_failure(
+            inner,
+            request,
+            conn,
+            started,
+            address,
+            "expired",
+            page::Notice::CertificateExpired,
+        ),
+        SignIn::Unpinned => certificate_failure(
+            inner,
+            request,
+            conn,
+            started,
+            address,
+            "pinned to no account",
+            page::Notice::CertificateUnpinned,
+        ),
         // An account the accounts admit that the portal does not (root, or below the lowest user id) is refused as any other.
         SignIn::Admitted { .. } | SignIn::Refused => {
             tracing::info!("a {} sign-in from {address} failed", method.id());
@@ -1184,6 +1228,24 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
             )
         }
     }
+}
+
+/// The answer to a certificate try that failed in a way the person can act on; the log says which, never the certificate.
+fn certificate_failure(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    started: Instant,
+    address: IpAddr,
+    why: &str,
+    notice: page::Notice,
+) -> Response {
+    tracing::info!("a certificate sign-in from {address} failed: the certificate is {why}");
+    after_floor(
+        inner,
+        started,
+        login_response(inner, request, conn, 401, Some(notice), None),
+    )
 }
 
 /// Whether the password typed to sign this session in, within `enrol`, was typed with the certificate `fingerprint` offered: then

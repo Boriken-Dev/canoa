@@ -366,6 +366,17 @@ impl Access {
     /// Asks `links` in order, or only the ones `providers` names, in the order it names them: the first that does not pass the
     /// credential on decides. A name no link has is skipped, so a policy naming a provider that is not here asks nobody.
     fn ask(&self, links: &[Link], credential: &Credential, providers: &[String]) -> SignIn {
+        self.ask_or(links, credential, providers, SignIn::Refused)
+    }
+
+    /// [`Self::ask`], answering `unknown` when every provider asked said it does not know the credential.
+    fn ask_or(
+        &self,
+        links: &[Link],
+        credential: &Credential,
+        providers: &[String],
+        unknown: SignIn,
+    ) -> SignIn {
         let chosen: Vec<&Link> = if providers.is_empty() {
             links.iter().collect()
         } else {
@@ -382,7 +393,7 @@ impl Access {
                 Err(error) => return SignIn::Failed(error.to_string()),
             }
         }
-        SignIn::Refused
+        unknown
     }
 }
 
@@ -524,16 +535,17 @@ impl Accounts for Access {
         if self.certificates.is_empty() {
             return SignIn::Refused;
         }
+        if !self.carries_certificate(headers) {
+            return SignIn::NoCertificate;
+        }
         let Some(chain) = forwarded_chain(headers, &self.header) else {
             return SignIn::Refused;
         };
         // Pinned trust does not look at dates, and a certificate past them is not one to let in.
-        if chain
-            .first()
-            .and_then(|leaf| leaf_fields(leaf))
-            .is_none_or(|fields| outside_validity(&fields))
-        {
-            return SignIn::Refused;
+        match chain.first().and_then(|leaf| leaf_fields(leaf)) {
+            None => return SignIn::Refused,
+            Some(fields) if outside_validity(&fields) => return SignIn::Expired,
+            Some(_) => {}
         }
         // The proxy proved the browser holds the leaf's key, and the portal believes the proxy only on its own socket; whether
         // the certificate is trusted is for the provider to say.
@@ -544,7 +556,11 @@ impl Accounts for Access {
             peer: Some(client.to_string()),
             ..Credential::default()
         };
-        self.ask(&self.certificates, &credential, providers)
+        self.ask_or(&self.certificates, &credential, providers, SignIn::Unpinned)
+    }
+
+    fn carries_certificate(&self, headers: &[(String, String)]) -> bool {
+        headers.iter().any(|(name, _)| *name == self.header)
     }
 
     fn certificate_status(
@@ -936,12 +952,13 @@ mod tests {
         let other = data_encoding::BASE64.encode(&other);
         assert_eq!(
             access.sign_in_certificate(&header(&other), client(), &[]),
-            SignIn::Refused
+            SignIn::Unpinned
         );
-        // Nothing, garbage, two headers, and a chain longer than the portal reads.
+        // Nothing is told apart from garbage, two headers, and a chain longer than the portal reads.
+        assert!(!access.carries_certificate(&[]));
         assert_eq!(
             access.sign_in_certificate(&[], client(), &[]),
-            SignIn::Refused
+            SignIn::NoCertificate
         );
         assert_eq!(
             access.sign_in_certificate(&header("not base64!"), client(), &[]),
@@ -1012,7 +1029,7 @@ mod tests {
                 if other == index {
                     admits(signed, &me, "coqui_access_mtls");
                 } else {
-                    assert_eq!(signed, SignIn::Refused, "pin {other} after pin {index}");
+                    assert_eq!(signed, SignIn::Unpinned, "pin {other} after pin {index}");
                 }
             }
         }
@@ -1028,7 +1045,7 @@ mod tests {
         for probe in &headers {
             assert_eq!(
                 access.sign_in_certificate(probe, client(), &[]),
-                SignIn::Refused
+                SignIn::Unpinned
             );
         }
         assert_eq!(access.unpin(&me), Ok(false));
@@ -1056,7 +1073,7 @@ mod tests {
         let other_header = header(&data_encoding::BASE64.encode(&other_der));
         assert_eq!(
             access.sign_in_certificate(&mine_header, client(), &[]),
-            SignIn::Refused
+            SignIn::Unpinned
         );
         let status = access
             .certificate_status(&me, mine(), &mine_header)
@@ -1099,7 +1116,7 @@ mod tests {
         assert_eq!(access.unpin(&me), Ok(true));
         assert_eq!(
             access.sign_in_certificate(&mine_header, client(), &[]),
-            SignIn::Refused
+            SignIn::Unpinned
         );
         assert_eq!(access.unpin(&me), Ok(false));
         assert!(
@@ -1217,7 +1234,7 @@ mod tests {
         let h = header(&data_encoding::BASE64.encode(&der));
         assert_eq!(
             access.sign_in_certificate(&h, client(), &[]),
-            SignIn::Refused
+            SignIn::Expired
         );
         let (cert, _) = access
             .certificate_status(&me, mine(), &h)

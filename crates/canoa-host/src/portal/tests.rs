@@ -105,6 +105,10 @@ impl Accounts for Fixed {
         Ok(pins.len() != before)
     }
 
+    fn carries_certificate(&self, headers: &[(String, String)]) -> bool {
+        headers.iter().any(|(name, _)| name == "x-client-cert")
+    }
+
     fn sign_in_certificate(
         &self,
         headers: &[(String, String)],
@@ -118,7 +122,11 @@ impl Accounts for Fixed {
             .iter()
             .find(|(name, _)| name == "x-client-cert")
             .map(|(_, value)| value.as_str());
+        if value == Some("MIIB-expired") {
+            return SignIn::Expired;
+        }
         let user = value.and_then(|value| self.certificates.lock().unwrap().get(value).cloned());
+        let known = user.is_some();
         match user.and_then(|user| {
             let uid = self
                 .accounts
@@ -134,6 +142,8 @@ impl Accounts for Fixed {
                 groups: Vec::new(),
                 provider: "stand-in".to_owned(),
             },
+            None if value.is_none() => SignIn::NoCertificate,
+            None if !known => SignIn::Unpinned,
             None => SignIn::Refused,
         }
     }
@@ -1741,15 +1751,15 @@ fn a_certificate_is_refused_on_the_loopback_address_whatever_header_it_carries()
 }
 
 #[test]
-fn an_unknown_certificate_reads_as_refused_and_the_throttle_holds_every_method() {
+fn an_unknown_certificate_is_a_counted_failure_and_the_throttle_holds_every_method() {
     let rig = rig(|settings| settings.max_failures_per_pair = 2, 0);
     for _ in 0..2 {
         let answer = cert_login(&rig, Some("MIIB-other"), "203.0.113.50");
         assert_eq!(answer.status, 401);
-        assert!(answer.body.contains("That certificate was not accepted"));
+        assert!(answer.body.contains("not linked to an account here"));
         assert!(answer.cookie().is_none());
     }
-    // No certificate at all is a failure of the same kind, and past the limit even the right one is not asked of the accounts.
+    // Past the limit even the right one is not asked of the accounts.
     let blocked = cert_login(&rig, Some("MIIB-test-cert"), "203.0.113.50");
     assert_eq!(blocked.status, 429);
     assert_eq!(blocked.header("retry-after"), Some("900"));
@@ -1760,7 +1770,46 @@ fn an_unknown_certificate_reads_as_refused_and_the_throttle_holds_every_method()
         login(&rig, "canoatesta", "pw-a", "203.0.113.50").status,
         303
     );
-    assert_eq!(cert_login(&rig, None, "203.0.113.51").status, 401);
+    assert_eq!(
+        cert_login(&rig, Some("MIIB-other"), "203.0.113.51").status,
+        401
+    );
+}
+
+#[test]
+fn a_try_with_no_certificate_says_so_is_not_counted_and_asks_no_provider() {
+    let rig = rig(|settings| settings.max_failures_per_pair = 2, 0);
+    for _ in 0..5 {
+        let answer = cert_login(&rig, None, "203.0.113.70");
+        assert_eq!(answer.status, 401);
+        assert!(answer.body.contains("sent no certificate"));
+        assert!(answer.body.contains("restart the browser"));
+        assert!(answer.cookie().is_none());
+    }
+    assert_eq!(rig.accounts.asked.load(Ordering::SeqCst), 0);
+    // None of those tries counted: the certificate is accepted at once, from the same address.
+    let signed = cert_login(&rig, Some("MIIB-test-cert"), "203.0.113.70");
+    assert_eq!(signed.status, 303);
+}
+
+#[test]
+fn an_expired_and_an_unpinned_certificate_each_have_their_own_notice_and_both_count() {
+    let rig = rig(|settings| settings.max_failures_per_pair = 2, 0);
+    let expired = cert_login(&rig, Some("MIIB-expired"), "203.0.113.80");
+    assert_eq!(expired.status, 401);
+    assert!(expired.body.contains("That certificate has expired."));
+    let unpinned = cert_login(&rig, Some("MIIB-nobody"), "203.0.113.80");
+    assert_eq!(unpinned.status, 401);
+    assert!(unpinned.body.contains("not linked to an account here"));
+    // No account is named by either.
+    for page in [&expired.body, &unpinned.body] {
+        assert!(!page.contains("canoatest") && !page.contains("MIIB"));
+    }
+    // Two failures reached the limit.
+    assert_eq!(
+        cert_login(&rig, Some("MIIB-test-cert"), "203.0.113.80").status,
+        429
+    );
 }
 
 #[test]

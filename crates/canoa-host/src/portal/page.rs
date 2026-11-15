@@ -22,6 +22,12 @@ pub enum Notice {
     Failed,
     /// A certificate was not accepted.
     Certificate,
+    /// The browser sent no certificate.
+    NoCertificate,
+    /// The certificate is past its validity dates.
+    CertificateExpired,
+    /// The certificate is pinned to no account.
+    CertificateUnpinned,
     /// Too many failures.
     Throttled,
     /// Every sign-in slot is taken.
@@ -35,6 +41,11 @@ impl Notice {
         match self {
             Self::Failed => "Sign-in failed.",
             Self::Certificate => "That certificate was not accepted here.",
+            Self::NoCertificate => {
+                "Your browser sent no certificate. Check that the card is inserted, then restart the browser: it remembers a choice of none until it restarts."
+            }
+            Self::CertificateExpired => "That certificate has expired.",
+            Self::CertificateUnpinned => "That certificate is not linked to an account here.",
             Self::Throttled => "Too many failed attempts.",
             Self::Busy => "Busy. Try again in a moment.",
             Self::Unavailable => "Sign-in is not available.",
