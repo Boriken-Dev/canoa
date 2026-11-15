@@ -56,8 +56,8 @@ fn same_digest(a: &str, b: &str) -> bool {
 }
 /// The plugin Claude Code is given a profile's skills in.
 const CLAUDE_PLUGIN: &str = "canoa-profile";
-/// Where Codex reads skills inside each directory it is given as `additionalDirectories`.
-const CODEX_SKILLS: &str = ".agents/skills";
+/// Where Codex and Antigravity read skills inside each directory they are given as `additionalDirectories`.
+const AGENT_SKILLS: &str = ".agents/skills";
 /// The session requests a profile's parts go with.
 const SESSION_METHODS: [&str; 3] = ["session/new", "session/load", "session/resume"];
 /// `initialize` and session requests a connection may have waiting for the agent's answer.
@@ -898,11 +898,13 @@ fn harness_of(reported: Option<&str>, entry: &str) -> Option<&'static str> {
         // Pi's own translator says what it takes, as Claude's and Codex's do, so the entry's name does not decide.
         Some("coqui-acp-pi") => None,
         Some("OpenCode") => Some("opencode"),
+        Some("Antigravity ACP Server") => Some("antigravity"),
         _ => match entry {
             "Claude" => Some("claude-code"),
             "Codex" => Some("codex"),
             "Gemini" => Some("gemini-cli"),
             "Pi" => Some("pi"),
+            "Antigravity" => Some("antigravity"),
             _ => None,
         },
     }
@@ -936,6 +938,9 @@ fn skills_not_taken(harness: Option<&str>) -> &'static str {
         }
         Some("codex") => {
             "the adapter does not say it takes more directories, where Codex would read them"
+        }
+        Some("antigravity") => {
+            "Antigravity reads skills from a session's additionalDirectories, and this agent does not say it takes them"
         }
         _ => "ACP has no field for skills, and Canoa knows no other way this agent takes them",
     }
@@ -1552,7 +1557,9 @@ fn parts_for(
     if !usable.is_empty() {
         let prefix = match harness {
             Some("claude-code") => Some(format!("{CLAUDE_PLUGIN}/skills")),
-            Some("codex") if takes.additional_directories() => Some(CODEX_SKILLS.to_owned()),
+            Some("codex" | "antigravity") if takes.additional_directories() => {
+                Some(AGENT_SKILLS.to_owned())
+            }
             _ => None,
         };
         match prefix {
@@ -1595,7 +1602,14 @@ fn parts_for(
                                     "the Claude plugin {CLAUDE_PLUGIN}, through the adapter's _meta, as {CLAUDE_PLUGIN}:{name}"
                                 )
                             } else {
-                                "a directory of skills Codex reads, through ACP additionalDirectories".to_owned()
+                                let agent = if harness == Some("antigravity") {
+                                    "Antigravity"
+                                } else {
+                                    "Codex"
+                                };
+                                format!(
+                                    "a directory of skills {agent} reads, through ACP additionalDirectories"
+                                )
                             };
                             items.push(Item::new(
                                 format!("skills.{name}"),

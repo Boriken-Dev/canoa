@@ -341,7 +341,7 @@ fn codex_reads_skills_from_a_directory_given_as_additional_directories() {
     let directory = PathBuf::from(&parts.directories[0]);
     assert!(
         directory
-            .join(CODEX_SKILLS)
+            .join(AGENT_SKILLS)
             .join("review/SKILL.md")
             .is_file()
     );
@@ -1294,4 +1294,74 @@ fn a_chosen_skill_with_no_record_is_reported_and_one_not_listed_is_never_read() 
     )
     .expect("parses");
     assert!(config.local_profiles.for_agent("a").is_none());
+}
+
+/// What `agy acp` 1.5.9 answers to `initialize`, trimmed to the parts that decide how it is served.
+fn antigravity_initialize() -> Value {
+    json!({
+        "protocolVersion": 1,
+        "agentCapabilities": {
+            "sessionCapabilities": {"additionalDirectories": {}, "resume": {}, "close": {}, "load": {}, "list": {}},
+            "_meta": {"antigravity": {"tier": true, "systemPrompt": {"append": true}}},
+        },
+        "agentInfo": {"name": "Antigravity ACP Server", "version": "1.5.9"},
+    })
+}
+
+#[test]
+fn antigravity_is_named_by_what_it_reports() {
+    assert_eq!(
+        harness_of(Some("Antigravity ACP Server"), "mine"),
+        Some("antigravity")
+    );
+    assert_eq!(harness_of(None, "Antigravity"), Some("antigravity"));
+}
+
+#[test]
+fn antigravity_reads_skills_from_an_additional_directory_the_connection_made() {
+    let temp = temp_with_skill();
+    let offer = offer_of(&temp, &config_with(""));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let initialize = antigravity_initialize();
+    let (takes, reported) = described(&initialize);
+    let harness = harness_of(reported, "mine");
+    let parts = parts_for(&connection, harness, &takes, &lookup);
+    let directory = PathBuf::from(&parts.directories[0]);
+    assert!(
+        directory
+            .join(AGENT_SKILLS)
+            .join("review/SKILL.md")
+            .is_file(),
+        "{}",
+        parts.report
+    );
+    assert_eq!(
+        item(&parts.report, "skills.review")["state"],
+        "applied",
+        "{}",
+        parts.report
+    );
+}
+
+#[test]
+fn an_antigravity_that_takes_no_additional_directories_is_told_why() {
+    let temp = temp_with_skill();
+    let offer = offer_of(&temp, &config_with(""));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let takes = Takes {
+        version: 1,
+        capabilities: json!({"sessionCapabilities": {}}),
+    };
+    let parts = parts_for(&connection, Some("antigravity"), &takes, &lookup);
+    assert!(parts.directories.is_empty() && parts.written.is_none());
+    let skill = item(&parts.report, "skills.review");
+    assert_eq!(skill["state"], "not supported", "{}", parts.report);
+    assert!(
+        skill["how"]
+            .as_str()
+            .unwrap_or("")
+            .contains("additionalDirectories"),
+        "{}",
+        parts.report
+    );
 }
