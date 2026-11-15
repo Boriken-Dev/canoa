@@ -1,7 +1,7 @@
 // The provider in a real browser: a real page under a strict CSP, the real extension, and an agent on a real socket proving
 // itself with the real handshake. Drives the browser over its DevTools protocol, with the person's window clicked by script.
 //
-//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge] [CANOA_E2E_PAGES=dir] [CANOA_E2E_METHOD=noise]
+//   CANOA_E2E_BROWSER=path/to/chrome [CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge CANOA_E2E_HOST=path/to/canoa] [CANOA_E2E_PAGES=dir] [CANOA_E2E_METHOD=noise]
 //     node e2e/run.mjs
 //
 // CANOA_E2E_METHOD is the method every agent of the run proves by, `noise` unless set: its in-process agent, the bridges it
@@ -10,7 +10,8 @@
 // CANOA_E2E_PAGES holds the other languages' pages: wasm/page.js and page_bg.wasm from coqui-acp-page's example through
 // wasm-bindgen --target web, and dart/page.js from app/tool/provider_page.dart through dart compile js.
 //
-// With a bridge, its companion is registered for this user during the run and removed after, replacing any registered before.
+// With a bridge, Canoa's native messaging host (`canoa native install`, CANOA_E2E_HOST) is registered for this user during the run and
+// removed after; "look nearby" is answered by it, searching the run's descriptor folder. A run refuses to start when it is already registered.
 // Needs `npm install` in e2e/, for the ws package its WebSocket server uses.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -32,6 +33,8 @@ const { WebSocketServer } = createRequire(import.meta.url)("ws");
 const browser = process.env.CANOA_E2E_BROWSER;
 if (!browser) throw new Error("set CANOA_E2E_BROWSER");
 const bridge = process.env.CANOA_E2E_BRIDGE;
+const canoa = process.env.CANOA_E2E_HOST;
+if (bridge && !canoa) throw new Error("set CANOA_E2E_HOST: look nearby is answered by Canoa's native host");
 const pages = process.env.CANOA_E2E_PAGES;
 const METHOD = process.env.CANOA_E2E_METHOD ?? "noise";
 const { createResponder, generateIdentity } = METHOD === "noise" ? noiseMethod : webcryptoMethod;
@@ -211,7 +214,8 @@ async function freeForBoth() {
 }
 
 let exitCode = 1;
-let companionInstalled = false;
+let nativeInstalled = false;
+const nativeEnv = () => ({ ...process.env, COQUI_AGENTIC_PEER_HOME: path.join(work, "canoa-home") });
 const bridges = [];
 const watchdog = setTimeout(() => {
   console.log(`FAILED: the run took too long, at: ${lastCall()}`);
@@ -397,8 +401,15 @@ try {
     assert.equal(plain.length, 1);
   });
   if (bridge) {
-    execFileSync(bridge, ["companion", "install", "--extension-id", new URL(worker.url).hostname], { stdio: "ignore" });
-    companionInstalled = true;
+    if (process.platform === "win32") {
+      for (const key of ["Microsoft\Edge", "Google\Chrome", "Chromium"]) {
+        let held = true;
+        try { execFileSync("reg", ["query", `HKCU\Software\${key}\NativeMessagingHosts\dev.boriken.canoa`], { stdio: "ignore" }); } catch { held = false; }
+        if (held) throw new Error(`dev.boriken.canoa is already registered under ${key}: remove it first (canoa native uninstall)`);
+      }
+    }
+    execFileSync(canoa, ["native", "install", "--extension-id", new URL(worker.url).hostname], { stdio: "ignore", env: nativeEnv() });
+    nativeInstalled = true;
     const describe = (name, label, peer, tail) => writeFileSync(path.join(descriptors, name), JSON.stringify({ txtvers: 1, proto: "acp", label, url: `${agentUrl}/${tail}`, peer, method: METHOD }));
     const search = async (view, label) => {
       await view.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Look for agents nearby').click()");
@@ -415,7 +426,7 @@ try {
       [...document.querySelectorAll('button')].find((b) => b.textContent.startsWith('Allow')).click();
     })()`).catch(() => {});
 
-    await check("discovery: the companion finds an agent, shown unticked with its key, and the page sees nothing until it is chosen", async () => {
+    await check("discovery: Canoa's native host finds an agent, shown unticked with its key, and the page sees nothing until it is chosen", async () => {
       describe("found.json", "Found agent", foundIdentity.peerId, "found");
       await requested();
       const view = await prompt();
@@ -914,7 +925,7 @@ try {
   console.log(`ABORTED: ${error.stack ?? error}`);
 } finally {
   clearTimeout(watchdog);
-  if (companionInstalled) execFileSync(bridge, ["companion", "uninstall"], { stdio: "ignore" });
+  if (nativeInstalled) execFileSync(canoa, ["native", "uninstall"], { stdio: "ignore", env: nativeEnv() });
   for (const child of bridges) child.kill();
   chrome.kill();
   await sleep(1500);
