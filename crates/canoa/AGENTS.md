@@ -89,7 +89,7 @@ Checks if the service is verified.
 ## `ServiceId`, `ClientId`, `Capability`
 
 Three text identifiers with the same items, shown for `ServiceId`. They implement `Clone`, `Debug`, `Eq`, `Ord`,
-`Display` and `From<&str>`.
+`Display`, `Hash`, `AsRef<str>`, `Borrow<str>` and `From<&str>`; all are `Send + Sync`.
 
 ```rust
 pub fn new(id: impl Into<String>) -> Self

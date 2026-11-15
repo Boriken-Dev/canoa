@@ -25,10 +25,10 @@ pub fn differs(dir: &Path, manifest: &Manifest) -> Result<Option<String>>;  // w
 pub fn sha256_hex(bytes: &[u8]) -> String;
 
 pub struct Payload<'a> { pub bytes: &'a [u8], pub sha256: &'a str }   // .manifest() checks the digest, reads the manifest
-pub struct Installed { pub dir: PathBuf, pub manifest: Manifest, pub reused: bool }  // .program(name) only if listed
+#[non_exhaustive] pub struct Installed { pub dir: PathBuf, pub manifest: Manifest, pub reused: bool }  // .program(name) only if listed
 pub struct Manifest { pub version: String, pub entries: Vec<Entry> }  // new/parse/text/digest/entry; canonical text only
 pub struct Entry { pub path: String, pub size: u64, pub sha256: [u8; 32] }
-pub enum Error { Io { context, source }, Refused(String), Payload(String) }
+#[non_exhaustive] pub enum Error { Io { context, source }, Refused(String), Payload(String) }
 pub const MARKER: &str = "canoa-launch.manifest"; pub const APP_PROGRAM: &str = "CanoaUI.exe";
 pub const KEEP_VERSIONS: usize = 2; pub const MAX_FILES: usize = 20_000; pub const MAX_BYTES: u64 = 4 << 30;
 ```
