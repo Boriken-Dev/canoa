@@ -141,6 +141,101 @@ function webTransportLink({ url, hash }, WebTransportClass) {
   };
 }
 
+/** The native messaging host's name: what `connectNative` is given to reach the Canoa on this computer. */
+export const NATIVE_HOST = "dev.boriken.canoa";
+/** The most one native message carries of a link's bytes, in either direction: what the relay takes, under the browser's 1 MiB. */
+export const NATIVE_PIECE = 700_000;
+const OPEN_MS = 10_000;
+
+const toBase64 = (bytes) => {
+  let text = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return btoa(text);
+};
+const fromBase64 = (text) => Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
+
+/**
+ * The same small surface as a WebSocket, over the Canoa on this computer by way of the browser's native messaging host: a port
+ * that opens `entry` (an entry of the host, `@control` or `@pair`) and then carries the link's bytes in base64 pieces, which it
+ * frames and deframes as a stream. The host on the far side proves itself through it; the relay in between sees sealed records.
+ */
+function nativeLink({ entry, host = NATIVE_HOST }, connectNative) {
+  const listeners = { message: [], close: [] };
+  const emit = (type, event) => {
+    for (const listen of listeners[type]) listen(event);
+  };
+  const deframe = createDeframer(MAX_PROOF_MESSAGE);
+  let port;
+  let closed = false;
+  let settle;
+  const opened = new Promise((resolve, reject) => {
+    settle = { resolve, reject };
+  });
+  const end = (why) => {
+    if (closed) return;
+    closed = true;
+    try {
+      port.disconnect();
+    } catch {
+      // Already over.
+    }
+    settle.reject(new Error(why ?? "the native link closed"));
+    emit("close", {});
+  };
+  try {
+    port = connectNative(host);
+  } catch (error) {
+    closed = true;
+    settle.reject(error);
+    return { opened, socket: { send() {}, close() {}, proven() {}, addEventListener() {} } };
+  }
+  port.onMessage.addListener((message) => {
+    if (message?.reply === "open") {
+      if (message.opened === true) settle.resolve();
+      else end(typeof message.error === "string" ? message.error : "the native host would not open that");
+      return;
+    }
+    if (typeof message?.d === "string") {
+      try {
+        for (const data of deframe(fromBase64(message.d))) emit("message", { data });
+      } catch {
+        end("the native host sent what no host sends");
+      }
+    } else if (message?.closed === true) {
+      end("the host closed the link");
+    }
+  });
+  port.onDisconnect.addListener(() => end("the native host went away"));
+  port.postMessage({ op: "open", entry });
+  return {
+    opened,
+    socket: {
+      send(body) {
+        const framed = frame(body);
+        for (let at = 0; at < framed.length; at += NATIVE_PIECE) {
+          port.postMessage({ d: toBase64(framed.subarray(at, at + NATIVE_PIECE)) });
+        }
+      },
+      close: () => end(),
+      proven: () => deframe.raiseLimit(MAX_MESSAGE),
+      addEventListener: (type, listen) => listeners[type]?.push(listen),
+    },
+  };
+}
+
+/** Opens the link to a local entry, with the time the open may take. */
+async function openNative(native, connectNative) {
+  if (typeof connectNative !== "function") throw new Error("this browser has no native messaging");
+  const link = nativeLink(native, connectNative);
+  try {
+    await within(link.opened, OPEN_MS, "the native host did not open the link");
+  } catch (error) {
+    link.socket.close();
+    throw error;
+  }
+  return link.socket;
+}
+
 function webSocketLink(url, WebSocketClass) {
   const socket = new WebSocketClass(url);
   socket.binaryType = "arraybuffer";
@@ -163,7 +258,8 @@ function within(promise, ms, message) {
  * WebTransport where the agent offers it, then its WebSocket. Trying the other on any failure to open gives nothing away: TLS
  * authenticates nothing here, and whichever opens has the same proof to pass.
  */
-async function openLink(agent, { WebSocketClass, WebTransportClass }) {
+async function openLink(agent, { WebSocketClass, WebTransportClass, connectNative }) {
+  if (agent.native) return openNative(agent.native, connectNative);
   if (agent.webtransport && WebTransportClass) {
     const link = webTransportLink(agent.webtransport, WebTransportClass);
     try {
@@ -321,14 +417,25 @@ function queue(socket) {
  * Pairs this browser's Noise key with the agent's machine at `url`, a `coqui-acp-bridge pair-accept --method noise`, by the PIN it
  * shows, and answers the key that machine proved. A wrong PIN is spent: never try it again, and ask for a new one.
  */
-export async function pairWithPin({ url, pin }, { identity: given, wait = PAIR_MS, WebSocketClass = globalThis.WebSocket } = {}) {
+export async function pairWithPin({ url, pin, native }, {
+  identity: given,
+  wait = PAIR_MS,
+  WebSocketClass = globalThis.WebSocket,
+  connectNative = globalThis.chrome?.runtime?.connectNative?.bind(globalThis.chrome.runtime),
+} = {}) {
   const identity = given ?? (await localIdentity("noise"));
-  const socket = new WebSocketClass(url);
-  socket.binaryType = "arraybuffer";
-  await within(new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", () => reject(new Error("the connection failed")), { once: true });
-  }), PROOF_MS, "the WebSocket did not open");
+  let socket;
+  if (native) {
+    // The Canoa on this computer, by the native host: its pairing door, open only while the person asked for a PIN.
+    socket = await openNative({ entry: "@pair" }, connectNative);
+  } else {
+    socket = new WebSocketClass(url);
+    socket.binaryType = "arraybuffer";
+    await within(new Promise((resolve, reject) => {
+      socket.addEventListener("open", resolve, { once: true });
+      socket.addEventListener("error", () => reject(new Error("the connection failed")), { once: true });
+    }), PROOF_MS, "the WebSocket did not open");
+  }
   const next = queue(socket);
   const bytes = (data) => (data === null ? null : new Uint8Array(data));
   try {
@@ -358,13 +465,14 @@ export async function dialAgent(agent, {
   settle = NOISE_SETTLE_MS,
   WebSocketClass = globalThis.WebSocket,
   WebTransportClass = globalThis.WebTransport,
+  connectNative = globalThis.chrome?.runtime?.connectNative?.bind(globalThis.chrome.runtime),
 } = {}) {
   if (typeof agent.peer !== "string") return dialUnproven(agent, WebSocketClass);
   const method = methodOf(agent);
   const local = identity ?? (await localIdentity(method));
   if (local.method !== method) throw new Error(`a ${local.method} key cannot prove a ${method} agent`);
   const proof = await MODULES[method].createInitiator(local, agent.peer);
-  const socket = await openLink(agent, { WebSocketClass, WebTransportClass });
+  const socket = await openLink(agent, { WebSocketClass, WebTransportClass, connectNative });
   const inbox = [];
   let waiter;
   let onMessage = () => {};

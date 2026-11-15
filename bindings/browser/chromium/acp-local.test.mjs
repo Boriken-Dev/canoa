@@ -1,0 +1,174 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { createLocalHost, fromOwnPage, localAgents, localGrants, readHello, viewOf } from "./acp-local.js";
+
+const PEER = `sha256:${"ab".repeat(32)}`;
+const runningReply = (extra = {}) => ({
+  reply: "hello", running: true, peer: PEER, method: "noise", name: "Canoa", version: "0.0.1", control: true,
+  entries: [{ name: "claude", label: "Claude", kind: "agent", local: true }, { name: "scripted", label: "Scripted", kind: "agent", local: false }],
+  ...extra,
+});
+
+/** `connectNative` whose host answers each question by `script(request)`; `null` is no answer, a string a disconnect with that error. */
+function scripted(script, log = []) {
+  let lastError;
+  const connectNative = () => {
+    const listeners = { message: [], disconnect: [] };
+    return {
+      onMessage: { addListener: (listen) => listeners.message.push(listen) },
+      onDisconnect: { addListener: (listen) => listeners.disconnect.push(listen) },
+      disconnect() {},
+      postMessage(request) {
+        log.push(request.op);
+        const answer = script(request);
+        queueMicrotask(() => {
+          if (answer === null) return;
+          if (typeof answer === "string") {
+            lastError = answer;
+            listeners.disconnect.forEach((listen) => listen());
+          } else {
+            listeners.message.forEach((listen) => listen(answer));
+          }
+        });
+      },
+    };
+  };
+  return { connectNative, lastError: () => lastError };
+}
+
+test("a running host's entries are what a panel lists, as a claim cut down to size", () => {
+  const claim = readHello(runningReply({
+    entries: [
+      { name: "ok", label: "A‮evil", kind: "agent" },
+      { name: "@control", label: "no", kind: "agent" },
+      { name: "tool", label: "A tool", kind: "tool" },
+      { name: "ok", label: "twice", kind: "agent" },
+      ...Array.from({ length: 200 }, (_, n) => ({ name: `e${n}`, label: "x".repeat(500), kind: "provider" })),
+    ],
+  }));
+  assert.equal(claim.entries.length, 64);
+  assert.deepEqual(claim.entries[0], { name: "ok", label: "Aevil", kind: "agent", local: false });
+  assert.ok(claim.entries.every((entry) => entry.label.length <= 80 && !entry.name.startsWith("@") && entry.kind !== "tool"));
+});
+
+test("a reply that is not a host's is no claim", () => {
+  assert.equal(readHello(undefined), null);
+  assert.equal(readHello(runningReply({ peer: "me" })), null);
+  assert.equal(readHello(runningReply({ method: "rot13" })), null);
+  assert.equal(readHello(runningReply({ reply: "start" })), null);
+  assert.equal(readHello({ reply: "hello", running: false }), null);
+});
+
+test("three states: no native host, no Canoa running, and Canoa running with what it serves", async () => {
+  const missing = scripted(() => "Specified native messaging host not found.");
+  assert.deepEqual(await createLocalHost(missing).hello(), { state: "not-installed" });
+
+  const forbidden = scripted(() => "Access to the specified native messaging host is forbidden.");
+  assert.deepEqual(await createLocalHost(forbidden).hello(), { state: "not-installed", forbidden: true });
+
+  const stopped = scripted(() => ({ reply: "hello", running: false, door: false }));
+  assert.deepEqual(await createLocalHost(stopped).hello(), { state: "stopped" });
+
+  const running = scripted(() => runningReply());
+  const state = await createLocalHost(running).hello();
+  assert.equal(state.state, "running");
+  assert.equal(state.host.peer, PEER);
+  assert.deepEqual(state.host.entries.map((entry) => entry.name), ["claude", "scripted"]);
+
+  const doorOff = scripted(() => ({ reply: "hello", running: true, door: false }));
+  assert.equal((await createLocalHost(doorOff).hello()).state, "unavailable");
+});
+
+test("a host that never answers is unavailable after the wait, not for ever", async () => {
+  const silent = scripted(() => null);
+  const state = await createLocalHost({ ...silent, helloMs: 20 }).hello();
+  assert.equal(state.state, "unavailable");
+});
+
+test("connectNative throwing is a state too", async () => {
+  const state = await createLocalHost({ connectNative: () => { throw new Error("Specified native messaging host not found."); } }).hello();
+  assert.deepEqual(state, { state: "not-installed" });
+});
+
+test("Start asks once, waits for the host to answer, and a second click while it starts does nothing", async () => {
+  const log = [];
+  let asks = 0;
+  const host = scripted((request) => {
+    if (request.op === "start") return { reply: "start", started: 4242 };
+    asks += 1;
+    return asks < 3 ? { reply: "hello", running: false } : runningReply();
+  }, log);
+  const local = createLocalHost({ ...host, pollMs: 1, sleep: () => new Promise((resolve) => setTimeout(resolve, 1)) });
+  const first = local.start();
+  assert.equal(local.starting, true);
+  const second = local.start();
+  assert.equal(first, second);
+  const state = await first;
+  assert.equal(state.state, "running");
+  assert.equal(log.filter((op) => op === "start").length, 1, log.join());
+  assert.equal(local.starting, false);
+});
+
+test("Start that the host program refuses, or that never brings Canoa up, says so", async () => {
+  const refused = scripted(() => ({ reply: "start", error: "Canoa is already running" }));
+  const state = await createLocalHost(refused).start();
+  assert.equal(state.state, "unavailable");
+  assert.match(state.why, /already running/);
+
+  const never = scripted((request) => (request.op === "start" ? { reply: "start", started: 1 } : { reply: "hello", running: false }));
+  const slow = await createLocalHost({ ...never, startWaitMs: 30, pollMs: 5, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }).start();
+  assert.equal(slow.state, "unavailable");
+  assert.match(slow.why, /did not come up/);
+
+  const missing = scripted(() => "Specified native messaging host not found.");
+  assert.deepEqual(await createLocalHost(missing).start(), { state: "not-installed" });
+});
+
+test("only the extension's own pages may start Canoa, never a web page or a content script in one", () => {
+  const runtime = { id: "abc", getURL: (path) => `chrome-extension://abc/${path}` };
+  assert.equal(fromOwnPage({ id: "abc", url: "chrome-extension://abc/ui/index.html?view=panel" }, runtime), true);
+  assert.equal(fromOwnPage({ id: "abc", url: "chrome-extension://abc/permissions.html" }, runtime), true);
+  // A content script reports the page it runs in.
+  assert.equal(fromOwnPage({ id: "abc", url: "https://evil.example/", tab: { id: 1 } }, runtime), false);
+  assert.equal(fromOwnPage({ id: "abc", url: "chrome-extension://abc/acp-request.html?ask=1" }, runtime), false);
+  assert.equal(fromOwnPage({ id: "other", url: "chrome-extension://abc/ui/index.html" }, runtime), false);
+  assert.equal(fromOwnPage({ id: "abc" }, runtime), false);
+  assert.equal(fromOwnPage(undefined, runtime), false);
+});
+
+const running = (host = {}) => ({ state: "running", host: { ...readHello(runningReply({ home: "C:\Users\p", ...host })) } });
+const pinned = { peer: PEER, method: "noise" };
+
+test("the host's agents are listed only once this browser's key is paired with the host that answers", () => {
+  const state = running();
+  assert.deepEqual(localAgents(state, null), []);
+  assert.deepEqual(localAgents({ state: "stopped" }, pinned), []);
+  // A claim of another key than the one paired is not the same Canoa, and nothing is listed from it.
+  const other = running({ peer: `sha256:${"cd".repeat(32)}` });
+  assert.deepEqual(localAgents(other, pinned), []);
+  assert.equal(viewOf(other, pinned).changed, true);
+  const agents = localAgents(state, pinned);
+  assert.deepEqual(agents.map((agent) => agent.key), ["local:claude", "local:scripted"]);
+  assert.deepEqual(agents[0].native, { entry: "claude" });
+  assert.equal(agents[0].peer, PEER, "the pinned key, which the proof checks");
+  assert.equal(agents[0].method, "noise");
+  assert.equal(agents[0].source, "local");
+});
+
+test("Canoa's own pages hold those agents with the host's home as their folder, and nobody else's page is given any", () => {
+  const grants = localGrants("chrome-extension://me", running(), pinned);
+  assert.equal(grants.length, 2);
+  assert.ok(grants.every((grant) => grant.origin === "chrome-extension://me" && grant.cwd === "C:\Users\p" && grant.permissions === true));
+  assert.deepEqual(localGrants("chrome-extension://me", running(), null), []);
+});
+
+test("the view says what a panel needs and nothing else of the claim", () => {
+  const view = viewOf(running(), pinned);
+  assert.equal(view.state, "running");
+  assert.equal(view.paired, true);
+  assert.equal(view.canPin, true);
+  assert.deepEqual(Object.keys(view.host).sort(), ["control", "entries", "home", "method", "name", "peer", "version"]);
+  assert.equal(viewOf({ state: "not-installed" }, pinned).paired, false);
+  assert.equal(viewOf(running(), null).paired, false);
+});

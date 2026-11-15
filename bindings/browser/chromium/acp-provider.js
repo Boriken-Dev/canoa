@@ -1,5 +1,6 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
 import { METHODS, dialAgent, ownPeerId, pairWithPin, unreachable } from "./acp-dial.js";
+import { createLocalHost, fromExtensionPage, fromOwnPage, localAgents, localGrants, viewOf } from "./acp-local.js";
 import { COMPANION, addedMethod, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
 import { createGateway, dialRecord } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
@@ -20,6 +21,9 @@ const PORT_NAME = "canoa-acp";
 const ASK_MS = 120_000;
 const TOOL_MS = 30_000;
 const SEARCH_SECONDS = 3;
+const LOCAL_PIN = "canoa_local_host";
+const LOCAL_STATE = "canoa_local_state";
+const CONTROL_MS = 30_000;
 const STANDING = "canoa_standing";
 const STANDING_STATUS = "canoa_standing_status";
 const STANDING_ALARM = "canoa-standing";
@@ -56,11 +60,28 @@ async function dropGrant(grant) {
   }
 }
 
+const localHost = createLocalHost({
+  connectNative: (name) => chrome.runtime.connectNative(name),
+  lastError: () => chrome.runtime.lastError?.message,
+});
+
+const pinnedHost = () => read("local", LOCAL_PIN, null);
+const lastLocal = () => read("session", LOCAL_STATE, { state: "unknown" });
+
+/** Asks the native host what Canoa on this computer is doing, and remembers it for the lists that cannot wait for it. */
+async function refreshLocal() {
+  const state = await localHost.hello();
+  await write("session", LOCAL_STATE, state);
+  return { state, pinned: await pinnedHost() };
+}
+
 const store = {
-  agents: () => read("local", AGENTS, []),
+  stored: () => read("local", AGENTS, []),
+  // What this computer's Canoa serves is listed beside the agents the person added, once this browser's key is paired with it.
+  agents: async () => [...(await read("local", AGENTS, [])), ...localAgents(await lastLocal(), await pinnedHost())],
   addAgent: (details) => oneAtATime(() => addAgent(details)),
   removeAgent: (key) => oneAtATime(async () => {
-    await write("local", AGENTS, (await store.agents()).filter((agent) => agent.key !== key));
+    await write("local", AGENTS, (await store.stored()).filter((agent) => agent.key !== key));
     for (const [area, name] of [["local", GRANTS], ["session", ONCE]]) {
       await write(area, name, (await read(area, name, [])).filter((grant) => grant.agent !== key));
     }
@@ -71,7 +92,14 @@ const store = {
   async allGrants() {
     return [...(await read("local", GRANTS, [])), ...(await read("session", ONCE, []))];
   },
-  grants: async (origin) => (await store.allGrants()).filter((grant) => grant.origin === origin),
+  async grants(origin) {
+    const held = (await store.allGrants()).filter((grant) => grant.origin === origin);
+    if (origin !== OWN_ORIGIN) return held;
+    // Canoa's own pages hold the local host's agents without asking, but keep their sessions in a grant like any other.
+    const local = localGrants(origin, await lastLocal(), await pinnedHost());
+    const kept = held.map((grant) => (local.find((item) => item.agent === grant.agent) === undefined ? grant : { ...grant, cwd: local[0].cwd, permissions: true }));
+    return [...kept, ...local.filter((grant) => !held.some((item) => item.agent === grant.agent))];
+  },
   saveGrant: (grant) => oneAtATime(async () => {
     await dropGrant(grant);
     const [area, name] = areaOf(grant);
@@ -89,7 +117,7 @@ const store = {
 };
 
 async function addAgent({ label, url, peer, method, source, webtransport, offers }) {
-    const agents = await store.agents();
+    const agents = await store.stored();
     // The same key at a new address is the same agent, whose grants carry over and whose name stays the person's. Anyone can
     // name a public key, so nothing counts as shown until a proof there, and the old address is kept until then.
     const chosen = addedMethod(method);
@@ -110,6 +138,75 @@ async function addAgent({ label, url, peer, method, source, webtransport, offers
     agent.offers = offersOf({ offers });
     await write("local", AGENTS, [...agents, agent]);
     return agent;
+}
+
+/** Runs one control method of Canoa on this computer, over a proven link of its own that lasts for the call. */
+async function controlCall(method, params) {
+  if (typeof method !== "string" || !/^[a-z_]{1,32}\/[a-z_]{1,32}$/.test(method)) throw new Error("not a control method");
+  const { state, pinned } = await refreshLocal();
+  const view = viewOf(state, pinned);
+  if (!view.paired) throw new Error("Canoa on this computer is not paired with this browser");
+  const link = await dialAgent({ native: { entry: "@control" }, peer: pinned.peer, method: pinned.method, label: "Canoa" }, {});
+  try {
+    const answered = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Canoa did not answer in time")), CONTROL_MS);
+      link.onMessage((text) => {
+        const message = JSON.parse(text);
+        if (message.id !== 1) return;
+        clearTimeout(timer);
+        if (message.error) reject(new Error(String(message.error.message ?? "refused")));
+        else resolve(message.result);
+      });
+      link.onClose(() => {
+        clearTimeout(timer);
+        reject(new Error("the link to Canoa ended"));
+      });
+    });
+    await link.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: params ?? {} }));
+    return await answered;
+  } finally {
+    link.close();
+  }
+}
+
+/** The messages the panel and the options page send about Canoa on this computer. Only the extension's own pages are heard. */
+function installLocalHost() {
+  chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    const type = message?.type;
+    if (typeof type !== "string" || !type.startsWith("canoa.host.")) return false;
+    const heard = type === "canoa.host.status" ? fromExtensionPage(sender, chrome.runtime) : fromOwnPage(sender, chrome.runtime);
+    if (!heard) return false;
+    const view = async () => {
+      const { state, pinned } = await refreshLocal();
+      return viewOf(state, pinned);
+    };
+    let answer;
+    if (type === "canoa.host.status") {
+      answer = view();
+    } else if (type === "canoa.host.start") {
+      answer = localHost.start().then(async (state) => {
+        await write("session", LOCAL_STATE, state);
+        return viewOf(state, await pinnedHost());
+      });
+    } else if (type === "canoa.host.pair") {
+      // The PIN the person read on their own computer, typed here: the key that proves itself through it is the one that is kept.
+      answer = pairWithPin({ native: true, pin: String(message.pin ?? "") })
+        .then(async (peer) => {
+          await write("local", LOCAL_PIN, { peer, method: "noise" });
+          return view();
+        });
+    } else if (type === "canoa.host.unpair") {
+      answer = write("local", LOCAL_PIN, null).then(view);
+    } else if (type === "canoa.host.control") {
+      answer = controlCall(message.method, message.params).then((result) => ({ result }));
+    } else {
+      return false;
+    }
+    answer.then(reply, (error) => reply({ error: String(error?.refusal ?? error?.message ?? error) }));
+    return true;
+  });
+  // A worker that starts looks once, so the first list a panel asks for already knows.
+  refreshLocal().catch(() => {});
 }
 
 /** Asks the companion who is around. No companion is an answer too: the person can still add an agent by hand. */
@@ -347,6 +444,7 @@ export async function pairedPeers() {
 }
 
 export function installProvider() {
+  installLocalHost();
   // Without this, a content script could read the agents' secret and turn on what only the person may.
   chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
 

@@ -67,8 +67,25 @@ function watch(callback) {
   });
 }
 
+// The Canoa on this computer, by the native messaging host: its state, Start, pairing by PIN, and the control channel. The worker
+// answers only this extension's own pages; every reply is JSON text, as the other calls'.
+const HOST = {
+  status: () => send("canoa.host.status"),
+  start: () => send("canoa.host.start"),
+  pair: (pin) => send("canoa.host.pair", { pin }),
+  unpair: () => send("canoa.host.unpair"),
+  control: (method, params) => send("canoa.host.control", { method, params })
+};
+
 window.canoaBridge = Object.freeze({
   client: CLIENT,
+  host: Object.freeze({
+    status: async () => JSON.stringify(await HOST.status()),
+    start: async () => JSON.stringify(await HOST.start()),
+    pair: async (pin) => JSON.stringify(await HOST.pair(pin)),
+    unpair: async () => JSON.stringify(await HOST.unpair()),
+    control: async (method, params) => JSON.stringify(await HOST.control(method, JSON.parse(params)))
+  }),
   popout: Object.freeze({
     call: async (name, args) => {
       if (!Object.hasOwn(POPOUT, name)) throw new Error("Unknown call");
