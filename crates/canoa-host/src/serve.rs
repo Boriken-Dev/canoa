@@ -1089,11 +1089,19 @@ impl Serving {
             }
             None => config,
         };
-        let sources = if options.local_sources {
+        let mut sources = if options.local_sources {
             sources::entries(config)
         } else {
             Vec::new()
         };
+        // A host for a portal has no process of the person's to open them in: its sources listen on the sockets only that person's
+        // browser reaches, as its other entries do.
+        if portal_of(options).is_some() {
+            for source in &mut sources {
+                source.entry.local = false;
+                source.entry.own_profile = true;
+            }
+        }
         let controlled = config
             .control
             .as_ref()

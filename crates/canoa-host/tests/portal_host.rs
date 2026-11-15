@@ -52,9 +52,10 @@ fn portal_host(uid: u32) -> (Host, std::path::PathBuf) {
         "--portal-group",
         &group,
     ];
-    // One line for the entry and one for the control channel.
+    // One line for the entry, one for the control channel and one for each of the host's own sources (Claude, Codex, Antigravity,
+    // Grok and Pi), which a host for a portal serves on sockets too.
     // The account's name is the last part of the folder, as the unit makes it.
-    let host = Host::start_in_with(scratch, &config, 2, &args, &[("USER", "run".into())]);
+    let host = Host::start_in_with(scratch, &config, 7, &args, &[("USER", "run".into())]);
     (host, dir)
 }
 
@@ -95,6 +96,15 @@ fn every_entry_and_the_control_channel_are_on_sockets_whatever_the_file_asks() {
         "{index}"
     );
     assert!(entries.iter().any(|entry| entry["kind"] == "control"));
+    // The host's own sources are entries like the others: a program the Store installs is one the page can start.
+    for name in ["Claude", "Codex"] {
+        let one = entries
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .expect(name);
+        assert!(one.get("local").is_none(), "{one}");
+        assert!(host.url(name).starts_with("unix:"), "{name}");
+    }
 }
 
 #[test]

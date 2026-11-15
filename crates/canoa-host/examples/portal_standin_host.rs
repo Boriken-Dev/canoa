@@ -1,7 +1,9 @@
-//! `canoa` with the made-up program Store (the echo stores, over a fake publisher, installing the `version_standin` example into
-//! `$HOME/standin-programs`) in place of the built-in ones, so a real browser can install a program through a portal's host
-//! without downloading anything. Its command line is `canoa`'s; the portal's template unit runs it as `canoa serve --portal ...`.
-//! Built by `cargo build -p canoa-host --bin canoa --examples`; `version_standin` has to sit beside it.
+//! `canoa` with a made-up program Store in place of the built-in ones: one program, `claude`, published by a fake publisher and
+//! installed on the user's programs shelf, where an entry that runs Claude Code looks for the Store's copy. The program installed
+//! is the file `claude_standin` beside this one (a script that answers `--version` and then becomes `harness_standin`), so a real
+//! browser can install a program through a portal's host, and start a session on it, without downloading anything. Its command
+//! line is `canoa`'s; the portal's template unit runs it as `canoa serve --portal ...`.
+//! Built by `cargo build -p canoa-host --bin canoa --examples`.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -15,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use canoa_host::cli::{self, Cli, Front, Program};
-use canoa_host::store::builtin::{EchoArchiveStore, EchoStore};
+use canoa_host::store::builtin::{EchoClaudeStore, EchoStore};
 use canoa_host::store::contract::{Fixture as _, Variant, WorldTransport};
 use canoa_host::store::echo::EchoFixture;
 use canoa_host::store::programs::{Options, Programs};
@@ -26,7 +28,7 @@ use coqui_acp_api::guatiao::library::Registry;
 coqui_acp_api::guatiao::local_providers!(
     id = "echo-stores",
     version = "0.0.0",
-    providers = [EchoStore, EchoArchiveStore]
+    providers = [EchoStore, EchoClaudeStore]
 );
 
 fn sibling(name: &str) -> PathBuf {
@@ -39,7 +41,7 @@ fn echo_programs() -> Option<Programs> {
     let mut registry = Registry::new("test", "0.0.0");
     registry.register_local("test", library).ok()?;
     let fixture = EchoFixture {
-        standin: sibling("version_standin"),
+        standin: sibling("claude_standin"),
         archive: false,
     };
     let mut options = Options::default();
@@ -57,12 +59,9 @@ fn echo_programs() -> Option<Programs> {
         env
     };
     Some(
-        Programs::new(
-            Shelf::unchecked(home.join("standin-programs")),
-            Arc::new(registry),
-        )
-        .transport(WorldTransport::new(fixture.world(Variant::Normal)))
-        .options(options),
+        Programs::new(Shelf::unchecked(Shelf::default_root()?), Arc::new(registry))
+            .transport(WorldTransport::new(fixture.world(Variant::Normal)))
+            .options(options),
     )
 }
 
@@ -107,7 +106,7 @@ impl Front for Standin {
     }
 
     fn programs(&self) -> Option<(Arc<Programs>, Vec<String>)> {
-        echo_programs().map(|programs| (Arc::new(programs), vec!["echo_store".to_owned()]))
+        echo_programs().map(|programs| (Arc::new(programs), vec!["echo_claude_store".to_owned()]))
     }
 }
 

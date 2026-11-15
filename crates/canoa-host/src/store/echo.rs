@@ -338,3 +338,74 @@ impl Fixture for EchoFixture {
         world
     }
 }
+
+/// The echo program published the way Claude Code is: the same one file, kept on the shelf as `claude`, whose `--version` line ends
+/// in `(Claude Code)`. A browser run installs it to see an entry start the Store's copy.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EchoClaudeRecipe;
+
+impl Recipe for EchoClaudeRecipe {
+    fn info(&self) -> StoreInfo {
+        let mut info = StoreInfo::new("claude", "Claude Code (made up)", "Example Publisher");
+        info.serves = vec![Serves::any("claude")];
+        info.platforms = vec![Platform::new(std::env::consts::OS, std::env::consts::ARCH)];
+        info.endpoints = vec![ORIGIN.to_owned()];
+        info
+    }
+
+    fn names(&self) -> &'static [&'static str] {
+        &["claude"]
+    }
+
+    fn dirs(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn version_args(&self) -> &'static [&'static str] {
+        &["--version"]
+    }
+
+    fn parse_version(&self, line: &str) -> Option<String> {
+        line.contains("(Claude Code)")
+            .then(|| line.split_whitespace().next().map(str::to_owned))
+            .flatten()
+            .filter(|version| !version.is_empty())
+    }
+
+    fn classify(&self, path: &str) -> (&'static str, Updatable) {
+        EchoRecipe.classify(path)
+    }
+
+    fn launch_environment(&self) -> BTreeMap<String, String> {
+        EchoRecipe.launch_environment()
+    }
+
+    fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
+        latest(tools)
+    }
+
+    fn release(
+        &self,
+        version: Option<&str>,
+        _channel: Option<&str>,
+        _platform: &Platform,
+        tools: &Object<dyn InstallTools>,
+    ) -> Result<Release, ProviderError> {
+        let version = newest(version, tools)?;
+        let base = format!("{ORIGIN}/{version}/echo-{}", platform_name());
+        let digest = tools.fetch_text(&format!("{base}.sha256"), 256)?;
+        let download = Download::new(
+            base,
+            None,
+            Check::Sha256 {
+                value: digest.trim().to_owned(),
+            },
+        );
+        let name = exe("claude");
+        Ok(Release::new(
+            version,
+            name.clone(),
+            vec![Part::new(download, name).executable()],
+        ))
+    }
+}

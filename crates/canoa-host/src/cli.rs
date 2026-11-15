@@ -943,7 +943,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         .with_program_args(program.args)
         .with_rekey(!args.no_rekey)
         .with_nothing_to_serve(args.allow_empty || args.portal.is_some())
-        .with_local_sources(args.local_sources)
+        .with_local_sources(args.local_sources || args.portal.is_some())
         .with_supervised(args.supervised)
         .with_layers(layers)
         .with_state_dir(home.dir());
