@@ -244,6 +244,10 @@ fn hello_lists_the_entries_and_says_the_host_runs() {
     assert_eq!(reply["entries"][0]["name"], "fixture", "{reply}");
     assert_eq!(reply["entries"][0]["kind"], "agent");
     assert_eq!(reply["control"], true);
+    assert!(
+        reply.get("home").is_none(),
+        "a claim of a folder is not made: {reply}"
+    );
 }
 
 #[test]
@@ -717,4 +721,150 @@ fn a_wrong_pin_pairs_nobody() {
         .store()
         .expect("the host's store");
     assert!(!store.is_accepted(&client.peer_id()), "nobody was paired");
+}
+
+/// Runs `body` on the control channel through the door, as a key the host has paired.
+fn on_control<R>(
+    host: &Host,
+    client: &coqui_agentic_peer::auth::Identity,
+    body: impl FnOnce(&support::Rpc<'_, Link<'_>>) -> R,
+) -> Result<R, String> {
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@control").map_err(|error| error.to_string())?;
+    support::with_channel(link, client, host.peer, body)
+}
+
+#[test]
+fn control_through_the_door_refuses_what_installs_restarts_or_belongs_to_the_owner() {
+    let host = host();
+    let client = support::key();
+    host.pair(&client);
+    let refused = on_control(&host, &client, |rpc| {
+        let listed = rpc.request("ledger/list", json!({}));
+        let denied: Vec<(&str, Option<i64>)> = [
+            ("overlay/apply", json!({})),
+            ("overlay/remove", json!({"name": "x"})),
+            ("catalog/fetch", json!({})),
+            ("host/restart", json!({})),
+            ("upload/put", json!({"name": "x", "data": ""})),
+            (
+                "config/set",
+                json!({"section": "permissions", "value": {"protected": []}}),
+            ),
+            ("config/set", json!({"section": "overlays", "value": {}})),
+            ("accounts/list", json!({})),
+            ("store/rollback", json!({})),
+            ("history/export", json!({})),
+        ]
+        .into_iter()
+        .map(|(method, params)| {
+            let said = rpc.request(method, params);
+            (method, said.err().and_then(|error| error["code"].as_i64()))
+        })
+        .collect();
+        (listed.is_ok(), denied)
+    })
+    .expect("a paired key reaches the control channel");
+    assert!(refused.0, "its own ledger is the one thing it may read");
+    for (method, code) in refused.1 {
+        assert!(matches!(code, Some(-32001 | -32002)), "{method}: {code:?}");
+    }
+}
+
+#[test]
+fn a_key_forgets_itself_over_the_door_and_is_refused_after() {
+    let host = host();
+    let client = support::key();
+    host.pair(&client);
+    let said = on_control(&host, &client, |rpc| rpc.request("peer/forget", json!({})))
+        .expect("a paired key reaches the control channel");
+    assert_eq!(said.expect("it is forgotten")["removed"], true);
+    let store = canoa_host::Home::at(host.home())
+        .store()
+        .expect("the host's store");
+    assert!(
+        !store.is_accepted(&client.peer_id()),
+        "the host no longer pairs it"
+    );
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "fixture").expect("the door opens the entry");
+    let again = support::with_channel(link, &client, host.peer, |rpc| rpc.initialize());
+    assert!(!matches!(again, Ok(Ok(_))), "{again:?}");
+}
+
+#[test]
+fn an_unreadable_record_of_origins_closes_the_door_to_every_key() {
+    let host = host();
+    let client = support::key();
+    host.pair(&client);
+    std::fs::create_dir_all(host.home().join("native")).expect("a folder");
+    std::fs::write(
+        host.home().join("native").join("origins.json"),
+        "{ not json",
+    )
+    .expect("a corrupt file");
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "fixture").expect("the door opens the entry");
+    let served = support::with_channel(link, &client, host.peer, |rpc| rpc.initialize());
+    assert!(
+        !matches!(served, Ok(Ok(_))),
+        "a key was served with the record of origins unreadable: {served:?}"
+    );
+}
+
+#[test]
+fn pairing_that_cannot_record_its_origin_leaves_no_accepted_key() {
+    use coqui_agentic_peer::pairing;
+    use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
+
+    let host = host();
+    // A folder where the record belongs: it can be neither read nor replaced.
+    std::fs::create_dir_all(host.home().join("native").join("origins.json"))
+        .expect("a folder in its place");
+    let (mut pair, shown) = pairing_door(&host.home());
+    let pin =
+        Pin::parse(&CodeAlphabet::pin(), shown["pin"].as_str().expect("a PIN")).expect("a PIN");
+    let client = support::key();
+    let client_store = canoa_host::Home::at(host.scratch.0.join("client"))
+        .store()
+        .expect("a store");
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@pair").expect("the pairing door opens");
+    let _ = pairing::join(&link, &client, pin, &client_store, WAIT);
+    link.close();
+    assert!(
+        !pair.wait().expect("pair ends").success(),
+        "pairing reports what it could not record"
+    );
+    let store = canoa_host::Home::at(host.home())
+        .store()
+        .expect("the host's store");
+    assert!(
+        !store.is_accepted(&client.peer_id()),
+        "a key was left accepted with no origin bound to it"
+    );
+}
+
+#[test]
+fn a_door_that_could_not_be_opened_is_said_to_the_browser_and_in_status() {
+    let scratch = Scratch::new();
+    let home = scratch.0.join("home");
+    std::fs::create_dir_all(&home).expect("a home");
+    // Something else holds the door's name first.
+    let name = canoa_host::native::door_name(&home).expect("a name");
+    let _squatter = canoa_host::pipe::Listener::bind(&name).expect("the name is free");
+    let host = Host::start_in(scratch, &agent_entry(), 1, &[]);
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let reply = relay.ask(&json!({ "op": "hello" }));
+    assert_eq!(reply["running"], true, "{reply}");
+    assert_eq!(reply["door"], false, "{reply}");
+    assert!(
+        reply["why"]
+            .as_str()
+            .is_some_and(|why| why.contains("door")),
+        "{reply}"
+    );
+    let status = host.command(&["native", "status"]);
+    let status: Value = serde_json::from_slice(&status.stdout).expect("a JSON object");
+    assert!(status["door_error"].is_string(), "{status}");
 }

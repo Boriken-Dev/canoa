@@ -1480,6 +1480,7 @@ impl Serving {
             config.history,
         ));
         let stopped = Arc::new(AtomicBool::new(false));
+        let trust = Arc::clone(&store);
         let serving = Self {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
@@ -1573,6 +1574,7 @@ impl Serving {
                                     .map_or(control::DEFAULT_MAX_UPLOADS, |c| c.max_uploads),
                             },
                         ));
+                    let kept = kept.with_trust(Arc::clone(&trust));
                     let kept = kept.with_history(control::Moves {
                         store: recorded,
                         targets: movers,
@@ -1630,6 +1632,10 @@ impl Serving {
                 tracing::warn!(
                     "the native door has no name, so a browser cannot reach this host: {error}"
                 );
+                crate::native::note_door(
+                    home,
+                    Some(&format!("the door for browsers has no name: {error}")),
+                );
                 return None;
             }
         };
@@ -1639,9 +1645,16 @@ impl Serving {
                 tracing::warn!(
                     "the native door could not be opened, so a browser cannot reach this host: {error}"
                 );
+                crate::native::note_door(
+                    home,
+                    Some(&format!(
+                        "the door for browsers could not be opened: {error}"
+                    )),
+                );
                 return None;
             }
         };
+        crate::native::note_door(home, None);
         let entries: Vec<serde_json::Value> = self
             .listening
             .iter()
@@ -1662,11 +1675,6 @@ impl Serving {
             "method": self.method().name(),
             "entries": entries,
             "control": true,
-            "home": options
-                .home_dir
-                .clone()
-                .or_else(home_from_environment)
-                .map(|dir| dir.to_string_lossy().into_owned()),
         });
         let control = Arc::new(Served {
             name: control::NAME.to_owned(),

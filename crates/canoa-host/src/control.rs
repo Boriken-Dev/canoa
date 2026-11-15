@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::{Channel, Failure};
 
 use crate::worktree::Worktrees;
@@ -223,6 +224,8 @@ pub(crate) struct Control {
     history: Option<Moves>,
     /// The owner's accounts, once the host knows where canoa.cfg is.
     accounts: Option<accounts::Accounts>,
+    /// The paired keys, so a key can take itself out.
+    trust: Option<Arc<TrustStore>>,
     entries: Vec<EntryRoots>,
     /// What a page may do with this computer's files.
     files: Files,
@@ -318,6 +321,7 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             accounts: None,
+            trust: None,
             entries,
             files: Files::default(),
             overlays: Overlays::default(),
@@ -369,6 +373,32 @@ impl Control {
     pub(crate) fn with_history(mut self, history: Moves) -> Self {
         self.history = Some(history);
         self
+    }
+
+    /// Lets a paired key remove itself (`peer/forget`).
+    #[must_use]
+    pub(crate) fn with_trust(mut self, trust: Arc<TrustStore>) -> Self {
+        self.trust = Some(trust);
+        self
+    }
+
+    /// A key removes its own pairing: the real revoke, which ends its links within about a second. No grant is needed for what
+    /// only takes access away; the owner holds no key.
+    fn forget(&self, caller: &Caller) -> Result<Value, (i32, String)> {
+        let Caller::Peer { id, .. } = caller else {
+            return Err((REFUSED, "this link holds no key to forget".to_owned()));
+        };
+        let trust = self
+            .trust
+            .as_ref()
+            .ok_or((REFUSED, "this host cannot unpair a key".to_owned()))?;
+        let peer: PeerId = id
+            .parse()
+            .map_err(|_| (REFUSED, "this key is not an id".to_owned()))?;
+        let removed = trust
+            .remove(&peer)
+            .map_err(|_| (REFUSED, "the key could not be removed".to_owned()))?;
+        Ok(json!({ "removed": removed }))
     }
 
     /// Answers `accounts/*` for the owner.
@@ -430,6 +460,7 @@ impl Control {
                 Some("ledger/put") => self.put(caller, &params),
                 Some("ledger/remove") => self.remove(caller, &params),
                 Some("ledger/clear") => self.clear(caller),
+                Some("peer/forget") => self.forget(caller),
                 Some("fs/list") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
                 }

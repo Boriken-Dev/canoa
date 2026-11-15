@@ -1093,6 +1093,7 @@ fn native(action: NativeAction, front: &dyn Front) -> Result<(), Failed> {
                     "registered": status.registered,
                     "launch": status.launch,
                     "running": status.running,
+                    "door_error": status.door_error,
                     "holder": status.holder.map(|holder| serde_json::json!({ "name": holder.name, "pid": holder.pid })),
                 })
                 .to_string(),
@@ -1202,12 +1203,16 @@ fn pair_native(
                 .and_then(|origin| {
                     pairing::respond(&channel, &identity, &store, &desk, None, PAIRING_RUN)
                         .map_err(|error| error.to_string())
-                        .map(|paired| (paired.peer.id().to_string(), origin))
+                        .map(|paired| (paired.peer.id(), origin))
                 })
                 .and_then(|(peer, origin)| {
-                    crate::native::record_origin(&dir, &peer, &origin)
-                        .map(|()| peer)
-                        .map_err(|error| format!("the extension could not be recorded: {error}"))
+                    crate::native::record_origin(&dir, &peer.to_string(), &origin)
+                        .map(|()| peer.to_string())
+                        .map_err(|error| {
+                            // A key no extension is bound to is served to any: take it back out rather than leave it.
+                            let _ = store.remove(&peer);
+                            format!("the extension could not be recorded, so its key was not kept: {error}")
+                        })
                 });
             channel.close();
             running.fetch_sub(1, Ordering::SeqCst);

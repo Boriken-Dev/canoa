@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use coqui_agentic_peer::Error;
 use coqui_agentic_peer::companion::{self, Browser, Registration};
-use coqui_transport_pipe::ReadTimeout as _;
+use coqui_transport_pipe::{OsIdentity, ReadTimeout as _};
 use coqui_transport_web::frame;
 use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
@@ -146,6 +146,12 @@ fn knock(home: &Path, origin: &str, open: &str) -> io::Result<Option<Stream>> {
         Err(pipe::Error::NotListening) => return Ok(None),
         Err(error) => return Err(io::Error::other(error.to_string())),
     };
+    // Whatever listens on the name, it is the user's own process or it is told nothing: the system says who owns the pipe's server
+    // end (its owner on Windows, the peer's credentials on Unix), and a system that will not say is not trusted.
+    let owner = stream.peer().and_then(|identity| same_user(&identity));
+    if !owner.is_ok_and(|same| same) {
+        return Err(io::Error::other("the door is not held by this user"));
+    }
     let preamble = json!({ "canoa_native": PREAMBLE_VERSION, "open": open, "origin": origin });
     let framed = frame::encode(preamble.to_string().as_bytes(), MAX_PREAMBLE)
         .map_err(|error| io::Error::other(error.to_string()))?;
@@ -165,19 +171,50 @@ pub fn accept_pairing(channel: &pipe::PipeChannel) -> Option<String> {
     Some(wanted.origin)
 }
 
+fn door_error_file(home: &Path) -> PathBuf {
+    home.join("native").join("door-error.txt")
+}
+
+/// Records why the door could not be opened, or that it is open: what `hello` and `status` say when a browser finds the host
+/// running with no door.
+pub(crate) fn note_door(home: &Path, error: Option<&str>) {
+    let file = door_error_file(home);
+    match error {
+        Some(text) => {
+            let _ = fs::create_dir_all(file.parent().unwrap_or(home));
+            let _ = fs::write(&file, text);
+        }
+        None => {
+            let _ = fs::remove_file(&file);
+        }
+    }
+}
+
+fn door_error(home: &Path) -> Option<String> {
+    fs::read_to_string(door_error_file(home))
+        .ok()
+        .map(|text| text.chars().filter(|c| !c.is_control()).take(200).collect())
+}
+
 fn origins_file(home: &Path) -> PathBuf {
     home.join("native").join("origins.json")
 }
 
-fn origins(home: &Path) -> serde_json::Map<String, Value> {
-    fs::read_to_string(origins_file(home))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|value| match value {
-            Value::Object(map) => Some(map),
-            _ => None,
-        })
-        .unwrap_or_default()
+/// The record of which extension paired which key. A record that is not there is empty; one that is there and cannot be read
+/// whole is an error, and nothing is allowed on it.
+fn origins(home: &Path) -> io::Result<serde_json::Map<String, Value>> {
+    let text = match fs::read_to_string(origins_file(home)) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(serde_json::Map::new()),
+        Err(error) => return Err(error),
+    };
+    match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Object(map)) => Ok(map),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the record of which extension paired which key is not readable",
+        )),
+    }
 }
 
 /// Binds a key paired through the door to the origin the browser gave the relay: the key is that extension's, and no other
@@ -186,7 +223,7 @@ fn origins(home: &Path) -> serde_json::Map<String, Value> {
 /// # Errors
 /// When the record cannot be written.
 pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()> {
-    let mut map = origins(home);
+    let mut map = origins(home)?;
     map.insert(peer.to_owned(), origin.into());
     let file = origins_file(home);
     fs::create_dir_all(file.parent().unwrap_or(home))?;
@@ -202,10 +239,16 @@ pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()> {
 /// `canoa accept`) is bound to none and keeps the access its pairing gave it.
 #[must_use]
 pub fn origin_allows(home: &Path, peer: &str, origin: &str) -> bool {
-    origins(home)
-        .get(peer)
-        .and_then(Value::as_str)
-        .is_none_or(|bound| bound == origin)
+    origins(home).is_ok_and(|map| {
+        map.get(peer)
+            .and_then(Value::as_str)
+            .is_none_or(|bound| bound == origin)
+    })
+}
+
+/// Whether the other end of a stream is the user this process runs as.
+fn same_user(identity: &OsIdentity) -> io::Result<bool> {
+    Ok(identity.is_current_user()?.unwrap_or(false))
 }
 
 /// Whether a host holds the home now.
@@ -228,7 +271,18 @@ fn hello(home: &Home, origin: &str) -> Value {
             claim.insert("running".into(), true.into());
             Value::Object(claim)
         }
-        _ => json!({ "reply": "hello", "running": running(home), "door": false }),
+        _ => {
+            let held = running(home);
+            let mut reply = json!({ "reply": "hello", "running": held, "door": false });
+            if held {
+                // Canoa runs and the door is not open: say why, as far as the host could.
+                let why = door_error(home.dir()).unwrap_or_else(|| {
+                    "Canoa runs, but its door for browsers is not open".to_owned()
+                });
+                reply["why"] = why.into();
+            }
+            reply
+        }
     }
 }
 
@@ -596,6 +650,8 @@ pub struct Status {
     pub running: bool,
     /// Who holds it, by what it wrote: its name and process id.
     pub holder: Option<crate::home::Holder>,
+    /// Why the running host could not open its door for browsers, when it could not.
+    pub door_error: Option<String>,
 }
 
 /// What is registered for `name` and whether a host runs.
@@ -612,6 +668,7 @@ pub fn status(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<S
         launch: Launch::read(home).ok(),
         running: running(home),
         holder: home.holder(),
+        door_error: door_error(home.dir()),
     })
 }
 
@@ -646,6 +703,41 @@ mod tests {
         let b = std::env::temp_dir().join("canoa-door-b");
         assert_eq!(door_name(&a).unwrap(), door_name(&a).unwrap());
         assert_ne!(door_name(&a).unwrap(), door_name(&b).unwrap());
+    }
+
+    #[test]
+    fn only_this_users_door_is_spoken_to() {
+        let mut identity = OsIdentity::default();
+        assert!(
+            !same_user(&identity).expect("answers"),
+            "a system that will not say is not trusted"
+        );
+        identity.user = Some("S-1-5-21-not-me".to_owned());
+        assert!(
+            !same_user(&identity).expect("answers"),
+            "another user's door is not this user's"
+        );
+        identity.user = Some(coqui_transport_pipe::current_user().expect("this user"));
+        assert!(same_user(&identity).expect("answers"));
+    }
+
+    #[test]
+    fn a_record_of_origins_that_cannot_be_read_allows_nothing_and_is_not_written_over() {
+        let dir = std::env::temp_dir().join(format!("canoa-origins-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("native")).expect("a folder");
+        assert!(
+            origin_allows(&dir, "sha256:a", "chrome-extension://x/"),
+            "no record, no binding"
+        );
+        fs::write(dir.join("native").join("origins.json"), "[1]").expect("a file");
+        assert!(!origin_allows(&dir, "sha256:a", "chrome-extension://x/"));
+        assert!(record_origin(&dir, "sha256:a", "chrome-extension://x/").is_err());
+        assert_eq!(
+            fs::read_to_string(dir.join("native").join("origins.json")).expect("kept"),
+            "[1]"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
