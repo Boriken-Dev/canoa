@@ -395,7 +395,7 @@ void main() {
       expect(find.text('Lineage · 4 running'), findsOneWidget);
       expect(scene.session.openChild, isNull);
       await tester.tap(find.byKey(const ValueKey('lineage c2')));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(scene.session.openChild, 'c2');
     });
 
@@ -424,7 +424,8 @@ void main() {
       await details(tester);
       expect(find.byType(BottomSheet), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('lineage c1')));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.byType(BottomSheet), findsNothing);
       expect(scene.session.openChild, 'c1');
       expect(scene.session.tasks['c1']!.phase, TaskPhase.working);

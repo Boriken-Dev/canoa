@@ -2073,6 +2073,7 @@ class _ConversationState extends State<_Conversation> {
             terminals: session.terminals,
             plan: session.plan,
             working: session.status == SessionStatus.working,
+            turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
             renderers: delegationRenderers.merge(widget.renderers),
             narrow: widget.narrow,
           )),

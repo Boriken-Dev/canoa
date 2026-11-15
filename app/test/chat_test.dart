@@ -117,6 +117,13 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump();
 }
 
+/// Frames for an animation to end while the working row's mark pulses, which keeps pumpAndSettle from returning.
+Future<void> _frames(WidgetTester tester) async {
+  for (var i = 0; i < 8; i++) {
+    await tester.pump(const Duration(milliseconds: 60));
+  }
+}
+
 Future<void> _openAll(WidgetTester tester, Finder titles) async {
   for (final title in titles.evaluate().toList()) {
     await tester.tap(find.byWidget(title.widget), warnIfMissed: false);
@@ -657,7 +664,8 @@ void main() {
         }));
         await _settle(tester);
         await tester.tap(find.textContaining('to edit src/calc.js?'));
-        await tester.pumpAndSettle();
+        // The working row pulses for as long as the turn runs, so the frames are counted, not awaited.
+        await _frames(tester);
         expect(tester.takeException(), isNull);
         expect(find.byTooltip('Stop'), findsOneWidget);
         expect(find.text('Yes'), findsOneWidget);
