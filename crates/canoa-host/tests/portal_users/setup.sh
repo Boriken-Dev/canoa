@@ -3,7 +3,8 @@
 # the portal, canoatesta and canoatestb for the two people), a PAM service that checks a password file of its own, a slice and
 # the template unit, the root helper and a sudoers rule that lets the portal run only it, and a copy of the built programs.
 #
-#   sudo sh setup.sh TARGET_DIR      # TARGET_DIR holds canoa and examples/stdio_agent, such as target/debug
+#   sudo sh setup.sh TARGET_DIR [MTLS_PLUGIN]   # TARGET_DIR holds canoa and examples/stdio_agent, such as target/debug; the plugin is
+#                                               # found under TARGET_DIR/deps when it is not named
 #   sudo sh teardown.sh              # removes all of it
 #
 # Every name starts with canoatest. Nothing here touches another account, sssd, or the real PAM services. The proxy's socket is
@@ -69,6 +70,30 @@ pair_seconds = 8
 max_failures_per_pair = 3
 failure_floor_seconds = 1
 EOF
+
+# The same portal with the network rule: a password only from 10.0.0.0/8, a certificate (pinned through the portal) from anywhere.
+# The certificate provider is a library the portal loads, so it is root's: built beside the tests, or named by the second argument.
+mtls=${2:-$(ls -t "$target"/deps/libcoqui_access_mtls_plugin*.so "$target"/libcoqui_access_mtls_plugin.so 2>/dev/null | head -n 1)}
+[ -f "$mtls" ] || { echo "no coqui_access_mtls plugin library: cargo build -p coqui-access-mtls-plugin, or name it as the second argument" >&2; exit 1; }
+install -m 0755 "$mtls" /opt/canoatest/libcoqui_access_mtls_plugin.so
+install -d -o canoatestportal -m 0700 /var/lib/canoatest-portal
+{
+    cat /opt/canoatest/portal.toml
+    cat <<'EOF'
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_mtls", library = "/opt/canoatest/libcoqui_access_mtls_plugin.so", enrol = true,
+    config = { trust = "pinned", source = { file = { path = "/var/lib/canoatest-portal/certificates.toml", format = "toml" } } } },
+]
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"], ["certificate"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["certificate"]]
+EOF
+} > /opt/canoatest/portal_network.toml
 
 # The passwords of the test accounts, and the PAM service that checks them and counts how often it was asked.
 printf 'canoatesta:pw-a-test\ncanoatestb:pw-b-test\ncanoatestc:pw-c-test\n' > /etc/canoatest/passwords

@@ -11,6 +11,11 @@
 //
 // The trusted certificate is accepted by the portal's provider as it stands; the untrusted one is accepted only after the account
 // enrols it, which the run does and then undoes.
+//
+// With CANOA_E2E_OUTSIDE=<an address outside 10.0.0.0/8> the portal runs the sign-in policy "a password only from 10.0.0.0/8, a
+// certificate from anywhere" (docs/portal.md) behind a front that takes the browser's address from the X-Test-Address header
+// (e2e/portal_front.py, whose default is 10.1.2.3), and the run also checks what the page offers, and what a session does, once
+// the browser is outside.
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +36,7 @@ const other = need("CANOA_E2E_OTHER_USER");
 const trusted = readFileSync(need("CANOA_E2E_TRUSTED"), "utf8").trim();
 const untrusted = readFileSync(need("CANOA_E2E_UNTRUSTED"), "utf8").trim();
 const shots = need("CANOA_E2E_SHOTS");
+const outside = process.env.CANOA_E2E_OUTSIDE;
 mkdirSync(shots, { recursive: true });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -70,7 +76,10 @@ const mode = async ({ width, height, dark, mobile }) => {
   await page.call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
   await page.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: dark ? "dark" : "light" }] });
 };
-const header = (cert) => page.call("Network.setExtraHTTPHeaders", { headers: cert ? { "X-Client-Cert": cert } : {} });
+// Where the front says the browser is: unset is the front's own default, inside 10.0.0.0/8.
+let at;
+const header = (cert) =>
+  page.call("Network.setExtraHTTPHeaders", { headers: { ...(cert ? { "X-Client-Cert": cert } : {}), ...(at ? { "X-Test-Address": at } : {}) } });
 const where = () => page.run("location.pathname + location.search");
 const text = () => page.run("document.body.innerText");
 async function until(expression, what) {
@@ -238,6 +247,74 @@ await check("a certificate that was not offered with the password sign-in asks f
   await until("document.body.innerText.includes('is removed')", "the removal");
   await signOut();
 });
+
+if (outside) {
+  await check("outside the network the page offers the certificate alone, in four looks", async () => {
+    at = outside;
+    await header(undefined);
+    // The sign-in page's policy allows no fetch; the stylesheet is a document of the site's own that allows one.
+    await go("/portal/login.css");
+    const methods = await page.run(`fetch('/portal/methods').then((r) => r.text())`);
+    if (JSON.stringify(JSON.parse(methods)) !== JSON.stringify({ methods: ["certificate"] })) throw new Error(methods);
+    await go("/portal/login");
+    const body = await text();
+    if (!body.includes("Sign in with your certificate") || body.includes("Password") || body.includes("Account")) throw new Error(body);
+    for (const [name, look] of looks) {
+      await mode(look);
+      await shot(`signin-outside-${name}`);
+    }
+    await mode(looks[0][1]);
+  });
+
+  await check("a password posted from outside is refused before anything is asked", async () => {
+    at = outside;
+    await header(undefined);
+    await go("/portal/login.css");
+    const refused = await page.run(`fetch('/portal/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: ${JSON.stringify(`user=${user}&password=${password}`)} }).then((r) => r.status + ' ' + r.headers.get('set-cookie'))`);
+    if (refused !== "403 null") throw new Error(refused);
+    // Nothing counted: the same address still gets the certificate in. The earlier checks may have replaced or removed the pin,
+    // so the account pins the trusted certificate again from inside, as its owner would.
+    at = undefined;
+    await header(trusted);
+    await go("/portal/login");
+    await passwordSignIn(user, password);
+    await until("location.pathname === '/' || location.pathname === '/portal/certificate'", "the sign-in");
+    if ((await where()) === "/portal/certificate") {
+      await click("form:has([value=enrol]) button");
+      await until("document.body.innerText.includes('now signs you in')", "the confirmation");
+    }
+    await signOut();
+    at = outside;
+    await header(trusted);
+    await go("/portal/login");
+    await click("form:has([value=certificate]) button");
+    await until("location.pathname === '/'", "the site by certificate from outside");
+    const answer = await signedInAs();
+    if (!answer.startsWith("200") || !answer.includes(user)) throw new Error(answer);
+    const index = await page.run(`fetch('/canoa.json').then((r) => r.status)`);
+    if (index !== 200) throw new Error(`/canoa.json ${index}`);
+    await signOut();
+  });
+
+  await check("a session a password opened inside ends when the browser is seen outside", async () => {
+    at = undefined;
+    await header(undefined);
+    await go("/portal/login");
+    await passwordSignIn(user, password);
+    await until("location.pathname === '/'", "the site");
+    const inside = await page.run(`fetch('/canoa.json').then((r) => r.status)`);
+    if (inside !== 200) throw new Error(`inside: ${inside}`);
+    at = outside;
+    await header(undefined);
+    const moved = await page.run(`fetch('/canoa.json').then((r) => r.status)`);
+    if (moved !== 401) throw new Error(`outside: ${moved}`);
+    at = undefined;
+    await header(undefined);
+    const back = await page.run(`fetch('/canoa.json').then((r) => r.status)`);
+    if (back !== 401) throw new Error(`back inside: ${back}`);
+    await signOut();
+  });
+}
 
 await check("failed passwords end in a 429 whose wait counts down and holds the buttons", async () => {
   await header(undefined);

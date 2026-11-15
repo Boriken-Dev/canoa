@@ -7,8 +7,11 @@
 //! sudoers rule for the two test units; `teardown.sh` removes them. Then, as a user that may run `sudo -n -u canoatest...`:
 //!
 //! ```text
-//! CANOA_TEST_PORTAL_USERS=1 cargo test -p canoa-host --features portal --test portal_users -- --ignored
+//! CANOA_TEST_PORTAL_USERS=1 cargo test -p canoa-host --features portal --test portal_users -- --ignored --test-threads=1
 //! ```
+//!
+//! The tests share the accounts, their hosts and the portal's socket, so they run one at a time. The second runs the portal with
+//! a sign-in policy: a password only from 10.0.0.0/8, a certificate (pinned through the portal) from anywhere.
 #![cfg(unix)]
 #![allow(
     clippy::std_instead_of_core,
@@ -37,6 +40,13 @@ struct Answer {
 }
 
 impl Answer {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(each, _)| each.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
     fn cookie(&self) -> Option<String> {
         self.headers
             .iter()
@@ -217,6 +227,10 @@ impl Drop for Portal {
 }
 
 fn start_portal() -> Portal {
+    start_portal_with("/opt/canoatest/portal.toml")
+}
+
+fn start_portal_with(config: &str) -> Portal {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("a port")
         .local_addr()
@@ -225,12 +239,7 @@ fn start_portal() -> Portal {
     let listen = format!("127.0.0.1:{port}");
     let mut child = Command::new("sudo")
         .args(["-n", "-u", PORTAL_USER, "/opt/canoatest/canoa", "portal"])
-        .args([
-            "--config",
-            "/opt/canoatest/portal.toml",
-            "--listen",
-            &listen,
-        ])
+        .args(["--config", config, "--listen", &listen])
         .env("CANOA_LOG", "info")
         .stdout(Stdio::piped())
         .spawn()
@@ -746,6 +755,164 @@ fn two_people_each_get_their_own_host_as_themselves_and_reach_nothing_of_the_oth
         .status,
         401
     );
+}
+
+/// A sign-in as the proxy makes it, the browser at `from`, carrying `certificate` (DER in base64) when it has one.
+fn sign_in_via_proxy(user: &str, password: &str, from: &str, certificate: Option<&str>) -> Answer {
+    let mut extra = vec![
+        ("Origin", "http://localhost".to_owned()),
+        (
+            "Content-Type",
+            "application/x-www-form-urlencoded".to_owned(),
+        ),
+        ("X-Forwarded-For", from.to_owned()),
+    ];
+    if let Some(certificate) = certificate {
+        extra.push(("X-Client-Cert", certificate.to_owned()));
+    }
+    call_unix(
+        "POST",
+        "/portal/login",
+        &extra,
+        &if certificate.is_some() && password.is_empty() {
+            "method=certificate".to_owned()
+        } else {
+            format!("user={user}&password={password}")
+        },
+    )
+}
+
+/// The methods the portal offers a browser the proxy says is at `from`.
+fn methods_for(from: &str) -> Value {
+    let answer = call_unix(
+        "GET",
+        "/portal/methods",
+        &[("X-Forwarded-For", from.to_owned())],
+        "",
+    );
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    serde_json::from_str::<Value>(&answer.body).expect("json")["methods"].clone()
+}
+
+/// The host's index with `cookie`, the browser at `from`: where a session is decided again.
+fn index_via_proxy(cookie: &str, from: &str) -> Answer {
+    call_unix(
+        "GET",
+        "/canoa.json",
+        &[
+            ("Cookie", cookie.to_owned()),
+            ("X-Forwarded-For", from.to_owned()),
+        ],
+        "",
+    )
+}
+
+#[test]
+#[ignore = "needs CANOA_TEST_PORTAL_USERS and the accounts tests/portal_users/setup.sh makes"]
+fn the_network_rule_refuses_a_password_from_outside_and_takes_a_certificate_from_anywhere() {
+    if std::env::var_os("CANOA_TEST_PORTAL_USERS").is_none() {
+        panic!("CANOA_TEST_PORTAL_USERS is not set: run tests/portal_users/setup.sh first");
+    }
+    let _ = Command::new("sudo")
+        .args(["-n", "systemctl", "stop", &unit("canoatesta")])
+        .status();
+    // A pin an earlier run made is not this run's.
+    let _ = Command::new("sudo")
+        .args([
+            "-n",
+            "-u",
+            PORTAL_USER,
+            "rm",
+            "-f",
+            "/var/lib/canoatest-portal/certificates.toml",
+        ])
+        .status();
+    let made = rcgen::generate_simple_self_signed(vec!["canoa.example".to_owned()])
+        .expect("a certificate");
+    let certificate = data_encoding::BASE64.encode(made.cert.der());
+    let _portal = start_portal_with("/opt/canoatest/portal_network.toml");
+    let (inside, outside) = ("10.1.2.3", "203.0.113.7");
+
+    // What the page offers, by where the proxy says the browser is.
+    assert_eq!(methods_for(inside), json!(["password", "certificate"]));
+    assert_eq!(methods_for(outside), json!(["certificate"]));
+    assert_eq!(methods_for("2001:db8::1"), json!(["certificate"]));
+
+    // A password from outside is refused before PAM is asked, as often as it is tried, and counts against nothing.
+    let before = pam_asked();
+    for password in [
+        "pw-a-test",
+        "not-the-password",
+        "pw-a-test",
+        "pw-a-test",
+        "pw-a-test",
+    ] {
+        let refused = sign_in_via_proxy("canoatesta", password, outside, None);
+        assert_eq!(refused.status, 403, "{}", refused.body);
+        assert!(refused.cookie().is_none());
+    }
+    assert_eq!(pam_asked(), before, "a refused password reached PAM");
+
+    // From inside it signs in, and the person is offered the certificate their browser carries.
+    let by_password = sign_in_via_proxy("canoatesta", "pw-a-test", inside, Some(&certificate));
+    assert_eq!(by_password.status, 303, "{}", by_password.body);
+    assert_eq!(by_password.header("location"), Some("/portal/certificate"));
+    assert_eq!(pam_asked(), before + 1);
+    let password_cookie = by_password.cookie().expect("a session");
+    assert_eq!(index_via_proxy(&password_cookie, inside).status, 200);
+    let pinned = call_unix(
+        "POST",
+        "/portal/certificate",
+        &[
+            ("Origin", "http://localhost".to_owned()),
+            ("Cookie", password_cookie.clone()),
+            ("X-Forwarded-For", inside.to_owned()),
+            ("X-Client-Cert", certificate.clone()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+        ],
+        "action=enrol",
+    );
+    assert_eq!(pinned.status, 200, "{}", pinned.body);
+    assert!(pinned.body.contains("now signs you in"), "{}", pinned.body);
+
+    // The password session does not follow the browser out of 10/8: its next use from outside ends it.
+    assert_eq!(index_via_proxy(&password_cookie, outside).status, 401);
+    assert_eq!(index_via_proxy(&password_cookie, inside).status, 401);
+
+    // The certificate signs in from outside, as the person, and the session stands wherever the browser is.
+    let by_certificate = sign_in_via_proxy("canoatesta", "", outside, Some(&certificate));
+    assert_eq!(by_certificate.status, 303, "{}", by_certificate.body);
+    assert_eq!(by_certificate.header("location"), Some("/"));
+    let cookie = by_certificate.cookie().expect("a session");
+    for from in [outside, inside] {
+        let index = index_via_proxy(&cookie, from);
+        assert_eq!(index.status, 200, "{}", index.body);
+    }
+    assert!(active("canoatesta"), "the person's host runs");
+    assert_eq!(
+        process_uid(main_pid("canoatesta")),
+        uid_of("canoatesta"),
+        "as the person"
+    );
+    // A certificate nobody pinned signs no one in, from anywhere.
+    let other = rcgen::generate_simple_self_signed(vec!["other.example".to_owned()])
+        .expect("a certificate");
+    let unknown = data_encoding::BASE64.encode(other.cert.der());
+    assert_eq!(
+        sign_in_via_proxy("canoatesta", "", outside, Some(&unknown)).status,
+        401
+    );
+    // Nothing the outside address did counted against the password a person types inside.
+    assert_eq!(
+        sign_in_via_proxy("canoatesta", "pw-a-test", inside, None).status,
+        303
+    );
+    let _ = Command::new("sudo")
+        .args(["-n", "systemctl", "stop", &unit("canoatesta")])
+        .status();
 }
 
 /// Where setup.sh put the script, readable by every account.

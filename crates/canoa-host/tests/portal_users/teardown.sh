@@ -8,7 +8,7 @@ for person in canoatesta canoatestb; do
 done
 rm -f /etc/systemd/system/canoatest@.service /etc/systemd/system/canoatest.slice /etc/sudoers.d/canoatest /etc/pam.d/canoatest
 systemctl daemon-reload
-rm -rf /opt/canoatest /etc/canoatest /run/canoatest /run/canoatest-portal /var/tmp/canoatest-pam-count
+rm -rf /opt/canoatest /var/lib/canoatest-portal /etc/canoatest /run/canoatest /run/canoatest-portal /var/tmp/canoatest-pam-count
 for name in canoatesta canoatestb canoatestc canoatestportal; do
     if id "$name" >/dev/null 2>&1; then
         # A host that was just stopped may still be exiting, and userdel refuses an account with a process.
