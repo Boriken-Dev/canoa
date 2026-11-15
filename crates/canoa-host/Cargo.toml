@@ -160,6 +160,9 @@ name = "web_peer"
 [[example]]
 name = "store_control"
 
+[[example]]
+name = "portal_standin_host"
+
 [lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"

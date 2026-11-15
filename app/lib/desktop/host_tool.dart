@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../acp/link_secret.dart' show LinkSecretIdentity;
+
 import 'host_tool_stub.dart' if (dart.library.io) 'host_tool_io.dart' as platform;
 
 /// The status of `canoa serve` when another host holds its home.
@@ -136,6 +138,13 @@ abstract interface class HostLinkSecret {
   /// The 32 bytes, once: the link forgets them as it hands them over, and the caller zeroes them after deriving what it needs. Null
   /// when the host had none to give, or they were taken already.
   Uint8List? takeLinkSecret();
+}
+
+/// A link to a host over the network whose peer proof left a key to bind secret answers with: this app's own key and the host's
+/// identity, as the proof showed it. A link to a host in this process has [HostLinkSecret] instead.
+abstract interface class HostLinkBinding {
+  /// Null where the proof gave no key to bind by, so the host is offered nothing and asks no typed secret.
+  Future<LinkSecretIdentity?> secretBinding();
 }
 
 /// A [HostChild] that is a `serve` in this process, which can be connected to without a socket.

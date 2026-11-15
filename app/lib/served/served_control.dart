@@ -1,8 +1,11 @@
 import 'dart:async';
 
+import 'package:coqui_acp/secret.dart' show AcpIdentityId;
 import 'package:coqui_web/coqui_web.dart';
 
-import '../acp/client.dart' show VerifyAcpPeer;
+import '../acp/client.dart' show LinkSecretIdentity, VerifyAcpPeer;
+import '../acp/noise_secret.dart' show NoiseSecrets;
+import '../acp/secret_identity.dart' show browserSecretIdentity;
 import '../acp/connect.dart' show chatEndpoints;
 import '../acp/served_host.dart';
 import '../auth/browser_peer.dart';
@@ -19,10 +22,24 @@ final class ServedControlUnavailable implements Exception {
 
 /// A link over a proven channel: the control channel's messages, one a line, once the host has shown it holds the key this page
 /// pinned. Only a key the host's `[host.control]` grants is served after the proof.
-final class _ProvenLink implements HostLink {
-  _ProvenLink(this._channel);
+final class _ProvenLink implements HostLink, HostLinkBinding {
+  _ProvenLink(this._channel, this._host, this._noise);
 
   final WebChannel _channel;
+  final String _host;
+  final NoiseSecrets? _noise;
+
+  /// This page's key bound to the host it proved: by Noise the identity the proof made, else the WebCrypto key of this page.
+  @override
+  Future<LinkSecretIdentity?> secretBinding() async {
+    try {
+      final noise = _noise;
+      final identity = noise != null ? noise.identity : await browserSecretIdentity();
+      return identity == null ? null : (identity: identity, host: AcpIdentityId.parse(_host));
+    } on Object {
+      return null;
+    }
+  }
 
   @override
   Stream<String> get messages => _channel.messages;
@@ -58,7 +75,7 @@ Future<HostLink> dialServedControl(
       throw const ServedControlUnavailable('the host proved another key than the one this page pinned');
     }
     staged.allowApplicationMessages();
-    return _ProvenLink(proven.channel);
+    return _ProvenLink(proven.channel, proven.peerId, proven.noise);
   } catch (_) {
     await staged.close();
     rethrow;

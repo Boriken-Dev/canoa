@@ -73,6 +73,7 @@ final class ControlClient {
   /// process (which the link hands over once and the bytes are then zeroed). Null where the link has none, so the host asks nothing.
   Future<LinkSecretIdentity?> linkSecrets() async {
     final link = _link;
+    if (link is HostLinkBinding) return (link as HostLinkBinding).secretBinding();
     final secret = link is HostLinkSecret ? (link as HostLinkSecret).takeLinkSecret() : null;
     if (secret == null) return null;
     try {

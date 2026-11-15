@@ -79,6 +79,12 @@ pub trait Front: Send + Sync {
     /// Hands over the way into the entries from inside this process, once `serve` is bound and before it says it is ready.
     /// It works until `serve` has ended. A front that has no use for it ignores it.
     fn local(&self, _local: crate::Local) {}
+
+    /// The programs the control channel's `store/*` methods keep and the ids of the stores it offers, for a front that serves
+    /// stores of its own; `None` serves the built-in stores over this user's programs folder.
+    fn programs(&self) -> Option<(Arc<crate::store::programs::Programs>, Vec<String>)> {
+        None
+    }
 }
 
 /// How a host starts its own `provider`, `tool` and `launch` commands.
@@ -946,6 +952,9 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     }
     if let Some(bytes) = args.key_limit {
         options = options.with_key_limit(bytes);
+    }
+    if let Some((programs, providers)) = front.programs() {
+        options = options.with_programs(programs, providers);
     }
     if let Some(dir) = &args.portal {
         let user = args

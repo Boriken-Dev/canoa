@@ -38,6 +38,7 @@ import 'package:flutter/material.dart';
 import 'accounts/account_models.dart' show accountMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
+import 'desktop/host_grants.dart';
 import 'chat/cache_lifetime.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
@@ -850,13 +851,27 @@ class _CanoaAppState extends State<CanoaApp> {
     return SourceCheck(missing: listening.missing);
   }
 
-  /// The accounts of this computer's host, for Settings and the composer's chip; none where the app runs no host.
-  late final AccountsController? _accounts = _buildAccounts();
+  /// What the host this app reaches gives its key. The app shows the program Store and the accounts when it says so, and the
+  /// host's own link holds every grant: the host is the one place that decides.
+  late final HostGrants? _grants = _control == null ? null : (HostGrants(() => _control.ready(wait: false))..addListener(_grantsChanged));
+
+  /// A grant arrived or changed: what it opens is listed, and a source's readiness may now name its program.
+  void _grantsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
+    if (_programs != null && _checked) unawaited(_checkSources());
+  }
+
+  /// The accounts of the host this app reaches, for Settings and the composer's chip; none where the app reaches no host or the
+  /// host does not grant them.
+  AccountsController? get _accounts => widget.accountsHost != null || (_grants?.may(HostGrants.accounts) ?? false) ? _accountsHeld : null;
+
+  late final AccountsController? _accountsHeld = _buildAccounts();
 
   AccountsController? _buildAccounts() {
     final control = _control;
-    // The account methods are the owner's alone: a page the host served is a paired peer and is given none, so it shows none.
-    final host = widget.accountsHost ?? (control == null || widget.served != null ? null : ControlAccountsHost(control));
+    final host = widget.accountsHost ?? (control == null ? null : ControlAccountsHost(control));
     if (host == null) return null;
     return AccountsController(
       host: host,
@@ -938,9 +953,12 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// The programs the host's Store keeps. Nothing is asked of the host until a page that shows them, or a source's readiness,
   /// needs it; an install runs only when the person confirms its plan.
-  late final ProgramStores? _programs = _control == null || widget.served != null
+  late final ProgramStores? _programsHeld = _control == null
       ? null
       : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open)..addListener(_programsChanged));
+
+  /// The programs the host's Store keeps, when the host grants installing them.
+  ProgramStores? get _programs => _grants?.may(HostGrants.programs) ?? false ? _programsHeld : null;
 
   String? _programsSeen;
 
@@ -1340,7 +1358,10 @@ class _CanoaAppState extends State<CanoaApp> {
   List<AgentSource>? _serving;
   void _hostChanged() {
     // The host was started anew: which accounts it has is asked again.
-    if (widget.host?.listening.isNotEmpty ?? false) unawaited(_accounts?.refresh());
+    if (widget.host?.listening.isNotEmpty ?? false) {
+      unawaited(_grants?.refresh());
+      unawaited(_accounts?.refresh());
+    }
     final serving = _hostedSources;
     if (_serving != null && _serving!.length == serving.length && _serving!.every(serving.contains)) return;
     _serving = serving;
@@ -1438,7 +1459,10 @@ class _CanoaAppState extends State<CanoaApp> {
     store.gitReader = _gitReaderFor;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
-    scheduleMicrotask(() => _accounts?.refresh());
+    scheduleMicrotask(() {
+      unawaited(_grants?.refresh());
+      unawaited(_accounts?.refresh());
+    });
     if (store.secretIdentity == null) unawaited(_loadSecretIdentity());
     unawaited(store.restoreDrafts((label) =>
         _sources.where((source) => source.label == label).firstOrNull));
