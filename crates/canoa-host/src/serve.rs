@@ -1471,9 +1471,14 @@ impl Serving {
                     delegable: false,
                     run: Run::Control {
                         grants: settings.grants.clone(),
-                        everyone: portal_of(options)
-                            .is_some()
-                            .then(|| control::Grant::all().into_iter().collect()),
+                        everyone: portal_of(options).is_some().then(|| {
+                            // A person's browser asking a shared machine to search its link tells it about that machine's
+                            // network, not about the person's own.
+                            control::Grant::all()
+                                .into_iter()
+                                .filter(|grant| *grant != control::Grant::Discover)
+                                .collect()
+                        }),
                     },
                     running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
                 }),

@@ -503,7 +503,7 @@ The API header lists every setting.
 ```toml
 [host.native]
 enabled = true                                 # false closes the door the browser's native host reaches
-control = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write"]   # the default
+control = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "discover"]   # the default
 ```
 
 `control` is what a browser key may do on the control channel; it cannot hold `config.write.sessions`, `overlay.write`, `host.restart` or `upload`. A key paired this way works only from the extension that paired it. `canoa native status` shows what is registered and what Start would run, and `canoa native uninstall` removes it. Chrome, Edge and Chromium installed as Flatpak or Snap cannot start a native host. See [browser integration](browser.md#canoa-on-this-computer).

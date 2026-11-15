@@ -36,8 +36,13 @@ struct Relay {
 
 impl Relay {
     fn start(home: &Path, origin: &str) -> Self {
+        Self::start_with(home, origin, &[])
+    }
+
+    fn start_with(home: &Path, origin: &str, env: &[(&str, &Path)]) -> Self {
         let mut child = Command::new(host_binary())
             .arg(origin)
+            .envs(env.iter().copied())
             .env("COQUI_AGENTIC_PEER_HOME", home)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -867,4 +872,130 @@ fn a_door_that_could_not_be_opened_is_said_to_the_browser_and_in_status() {
     let status = host.command(&["native", "status"]);
     let status: Value = serde_json::from_slice(&status.stdout).expect("a JSON object");
     assert!(status["door_error"].is_string(), "{status}");
+}
+
+const NEARBY_PEER: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+/// A descriptor directory naming an agent that is listening on loopback, as `serve --advertise` leaves one.
+struct Nearby {
+    dir: Scratch,
+    _listener: std::net::TcpListener,
+}
+
+impl Nearby {
+    fn new() -> Self {
+        let dir = Scratch::new();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback listener");
+        let port = listener.local_addr().expect("its address").port();
+        let descriptor = json!({
+            "txtvers": 1,
+            "proto": "acp",
+            "label": "Nearby fixture",
+            "url": format!("ws://127.0.0.1:{port}/acp"),
+            "peer": NEARBY_PEER,
+            "method": "noise",
+        });
+        std::fs::write(dir.0.join("nearby.json"), descriptor.to_string()).expect("a descriptor");
+        Self {
+            dir,
+            _listener: listener,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.dir.0
+    }
+
+    fn port(&self) -> u16 {
+        self._listener.local_addr().expect("its address").port()
+    }
+}
+
+fn found(result: &Value, nearby: &Nearby) {
+    let list = result["candidates"]
+        .as_array()
+        .expect("a list of candidates");
+    let candidate = list
+        .iter()
+        .find(|candidate| candidate["label"] == "Nearby fixture")
+        .unwrap_or_else(|| panic!("the descriptor's agent is listed: {result}"));
+    assert_eq!(
+        candidate["url"],
+        format!("ws://127.0.0.1:{}/acp", nearby.port()).as_str()
+    );
+    assert_eq!(candidate["peer"], NEARBY_PEER);
+    assert_eq!(candidate["method"], "noise");
+    assert_eq!(candidate["source"], "local");
+}
+
+#[test]
+fn discover_nearby_over_the_door_lists_the_agents_this_machine_advertises() {
+    let nearby = Nearby::new();
+    let host = Host::start_with(
+        &agent_entry(),
+        1,
+        &[],
+        &[("COQUI_ACP_DESCRIPTORS", &nearby.path().to_string_lossy())],
+    );
+    let client = support::key();
+    host.pair(&client);
+    let result = on_control(&host, &client, |rpc| {
+        rpc.request("discover/nearby", json!({ "seconds": 1 }))
+    })
+    .expect("a paired key reaches the control channel")
+    .expect("the default grants include discovery");
+    found(&result, &nearby);
+}
+
+#[test]
+fn discover_nearby_is_refused_to_a_key_without_the_grant_and_a_seconds_that_is_not_a_number() {
+    let nearby = Nearby::new();
+    let config = format!(
+        "{}\n[host.native]\ncontrol = [\"ledger.read\"]\n",
+        agent_entry()
+    );
+    let host = Host::start_with(
+        &config,
+        1,
+        &[],
+        &[("COQUI_ACP_DESCRIPTORS", &nearby.path().to_string_lossy())],
+    );
+    let client = support::key();
+    host.pair(&client);
+    let refused = on_control(&host, &client, |rpc| {
+        rpc.request("discover/nearby", json!({ "seconds": 1 }))
+    })
+    .expect("a paired key reaches the control channel")
+    .expect_err("no discover grant, no search");
+    assert_eq!(refused["code"], -32001, "{refused}");
+
+    let allowed = Host::start_with(
+        &agent_entry(),
+        1,
+        &[],
+        &[("COQUI_ACP_DESCRIPTORS", &nearby.path().to_string_lossy())],
+    );
+    allowed.pair(&client);
+    let bad = on_control(&allowed, &client, |rpc| {
+        rpc.request("discover/nearby", json!({ "seconds": "soon" }))
+    })
+    .expect("a paired key reaches the control channel")
+    .expect_err("seconds is a whole number");
+    assert_eq!(bad["code"], -32602, "{bad}");
+}
+
+#[test]
+fn the_relay_discovers_with_no_host_running() {
+    let nearby = Nearby::new();
+    let scratch = Scratch::new();
+    let relay = Relay::start_with(
+        &scratch.0.join("home"),
+        ORIGIN,
+        &[("COQUI_ACP_DESCRIPTORS", nearby.path())],
+    );
+    let hello = relay.ask(&json!({ "op": "hello" }));
+    assert_eq!(hello["running"], false, "no host runs: {hello}");
+    let reply = relay.ask(&json!({ "op": "discover", "seconds": 1 }));
+    assert_eq!(reply["reply"], "discover", "{reply}");
+    found(&reply, &nearby);
 }

@@ -210,6 +210,7 @@ impl NativeConfig {
             Grant::Folders,
             Grant::ConfigRead,
             Grant::ConfigWrite,
+            Grant::Discover,
         ]
         .into_iter()
         .collect()

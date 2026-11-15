@@ -100,12 +100,15 @@ pub enum Grant {
     /// the host's keyring, and choose which accounts an agent entry offers. A key with it can attach any account to any harness entry,
     /// including an entry whose `peers` leave that key out, and can make an entry for a built-in source.
     Accounts,
+    /// `discover/nearby`: the agents this host finds on the computer and the link it is on, for a client that cannot search itself.
+    /// It makes the host send multicast queries and tells the key what answered; it starts and changes nothing.
+    Discover,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 14] {
+    pub fn all() -> [Self; 15] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -121,6 +124,7 @@ impl Grant {
             Self::OverlayWrite,
             Self::StorePrograms,
             Self::Accounts,
+            Self::Discover,
         ]
     }
 
@@ -142,6 +146,7 @@ impl Grant {
             Self::OverlayWrite => "overlay.write",
             Self::StorePrograms => "store.programs",
             Self::Accounts => "accounts",
+            Self::Discover => "discover",
         }
     }
 
@@ -556,6 +561,9 @@ impl Control {
                 ) => allow(caller, Grant::Accounts)
                     .and_then(|()| self.accounts())
                     .and_then(|accounts| accounts.call(method, &params)),
+                Some("discover/nearby") => {
+                    allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
+                }
                 Some("host/grants") => Ok(caller.grants_json()),
                 Some("store/apply" | "accounts/add" | "accounts/login") => Err((
                     REFUSED,
@@ -934,6 +942,7 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 pub(crate) mod accounts;
+pub(crate) mod discover;
 mod files;
 #[cfg(test)]
 mod files_tests;

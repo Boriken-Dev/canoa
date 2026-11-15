@@ -1790,6 +1790,10 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
     let none = Config::from_str_in("", &base()).expect("parses");
     assert!(none.native.enabled);
     assert_eq!(none.native.control, NativeConfig::default_control());
+    assert!(
+        none.native.control.contains(&Grant::Discover),
+        "a browser asks its host who is nearby by default"
+    );
     for never in [
         Grant::ConfigWriteSessions,
         Grant::OverlayWrite,

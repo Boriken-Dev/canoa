@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+use crate::control::discover;
 use crate::home::{Home, LockError};
 use crate::pipe::{self, PipeName, Stream};
 
@@ -412,6 +413,25 @@ impl<W: Write + Send + 'static> Relay<W> {
                 let message = match started {
                     Ok(pid) => json!({ "reply": "start", "started": pid }),
                     Err(error) => json!({ "reply": "start", "error": error }),
+                };
+                self.say(&message).ok()?;
+                None
+            }
+            Some("discover") => {
+                // Canoa installed is enough: the search is the same call the host answers `discover/nearby` with, and it
+                // reads only what this user's own processes advertised and what answers on the link.
+                let found = discover::wait_of(request)
+                    .map_err(|(_, error)| error)
+                    .and_then(|wait| {
+                        discover::search(wait)
+                            .ok_or_else(|| "a search is already running".to_owned())
+                    });
+                let message = match found {
+                    Ok(mut found) => {
+                        found["reply"] = "discover".into();
+                        found
+                    }
+                    Err(error) => json!({ "reply": "discover", "error": error }),
                 };
                 self.say(&message).ok()?;
                 None
