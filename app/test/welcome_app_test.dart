@@ -87,6 +87,9 @@ void main() {
     final store = SessionStore();
     addTearDown(store.dispose);
     await pumpApp(tester, store);
+    // The page scrolls: beside the section selector its text wraps more, and the button can lie below the window.
+    await tester.ensureVisible(find.byKey(const Key('welcome-new-session')));
+    await tester.pump();
     await tester.tap(find.byKey(const Key('welcome-new-session')));
     await frames(tester);
     expect(store.selected?.isDraft, isTrue);
