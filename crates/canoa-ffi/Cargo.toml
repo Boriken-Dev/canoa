@@ -21,31 +21,31 @@ default = []
 web = ["canoa-host/web"]
 
 [dependencies]
-canoa-host = { path = "../canoa-host" }
+canoa-host.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-zeroize = "1"
+zeroize.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 # Puts this process's standard error on a pipe, through a safe call; sets SIGPIPE aside, which rustix has no stable call for.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "stdio"] }
-libc = "0.2"
+rustix = { workspace = true, features = ["stdio"] }
+libc.workspace = true
 
 # Puts this process's standard error on a pipe, and gives a windowed process a console nobody sees for what it starts.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
 
 # The secret-prompt test plays the application: the link's binding and the sealing, and the scan for the value's forms.
 [dev-dependencies]
 coqui-acp = { workspace = true, features = ["secret"] }
-data-encoding = { version = "2", default-features = false, features = ["std"] }
+data-encoding.workspace = true
 
 # Whether a console has a window anybody can see, asked by a test's probe.
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 [lints.rust]
 missing_docs = "warn"

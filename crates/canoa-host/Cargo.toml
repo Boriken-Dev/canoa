@@ -35,8 +35,8 @@ coqui-access = { workspace = true, optional = true }
 coqui-access-system = { workspace = true, optional = true }
 # The WebSocket handshake of the portal's relay, which checks the session before it upgrades; already in the graph through
 # coqui-transport-web.
-tungstenite = { version = "0.30", optional = true, default-features = false, features = ["handshake"] }
-canoa = { path = "../canoa", features = ["store"] }
+tungstenite = { workspace = true, optional = true, features = ["handshake"] }
+canoa = { workspace = true, features = ["store"] }
 clap.workspace = true
 coqui-acp = { workspace = true, features = ["secret"] }
 coqui-acp-api.workspace = true
@@ -59,31 +59,31 @@ coqui-builder.workspace = true
 coqui-transport.workspace = true
 coqui-transport-web.workspace = true
 # The one-time token a provider's process proves its socket with.
-getrandom = "0.4"
+getrandom.workspace = true
 guatiao.workspace = true
 guatiao-serde.workspace = true
 httparse.workspace = true
 # The address a remote source is dialed at; already in the graph through coqui-transport-web.
-url = "2.5"
+url.workspace = true
 indexmap.workspace = true
 percent-encoding.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # An upload travels in base64; already in the graph (the web_peer example reads it too).
-data-encoding = { version = "2", default-features = false, features = ["std"] }
+data-encoding.workspace = true
 # An account's credential in the operating system's store, through keyring-core and the platform's store below.
-keyring-core = "1"
+keyring-core.workspace = true
 # The file store's sealing, at the version the dependency graph already holds.
-aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "getrandom", "zeroize"] }
+aes-gcm.workspace = true
 # A credential's memory wiped once it is used.
-zeroize = "1"
+zeroize.workspace = true
 # An account's renewal compared with the stored copy by when each stops working.
-time = { version = "0.3", default-features = false, features = ["parsing"] }
+time.workspace = true
 # A secret typed at the terminal, with no echo.
-rpassword = "7"
+rpassword.workspace = true
 # The digest of a worktree's status listing, and of what the examples print; the version the dependency graph already holds.
-sha2 = { version = "0.10", default-features = false }
+sha2.workspace = true
 toml.workspace = true
 anycfg.workspace = true
 serde-saphyr = { workspace = true, optional = true }
@@ -97,29 +97,29 @@ tracing-subscriber.workspace = true
 # Ends a provider's process group, through a safe call; and passes the descriptors of a child's standard streams to the host's own
 # process starter, over a socket (`spawn`).
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "process", "net", "event"] }
+rustix = { workspace = true, features = ["process", "net", "event"] }
 
 # The operating system's credential store: Secret Service on a Linux or other Unix desktop.
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
-zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+zbus-secret-service-keyring-store = { workspace = true, features = ["crypto-rust"] }
 
 # The Keychain.
 [target.'cfg(target_os = "macos")'.dependencies]
-apple-native-keyring-store = { version = "1", features = ["keychain"] }
+apple-native-keyring-store = { workspace = true, features = ["keychain"] }
 
 # A job object per provider process, which ends everything in it.
 [target.'cfg(windows)'.dependencies]
-win32job = "2.0.3"
+win32job.workspace = true
 # Windows' Credential Manager, whose credentials are made local to the machine and not roamed with the profile.
-windows-native-keyring-store = "1"
+windows-native-keyring-store.workspace = true
 # The user's registry keys an install may write, read to check a plan declared them.
-windows-registry = "0.6"
+windows-registry.workspace = true
 # Whether this process runs elevated, through a safe call: the host forbids unsafe code. Small and old (winapi); one function.
-is_elevated = "0.1"
+is_elevated.workspace = true
 
 [dev-dependencies]
 # A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
-rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+rcgen.workspace = true
 # The peers the web_peer example plays the page of; already in the graph through coqui-acp-bridge.
 coqui-peer-noise.workspace = true
 

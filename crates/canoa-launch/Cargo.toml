@@ -23,7 +23,7 @@ path = "src/bin/canoa-pack.rs"
 
 [dependencies]
 # The digest of every file and of the payload.
-sha2 = { version = "0.10", default-features = false }
+sha2.workspace = true
 # The payload is a zip archive, written and read with the workspace's one zip.
 zip.workspace = true
 # zip's deflate runs on flate2, which needs a backend chosen; the workspace picks the pure Rust one.
@@ -32,15 +32,15 @@ flate2.workspace = true
 # The owner of a folder, through safe wrappers (this crate forbids unsafe code); a message box for a launch that failed,
 # since the launcher has no console.
 [target.'cfg(windows)'.dependencies]
-windows-permissions = "0.2"
-win-msgbox = "0.2"
+windows-permissions.workspace = true
+win-msgbox.workspace = true
 
 # The import table of the built launcher, read by a test.
 [target.'cfg(windows)'.dev-dependencies]
-object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }
+object.workspace = true
 
 [build-dependencies]
-sha2 = { version = "0.10", default-features = false }
+sha2.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"
