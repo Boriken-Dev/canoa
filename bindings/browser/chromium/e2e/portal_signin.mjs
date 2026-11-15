@@ -7,6 +7,7 @@
 //   CANOA_E2E_BROWSER=<msedge or chrome> CANOA_E2E_URL=http://localhost:PORT \
 //   CANOA_E2E_USER=<account> CANOA_E2E_PASSWORD=<its password> CANOA_E2E_OTHER_USER=<a second account> \
 //   CANOA_E2E_TRUSTED=<file with a trusted certificate as base64 DER> CANOA_E2E_UNTRUSTED=<file with an unknown one for the same account> \
+//   [CANOA_E2E_EXPIRED=<file with an expired certificate as base64 DER>] \
 //   CANOA_E2E_SHOTS=<directory for screenshots> node e2e/portal_signin.mjs
 //
 // The trusted certificate is accepted by the portal's provider as it stands; the untrusted one is accepted only after the account
@@ -186,13 +187,44 @@ await check("an unknown certificate is refused and the password form is still th
   await click("form:has([value=certificate]) button");
   await until("document.querySelector('.notice')", "the notice");
   const shown = await text();
-  if (!shown.includes("That certificate was not accepted here.") || !shown.includes("Password")) throw new Error(shown);
+  if (!shown.includes("That certificate is not linked to an account here.") || !shown.includes("Password")) throw new Error(shown);
   await shot("certificate-refused-desktop-light");
   await mode(looks[2][1]);
   await shot("certificate-refused-phone-light");
   await mode(looks[0][1]);
   await signOut();
 });
+
+await check("a browser that sends no certificate is told so, and the tries are not counted", async () => {
+  await header(undefined);
+  // More tries than the failure limit allows: none of them counts, so none is answered 429.
+  for (let i = 0; i < 6; i++) {
+    await go("/portal/login");
+    await click("form:has([value=certificate]) button");
+    await until("document.querySelector('.notice')", "the notice");
+    const shown = await text();
+    if (!shown.includes("Your browser sent no certificate.") || !shown.includes("restart the browser") || shown.includes("Too many")) throw new Error(shown);
+  }
+  await shot("certificate-none-desktop-light");
+  await mode(looks[2][1]);
+  await shot("certificate-none-phone-light");
+  await mode(looks[0][1]);
+  await signOut();
+});
+
+const expired = process.env.CANOA_E2E_EXPIRED && readFileSync(process.env.CANOA_E2E_EXPIRED, "utf8").trim();
+if (expired) {
+  await check("an expired certificate is told so", async () => {
+    await header(expired);
+    await go("/portal/login");
+    await click("form:has([value=certificate]) button");
+    await until("document.querySelector('.notice')", "the notice");
+    const shown = await text();
+    if (!shown.includes("That certificate has expired.")) throw new Error(shown);
+    await shot("certificate-expired-desktop-light");
+    await signOut();
+  });
+}
 
 await check("a password sign-in offers the browser's new certificate, pinning it lets it sign in alone, and removing it undoes that", async () => {
   await header(untrusted);
