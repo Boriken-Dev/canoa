@@ -192,6 +192,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "argon2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "134c52ddac6d63c576bef8168db10c83c49c26444ecbc68060fef078925a901c"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures 0.3.1",
+ "password-hash",
+]
+
+[[package]]
 name = "arraydeque"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -425,6 +437,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "blake2"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b5d4d889834ee8ecfc0f8426ad30faf7cdcb10f741a8e6d7224d95325479f6f"
+dependencies = [
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -540,6 +561,8 @@ dependencies = [
  "clap",
  "coqui-a2a",
  "coqui-access",
+ "coqui-access-mtls-plugin",
+ "coqui-access-password-plugin",
  "coqui-access-system",
  "coqui-acp",
  "coqui-acp-api",
@@ -556,6 +579,7 @@ dependencies = [
  "coqui-builder",
  "coqui-peer",
  "coqui-peer-noise",
+ "coqui-peer-tls",
  "coqui-peer-webcrypto",
  "coqui-transport",
  "coqui-transport-guatiao",
@@ -778,6 +802,75 @@ source = "git+https://github.com/Boriken-Dev/coqui-access?rev=ce68969a397073dcef
 dependencies = [
  "coqui-builder",
  "guatiao",
+]
+
+[[package]]
+name = "coqui-access-kit"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=ce68969a397073dcef0a37fb00a83888b767e273#ce68969a397073dcef0a37fb00a83888b767e273"
+dependencies = [
+ "argon2",
+ "coqui-access",
+ "coqui-builder",
+ "data-encoding",
+ "getrandom 0.4.3",
+ "guatiao-serde",
+ "serde",
+ "sha2 0.11.1",
+ "subtle",
+]
+
+[[package]]
+name = "coqui-access-mtls"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=ce68969a397073dcef0a37fb00a83888b767e273#ce68969a397073dcef0a37fb00a83888b767e273"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-builder",
+ "coqui-peer",
+ "coqui-peer-tls",
+]
+
+[[package]]
+name = "coqui-access-mtls-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=ce68969a397073dcef0a37fb00a83888b767e273#ce68969a397073dcef0a37fb00a83888b767e273"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-access-mtls",
+ "coqui-builder",
+ "coqui-peer",
+ "coqui-peer-tls",
+ "guatiao-builder",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "coqui-access-password"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=ce68969a397073dcef0a37fb00a83888b767e273#ce68969a397073dcef0a37fb00a83888b767e273"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+]
+
+[[package]]
+name = "coqui-access-password-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=ce68969a397073dcef0a37fb00a83888b767e273#ce68969a397073dcef0a37fb00a83888b767e273"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-access-password",
+ "coqui-builder",
+ "guatiao-builder",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -1541,7 +1634,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2686,6 +2779,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
+name = "password-hash"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aab41826031698d6ffcd9cff78ef56ef998e39dc7e5067cdfebe373842d4723b"
+dependencies = [
+ "getrandom 0.4.3",
+ "phc",
+]
+
+[[package]]
 name = "pem"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2710,6 +2813,17 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "phc"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44dc769b75f93afdddd8c7fa12d685292ddeff1e66f7f0f3a234cf1818afe892"
+dependencies = [
+ "base64ct",
+ "ctutils",
+ "getrandom 0.4.3",
+]
 
 [[package]]
 name = "pin-project"
@@ -2911,7 +3025,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3106,7 +3220,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3164,7 +3278,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3693,7 +3807,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4257,7 +4371,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

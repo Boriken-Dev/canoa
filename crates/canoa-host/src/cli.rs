@@ -811,9 +811,7 @@ fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
         settings.socket = Some(socket.clone());
     }
     let (socket, tcp) = (settings.socket.clone(), settings.listen);
-    let accounts =
-        crate::portal::System::new(&settings.pam_service, settings.min_uid, &settings.groups)
-            .map_err(Failed::usage)?;
+    let accounts = crate::portal::Access::new(&settings).map_err(Failed::usage)?;
     let mut controller = Systemd::new();
     controller.systemctl.clone_from(&settings.systemctl);
     controller.elevate = settings.elevate.iter().map(Into::into).collect();

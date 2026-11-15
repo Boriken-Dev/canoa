@@ -6,8 +6,10 @@
 //! `canoa@USER.service`, introduces the browser's own key to it and relays the browser's channel to its sockets. The browser and
 //! the host still prove their keys to each other through the relay.
 
+mod access;
 mod conn;
 mod instance;
+mod page;
 mod relay;
 mod session;
 mod settings;
@@ -26,11 +28,15 @@ use std::time::{Instant, SystemTime};
 
 use coqui_transport_pipe::{PipeName, SocketGroup};
 
+pub use access::Access;
 pub use conn::Conn;
 pub use instance::{Controller, Instances, Lease, Systemd};
 pub use session::{Attempt, Session, Sessions, Throttle};
-pub use settings::Settings;
-pub use signin::{Accounts, MAX_PASSWORD, NAME_PATTERN, SignIn, Standing, System, valid_user};
+pub use settings::{Entry, Settings};
+pub use signin::{
+    Accounts, CertificateStatus, MAX_PASSWORD, Method, NAME_PATTERN, PinError, PinState, Presented,
+    SignIn, Standing, valid_user,
+};
 
 use crate::pipe::PipeChannel;
 use crate::web::{self, Body, Lookup};
@@ -40,6 +46,10 @@ use crate::web::{self, Body, Lookup};
 pub const COOKIE: &str = "__Host-canoa";
 /// Where a browser signs in.
 pub const LOGIN: &str = "/portal/login";
+/// Where a browser asks which ways in the portal accepts; no cookie is needed.
+pub const METHODS: &str = "/portal/methods";
+/// Where a signed-in person sees the certificate their browser offers, pins it to their account, or removes the pin.
+pub const CERTIFICATE: &str = "/portal/certificate";
 const MAX_HEAD: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_FORM: usize = 4096;
@@ -642,24 +652,56 @@ fn from_own_page(request: &Request, conn: &Conn) -> bool {
     origin.eq_ignore_ascii_case(&format!("{}://{host}", scheme_of(request, conn)))
 }
 
-fn login_page(message: &str) -> Vec<u8> {
-    let note = if message.is_empty() {
-        String::new()
-    } else {
-        format!("<p role=\"alert\">{message}</p>")
-    };
-    format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Sign in to Canoa</title><style>body{{font:16px system-ui,sans-serif;max-width:22rem;margin:12vh auto;padding:0 16px}}label,input,button{{display:block;width:100%;box-sizing:border-box}}input,button{{margin:.25rem 0 1rem;padding:.6rem;font:inherit}}p{{color:#b00020}}</style></head><body><h1>Canoa</h1>{note}<form method=\"post\" action=\"{LOGIN}\"><label for=\"user\">Account</label><input id=\"user\" name=\"user\" autocomplete=\"username\" autocapitalize=\"none\" required><label for=\"password\">Password</label><input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required><button type=\"submit\">Sign in</button></form></body></html>"
-    )
-    .into_bytes()
+/// Whether `method` may be used for a request from `address`. This is the one place a sign-in policy decides, asked for the
+/// page's methods and again once a credential has been accepted; it allows every method.
+const fn method_allowed(_inner: &Inner, _method: Method, _address: IpAddr) -> bool {
+    true
 }
 
-const LOGIN_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+/// The ways in this client may use: a certificate only on the proxy's socket, since that is the one connection whose headers
+/// are believed.
+fn methods_for(inner: &Inner, conn: &Conn, address: IpAddr) -> Vec<Method> {
+    inner
+        .accounts
+        .methods()
+        .into_iter()
+        .filter(|method| *method != Method::Certificate || conn.from_proxy())
+        .filter(|method| method_allowed(inner, *method, address))
+        .collect()
+}
 
 /// The sign-in page.
-fn login_response(status: u16, message: &str) -> Response {
-    Response::text(status, "text/html; charset=utf-8", login_page(message))
-        .with("Content-Security-Policy", LOGIN_POLICY.to_owned())
+fn login_response(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    status: u16,
+    notice: Option<page::Notice>,
+    retry: Option<u64>,
+) -> Response {
+    let address = client_of(inner, request, conn);
+    Response::text(
+        status,
+        "text/html; charset=utf-8",
+        page::render(&methods_for(inner, conn, address), notice, retry),
+    )
+    .with("Content-Security-Policy", page::POLICY.to_owned())
+    .with("Cache-Control", "no-store".to_owned())
+}
+
+fn asset(kind: &'static str, body: &'static str) -> Response {
+    Response::text(200, kind, body).with("Cache-Control", "no-cache".to_owned())
+}
+
+/// What a browser may ask before it signs in: the ways in this portal accepts here.
+fn methods_response(inner: &Inner, request: &Request, conn: &Conn) -> Response {
+    let address = client_of(inner, request, conn);
+    let ids: Vec<&str> = methods_for(inner, conn, address)
+        .into_iter()
+        .map(Method::id)
+        .collect();
+    Response::json(200, &serde_json::json!({ "methods": ids }))
+        .with("Cache-Control", "no-store".to_owned())
 }
 
 fn serve_connection(inner: &Inner, mut conn: Conn) {
@@ -728,13 +770,27 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
     let path = request.path();
     match (request.method.as_str(), path) {
         ("GET" | "HEAD", LOGIN) => {
-            let message = match request.query() {
-                "e=1" => "Sign-in failed.",
-                "e=2" => "Too many failed attempts. Try again later.",
-                _ => "",
+            let notice = match request.query() {
+                "e=1" => Some(page::Notice::Failed),
+                "e=2" => Some(page::Notice::Throttled),
+                _ => None,
             };
-            login_response(200, message)
+            login_response(inner, request, conn, 200, notice, None)
         }
+        ("GET" | "HEAD", page::CSS_PATH) => asset("text/css; charset=utf-8", page::CSS),
+        ("GET" | "HEAD", page::JS_PATH) => asset("text/javascript; charset=utf-8", page::JS),
+        ("GET" | "HEAD", METHODS) => methods_response(inner, request, conn),
+        ("GET" | "HEAD", CERTIFICATE) => match authed(inner, request) {
+            Some(session) => certificate_page(inner, request, conn, &session, None),
+            None => Response::redirect(LOGIN),
+        },
+        ("POST", CERTIFICATE) => match authed(inner, request) {
+            Some(session) if from_own_page(request, conn) => {
+                certificate_action(inner, request, conn, &session)
+            }
+            Some(_) => Response::refusal(403),
+            None => Response::refusal(401),
+        },
         ("POST", LOGIN) => sign_in(inner, request, conn, started),
         ("POST", "/portal/logout") => {
             if !from_own_page(request, conn) {
@@ -793,6 +849,27 @@ fn after_floor(inner: &Inner, started: Instant, response: Response) -> Response 
     response
 }
 
+/// The throttle's name for a certificate try, which names no account: one per address, so no address can slow another's.
+fn certificate_key(address: IpAddr) -> String {
+    format!("\0certificate@{address}")
+}
+
+/// What the browser sent that a provider may read of a certificate sign-in: every header but the ones that carry the portal's
+/// own or the browser's credentials.
+fn presented(request: &Request) -> Vec<(String, String)> {
+    request
+        .headers
+        .iter()
+        .filter(|(name, _)| {
+            !matches!(
+                name.as_str(),
+                "cookie" | "authorization" | "proxy-authorization"
+            )
+        })
+        .cloned()
+        .collect()
+}
+
 fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> Response {
     if !from_own_page(request, conn) {
         return Response::refusal(403);
@@ -803,25 +880,49 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
     {
         return Response::refusal(400);
     }
-    let (Some(user), Some(password)) = (
-        form_field(&request.body, "user"),
-        form_field(&request.body, "password"),
-    ) else {
-        return Response::refusal(400);
-    };
     let address = client_of(inner, request, conn);
-    let key: String = user.trim().to_ascii_lowercase().chars().take(64).collect();
+    let method = match form_field(&request.body, "method").as_deref() {
+        None | Some("password") => Method::Password,
+        Some("certificate") => Method::Certificate,
+        Some(_) => return Response::refusal(400),
+    };
+    if !methods_for(inner, conn, address).contains(&method) {
+        return Response::refusal(400);
+    }
+    let (user, password, key) = match method {
+        Method::Certificate => (String::new(), String::new(), certificate_key(address)),
+        _ => {
+            let (Some(user), Some(password)) = (
+                form_field(&request.body, "user"),
+                form_field(&request.body, "password"),
+            ) else {
+                return Response::refusal(400);
+            };
+            let key: String = user.trim().to_ascii_lowercase().chars().take(64).collect();
+            (user, password, key)
+        }
+    };
+    let refused = match method {
+        Method::Certificate => page::Notice::Certificate,
+        _ => page::Notice::Failed,
+    };
     // Counted as a failure as it is let through, before the accounts are asked, so that tries made together cannot all pass the
     // limit and a refused try never reaches the directory, where it could lock an account.
     let Some(attempt) = inner.throttle.begin(address, &key) else {
         tracing::info!("a sign-in from {address} was refused for its failures");
+        let wait = inner.settings.failure_window.as_secs();
         return after_floor(
             inner,
             started,
-            login_response(429, "Too many failed attempts. Try again later.").with(
-                "Retry-After",
-                inner.settings.failure_window.as_secs().to_string(),
-            ),
+            login_response(
+                inner,
+                request,
+                conn,
+                429,
+                Some(page::Notice::Throttled),
+                Some(wait),
+            )
+            .with("Retry-After", wait.to_string()),
         );
     };
     if !attempt.wait.is_zero() {
@@ -831,21 +932,42 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         inner.signing_in.fetch_sub(1, Ordering::SeqCst);
         // Nothing was asked of the accounts, so nothing counts against the address.
         inner.throttle.succeeded(attempt);
-        return login_response(503, "Busy. Try again in a moment.");
+        return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
     }
-    let result = inner.accounts.sign_in(user.trim(), &password);
+    let result = match method {
+        Method::Certificate => inner.accounts.sign_in_certificate(&presented(request)),
+        _ => inner.accounts.sign_in(user.trim(), &password),
+    };
     inner.signing_in.fetch_sub(1, Ordering::SeqCst);
     match result {
         SignIn::Admitted { user, uid }
             if !crate::portal_link::system_uid(uid) && uid >= inner.settings.min_uid =>
         {
-            let Some((token, _)) = inner.sessions.open(&user, uid) else {
+            // Asked again now that the credential is known to be good: the same function that listed the methods.
+            if !method_allowed(inner, method, address) {
+                tracing::info!("a {} sign-in from {address} is not allowed", method.id());
+                return after_floor(
+                    inner,
+                    started,
+                    login_response(inner, request, conn, 401, Some(refused), None),
+                );
+            }
+            let by_password = method == Method::Password;
+            let Some((token, _)) = inner.sessions.open_by(&user, uid, by_password) else {
                 inner.throttle.succeeded(attempt);
-                return login_response(503, "Busy. Try again in a moment.");
+                return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
             };
             inner.throttle.succeeded(attempt);
-            tracing::info!("{user} signed in from {address}");
-            Response::redirect("/").with(
+            tracing::info!("{user} signed in from {address} by {}", method.id());
+            // A person who signed in by password with a certificate their account does not use yet is offered to pin it.
+            let offered = by_password
+                && conn.from_proxy()
+                && inner
+                    .accounts
+                    .certificate_status(&user, &presented(request))
+                    .and_then(|status| status.presented)
+                    .is_some_and(|(_, state)| state == PinState::Unpinned);
+            Response::redirect(if offered { CERTIFICATE } else { "/" }).with(
                 "Set-Cookie",
                 format!(
                     "{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={}",
@@ -855,17 +977,138 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         }
         // An account the accounts admit that the portal does not (root, or below the lowest user id) is refused as any other.
         SignIn::Admitted { .. } | SignIn::Refused => {
-            tracing::info!("a sign-in from {address} failed");
-            after_floor(inner, started, login_response(401, "Sign-in failed."))
+            tracing::info!("a {} sign-in from {address} failed", method.id());
+            after_floor(
+                inner,
+                started,
+                login_response(inner, request, conn, 401, Some(refused), None),
+            )
         }
         SignIn::Failed(why) => {
             tracing::warn!("the accounts could not be asked: {why}");
             after_floor(
                 inner,
                 started,
-                login_response(503, "Sign-in is not available."),
+                login_response(
+                    inner,
+                    request,
+                    conn,
+                    503,
+                    Some(page::Notice::Unavailable),
+                    None,
+                ),
             )
         }
+    }
+}
+
+/// The page of the signed-in person's certificates: the one their browser offers here, and the one pinned to their account.
+fn certificate_page(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    session: &Session,
+    notice: Option<page::CertNotice>,
+) -> Response {
+    let headers = if conn.from_proxy() {
+        presented(request)
+    } else {
+        Vec::new()
+    };
+    let status = inner.accounts.certificate_status(&session.user, &headers);
+    let fresh = session
+        .password_at
+        .is_some_and(|at| at.elapsed() <= inner.settings.enrol);
+    let code = match notice {
+        Some(page::CertNotice::Problem(_)) => 403,
+        _ => 200,
+    };
+    Response::text(
+        code,
+        "text/html; charset=utf-8",
+        page::render_certificate(&session.user, status.as_ref(), fresh, notice),
+    )
+    .with("Content-Security-Policy", page::POLICY.to_owned())
+    .with("Cache-Control", "no-store".to_owned())
+}
+
+/// `POST /portal/certificate`: `action=enrol` pins the request's certificate to the account, `action=remove` takes the pin away.
+/// Pinning needs the session to have been opened by a password not long ago, so a stolen cookie or a certificate alone never adds
+/// a way in.
+fn certificate_action(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    session: &Session,
+) -> Response {
+    if !request
+        .header("content-type")
+        .is_some_and(|kind| kind.starts_with("application/x-www-form-urlencoded"))
+    {
+        return Response::refusal(400);
+    }
+    let problem = |text| {
+        certificate_page(
+            inner,
+            request,
+            conn,
+            session,
+            Some(page::CertNotice::Problem(text)),
+        )
+    };
+    match form_field(&request.body, "action").as_deref() {
+        Some("enrol") => {
+            let fresh = session
+                .password_at
+                .is_some_and(|at| at.elapsed() <= inner.settings.enrol);
+            if !fresh {
+                return problem("Sign in again with your password to add a certificate.");
+            }
+            if !conn.from_proxy() {
+                return problem("This connection carries no certificate.");
+            }
+            match inner.accounts.pin(&session.user, &presented(request)) {
+                Ok(()) => {
+                    tracing::info!("{} pinned a certificate", session.user);
+                    certificate_page(
+                        inner,
+                        request,
+                        conn,
+                        session,
+                        Some(page::CertNotice::Done("This certificate now signs you in.")),
+                    )
+                }
+                Err(PinError::NoCertificate) => {
+                    problem("Your browser did not offer a certificate to this site.")
+                }
+                Err(PinError::Taken) => problem("That certificate belongs to another account."),
+                Err(PinError::Unsupported) => problem("This portal does not keep certificates."),
+                Err(PinError::Failed(why)) => {
+                    tracing::warn!("pinning a certificate failed: {why}");
+                    problem("The certificate could not be saved.")
+                }
+            }
+        }
+        Some("remove") => match inner.accounts.unpin(&session.user) {
+            Ok(removed) => {
+                if removed {
+                    tracing::info!("{} removed their pinned certificate", session.user);
+                }
+                certificate_page(
+                    inner,
+                    request,
+                    conn,
+                    session,
+                    Some(page::CertNotice::Done("The pinned certificate is removed.")),
+                )
+            }
+            Err(PinError::Unsupported) => problem("This portal does not keep certificates."),
+            Err(error) => {
+                tracing::warn!("removing a pinned certificate failed: {error:?}");
+                problem("The certificate could not be removed.")
+            }
+        },
+        _ => Response::refusal(400),
     }
 }
 

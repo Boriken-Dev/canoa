@@ -6,6 +6,46 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+/// One authenticator of the sign-in list: a coqui-access provider and the configuration it is built from.
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Entry {
+    /// The provider's id: `coqui_access_system` and `coqui_access_proxy` are built in; any other comes from `library`.
+    pub provider: String,
+    /// The Guatiao library that provides it, for a provider that is not built in.
+    pub library: Option<PathBuf>,
+    /// What the provider is configured with, checked against its own schema when the portal starts.
+    pub config: serde_json::Map<String, serde_json::Value>,
+    /// `enrol`: this provider keeps the certificates people pin to their accounts, through its account kind. Only a provider that
+    /// takes a certificate and trusts pinned ones (`trust` of `pinned` or `pinned-or-ca`) can; at most one entry says so.
+    pub enrol: bool,
+}
+
+impl Entry {
+    /// An entry for `provider` with its default configuration.
+    #[must_use]
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            library: None,
+            config: serde_json::Map::new(),
+            enrol: false,
+        }
+    }
+}
+
+impl core::fmt::Debug for Entry {
+    /// The keys of the configuration and never a value: a provider's settings can hold a bind password.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Entry")
+            .field("provider", &self.provider)
+            .field("library", &self.library)
+            .field("config", &self.config.keys().collect::<Vec<_>>())
+            .field("enrol", &self.enrol)
+            .finish()
+    }
+}
+
 /// How the portal runs. `Settings::default()` is what runs with no file; each field is the file's key of the same name
 /// (a duration as `NAME_seconds`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +78,15 @@ pub struct Settings {
     /// `groups`: the groups an account must be in. Name them: with none, every account on the machine that has a password may
     /// ask for a host.
     pub groups: Vec<String>,
+    /// `authenticators`: the providers that sign people in, in order; each credential goes to the ones that take it, and a
+    /// provider's `Unknown` passes it on while its `Invalid` ends the try. Default: the operating system's accounts alone.
+    pub authenticators: Vec<Entry>,
+    /// `certificate_header`: the header the proxy puts a client certificate in, as base64 DER, leaf first, comma-separated. It
+    /// is read only on `socket`, and the proxy must delete any of that name the browser sent.
+    pub certificate_header: String,
+    /// `enrol_seconds`: how long after a password sign-in a session may pin a certificate. A session opened any other way never
+    /// may.
+    pub enrol: Duration,
     /// `hosts`: names a request may carry in `Host`, besides `localhost` and addresses; an `Origin` must match `Host`.
     pub hosts: Vec<String>,
     /// `trusted_proxies`: addresses in `client_address_header` that are proxies of ours and so not the browser's.
@@ -103,6 +152,9 @@ impl Default for Settings {
             pam_service: "canoa".to_owned(),
             min_uid: 1000,
             groups: Vec::new(),
+            authenticators: vec![Entry::new("coqui_access_system")],
+            certificate_header: "x-client-cert".to_owned(),
+            enrol: Duration::from_secs(10 * 60),
             hosts: Vec::new(),
             trusted_proxies: Vec::new(),
             client_address_header: "x-forwarded-for".to_owned(),
@@ -132,6 +184,15 @@ impl Default for Settings {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawEntry {
+    provider: String,
+    library: Option<PathBuf>,
+    config: Option<serde_json::Map<String, serde_json::Value>>,
+    enrol: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Raw {
     socket: Option<PathBuf>,
     socket_group: Option<String>,
@@ -144,6 +205,9 @@ struct Raw {
     pam_service: Option<String>,
     min_uid: Option<u32>,
     groups: Option<Vec<String>>,
+    authenticators: Option<Vec<RawEntry>>,
+    certificate_header: Option<String>,
+    enrol_seconds: Option<u64>,
     hosts: Option<Vec<String>>,
     trusted_proxies: Option<Vec<String>>,
     client_address_header: Option<String>,
@@ -206,6 +270,20 @@ impl Settings {
             settings.min_uid = value;
         }
         settings.groups = raw.groups.unwrap_or(settings.groups);
+        if let Some(value) = raw.certificate_header {
+            settings.certificate_header = value.to_ascii_lowercase();
+        }
+        if let Some(entries) = raw.authenticators {
+            settings.authenticators = entries
+                .into_iter()
+                .map(|entry| Entry {
+                    provider: entry.provider,
+                    library: entry.library,
+                    config: entry.config.unwrap_or_default(),
+                    enrol: entry.enrol.unwrap_or(false),
+                })
+                .collect();
+        }
         settings.hosts = raw
             .hosts
             .unwrap_or(settings.hosts)
@@ -225,6 +303,7 @@ impl Settings {
         let seconds = |value: Option<u64>, now: Duration| value.map_or(now, Duration::from_secs);
         settings.session = seconds(raw.session_seconds, settings.session);
         settings.idle = seconds(raw.idle_seconds, settings.idle);
+        settings.enrol = seconds(raw.enrol_seconds, settings.enrol);
         settings.start = seconds(raw.start_seconds, settings.start);
         settings.pair = seconds(raw.pair_seconds, settings.pair);
         settings.slow = seconds(raw.slow_seconds, settings.slow);
@@ -284,6 +363,38 @@ impl Settings {
         if !self.socket_dir.is_absolute() {
             return Err("socket_dir: an absolute path".to_owned());
         }
+        if self.authenticators.is_empty() {
+            return Err("authenticators: name at least one provider".to_owned());
+        }
+        if self
+            .authenticators
+            .iter()
+            .filter(|entry| entry.enrol)
+            .count()
+            > 1
+        {
+            return Err("authenticators: at most one keeps enrolled certificates".to_owned());
+        }
+        for entry in &self.authenticators {
+            if entry.provider.is_empty() {
+                return Err("authenticators: a provider id".to_owned());
+            }
+            if entry
+                .library
+                .as_ref()
+                .is_some_and(|path| !path.is_absolute())
+            {
+                return Err("authenticators: `library` is an absolute path".to_owned());
+            }
+        }
+        if self.certificate_header.is_empty()
+            || !self
+                .certificate_header
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Err("certificate_header: a header name".to_owned());
+        }
         if self.min_uid == 0 {
             return Err("min_uid: at least 1; root never signs in".to_owned());
         }
@@ -339,6 +450,38 @@ mod tests {
     }
 
     #[test]
+    fn the_authenticators_default_to_the_system_and_read_in_order_with_their_configuration() {
+        assert_eq!(
+            Settings::default()
+                .authenticators
+                .iter()
+                .map(|entry| entry.provider.as_str())
+                .collect::<Vec<_>>(),
+            ["coqui_access_system"]
+        );
+        let settings = Settings::from_toml(
+            r#"authenticators = [
+                { provider = "coqui_access_mtls", library = "/opt/canoa/libmtls.so", config = { trust = "ca", ca_file = "x-client-cert" } },
+                { provider = "coqui_access_system" },
+            ]"#,
+        )
+        .unwrap();
+        let ids: Vec<_> = settings
+            .authenticators
+            .iter()
+            .map(|e| e.provider.as_str())
+            .collect();
+        assert_eq!(ids, ["coqui_access_mtls", "coqui_access_system"]);
+        assert_eq!(
+            settings.authenticators[0].config["ca_file"],
+            "x-client-cert"
+        );
+        // A configuration's values are for the provider; the log and a panic never carry them.
+        let shown = format!("{:?}", settings.authenticators[0]);
+        assert!(shown.contains("ca_file") && !shown.contains("x-client-cert"));
+    }
+
+    #[test]
     fn a_listen_beyond_loopback_an_unknown_key_and_a_zero_limit_are_refused() {
         for text in [
             "listen = \"0.0.0.0:7890\"",
@@ -350,6 +493,10 @@ mod tests {
             "pam_service = \"../x\"",
             "idle_seconds = 0",
             "min_uid = 0",
+            "authenticators = []",
+            "authenticators = [{ provider = \"\" }]",
+            "authenticators = [{ provider = \"x\", library = \"x.so\" }]",
+            "authenticators = [{ provider = \"x\", extra = 1 }]",
             "socket = \"relative.sock\"",
         ] {
             assert!(Settings::from_toml(text).is_err(), "{text}");

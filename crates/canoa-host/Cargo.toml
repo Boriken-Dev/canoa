@@ -28,11 +28,12 @@ json = []
 web = []
 # `canoa portal`: sign users in through the operating system's accounts and give each their own host, as themselves. Unix only;
 # it links the system's libpam.
-portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:tungstenite"]
+portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:coqui-peer-tls", "dep:tungstenite"]
 
 [dependencies]
 coqui-access = { workspace = true, optional = true }
 coqui-access-system = { workspace = true, optional = true }
+coqui-peer-tls = { workspace = true, optional = true }
 # The WebSocket handshake of the portal's relay, which checks the session before it upgrades; already in the graph through
 # coqui-transport-web.
 tungstenite = { workspace = true, optional = true, features = ["handshake"] }
@@ -167,3 +168,8 @@ missing_debug_implementations = "warn"
 std_instead_of_core = "warn"
 std_instead_of_alloc = "warn"
 alloc_instead_of_core = "warn"
+
+# The providers the portal loads from a path (Unix only, like the portal): cargo builds them beside the tests.
+[target.'cfg(unix)'.dev-dependencies]
+coqui-access-password-plugin.workspace = true
+coqui-access-mtls-plugin.workspace = true

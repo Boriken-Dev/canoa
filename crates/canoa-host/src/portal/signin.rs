@@ -1,7 +1,4 @@
-//! Who may sign in, and as whom: the operating system's accounts.
-
-use coqui_access::{Attempt, Authenticator, Directory, Verdict};
-use coqui_access_system::SystemAccounts;
+//! Who may sign in, and as whom: the contract the portal asks of its accounts.
 
 /// The longest password a sign-in takes, in bytes.
 pub const MAX_PASSWORD: usize = 1024;
@@ -23,10 +20,119 @@ pub enum SignIn {
     Failed(String),
 }
 
-/// Whoever says if a name and a password are an account.
+/// A certificate a request carried: what its subject says of it and its SHA-256 fingerprint (`sha256:` and lower-case hex).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Presented {
+    /// The subject, as text. Whatever the certificate says: show it escaped.
+    pub subject: String,
+    /// The fingerprint of the certificate, which is what is pinned.
+    pub fingerprint: String,
+}
+
+/// Whose a presented certificate is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PinState {
+    /// Pinned to the account asking.
+    Yours,
+    /// Pinned to another account.
+    Another,
+    /// Pinned to no one.
+    Unpinned,
+}
+
+/// What a signed-in person is shown about certificates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CertificateStatus {
+    /// The certificate the request carried, with whose it is; none when the request carried none the portal can read.
+    pub presented: Option<(Presented, PinState)>,
+    /// Whether a certificate is pinned to the account.
+    pub pinned: bool,
+}
+
+/// Why a certificate was not pinned or unpinned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PinError {
+    /// The request carried no certificate the portal can read.
+    NoCertificate,
+    /// It is pinned to another account.
+    Taken,
+    /// This portal pins no certificates.
+    Unsupported,
+    /// The store could not be read or written; the reason is for the log.
+    Failed(String),
+}
+
+/// A way to sign in that the portal can offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Method {
+    /// A name and a password, typed into the page.
+    Password,
+    /// A client certificate that the proxy verified and forwards in a header; only on the proxy's socket.
+    Certificate,
+}
+
+impl Method {
+    /// The word `GET /portal/methods` and the sign-in form use for it.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::Certificate => "certificate",
+        }
+    }
+}
+
+/// Whoever says if a credential is an account.
 pub trait Accounts: Send + Sync {
+    /// The ways in this portal accepts. The default is a password alone.
+    fn methods(&self) -> Vec<Method> {
+        vec![Method::Password]
+    }
+
     /// Checks `password` for `user`. Blocks: the system may sleep after a wrong one, or ask a directory across a network.
     fn sign_in(&self, user: &str, password: &str) -> SignIn;
+
+    /// What this portal knows of the certificate the proxy forwarded in `headers` and of `user`'s pinned certificate; `None`
+    /// when it pins no certificates. The portal asks for `headers` only from a request on the proxy's socket.
+    fn certificate_status(
+        &self,
+        user: &str,
+        headers: &[(String, String)],
+    ) -> Option<CertificateStatus> {
+        let _ = (user, headers);
+        None
+    }
+
+    /// Pins the certificate in `headers` to `user`, so that it alone signs them in from now on. Replaces the one pinned already.
+    ///
+    /// # Errors
+    ///
+    /// [`PinError`] for no certificate, one pinned to another account, or a store that cannot be written.
+    fn pin(&self, user: &str, headers: &[(String, String)]) -> Result<(), PinError> {
+        let _ = (user, headers);
+        Err(PinError::Unsupported)
+    }
+
+    /// Removes the certificate pinned to `user`; whether there was one.
+    ///
+    /// # Errors
+    ///
+    /// [`PinError`] when the store cannot be written.
+    fn unpin(&self, user: &str) -> Result<bool, PinError> {
+        let _ = user;
+        Err(PinError::Unsupported)
+    }
+
+    /// Checks the certificate the proxy forwarded in `headers` (the request's, in order, names in lower case). The portal asks
+    /// only for a request that came on the proxy's socket. The default refuses.
+    fn sign_in_certificate(&self, headers: &[(String, String)]) -> SignIn {
+        let _ = headers;
+        SignIn::Refused
+    }
 
     /// Whether `user` is still the account with user id `uid`, asked again each time a host is wanted, so an account that was
     /// removed or renamed since the sign-in is not given one. [`Standing::Unknown`] when the directory could not say, which
@@ -63,83 +169,6 @@ pub fn valid_user(name: &str) -> bool {
         .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
         && name.len() <= 32
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-}
-
-/// The accounts of the operating system, through coqui-access's `system` provider: PAM for the password and NSS for the
-/// directory, so SSSD and LDAP accounts the machine knows are there too.
-pub struct System(SystemAccounts);
-
-impl core::fmt::Debug for System {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("System").finish_non_exhaustive()
-    }
-}
-
-impl System {
-    /// Accounts checked under the PAM service `pam_service`, of user id `min_uid` and above, and of one of `groups` when any are
-    /// named.
-    ///
-    /// # Errors
-    ///
-    /// When the provider refuses the settings.
-    pub fn new(pam_service: &str, min_uid: u32, groups: &[String]) -> Result<Self, String> {
-        SystemAccounts::builder()
-            .pam_service(pam_service)
-            .min_uid(min_uid)
-            .groups(groups.iter().cloned())
-            .build()
-            .map(Self)
-            .map_err(|error| error.to_string())
-    }
-}
-
-impl Accounts for System {
-    fn still(&self, user: &str, uid: u32) -> Standing {
-        let ask = || {
-            self.0.lookup(coqui_access::Lookup {
-                by: "id".to_owned(),
-                value: uid.to_string(),
-            })
-        };
-        // A directory that fails once may answer the next time; only a definite answer ends a session.
-        let found = ask().or_else(|_| {
-            std::thread::sleep(core::time::Duration::from_millis(200));
-            ask()
-        });
-        match found {
-            Ok(Some(person)) if person.name == user => Standing::Present,
-            Ok(_) => Standing::Gone,
-            Err(_) => Standing::Unknown,
-        }
-    }
-
-    fn sign_in(&self, user: &str, password: &str) -> SignIn {
-        if !valid_user(user) || password.is_empty() || password.len() > MAX_PASSWORD {
-            return SignIn::Refused;
-        }
-        let attempt = Attempt {
-            name: Some(user.to_owned()),
-            secret: Some(password.to_owned()),
-            ..Attempt::default()
-        };
-        let account = match self.0.authenticate(attempt) {
-            Ok(Verdict::Valid(account)) => account,
-            Ok(_) => return SignIn::Refused,
-            Err(error) => return SignIn::Failed(error.to_string()),
-        };
-        // The name the system gives the account is the one a unit and a path are made of, whatever case was typed.
-        match self.0.lookup(account) {
-            Ok(Some(person)) if valid_user(&person.name) => match person.id.parse() {
-                Ok(uid) => SignIn::Admitted {
-                    user: person.name,
-                    uid,
-                },
-                Err(_) => SignIn::Refused,
-            },
-            Ok(_) => SignIn::Refused,
-            Err(error) => SignIn::Failed(error.to_string()),
-        }
-    }
 }
 
 #[cfg(test)]

@@ -24,6 +24,8 @@ pub struct Session {
     pub uid: u32,
     /// What names this session to its relays, so that ending it ends them.
     pub id: u64,
+    /// When a password signed this session in; `None` for a session any other method opened.
+    pub password_at: Option<Instant>,
 }
 
 struct Kept {
@@ -31,6 +33,7 @@ struct Kept {
     uid: u32,
     id: u64,
     until: Instant,
+    password_at: Option<Instant>,
 }
 
 /// The sessions of signed-in browsers, by the digest of the token the browser holds: the token itself is never kept.
@@ -66,6 +69,11 @@ impl Sessions {
     /// A new session for `user`, and the token the browser keeps. An account that holds its share already loses its oldest
     /// session, so one account cannot fill the table. `None` when the whole table is full of live sessions of others.
     pub fn open(&self, user: &str, uid: u32) -> Option<(String, Session)> {
+        self.open_by(user, uid, false)
+    }
+
+    /// [`Sessions::open`] for a sign-in that `password` says was, or was not, a password's.
+    pub fn open_by(&self, user: &str, uid: u32, password: bool) -> Option<(String, Session)> {
         let mut bytes = [0_u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes).ok()?;
         let token = BASE64URL_NOPAD.encode(&bytes);
@@ -97,6 +105,7 @@ impl Sessions {
                 uid,
                 id,
                 until: now.checked_add(self.lifetime)?,
+                password_at: password.then_some(now),
             },
         );
         Some((
@@ -105,6 +114,7 @@ impl Sessions {
                 user: user.to_owned(),
                 uid,
                 id,
+                password_at: password.then_some(now),
             },
         ))
     }
@@ -126,6 +136,7 @@ impl Sessions {
             user: kept.user.clone(),
             uid: kept.uid,
             id: kept.id,
+            password_at: kept.password_at,
         })
     }
 

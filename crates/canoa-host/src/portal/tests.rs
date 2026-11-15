@@ -27,6 +27,10 @@ struct Fixed {
     gone: Mutex<HashSet<String>>,
     unsure: Mutex<HashSet<String>>,
     asked: AtomicUsize,
+    /// The certificate header value that is the named account's certificate.
+    certificates: Mutex<HashMap<String, String>>,
+    /// The headers each certificate sign-in was asked with.
+    presented: Mutex<Vec<Vec<(String, String)>>>,
 }
 
 /// This process's user id: the stand-in hosts run in it, so it is whose process made their sockets.
@@ -35,6 +39,86 @@ fn mine() -> u32 {
 }
 
 impl Accounts for Fixed {
+    fn methods(&self) -> Vec<Method> {
+        vec![Method::Password, Method::Certificate]
+    }
+
+    fn certificate_status(
+        &self,
+        user: &str,
+        headers: &[(String, String)],
+    ) -> Option<CertificateStatus> {
+        let pins = self.certificates.lock().unwrap();
+        let presented = headers
+            .iter()
+            .find(|(name, _)| name == "x-client-cert")
+            .map(|(_, cert)| {
+                let subject = if cert == "MIIB-xss" {
+                    "<script>alert(1)</script>".to_owned()
+                } else {
+                    format!("CN={user}")
+                };
+                let state = match pins.get(cert) {
+                    Some(owner) if owner == user => PinState::Yours,
+                    Some(_) => PinState::Another,
+                    None => PinState::Unpinned,
+                };
+                (
+                    Presented {
+                        subject,
+                        fingerprint: format!("sha256:{cert}"),
+                    },
+                    state,
+                )
+            });
+        let pinned = pins.values().any(|owner| owner == user);
+        Some(CertificateStatus { presented, pinned })
+    }
+
+    fn pin(&self, user: &str, headers: &[(String, String)]) -> Result<(), PinError> {
+        let cert = headers
+            .iter()
+            .find(|(name, _)| name == "x-client-cert")
+            .map(|(_, cert)| cert.clone())
+            .ok_or(PinError::NoCertificate)?;
+        let mut pins = self.certificates.lock().unwrap();
+        if pins.get(&cert).is_some_and(|owner| owner != user) {
+            return Err(PinError::Taken);
+        }
+        pins.retain(|_, owner| owner != user);
+        pins.insert(cert, user.to_owned());
+        Ok(())
+    }
+
+    fn unpin(&self, user: &str) -> Result<bool, PinError> {
+        let mut pins = self.certificates.lock().unwrap();
+        let before = pins.len();
+        pins.retain(|_, owner| owner != user);
+        Ok(pins.len() != before)
+    }
+
+    fn sign_in_certificate(&self, headers: &[(String, String)]) -> SignIn {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.presented.lock().unwrap().push(headers.to_vec());
+        let value = headers
+            .iter()
+            .find(|(name, _)| name == "x-client-cert")
+            .map(|(_, value)| value.as_str());
+        let user = value.and_then(|value| self.certificates.lock().unwrap().get(value).cloned());
+        match user.and_then(|user| {
+            let uid = self
+                .accounts
+                .lock()
+                .unwrap()
+                .get(&user)
+                .map(|(_, uid)| *uid)?;
+            Some((user, uid))
+        }) {
+            Some((user, uid)) => SignIn::Admitted { user, uid },
+            None => SignIn::Refused,
+        }
+    }
+
     fn sign_in(&self, user: &str, password: &str) -> SignIn {
         self.asked.fetch_add(1, Ordering::SeqCst);
         if password == "FAIL" {
@@ -239,6 +323,12 @@ fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
         gone: Mutex::new(HashSet::new()),
         unsure: Mutex::new(HashSet::new()),
         asked: AtomicUsize::new(0),
+        certificates: Mutex::new(
+            [("MIIB-test-cert".to_owned(), "canoatesta".to_owned())]
+                .into_iter()
+                .collect(),
+        ),
+        presented: Mutex::new(Vec::new()),
     });
     let hosts = Arc::new(Hosts {
         dir: dir.clone(),
@@ -1230,6 +1320,8 @@ fn a_portal_with_no_site_or_a_site_without_an_index_does_not_start() {
             gone: Mutex::new(HashSet::new()),
             unsure: Mutex::new(HashSet::new()),
             asked: AtomicUsize::new(0),
+            certificates: Mutex::new(HashMap::new()),
+            presented: Mutex::new(Vec::new()),
         }),
         Arc::new(Systemd::new()),
     );
@@ -1247,6 +1339,8 @@ fn a_portal_with_no_site_or_a_site_without_an_index_does_not_start() {
             gone: Mutex::new(HashSet::new()),
             unsure: Mutex::new(HashSet::new()),
             asked: AtomicUsize::new(0),
+            certificates: Mutex::new(HashMap::new()),
+            presented: Mutex::new(Vec::new()),
         }),
         Arc::new(Systemd::new()),
     );
@@ -1484,4 +1578,387 @@ fn the_site_behind_the_sign_in_is_kept_private_and_asked_about_with_its_tag() {
         "",
     );
     assert_eq!(anonymous.status, 303);
+}
+
+/// A certificate sign-in as the proxy makes it, carrying `cert` in the header the portal reads, on the Unix socket.
+fn cert_login(rig: &Rig, cert: Option<&str>, forwarded: &str) -> Answer {
+    let to = To::Unix(rig.sock.clone());
+    let mut extra = vec![
+        ("Origin", to.origin()),
+        (
+            "Content-Type",
+            "application/x-www-form-urlencoded".to_owned(),
+        ),
+        ("X-Forwarded-For", forwarded.to_owned()),
+        ("Cookie", "__Host-canoa=not-a-session".to_owned()),
+        ("Authorization", "Bearer secret".to_owned()),
+    ];
+    if let Some(cert) = cert {
+        extra.push(("X-Client-Cert", cert.to_owned()));
+    }
+    request(&to, "POST", LOGIN, &extra, "method=certificate")
+}
+
+#[test]
+fn the_methods_list_what_this_connection_may_use_and_needs_no_cookie() {
+    let rig = rig(|_| {}, 0);
+    let proxied = request(&To::Unix(rig.sock.clone()), "GET", METHODS, &[], "");
+    assert_eq!(proxied.status, 200);
+    let list: serde_json::Value = serde_json::from_str(&proxied.body).unwrap();
+    assert_eq!(
+        list,
+        serde_json::json!({"methods": ["password", "certificate"]})
+    );
+    assert_eq!(proxied.header("cache-control"), Some("no-store"));
+    // A header on the loopback address is anyone's: a certificate is not offered there.
+    let local = call(rig.addr, "GET", METHODS, &[], "");
+    let list: serde_json::Value = serde_json::from_str(&local.body).unwrap();
+    assert_eq!(list, serde_json::json!({"methods": ["password"]}));
+}
+
+#[test]
+fn the_page_offers_the_methods_and_runs_nothing_inline() {
+    let rig = rig(|_| {}, 0);
+    let proxied = request(&To::Unix(rig.sock.clone()), "GET", LOGIN, &[], "");
+    assert!(proxied.body.contains("name=\"password\""));
+    assert!(proxied.body.contains("Sign in with your certificate"));
+    let local = call(rig.addr, "GET", LOGIN, &[], "");
+    assert!(local.body.contains("name=\"password\""));
+    assert!(!local.body.contains("certificate"));
+    let policy = proxied.header("content-security-policy").unwrap();
+    assert!(policy.contains("script-src 'self'") && policy.contains("style-src 'self'"));
+    assert!(!policy.contains("unsafe-inline"));
+    for body in [&proxied.body, &local.body] {
+        assert!(!body.contains("style=") && !body.contains("<style") && !body.contains(" onclick"));
+        assert_eq!(body.matches("<script").count(), 1);
+        assert!(body.contains("src=\"/portal/login.js\""));
+    }
+    for (path, kind) in [
+        ("/portal/login.css", "text/css"),
+        ("/portal/login.js", "text/javascript"),
+    ] {
+        let asset = call(rig.addr, "GET", path, &[], "");
+        assert_eq!(asset.status, 200);
+        assert!(asset.header("content-type").unwrap().starts_with(kind));
+    }
+}
+
+#[test]
+fn a_certificate_from_the_proxy_signs_in_and_the_provider_sees_no_cookie() {
+    let rig = rig(|_| {}, 0);
+    let answer = cert_login(&rig, Some("MIIB-test-cert"), "198.51.100.7");
+    assert_eq!((answer.status, answer.header("location")), (303, Some("/")));
+    let cookie = answer.cookie().expect("a session cookie");
+    let home = call(rig.addr, "GET", "/", &[("Cookie", cookie)], "");
+    assert_eq!(home.status, 200);
+    let seen = rig.accounts.presented.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].iter().any(|(name, _)| name == "x-client-cert"));
+    assert!(
+        !seen[0]
+            .iter()
+            .any(|(name, _)| name == "cookie" || name == "authorization")
+    );
+}
+
+#[test]
+fn a_certificate_is_refused_on_the_loopback_address_whatever_header_it_carries() {
+    let rig = rig(|_| {}, 0);
+    let answer = call(
+        rig.addr,
+        "POST",
+        LOGIN,
+        &[
+            ("Origin", origin(&rig)),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+            ("X-Client-Cert", "MIIB-test-cert".to_owned()),
+        ],
+        "method=certificate",
+    );
+    assert_eq!(answer.status, 400);
+    assert!(answer.cookie().is_none());
+    assert_eq!(rig.accounts.asked.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn an_unknown_certificate_reads_as_refused_and_the_throttle_holds_every_method() {
+    let rig = rig(|settings| settings.max_failures_per_pair = 2, 0);
+    for _ in 0..2 {
+        let answer = cert_login(&rig, Some("MIIB-other"), "203.0.113.50");
+        assert_eq!(answer.status, 401);
+        assert!(answer.body.contains("That certificate was not accepted"));
+        assert!(answer.cookie().is_none());
+    }
+    // No certificate at all is a failure of the same kind, and past the limit even the right one is not asked of the accounts.
+    let blocked = cert_login(&rig, Some("MIIB-test-cert"), "203.0.113.50");
+    assert_eq!(blocked.status, 429);
+    assert_eq!(blocked.header("retry-after"), Some("900"));
+    assert!(blocked.body.contains("data-retry=\"900\""));
+    assert_eq!(rig.accounts.asked.load(Ordering::SeqCst), 2);
+    // The password form from that address still has its own count, and another address its own.
+    assert_eq!(
+        login(&rig, "canoatesta", "pw-a", "203.0.113.50").status,
+        303
+    );
+    assert_eq!(cert_login(&rig, None, "203.0.113.51").status, 401);
+}
+
+#[test]
+fn a_certificate_for_an_account_the_portal_does_not_admit_is_refused() {
+    let rig = rig(|_| {}, 0);
+    rig.accounts
+        .certificates
+        .lock()
+        .unwrap()
+        .insert("MIIB-root".to_owned(), "rootish".to_owned());
+    rig.accounts
+        .certificates
+        .lock()
+        .unwrap()
+        .insert("MIIB-low".to_owned(), "lowuid".to_owned());
+    for cert in ["MIIB-root", "MIIB-low"] {
+        let answer = cert_login(&rig, Some(cert), "203.0.113.60");
+        assert_eq!(answer.status, 401);
+        assert!(answer.cookie().is_none());
+    }
+}
+
+/// A request to the certificate page or its actions, with `cookie`, as the proxy makes it, carrying `cert`.
+fn cert_page(rig: &Rig, method: &str, cookie: &str, cert: Option<&str>, body: &str) -> Answer {
+    let to = To::Unix(rig.sock.clone());
+    let mut extra = vec![
+        ("Origin", to.origin()),
+        (
+            "Content-Type",
+            "application/x-www-form-urlencoded".to_owned(),
+        ),
+        ("X-Forwarded-For", "198.51.100.7".to_owned()),
+        ("Cookie", cookie.to_owned()),
+    ];
+    if let Some(cert) = cert {
+        extra.push(("X-Client-Cert", cert.to_owned()));
+    }
+    request(&to, method, CERTIFICATE, &extra, body)
+}
+
+fn cert_session(rig: &Rig) -> String {
+    cert_login(rig, Some("MIIB-test-cert"), "198.51.100.8")
+        .cookie()
+        .expect("a certificate session")
+}
+
+#[test]
+fn a_person_signed_in_by_password_with_a_new_certificate_is_offered_it_and_pinning_it_lets_it_sign_in()
+ {
+    let rig = rig(|_| {}, 0);
+    let to = To::Unix(rig.sock.clone());
+    // The password sign-in carries the browser's certificate: the person is taken to the page that offers it.
+    let answer = request(
+        &to,
+        "POST",
+        LOGIN,
+        &[
+            ("Origin", to.origin()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+            ("X-Forwarded-For", "198.51.100.7".to_owned()),
+            ("X-Client-Cert", "MIIB-new".to_owned()),
+        ],
+        "user=canoatestb&password=pw-b",
+    );
+    assert_eq!(
+        (answer.status, answer.header("location")),
+        (303, Some(CERTIFICATE))
+    );
+    let cookie = answer.cookie().unwrap();
+    let page = cert_page(&rig, "GET", &cookie, Some("MIIB-new"), "");
+    assert_eq!(page.status, 200);
+    assert!(page.body.contains("Use this certificate to sign in"));
+    assert!(page.body.contains("CN=canoatestb") && page.body.contains("sha256:MIIB-new"));
+    assert_eq!(
+        cert_login(&rig, Some("MIIB-new"), "198.51.100.9").status,
+        401
+    );
+    let done = cert_page(&rig, "POST", &cookie, Some("MIIB-new"), "action=enrol");
+    assert_eq!(done.status, 200);
+    assert!(done.body.contains("now signs you in"));
+    // The certificate alone signs the person in, as themselves.
+    let alone = cert_login(&rig, Some("MIIB-new"), "198.51.100.10");
+    assert_eq!(alone.status, 303);
+    let session = call(
+        rig.addr,
+        "GET",
+        "/portal/session",
+        &[("Cookie", alone.cookie().unwrap())],
+        "",
+    );
+    assert!(session.body.contains("canoatestb"));
+    // A password sign-in without a certificate, or on the loopback address, goes straight in.
+    assert_eq!(
+        login(&rig, "canoatesta", "pw-a", "198.51.100.7").header("location"),
+        Some("/")
+    );
+}
+
+#[test]
+fn pinning_needs_a_fresh_password_sign_in_in_the_same_session() {
+    let rig = rig(|_| {}, 0);
+    // A session a certificate opened never pins, however recent.
+    let by_certificate = cert_session(&rig);
+    let refused = cert_page(
+        &rig,
+        "POST",
+        &by_certificate,
+        Some("MIIB-new"),
+        "action=enrol",
+    );
+    assert_eq!(refused.status, 403);
+    assert!(refused.body.contains("Sign in again with your password"));
+    assert!(
+        !rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .contains_key("MIIB-new")
+    );
+    let page = cert_page(&rig, "GET", &by_certificate, Some("MIIB-new"), "");
+    assert!(!page.body.contains("Use this certificate to sign in"));
+    // A password session whose time is up does not either.
+    let stale = rig_with_enrol_window_zero();
+    let cookie = signed_in(&stale, "canoatesta");
+    std::thread::sleep(Duration::from_millis(5));
+    let late = cert_page(&stale, "POST", &cookie, Some("MIIB-new"), "action=enrol");
+    assert_eq!(late.status, 403);
+    assert!(
+        !stale
+            .accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .contains_key("MIIB-new")
+    );
+    // Nor does a request with no session, or from another site's page.
+    let to = To::Unix(rig.sock.clone());
+    let anonymous = request(
+        &to,
+        "POST",
+        CERTIFICATE,
+        &[
+            ("Origin", to.origin()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+        ],
+        "action=enrol",
+    );
+    assert_eq!(anonymous.status, 401);
+    let password = signed_in(&rig, "canoatesta");
+    let cross = request(
+        &to,
+        "POST",
+        CERTIFICATE,
+        &[
+            ("Origin", "http://evil.example".to_owned()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+            ("Cookie", password),
+            ("X-Client-Cert", "MIIB-new".to_owned()),
+        ],
+        "action=enrol",
+    );
+    assert_eq!(cross.status, 403);
+    assert!(
+        !rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .contains_key("MIIB-new")
+    );
+}
+
+fn rig_with_enrol_window_zero() -> Rig {
+    rig(|settings| settings.enrol = Duration::ZERO, 0)
+}
+
+#[test]
+fn a_certificate_pinned_to_another_account_cannot_be_enrolled() {
+    let rig = rig(|_| {}, 0);
+    // MIIB-test-cert is canoatesta's.
+    let cookie = signed_in(&rig, "canoatestb");
+    let page = cert_page(&rig, "GET", &cookie, Some("MIIB-test-cert"), "");
+    assert!(page.body.contains("already used by another account"));
+    assert!(!page.body.contains("Use this certificate to sign in"));
+    let refused = cert_page(
+        &rig,
+        "POST",
+        &cookie,
+        Some("MIIB-test-cert"),
+        "action=enrol",
+    );
+    assert!(refused.body.contains("belongs to another account"));
+    assert_eq!(
+        rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .get("MIIB-test-cert")
+            .map(String::as_str),
+        Some("canoatesta")
+    );
+}
+
+#[test]
+fn a_pinned_certificate_is_shown_and_can_be_removed_and_then_signs_no_one_in() {
+    let rig = rig(|_| {}, 0);
+    let cookie = signed_in(&rig, "canoatesta");
+    let page = cert_page(&rig, "GET", &cookie, Some("MIIB-test-cert"), "");
+    assert!(page.body.contains("signs you in") && page.body.contains("A certificate is pinned"));
+    let removed = cert_page(
+        &rig,
+        "POST",
+        &cookie,
+        Some("MIIB-test-cert"),
+        "action=remove",
+    );
+    assert_eq!(removed.status, 200);
+    assert!(
+        removed.body.contains("is removed") && removed.body.contains("No certificate is pinned")
+    );
+    assert_eq!(
+        cert_login(&rig, Some("MIIB-test-cert"), "198.51.100.11").status,
+        401
+    );
+    // Removing is for the signed-in person's own pin only.
+    let other = signed_in(&rig, "canoatestb");
+    rig.accounts
+        .certificates
+        .lock()
+        .unwrap()
+        .insert("MIIB-b".to_owned(), "canoatestb".to_owned());
+    cert_page(&rig, "POST", &cookie, None, "action=remove");
+    assert!(
+        rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .contains_key("MIIB-b")
+    );
+    drop(other);
+}
+
+#[test]
+fn a_certificates_subject_is_escaped_on_the_page() {
+    let rig = rig(|_| {}, 0);
+    let cookie = signed_in(&rig, "canoatesta");
+    let page = cert_page(&rig, "GET", &cookie, Some("MIIB-xss"), "");
+    assert!(page.body.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert!(!page.body.contains("<script>alert"));
 }
