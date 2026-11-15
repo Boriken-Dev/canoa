@@ -253,11 +253,11 @@ impl Scope {
             return Err("a device path is not a directory");
         }
         if !self.roots.is_empty()
-            && !(plain_absolute(&path)
-                && self
+            && (!plain_absolute(&path)
+                || self
                     .roots
                     .iter()
-                    .any(|root| path.starts_with(share::plain(root))))
+                    .all(|root| !path.starts_with(share::plain(root))))
         {
             return Err("this host serves this agent only under its working roots");
         }
