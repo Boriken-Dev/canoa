@@ -133,8 +133,9 @@ abstract interface class AccountsHost {
   /// The agent entries of the host that run a provider with accounts, and the accounts each offers.
   Future<List<AccountEntry>> entries();
 
-  /// Makes the entry [entry] offer exactly [accounts], in that order, in the host's canoa.cfg. The host reads it when it starts.
-  Future<void> offer(String entry, List<String> accounts);
+  /// Makes the entry [entry] offer exactly [accounts], in that order, in the host's canoa.cfg, which the host alone writes. An entry
+  /// it does not have is made when [harness] says what it runs. The host reads it when it starts.
+  Future<void> offer(String entry, List<String> accounts, {String? harness});
 
   /// Signs in by [method] and makes the account [name], or signs in again to it when [again].
   SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false});
@@ -176,8 +177,8 @@ final class ControlAccountsHost implements AccountsHost {
   }
 
   @override
-  Future<void> offer(String entry, List<String> accounts) async {
-    await _call('accounts/offer', {'entry': entry, 'accounts': accounts});
+  Future<void> offer(String entry, List<String> accounts, {String? harness}) async {
+    await _call('accounts/offer', {'entry': entry, 'accounts': accounts, 'harness': ?harness});
   }
 
   @override

@@ -94,6 +94,7 @@ Future<List<CanoaConfig>> pumpApp(
   PopoutWindows? popoutWindows,
   AccountsHost? accountsHost,
   ServedApp? served,
+  Future<CanoaConfig> Function()? readConfig,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -109,6 +110,7 @@ Future<List<CanoaConfig>> pumpApp(
     config: config,
     configPath: '${dir.path}/canoa.cfg',
     writeConfig: (changed) async => written.add(changed),
+    readConfig: readConfig,
     isGitRepository: (folder) => folder.endsWith('repo'),
     folderExists: folderExists ?? (_) => true,
     pickFolder: pickFolder ?? () async => '/work/repo',

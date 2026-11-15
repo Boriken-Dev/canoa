@@ -93,6 +93,7 @@ final class FakeAccountsHost implements AccountsHost {
   /// The agent entries the host lists, and what it was asked to make each offer, in order.
   final List<AccountEntry> hostEntries = [];
   final offers = <(String, List<String>)>[];
+  final offerHarness = <String, String?>{};
   int cancelled = 0;
   String? removeRefusal;
 
@@ -106,8 +107,9 @@ final class FakeAccountsHost implements AccountsHost {
   Future<List<AccountEntry>> entries() async => List.of(hostEntries);
 
   @override
-  Future<void> offer(String entry, List<String> accounts) async {
+  Future<void> offer(String entry, List<String> accounts, {String? harness}) async {
     offers.add((entry, List.of(accounts)));
+    offerHarness[entry] = harness;
     final at = hostEntries.indexWhere((each) => each.name == entry);
     if (at >= 0) {
       final one = hostEntries[at];

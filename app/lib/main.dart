@@ -1,6 +1,5 @@
 import 'attention/notifier.dart';
 import 'dart:async';
-import 'dart:convert' show jsonEncode;
 import 'served/folder_dialog.dart';
 import 'served/served_app.dart';
 import 'desktop/control_client.dart' show ControlFailed;
@@ -199,7 +198,7 @@ class CanoaApp extends StatefulWidget {
   const CanoaApp({
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
-    this.configPath, this.writeConfig, this.ledger, this.rules, this.notifier, this.drafts,
+    this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
     this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served,
@@ -286,6 +285,9 @@ class CanoaApp extends StatefulWidget {
   final String? configPath;
   @visibleForTesting
   final Future<void> Function(CanoaConfig)? writeConfig;
+
+  /// Reads canoa.cfg again after the host changed it; by default the person's own file on this computer.
+  final Future<CanoaConfig> Function()? readConfig;
 
   @override
   State<CanoaApp> createState() => _CanoaAppState();
@@ -897,38 +899,33 @@ class _CanoaAppState extends State<CanoaApp> {
   /// the person's file, so it is read again first: saving the copy this app held would take it out.
   Future<void> _changeAccounts(CanoaConfig Function(CanoaConfig config) edit) async {
     final path = _configPath;
-    final fresh = widget.writeConfig == null && widget.served == null ? await loadConfig() : config;
-    // What entries offer is the host's to say: the edit is made over the entries it lists, and a change to an entry it has is asked
-    // of it, which writes canoa.cfg. An entry the edit makes new (the app's own, for accounts nothing else offers) is written as before.
+    final fresh = await _readConfig();
+    // What entries offer is the host's to say, and the host alone writes canoa.cfg for it: the edit is made over the entries the host
+    // lists, and each entry it changes is asked of the host, which makes the entry too when there is none. This app reads the file
+    // again afterwards and never writes it from here, so a write of this app's copy cannot undo what the host just wrote.
     final entries = _accountsHeld?.hostEntries ?? const <AccountEntry>[];
     final view = fresh.withHostEntries(entries);
     final edited = edit(view);
-    final known = {for (final entry in entries) entry.name};
     final offers = <String, List<String>>{
       for (final entry in edited.hostEntries)
-        if (known.contains(entry.name) && !_sameList(edited.hostAccountsOf(entry.name), view.hostAccountsOf(entry.name)))
-          entry.name: edited.hostAccountsOf(entry.name),
+        if (!_sameList(edited.hostAccountsOf(entry.name), view.hostAccountsOf(entry.name))) entry.name: edited.hostAccountsOf(entry.name),
     };
     final accountsHost = widget.accountsHost ?? (_control == null ? null : ControlAccountsHost(_control));
     for (final MapEntry(:key, :value) in offers.entries) {
-      await accountsHost?.offer(key, value);
-    }
-    // The host's built-in sources are not in the file until an offer names them: they are not written from here.
-    var changed = edited;
-    for (final entry in entries) {
-      if (!fresh.hostEntries.any((each) => each.name == entry.name)) changed = changed.withoutHostEntry(entry.name);
+      await accountsHost?.offer(key, value, harness: edited.hostHarnessOf(key));
     }
     // The host serves what an entry offers from the moment it starts, so a change of the offers restarts it, which ends the
     // sessions open on it: the person is asked first, and says which. Declined, it is saved and applies when the host next starts.
     final canRestart = widget.served != null || (widget.host != null && path != null);
-    var restart = canRestart && (offers.isNotEmpty || jsonEncode(changed.host) != jsonEncode(fresh.host));
+    var restart = canRestart && offers.isNotEmpty;
     if (restart) {
       final ending = _endedByRestart();
       if (ending.isNotEmpty && !await _confirmAccountsRestart(ending)) restart = false;
     }
-    await _write(changed);
+    final changed = await _readConfig();
     if (mounted) setState(() => config = changed);
     _settingsKey.currentState?.controller.adopt(changed);
+    await _accountsHeld?.refresh();
     _accounts?.changed();
     if (!restart) return;
     if (widget.served != null) {
@@ -937,6 +934,13 @@ class _CanoaAppState extends State<CanoaApp> {
       await widget.host!.apply(configPath: path);
     }
     await _accountsHeld?.refresh();
+  }
+
+  /// canoa.cfg as it is now: the person's own file on this computer, or the copy this page holds where the host that served it keeps
+  /// the file.
+  Future<CanoaConfig> _readConfig() async {
+    if (widget.readConfig case final read?) return read();
+    return widget.writeConfig == null && widget.served == null ? loadConfig() : config;
   }
 
   static bool _sameList(List<String> a, List<String> b) => a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((same) => same);

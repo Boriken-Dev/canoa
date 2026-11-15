@@ -163,7 +163,7 @@ void main() {
         await frames(tester);
         await tester.pump(const Duration(seconds: 1));
         expect(control.params['accounts/offer'], [
-          {'entry': 'Claude', 'accounts': ['work']},
+          {'entry': 'Claude', 'accounts': ['work'], 'harness': 'claude'},
         ]);
         if (label.contains('served')) expect(control.asked, contains('host/restart'));
       });

@@ -65,7 +65,8 @@ class _AccountsSectionState extends State<AccountsSection> {
           key: const Key('offer-open-entry'),
           title: Text('Offer ${account.name} in $entry?'),
           content: Text(
-            '$entry has no list of keys, so every key paired with this host can start a session on it, and sessions there run on '
+            '$entry has no list of keys, so every key paired with this host can start a session on it, running the agent as the user '
+            'who runs this host, and sessions there run on '
             '${_accounts.offeredBy(entry).isEmpty ? account.name : 'any account it offers, ${account.name} included'}'
             '${_accounts.offeredBy(entry).isEmpty ? ', which then replaces the login $entry runs on now' : ''}. '
             'Add the keys that may use it to its peers in canoa.cfg, or keep ${account.name} to an entry only this computer reaches.',

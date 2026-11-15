@@ -42,10 +42,11 @@ void main() {
     accounts = FakeAccountsHost(accounts: [account('work', kind: 'claude-login'), account('metered')]);
   });
 
-  Future<List<CanoaConfig>> app(WidgetTester tester, SessionStore store) => pumpApp(
+  Future<List<CanoaConfig>> app(WidgetTester tester, SessionStore store, {Future<CanoaConfig> Function()? readConfig}) => pumpApp(
     tester,
     store,
     config: _config,
+    readConfig: readConfig,
     accountsHost: accounts,
     host: linkedHost(agent.openLink, sources: () {
       starts++;
@@ -69,9 +70,32 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('restart-accounts')), matching: find.textContaining(title)), findsWidgets);
     await tester.tap(find.byKey(const Key('restart-accounts-later')));
     await frames(tester);
-    // Saved, not applied: the offer is in canoa.cfg and the host was not started again.
-    expect(written.last.hostAccountsOf('Claude-accounts'), ['work', 'metered']);
+    // Asked of the host, which writes canoa.cfg, and not applied: the host was not started again. The app wrote nothing itself.
+    expect(accounts.offers.last.$1, 'Claude-accounts');
+    expect(accounts.offers.last.$2, ['work', 'metered']);
+    expect(written, isEmpty, reason: 'a write of the copy this app holds could undo what the host just wrote');
     expect(starts, before);
+    await finish(tester);
+  });
+
+  testWidgets('an offer is written by the host alone: the app reads canoa.cfg again after it and writes none of it', (tester) async {
+    // What the host wrote while this app held an older copy: the entry it made, which the app never saw.
+    const written = CanoaConfig(host: {
+      'agents': {
+        'Claude-accounts': {'harness': 'claude', 'accounts': ['work', 'metered'], 'peers': <String>[]},
+        'Claude': {'harness': 'claude', 'accounts': ['work']},
+      },
+    });
+    var reads = 0;
+    final saved = await app(tester, _store(), readConfig: () async {
+      reads++;
+      return reads > 1 ? written : _config;
+    });
+    await _offerMetered(tester);
+    await settle(tester);
+    expect(saved, isEmpty, reason: 'writing the copy this app holds over canoa.cfg would undo the entry the host made');
+    expect(reads, greaterThan(1), reason: 'the file is read again once the host changed it');
+    expect(accounts.offers, isNotEmpty);
     await finish(tester);
   });
 
@@ -97,7 +121,9 @@ void main() {
     await _offerMetered(tester);
     expect(find.byKey(const Key('restart-accounts')), findsNothing);
     await settle(tester);
-    expect(written.last.hostAccountsOf('Claude-accounts'), ['work', 'metered']);
+    expect(accounts.offers.last.$1, 'Claude-accounts');
+    expect(accounts.offers.last.$2, ['work', 'metered']);
+    expect(written, isEmpty);
     expect(starts, greaterThan(before));
     await finish(tester);
   });
