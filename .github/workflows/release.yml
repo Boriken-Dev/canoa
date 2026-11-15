@@ -1,7 +1,7 @@
 name: Release
 
 # A gate, so a first real release is not the first time this runs. Nothing here publishes: no crate or package of
-# this workspace is released yet. It creates a source release from CHANGELOG.md.
+# this workspace is released yet. It creates a source release from CHANGELOG.md and starts the docs deploy at the tag.
 on:
   push:
     tags:
@@ -17,13 +17,39 @@ jobs:
   docs-gate:
     name: Build the documentation strictly
     runs-on: ubuntu-latest
+    # Pages is enabled here as docs.yml enables it, so a first release does not meet a repository without it.
+    permissions:
+      contents: read
+      pages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
       - run: pip install mkdocs-material==9.6.22
+      - name: Build Rust API
+        run: cargo doc --workspace --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+          # The site canoa's web feature builds in.
+          CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
       - run: mkdocs build --strict
+
+  # The docs workflow owns every Pages deploy; the release does not wait for it.
+  docs-deploy:
+    name: Start the documentation deploy at the tag
+    needs: docs-gate
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   release:
     name: Create source release
