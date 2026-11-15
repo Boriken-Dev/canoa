@@ -9,6 +9,7 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
 import 'package:canoa/accounts/accounts_host.dart';
+import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/acp/browser_connect.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/accounts/account_models.dart' show accountMeta;
@@ -26,8 +27,8 @@ Future<void> _until(bool Function() test, String what, {Duration within = const 
   }
 }
 
-/// The page's first step. [options] holds `name` (the account to add), `key` (the API key typed into the sealed form) and `store`
-/// (the id of the made-up Store).
+/// The page's first step. [options] holds `name` (the account to add), `key` (the API key typed into the sealed form), `entry` (the
+/// entry that offers it) and `store` (the id of the made-up Store).
 Future<String> _first(String options) async {
   final asked = jsonDecode(options) as Map<String, Object?>;
   final report = <String, Object?>{};
@@ -84,6 +85,18 @@ Future<String> _first(String options) async {
     final listed = await host.list();
     report['accounts'] = [for (final each in listed) each.name];
 
+    // The entry that runs the provider offers the account, as Settings › Accounts has the host do it, and the host starts again
+    // with it. The built-in source is an entry of the host's before any canoa.cfg names it.
+    final entries = await host.entries();
+    report['entries'] = [for (final each in entries) each.name];
+    final entry = asked['entry']! as String;
+    await host.offer(entry, [name]);
+    report['offeredTo'] = [for (final each in await host.entries()) if (each.accounts.contains(name)) each.name];
+    await app.files.restart().onError<Object>((error, stack) {
+      if (error is ControlFailed) throw error;
+    });
+    await app.files.awaitHost();
+
     report['ok'] = true;
   } on Object catch (error, stack) {
     report['error'] = '$error';
@@ -101,8 +114,7 @@ void main() {
     ..setProperty('canoaReady'.toJS, true.toJS);
 }
 
-/// The page's second step, in a page loaded after the person's canoa.cfg names the account under the entry (the control channel
-/// never writes an entry): a session of the entry, on the account. [options] holds `entry` and `name`.
+/// The page's second step, in a page loaded after the host started again: a session of the entry, on the account. [options] holds `entry` and `name`.
 Future<String> _second(String options) async {
   final asked = jsonDecode(options) as Map<String, Object?>;
   final report = <String, Object?>{};

@@ -1,18 +1,19 @@
 // The program Store and accounts of a person's own host through `canoa portal`, in a real browser: the browser signs in on the
-// portal's form, and the app's own code (app/tool/store_accounts_page.dart, a web target) installs a made-up program from the
-// Store and adds an account by an API key typed into a form the host sealed to this browser's key. The control channel never writes an
-// entry, so the person's canoa.cfg gets the entry's `accounts` line from CANOA_E2E_OFFER (a command, as a JSON array, that also
-// restarts the host); a second page then opens a session on the account. The host is `portal_standin_host` (canoa-host's example), whose Store is the echo stores, and whose
-// Claude entry runs `harness_standin`, so nothing is downloaded and no real account is touched.
+// portal's form, and the app's own code (app/tool/store_accounts_page.dart, a web target) installs a made-up Claude Code from the
+// Store, adds an account by an API key typed into a form the host sealed to this browser's key, has the Claude entry offer it (the
+// host writes canoa.cfg and starts again), and a second page opens a session on that account. Nothing in canoa.cfg is edited by
+// hand. The host is `portal_standin_host` (canoa-host's example): its Store publishes a script that answers `--version` and then
+// becomes `harness_standin`, so nothing is downloaded and no real account is touched. The runner checks afterwards that the
+// stand-in's record shows the Store's copy started.
 //
 //   python app/tool/build_noise.py; in app/:
 //   flutter build web --release --csp --no-web-resources-cdn --base-href=/page/ -t tool/store_accounts_page.dart --output <page>
 //   (the portal's `site` has the page in its `page` folder; the portal and its throwaway accounts are tests/portal_users/setup.sh's)
 //   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_PORTAL=http://localhost:PORT CANOA_E2E_USER=name CANOA_E2E_PASSWORD=secret \
-//   CANOA_E2E_KEY=the-api-key-to-type CANOA_E2E_OFFER='["wsl", "...", "offer.sh"]' node e2e/portal_store.mjs
+//   CANOA_E2E_KEY=the-api-key-to-type node e2e/portal_store.mjs
 //
 // The password and the key are read from the environment and never printed.
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,10 +22,10 @@ import { lastCall, Session } from "./cdp.mjs";
 
 const {
   CANOA_E2E_BROWSER: browser, CANOA_E2E_PORTAL: portal, CANOA_E2E_USER: user, CANOA_E2E_PASSWORD: password,
-  CANOA_E2E_KEY: key, CANOA_E2E_OFFER: offer,
+  CANOA_E2E_KEY: key,
 } = process.env;
-if (!browser || !portal || !user || !password || !key || !offer) {
-  throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_PORTAL, CANOA_E2E_USER, CANOA_E2E_PASSWORD, CANOA_E2E_KEY and CANOA_E2E_OFFER");
+if (!browser || !portal || !user || !password || !key) {
+  throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_PORTAL, CANOA_E2E_USER, CANOA_E2E_PASSWORD and CANOA_E2E_KEY");
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const work = mkdtempSync(path.join(tmpdir(), "canoa-portal-store-e2e-"));
@@ -91,7 +92,7 @@ try {
 
   const page = await open(`${portal}/page/index.html`);
   await waitFor("the page's code", () => page.run("globalThis.canoaReady === true").catch(() => false), 60_000);
-  const options = JSON.stringify({ name: "work", key, store: "echo_store" });
+  const options = JSON.stringify({ name: "work", key, entry: "Claude", store: "echo_claude_store" });
   let report;
   await check("the page's run finishes", async () => {
     report = JSON.parse(await page.run(`canoaFirst(${JSON.stringify(options)})`));
@@ -102,10 +103,14 @@ try {
     if (!report.grants?.programs || !report.grants?.accounts) throw new Error(JSON.stringify(report.grants));
   });
   await check("the Store lists the made-up store and installs the program from it", async () => {
-    if (!report.stores?.includes("echo_store")) throw new Error(JSON.stringify(report.stores));
+    if (!report.stores?.includes("echo_claude_store")) throw new Error(JSON.stringify(report.stores));
     if (report.plan?.action !== "install") throw new Error(JSON.stringify(report.plan));
     if (!report.installed?.version) throw new Error(JSON.stringify(report.installed));
     if (!(report.copiesAfter > (report.copiesBefore ?? 0))) throw new Error(`copies ${report.copiesBefore} then ${report.copiesAfter}`);
+  });
+  await check("the Claude entry offers the account, and the host started again", async () => {
+    if (!report.entries?.includes("Claude")) throw new Error(JSON.stringify(report.entries));
+    if (JSON.stringify(report.offeredTo) !== '["Claude"]') throw new Error(JSON.stringify(report.offeredTo));
   });
   await check("the account is added by a key sealed to this browser's key, and listed", async () => {
     if (report.signIn !== "done") throw new Error(`${report.signIn}: ${report.signInProblem}`);
@@ -114,10 +119,6 @@ try {
     if (JSON.stringify(report).includes(key)) throw new Error("the key is in the page's report");
   });
   page.close();
-  await check("the person's canoa.cfg offers the account under the entry, and the host starts again", async () => {
-    const [program, ...args] = JSON.parse(offer);
-    execFileSync(program, args, { stdio: "pipe", timeout: 60_000 });
-  });
   const again = await open(`${portal}/page/index.html`);
   await waitFor("the page's code", () => again.run("globalThis.canoaReady === true").catch(() => false), 60_000);
   await check("a session opens on the entry that offers the account", async () => {
