@@ -117,7 +117,8 @@ Future<void> _browser(WidgetTester tester, _Control control) {
 }
 
 Future<void> _openSettings(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('Settings').evaluate().isNotEmpty ? find.byTooltip('Settings') : find.text('Settings').first);
+  // Settings is a section of the shell, reached from its selector.
+  await tester.tap(find.byTooltip('Canoa settings'));
   await frames(tester);
 }
 
