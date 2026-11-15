@@ -290,15 +290,15 @@ fn id_with_base(base: &std::path::Path) -> Output {
 }
 
 #[test]
-fn a_host_with_no_home_named_keeps_its_identity_in_canoas_folder_and_makes_no_other() {
+fn a_host_with_no_home_named_keeps_its_identity_in_dot_canoa_and_makes_no_other() {
     let scratch = Scratch::new();
     let out = id_with_base(&scratch.0);
     assert!(out.status.success(), "{out:?}");
-    let home = scratch.0.join("Canoa");
+    let home = scratch.0.join(".canoa");
     assert!(home.join("method").is_file(), "{home:?}");
     for entry in std::fs::read_dir(&scratch.0).expect("listed") {
         let name = entry.expect("an entry").file_name();
-        assert_eq!(name, "Canoa", "something else was made: {name:?}");
+        assert_eq!(name, ".canoa", "something else was made: {name:?}");
     }
     // The same folder serves the next run: one identity, not one a run.
     let again = id_with_base(&scratch.0);

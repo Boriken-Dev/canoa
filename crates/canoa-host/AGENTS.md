@@ -847,7 +847,7 @@ pub fn ServeOptions::with_portal(self, sockets: PortalSockets) -> ServeOptions
 
 ```rust
 pub fn Home::at(dir: impl Into<PathBuf>) -> Home
-pub fn Home::of_user() -> Result<Home, coqui_agentic_peer::Error>   // COQUI_AGENTIC_PEER_HOME, else Canoa's folder: %LOCALAPPDATA%\Canoa, ~/Library/Application Support/Canoa, $XDG_DATA_HOME/Canoa or ~/.local/share/Canoa
+pub fn Home::of_user() -> Result<Home, coqui_agentic_peer::Error>   // COQUI_AGENTIC_PEER_HOME, else ~/.canoa (%USERPROFILE%\.canoa on Windows)
 pub fn Home::dir(&self) -> &Path
 pub fn Home::identity(&self, method: Option<Method>) -> Result<Identity, coqui_agentic_peer::Error>   // as coqui_agentic_peer::home, in this directory
 pub fn Home::store(&self) -> Result<TrustStore, coqui_agentic_peer::Error>
@@ -1113,7 +1113,7 @@ A client that is a webpage has no file system and names no path. Its `session/ne
 | `CANOA_INSTALLED_DIR` | the folder whose `canoa.cfg` is the installed copy | the executable's folder (the portable launcher sets its own) |
 | `CANOA_LOG` | what to log, a `tracing` filter | `info` |
 | `CANOA_WEB_DIST` | at build time, with feature `web`: the absolute directory of the site built in | none; the build stops without it |
-| `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `Canoa` under `%LOCALAPPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME` or `~/.local/share` (the same folder as `programs/`); no folder named after the peer library is made |
+| `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `.canoa` in the user's home folder (`%USERPROFILE%\.canoa` on Windows); no folder named after the peer library is made. canoa.cfg's place is unchanged and separate |
 | `XDG_DOCUMENTS_DIR` | the Documents folder a webpage session's scratch folder is made in (absolute, or from `$HOME`), on any system | the system's: the Documents known folder on Windows, `user-dirs.dirs` then `~/Documents` on Linux, `~/Documents` on macOS |
 | `NO_COLOR` | no colour in the log | colour on a terminal |
 

@@ -17,7 +17,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `app/native/` | The app's own plugin: builds `crates/canoa-ffi` with the desktop runner and declares its C ABI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
 | `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app; `examples/` holds the programs the tests run (`stdio_agent`, also scripted with `--scripted`; `web_peer`, the page's peer; `mcp_server`; `harness_standin`; `store_control`, the control channel over standard streams with a stand-in program as its only Store) |
-| `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe`, bar `canoa-host`'s Windows process-table module |
+| `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe`, bar one module of `canoa-host` (`usage_splice/members/win32.rs`, the Windows process table) |
 | `crates/canoa-launch/` | The Windows portable launcher: carries the built app folder, unpacks it once per version, verifies and starts it; `app/tool/portable.py` builds it and the Linux AppImage |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |

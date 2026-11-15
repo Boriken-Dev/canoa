@@ -128,18 +128,19 @@ impl Home {
         Self { dir: dir.into() }
     }
 
-    /// This user's home: `COQUI_AGENTIC_PEER_HOME`, else Canoa's own data folder, never one named after the
-    /// library that keeps the identity.
+    /// This user's home: `COQUI_AGENTIC_PEER_HOME`, else `.canoa` in the user's home folder (`%USERPROFILE%\.canoa`
+    /// on Windows), never a folder named after the library that keeps the identity.
     ///
     /// # Errors
     ///
     /// [`Error::Identity`] when no directory can be worked out for this user.
     pub fn of_user() -> Result<Self, Error> {
-        user_dir(Platform::current(), &|name| {
-            std::env::var_os(name)
+        user_dir(
+            std::env::var_os(home::HOME_ENV)
                 .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        })
+                .map(PathBuf::from),
+            std::env::home_dir(),
+        )
         .map(Self::at)
         .ok_or_else(|| Error::Identity("no home directory for this user".to_owned()))
     }
@@ -294,51 +295,10 @@ impl Home {
     }
 }
 
-/// The systems whose place for a user's data differs.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Platform {
-    Windows,
-    MacOs,
-    Other,
-}
-
-impl Platform {
-    /// The system this was built for.
-    pub(crate) const fn current() -> Self {
-        if cfg!(windows) {
-            Self::Windows
-        } else if cfg!(target_os = "macos") {
-            Self::MacOs
-        } else {
-            Self::Other
-        }
-    }
-}
-
-/// Canoa's folder for what it keeps for one user: `%LOCALAPPDATA%\Canoa`, `~/Library/Application Support/Canoa`, else
-/// `$XDG_DATA_HOME/Canoa` or `~/.local/share/Canoa`. `None` when the system names no such place.
-pub(crate) fn data_dir() -> Option<PathBuf> {
-    data_dir_of(Platform::current(), &|name| {
-        std::env::var_os(name)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    })
-}
-
-/// [`data_dir`] on `platform`, reading variables through `env`.
-fn data_dir_of(platform: Platform, env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
-    let base = match platform {
-        Platform::Windows => env("LOCALAPPDATA")?,
-        Platform::MacOs => env("HOME")?.join("Library").join("Application Support"),
-        Platform::Other => env("XDG_DATA_HOME")
-            .or_else(|| env("HOME").map(|home| home.join(".local").join("share")))?,
-    };
-    Some(base.join("Canoa"))
-}
-
-/// The directory a host with no home named uses: the library's override variable, else [`data_dir_of`].
-fn user_dir(platform: Platform, env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
-    env(home::HOME_ENV).or_else(|| data_dir_of(platform, env))
+/// The directory a host with no home named uses: `named` (the library's override variable), else `.canoa` in `user`, the
+/// person's home folder.
+fn user_dir(named: Option<PathBuf>, user: Option<PathBuf>) -> Option<PathBuf> {
+    named.or_else(|| user.map(|user| user.join(".canoa")))
 }
 
 /// What the lock is taken on: see the module's documentation.
@@ -422,57 +382,28 @@ mod tests {
         dir
     }
 
-    fn env_of<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<PathBuf> + 'a {
-        move |name| {
-            vars.iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| PathBuf::from(value))
-        }
-    }
-
     #[test]
-    fn a_home_with_none_named_is_canoas_own_folder_on_every_system() {
-        let windows = env_of(&[
-            ("LOCALAPPDATA", "/l"),
-            ("HOME", "/h"),
-            ("XDG_DATA_HOME", "/x"),
-        ]);
-        assert_eq!(
-            user_dir(Platform::Windows, &windows),
-            Some(PathBuf::from("/l").join("Canoa"))
-        );
-        let mac = env_of(&[("HOME", "/h"), ("LOCALAPPDATA", "/l")]);
-        assert_eq!(
-            user_dir(Platform::MacOs, &mac),
-            Some(PathBuf::from("/h/Library/Application Support/Canoa"))
-        );
-        let xdg = env_of(&[("HOME", "/h"), ("XDG_DATA_HOME", "/x")]);
-        assert_eq!(
-            user_dir(Platform::Other, &xdg),
-            Some(PathBuf::from("/x").join("Canoa"))
-        );
-        let plain = env_of(&[("HOME", "/h")]);
-        assert_eq!(
-            user_dir(Platform::Other, &plain),
-            Some(PathBuf::from("/h/.local/share/Canoa"))
-        );
-        assert_eq!(user_dir(Platform::Other, &env_of(&[])), None);
-        assert_eq!(
-            user_dir(Platform::Windows, &env_of(&[("HOME", "/h")])),
-            None
-        );
+    fn a_home_with_none_named_is_dot_canoa_in_the_persons_home_folder() {
+        let user = |path: &str| Some(PathBuf::from(path));
+        for path in ["/home/me", "/Users/me", r"C:\Users\me"] {
+            assert_eq!(
+                user_dir(None, user(path)),
+                Some(PathBuf::from(path).join(".canoa"))
+            );
+        }
+        assert_eq!(user_dir(None, None), None);
     }
 
     #[test]
     fn the_peer_library_variable_still_names_the_home() {
-        let set = env_of(&[
-            ("COQUI_AGENTIC_PEER_HOME", "/elsewhere"),
-            ("LOCALAPPDATA", "/l"),
-            ("HOME", "/h"),
-        ]);
-        for platform in [Platform::Windows, Platform::MacOs, Platform::Other] {
-            assert_eq!(user_dir(platform, &set), Some(PathBuf::from("/elsewhere")));
-        }
+        assert_eq!(
+            user_dir(Some("/elsewhere".into()), Some("/home/me".into())),
+            Some(PathBuf::from("/elsewhere"))
+        );
+        assert_eq!(
+            user_dir(Some("/elsewhere".into()), None),
+            Some(PathBuf::from("/elsewhere"))
+        );
     }
 
     #[test]
