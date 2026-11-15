@@ -115,6 +115,12 @@ it: `coqui_access_mtls` pins certificates by their SHA-256 fingerprint (`trust =
 (`"ca"`, which needs the chain, so the proxy must forward the intermediates) or either (`"pinned-or-ca"`). Then the account is
 looked up as for a password.
 
+The sign-in page says why a certificate try failed when that is no secret. A try that carried **no certificate** (the browser
+chose none: Chrome and Edge remember a choice, "none" included, until the browser is restarted) is answered with a notice to
+check that the card is inserted and to restart the browser; it is not counted by the throttle and no provider is asked, so a
+person cannot lock themselves out by clicking again. An **expired** certificate and one **pinned to no account** each have their
+own notice, still count as failures, and name no account. The log says which of the three it was, never the certificate.
+
 A pinned certificate is refused once it is past its validity dates, whatever the provider says. With `trust = "ca"` or
 `"pinned-or-ca"`, always set the provider's `san` or `subject` globs to the names your CA issues for people, and issue those
 certificates with the `clientAuth` extended key usage only: a CA with no restriction signs for anyone who can get a certificate
