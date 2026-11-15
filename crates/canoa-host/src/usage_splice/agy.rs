@@ -660,11 +660,18 @@ impl Reading {
 
     /// A prompt was answered, which may have spent some of the quota.
     pub(crate) fn prompted(self: &Arc<Self>) {
-        let _ = self
-            .running
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
-                held.checked_sub(1)
-            });
+        // A compare-exchange loop rather than `fetch_update`, which newer compilers deprecate and the minimum one lacks
+        // the replacement for.
+        let mut held = self.running.load(Ordering::SeqCst);
+        while let Some(less) = held.checked_sub(1) {
+            match self
+                .running
+                .compare_exchange(held, less, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break,
+                Err(now) => held = now,
+            }
+        }
         self.turned.store(true, Ordering::SeqCst);
         self.spawn(Self::read_quietly);
     }
