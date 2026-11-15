@@ -422,10 +422,7 @@ impl<W: Write + Send + 'static> Relay<W> {
                 // reads only what this user's own processes advertised and what answers on the link.
                 let found = discover::wait_of(request)
                     .map_err(|(_, error)| error)
-                    .and_then(|wait| {
-                        discover::search(wait)
-                            .ok_or_else(|| "a search is already running".to_owned())
-                    });
+                    .map(discover::search);
                 let message = match found {
                     Ok(mut found) => {
                         found["reply"] = "discover".into();

@@ -926,6 +926,12 @@ fn found(result: &Value, nearby: &Nearby) {
     assert_eq!(candidate["peer"], NEARBY_PEER);
     assert_eq!(candidate["method"], "noise");
     assert_eq!(candidate["source"], "local");
+    // A folder named by the override is this user's own on Unix, and not shown to be on Windows.
+    if cfg!(windows) {
+        assert_eq!(result["directory"], "unchecked", "{result}");
+    } else {
+        assert!(result.get("directory").is_none(), "{result}");
+    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readCandidates } from "./acp-discovery.js";
+import { lookNearby, readCandidates, searchNotes } from "./acp-discovery.js";
 
 const KEY = `sha256:${"a".repeat(64)}`;
 const OTHER = `sha256:${"b".repeat(64)}`;
@@ -108,4 +108,37 @@ test("what a candidate says it serves is read as a stranger wrote it", () => {
   assert.deepEqual(offers("acp/1"), []);
   assert.deepEqual(offers(["a b", "a,b", "a=b", "", 7, null, "\u202eacp", "x".repeat(65), "mcp"]), ["mcp"]);
   assert.equal(offers(Array.from({ length: 100 }, (_, index) => `p${index}`)).length, 16);
+});
+
+const found = (state = "ok", extra = {}) => ({ state, reply: { candidates: [good], ...extra } });
+
+test("a host that refuses the key is the answer: the native host is not asked in its place", async () => {
+  let relayAsked = false;
+  const viaRelay = async () => {
+    relayAsked = true;
+    return found();
+  };
+  const refused = await lookNearby({ viaHost: async () => { throw Object.assign(new Error("this key has no discover grant"), { code: -32001 }); }, viaRelay, known: [] });
+  assert.deepEqual(refused, { candidates: [], refused: true });
+  assert.equal(relayAsked, false);
+});
+
+test("a host that cannot be reached, or fails otherwise, or no pairing, leaves the native host to look", async () => {
+  const viaRelay = async () => found();
+  for (const viaHost of [async () => { throw new Error("the link to Canoa ended"); }, async () => { throw Object.assign(new Error("busy"), { code: -32002 }); }, undefined]) {
+    const said = await lookNearby({ viaHost, viaRelay, known: [] });
+    assert.equal(said.candidates.length, 1);
+    assert.equal(said.refused, undefined);
+  }
+  const none = await lookNearby({ viaHost: undefined, viaRelay: async () => ({ state: "not-installed" }), known: [] });
+  assert.deepEqual(none, { candidates: [], needsCanoa: true, why: undefined });
+});
+
+test("what a search says about its folder and its network is given to the person, cut down", () => {
+  assert.deepEqual(searchNotes({ candidates: [] }), []);
+  assert.equal(searchNotes({ directory: "shared" }).length, 1);
+  assert.match(searchNotes({ directory: "unchecked" })[0], /could not be checked/);
+  const [net] = searchNotes({ networkError: `no‮ multicast ${"x".repeat(500)}` });
+  assert.ok(net.startsWith("The network could not be searched: no multicast") && net.length < 260, net);
+  assert.deepEqual(searchNotes({ networkError: "  " }), []);
 });

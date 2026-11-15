@@ -70,6 +70,43 @@ function pointsHome(hostname) {
   return /^(127|0|169\.254)\./.test(hostname);
 }
 
+/** The code of a host's JSON-RPC answer that says the key may not do this. */
+export const REFUSED = -32001;
+
+/**
+ * What a search said about itself that the person should read: a descriptor folder that was not read or could not be checked, and
+ * why the network could not be searched. Text from the host, so cut down and stripped of anything that reorders it.
+ */
+export function searchNotes(reply) {
+  const notes = [];
+  if (reply?.directory === "shared") notes.push("The folder where agents on this computer announce themselves can be changed by another user, so it was not read.");
+  if (reply?.directory === "unchecked") notes.push("The folder where agents on this computer announce themselves could not be checked for who can change it.");
+  if (typeof reply?.networkError === "string") {
+    const why = reply.networkError.replace(/\p{Cf}|\p{Cc}/gu, "").trim().slice(0, 200);
+    if (why !== "") notes.push(`The network could not be searched: ${why}`);
+  }
+  return notes;
+}
+
+/**
+ * Asks who is nearby: `viaHost` (undefined when this browser is not paired with a running host) first, then `viaRelay`, the native
+ * host searching for itself. A host that refuses the key (no discover grant) is the answer: another route would make the grant mean
+ * nothing. A host that cannot be reached, or fails, leaves the relay to look.
+ */
+export async function lookNearby({ viaHost, viaRelay, known }) {
+  if (viaHost !== undefined) {
+    try {
+      const reply = await viaHost();
+      return { candidates: readCandidates(reply, known), notes: searchNotes(reply) };
+    } catch (error) {
+      if (error?.code === REFUSED) return { candidates: [], refused: true };
+    }
+  }
+  const found = await viaRelay();
+  if (found.state === "ok") return { candidates: readCandidates(found.reply, known), notes: searchNotes(found.reply) };
+  return { candidates: [], needsCanoa: found.state === "not-installed", why: found.why };
+}
+
 /** The usable candidates in a reply, without agents the person already has at that address with that key. */
 export function readCandidates(reply, known = []) {
   const list = Array.isArray(reply?.candidates) ? reply.candidates.slice(0, MAX_CANDIDATES) : [];

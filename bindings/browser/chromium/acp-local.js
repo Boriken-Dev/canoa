@@ -8,6 +8,8 @@ export const HELLO_MS = 5_000;
 /** How long Start waits for the host to come up, asking every `POLL_MS`. */
 export const START_WAIT_MS = 30_000;
 export const POLL_MS = 500;
+/** What a search takes beyond its wait: reading the descriptor folder is bounded at 5 s, and each agent's check at about 3 s. */
+export const SEARCH_SLACK_MS = 8_000 + 2_000;
 /** The longest a search nearby may take; the host clamps to the same. */
 export const MAX_SEARCH_SECONDS = 10;
 
@@ -117,7 +119,7 @@ export function createLocalHost({
    */
   async function discover(seconds) {
     const wait = Math.min(Math.max(Math.trunc(seconds), 1), MAX_SEARCH_SECONDS);
-    const answer = await ask({ op: "discover", seconds: wait }, wait * 1000 + helloMs);
+    const answer = await ask({ op: "discover", seconds: wait }, wait * 1000 + SEARCH_SLACK_MS);
     if (answer.gone !== undefined) {
       if (NOT_FOUND.test(answer.gone)) return { state: "not-installed" };
       if (FORBIDDEN.test(answer.gone)) return { state: "not-installed", forbidden: true };

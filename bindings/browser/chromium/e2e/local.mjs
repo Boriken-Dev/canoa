@@ -275,6 +275,8 @@ try {
     assert.equal(found.candidates[0].peer, PEER);
     assert.equal(found.candidates[0].source, "local");
     assert.equal(found.needsCanoa, undefined);
+    // The run names its own descriptor folder, which Windows cannot show to be the user's alone, and the person is told.
+    if (process.platform === "win32") assert.ok(found.notes.some((note) => /could not be checked/.test(note)), JSON.stringify(found));
   });
 
   const turn = (label) => `(async () => {

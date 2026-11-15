@@ -1,7 +1,7 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
 import { METHODS, dialAgent, ownPeerId, pairWithPin, unreachable } from "./acp-dial.js";
 import { createLocalHost, fromExtensionPage, fromOwnPage, localAgents, localGrants, viewOf } from "./acp-local.js";
-import { addedMethod, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
+import { addedMethod, lookNearby, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
 import { createGateway, dialRecord } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
 import { createTools, OFFER } from "./acp-tools.js";
@@ -154,7 +154,7 @@ async function controlCall(method, params) {
         const message = JSON.parse(text);
         if (message.id !== 1) return;
         clearTimeout(timer);
-        if (message.error) reject(new Error(String(message.error.message ?? "refused")));
+        if (message.error) reject(Object.assign(new Error(String(message.error.message ?? "refused")), { code: message.error.code }));
         else resolve(message.result);
       });
       link.onClose(() => {
@@ -230,17 +230,18 @@ function installLocalHost() {
  */
 async function nearby() {
   const known = await store.stored();
+  let paired = false;
   try {
     const { state, pinned } = await refreshLocal();
-    if (viewOf(state, pinned).paired) {
-      return { candidates: readCandidates(await controlCall("discover/nearby", { seconds: SEARCH_SECONDS }), known) };
-    }
+    paired = viewOf(state, pinned).paired;
   } catch {
-    // A host that does not answer, or a key it gave no discover grant: the native host can still look.
+    // Not reachable: the native host can still look.
   }
-  const found = await localHost.discover(SEARCH_SECONDS);
-  if (found.state === "ok") return { candidates: readCandidates(found.reply, known) };
-  return { candidates: [], needsCanoa: found.state === "not-installed", why: found.why };
+  return lookNearby({
+    viaHost: paired ? () => controlCall("discover/nearby", { seconds: SEARCH_SECONDS }) : undefined,
+    viaRelay: () => localHost.discover(SEARCH_SECONDS),
+    known,
+  });
 }
 
 const asking = new Map();

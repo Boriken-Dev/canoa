@@ -7,35 +7,68 @@
     reason = "a search names what it uses from std"
 )]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use coqui_agentic_peer::discovery::{self, DirectoryCheck};
 use serde_json::{Value, json};
 
-use super::{BAD_PARAMS, REFUSED};
+use super::BAD_PARAMS;
 
 /// The longest a search may be asked to take.
 pub const MAX_SECONDS: u64 = 10;
 /// How long a search takes when it is not told.
 pub const DEFAULT_SECONDS: u64 = 3;
 
-/// Whether a search is running in this process: each opens a multicast socket and waits, so a second one is turned away rather
-/// than queued behind the first.
-static SEARCHING: AtomicBool = AtomicBool::new(false);
+/// The search this process is running, if any, and the answer the last one gave. Each search opens a multicast socket and waits, so
+/// a caller that arrives while one runs takes that one's answer instead of starting another.
+struct Slot {
+    running: bool,
+    finished: u64,
+    answer: Value,
+}
 
-struct Searching;
+static SLOT: Mutex<Slot> = Mutex::new(Slot {
+    running: false,
+    finished: 0,
+    answer: Value::Null,
+});
+static DONE: Condvar = Condvar::new();
 
-impl Searching {
-    fn begin() -> Option<Self> {
-        (!SEARCHING.swap(true, Ordering::AcqRel)).then(|| Self)
+/// Ends the running search when dropped, so a search that panics frees the callers waiting on it.
+struct Running(Option<Value>);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let answer = self
+            .0
+            .take()
+            .unwrap_or_else(|| json!({ "candidates": [], "networkError": "the search failed" }));
+        let mut slot = SLOT.lock().unwrap_or_else(PoisonError::into_inner);
+        slot.running = false;
+        slot.finished += 1;
+        slot.answer = answer;
+        DONE.notify_all();
     }
 }
 
-impl Drop for Searching {
-    fn drop(&mut self) {
-        SEARCHING.store(false, Ordering::Release);
+/// Runs `run` unless a search is running, in which case this waits for that search and answers what it found.
+fn shared(run: impl FnOnce() -> Value) -> Value {
+    let mut slot = SLOT.lock().unwrap_or_else(PoisonError::into_inner);
+    if slot.running {
+        let seen = slot.finished;
+        while slot.finished == seen {
+            slot = DONE.wait(slot).unwrap_or_else(PoisonError::into_inner);
+        }
+        return slot.answer.clone();
     }
+    slot.running = true;
+    drop(slot);
+    let mut running = Running(None);
+    let answer = run();
+    running.0 = Some(answer.clone());
+    drop(running);
+    answer
 }
 
 /// How long `params` asks a search to take: `seconds`, cut to [`MAX_SECONDS`].
@@ -55,21 +88,33 @@ pub(crate) fn wait_of(params: &Value) -> Result<Duration, (i32, String)> {
 /// `discover/nearby {seconds?}` -> `{"candidates": [{label, url, peer, method, source, webtransport, webtransportHash,
 /// acpVersions, offers}], "directory"?, "networkError"?}`.
 ///
-/// `directory` is `"shared"` when the descriptor directory is writable by others, so none of its descriptors were read.
-/// `networkError` says why the link could not be searched; the descriptors are still read.
+/// `directory` is `"shared"` when another user can change the descriptor folder (none of its descriptors were read) and
+/// `"unchecked"` when this platform could not say (they were read). `networkError` says why the link could not be searched; the
+/// descriptors are still read. A call that arrives while a search runs waits for it and answers what it found.
 ///
 /// # Errors
-/// `-32602` for a `seconds` that is no whole number, and `-32002` while another search of this process runs.
+/// `-32602` for a `seconds` that is no whole number.
 pub(crate) fn nearby(params: &Value) -> Result<Value, (i32, String)> {
-    let wait = wait_of(params)?;
-    search(wait).ok_or((REFUSED, "a search is already running".to_owned()))
+    Ok(search(wait_of(params)?))
 }
 
-/// The search itself, for a caller that has already read its wait; `None` while another runs in this process.
+/// The search itself, for a caller that has already read its wait.
 #[must_use]
-pub fn search(wait: Duration) -> Option<Value> {
-    let _held = Searching::begin()?;
-    let found = discovery::discover_report(wait);
+pub fn search(wait: Duration) -> Value {
+    shared(|| report(&discovery::discover_report(wait)))
+}
+
+/// What a descriptor folder's check tells a client, or `None` when the folder is as private as it should be.
+fn directory_word(check: DirectoryCheck) -> Option<&'static str> {
+    match check {
+        DirectoryCheck::SharedWithOthers => Some("shared"),
+        DirectoryCheck::Private => None,
+        // Every other finding, `NotChecked` included, means the folder was not shown to be this user's alone.
+        _ => Some("unchecked"),
+    }
+}
+
+fn report(found: &discovery::Discovery) -> Value {
     let mut reply = json!({
         "candidates": found
             .candidates
@@ -78,10 +123,10 @@ pub fn search(wait: Duration) -> Option<Value> {
             .map(discovery::Candidate::to_json)
             .collect::<Vec<_>>(),
     });
-    if found.directory == Some(DirectoryCheck::SharedWithOthers) {
-        reply["directory"] = "shared".into();
+    if let Some(word) = found.directory.and_then(directory_word) {
+        reply["directory"] = word.into();
     }
-    if let Some(error) = found.network_error {
+    if let Some(error) = &found.network_error {
         reply["networkError"] = error
             .chars()
             .filter(|c| !c.is_control())
@@ -89,12 +134,17 @@ pub fn search(wait: Duration) -> Option<Value> {
             .collect::<String>()
             .into();
     }
-    Some(reply)
+    reply
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// The tests share the one slot: each runs alone.
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
     #[test]
     fn a_wait_is_a_whole_number_of_seconds_cut_to_the_most_a_search_takes() {
@@ -118,11 +168,63 @@ mod tests {
     }
 
     #[test]
-    fn a_second_search_is_turned_away_while_one_runs() {
-        let first = Searching::begin().expect("none runs");
-        assert!(Searching::begin().is_none());
-        assert_eq!(nearby(&json!({"seconds": 0})).unwrap_err().0, REFUSED);
-        drop(first);
-        assert!(Searching::begin().is_some());
+    fn a_caller_that_arrives_during_a_search_takes_its_answer_and_starts_none() {
+        let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let (started, hold) = std::sync::mpsc::channel::<()>();
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let leader = {
+            let runs = Arc::clone(&runs);
+            std::thread::spawn(move || {
+                shared(|| {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    started.send(()).unwrap();
+                    wait.recv().unwrap();
+                    json!({"candidates": ["leader"]})
+                })
+            })
+        };
+        hold.recv().unwrap();
+        let follower = {
+            let runs = Arc::clone(&runs);
+            std::thread::spawn(move || {
+                shared(|| {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    json!({"candidates": ["follower"]})
+                })
+            })
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        release.send(()).unwrap();
+        let led = leader.join().unwrap();
+        let followed = follower.join().unwrap();
+        assert_eq!(led, json!({"candidates": ["leader"]}));
+        assert_eq!(
+            followed, led,
+            "the follower answers what the running search found"
+        );
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_search_that_panics_frees_the_next_caller() {
+        let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+        let failed = std::thread::spawn(|| shared(|| panic!("the search failed")));
+        assert!(failed.join().is_err());
+        let next = shared(|| json!({"candidates": []}));
+        assert_eq!(next, json!({"candidates": []}));
+    }
+
+    #[test]
+    fn a_folder_not_shown_to_be_private_is_said_so() {
+        assert_eq!(directory_word(DirectoryCheck::Private), None);
+        assert_eq!(
+            directory_word(DirectoryCheck::SharedWithOthers),
+            Some("shared")
+        );
+        assert_eq!(
+            directory_word(DirectoryCheck::NotChecked),
+            Some("unchecked")
+        );
     }
 }
