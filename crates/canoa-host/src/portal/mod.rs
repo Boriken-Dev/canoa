@@ -760,8 +760,10 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             None => Response::refusal(401),
         },
         ("GET" | "HEAD", _) if path.starts_with("/portal/") => Response::refusal(404),
+        // A browser asks for these without the cookie, whoever is looking; they hold nothing of anyone's.
+        ("GET" | "HEAD", _) if is_public_asset(path) => site(inner, request, true),
         ("GET" | "HEAD", _) => match authed(inner, request) {
-            Some(_) => site(inner, request),
+            Some(_) => site(inner, request, false),
             None => Response::redirect(LOGIN),
         },
         _ => Response::refusal(405).with("Allow", "GET, HEAD, POST".to_owned()),
@@ -953,7 +955,18 @@ fn pair(inner: &Inner, request: &Request, session: &Session) -> Response {
     result
 }
 
-fn site(inner: &Inner, request: &Request) -> Response {
+/// The web manifest, the favicon and the app's icons: what the page links in its head, which a browser fetches with no
+/// credentials, so the sign-in cannot gate them.
+fn is_public_asset(path: &str) -> bool {
+    match web::segments(path).as_deref() {
+        Some([name]) => name == "manifest.json" || name == "favicon.ico",
+        Some([folder, name]) => folder == "icons" && !name.is_empty(),
+        _ => false,
+    }
+}
+
+/// A file of the site. `public` says it is given to a browser that has not signed in.
+fn site(inner: &Inner, request: &Request, public: bool) -> Response {
     let Some(segments) = web::segments(request.path()) else {
         return Response::refusal(404);
     };
@@ -975,12 +988,17 @@ fn site(inner: &Inner, request: &Request) -> Response {
     let Body::File(file, length) = found.body else {
         return Response::refusal(404);
     };
-    // The site is behind the sign-in, so no shared cache may keep it.
+    // The rest of the site is behind the sign-in, so no shared cache may keep it.
+    let caching = if public {
+        "no-cache"
+    } else {
+        "private, no-cache"
+    };
     Response {
         status: 200,
         headers: vec![
             ("Content-Type", web::content_type(&name).to_owned()),
-            ("Cache-Control", "private, no-cache".to_owned()),
+            ("Cache-Control", caching.to_owned()),
             ("ETag", found.tag),
         ],
         payload: Payload::File(file, length),

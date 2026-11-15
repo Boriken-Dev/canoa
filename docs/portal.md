@@ -282,7 +282,8 @@ server {
 | `GET /canoa.json` | the person's host: `peer`, `method`, `os`, `user` and each entry with a `url` through the portal (`/portal/ws/entry/NAME`, `/portal/ws/control`), starting the host if it is not running |
 | `GET /portal/ws/entry/NAME`, `GET /portal/ws/control` | a WebSocket to that entry or the control channel of the person's own host |
 | `POST /portal/pair` `{"peer": ID}` | accepts the browser's key once it has connected and waits in the host |
-| anything else, `GET` | the web app |
+| `GET /manifest.json`, `/favicon.ico`, `/icons/NAME` | given to anyone, signed in or not: a browser fetches the web manifest with no cookie, and they hold nothing of anyone's |
+| anything else, `GET` | the web app, to a signed-in browser; to any other `303 /portal/login` |
 
 A page connects to an entry once, which the host turns away and remembers as waiting, asks `/portal/pair` to accept its key,
 and connects again. The key stays paired in the person's home: the next visit, and a restart after an idle stop, need no new

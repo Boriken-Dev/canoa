@@ -423,6 +423,35 @@ fn nothing_but_the_login_is_given_to_a_browser_that_has_not_signed_in() {
 }
 
 #[test]
+fn the_manifest_the_favicon_and_the_icons_are_given_to_a_browser_that_has_not_signed_in() {
+    // A browser fetches the manifest with no cookie, so the sign-in must not gate what the page links in its head.
+    let rig = rig(|_| {}, 0);
+    std::fs::create_dir_all(rig.root.join("icons")).unwrap();
+    std::fs::write(rig.root.join("manifest.json"), "{}").unwrap();
+    std::fs::write(rig.root.join("favicon.ico"), "ico").unwrap();
+    std::fs::write(rig.root.join("icons").join("Icon-192.png"), "png").unwrap();
+    std::fs::write(rig.root.join("main.dart.js"), "code").unwrap();
+    for path in ["/manifest.json", "/favicon.ico", "/icons/Icon-192.png"] {
+        let answer = call(rig.addr, "GET", path, &[], "");
+        assert_eq!(answer.status, 200, "{path}");
+        assert_eq!(answer.header("cache-control"), Some("no-cache"), "{path}");
+    }
+    assert_eq!(
+        call(rig.addr, "GET", "/icons/none.png", &[], "").status,
+        404
+    );
+    // Nothing else of the site is.
+    for path in ["/main.dart.js", "/index.html", "/icons", "/icons/x/y"] {
+        let answer = call(rig.addr, "GET", path, &[], "");
+        assert_eq!(
+            (answer.status, answer.header("location")),
+            (303, Some(LOGIN)),
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn a_right_password_gives_a_cookie_that_script_cannot_read_and_the_site() {
     let rig = rig(|_| {}, 0);
     let answer = login(&rig, "canoatesta", "pw-a", "198.51.100.7");
