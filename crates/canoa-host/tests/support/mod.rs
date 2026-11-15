@@ -132,7 +132,7 @@ impl Host {
             .collect();
         Self::launch(
             Scratch::new(),
-            config,
+            Some(config),
             entries,
             args,
             &env,
@@ -150,7 +150,7 @@ impl Host {
         let log = scratch.0.join("host.log");
         let file = std::fs::File::create(&log).expect("a log file");
         (
-            Self::launch(scratch, config, entries, &[], env, Stdio::from(file)),
+            Self::launch(scratch, Some(config), entries, &[], env, Stdio::from(file)),
             log,
         )
     }
@@ -165,7 +165,7 @@ impl Host {
         let log = scratch.0.join("host.log");
         let file = std::fs::File::create(&log).expect("a log file");
         (
-            Self::launch(scratch, config, entries, args, &[], Stdio::from(file)),
+            Self::launch(scratch, Some(config), entries, args, &[], Stdio::from(file)),
             log,
         )
     }
@@ -177,7 +177,7 @@ impl Host {
         entries: usize,
         env: &[(&str, std::ffi::OsString)],
     ) -> Self {
-        Self::launch(scratch, config, entries, &[], env, Stdio::inherit())
+        Self::launch(scratch, Some(config), entries, &[], env, Stdio::inherit())
     }
 
     /// As [`Host::start_in`], with more arguments to `serve`.
@@ -188,23 +188,36 @@ impl Host {
         args: &[&str],
         env: &[(&str, std::ffi::OsString)],
     ) -> Self {
-        Self::launch(scratch, config, entries, args, env, Stdio::inherit())
+        Self::launch(scratch, Some(config), entries, args, env, Stdio::inherit())
+    }
+
+    /// As [`Host::start_in_with`], with no canoa.cfg written and none named: the files the host looks for itself are
+    /// whatever `env` points them at.
+    pub fn start_unconfigured(
+        scratch: Scratch,
+        entries: usize,
+        args: &[&str],
+        env: &[(&str, std::ffi::OsString)],
+    ) -> Self {
+        Self::launch(scratch, None, entries, args, env, Stdio::inherit())
     }
 
     fn launch(
         scratch: Scratch,
-        config: &str,
+        config: Option<&str>,
         entries: usize,
         args: &[&str],
         env: &[(&str, std::ffi::OsString)],
         stderr: Stdio,
     ) -> Self {
-        let path = scratch.0.join("canoa.cfg");
-        std::fs::write(&path, config).expect("canoa.cfg is written");
-        let mut child = Command::new(host_binary())
-            .arg("serve")
-            .arg("--config")
-            .arg(&path)
+        let mut command = Command::new(host_binary());
+        command.arg("serve");
+        if let Some(config) = config {
+            let path = scratch.0.join("canoa.cfg");
+            std::fs::write(&path, config).expect("canoa.cfg is written");
+            command.arg("--config").arg(&path);
+        }
+        let mut child = command
             .args(args)
             .args(["--method", method().name()])
             .envs(env.iter().map(|(name, value)| (name, value)))

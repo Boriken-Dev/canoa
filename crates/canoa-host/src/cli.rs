@@ -688,15 +688,17 @@ fn load(args: &ConfigArgs, front: &dyn Front) -> Result<Config, Failed> {
 }
 
 /// canoa.cfg for `serve`. With `--allow-empty`, no file at all names nothing, as an empty one does: a person who has
-/// written none yet has a host to run all the same.
+/// written none yet has a host to run all the same. A host for a portal is always run so: the person's own file is the one
+/// their settings are written to, and it does not exist until the first of them.
 fn load_for_serving(
     args: &ServeArgs,
     front: &dyn Front,
 ) -> Result<(Config, crate::Layers), Failed> {
-    let layers = layers_of(&args.config, front, !args.allow_empty)?;
+    let lenient = args.allow_empty || args.portal.is_some();
+    let layers = layers_of(&args.config, front, !lenient)?;
     let config = match Config::load_layers(&layers) {
         Err(crate::ConfigError::Read { source, .. })
-            if args.allow_empty && source.kind() == std::io::ErrorKind::NotFound =>
+            if lenient && source.kind() == std::io::ErrorKind::NotFound =>
         {
             Config::from_str_in("", layers.own.parent().unwrap_or_else(|| Path::new("")))
                 .map_err(Failed::usage)
@@ -861,7 +863,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     let mut options = ServeOptions::new(program.path)
         .with_program_args(program.args)
         .with_rekey(!args.no_rekey)
-        .with_nothing_to_serve(args.allow_empty)
+        .with_nothing_to_serve(args.allow_empty || args.portal.is_some())
         .with_local_sources(args.local_sources)
         .with_supervised(args.supervised)
         .with_layers(layers)

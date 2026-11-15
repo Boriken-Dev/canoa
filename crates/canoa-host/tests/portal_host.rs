@@ -260,3 +260,53 @@ fn a_portal_user_that_is_not_an_account_is_a_usage_error_and_binds_nothing() {
     );
     assert!(!scratch.0.join("run").join("portal.sock").exists());
 }
+
+#[test]
+fn a_host_for_a_portal_starts_for_a_person_who_has_no_canoa_cfg_and_the_first_setting_creates_it() {
+    let scratch = Scratch::new();
+    let dir = scratch.0.join("run");
+    std::fs::create_dir_all(&dir).expect("the folder the unit makes");
+    // Neither the installed file nor the person's own is there, and none is named: the unit's own command line.
+    let installed = scratch.0.join("installed");
+    std::fs::create_dir_all(&installed).expect("a folder");
+    let own = scratch.0.join("xdg").join("Canoa").join("canoa.cfg");
+    let uid = my_uid().to_string();
+    let group = my_group();
+    let args = [
+        "--portal",
+        dir.to_str().expect("utf-8"),
+        "--portal-user",
+        &uid,
+        "--portal-group",
+        &group,
+    ];
+    let env = [
+        ("USER", "run".into()),
+        ("HOME", scratch.0.join("home-dir").into()),
+        ("XDG_CONFIG_HOME", scratch.0.join("xdg").into()),
+        ("CANOA_INSTALLED_DIR", installed.into()),
+        ("CANOA_CONFIG", "".into()),
+    ];
+    // Only the control channel: there is no entry.
+    let host = Host::start_unconfigured(scratch, 1, &args, &env);
+    assert!(!own.exists());
+    let key = support::key();
+    host.pair(&key);
+    let control = format!("unix:{}", dir.join("control.sock").display());
+    let before = with_pipe_link(&control, &key, host.peer, |rpc| {
+        rpc.request("config/get", json!({"section": "appearance"}))
+    })
+    .expect("the key reaches the control channel")
+    .expect("it answers");
+    assert!(before["value"].is_null(), "{before}");
+    with_pipe_link(&control, &key, host.peer, |rpc| {
+        rpc.request(
+            "config/set",
+            json!({"section": "appearance", "value": {"accent": "teal"}}),
+        )
+    })
+    .expect("the key reaches the control channel")
+    .expect("the setting is written");
+    let written = std::fs::read_to_string(&own).expect("the first setting creates the file");
+    assert!(written.contains("accent"), "{written}");
+}
