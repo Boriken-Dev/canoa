@@ -420,34 +420,98 @@ fn a_key_reaches_only_the_roots_of_the_entries_it_may_use() {
 }
 
 #[test]
-fn only_the_owner_installs_updates_rolls_back_or_removes() {
+fn a_key_installs_updates_rolls_back_or_removes_only_with_the_programs_grant() {
     let control = memory();
     let reader = peer("sha256:aa", &[Grant::StoreRead]);
+    let installer = peer("sha256:cc", &[Grant::StoreRead, Grant::StorePrograms]);
     for method in ["store/rollback", "store/remove"] {
-        let answer = ask(
-            &control,
-            &reader,
-            method,
-            json!({"provider": "claude_store"}),
-        );
+        let params = json!({"provider": "claude_store"});
+        let answer = ask(&control, &reader, method, params.clone());
         assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+        // Past the gate; this control has no stores, so the host says that.
+        let answer = ask(&control, &installer, method, params);
+        assert_ne!(answer["error"]["code"], DENIED, "{method}: {answer}");
     }
-    let apply = serde_json::to_vec(&json!({
-        "jsonrpc": "2.0", "id": 1, "method": "store/apply",
-        "params": {"provider": "claude_store", "plan": {}},
-    }))
-    .expect("encodes");
-    let answer: Value =
-        serde_json::from_slice(&control.handle(&reader, &apply).expect("answered")).expect("JSON");
-    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+    let probe = json!({"provider": "claude_store", "probe": true});
+    let answer = ask(&control, &reader, "store/report", probe.clone());
+    assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    let answer = ask(&control, &installer, "store/report", probe);
+    assert_ne!(answer["error"]["code"], DENIED, "{answer}");
     let blind = peer("sha256:bb", &[Grant::LedgerRead]);
     let answer = ask(&control, &blind, "store/list", json!({}));
+    assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    // The programs grant does not read the store, and reading it does not install.
+    let only_installs = peer("sha256:dd", &[Grant::StorePrograms]);
+    let answer = ask(&control, &only_installs, "store/list", json!({}));
     assert_eq!(answer["error"]["code"], DENIED, "{answer}");
     assert!(
         Grant::named("store.write").is_none(),
         "not a grant a key can hold"
     );
     assert_eq!(Grant::named("store.read"), Some(Grant::StoreRead));
+    assert_eq!(Grant::named("store.programs"), Some(Grant::StorePrograms));
+    assert_eq!(Grant::named("accounts"), Some(Grant::Accounts));
+}
+
+#[test]
+fn a_key_is_told_the_grants_it_holds_and_the_owner_all() {
+    let control = memory();
+    let key = peer("sha256:aa", &[Grant::LedgerRead, Grant::Accounts]);
+    let answer = ask(&control, &key, "host/grants", json!({}));
+    assert_eq!(
+        answer["result"]["grants"],
+        json!(["ledger.read", "accounts"])
+    );
+    let nothing = peer("sha256:bb", &[]);
+    let answer = ask(&control, &nothing, "host/grants", json!({}));
+    assert_eq!(answer["result"]["grants"], json!([]));
+    let owner = ask(&control, &Caller::Owner, "host/grants", json!({}));
+    assert_eq!(
+        owner["result"]["grants"].as_array().map(Vec::len),
+        Some(Grant::all().len())
+    );
+}
+
+/// Sends `requests` on a link served as `caller`, and the answer to each.
+fn over_a_link(control: &Control, caller: &Caller, requests: &[(&str, Value)]) -> Vec<Value> {
+    let stopped = alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false));
+    let (client, host) = crate::local::pair(MAX_REQUEST, stopped);
+    std::thread::scope(|scope| {
+        scope.spawn(|| serve(control, caller, &host));
+        let mut answers = Vec::new();
+        for (id, (method, params)) in requests.iter().enumerate() {
+            client
+                .send(
+                    &serde_json::to_vec(
+                        &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+                    )
+                    .expect("encodes"),
+                )
+                .expect("sent");
+            let answer = client
+                .receive(Some(Duration::from_secs(5)))
+                .expect("answered")
+                .expect("a message");
+            answers.push(serde_json::from_slice::<Value>(&answer).expect("JSON"));
+        }
+        client.close();
+        answers
+    })
+}
+
+#[test]
+fn a_key_on_a_connection_is_refused_an_apply_without_the_programs_grant() {
+    let control = memory();
+    let apply = [(
+        "store/apply",
+        json!({"provider": "claude_store", "plan": {}}),
+    )];
+    let without = peer("sha256:aa", &[Grant::StoreRead, Grant::Accounts]);
+    let refused = over_a_link(&control, &without, &apply);
+    assert_eq!(refused[0]["error"]["code"], DENIED, "{refused:?}");
+    let with = peer("sha256:bb", &[Grant::StorePrograms]);
+    let allowed = over_a_link(&control, &with, &apply);
+    assert_ne!(allowed[0]["error"]["code"], DENIED, "{allowed:?}");
 }
 
 #[test]
@@ -602,7 +666,7 @@ fn no_grant_names_history() {
 }
 
 #[test]
-fn a_key_manages_no_account_whatever_it_is_granted() {
+fn a_key_manages_accounts_only_with_the_accounts_grant() {
     let control = memory();
     let key = peer(
         "sha256:abc",
@@ -611,64 +675,44 @@ fn a_key_manages_no_account_whatever_it_is_granted() {
             Grant::LedgerWrite,
             Grant::Worktree,
             Grant::StoreRead,
+            Grant::StorePrograms,
         ],
     );
+    let granted = peer("sha256:def", &[Grant::Accounts]);
     for (method, params) in [
         ("accounts/catalog", json!({"harness": "claude"})),
         ("accounts/list", json!({})),
         ("accounts/remove", json!({"name": "work"})),
     ] {
-        let answer = ask(&control, &key, method, params);
+        let answer = ask(&control, &key, method, params.clone());
         assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+        // Past the gate: the reason the owner of a host with no canoa.cfg gets.
+        let answer = ask(&control, &granted, method, params);
+        assert_eq!(answer["error"]["code"], REFUSED, "{method}: {answer}");
     }
-    // The owner of a host that was told where canoa.cfg is not gets a reason, not a missing method.
     let owner = ask(&control, &Caller::Owner, "accounts/list", json!({}));
     assert_eq!(owner["error"]["code"], REFUSED, "{owner}");
 }
 
 #[test]
-fn a_key_on_a_connection_is_refused_a_sign_in_whatever_it_is_granted() {
+fn a_key_on_a_connection_is_refused_a_sign_in_without_the_accounts_grant() {
     let control = memory();
-    let key = peer(
+    let sign_ins = [
+        (
+            "accounts/add",
+            json!({"name": "x", "harness": "claude", "method": "api-key"}),
+        ),
+        ("accounts/login", json!({"name": "x"})),
+    ];
+    let without = peer(
         "sha256:abc",
-        &[
-            Grant::LedgerRead,
-            Grant::LedgerWrite,
-            Grant::Worktree,
-            Grant::StoreRead,
-        ],
+        &[Grant::LedgerRead, Grant::StoreRead, Grant::StorePrograms],
     );
-    let stopped = alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false));
-    let (client, host) = crate::local::pair(MAX_REQUEST, stopped);
-    let answers = std::thread::scope(|scope| {
-        scope.spawn(|| serve(&control, &key, &host));
-        let mut answers = Vec::new();
-        for (id, method, params) in [
-            (
-                1,
-                "accounts/add",
-                json!({"name": "x", "harness": "claude", "method": "api-key"}),
-            ),
-            (2, "accounts/login", json!({"name": "x"})),
-        ] {
-            client
-                .send(
-                    &serde_json::to_vec(
-                        &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
-                    )
-                    .expect("encodes"),
-                )
-                .expect("sent");
-            let answer = client
-                .receive(Some(Duration::from_secs(5)))
-                .expect("answered")
-                .expect("a message");
-            answers.push(serde_json::from_slice::<Value>(&answer).expect("JSON"));
-        }
-        client.close();
-        answers
-    });
-    for answer in &answers {
+    for answer in &over_a_link(&control, &without, &sign_ins) {
         assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    }
+    let with = peer("sha256:def", &[Grant::Accounts]);
+    for answer in &over_a_link(&control, &with, &sign_ins) {
+        assert_ne!(answer["error"]["code"], DENIED, "{answer}");
     }
 }

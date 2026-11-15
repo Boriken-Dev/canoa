@@ -61,6 +61,16 @@ impl Asker {
         })
     }
 
+    /// What asks a browser's key, which no process secret binds: its prover and verifier are the ones secret tools use for it.
+    pub(super) fn bound(prover: Prover, verifier: Verifier, app: IdentityId) -> Self {
+        Self {
+            prover,
+            verifier,
+            app,
+            next: AtomicU64::new(0),
+        }
+    }
+
     /// The request that puts `schema` (JSON text of a form), titled `title`, to the person, and what is needed to open the answer.
     pub(crate) fn ask(&self, title: &str, schema: &str) -> Result<(Value, Asked), String> {
         let mut random = [0_u8; 12];

@@ -72,7 +72,7 @@ pub enum Grant {
     /// `worktree/new`, `worktree/status` and `worktree/remove`, under the working roots of the entries the key may use.
     Worktree,
     /// `store/list`, `store/report`, `store/latest` and `store/plan`: what the host finds and would do, and nothing it writes.
-    /// There is no grant for installing: only the owner installs, updates, rolls back and removes.
+    /// Installing, updating, rolling back and removing is [`Grant::StorePrograms`], which is not implied by this.
     StoreRead,
     /// `fs/list`: the folders under the user's home and the working roots of the entries the key may use.
     Folders,
@@ -92,12 +92,18 @@ pub enum Grant {
     OverlayWrite,
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
     HostRestart,
+    /// `store/apply`, `store/rollback` and `store/remove`, and the probing `store/report`: install, update, roll back and remove an
+    /// agent program on the host's programs shelf, which downloads and runs code as this user.
+    StorePrograms,
+    /// `accounts/catalog`, `accounts/list`, `accounts/add`, `accounts/login` and `accounts/remove`: sign in to a provider on this
+    /// host, which runs the provider's program as this user and keeps a credential in the host's keyring.
+    Accounts,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 12] {
+    pub fn all() -> [Self; 14] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -111,6 +117,8 @@ impl Grant {
             Self::HostRestart,
             Self::OverlayRead,
             Self::OverlayWrite,
+            Self::StorePrograms,
+            Self::Accounts,
         ]
     }
 
@@ -130,28 +138,15 @@ impl Grant {
             Self::HostRestart => "host.restart",
             Self::OverlayRead => "overlay.read",
             Self::OverlayWrite => "overlay.write",
+            Self::StorePrograms => "store.programs",
+            Self::Accounts => "accounts",
         }
     }
 
     /// The grant of that name.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        [
-            Self::LedgerRead,
-            Self::LedgerWrite,
-            Self::Worktree,
-            Self::StoreRead,
-            Self::Folders,
-            Self::ConfigRead,
-            Self::ConfigWrite,
-            Self::ConfigWriteSessions,
-            Self::Upload,
-            Self::HostRestart,
-            Self::OverlayRead,
-            Self::OverlayWrite,
-        ]
-        .into_iter()
-        .find(|grant| grant.as_str() == name)
+        Self::all().into_iter().find(|grant| grant.as_str() == name)
     }
 }
 
@@ -171,6 +166,16 @@ impl Caller {
             Self::Owner => OWNER,
             Self::Peer { id, .. } => id,
         }
+    }
+
+    /// `host/grants`: the names of what this caller may do beyond the ledger, so an application shows only what it can use.
+    fn grants_json(&self) -> Value {
+        let names: Vec<&str> = Grant::all()
+            .into_iter()
+            .filter(|grant| self.may(*grant))
+            .map(Grant::as_str)
+            .collect();
+        json!({"grants": names})
     }
 
     fn may(&self, grant: Grant) -> bool {
@@ -516,15 +521,23 @@ impl Control {
                             .is_some_and(|probe| probe != &Value::Bool(false))
                             || params.get("pick").is_some_and(|pick| !pick.is_null()));
                     allow(caller, Grant::StoreRead)
-                        .and_then(|()| if runs { owner_only(caller) } else { Ok(()) })
+                        .and_then(|()| {
+                            if runs {
+                                allow(caller, Grant::StorePrograms)
+                            } else {
+                                Ok(())
+                            }
+                        })
                         .and_then(|()| self.stores())
                         .and_then(|stores| {
-                            stores.read(method, &params, matches!(caller, Caller::Owner))
+                            stores.read(method, &params, caller.may(Grant::StorePrograms))
                         })
                 }
-                Some(method @ ("store/rollback" | "store/remove")) => owner_only(caller)
-                    .and_then(|()| self.stores())
-                    .and_then(|stores| stores.change(method, &params)),
+                Some(method @ ("store/rollback" | "store/remove")) => {
+                    allow(caller, Grant::StorePrograms)
+                        .and_then(|()| self.stores())
+                        .and_then(|stores| stores.change(method, &params))
+                }
                 Some(method @ ("history/export" | "history/move")) => {
                     owner_only_history(caller).and_then(|()| self.history_call(method, &params))
                 }
@@ -532,10 +545,11 @@ impl Control {
                     owner_only_history(caller).and_then(|()| self.import_call(method, &params))
                 }
                 Some(method @ ("accounts/catalog" | "accounts/list" | "accounts/remove")) => {
-                    owner_only_accounts(caller)
+                    allow(caller, Grant::Accounts)
                         .and_then(|()| self.accounts())
                         .and_then(|accounts| accounts.call(method, &params))
                 }
+                Some("host/grants") => Ok(caller.grants_json()),
                 Some("store/apply" | "accounts/add" | "accounts/login") => Err((
                     REFUSED,
                     "this needs a link that can carry its progress".to_owned(),
@@ -744,28 +758,6 @@ fn whole_machine() -> Vec<PathBuf> {
     }
 }
 
-/// Only the person running this host installs, updates and removes: an install runs code as the user.
-fn owner_only(caller: &Caller) -> Result<(), (i32, String)> {
-    match caller {
-        Caller::Owner => Ok(()),
-        Caller::Peer { .. } => Err((
-            DENIED,
-            "only the person running this host installs, updates or removes a program".to_owned(),
-        )),
-    }
-}
-
-/// Accounts are the person's: signing in runs a program of theirs and stores a credential.
-fn owner_only_accounts(caller: &Caller) -> Result<(), (i32, String)> {
-    match caller {
-        Caller::Owner => Ok(()),
-        Caller::Peer { .. } => Err((
-            DENIED,
-            "only the person running this host manages its accounts".to_owned(),
-        )),
-    }
-}
-
 /// A recorded session is the person's: only this process reads or moves one, and no grant says otherwise.
 fn owner_only_history(caller: &Caller) -> Result<(), (i32, String)> {
     match caller {
@@ -830,20 +822,27 @@ impl Control {
     fn apply<C: Channel>(&self, caller: &Caller, line: &[u8], channel: &C) -> Vec<u8> {
         let request: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
         let id = request.get("id").cloned().unwrap_or(Value::Null);
-        if let Err((code, message)) = owner_only(caller) {
-            return error_line(&id, code, &message);
-        }
         if let Some(long) = request
             .get("method")
             .and_then(Value::as_str)
             .and_then(accounts::Long::of)
         {
+            if let Err((code, message)) = allow(caller, Grant::Accounts) {
+                return error_line(&id, code, &message);
+            }
+            let peer = match caller {
+                Caller::Owner => None,
+                Caller::Peer { id, .. } => Some(id.as_str()),
+            };
             return match self.accounts() {
-                Ok(accounts) => {
-                    accounts.sign_in(long, &request, channel, &|other| self.handle(caller, other))
-                }
+                Ok(accounts) => accounts.sign_in(long, &request, (channel, peer), &|other| {
+                    self.handle(caller, other)
+                }),
                 Err((code, message)) => error_line(&id, code, &message),
             };
+        }
+        if let Err((code, message)) = allow(caller, Grant::StorePrograms) {
+            return error_line(&id, code, &message);
         }
         match self.stores() {
             Ok(stores) => stores.apply(&request, channel, &|other| self.handle(caller, other)),

@@ -171,6 +171,19 @@ impl Hub {
         ask::Asker::new(&self.local.as_ref()?.key)
     }
 
+    /// What puts a form of the host's own to the person behind `peer`, a paired key, sealed to that key: `None` for the host's own
+    /// key, a key the trust store does not hold, or a host key secret prompts do not serve.
+    pub(crate) fn asker_for(&self, peer: &str) -> Option<ask::Asker> {
+        let peer: PeerId = peer.parse().ok()?;
+        if peer == self.identity.peer_id() {
+            return None;
+        }
+        let material = self.store.accepted_key(&peer)?;
+        let owner = IdentityId::of(&material.bytes);
+        let keys = self.keys(&material.bytes, owner).ok()?;
+        Some(ask::Asker::bound(keys.prover, keys.verifier, owner))
+    }
+
     /// The secrets of the connection the application in this process holds, bound by the link's own secret. Only
     /// [`crate::serve::Local::open`] asks, so a connection with a relay never gets this binding.
     pub(crate) fn local_link(self: &Arc<Self>) -> Option<Arc<Link>> {

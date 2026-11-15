@@ -165,13 +165,17 @@ impl Accounts {
         &self,
         long: Long,
         request: &Value,
-        channel: &C,
+        (channel, peer): (&C, Option<&str>),
         others: &dyn Fn(&[u8]) -> Option<Vec<u8>>,
     ) -> Vec<u8> {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let params = request.get("params").cloned().unwrap_or(Value::Null);
         let started = (|| {
-            let asker = self.hub.asker().ok_or((
+            let asker = match peer {
+                Some(peer) => self.hub.asker_for(peer),
+                None => self.hub.asker(),
+            }
+            .ok_or((
                 REFUSED,
                 "this host has no secret to seal a typed answer with, so it cannot sign in"
                     .to_owned(),
