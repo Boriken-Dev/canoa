@@ -230,6 +230,8 @@ pub(crate) struct Control {
     /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
     restart: Arc<AtomicBool>,
     stop: Option<Arc<AtomicBool>>,
+    /// A restart was asked and its answer is not yet sent; [`serve`] raises `stop` once it is.
+    restart_due: AtomicBool,
     path: Option<PathBuf>,
     max_records: usize,
     max_record_bytes: usize,
@@ -321,6 +323,7 @@ impl Control {
             overlays: Overlays::default(),
             restart: Arc::new(AtomicBool::new(false)),
             stop: None,
+            restart_due: AtomicBool::new(false),
             path,
             max_records,
             max_record_bytes,
@@ -833,9 +836,9 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
                 } else {
                     control.handle(caller, &line)
                 };
-                if let Some(answer) = answer
-                    && channel.send(&answer).is_err()
-                {
+                let sent = answer.is_none_or(|answer| channel.send(&answer).is_ok());
+                control.stop_if_restarting();
+                if !sent {
                     return;
                 }
             }
@@ -908,21 +911,25 @@ mod stores;
 mod tests;
 
 impl Control {
-    /// `host/restart`: ends the host after this answer is sent.
+    /// Ends the host if `host/restart` was asked: called once the answer to a request is sent, so the key that asked has it.
+    fn stop_if_restarting(&self) {
+        if self.restart_due.swap(false, Ordering::SeqCst)
+            && let Some(stop) = &self.stop
+        {
+            stop.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// `host/restart`: ends the host once this answer is sent.
     fn restart_now(&self) -> Result<Value, (i32, String)> {
-        let Some(stop) = &self.stop else {
+        if self.stop.is_none() {
             return Err((
                 REFUSED,
                 "restart is not available: no supervisor starts this host again".to_owned(),
             ));
-        };
+        }
         self.restart.store(true, Ordering::SeqCst);
-        // After the answer has been sent.
-        let stop = Arc::clone(stop);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
-            stop.store(true, Ordering::SeqCst);
-        });
+        self.restart_due.store(true, Ordering::SeqCst);
         Ok(json!({"restarting": true}))
     }
 }

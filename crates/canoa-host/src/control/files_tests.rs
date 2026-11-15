@@ -583,13 +583,23 @@ fn a_restart_raises_the_flag_and_then_stops_the_host() {
     let flag = control.restart_flag();
     let a = key("sha256:aa", &[Grant::HostRestart]);
     assert!(!flag.load(Ordering::SeqCst));
-    let answer = ask(&control, &a, "host/restart", json!({}));
+    let (client, host) = crate::local::pair(MAX_REQUEST, Arc::new(AtomicBool::new(false)));
+    let answer = std::thread::scope(|scope| {
+        let serving = scope.spawn(|| serve(&control, &a, &host));
+        client
+            .send(br#"{"jsonrpc":"2.0","id":1,"method":"host/restart"}"#)
+            .expect("sent");
+        let answer = client
+            .receive(Some(Duration::from_secs(5)))
+            .expect("answered")
+            .expect("a message");
+        client.close();
+        serving.join().expect("served");
+        serde_json::from_slice::<Value>(&answer).expect("JSON")
+    });
     assert_eq!(answer["result"], json!({"restarting": true}), "{answer}");
     assert!(flag.load(Ordering::SeqCst));
-    let until = std::time::Instant::now() + Duration::from_secs(5);
-    while !stop.load(Ordering::SeqCst) && std::time::Instant::now() < until {
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // Raised by the connection that sent the answer, with no wait and no thread of its own.
     assert!(stop.load(Ordering::SeqCst));
     // A control that cannot stop its host says so, and promises nothing.
     let bare = ask(&memory_control(), &a, "host/restart", json!({}));
