@@ -20,6 +20,7 @@ use coqui_access::{
     AccountPut, Accounts as AccountKind, Attempt as Credential, Authenticator, Directory, Lookup,
     Verdict, takes,
 };
+use coqui_access_signin::SignInRules;
 use coqui_access_system::SystemAccounts;
 use coqui_peer_tls::CertificateFields;
 
@@ -43,7 +44,7 @@ const MAX_HEADER: usize = 16 * 1024;
 coqui_access::guatiao::local_providers!(
     id = "canoa-portal",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [SystemAccounts]
+    providers = [SystemAccounts, SignInRules]
 );
 
 /// One authenticator of the list, built.
@@ -84,7 +85,16 @@ impl fmt::Debug for Access {
     }
 }
 
-fn value_of(map: &serde_json::Map<String, serde_json::Value>) -> Result<Value, String> {
+/// A registry holding the providers the portal has built in.
+pub(super) fn new_registry() -> Result<Registry, String> {
+    let mut registry = Registry::new("canoa-portal", env!("CARGO_PKG_VERSION"));
+    registry
+        .register_local("canoa-portal", library)
+        .map_err(|error| error.to_string())?;
+    Ok(registry)
+}
+
+pub(super) fn value_of(map: &serde_json::Map<String, serde_json::Value>) -> Result<Value, String> {
     let mut out = Map::new();
     for (key, value) in map {
         let value = guatiao_serde::adapt::to_value_in(value, Alloc::rust())
@@ -114,7 +124,7 @@ fn config_of(entry: &Entry, settings: &Settings) -> serde_json::Map<String, serd
 
 /// Refuses a library unless it and every directory above it belong to root and nobody else may write them: the portal runs its
 /// code, so whoever can replace the file can run as the portal.
-fn check_library(library: &Path) -> Result<(), String> {
+pub(super) fn check_library(library: &Path) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt as _;
     let real = std::fs::canonicalize(library).map_err(|error| error.to_string())?;
     for each in real.ancestors() {
@@ -146,7 +156,7 @@ fn loose_sources(config: &serde_json::Map<String, serde_json::Value>) -> Vec<Pat
         .collect()
 }
 
-fn open_library(registry: &mut Registry, library: &Path) -> Result<(), String> {
+pub(super) fn open_library(registry: &mut Registry, library: &Path) -> Result<(), String> {
     registry.set_import_search(ImportSearch::Library);
     registry
         .load_file(library)
@@ -168,10 +178,7 @@ impl Access {
             .groups(settings.groups.iter().cloned())
             .build()
             .map_err(|error| error.to_string())?;
-        let mut registry = Registry::new("canoa-portal", env!("CARGO_PKG_VERSION"));
-        registry
-            .register_local("canoa-portal", library)
-            .map_err(|error| error.to_string())?;
+        let mut registry = new_registry()?;
         if settings.libraries_any_owner {
             tracing::warn!(
                 "libraries_any_owner: provider libraries are loaded whoever owns or may write them"
@@ -268,11 +275,20 @@ impl Access {
 
     /// The account a provider's valid answer names, if the operating system admits it: its name and user id.
     fn resolve(&self, link: &Link, lookup: Lookup) -> SignIn {
+        // A provider that names no account itself leaves it to a matcher over the credential's claims, which the portal does
+        // not run: such a certificate is refused, and the log says what to set instead.
+        if lookup.by == "claims" {
+            tracing::warn!(
+                "authenticators: {} answered by claims, which the portal has no matcher for; give it `account` picks that name an account",
+                link.id
+            );
+            return SignIn::Refused;
+        }
         let named = if link.id == SYSTEM {
             self.system.lookup(lookup.clone())
         } else if link.directory.is_none() && lookup.by == "name" {
             // A provider with no directory of its own names the account outright.
-            return self.admit(&lookup.value);
+            return self.admit(&lookup.value, &link.id);
         } else if let Some(directory) = &link.directory {
             directory.lookup(lookup.clone())
         } else {
@@ -285,7 +301,7 @@ impl Access {
                     .iter()
                     .find_map(|group| group.strip_prefix(UID_MARKER))
                     .map(str::to_owned);
-                match self.admit(&person.name) {
+                match self.admit(&person.name, &link.id) {
                     // A pin made for another user id than this name has now is not this account's.
                     SignIn::Admitted { uid, .. }
                         if link.takes_request
@@ -299,7 +315,9 @@ impl Access {
                 }
             }
             // A certificate a CA signed names its account by a field of the certificate, which no table of the provider holds.
-            Ok(None) if link.takes_request && lookup.by == "name" => self.admit(&lookup.value),
+            Ok(None) if link.takes_request && lookup.by == "name" => {
+                self.admit(&lookup.value, &link.id)
+            }
             Ok(None) => SignIn::Refused,
             Err(error) => SignIn::Failed(error.to_string()),
         }
@@ -319,20 +337,24 @@ impl Access {
         })
     }
 
-    /// `name` as the operating system admits it: under `min_uid` and `groups`, spelled as the system spells it.
-    fn admit(&self, name: &str) -> SignIn {
+    /// `name` as the operating system admits it: under `min_uid` and `groups`, spelled as the system spells it; `provider` is the
+    /// one that accepted the credential.
+    fn admit(&self, name: &str, provider: &str) -> SignIn {
         if !valid_user(name) {
             return SignIn::Refused;
         }
         let lookup = Lookup {
             by: "name".to_owned(),
             value: name.to_owned(),
+            claims: None,
         };
         match self.system.lookup(lookup) {
             Ok(Some(person)) if valid_user(&person.name) => match person.id.parse() {
                 Ok(uid) => SignIn::Admitted {
                     user: person.name,
                     uid,
+                    groups: person.groups,
+                    provider: provider.to_owned(),
                 },
                 Err(_) => SignIn::Refused,
             },
@@ -341,9 +363,18 @@ impl Access {
         }
     }
 
-    /// Asks `links` in order: the first that does not pass the credential on decides.
-    fn ask(&self, links: &[Link], credential: &Credential) -> SignIn {
-        for link in links {
+    /// Asks `links` in order, or only the ones `providers` names, in the order it names them: the first that does not pass the
+    /// credential on decides. A name no link has is skipped, so a policy naming a provider that is not here asks nobody.
+    fn ask(&self, links: &[Link], credential: &Credential, providers: &[String]) -> SignIn {
+        let chosen: Vec<&Link> = if providers.is_empty() {
+            links.iter().collect()
+        } else {
+            providers
+                .iter()
+                .filter_map(|id| links.iter().find(|link| &link.id == id))
+                .collect()
+        };
+        for link in chosen {
             match link.authenticator.authenticate(credential.clone()) {
                 Ok(Verdict::Unknown) => {}
                 Ok(Verdict::Valid(lookup)) => return self.resolve(link, lookup),
@@ -468,7 +499,7 @@ impl Accounts for Access {
         methods
     }
 
-    fn sign_in(&self, user: &str, password: &str) -> SignIn {
+    fn sign_in(&self, user: &str, password: &str, providers: &[String]) -> SignIn {
         if self.passwords.is_empty()
             || !valid_user(user)
             || password.is_empty()
@@ -481,10 +512,15 @@ impl Accounts for Access {
             secret: Some(password.to_owned()),
             ..Credential::default()
         };
-        self.ask(&self.passwords, &credential)
+        self.ask(&self.passwords, &credential, providers)
     }
 
-    fn sign_in_certificate(&self, headers: &[(String, String)], client: IpAddr) -> SignIn {
+    fn sign_in_certificate(
+        &self,
+        headers: &[(String, String)],
+        client: IpAddr,
+        providers: &[String],
+    ) -> SignIn {
         if self.certificates.is_empty() {
             return SignIn::Refused;
         }
@@ -508,7 +544,7 @@ impl Accounts for Access {
             peer: Some(client.to_string()),
             ..Credential::default()
         };
-        self.ask(&self.certificates, &credential)
+        self.ask(&self.certificates, &credential, providers)
     }
 
     fn certificate_status(
@@ -522,6 +558,7 @@ impl Accounts for Access {
             let state = match pins.directory.lookup(Lookup {
                 by: "certificate".to_owned(),
                 value: presented.fingerprint.clone(),
+                claims: None,
             }) {
                 Ok(Some(person)) if person.name == user && marker_fits(&person.groups, uid) => {
                     PinState::Yours
@@ -570,6 +607,7 @@ impl Accounts for Access {
         match pins.directory.lookup(Lookup {
             by: "certificate".to_owned(),
             value: presented.fingerprint.clone(),
+            claims: None,
         }) {
             Ok(Some(person)) if person.name != user => return Err(PinError::Taken),
             Err(error) => return Err(PinError::Failed(error.to_string())),
@@ -609,6 +647,7 @@ impl Accounts for Access {
             self.system.lookup(Lookup {
                 by: "id".to_owned(),
                 value: uid.to_string(),
+                claims: None,
             })
         };
         // A directory that fails once may answer the next time; only a definite answer ends a session.
@@ -617,7 +656,7 @@ impl Accounts for Access {
             ask()
         });
         match found {
-            Ok(Some(person)) if person.name == user => Standing::Present,
+            Ok(Some(person)) if person.name == user => Standing::Present(person.groups),
             Ok(_) => Standing::Gone,
             Err(_) => Standing::Unknown,
         }
@@ -672,6 +711,7 @@ mod tests {
             .lookup(Lookup {
                 by: "id".to_owned(),
                 value: mine().to_string(),
+                claims: None,
             })
             .unwrap()
             .expect("this process's user is in the directory")
@@ -765,15 +805,16 @@ mod tests {
         seed_password(&file, &me, "file-pw");
         let access = Access::new(&settings(vec![password_entry(&file)])).unwrap();
         assert_eq!(access.methods(), [Method::Password]);
-        assert_eq!(
-            access.sign_in(&me, "file-pw"),
-            SignIn::Admitted {
-                user: me.clone(),
-                uid: mine()
-            }
+        admits(
+            access.sign_in(&me, "file-pw", &[]),
+            &me,
+            "coqui_access_password",
         );
-        assert_eq!(access.sign_in(&me, "wrong"), SignIn::Refused);
-        assert_eq!(access.sign_in("nobody-here", "file-pw"), SignIn::Refused);
+        assert_eq!(access.sign_in(&me, "wrong", &[]), SignIn::Refused);
+        assert_eq!(
+            access.sign_in("nobody-here", "file-pw", &[]),
+            SignIn::Refused
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -786,13 +827,13 @@ mod tests {
         let mut outside = settings(vec![password_entry(&file)]);
         outside.groups = vec!["canoa-no-such-group".to_owned()];
         assert_eq!(
-            Access::new(&outside).unwrap().sign_in(&me, "file-pw"),
+            Access::new(&outside).unwrap().sign_in(&me, "file-pw", &[]),
             SignIn::Refused
         );
         let mut above = settings(vec![password_entry(&file)]);
         above.min_uid = mine() + 1;
         assert_eq!(
-            Access::new(&above).unwrap().sign_in(&me, "file-pw"),
+            Access::new(&above).unwrap().sign_in(&me, "file-pw", &[]),
             SignIn::Refused
         );
         std::fs::remove_dir_all(dir).unwrap();
@@ -812,10 +853,10 @@ mod tests {
         ]))
         .unwrap();
         assert!(matches!(
-            both.sign_in(&me, "pw-one"),
+            both.sign_in(&me, "pw-one", &[]),
             SignIn::Admitted { .. }
         ));
-        assert_eq!(both.sign_in(&me, "pw-two"), SignIn::Refused);
+        assert_eq!(both.sign_in(&me, "pw-two", &[]), SignIn::Refused);
         // Unknown: the system provider, limited to a group this account is not in, says it is not its to judge.
         let narrow = entry(
             SYSTEM,
@@ -824,10 +865,23 @@ mod tests {
         );
         let passed_on = Access::new(&settings(vec![narrow, password_entry(&second)])).unwrap();
         assert!(matches!(
-            passed_on.sign_in(&me, "pw-two"),
+            passed_on.sign_in(&me, "pw-two", &[]),
             SignIn::Admitted { .. }
         ));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `result` is a sign-in of `me`, by this process's user id, accepted by `provider`.
+    fn admits(result: SignIn, me: &str, provider: &str) {
+        match result {
+            SignIn::Admitted {
+                user,
+                uid,
+                provider: by,
+                ..
+            } => assert_eq!((user.as_str(), uid, by.as_str()), (me, mine(), provider)),
+            other => panic!("not admitted: {other:?}"),
+        }
     }
 
     fn certificate() -> (Vec<u8>, String) {
@@ -865,24 +919,25 @@ mod tests {
         let (access, me, der) = pinned(&dir.join("peers.toml"), &[]);
         assert_eq!(access.methods(), [Method::Certificate]);
         let b64 = data_encoding::BASE64.encode(&der);
-        assert_eq!(
-            access.sign_in_certificate(&header(&b64), client()),
-            SignIn::Admitted {
-                user: me.clone(),
-                uid: mine()
-            }
+        admits(
+            access.sign_in_certificate(&header(&b64), client(), &[]),
+            &me,
+            "coqui_access_mtls",
         );
         // A certificate nobody pinned, however well formed.
         let (other, _) = certificate();
         let other = data_encoding::BASE64.encode(&other);
         assert_eq!(
-            access.sign_in_certificate(&header(&other), client()),
+            access.sign_in_certificate(&header(&other), client(), &[]),
             SignIn::Refused
         );
         // Nothing, garbage, two headers, and a chain longer than the portal reads.
-        assert_eq!(access.sign_in_certificate(&[], client()), SignIn::Refused);
         assert_eq!(
-            access.sign_in_certificate(&header("not base64!"), client()),
+            access.sign_in_certificate(&[], client(), &[]),
+            SignIn::Refused
+        );
+        assert_eq!(
+            access.sign_in_certificate(&header("not base64!"), client(), &[]),
             SignIn::Refused
         );
         let twice = vec![
@@ -890,16 +945,16 @@ mod tests {
             ("x-client-cert".to_owned(), b64.clone()),
         ];
         assert_eq!(
-            access.sign_in_certificate(&twice, client()),
+            access.sign_in_certificate(&twice, client(), &[]),
             SignIn::Refused
         );
         let long = [b64.as_str(); 9].join(",");
         assert_eq!(
-            access.sign_in_certificate(&header(&long), client()),
+            access.sign_in_certificate(&header(&long), client(), &[]),
             SignIn::Refused
         );
         // A password goes to no certificate provider.
-        assert_eq!(access.sign_in(&me, "anything"), SignIn::Refused);
+        assert_eq!(access.sign_in(&me, "anything", &[]), SignIn::Refused);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -908,7 +963,7 @@ mod tests {
         let dir = scratch("pinned-groups");
         let (access, _, der) = pinned(&dir.join("peers.toml"), &["canoa-no-such-group"]);
         assert_eq!(
-            access.sign_in_certificate(&header(&data_encoding::BASE64.encode(&der)), client()),
+            access.sign_in_certificate(&header(&data_encoding::BASE64.encode(&der)), client(), &[]),
             SignIn::Refused
         );
         std::fs::remove_dir_all(dir).unwrap();
@@ -939,7 +994,7 @@ mod tests {
         let mine_header = header(&data_encoding::BASE64.encode(&der));
         let other_header = header(&data_encoding::BASE64.encode(&other_der));
         assert_eq!(
-            access.sign_in_certificate(&mine_header, client()),
+            access.sign_in_certificate(&mine_header, client(), &[]),
             SignIn::Refused
         );
         let status = access
@@ -953,12 +1008,10 @@ mod tests {
         assert!(!status.pinned);
         // Pinned, the certificate alone signs the account in.
         access.pin(&me, mine(), &mine_header).unwrap();
-        assert_eq!(
-            access.sign_in_certificate(&mine_header, client()),
-            SignIn::Admitted {
-                user: me.clone(),
-                uid: mine()
-            }
+        admits(
+            access.sign_in_certificate(&mine_header, client(), &[]),
+            &me,
+            "coqui_access_mtls",
         );
         let status = access
             .certificate_status(&me, mine(), &mine_header)
@@ -984,7 +1037,7 @@ mod tests {
         // Removed, it signs no one in, and removing again finds nothing.
         assert_eq!(access.unpin(&me), Ok(true));
         assert_eq!(
-            access.sign_in_certificate(&mine_header, client()),
+            access.sign_in_certificate(&mine_header, client(), &[]),
             SignIn::Refused
         );
         assert_eq!(access.unpin(&me), Ok(false));
@@ -1019,9 +1072,10 @@ mod tests {
     }
 
     #[test]
-    fn a_password_file_listed_first_refuses_every_name_it_does_not_hold() {
-        // The password provider answers Invalid, not Unknown, for a name its file lacks, so the providers after it never see
-        // that name: with it first, a name only a later provider (the system's, say) knows is refused.
+    fn a_password_file_passes_on_a_name_it_does_not_hold_and_refuses_a_wrong_password_for_one_it_does()
+     {
+        // The password provider answers Unknown for a name its file lacks, so the providers after it are asked, and Invalid for
+        // a wrong password of a name it holds, which ends the try.
         let dir = scratch("lockout");
         let (first, second) = (dir.join("first.toml"), dir.join("second.toml"));
         let me = my_name();
@@ -1032,8 +1086,33 @@ mod tests {
             password_entry(&second),
         ]))
         .unwrap();
-        assert_eq!(first_listed.sign_in(&me, "pw-two"), SignIn::Refused);
-        // Listed after, the same file is reached for the names the earlier provider leaves alone.
+        admits(
+            first_listed.sign_in(&me, "pw-two", &[]),
+            &me,
+            "coqui_access_password",
+        );
+        assert_eq!(
+            first_listed.sign_in("someone-else", "pw-x", &[]),
+            SignIn::Refused
+        );
+        // A name the first file holds with another password is refused there, and the second is not asked.
+        seed_password(&first, &me, "pw-one");
+        let held = Access::new(&settings(vec![
+            password_entry(&first),
+            password_entry(&second),
+        ]))
+        .unwrap();
+        assert_eq!(held.sign_in(&me, "pw-two", &[]), SignIn::Refused);
+        // Only the providers a policy names are asked, in the order it names them.
+        assert_eq!(
+            held.sign_in(&me, "pw-two", &["coqui_access_password".to_owned()]),
+            SignIn::Refused
+        );
+        assert_eq!(
+            held.sign_in(&me, "pw-one", &["nobody".to_owned()]),
+            SignIn::Refused
+        );
+        // Listed after a provider that leaves the name alone, the same file is reached.
         let narrow = entry(
             SYSTEM,
             None,
@@ -1041,7 +1120,7 @@ mod tests {
         );
         let after = Access::new(&settings(vec![narrow, password_entry(&second)])).unwrap();
         assert!(matches!(
-            after.sign_in(&me, "pw-two"),
+            after.sign_in(&me, "pw-two", &[]),
             SignIn::Admitted { .. }
         ));
         std::fs::remove_dir_all(dir).unwrap();
@@ -1075,7 +1154,10 @@ mod tests {
         );
         let access = enrolling(&file);
         let h = header(&data_encoding::BASE64.encode(&der));
-        assert_eq!(access.sign_in_certificate(&h, client()), SignIn::Refused);
+        assert_eq!(
+            access.sign_in_certificate(&h, client(), &[]),
+            SignIn::Refused
+        );
         let (cert, _) = access
             .certificate_status(&me, mine(), &h)
             .unwrap()
@@ -1104,14 +1186,17 @@ mod tests {
         let h = header(&data_encoding::BASE64.encode(&der));
         // Pinned for the user id this name had before it was made again.
         access.pin(&me, mine() + 1, &h).unwrap();
-        assert_eq!(access.sign_in_certificate(&h, client()), SignIn::Refused);
+        assert_eq!(
+            access.sign_in_certificate(&h, client(), &[]),
+            SignIn::Refused
+        );
         let status = access.certificate_status(&me, mine(), &h).unwrap();
         assert!(!status.pinned);
         assert_eq!(status.presented.unwrap().1, PinState::Unpinned);
         // The person pins again, and the pin is theirs now.
         access.pin(&me, mine(), &h).unwrap();
         assert!(matches!(
-            access.sign_in_certificate(&h, client()),
+            access.sign_in_certificate(&h, client(), &[]),
             SignIn::Admitted { .. }
         ));
         let _ = other_der;

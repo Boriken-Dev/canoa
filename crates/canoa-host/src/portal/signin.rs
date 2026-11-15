@@ -15,6 +15,10 @@ pub enum SignIn {
         user: String,
         /// The account's user id: what the portal expects of whoever made the socket it dials.
         uid: u32,
+        /// The operating system's groups of the account, which the sign-in policy's `subjects` rules read.
+        groups: Vec<String>,
+        /// The id of the provider that accepted the credential, which the policy's `providers` read.
+        provider: String,
     },
     /// Not an account, a wrong password, or an account the system refuses now.
     Refused,
@@ -94,6 +98,14 @@ impl Method {
             Self::Certificate => "certificate",
         }
     }
+
+    /// The method a policy's word names, if the portal has it.
+    #[must_use]
+    pub fn from_id(word: &str) -> Option<Self> {
+        [Self::Password, Self::Certificate]
+            .into_iter()
+            .find(|method| method.id() == word)
+    }
 }
 
 /// Whoever says if a credential is an account.
@@ -103,8 +115,9 @@ pub trait Accounts: Send + Sync {
         vec![Method::Password]
     }
 
-    /// Checks `password` for `user`. Blocks: the system may sleep after a wrong one, or ask a directory across a network.
-    fn sign_in(&self, user: &str, password: &str) -> SignIn;
+    /// Checks `password` for `user`, asking the providers in `providers` in that order, or every provider that takes a password
+    /// when it is empty. Blocks: the system may sleep after a wrong one, or ask a directory across a network.
+    fn sign_in(&self, user: &str, password: &str, providers: &[String]) -> SignIn;
 
     /// What this portal knows of the certificate the proxy forwarded in `headers` and of `user`'s pinned certificate; `None`
     /// when it pins no certificates. The portal asks for `headers` only from a request on the proxy's socket.
@@ -139,27 +152,33 @@ pub trait Accounts: Send + Sync {
     }
 
     /// Checks the certificate the proxy forwarded in `headers` (the request's, in order, names in lower case) for a browser at
-    /// `client`. The portal asks only for a request that came on the proxy's socket. The default refuses.
-    fn sign_in_certificate(&self, headers: &[(String, String)], client: IpAddr) -> SignIn {
-        let _ = (headers, client);
+    /// `client`, asking the providers in `providers` in that order, or every provider that takes a certificate when it is empty.
+    /// The portal asks only for a request that came on the proxy's socket. The default refuses.
+    fn sign_in_certificate(
+        &self,
+        headers: &[(String, String)],
+        client: IpAddr,
+        providers: &[String],
+    ) -> SignIn {
+        let _ = (headers, client, providers);
         SignIn::Refused
     }
 
     /// Whether `user` is still the account with user id `uid`, asked again each time a host is wanted, so an account that was
     /// removed or renamed since the sign-in is not given one. [`Standing::Unknown`] when the directory could not say, which
-    /// ends nothing. The default says present.
+    /// ends nothing. The default says present, in no group.
     fn still(&self, user: &str, uid: u32) -> Standing {
         let _ = (user, uid);
-        Standing::Present
+        Standing::Present(Vec::new())
     }
 }
 
 /// What the accounts say of a signed-in account.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Standing {
-    /// It is there under that name and user id.
-    Present,
+    /// It is there under that name and user id, in these groups.
+    Present(Vec<String>),
     /// Definitely not: removed, renamed or given another id.
     Gone,
     /// The directory did not answer: the session stands until it does.

@@ -10,6 +10,7 @@ mod access;
 mod conn;
 mod instance;
 mod page;
+mod policy;
 mod relay;
 mod session;
 mod settings;
@@ -26,6 +27,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Instant, SystemTime};
 
+use coqui_access::purposes;
 use coqui_transport_pipe::{PipeName, SocketGroup};
 
 pub use access::Access;
@@ -84,6 +86,7 @@ struct Inner {
     root: PathBuf,
     sessions: Sessions,
     throttle: Throttle,
+    policy: policy::Policy,
     instances: Arc<Instances>,
     accounts: Arc<dyn Accounts>,
     stopped: Arc<AtomicBool>,
@@ -132,6 +135,18 @@ impl Portal {
         controller: Arc<dyn Controller>,
     ) -> Result<Self, PortalError> {
         settings.check().map_err(PortalError::Settings)?;
+        let policy =
+            policy::Policy::new(&settings, &accounts.methods()).map_err(PortalError::Settings)?;
+        Self::bind_with_policy(settings, accounts, controller, policy)
+    }
+
+    /// [`Portal::bind`] with the sign-in policy already built.
+    fn bind_with_policy(
+        settings: Settings,
+        accounts: Arc<dyn Accounts>,
+        controller: Arc<dyn Controller>,
+        policy: policy::Policy,
+    ) -> Result<Self, PortalError> {
         let site = settings
             .site
             .as_deref()
@@ -186,6 +201,7 @@ impl Portal {
                 settings.slow_after_user_failures,
                 settings.slow,
             ),
+            policy,
             root,
             instances,
             accounts,
@@ -595,11 +611,11 @@ fn write_response(
 }
 
 /// The browser's address: a TCP connection's own, which is all that is believed of one anyone local can make; or, on the proxy's
-/// socket, the last address in the header the proxy sets that is not one of ours. A proxy that says nothing usable counts all
-/// such browsers as one address.
-fn client_of(inner: &Inner, request: &Request, conn: &Conn) -> IpAddr {
+/// socket, the last address in the header the proxy sets that is not one of ours. `None` when there is none (the header is
+/// missing, malformed or all proxies of ours): the sign-in policy is told it is unknown, never a placeholder.
+fn client_address(inner: &Inner, request: &Request, conn: &Conn) -> Option<IpAddr> {
     if !conn.from_proxy() {
-        return conn.peer_ip().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        return conn.peer_ip();
     }
     request
         .header(&inner.settings.client_address_header)
@@ -608,7 +624,20 @@ fn client_of(inner: &Inner, request: &Request, conn: &Conn) -> IpAddr {
                 .filter_map(|part| part.trim().parse::<IpAddr>().ok())
                 .find(|address| !inner.settings.trusted_proxies.contains(address))
         })
-        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+}
+
+/// The address the throttle counts a try against: the browser's, or, when it is not known, one address shared by every such
+/// browser.
+fn client_of(inner: &Inner, request: &Request, conn: &Conn) -> IpAddr {
+    client_address(inner, request, conn).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+}
+
+/// An address as a log line shows it.
+fn shown(address: Option<IpAddr>) -> String {
+    address.map_or_else(
+        || "an unknown address".to_owned(),
+        |address| address.to_string(),
+    )
 }
 
 fn host_ok(inner: &Inner, request: &Request) -> bool {
@@ -659,22 +688,25 @@ fn from_own_page(request: &Request, conn: &Conn) -> bool {
     origin.eq_ignore_ascii_case(&format!("{}://{host}", scheme_of(request, conn)))
 }
 
-/// Whether `method` may be used for a request from `address`. This is the one place a sign-in policy decides, asked for the
-/// page's methods and again once a credential has been accepted; it allows every method.
-const fn method_allowed(_inner: &Inner, _method: Method, _address: IpAddr) -> bool {
-    true
-}
-
-/// The ways in this client may use: a certificate only on the proxy's socket, since that is the one connection whose headers
-/// are believed.
-fn methods_for(inner: &Inner, conn: &Conn, address: IpAddr) -> Vec<Method> {
-    inner
-        .accounts
-        .methods()
-        .into_iter()
-        .filter(|method| *method != Method::Certificate || conn.from_proxy())
-        .filter(|method| method_allowed(inner, *method, address))
-        .collect()
+/// What the sign-in policy offers this client before it has passed a step: the page's methods, and what a sign-in's method is
+/// decided against. A method this portal does not have is not offered, nor a certificate off the proxy's socket, the one
+/// connection whose headers are believed. `None` when the policy could not decide: nothing is offered then.
+fn offer_for(inner: &Inner, request: &Request, conn: &Conn) -> Option<policy::Decision> {
+    let address = client_address(inner, request, conn);
+    match inner.policy.decide(policy::offer_context(address)) {
+        Ok(mut decision) => {
+            let have = inner.accounts.methods();
+            decision.offers.retain(|offer| {
+                have.contains(&offer.method)
+                    && (offer.method != Method::Certificate || conn.from_proxy())
+            });
+            Some(decision)
+        }
+        Err(why) => {
+            tracing::warn!("the sign-in policy could not decide: {why}");
+            None
+        }
+    }
 }
 
 /// The sign-in page.
@@ -686,11 +718,14 @@ fn login_response(
     notice: Option<page::Notice>,
     retry: Option<u64>,
 ) -> Response {
-    let address = client_of(inner, request, conn);
+    let (status, notice, methods) = match offer_for(inner, request, conn) {
+        Some(decision) => (status, notice, decision.methods()),
+        None => (503, Some(page::Notice::Unavailable), Vec::new()),
+    };
     Response::text(
         status,
         "text/html; charset=utf-8",
-        page::render(&methods_for(inner, conn, address), notice, retry),
+        page::render(&methods, notice, retry),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
 }
@@ -701,11 +736,10 @@ fn asset(kind: &'static str, body: &'static str) -> Response {
 
 /// What a browser may ask before it signs in: the ways in this portal accepts here.
 fn methods_response(inner: &Inner, request: &Request, conn: &Conn) -> Response {
-    let address = client_of(inner, request, conn);
-    let ids: Vec<&str> = methods_for(inner, conn, address)
-        .into_iter()
-        .map(Method::id)
-        .collect();
+    let Some(decision) = offer_for(inner, request, conn) else {
+        return Response::refusal(503);
+    };
+    let ids: Vec<&str> = decision.methods().into_iter().map(Method::id).collect();
     Response::json(200, &serde_json::json!({ "methods": ids }))
 }
 
@@ -749,14 +783,52 @@ fn authed(inner: &Inner, request: &Request) -> Option<Session> {
 
 /// A host for the signed-in person, started if it must be: or the answer to give instead. An account that is no longer the one
 /// that signed in ends its sessions here.
-fn host_for(inner: &Inner, session: &Session) -> Result<Lease, Response> {
-    if inner.accounts.still(&session.user, session.uid) == Standing::Gone {
-        inner.sessions.close_user(&session.user);
-        tracing::info!(
-            "{} is no longer an account: its sessions ended",
-            session.user
-        );
-        return Err(Response::refusal(401));
+fn host_for(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    session: &Session,
+) -> Result<Lease, Response> {
+    let groups = match inner.accounts.still(&session.user, session.uid) {
+        Standing::Gone => {
+            inner.sessions.close_user(&session.user);
+            tracing::info!(
+                "{} is no longer an account: its sessions ended",
+                session.user
+            );
+            return Err(Response::refusal(401));
+        }
+        Standing::Present(groups) => groups,
+        // The directory did not answer: the session stands, in the groups it had.
+        _ => session.groups.clone(),
+    };
+    // The policy decides again at every use that starts or reaches a host, with the steps the session was opened with and the
+    // address the browser is at now: a session carried to where its method is no longer accepted ends.
+    let address = client_address(inner, request, conn);
+    let context = policy::context(
+        purposes::RESUME,
+        address,
+        Some(policy::person(&session.user, session.uid, &groups)),
+        session.done.clone(),
+    );
+    match inner.policy.decide(context) {
+        Ok(decision) if decision.complete => {}
+        Ok(decision) => {
+            if let Some(token) = request.token() {
+                inner.sessions.close(&token);
+            }
+            tracing::info!(
+                "{}'s session ended: not accepted from {} (rule {})",
+                session.user,
+                shown(address),
+                decision.rule_name()
+            );
+            return Err(Response::refusal(401));
+        }
+        Err(why) => {
+            tracing::warn!("the sign-in policy could not decide: {why}");
+            return Err(Response::refusal(503));
+        }
     }
     inner
         .instances
@@ -820,7 +892,7 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             None => Response::refusal(401),
         },
         ("POST", "/portal/pair") => match authed(inner, request) {
-            Some(session) if from_own_page(request, conn) => pair(inner, request, &session),
+            Some(session) if from_own_page(request, conn) => pair(inner, request, conn, &session),
             Some(_) => Response::refusal(403),
             None => Response::refusal(401),
         },
@@ -881,14 +953,34 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         return Response::refusal(400);
     }
     let address = client_of(inner, request, conn);
+    let seen = client_address(inner, request, conn);
     let method = match form_field(&request.body, "method").as_deref() {
         None | Some("password") => Method::Password,
         Some("certificate") => Method::Certificate,
         Some(_) => return Response::refusal(400),
     };
-    if !methods_for(inner, conn, address).contains(&method) {
-        return Response::refusal(400);
-    }
+    // Decided on this request's own, before the throttle counts it and before any provider is asked: a method the policy does
+    // not offer from here costs the directory nothing and counts against no one.
+    let Some(decision) = offer_for(inner, request, conn) else {
+        return login_response(
+            inner,
+            request,
+            conn,
+            503,
+            Some(page::Notice::Unavailable),
+            None,
+        );
+    };
+    let Some(offer) = decision.offer(method) else {
+        tracing::info!(
+            "a {} sign-in from {} is not accepted (rule {})",
+            method.id(),
+            shown(seen),
+            decision.rule_name()
+        );
+        return Response::refusal(403);
+    };
+    let providers = offer.providers.clone();
     let (user, password, key) = match method {
         Method::Certificate => (String::new(), String::new(), String::new()),
         _ => {
@@ -939,24 +1031,60 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
     }
     let result = match method {
-        Method::Certificate => inner
-            .accounts
-            .sign_in_certificate(&presented(request), address),
-        _ => inner.accounts.sign_in(user.trim(), &password),
+        Method::Certificate => {
+            inner
+                .accounts
+                .sign_in_certificate(&presented(request), address, &providers)
+        }
+        _ => inner.accounts.sign_in(user.trim(), &password, &providers),
     };
     inner.signing_in.fetch_sub(1, Ordering::SeqCst);
     match result {
-        SignIn::Admitted { user, uid }
-            if !crate::portal_link::system_uid(uid) && uid >= inner.settings.min_uid =>
-        {
-            // Asked again now that the credential is known to be good: the same function that listed the methods.
-            if !method_allowed(inner, method, address) {
-                tracing::info!("a {} sign-in from {address} is not allowed", method.id());
-                return after_floor(
-                    inner,
-                    started,
-                    login_response(inner, request, conn, 401, Some(refused), None),
-                );
+        SignIn::Admitted {
+            user,
+            uid,
+            groups,
+            provider,
+        } if !crate::portal_link::system_uid(uid) && uid >= inner.settings.min_uid => {
+            // Decided again now that the credential names someone: the steps passed so far must be enough, and one that is not
+            // is answered, counted and slowed as a wrong password is, so nothing tells the two apart.
+            let factor = policy::factor(method, &provider, uid);
+            let after = inner.policy.decide(policy::context(
+                purposes::SIGN_IN,
+                seen,
+                Some(policy::person(&user, uid, &groups)),
+                vec![factor.clone()],
+            ));
+            match after {
+                Ok(after) if after.complete => {}
+                Ok(after) => {
+                    tracing::info!(
+                        "a {} sign-in from {} is not enough (rule {})",
+                        method.id(),
+                        shown(seen),
+                        after.rule_name()
+                    );
+                    return after_floor(
+                        inner,
+                        started,
+                        login_response(inner, request, conn, 401, Some(refused), None),
+                    );
+                }
+                Err(why) => {
+                    tracing::warn!("the sign-in policy could not decide: {why}");
+                    return after_floor(
+                        inner,
+                        started,
+                        login_response(
+                            inner,
+                            request,
+                            conn,
+                            503,
+                            Some(page::Notice::Unavailable),
+                            None,
+                        ),
+                    );
+                }
             }
             let by_password = method == Method::Password;
             // What the browser offered with this sign-in: the only certificate a pin from this session may be, unless the
@@ -970,10 +1098,14 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
             };
             let seen = status.and_then(|status| status.presented);
             let fingerprint = seen.as_ref().map(|(cert, _)| cert.fingerprint.clone());
-            let Some((token, _)) = inner
-                .sessions
-                .open_with(&user, uid, Some(method), fingerprint)
-            else {
+            let Some((token, _)) = inner.sessions.open_with(
+                &user,
+                uid,
+                Some(method),
+                fingerprint,
+                vec![factor],
+                groups,
+            ) else {
                 inner.throttle.succeeded(attempt);
                 return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
             };
@@ -1104,7 +1236,8 @@ fn certificate_action(
                 else {
                     return problem("Enter your password to add this certificate.");
                 };
-                if let Err(refusal) = confirm_password(inner, session, address, &password, started)
+                if let Err(refusal) =
+                    confirm_password(inner, request, conn, session, address, &password, started)
                 {
                     return problem(refusal);
                 }
@@ -1190,11 +1323,27 @@ fn certificate_action(
 /// What to tell the person.
 fn confirm_password(
     inner: &Inner,
+    request: &Request,
+    conn: &Conn,
     session: &Session,
     address: IpAddr,
     password: &str,
     started: Instant,
 ) -> Result<(), &'static str> {
+    // A password typed here is a password sent: the policy decides whether this client may send one, before the throttle and
+    // before any provider.
+    let Some(providers) = offer_for(inner, request, conn).and_then(|decision| {
+        decision
+            .offer(Method::Password)
+            .map(|offer| offer.providers.clone())
+    }) else {
+        tracing::info!(
+            "a password for {} from {} is not accepted",
+            session.user,
+            shown(client_address(inner, request, conn))
+        );
+        return Err("A password is not accepted from here.");
+    };
     let key: String = session.user.to_ascii_lowercase().chars().take(64).collect();
     let Some(attempt) = inner.throttle.begin(address, &key) else {
         tracing::info!(
@@ -1217,10 +1366,10 @@ fn confirm_password(
         inner.throttle.succeeded(attempt);
         return Err("Busy. Try again in a moment.");
     }
-    let result = inner.accounts.sign_in(&session.user, password);
+    let result = inner.accounts.sign_in(&session.user, password, &providers);
     inner.signing_in.fetch_sub(1, Ordering::SeqCst);
     match result {
-        SignIn::Admitted { user, uid } if user == session.user && uid == session.uid => {
+        SignIn::Admitted { user, uid, .. } if user == session.user && uid == session.uid => {
             inner.throttle.succeeded(attempt);
             Ok(())
         }
@@ -1242,7 +1391,7 @@ fn confirm_password(
 
 /// `/canoa.json` for this user: their host's id, method and entries, each with the address of a channel through the portal.
 fn index(inner: &Inner, request: &Request, conn: &Conn, session: &Session) -> Response {
-    let lease = match host_for(inner, session) {
+    let lease = match host_for(inner, request, conn, session) {
         Ok(lease) => lease,
         Err(response) => return response,
     };
@@ -1290,7 +1439,7 @@ fn index(inner: &Inner, request: &Request, conn: &Conn, session: &Session) -> Re
 }
 
 /// Accepts the key the browser says is its own, once it has connected through a channel and waits in the host.
-fn pair(inner: &Inner, request: &Request, session: &Session) -> Response {
+fn pair(inner: &Inner, request: &Request, conn: &Conn, session: &Session) -> Response {
     let Some(peer) = serde_json::from_slice::<serde_json::Value>(&request.body)
         .ok()
         .and_then(|body| {
@@ -1302,7 +1451,7 @@ fn pair(inner: &Inner, request: &Request, session: &Session) -> Response {
     else {
         return Response::refusal(400);
     };
-    let lease = match host_for(inner, session) {
+    let lease = match host_for(inner, request, conn, session) {
         Ok(lease) => lease,
         Err(response) => return response,
     };
@@ -1429,7 +1578,7 @@ fn upgrade(inner: &Inner, conn: &mut Conn, request: &Request) {
     if request.header("sec-websocket-version") != Some("13") {
         return refuse(conn, 400);
     }
-    let lease = match host_for(inner, &session) {
+    let lease = match host_for(inner, request, conn, &session) {
         Ok(lease) => lease,
         Err(response) => return refuse(conn, response.status),
     };

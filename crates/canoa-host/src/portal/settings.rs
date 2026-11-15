@@ -81,6 +81,10 @@ pub struct Settings {
     /// `authenticators`: the providers that sign people in, in order; each credential goes to the ones that take it, and a
     /// provider's `Unknown` passes it on while its `Invalid` ends the try. Default: the operating system's accounts alone.
     pub authenticators: Vec<Entry>,
+    /// `sign_in_policy`: the provider that decides which methods a connection may use, from where it is made; `provider`
+    /// defaults to the rules provider `coqui_signin_rules`, which is built in, and any other comes from `library`. With none,
+    /// each configured method is enough alone, from anywhere.
+    pub sign_in_policy: Option<Entry>,
     /// `certificate_header`: the header the proxy puts a client certificate in, as base64 DER, leaf first, comma-separated. It
     /// is read only on `socket`, and the proxy must delete any of that name the browser sent.
     pub certificate_header: String,
@@ -156,6 +160,7 @@ impl Default for Settings {
             min_uid: 1000,
             groups: Vec::new(),
             authenticators: vec![Entry::new("coqui_access_system")],
+            sign_in_policy: None,
             certificate_header: "x-client-cert".to_owned(),
             libraries_any_owner: false,
             enrol: Duration::from_secs(10 * 60),
@@ -197,6 +202,14 @@ struct RawEntry {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawPolicy {
+    provider: Option<String>,
+    library: Option<PathBuf>,
+    config: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Raw {
     socket: Option<PathBuf>,
     socket_group: Option<String>,
@@ -210,6 +223,7 @@ struct Raw {
     min_uid: Option<u32>,
     groups: Option<Vec<String>>,
     authenticators: Option<Vec<RawEntry>>,
+    sign_in_policy: Option<RawPolicy>,
     certificate_header: Option<String>,
     enrol_seconds: Option<u64>,
     libraries_any_owner: Option<bool>,
@@ -291,6 +305,16 @@ impl Settings {
                     enrol: entry.enrol.unwrap_or(false),
                 })
                 .collect();
+        }
+        if let Some(policy) = raw.sign_in_policy {
+            settings.sign_in_policy = Some(Entry {
+                provider: policy
+                    .provider
+                    .unwrap_or_else(|| super::policy::RULES.to_owned()),
+                library: policy.library,
+                config: policy.config.unwrap_or_default(),
+                enrol: false,
+            });
         }
         settings.hosts = raw
             .hosts
@@ -382,6 +406,18 @@ impl Settings {
             > 1
         {
             return Err("authenticators: at most one keeps enrolled certificates".to_owned());
+        }
+        if let Some(entry) = &self.sign_in_policy {
+            if entry.provider.is_empty() {
+                return Err("sign_in_policy: a provider id".to_owned());
+            }
+            if entry
+                .library
+                .as_ref()
+                .is_some_and(|path| !path.is_absolute())
+            {
+                return Err("sign_in_policy: `library` is an absolute path".to_owned());
+            }
         }
         for entry in &self.authenticators {
             if entry.provider.is_empty() {

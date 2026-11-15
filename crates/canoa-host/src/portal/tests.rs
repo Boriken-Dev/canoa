@@ -105,7 +105,12 @@ impl Accounts for Fixed {
         Ok(pins.len() != before)
     }
 
-    fn sign_in_certificate(&self, headers: &[(String, String)], client: IpAddr) -> SignIn {
+    fn sign_in_certificate(
+        &self,
+        headers: &[(String, String)],
+        client: IpAddr,
+        _providers: &[String],
+    ) -> SignIn {
         self.asked.fetch_add(1, Ordering::SeqCst);
         *self.last_client.lock().unwrap() = Some(client);
         self.presented.lock().unwrap().push(headers.to_vec());
@@ -123,12 +128,17 @@ impl Accounts for Fixed {
                 .map(|(_, uid)| *uid)?;
             Some((user, uid))
         }) {
-            Some((user, uid)) => SignIn::Admitted { user, uid },
+            Some((user, uid)) => SignIn::Admitted {
+                user,
+                uid,
+                groups: Vec::new(),
+                provider: "stand-in".to_owned(),
+            },
             None => SignIn::Refused,
         }
     }
 
-    fn sign_in(&self, user: &str, password: &str) -> SignIn {
+    fn sign_in(&self, user: &str, password: &str, _providers: &[String]) -> SignIn {
         self.asked.fetch_add(1, Ordering::SeqCst);
         if password == "FAIL" {
             return SignIn::Failed("the directory is down".to_owned());
@@ -137,6 +147,8 @@ impl Accounts for Fixed {
             Some((expected, uid)) if expected == password => SignIn::Admitted {
                 user: user.to_owned(),
                 uid: *uid,
+                groups: Vec::new(),
+                provider: "stand-in".to_owned(),
             },
             _ => SignIn::Refused,
         }
@@ -148,7 +160,7 @@ impl Accounts for Fixed {
         } else if self.unsure.lock().unwrap().contains(user) {
             Standing::Unknown
         } else {
-            Standing::Present
+            Standing::Present(Vec::new())
         }
     }
 }
@@ -283,17 +295,18 @@ impl Controller for Hosts {
     }
 }
 
-struct Rig {
+struct Rig<A = Fixed> {
     addr: SocketAddr,
     sock: PathBuf,
-    accounts: Arc<Fixed>,
+    accounts: Arc<A>,
     hosts: Arc<Hosts>,
     stopper: Stopper,
+    inner: Arc<Inner>,
     dir: PathBuf,
     root: PathBuf,
 }
 
-impl Drop for Rig {
+impl<A> Drop for Rig<A> {
     fn drop(&mut self) {
         self.stopper.stop();
         for stop in self.hosts.running.lock().unwrap().values() {
@@ -306,16 +319,6 @@ impl Drop for Rig {
 }
 
 fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::SeqCst);
-    let base = std::env::temp_dir().join(format!("canoa-portal-{}-{id}", std::process::id()));
-    let dir = base.join("run");
-    let root = base.join("site");
-    let sock = base.join("front").join("portal.sock");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
-    std::fs::write(root.join("index.html"), "<!doctype html>the app").unwrap();
     let accounts = Arc::new(Fixed {
         accounts: Mutex::new(
             [
@@ -340,6 +343,35 @@ fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
         presented: Mutex::new(Vec::new()),
         last_client: Mutex::new(None),
     });
+    rig_with(accounts, change, refuse_accepts)
+}
+
+/// A portal over `accounts` and stand-in hosts, on a Unix socket for the proxy and a loopback address.
+fn rig_with<A: Accounts + 'static>(
+    accounts: Arc<A>,
+    change: impl FnOnce(&mut Settings),
+    refuse_accepts: usize,
+) -> Rig<A> {
+    rig_policy(accounts, change, refuse_accepts, None)
+}
+
+/// [`rig_with`] with a sign-in policy of the test's own, when it gives one.
+fn rig_policy<A: Accounts + 'static>(
+    accounts: Arc<A>,
+    change: impl FnOnce(&mut Settings),
+    refuse_accepts: usize,
+    policy: Option<policy::Policy>,
+) -> Rig<A> {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, Ordering::SeqCst);
+    let base = std::env::temp_dir().join(format!("canoa-portal-{}-{id}", std::process::id()));
+    let dir = base.join("run");
+    let root = base.join("site");
+    let sock = base.join("front").join("portal.sock");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+    std::fs::write(root.join("index.html"), "<!doctype html>the app").unwrap();
     let hosts = Arc::new(Hosts {
         dir: dir.clone(),
         running: Mutex::new(HashMap::new()),
@@ -359,9 +391,17 @@ fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
         ..Settings::default()
     };
     change(&mut settings);
-    let portal = Portal::bind(settings, accounts.clone(), hosts.clone()).unwrap();
+    let portal = match policy {
+        Some(policy) => {
+            settings.check().unwrap();
+            Portal::bind_with_policy(settings, accounts.clone(), hosts.clone(), policy)
+        }
+        None => Portal::bind(settings, accounts.clone(), hosts.clone()),
+    }
+    .unwrap();
     let addr = portal.local_addr().unwrap();
     let stopper = portal.stopper();
+    let inner = Arc::clone(&portal.inner);
     thread::spawn(move || portal.run());
     Rig {
         addr,
@@ -369,6 +409,7 @@ fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
         accounts,
         hosts,
         stopper,
+        inner,
         dir,
         root,
     }
@@ -1690,7 +1731,7 @@ fn a_certificate_is_refused_on_the_loopback_address_whatever_header_it_carries()
         ],
         "method=certificate",
     );
-    assert_eq!(answer.status, 400);
+    assert_eq!(answer.status, 403);
     assert!(answer.cookie().is_none());
     assert_eq!(rig.accounts.asked.load(Ordering::SeqCst), 0);
 }
@@ -2143,6 +2184,8 @@ fn the_certificate_sign_in_is_asked_for_the_browsers_address_not_the_proxys() {
         Some("198.51.100.77".parse().unwrap())
     );
 }
+
+mod sign_in_policy;
 
 #[test]
 fn no_answer_carries_a_header_twice() {

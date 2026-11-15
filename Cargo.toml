@@ -23,13 +23,15 @@ indexmap = { version = "2", default-features = false, features = ["std", "serde"
 # ACP messages a client sends, read to keep a program launch from reaching the agent.
 serde_json = "1"
 # The portal's sign-in: the operating system's accounts through PAM and NSS (`canoa portal`, feature `portal`).
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
-coqui-access-system = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
+coqui-access-system = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
+# Which methods a sign-in may use, from where, and what it still needs.
+coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
 # A forwarded certificate's subject and fingerprint, shown when it is enrolled.
 coqui-peer-tls = { version = "=0.0.0-alpha.1", default-features = false, features = ["fields"] }
 # The password and certificate providers are libraries the portal loads from a path (its tests build them).
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
-coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
+coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
 # The web app's server: requests parsed by tungstenite's own parser, request paths percent-decoded by url's, TLS by
 # coqui-transport-web's rustls; each already in the graph at these versions.
 httparse = { version = "1.10", default-features = false, features = ["std"] }

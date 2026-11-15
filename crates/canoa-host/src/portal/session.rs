@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
+use coqui_access::Factor;
 use data_encoding::BASE64URL_NOPAD;
 
 use super::signin::Method;
@@ -33,6 +34,10 @@ pub struct Session {
     /// The fingerprint of the certificate the sign-in request carried, whatever the method: what a pin from this session may
     /// be.
     pub fingerprint: Option<String>,
+    /// The steps that signed it in, which the sign-in policy is asked about again each time it is used.
+    pub done: Vec<Factor>,
+    /// The account's groups when it signed in: what the policy is told if the directory cannot say now.
+    pub groups: Vec<String>,
 }
 
 struct Kept {
@@ -43,6 +48,8 @@ struct Kept {
     password_at: Option<Instant>,
     method: Option<Method>,
     fingerprint: Option<String>,
+    done: Vec<Factor>,
+    groups: Vec<String>,
 }
 
 /// The sessions of signed-in browsers, by the digest of the token the browser holds: the token itself is never kept.
@@ -78,16 +85,19 @@ impl Sessions {
     /// A new session for `user`, and the token the browser keeps. An account that holds its share already loses its oldest
     /// session, so one account cannot fill the table. `None` when the whole table is full of live sessions of others.
     pub fn open(&self, user: &str, uid: u32) -> Option<(String, Session)> {
-        self.open_with(user, uid, None, None)
+        self.open_with(user, uid, None, None, Vec::new(), Vec::new())
     }
 
-    /// [`Sessions::open`] for a sign-in by `method`, whose request carried a certificate with `fingerprint`, if it did.
+    /// [`Sessions::open`] for a sign-in by `method`, whose request carried a certificate with `fingerprint`, if it did, and which
+    /// passed the steps `done` as an account in `groups`.
     pub fn open_with(
         &self,
         user: &str,
         uid: u32,
         method: Option<Method>,
         fingerprint: Option<String>,
+        done: Vec<Factor>,
+        groups: Vec<String>,
     ) -> Option<(String, Session)> {
         let password = method == Some(Method::Password);
         let mut bytes = [0_u8; TOKEN_BYTES];
@@ -124,6 +134,8 @@ impl Sessions {
                 password_at: password.then_some(now),
                 method,
                 fingerprint: fingerprint.clone(),
+                done: done.clone(),
+                groups: groups.clone(),
             },
         );
         Some((
@@ -135,6 +147,8 @@ impl Sessions {
                 password_at: password.then_some(now),
                 method,
                 fingerprint,
+                done,
+                groups,
             },
         ))
     }
@@ -159,6 +173,8 @@ impl Sessions {
             password_at: kept.password_at,
             method: kept.method,
             fingerprint: kept.fingerprint.clone(),
+            done: kept.done.clone(),
+            groups: kept.groups.clone(),
         })
     }
 
@@ -360,6 +376,17 @@ impl Throttle {
         })
     }
 
+    /// How many failures `address` has in the window, for a test to read what a try counted.
+    #[cfg(test)]
+    pub(super) fn failures_from(&self, address: IpAddr) -> usize {
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state
+            .addresses
+            .get_mut(&key_of(address))
+            .map_or(0, |times| recent(times, self.window, now))
+    }
+
     /// The try did not fail: its count is taken back, so a login that works does not use up its address's tries.
     pub fn succeeded(&self, attempt: Attempt) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -391,7 +418,14 @@ mod tests {
         let sessions = Sessions::new(Duration::from_secs(60), 10, 10);
         let open = |user: &str, method, fingerprint: Option<&str>| {
             sessions
-                .open_with(user, 1, Some(method), fingerprint.map(str::to_owned))
+                .open_with(
+                    user,
+                    1,
+                    Some(method),
+                    fingerprint.map(str::to_owned),
+                    Vec::new(),
+                    Vec::new(),
+                )
                 .unwrap()
                 .0
         };
