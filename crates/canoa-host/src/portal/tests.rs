@@ -1434,3 +1434,54 @@ fn a_portal_that_starts_again_adopts_the_hosts_already_running_and_stops_them_wh
         "a host that was up when the portal started was never stopped"
     );
 }
+
+#[test]
+fn the_site_behind_the_sign_in_is_kept_private_and_asked_about_with_its_tag() {
+    let rig = rig(|_| {}, 0);
+    std::fs::create_dir_all(rig.root.join("canvaskit")).unwrap();
+    std::fs::write(rig.root.join("main.dart.js"), "code").unwrap();
+    std::fs::write(rig.root.join("main.3f9a1b2c.js"), "hashed").unwrap();
+    std::fs::write(rig.root.join("canvaskit").join("canvaskit.wasm"), "wasm").unwrap();
+    let cookie = signed_in(&rig, "canoatesta");
+    let with = |path: &str, extra: &[(&str, String)]| {
+        let mut headers = vec![("Cookie", cookie.clone())];
+        headers.extend(extra.iter().cloned());
+        call(rig.addr, "GET", path, &headers, "")
+    };
+    for (path, cache) in [
+        ("/", "private, no-cache"),
+        ("/main.dart.js", "private, no-cache"),
+        ("/canvaskit/canvaskit.wasm", "private, no-cache"),
+        ("/main.3f9a1b2c.js", "private, max-age=31536000, immutable"),
+    ] {
+        let answer = with(path, &[]);
+        assert_eq!(answer.status, 200, "{path}");
+        assert_eq!(answer.header("cache-control"), Some(cache), "{path}");
+        assert!(answer.header("last-modified").is_some(), "{path}");
+    }
+    let first = with("/main.dart.js", &[]);
+    let tag = first.header("etag").unwrap().to_owned();
+    assert!(!tag.starts_with("W/"), "{tag}");
+    let again = with("/main.dart.js", &[("If-None-Match", tag.clone())]);
+    assert_eq!(again.status, 304);
+    assert!(again.body.is_empty());
+    assert_eq!(again.header("etag"), Some(tag.as_str()));
+    assert_eq!(again.header("cache-control"), Some("private, no-cache"));
+    assert_eq!(again.header("content-length"), None);
+
+    std::fs::write(rig.root.join("main.dart.js"), "new code, longer").unwrap();
+    let changed = with("/main.dart.js", &[("If-None-Match", tag.clone())]);
+    assert_eq!(changed.status, 200);
+    assert_eq!(changed.body, "new code, longer");
+    assert_ne!(changed.header("etag"), Some(tag.as_str()));
+
+    // Without the sign-in the tag buys nothing: the sign-in comes first.
+    let anonymous = call(
+        rig.addr,
+        "GET",
+        "/main.dart.js",
+        &[("If-None-Match", tag)],
+        "",
+    );
+    assert_eq!(anonymous.status, 303);
+}

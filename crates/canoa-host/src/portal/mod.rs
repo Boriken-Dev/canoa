@@ -523,11 +523,15 @@ fn write_response(
     };
     let has = |name: &str| response.headers.iter().any(|(each, _)| *each == name);
     let mut text = format!(
-        "HTTP/1.1 {} {}\r\nDate: {}\r\nContent-Length: {length}\r\n",
+        "HTTP/1.1 {} {}\r\nDate: {}\r\n",
         response.status,
         reason(response.status),
         web::http_date(SystemTime::now())
     );
+    // A 304 has no body, and its length would be the file's, which it does not send.
+    if response.status != 304 {
+        text.push_str(&format!("Content-Length: {length}\r\n"));
+    }
     if !has("Content-Security-Policy") {
         text.push_str(&format!(
             "Content-Security-Policy: {}\r\n",
@@ -985,22 +989,31 @@ fn site(inner: &Inner, request: &Request, public: bool) -> Response {
         return Response::refusal(404);
     };
     let name = name.unwrap_or_else(|| "index.html".to_owned());
+    // The rest of the site is behind the sign-in, so no shared cache may keep it.
+    let caching = if public {
+        "no-cache".to_owned()
+    } else {
+        web::cache_control(&segments, &name, web::Limits::default().immutable_age, true)
+    };
+    let mut headers = web::validators(&found, caching, &name);
+    if web::not_modified(
+        request.header("if-none-match"),
+        request.header("if-modified-since"),
+        &found,
+    ) {
+        headers.retain(|(name, _)| *name != "Content-Type");
+        return Response {
+            status: 304,
+            headers,
+            payload: Payload::Bytes(Vec::new()),
+        };
+    }
     let Body::File(file, length) = found.body else {
         return Response::refusal(404);
     };
-    // The rest of the site is behind the sign-in, so no shared cache may keep it.
-    let caching = if public {
-        "no-cache"
-    } else {
-        "private, no-cache"
-    };
     Response {
         status: 200,
-        headers: vec![
-            ("Content-Type", web::content_type(&name).to_owned()),
-            ("Cache-Control", caching.to_owned()),
-            ("ETag", found.tag),
-        ],
+        headers,
         payload: Payload::File(file, length),
     }
 }

@@ -61,8 +61,9 @@ pub struct Limits {
     pub idle_time: Duration,
     /// For one write to the connection to make progress. Default 30 s.
     pub send_time: Duration,
-    /// How long a browser may keep a file whose name holds a hash (`main.3f9a1b2c.js`) without asking again. Default
-    /// 365 days. Every other file is asked about each time (`no-cache`, answered 304 while its tag holds).
+    /// How long a browser may keep a file whose name holds a hash (`main.3f9a1b2c.js`), or that is in a folder named for
+    /// a revision, without asking again. Default 365 days. Every other file is asked about each time (`no-cache`, answered
+    /// 304 while its tag holds).
     pub immutable_age: Duration,
 }
 
@@ -1184,20 +1185,13 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
         return (Answer::refusal(404), head);
     };
     let name = name.unwrap_or("index.html");
-    let cache = if is_hashed(name) {
-        format!(
-            "public, max-age={}, immutable",
-            shared.limits.immutable_age.as_secs()
-        )
-    } else {
-        "no-cache".to_owned()
-    };
-    let mut headers = vec![
-        ("Content-Type", content_type(name).to_owned()),
-        ("Cache-Control", cache),
-        ("ETag", file.tag.clone()),
-    ];
-    if header(request, "if-none-match").is_some_and(|tags| tag_matches(tags, &file.tag)) {
+    let cache = cache_control(&segments, name, shared.limits.immutable_age, false);
+    let mut headers = validators(&file, cache, name);
+    if not_modified(
+        header(request, "if-none-match"),
+        header(request, "if-modified-since"),
+        &file,
+    ) {
         headers.retain(|(name, _)| *name != "Content-Type");
         return (
             Answer {
@@ -1220,6 +1214,100 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
     )
 }
 
+/// The headers a file's answer carries: its type, its caching, its tag and, when the file has one, when it changed.
+pub(crate) fn validators(file: &Found, cache: String, name: &str) -> Vec<(&'static str, String)> {
+    let mut headers = vec![
+        ("Content-Type", content_type(name).to_owned()),
+        ("Cache-Control", cache),
+        ("ETag", file.tag.clone()),
+    ];
+    if let Some(time) = file.modified {
+        headers.push(("Last-Modified", http_date(time)));
+    }
+    headers
+}
+
+/// How long a browser keeps the file at `segments`: a year, never asking again, when the path carries a version (a part
+/// of the file's name that is a hash, `main.3f9a1b2c.js`, or a folder named for a revision), else it asks each time and
+/// is answered 304 while the tag holds. `private` marks a site behind a sign-in, which no shared cache may keep.
+pub(crate) fn cache_control(
+    segments: &[String],
+    name: &str,
+    immutable_age: Duration,
+    private: bool,
+) -> String {
+    let scope = if private { "private" } else { "public" };
+    if is_hashed(name)
+        || segments
+            .iter()
+            .rev()
+            .skip(1)
+            .any(|folder| is_revision(folder))
+    {
+        format!("{scope}, max-age={}, immutable", immutable_age.as_secs())
+    } else if private {
+        "private, no-cache".to_owned()
+    } else {
+        "no-cache".to_owned()
+    }
+}
+
+/// Whether a folder's name is a build's revision or digest: twelve hexadecimal digits or more, and nothing else.
+fn is_revision(folder: &str) -> bool {
+    folder.len() >= 12 && folder.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Whether the browser's copy is current: `If-None-Match` names the file's tag, or, when the request has none,
+/// `If-Modified-Since` is no earlier than the file's change. A file with no change time is only asked by its tag.
+pub(crate) fn not_modified(
+    none_match: Option<&str>,
+    modified_since: Option<&str>,
+    file: &Found,
+) -> bool {
+    if let Some(tags) = none_match {
+        return tag_matches(tags, &file.tag);
+    }
+    let (Some(since), Some(changed)) = (modified_since.and_then(parse_http_date), file.modified)
+    else {
+        return false;
+    };
+    changed
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .is_ok_and(|changed| changed.as_secs() <= since)
+}
+
+/// Seconds since the epoch of a date in the form [`http_date`] writes (`Sun, 06 Nov 1994 08:49:37 GMT`); any other form is
+/// not understood, and the file is sent.
+fn parse_http_date(text: &str) -> Option<u64> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let mut parts = text.split_ascii_whitespace();
+    parts.next()?.strip_suffix(',')?;
+    let day: u64 = parts.next()?.parse().ok()?;
+    let month_name = parts.next()?;
+    let month = MONTHS.iter().position(|each| *each == month_name)? as u64 + 1;
+    let year: u64 = parts.next()?.parse().ok()?;
+    let mut clock = parts.next()?.split(':');
+    let hour: u64 = clock.next()?.parse().ok()?;
+    let minute: u64 = clock.next()?.parse().ok()?;
+    let second: u64 = clock.next()?.parse().ok()?;
+    if parts.next()? != "GMT" || parts.next().is_some() || clock.next().is_some() {
+        return None;
+    }
+    if !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 || year < 1970 {
+        return None;
+    }
+    // Days from the civil date, the inverse of the conversion in `http_date`.
+    let shifted_year = if month <= 2 { year - 1 } else { year };
+    let era = shifted_year / 400;
+    let year_of_era = shifted_year % 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = (era * 146_097 + of_era).checked_sub(719_468)?;
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
+}
+
 /// Whether an `If-None-Match` value names `tag`, compared weakly as a `GET` is.
 fn tag_matches(tags: &str, tag: &str) -> bool {
     let opaque = |tag: &str| tag.trim().trim_start_matches("W/").to_owned();
@@ -1229,7 +1317,10 @@ fn tag_matches(tags: &str, tag: &str) -> bool {
 /// A file found in the site.
 pub(crate) struct Found {
     pub(crate) body: Body,
+    /// A strong tag of the file's contents.
     pub(crate) tag: String,
+    /// When the file last changed; a site built in has no such time.
+    pub(crate) modified: Option<SystemTime>,
 }
 
 pub(crate) enum Lookup {
@@ -1252,6 +1343,7 @@ fn lookup(site: &Site, segments: &[String]) -> Lookup {
                     Lookup::Found(Found {
                         body: Body::Bytes(bytes),
                         tag: tag.to_owned(),
+                        modified: None,
                     })
                 }
                 Err(_) => Lookup::Missing,
@@ -1293,15 +1385,56 @@ pub(crate) fn lookup_dir(root: &Path, segments: &[String]) -> Lookup {
         return Lookup::Missing;
     }
     let length = metadata.len();
-    let modified = metadata
-        .modified()
-        .ok()
+    let modified = metadata.modified().ok();
+    let nanos = modified
         .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map_or(0, |since| since.as_nanos());
+    let Some(tag) = content_tag(&real, length, nanos) else {
+        return Lookup::Missing;
+    };
     Lookup::Found(Found {
         body: Body::File(file, length),
-        tag: format!("W/\"{length:x}-{modified:x}\""),
+        tag,
+        modified,
     })
+}
+
+/// Tags already worked out: a file's length and modification time, and the tag of its contents. A file whose length or
+/// time moved is read again.
+static TAGS: Mutex<BTreeMap<PathBuf, (u64, u128, String)>> = Mutex::new(BTreeMap::new());
+
+/// The strong tag of the contents of the file at `real`: the first 128 bits of their SHA-256, read once while the file's
+/// length and modification time stay as they were.
+fn content_tag(real: &Path, length: u64, nanos: u128) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    if let Some((was_length, was_nanos, tag)) = TAGS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(real)
+        && (*was_length, *was_nanos) == (length, nanos)
+    {
+        return Some(tag.clone());
+    }
+    let mut file = File::open(real).ok()?;
+    let mut hash = Sha256::new();
+    let mut chunk = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut chunk).ok()?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&chunk[..read]);
+    }
+    let digest = hash.finalize();
+    let mut tag = String::from("\"");
+    for byte in &digest[..16] {
+        tag.push_str(&format!("{byte:02x}"));
+    }
+    tag.push('"');
+    TAGS.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(real.to_path_buf(), (length, nanos, tag.clone()));
+    Some(tag)
 }
 
 /// Writes `answer`, with the headers every answer carries, and its body unless `head`.

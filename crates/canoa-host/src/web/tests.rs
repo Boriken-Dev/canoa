@@ -1046,3 +1046,131 @@ fn the_built_in_site_is_every_file_of_the_directory_it_was_built_from() {
         std::fs::read(dist.join("index.html")).expect("an index")
     );
 }
+
+fn conditional(address: SocketAddr, path: &str, header: &str, value: &str) -> Reply {
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{header}: {value}\r\nConnection: close\r\n\r\n"
+    );
+    replies(address, request.as_bytes())
+        .into_iter()
+        .next()
+        .expect("an answer")
+}
+
+#[test]
+fn a_dates_text_reads_back_to_the_second_it_was_written_from() {
+    for seconds in [0, 784_111_777, 951_782_400, 1_700_000_000, 4_102_444_799] {
+        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+        assert_eq!(parse_http_date(&http_date(time)), Some(seconds));
+    }
+    assert_eq!(
+        parse_http_date("Sunday, 06-Nov-94 08:49:37 GMT"),
+        None,
+        "an old form is not understood"
+    );
+    assert_eq!(parse_http_date("soon"), None);
+}
+
+#[test]
+fn a_file_carries_a_tag_of_its_contents_and_when_it_changed() {
+    let outside = Outside::new("validators");
+    std::fs::write(outside.site().join("main.dart.js"), "one").expect("a script");
+    let address = running(&loopback(&outside.site()), &[]);
+    let first = get(address, "/main.dart.js");
+    assert_eq!(first.status, 200);
+    let tag = first.headers["etag"].clone();
+    assert!(
+        tag.starts_with('"') && tag.ends_with('"') && tag.len() == 34,
+        "a strong tag, not W/: {tag}"
+    );
+    assert!(first.headers["last-modified"].ends_with(" GMT"));
+    assert_eq!(first.headers["cache-control"], "no-cache");
+    // The same contents give the same tag.
+    assert_eq!(get(address, "/main.dart.js").headers["etag"], tag);
+}
+
+#[test]
+fn a_matching_tag_is_answered_304_and_a_changed_file_is_sent_again() {
+    let outside = Outside::new("revalidate");
+    let file = outside.site().join("main.dart.js");
+    std::fs::write(&file, "one").expect("a script");
+    let address = running(&loopback(&outside.site()), &[]);
+    let first = get(address, "/main.dart.js");
+    let tag = first.headers["etag"].clone();
+    let again = conditional(address, "/main.dart.js", "If-None-Match", &tag);
+    assert_eq!(again.status, 304);
+    assert!(again.body.is_empty());
+    assert_eq!(again.headers["etag"], tag);
+    assert_eq!(again.headers["cache-control"], "no-cache");
+    assert!(!again.headers.contains_key("content-length"));
+
+    std::fs::write(&file, "two, longer").expect("a changed script");
+    let changed = conditional(address, "/main.dart.js", "If-None-Match", &tag);
+    assert_eq!(changed.status, 200);
+    assert_eq!(changed.body, b"two, longer");
+    assert_ne!(changed.headers["etag"], tag);
+}
+
+#[test]
+fn a_date_the_file_has_not_passed_is_answered_304_when_no_tag_is_asked() {
+    let outside = Outside::new("since");
+    let file = outside.site().join("main.dart.js");
+    std::fs::write(&file, "one").expect("a script");
+    let address = running(&loopback(&outside.site()), &[]);
+    let date = get(address, "/main.dart.js").headers["last-modified"].clone();
+    assert_eq!(
+        conditional(address, "/main.dart.js", "If-Modified-Since", &date).status,
+        304
+    );
+    assert_eq!(
+        conditional(
+            address,
+            "/main.dart.js",
+            "If-Modified-Since",
+            "Thu, 01 Jan 1970 00:00:00 GMT"
+        )
+        .status,
+        200,
+        "a copy older than the file is replaced"
+    );
+    // A tag that does not match wins over a date that would.
+    let request = format!(
+        "GET /main.dart.js HTTP/1.1\r\nHost: 127.0.0.1\r\nIf-None-Match: \"other\"\r\nIf-Modified-Since: {date}\r\nConnection: close\r\n\r\n"
+    );
+    assert_eq!(
+        replies(address, request.as_bytes())
+            .into_iter()
+            .next()
+            .expect("an answer")
+            .status,
+        200
+    );
+}
+
+#[test]
+fn caching_follows_whether_the_path_carries_a_version() {
+    let outside = Outside::new("caching");
+    let site = outside.site();
+    std::fs::create_dir_all(site.join("canvaskit")).expect("a folder");
+    std::fs::create_dir_all(site.join("0cd610717bde95fd")).expect("a revision folder");
+    std::fs::write(site.join("canvaskit").join("canvaskit.wasm"), "wasm").expect("a file");
+    std::fs::write(site.join("0cd610717bde95fd").join("engine.wasm"), "wasm").expect("a file");
+    std::fs::write(site.join("main.3f9a1b2c.js"), "js").expect("a file");
+    std::fs::write(site.join("main.dart.js"), "js").expect("a file");
+    let address = running(&loopback(&site), &[]);
+    for (path, cache) in [
+        ("/", "no-cache"),
+        ("/main.dart.js", "no-cache"),
+        ("/canvaskit/canvaskit.wasm", "no-cache"),
+        ("/main.3f9a1b2c.js", "public, max-age=31536000, immutable"),
+        (
+            "/0cd610717bde95fd/engine.wasm",
+            "public, max-age=31536000, immutable",
+        ),
+    ] {
+        let reply = get(address, path);
+        assert_eq!(reply.status, 200, "{path}");
+        assert_eq!(reply.headers["cache-control"], cache, "{path}");
+        assert!(reply.headers.contains_key("etag"), "{path}");
+    }
+}
