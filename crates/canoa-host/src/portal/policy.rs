@@ -70,6 +70,8 @@ impl Decision {
 /// The configured policy, built.
 pub struct Policy {
     provider: Arc<dyn SignInPolicy>,
+    /// What the log says is in force.
+    summary: String,
     /// Dropped after the provider, whose instance points into what it loaded.
     _registry: Arc<Registry>,
 }
@@ -93,6 +95,7 @@ impl Policy {
                 .map_err(|error| format!("sign_in_policy: {error}"))?;
             return Ok(Self {
                 provider: Arc::new(rules),
+                summary: "none: every method from anywhere".to_owned(),
                 _registry: Arc::new(registry),
             });
         };
@@ -123,10 +126,27 @@ impl Policy {
                 .instantiate(&config)
                 .map_err(|error| built(error.to_string()))?,
         );
+        let summary = if entry.provider == RULES {
+            let rules = entry
+                .config
+                .get("rule")
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, Vec::len);
+            format!("{rules} rule{}", if rules == 1 { "" } else { "s" })
+        } else {
+            format!("provider {}", entry.provider)
+        };
         Ok(Self {
             provider,
+            summary,
             _registry: Arc::new(registry),
         })
+    }
+
+    /// What is in force, for the log: how many rules, the provider's id, or that there is none.
+    #[must_use]
+    pub fn describe(&self) -> &str {
+        &self.summary
     }
 
     /// A policy that is `provider`, for a test that needs one the rules provider cannot be.
@@ -134,6 +154,7 @@ impl Policy {
     pub fn from_provider(provider: Arc<dyn SignInPolicy>) -> Result<Self, String> {
         Ok(Self {
             provider,
+            summary: "a provider of the test's own".to_owned(),
             _registry: Arc::new(new_registry()?),
         })
     }

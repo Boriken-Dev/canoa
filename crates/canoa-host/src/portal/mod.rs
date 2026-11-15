@@ -137,6 +137,7 @@ impl Portal {
         settings.check().map_err(PortalError::Settings)?;
         let policy =
             policy::Policy::new(&settings, &accounts.methods()).map_err(PortalError::Settings)?;
+        tracing::info!("sign-in policy: {}", policy.describe());
         Self::bind_with_policy(settings, accounts, controller, policy)
     }
 
@@ -622,8 +623,23 @@ fn client_address(inner: &Inner, request: &Request, conn: &Conn) -> Option<IpAdd
         .and_then(|list| {
             list.rsplit(',')
                 .filter_map(|part| part.trim().parse::<IpAddr>().ok())
-                .find(|address| !inner.settings.trusted_proxies.contains(address))
+                .find(|address| {
+                    let address = plain(*address);
+                    !inner
+                        .settings
+                        .trusted_proxies
+                        .iter()
+                        .any(|proxy| plain(*proxy) == address)
+                })
         })
+}
+
+/// An IPv4 address a dual-stack socket or a header spells as `::ffff:a.b.c.d` is that IPv4 address.
+fn plain(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address, IpAddr::V4),
+        other => other,
+    }
 }
 
 /// The address the throttle counts a try against: the browser's, or, when it is not known, one address shared by every such
@@ -789,6 +805,27 @@ fn host_for(
     conn: &Conn,
     session: &Session,
 ) -> Result<Lease, Response> {
+    resume(inner, request, conn, session)?;
+    inner
+        .instances
+        .acquire(&session.user, session.uid)
+        .map_err(|error| {
+            tracing::warn!("{}'s host is not there: {error}", session.user);
+            Response::refusal(503)
+        })
+}
+
+/// Whether the session may be used now, asked at each use that starts or reaches a host, shows who the person is or changes their
+/// certificate: the account must still be the one that signed in, and the policy decides again with the steps the session was
+/// opened with, the account's groups now and the address the browser is at now. A session carried to where its method is no
+/// longer accepted ends. When the directory cannot say which groups the account is in, the request is not served (`503`) and
+/// the session stands.
+fn resume(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    session: &Session,
+) -> Result<(), Response> {
     let groups = match inner.accounts.still(&session.user, session.uid) {
         Standing::Gone => {
             inner.sessions.close_user(&session.user);
@@ -799,11 +836,14 @@ fn host_for(
             return Err(Response::refusal(401));
         }
         Standing::Present(groups) => groups,
-        // The directory did not answer: the session stands, in the groups it had.
-        _ => session.groups.clone(),
+        _ => {
+            tracing::warn!(
+                "{}'s groups could not be read: the request is not served",
+                session.user
+            );
+            return Err(Response::refusal(503));
+        }
     };
-    // The policy decides again at every use that starts or reaches a host, with the steps the session was opened with and the
-    // address the browser is at now: a session carried to where its method is no longer accepted ends.
     let address = client_address(inner, request, conn);
     let context = policy::context(
         purposes::RESUME,
@@ -830,13 +870,7 @@ fn host_for(
             return Err(Response::refusal(503));
         }
     }
-    inner
-        .instances
-        .acquire(&session.user, session.uid)
-        .map_err(|error| {
-            tracing::warn!("{}'s host is not there: {error}", session.user);
-            Response::refusal(503)
-        })
+    Ok(())
 }
 
 fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
@@ -858,12 +892,20 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         ("GET" | "HEAD", page::JS_PATH) => asset("text/javascript; charset=utf-8", page::JS),
         ("GET" | "HEAD", METHODS) => methods_response(inner, request, conn),
         ("GET" | "HEAD", CERTIFICATE) => match authed(inner, request) {
-            Some(session) => certificate_page(inner, request, conn, &session, None),
+            Some(session) => match resume(inner, request, conn, &session) {
+                Ok(()) => certificate_page(inner, request, conn, &session, None),
+                // A session that ended is a browser to sign in again.
+                Err(refusal) if refusal.status == 401 => Response::redirect(LOGIN),
+                Err(refusal) => refusal,
+            },
             None => Response::redirect(LOGIN),
         },
         ("POST", CERTIFICATE) => match authed(inner, request) {
             Some(session) if from_own_page(request, conn) => {
-                certificate_action(inner, request, conn, &session)
+                match resume(inner, request, conn, &session) {
+                    Ok(()) => certificate_action(inner, request, conn, &session),
+                    Err(refusal) => refusal,
+                }
             }
             Some(_) => Response::refusal(403),
             None => Response::refusal(401),
@@ -882,7 +924,10 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             )
         }
         ("GET", "/portal/session") => match authed(inner, request) {
-            Some(session) => Response::json(200, &serde_json::json!({"user": session.user})),
+            Some(session) => match resume(inner, request, conn, &session) {
+                Ok(()) => Response::json(200, &serde_json::json!({"user": session.user})),
+                Err(refusal) => refusal,
+            },
             None => Response::refusal(401),
         },
         ("GET" | "HEAD", web::HOST_INDEX) => match authed(inner, request) {
@@ -1070,19 +1115,14 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
                         login_response(inner, request, conn, 401, Some(refused), None),
                     );
                 }
+                // A policy that cannot decide once the credential names someone is a refusal, as a policy that decides against is:
+                // the answer must not tell a person whose password is right from one whose is not.
                 Err(why) => {
                     tracing::warn!("the sign-in policy could not decide: {why}");
                     return after_floor(
                         inner,
                         started,
-                        login_response(
-                            inner,
-                            request,
-                            conn,
-                            503,
-                            Some(page::Notice::Unavailable),
-                            None,
-                        ),
+                        login_response(inner, request, conn, 401, Some(refused), None),
                     );
                 }
             }
@@ -1098,14 +1138,11 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
             };
             let seen = status.and_then(|status| status.presented);
             let fingerprint = seen.as_ref().map(|(cert, _)| cert.fingerprint.clone());
-            let Some((token, _)) = inner.sessions.open_with(
-                &user,
-                uid,
-                Some(method),
-                fingerprint,
-                vec![factor],
-                groups,
-            ) else {
+            let Some((token, _)) =
+                inner
+                    .sessions
+                    .open_with(&user, uid, Some(method), fingerprint, vec![factor])
+            else {
                 inner.throttle.succeeded(attempt);
                 return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
             };

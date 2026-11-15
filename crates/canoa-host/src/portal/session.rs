@@ -36,8 +36,6 @@ pub struct Session {
     pub fingerprint: Option<String>,
     /// The steps that signed it in, which the sign-in policy is asked about again each time it is used.
     pub done: Vec<Factor>,
-    /// The account's groups when it signed in: what the policy is told if the directory cannot say now.
-    pub groups: Vec<String>,
 }
 
 struct Kept {
@@ -49,7 +47,6 @@ struct Kept {
     method: Option<Method>,
     fingerprint: Option<String>,
     done: Vec<Factor>,
-    groups: Vec<String>,
 }
 
 /// The sessions of signed-in browsers, by the digest of the token the browser holds: the token itself is never kept.
@@ -85,11 +82,11 @@ impl Sessions {
     /// A new session for `user`, and the token the browser keeps. An account that holds its share already loses its oldest
     /// session, so one account cannot fill the table. `None` when the whole table is full of live sessions of others.
     pub fn open(&self, user: &str, uid: u32) -> Option<(String, Session)> {
-        self.open_with(user, uid, None, None, Vec::new(), Vec::new())
+        self.open_with(user, uid, None, None, Vec::new())
     }
 
     /// [`Sessions::open`] for a sign-in by `method`, whose request carried a certificate with `fingerprint`, if it did, and which
-    /// passed the steps `done` as an account in `groups`.
+    /// passed the steps `done`.
     pub fn open_with(
         &self,
         user: &str,
@@ -97,7 +94,6 @@ impl Sessions {
         method: Option<Method>,
         fingerprint: Option<String>,
         done: Vec<Factor>,
-        groups: Vec<String>,
     ) -> Option<(String, Session)> {
         let password = method == Some(Method::Password);
         let mut bytes = [0_u8; TOKEN_BYTES];
@@ -135,7 +131,6 @@ impl Sessions {
                 method,
                 fingerprint: fingerprint.clone(),
                 done: done.clone(),
-                groups: groups.clone(),
             },
         );
         Some((
@@ -148,7 +143,6 @@ impl Sessions {
                 method,
                 fingerprint,
                 done,
-                groups,
             },
         ))
     }
@@ -174,7 +168,6 @@ impl Sessions {
             method: kept.method,
             fingerprint: kept.fingerprint.clone(),
             done: kept.done.clone(),
-            groups: kept.groups.clone(),
         })
     }
 
@@ -423,7 +416,6 @@ mod tests {
                     1,
                     Some(method),
                     fingerprint.map(str::to_owned),
-                    Vec::new(),
                     Vec::new(),
                 )
                 .unwrap()

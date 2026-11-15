@@ -683,3 +683,181 @@ fn the_guide_shows_the_network_rule_as_these_tests_run_it() {
     .unwrap();
     assert!(guide.contains(NETWORK_RULE.trim()));
 }
+
+#[test]
+fn a_trusted_proxy_is_compared_as_the_address_it_is_whatever_its_spelling() {
+    // nginx behind another proxy: the front proxy is inside the network and is the last hop when no browser address was added.
+    let rig = rig(
+        |settings| {
+            settings.sign_in_policy = network_rule();
+            settings.trusted_proxies = vec!["10.0.0.1".parse().unwrap()];
+        },
+        0,
+    );
+    for hop in ["10.0.0.1", "::ffff:10.0.0.1", "10.0.0.1, ::ffff:10.0.0.1"] {
+        assert_eq!(methods_at(&rig, Some(hop)), ["certificate"], "{hop}");
+    }
+    // With the browser's own address in front of the proxy's, that address is the browser's.
+    assert_eq!(
+        methods_at(&rig, Some("10.1.2.3, ::ffff:10.0.0.1")),
+        ["password", "certificate"]
+    );
+    // A proxy that is not listed is taken for the browser: list the front proxy of a chain.
+    let unlisted = rig_with_no_proxies();
+    assert_eq!(
+        methods_at(&unlisted, Some("10.0.0.1")),
+        ["password", "certificate"]
+    );
+}
+
+fn rig_with_no_proxies() -> Rig {
+    rig(|settings| settings.sign_in_policy = network_rule(), 0)
+}
+
+/// Signs `canoatesta` in by password from inside, then asks `path` from outside, with `method` and a body.
+fn from_outside_after_inside(
+    rig: &Rig<impl Sized>,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> (Answer, String) {
+    let cookie = form_at(rig, Some("10.1.2.3"), None, "user=canoatesta&password=pw-a")
+        .cookie()
+        .expect("a session");
+    let to = proxied(rig);
+    let mut extra = vec![
+        ("Cookie", cookie.clone()),
+        ("X-Forwarded-For", "203.0.113.7".to_owned()),
+        ("Origin", to.origin()),
+    ];
+    if !body.is_empty() {
+        extra.push((
+            "Content-Type",
+            "application/x-www-form-urlencoded".to_owned(),
+        ));
+    }
+    (request(&to, method, path, &extra, body), cookie)
+}
+
+#[test]
+fn the_session_and_certificate_pages_decide_the_session_again_too() {
+    let rig = under_the_network_rule();
+    let inside = |rig: &Rig, path: &str, cookie: &str| {
+        request(
+            &proxied(rig),
+            "GET",
+            path,
+            &[
+                ("Cookie", cookie.to_owned()),
+                ("X-Forwarded-For", "10.1.2.3".to_owned()),
+            ],
+            "",
+        )
+    };
+    // From inside, the session says who it is.
+    let cookie = form_at(
+        &rig,
+        Some("10.1.2.3"),
+        None,
+        "user=canoatesta&password=pw-a",
+    )
+    .cookie()
+    .unwrap();
+    assert_eq!(inside(&rig, "/portal/session", &cookie).status, 200);
+    // From outside it does not, and it is ended.
+    let (moved, _) = from_outside_after_inside(&rig, "GET", "/portal/session", "");
+    assert_eq!(moved.status, 401);
+    assert!(!moved.body.contains("canoatesta"));
+    let (page, cookie) = from_outside_after_inside(&rig, "GET", CERTIFICATE, "");
+    assert_eq!(page.status, 303, "{}", page.body);
+    assert_eq!(inside(&rig, "/portal/session", &cookie).status, 401);
+    // The pin cannot be removed from there either.
+    rig.accounts
+        .certificates
+        .lock()
+        .unwrap()
+        .insert("MIIB-mine".to_owned(), "canoatesta".to_owned());
+    let (removed, _) = from_outside_after_inside(&rig, "POST", CERTIFICATE, "action=remove");
+    assert_eq!(removed.status, 401);
+    assert!(
+        rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .contains_key("MIIB-mine")
+    );
+}
+
+/// A policy that decides until it is told who is signing in, and then cannot.
+struct BreaksOnceNamed;
+
+impl SignInPolicy for BreaksOnceNamed {
+    fn decide(&self, context: SignInContext) -> Result<SignInDecision, ProviderError> {
+        if context.person.is_some() {
+            return Err(coqui_access::error::internal("the risk service is down"));
+        }
+        Ok(SignInDecision {
+            complete: false,
+            methods: vec![coqui_access::Offer {
+                method: "password".to_owned(),
+                providers: Vec::new(),
+            }],
+            ..SignInDecision::default()
+        })
+    }
+}
+
+#[test]
+fn a_policy_error_after_a_valid_credential_answers_as_a_refusal_and_counts() {
+    let policy = policy::Policy::from_provider(Arc::new(BreaksOnceNamed)).unwrap();
+    let rig = rig_policy(
+        Arc::new(Fixed {
+            accounts: Mutex::new(
+                [("canoatesta".to_owned(), ("pw-a".to_owned(), mine()))]
+                    .into_iter()
+                    .collect(),
+            ),
+            gone: Mutex::new(HashSet::new()),
+            unsure: Mutex::new(HashSet::new()),
+            asked: AtomicUsize::new(0),
+            certificates: Mutex::new(HashMap::new()),
+            last_client: Mutex::new(None),
+            presented: Mutex::new(Vec::new()),
+        }),
+        |_| {},
+        0,
+        Some(policy),
+    );
+    let right = form_at(
+        &rig,
+        Some("10.1.2.3"),
+        None,
+        "user=canoatesta&password=pw-a",
+    );
+    let wrong = form_at(
+        &rig,
+        Some("10.1.2.3"),
+        None,
+        "user=canoatesta&password=nope",
+    );
+    for answer in [&right, &wrong] {
+        assert_eq!(answer.status, 401, "{}", answer.body);
+        assert!(answer.cookie().is_none());
+        assert!(answer.body.contains("Sign-in failed."));
+    }
+    assert_eq!(
+        rig.inner
+            .throttle
+            .failures_from("10.1.2.3".parse().unwrap()),
+        2
+    );
+}
+
+#[test]
+fn the_policy_says_what_it_is_when_the_portal_binds() {
+    let none = policy::Policy::new(&Settings::default(), &[Method::Password]).unwrap();
+    assert_eq!(none.describe(), "none: every method from anywhere");
+    let settings = Settings::from_toml(NETWORK_RULE).unwrap();
+    let rules = policy::Policy::new(&settings, &[Method::Password]).unwrap();
+    assert_eq!(rules.describe(), "2 rules");
+}

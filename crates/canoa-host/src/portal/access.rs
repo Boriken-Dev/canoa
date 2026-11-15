@@ -613,6 +613,13 @@ impl Accounts for Access {
             Err(error) => return Err(PinError::Failed(error.to_string())),
             _ => {}
         }
+        // The provider adds a pin to an account that has one. Enrolling means this certificate is the account's only one, so the
+        // record goes first: a failure after that leaves the account with no pin, never with the old one.
+        if all.iter().any(|account| account.name == user) {
+            pins.accounts
+                .remove(user.to_owned())
+                .map_err(|error| PinError::Failed(error.to_string()))?;
+        }
         pins.accounts
             .put(AccountPut {
                 name: user.to_owned(),
@@ -973,6 +980,60 @@ mod tests {
         let mut entry = mtls_entry(file);
         entry.enrol = true;
         Access::new(&settings(vec![entry])).unwrap()
+    }
+
+    /// The provider adds a pin to an account that has one; enrolling a certificate means it is the account's only one, so the
+    /// one it replaces stops signing in, and removing takes the whole record.
+    #[test]
+    fn pinning_a_certificate_replaces_the_one_before_it_in_the_real_provider() {
+        let dir = scratch("replace");
+        let file = dir.join("peers.toml");
+        let me = my_name();
+        let (other_der, other_fingerprint) = certificate();
+        seed(
+            "coqui_access_mtls",
+            "coqui_access_mtls",
+            &file_source(&file),
+            "someone-else",
+            &other_fingerprint,
+        );
+        let access = enrolling(&file);
+        let (first, _) = certificate();
+        let (second, _) = certificate();
+        let (third, _) = certificate();
+        let headers: Vec<_> = [&first, &second, &third]
+            .into_iter()
+            .map(|der| header(&data_encoding::BASE64.encode(der)))
+            .collect();
+        for (index, enrolled) in headers.iter().enumerate() {
+            access.pin(&me, mine(), enrolled).unwrap();
+            for (other, probe) in headers.iter().enumerate().take(index + 1) {
+                let signed = access.sign_in_certificate(probe, client(), &[]);
+                if other == index {
+                    admits(signed, &me, "coqui_access_mtls");
+                } else {
+                    assert_eq!(signed, SignIn::Refused, "pin {other} after pin {index}");
+                }
+            }
+        }
+        // Pinning the certificate it already has changes nothing.
+        access.pin(&me, mine(), &headers[2]).unwrap();
+        admits(
+            access.sign_in_certificate(&headers[2], client(), &[]),
+            &me,
+            "coqui_access_mtls",
+        );
+        // Removing takes the whole record, and another account's is untouched.
+        assert_eq!(access.unpin(&me), Ok(true));
+        for probe in &headers {
+            assert_eq!(
+                access.sign_in_certificate(probe, client(), &[]),
+                SignIn::Refused
+            );
+        }
+        assert_eq!(access.unpin(&me), Ok(false));
+        let _ = other_der;
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

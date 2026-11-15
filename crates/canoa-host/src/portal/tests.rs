@@ -1486,7 +1486,7 @@ fn the_root_helper_refuses_what_the_validator_does_and_every_account_below_the_l
 }
 
 #[test]
-fn a_session_stands_while_the_directory_cannot_say_and_ends_only_when_it_says_gone() {
+fn a_request_waits_while_the_directory_cannot_say_and_the_session_ends_only_when_it_says_gone() {
     let rig = rig(|_| {}, 0);
     let cookie = signed_in(&rig, "canoatesta");
     rig.accounts
@@ -1504,11 +1504,15 @@ fn a_session_stands_while_the_directory_cannot_say_and_ends_only_when_it_says_go
         )
         .status
     };
-    assert_eq!(
-        index(&cookie),
-        200,
-        "a directory that does not answer signs nobody out"
-    );
+    // The groups the policy is told cannot be learnt, so the request is not served, and nobody is signed out for it.
+    assert_eq!(index(&cookie), 503, "a directory that does not answer");
+    rig.accounts.unsure.lock().unwrap().clear();
+    assert_eq!(index(&cookie), 200, "and the session stood meanwhile");
+    rig.accounts
+        .unsure
+        .lock()
+        .unwrap()
+        .insert("canoatesta".to_owned());
     rig.accounts
         .gone
         .lock()
