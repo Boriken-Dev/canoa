@@ -85,26 +85,25 @@ authenticators = [
   and the others there; build them with `cargo build --release -p coqui-access-mtls-plugin`.
 - Each credential goes to the providers that take it, in list order. A name and a password go to those that take a password:
   a provider that answers `Unknown` passes the credential on, one that answers `Invalid` ends the try. The system provider
-  answers `Unknown` for a name it does not admit and `Invalid` for a wrong password. `coqui_access_password` answers `Invalid`
-  for **every name its file does not hold**, so listed first it refuses all other names before the system provider is asked:
-  with `[password, system]` nobody but the file's accounts signs in. List it after the system provider, where it is reached
-  only for names the system provider does not admit (which the portal then refuses at the account check unless the system
-  entry's own `groups` are narrower than the portal's), or give the system entry no `groups` of its own and keep the file for
-  accounts the system provider does not know of. A client certificate goes to those that take a request. A provider that takes
+  answers `Unknown` for a name it does not admit and `Invalid` for a wrong password. `coqui_access_password` answers `Unknown`
+  for a name its file does not hold and `Invalid` for a wrong password of one it does, so in either order the providers
+  after it are asked about the other names. A client certificate goes to those that take a request. A provider that takes
   bearer keys (`coqui_access_key`) is left out with a note in the log: a key is not a sign-in for the page.
 - A provider answers with who the credential belongs to. The portal then asks the operating system's directory for that
   account under `min_uid` and `groups`; a name no operating-system account has, or an account outside the groups, is refused
   like a wrong password. A password file or a certificate table can therefore name an operating-system account and nothing else.
 - The throttle and the failure floor above apply to every method, and a wrong password, an unknown account and an account the
   portal does not admit all read the same.
+- A certificate provider that names no account itself answers by the certificate's claims, for a matcher to tie to an account.
+  The portal runs no matcher: such a certificate is refused, with a note in the log that names the provider. Give the
+  provider `account` picks that name the account (see its header), or pin certificates (`trust = "pinned"`).
 
-`GET /portal/methods` (no cookie needed) answers `{"methods": ["password", "certificate"]}`: the ways in this portal accepts
-for this connection. The certificate method is listed only on the proxy's socket. The sign-in page is built from the same list:
+`GET /portal/methods` (no cookie needed) answers `{"methods": ["password", "certificate"]}`: the ways in the sign-in policy
+(below) allows this connection, among the ones this portal has. The certificate method is listed only on the proxy's socket.
+The sign-in page is built from the same list:
 a password form, and a **Sign in with your certificate** button when the certificate method is on, each with its own error. A
 `429` carries `Retry-After` and the page counts it down and holds the buttons; the page's one script, `/portal/login.js`, does
-only that, and the page's policy allows scripts and styles from the portal itself and nothing inline. A single function in
-the portal decides whether a method is allowed for a request, given the client's address and the method; today it allows every
-method.
+only that, and the page's policy allows scripts and styles from the portal itself and nothing inline.
 
 ### Signing in by certificate
 
@@ -204,6 +203,60 @@ portal's machine forwards to the portal's socket:
 The portal believes the header only because it arrived on `socket`. Anything that can write to that socket (the proxy's group)
 can sign in as anyone whose certificate is pinned, by sending the header itself.
 
+### Which ways in a connection may use
+
+`sign_in_policy` decides which of the ways in above a connection may use, and whether the steps a sign-in has passed are enough.
+It is a coqui-access
+[sign-in policy](https://github.com/Boriken-Dev/coqui-access/blob/main/docs/sign-in.md): `provider` defaults to the rules
+provider `coqui_signin_rules`, which is built in, and any other comes from a `library` as an authenticator does. A password
+only from inside a network and a certificate from anywhere:
+
+```toml
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"], ["certificate"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["certificate"]]
+```
+
+The rules are tried in order; the first whose conditions hold decides. An address outside 10.0.0.0/8, an IPv6 address and an
+address the portal could not determine all fall to the second rule, so put the strictest last. Each `allow` is a list of
+chains; a chain is a set of methods that must all succeed for one account. With no `sign_in_policy`, each way in the portal has
+is enough alone, from anywhere.
+
+- **The page offers only what is allowed.** The sign-in page and `GET /portal/methods` list the methods the policy allows for
+  that connection, in the policy's order, and nothing else.
+- **A refused method is refused first.** A sign-in by a method the policy does not offer from where the browser is gets `403`
+  before the throttle counts it and before any provider is asked: a password from outside 10.0.0.0/8 never reaches PAM or a
+  directory, and counts against no address and no account. The log line names the method, the address and the rule, never a
+  name that was typed.
+- **A valid credential is decided again.** Once a provider accepts it, the policy is asked once more with the account it named
+  (its user id, name and groups) and the step passed. If that is enough, the session opens and records the steps; if it is not
+  (a chain that needs more, or a rule for that account that does not allow the method), the answer, the count and the delay
+  are those of a wrong password, so nothing tells the two apart. A password retyped at `/portal/certificate` is a password
+  sent: the policy decides whether this connection may send one before anything is asked.
+- **A session is decided again when it is used.** `/canoa.json`, `/portal/pair` and each new channel decide with the steps the
+  session was opened with and the address the browser is at now. A session that is no longer enough ends (`401`; the app goes
+  back to the sign-in page): a password session carried out of 10.0.0.0/8 ends at its next use, and a laptop that moves from
+  the office to elsewhere signs in again with its certificate. A certificate session stands wherever it is.
+- **The address** is the one the proxy reports: on `socket`, the last address in `client_address_header` that is not in
+  `trusted_proxies`; on `listen`, the connection's own peer. With nginx in front, either of these sets it (the first is the
+  portal's default):
+
+  ```nginx
+  proxy_set_header X-Forwarded-For $remote_addr;
+  proxy_set_header X-Real-IP $remote_addr;      # with client_address_header = "x-real-ip"
+  ```
+
+  When the header is missing, is not an address, or every address in it is a proxy of ours, the address is **unknown**: it
+  matches no network, and the policy is told so, never a placeholder. A proxy inside your network that drops the browser's
+  address therefore makes browsers look like nobody, not like they are inside.
+- **A policy that cannot decide offers nothing.** The page, `/portal/methods` and the sign-in answer `503` and the log says
+  why; the portal never falls back to allowing.
+- **A chain of more than one method** (`["password", "totp"]`) cannot be completed yet: the portal does not ask for a second
+  step, so a sign-in by such a chain is refused like a wrong password. Keep chains of one method until it does.
+
 ## The person's host: `canoa serve --portal`
 
 ```sh
@@ -247,7 +300,8 @@ authenticators = [{ provider = "coqui_access_system" }]   # see "Signing in"
 certificate_header = "x-client-cert"   # where the proxy puts the browser's certificate (base64 DER)
 enrol_seconds = 600                    # how long after a password sign-in a certificate may be pinned
 trusted_proxies = []                   # proxies of ours that may appear in X-Forwarded-For before the browser's address
-client_address_header = "x-forwarded-for"
+client_address_header = "x-forwarded-for"   # or the header your proxy puts the browser's address in
+# sign_in_policy: which ways in a connection may use, from where; a table, see "Which ways in a connection may use"
 session_seconds = 28800
 max_sessions_per_user = 8
 idle_seconds = 1800
