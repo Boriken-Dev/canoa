@@ -16,9 +16,13 @@ import json
 import math
 import re
 import shutil
+import sys
 import urllib.request
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+import fallback_fonts
 
 INDEX = "https://raw.githubusercontent.com/jose-pr/ai6/main/clients/outer-office/tool/cdn_files.json"
 # leanflutter's desktop packages: the tray and the window. A desktop build needs all of these, whichever of them pub resolves.
@@ -167,11 +171,18 @@ def main():
             return dict(host=e["host"],path=name,sha256=digest(data),bytes=len(data))
         with ThreadPoolExecutor(max_workers=12) as workers:
             files=list(workers.map(copy,fonts))
+    fallback=0
+    if not args.skip_cdn:
+        # The fonts the web engine falls back to, pinned by fallback_fonts.sha256: the app's build copies them from here.
+        pinned=fallback_fonts.read_list()
+        fallback_fonts.check_engine(pinned,fallback_fonts.flutter_root())
+        fallback=fallback_fonts.mirror(target,pinned)
     report=dict(format=2,source="Boriken-Dev/canoa",sourceCommit=args.revision,
                 status="complete",pubPackages=packages,gitDependencies=gits,
                 gitDependenciesNote="not mirrored; pub fetches them from their URL, so they need the network",
                 dropped=dict(directories=list(DROP_DIRECTORIES),counts=dropped,deletedFlaggedFiles=deleted),
                 cdnFiles=files,
+                fallbackFonts=dict(count=0 if args.skip_cdn else len(pinned),bytes=fallback),
                 desktopPackages=list(DESKTOP_PACKAGES),desktopLinuxSystemPackages=list(DESKTOP_LINUX_SYSTEM))
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
     print("Mirrored",len(packages),"pub packages,",len(gits),"git dependencies recorded and",len(files),"font assets;",
