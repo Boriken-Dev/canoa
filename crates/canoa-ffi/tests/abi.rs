@@ -489,7 +489,7 @@ fn accounts_are_listed_and_a_sign_in_that_needs_a_typed_secret_is_refused_as_a_j
 fn open_link(job: u64, entry: &str) -> Result<u64, i32> {
     let mut link = u64::MAX;
     // SAFETY: both point at what lives across the call.
-    let status = unsafe { canoa_ffi_link_open(job, entry.as_ptr(), entry.len(), &raw mut link) };
+    let status = unsafe { canoa_ffi_link_open(job, entry.as_ptr(), entry.len(), 0, &raw mut link) };
     if status == STATUS_OK {
         assert_ne!(link, 0);
         Ok(link)
@@ -568,20 +568,20 @@ fn a_link_refuses_what_it_cannot_open_and_says_which() {
     let mut link = 9_u64;
     // SAFETY: a null entry is what is being refused; `link` lives across the call.
     assert_eq!(
-        unsafe { canoa_ffi_link_open(1, core::ptr::null(), 0, &raw mut link) },
+        unsafe { canoa_ffi_link_open(1, core::ptr::null(), 0, 0, &raw mut link) },
         STATUS_BAD_ARGUMENT
     );
     assert_eq!(link, 0, "written first");
     // SAFETY: a null out-parameter is what is being refused.
     assert_eq!(
-        unsafe { canoa_ffi_link_open(1, b"x".as_ptr(), 1, core::ptr::null_mut()) },
+        unsafe { canoa_ffi_link_open(1, b"x".as_ptr(), 1, 0, core::ptr::null_mut()) },
         STATUS_BAD_ARGUMENT
     );
     assert_eq!(open_link(u64::MAX, "x"), Err(STATUS_UNKNOWN_JOB));
     let bad = [0xff_u8, 0xfe];
     // SAFETY: both point at what lives across the call; text that is not UTF-8 is what is being refused.
     assert_eq!(
-        unsafe { canoa_ffi_link_open(1, bad.as_ptr(), bad.len(), &raw mut link) },
+        unsafe { canoa_ffi_link_open(1, bad.as_ptr(), bad.len(), 0, &raw mut link) },
         STATUS_BAD_ARGUMENT
     );
     assert_eq!(canoa_ffi_link_close(u64::MAX), STATUS_UNKNOWN_LINK);

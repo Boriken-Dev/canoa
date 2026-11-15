@@ -2,12 +2,13 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 /// The ABI this code was written for; a library of another is refused.
-const int canoaAbiVersion = 3;
+const int canoaAbiVersion = 4;
 
 // One table with crates/canoa-ffi/src/exports.rs; app/test/host_library_test.dart compares them.
 const int statusOk = 0;
@@ -53,7 +54,7 @@ final class LinkSaid {
 }
 
 /// The library, loaded.
-final class CanoaNative {
+final class CanoaNative implements Finalizable {
   CanoaNative._(DynamicLibrary library, this.path)
     : _start = library.lookupFunction<
         Int32 Function(Pointer<Uint8>, Size, Pointer<Uint64>),
@@ -69,8 +70,8 @@ final class CanoaNative {
       _stop = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_job_stop'),
       _free = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_job_free'),
       _linkOpen = library.lookupFunction<
-        Int32 Function(Uint64, Pointer<Uint8>, Size, Pointer<Uint64>),
-        int Function(int, Pointer<Uint8>, int, Pointer<Uint64>)
+        Int32 Function(Uint64, Pointer<Uint8>, Size, Int64, Pointer<Uint64>),
+        int Function(int, Pointer<Uint8>, int, int, Pointer<Uint64>)
       >('canoa_ffi_link_open'),
       _linkSecret = library.lookupFunction<
         Int32 Function(Uint64, Pointer<Uint8>, Size),
@@ -84,16 +85,44 @@ final class CanoaNative {
         Int32 Function(Uint64, Pointer<Pointer<Uint8>>, Pointer<Size>),
         int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>)
       >('canoa_ffi_link_read'),
-      _linkClose = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_link_close');
+      _linkClose = library.lookupFunction<Int32 Function(Uint64), int Function(int)>('canoa_ffi_link_close'),
+      // Last, so that nothing after it can fail: the library's count of Dart's tables is given up only by this finalizer.
+      _armed = _arm(library) {
+    // Straight after, with nothing between that can throw.
+    _armed?.attach(this, nullptr);
+  }
+
+  /// Hands the library Dart's native API table, and answers the finalizer that gives it up again; null when the library
+  /// refuses it. Dart allows no post to a port once its machine is torn down, which comes after the isolate group's end,
+  /// when native finalizers are guaranteed to have run. The library then waits for any post in flight and makes none.
+  static NativeFinalizer? _arm(DynamicLibrary library) {
+    // Looked up before the table is given, so that a missing symbol leaves nothing to give up.
+    final finalizer = NativeFinalizer(
+      library.lookup<NativeFunction<Void Function(Pointer<Void>)>>('canoa_ffi_dart_forget'),
+    );
+    final status = library.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
+      'canoa_ffi_dart_api',
+    )(NativeApi.initializeApiDLData);
+    if (status != statusOk) return null;
+    _finalizers.add(finalizer);
+    return finalizer;
+  }
+
+  // Held for the life of the process: a finalizer that is collected does not run.
+  static final List<NativeFinalizer> _finalizers = [];
 
   /// Where it was loaded from.
   final String path;
+
+  /// Whether a link can be given a port to be told on; when not, a link is polled.
+  bool get canNotify => _armed != null;
+  final NativeFinalizer? _armed;
   final int Function(Pointer<Uint8>, int, Pointer<Uint64>) _start;
   final int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>) _read;
   final void Function(Pointer<Uint8>, int) _textFree;
   final int Function(int) _stop;
   final int Function(int) _free;
-  final int Function(int, Pointer<Uint8>, int, Pointer<Uint64>) _linkOpen;
+  final int Function(int, Pointer<Uint8>, int, int, Pointer<Uint64>) _linkOpen;
   final int Function(int, Pointer<Uint8>, int) _linkSecret;
   final int Function(int, Pointer<Uint8>, int) _linkSend;
   final int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>) _linkRead;
@@ -178,13 +207,17 @@ final class CanoaNative {
 
   /// Opens a link to the entry [entry] of the `serve` job [job] runs: a connection inside this process, needing no proof.
   /// Throws [CanoaNativeError] with [statusNoEntry] when the job serves no such entry (yet), or has stopped.
-  int openLink(int job, String entry) {
+  ///
+  /// With a [notifyPort], the library posts the link's number to it each time the link has something to read and when it ends,
+  /// so [readLink] need not be polled; only when [canNotify].
+  int openLink(int job, String entry, {SendPort? notifyPort}) {
+    if (notifyPort != null && !canNotify) throw ArgumentError('the library cannot notify a port');
     final bytes = utf8.encode(entry);
     final text = malloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
     final link = malloc<Uint64>();
     try {
       text.asTypedList(bytes.length).setAll(0, bytes);
-      final status = _linkOpen(job, text, bytes.length, link);
+      final status = _linkOpen(job, text, bytes.length, notifyPort?.nativePort ?? 0, link);
       if (status != statusOk) throw CanoaNativeError('link_open', status);
       return link.value;
     } finally {

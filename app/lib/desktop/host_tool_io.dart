@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -114,16 +115,21 @@ const Duration _linkPollEvery = Duration(milliseconds: 15);
 /// How long a send waits between tries while the library holds all it takes.
 const Duration _linkBusyPause = Duration(milliseconds: 10);
 
-/// A link the library holds, read on a timer like a command.
+/// A link the library holds, read when the library says it has something, or on a timer when it cannot say.
 final class _LibraryLink implements HostLink, HostLinkSecret {
-  _LibraryLink(this._native, this._link, this._linkSecret) {
-    _timer = Timer.periodic(_linkPollEvery, (_) => _read());
+  _LibraryLink(this._native, this._link, this._linkSecret, this._wake) {
+    if (_wake != null) {
+      _wake.listen((_) => _read());
+    } else {
+      _timer = Timer.periodic(_linkPollEvery, (_) => _read());
+    }
     scheduleMicrotask(_read);
   }
 
   final CanoaNative _native;
   final int _link;
   Uint8List? _linkSecret;
+  final ReceivePort? _wake;
 
   @override
   Uint8List? takeLinkSecret() {
@@ -133,7 +139,7 @@ final class _LibraryLink implements HostLink, HostLinkSecret {
   }
 
   final _messages = StreamController<String>();
-  late final Timer _timer;
+  Timer? _timer;
   bool _closed = false;
 
   void _read() {
@@ -151,7 +157,8 @@ final class _LibraryLink implements HostLink, HostLinkSecret {
   void _end() {
     if (_closed) return;
     _closed = true;
-    _timer.cancel();
+    _timer?.cancel();
+    _wake?.close();
     try {
       _native.closeLink(_link);
     } on Object {
@@ -253,14 +260,21 @@ final class _LibraryChild implements HostChild, HostLinks {
   @override
   HostLink openLink(String entry) {
     if (_exit.isCompleted) throw StateError('the host has ended');
-    final link = _native.openLink(_job, entry);
+    final wake = _native.canNotify ? ReceivePort() : null;
+    final int link;
+    try {
+      link = _native.openLink(_job, entry, notifyPort: wake?.sendPort);
+    } on Object {
+      wake?.close();
+      rethrow;
+    }
     Uint8List? secret;
     try {
       secret = _native.linkSecret(_job);
     } on CanoaNativeError {
       // This host has none to give: its secret prompts are off on the link.
     }
-    return _LibraryLink(_native, link, secret);
+    return _LibraryLink(_native, link, secret, wake);
   }
 
   @override

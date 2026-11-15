@@ -178,7 +178,7 @@ fn wait_for(job: u64, log: &mut Vec<String>, done: impl Fn(&[String], Option<i64
 fn open_link(job: u64, entry: &str) -> u64 {
     let mut link = u64::MAX;
     // SAFETY: both point at what lives across the call.
-    let status = unsafe { canoa_ffi_link_open(job, entry.as_ptr(), entry.len(), &raw mut link) };
+    let status = unsafe { canoa_ffi_link_open(job, entry.as_ptr(), entry.len(), 0, &raw mut link) };
     assert_eq!(status, STATUS_OK);
     link
 }

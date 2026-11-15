@@ -145,6 +145,198 @@ pub(crate) fn share_parents_console() {
     let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 }
 
+/// Dart's native API, as the virtual machine hands it over: a table of named functions, of which only the one that posts an
+/// integer to a port is used. It is how a thread of this library wakes the application when a link has something to read,
+/// without the application polling. The table's layout is `dart_api_dl.h`'s `DartApi` and `DartApiEntry`.
+///
+/// Posting is allowed only while the virtual machine lives, so the function is held behind a lock that [`forget`] takes for
+/// writing: it returns once no post is in flight, and none starts after it.
+pub(crate) mod dart {
+    use core::ffi::{CStr, c_char, c_void};
+    use std::sync::{PoisonError, RwLock};
+
+    /// `DartApi`: the table's version and its entries, ended by one with no name.
+    #[repr(C)]
+    struct Api {
+        major: i32,
+        minor: i32,
+        functions: *const Entry,
+    }
+
+    /// `DartApiEntry`.
+    #[repr(C)]
+    struct Entry {
+        name: *const c_char,
+        function: *const c_void,
+    }
+
+    /// `Dart_PostInteger`: false when the port is closed or unknown.
+    type Post = unsafe extern "C" fn(i64, i64) -> bool;
+
+    /// The table's major version this code reads.
+    const API_MAJOR: i32 = 2;
+    /// Entries read before the table is taken for unterminated.
+    const MAX_ENTRIES: usize = 4096;
+
+    struct Armed {
+        post: Option<Post>,
+        /// Tables taken and not yet forgotten: the function stays until the last is.
+        holders: usize,
+    }
+
+    static ARMED: RwLock<Armed> = RwLock::new(Armed {
+        post: None,
+        holders: 0,
+    });
+
+    /// Takes the table the virtual machine gave the application (`NativeApi.initializeApiDLData`), whose version this code
+    /// reads and which names the function that posts. False for a table that does not. Each success is to be matched by one
+    /// [`forget`].
+    ///
+    /// # Safety
+    ///
+    /// `data` is null, or the table Dart's `NativeApi.initializeApiDLData` holds, which stays valid until the virtual machine
+    /// is torn down.
+    pub(crate) unsafe fn init(data: *const c_void) -> bool {
+        if data.is_null() || !data.cast::<Api>().is_aligned() {
+            return false;
+        }
+        // SAFETY: non-null and aligned, and the caller promises it is the VM's table.
+        let api = unsafe { &*data.cast::<Api>() };
+        if api.major != API_MAJOR || api.functions.is_null() || !api.functions.is_aligned() {
+            return false;
+        }
+        for index in 0..MAX_ENTRIES {
+            // SAFETY: entries follow one another up to the one with no name, which the loop does not pass.
+            let entry = unsafe { &*api.functions.add(index) };
+            if entry.name.is_null() {
+                return false;
+            }
+            // SAFETY: a name is a NUL-ended string that lives as long as the table.
+            if unsafe { CStr::from_ptr(entry.name) } != c"Dart_PostInteger" {
+                continue;
+            }
+            if entry.function.is_null() {
+                return false;
+            }
+            // SAFETY: the entry of this name is `Dart_PostInteger`, of the type `Post`.
+            let post = unsafe { core::mem::transmute::<*const c_void, Post>(entry.function) };
+            let mut armed = ARMED.write().unwrap_or_else(PoisonError::into_inner);
+            armed.post = Some(post);
+            armed.holders += 1;
+            return true;
+        }
+        false
+    }
+
+    /// Gives up one [`init`]; with the last, no post is made again. It waits for the posts in flight, so that when it returns
+    /// the virtual machine may be torn down.
+    pub(crate) fn forget() {
+        let mut armed = ARMED.write().unwrap_or_else(PoisonError::into_inner);
+        debug_assert!(armed.holders > 0, "more forgets than tables taken");
+        armed.holders = armed.holders.saturating_sub(1);
+        if armed.holders == 0 {
+            armed.post = None;
+        }
+    }
+
+    /// Whether a table is held.
+    pub(crate) fn ready() -> bool {
+        ARMED
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .post
+            .is_some()
+    }
+
+    /// Posts `value` to the port `port`, from any thread. False when nothing could be posted.
+    pub(crate) fn post(port: i64, value: i64) -> bool {
+        let armed = ARMED.read().unwrap_or_else(PoisonError::into_inner);
+        let Some(post) = armed.post else {
+            return false;
+        };
+        // SAFETY: `Dart_PostInteger` may be called from any thread while the virtual machine lives, which it does while the
+        // read lock is held, since [`forget`] needs the write lock.
+        unsafe { post(port, value) }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        static POSTED: AtomicUsize = AtomicUsize::new(0);
+        static ENTERED: AtomicBool = AtomicBool::new(false);
+        static HOLD: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" fn fake(_port: i64, _value: i64) -> bool {
+            ENTERED.store(true, Ordering::SeqCst);
+            while HOLD.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            POSTED.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+
+        fn table() -> *const c_void {
+            let entries = Box::leak(Box::new([
+                Entry {
+                    name: c"Dart_PostInteger".as_ptr(),
+                    function: fake as *const c_void,
+                },
+                Entry {
+                    name: core::ptr::null(),
+                    function: core::ptr::null(),
+                },
+            ]));
+            let api = Box::leak(Box::new(Api {
+                major: API_MAJOR,
+                minor: 0,
+                functions: entries.as_ptr(),
+            }));
+            core::ptr::from_ref(api).cast()
+        }
+
+        /// One test, since the lock is the process's.
+        #[test]
+        fn nothing_is_posted_once_forgotten_and_forgetting_waits_for_a_post_in_flight() {
+            assert!(!post(1, 1), "no table yet");
+            // SAFETY: a table that lives for the whole test.
+            unsafe {
+                assert!(init(table()));
+                assert!(init(table()));
+            }
+            assert!(post(1, 1));
+            assert_eq!(POSTED.load(Ordering::SeqCst), 1);
+            forget();
+            assert!(ready(), "one holder is left");
+            assert!(post(1, 1));
+
+            HOLD.store(true, Ordering::SeqCst);
+            let flying = std::thread::spawn(|| post(1, 1));
+            let until = Instant::now() + Duration::from_secs(10);
+            while !ENTERED.load(Ordering::SeqCst) {
+                assert!(Instant::now() < until, "the post never started");
+                std::thread::yield_now();
+            }
+            let forgetting = std::thread::spawn(forget);
+            std::thread::sleep(Duration::from_millis(150));
+            assert!(
+                !forgetting.is_finished(),
+                "forgetting waits for the post in flight"
+            );
+            HOLD.store(false, Ordering::SeqCst);
+            assert!(flying.join().expect("no panic"));
+            forgetting.join().expect("no panic");
+            let before = POSTED.load(Ordering::SeqCst);
+            assert!(!ready());
+            assert!(!post(1, 1), "nothing is posted once forgotten");
+            assert_eq!(POSTED.load(Ordering::SeqCst), before);
+        }
+    }
+}
+
 /// On macOS the library is linked into the application's own framework, so this runs before the application's `main` and
 /// can take over as Windows' and Linux's small entry files do.
 #[cfg(target_os = "macos")]

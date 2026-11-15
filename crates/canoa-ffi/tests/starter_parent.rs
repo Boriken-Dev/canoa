@@ -136,7 +136,7 @@ fn every_process_the_host_starts_is_a_child_of_its_process_starter_and_never_of_
     let name = "fixture";
     // SAFETY: both point at what lives across the call.
     assert_eq!(
-        unsafe { canoa_ffi_link_open(job, name.as_ptr(), name.len(), &raw mut link) },
+        unsafe { canoa_ffi_link_open(job, name.as_ptr(), name.len(), 0, &raw mut link) },
         STATUS_OK
     );
     send_on(

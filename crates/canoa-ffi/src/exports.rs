@@ -7,7 +7,7 @@ use core::panic::AssertUnwindSafe;
 use core::ptr;
 use std::panic::catch_unwind;
 
-use crate::{jobs, links};
+use crate::{jobs, links, platform};
 
 /// Done.
 pub const STATUS_OK: i32 = 0;
@@ -31,7 +31,7 @@ pub const STATUS_BUSY: i32 = 7;
 pub const STATUS_ENDED: i32 = 8;
 
 /// The version of this ABI, raised by any change to a function here.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// The bytes of the secret [`canoa_ffi_link_secret`] writes.
 pub const LINK_SECRET_LEN: usize = 32;
@@ -182,10 +182,45 @@ pub extern "C" fn canoa_ffi_job_free(job: u64) -> i32 {
     })
 }
 
+/// Hands the library the table Dart's `NativeApi.initializeApiDLData` holds, so that a link can post to a Dart port. Call it
+/// once before any [`canoa_ffi_link_open`] that names a port; each success is matched by one [`canoa_ffi_dart_forget`]. [`STATUS_BAD_ARGUMENT`] says
+/// the pointer is null or misaligned, or the table is not one of the version this library reads or lacks the function that
+/// posts; no link may then name a port.
+///
+/// # Safety
+///
+/// `table` is null, or the table Dart's `NativeApi.initializeApiDLData` holds, which stays valid for the life of the process.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn canoa_ffi_dart_api(table: *const core::ffi::c_void) -> i32 {
+    guarded(|| {
+        // SAFETY: the caller promises the table is Dart's, or null, which `init` refuses.
+        if unsafe { platform::dart::init(table) } {
+            STATUS_OK
+        } else {
+            STATUS_BAD_ARGUMENT
+        }
+    })
+}
+
+/// Gives up one successful [`canoa_ffi_dart_api`]; with the last, the library posts to no port again. It returns once any post
+/// in flight has, so that the virtual machine may be torn down after it: Dart allows posts only until then. It takes the
+/// argument of a `NativeFinalizer`'s callback and ignores it. Links still open then are never told of anything again.
+#[unsafe(no_mangle)]
+pub extern "C" fn canoa_ffi_dart_forget(_token: *mut core::ffi::c_void) {
+    let _ = guarded(|| {
+        platform::dart::forget();
+        STATUS_OK
+    });
+}
+
 /// Opens a link to the entry `entry` (`entry_len` bytes of UTF-8) of the `serve` job `job` runs, and writes its number to
 /// `out_link`, 0 on failure. The link is a connection inside this process: it needs no proof, and the entry serves it as it
 /// serves a paired key's, its agent starting on the first message sent. [`STATUS_NO_ENTRY`] says the job is no `serve` yet,
 /// the host serves no such entry, or it is stopping.
+///
+/// A `notify_port` other than 0 is a Dart port, to which the library posts the link's number each time the link goes from
+/// nothing to read to something, and when it ends. It needs [`canoa_ffi_dart_api`] to have succeeded first, else the call is
+/// [`STATUS_BAD_ARGUMENT`]. With 0 the application polls.
 ///
 /// # Safety
 ///
@@ -195,6 +230,7 @@ pub unsafe extern "C" fn canoa_ffi_link_open(
     job: u64,
     entry: *const u8,
     entry_len: usize,
+    notify_port: i64,
     out_link: *mut u64,
 ) -> i32 {
     guarded(|| {
@@ -210,7 +246,10 @@ pub unsafe extern "C" fn canoa_ffi_link_open(
         }
         // SAFETY: non-null, aligned and apart from the entry just above, and the caller promises it can be written.
         unsafe { out_link.write(0) };
-        if entry.is_null() || isize::try_from(entry_len).is_err() {
+        if entry.is_null()
+            || isize::try_from(entry_len).is_err()
+            || (notify_port != 0 && !platform::dart::ready())
+        {
             return STATUS_BAD_ARGUMENT;
         }
         // SAFETY: non-null and no longer than a slice may be, the caller promises `entry_len` readable bytes, and `u8` has
@@ -219,7 +258,7 @@ pub unsafe extern "C" fn canoa_ffi_link_open(
         let Ok(entry) = core::str::from_utf8(entry) else {
             return STATUS_BAD_ARGUMENT;
         };
-        match links::open(job, entry) {
+        match links::open(job, entry, notify_port) {
             Ok(link) => {
                 // SAFETY: as the first write.
                 unsafe { out_link.write(link) };

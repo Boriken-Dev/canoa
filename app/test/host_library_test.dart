@@ -66,13 +66,15 @@ void main() {
   group('in this process', skip: skip, () {
     late Directory dir;
     late String cfg;
+    late CanoaNative native;
     late LibraryHostTool tool;
 
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('canoa-library');
       cfg = '${dir.path}${Platform.pathSeparator}canoa.cfg';
       await File(cfg).writeAsString(const CanoaConfig().encode());
-      tool = LibraryHostTool(CanoaNative.open(path: _library), home: '${dir.path}/home', program: _host);
+      native = CanoaNative.open(path: _library);
+      tool = LibraryHostTool(native, home: '${dir.path}/home', program: _host);
     });
     tearDown(() async {
       try {
@@ -168,6 +170,47 @@ void main() {
       await supervisor.stop();
       await ended.timeout(const Duration(seconds: 30));
       await expectLater(second.send('{}'), throwsStateError);
+    });
+
+    test('a message and its answer cross the link in a few milliseconds, with no timer to wait for', () async {
+      final agent = exampleBinary('stdio_agent');
+      if (agent == null) fail(exampleMissing('stdio_agent')!);
+      await File(cfg).writeAsString('[host.agents.fixture]\nprogram = ${jsonEncode(agent)}\nlisten = "127.0.0.1:0"\n');
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      expect(native.canNotify, isTrue, reason: 'a link that cannot be told falls back to polling, which this test is not for');
+      final link = supervisor.openLink('fixture');
+      final answers = <int, Completer<void>>{};
+      final listening = link.messages.listen((message) {
+        final id = (jsonDecode(message) as Map<String, Object?>)['id'];
+        if (id is int) answers[id]?.complete();
+      });
+      Future<Duration> roundTrip(int id) async {
+        final done = answers[id] = Completer<void>();
+        final clock = Stopwatch()..start();
+        await link.send(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'method': 'initialize',
+            'params': {'protocolVersion': 1},
+          }),
+        );
+        await done.future.timeout(const Duration(seconds: 30));
+        return clock.elapsed;
+      }
+
+      // The first message starts the agent.
+      await roundTrip(1);
+      final times = <Duration>[for (var id = 2; id < 52; id++) await roundTrip(id)]..sort();
+      final median = times[times.length ~/ 2];
+      // ignore: avoid_print
+      print('link round trip: median ${median.inMicroseconds / 1000} ms, worst ${times.last.inMicroseconds / 1000} ms');
+      expect(median, lessThan(const Duration(milliseconds: 5)));
+      await listening.cancel();
+      await link.close();
+      await supervisor.stop();
     });
 
     test('the scripted secret flow runs over the link to the library host: sealed by the link\'s secret, used once in an env, only the handle in the transcript', () async {

@@ -1,5 +1,5 @@
 //! Links into a running host's entries: each is a connection inside this process, with no proof, which the application drives
-//! by polling. No call blocks: two threads of the link's own move messages between its queues and the host.
+//! by polling or, when it gave a Dart port, by being told. No call blocks: two threads of the link's own move messages between its queues and the host.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -17,7 +17,7 @@ use serde_json::json;
 use crate::exports::{
     STATUS_BUSY, STATUS_ENDED, STATUS_FAILED, STATUS_NO_ENTRY, STATUS_OK, STATUS_UNKNOWN_JOB,
 };
-use crate::jobs;
+use crate::{jobs, platform};
 
 /// Messages of the host's a link holds unread; past it the host's sends wait on the application.
 const MAX_INCOMING: usize = 1024;
@@ -41,6 +41,10 @@ struct Incoming {
 
 struct Connection {
     link: Link,
+    /// The link's number, posted to `port`.
+    number: u64,
+    /// The Dart port told when there is something to read; 0 for none.
+    port: i64,
     done: AtomicBool,
     outgoing: Mutex<Outgoing>,
     sendable: Condvar,
@@ -53,12 +57,20 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Connection {
+    /// Tells the application's port, when it gave one, that the link has something to read.
+    fn wake(&self) {
+        if self.port != 0 {
+            platform::dart::post(self.port, i64::try_from(self.number).unwrap_or(i64::MAX));
+        }
+    }
+
     fn finish(&self) {
         self.done.store(true, Ordering::SeqCst);
         self.link.close();
         locked(&self.incoming).ended = true;
         self.readable.notify_all();
         self.sendable.notify_all();
+        self.wake();
     }
 
     /// Moves what the application sent to the host, until the link is done.
@@ -101,9 +113,14 @@ impl Connection {
                             .unwrap_or_else(PoisonError::into_inner)
                             .0;
                     }
+                    // A read takes everything, so the port is told only when it was not told of what is already there.
+                    let first = incoming.messages.is_empty();
                     incoming.messages.push_back(text);
                     drop(incoming);
                     self.readable.notify_all();
+                    if first {
+                        self.wake();
+                    }
                 }
                 Err(LinkError::Timeout) => {}
                 Ok(None) | Err(_) => return self.finish(),
@@ -121,7 +138,7 @@ fn link(number: u64) -> Option<Arc<Connection>> {
 }
 
 /// Opens a link to `entry` of the `serve` job `job` runs, and answers its number.
-pub(crate) fn open(job: u64, entry: &str) -> Result<u64, i32> {
+pub(crate) fn open(job: u64, entry: &str, port: i64) -> Result<u64, i32> {
     let local = match jobs::local_of(job) {
         Err(()) => return Err(STATUS_UNKNOWN_JOB),
         // Not a `serve`, or one that has not bound its entries yet.
@@ -132,8 +149,11 @@ pub(crate) fn open(job: u64, entry: &str) -> Result<u64, i32> {
         LocalError::Thread => STATUS_FAILED,
         _ => STATUS_NO_ENTRY,
     })?;
+    let number = NEXT.fetch_add(1, Ordering::Relaxed);
     let connection = Arc::new(Connection {
         link,
+        number,
+        port,
         done: AtomicBool::new(false),
         outgoing: Mutex::default(),
         sendable: Condvar::new(),
@@ -154,7 +174,6 @@ pub(crate) fn open(job: u64, entry: &str) -> Result<u64, i32> {
             return Err(STATUS_FAILED);
         }
     }
-    let number = NEXT.fetch_add(1, Ordering::Relaxed);
     locked(&LINKS).insert(number, connection);
     Ok(number)
 }
