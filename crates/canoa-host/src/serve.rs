@@ -1096,10 +1096,11 @@ impl Serving {
         };
         // A host for a portal has no process of the person's to open them in: its sources listen on the sockets only that person's
         // browser reaches, as its other entries do.
-        if portal_of(options).is_some() {
+        if let Some(sockets) = portal_of(options) {
             for source in &mut sources {
                 source.entry.local = false;
                 source.entry.own_profile = true;
+                source.entry.listen = Listen::Pipe(sockets.entry(&source.entry.name)?);
             }
         }
         let controlled = config
