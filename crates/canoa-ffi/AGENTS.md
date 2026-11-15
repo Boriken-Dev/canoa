@@ -69,6 +69,10 @@ The first command in a process installs a `tracing` subscriber writing to the lo
 
 The console comes before the pipe: attaching to one replaces the standard handles of a process started with none, as Explorer starts an application. These stay for the life of the process; stopping a host does not undo them, and the library is never to be unloaded, since its threads run on in it.
 
+## Started by a browser
+
+A browser starts a native messaging host with the extension's origin (`chrome-extension://ID/`) as its first argument and no way to name a command. `jobs::starts_as_child` is true for that as it is for `--canoa-child`: the runners' entry files (`child_entry.cpp`, `child_entry.cc`, the macOS load-time hook) call `canoa_ffi_child_main` before any window, and `child_main` runs the hidden `native-host` command with the origin, which relays the extension to the host of the home. Like the other child commands it is refused as a job.
+
 ## Accounts as jobs
 
 `canoa accounts list|add|login|remove` (see `canoa-host`'s header) run as jobs like any command that changes nothing about the process, with `home` naming the host's directory, where the accounts keep their state and, with `[host] account_store = "file"`, their sealed files.

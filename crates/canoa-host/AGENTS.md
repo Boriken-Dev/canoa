@@ -298,6 +298,30 @@ impl PipeChannel {
 - Every peer on pipes shares one bucket of the trust store's waiting queue, since there is no address to tell them apart by.
 - The served web page never offers or allows a pipe entry: `/canoa.json` and the page's Content-Security-Policy leave it out (`Listening::on_address`), and no browser can reach it.
 - A pipe name on Windows is visible to every user: the first instance is taken at bind, so a second host on one name is `ServeError::Pipe` (`NameTaken`), but a client that connects before any host bound reaches whoever bound first, and only the key proof tells it from the host.
+## The browser extension's native host (`canoa_host::native`, `[host.native]`, `canoa native`)
+
+```rust
+pub const HOST_NAME: &str = "dev.boriken.canoa";            // what the extension passes to connectNative
+pub const KNOWN_EXTENSIONS: &[&str];                         // the id manifest.json's key gives, allowed without being named
+pub const MAX_PIECE: usize = 768_000;                        // a link's bytes per native message, either way
+pub fn door_name(home: &Path) -> Result<PipeName, pipe::Error>        // Windows canoa-native-<16 hex of the home's path>; else <home>/native.sock
+pub fn pair_door_name(home: &Path) -> Result<PipeName, pipe::Error>  // beside it, bound only by `canoa pair --native`
+pub fn relay(home: &Home, origin: &str, input: &mut impl Read, output: impl Write + Send + 'static, ended: impl Fn() + Send + Sync + 'static) -> io::Result<()>
+pub fn install(home: &Home, program: &Path, options: &Install) -> Result<Vec<String>, Error>
+pub fn uninstall(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<(), Error>
+pub fn status(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<Status, Error>
+pub struct Launch { pub program: PathBuf, pub args: Vec<String> }     // <home>/native/launch.json; Launch::read, Launch::start
+pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()>
+pub fn origin_allows(home: &Path, peer: &str, origin: &str) -> bool
+```
+
+- The browser starts the native host with the extension's origin as its first argument (`chrome-extension://ID/`, then `--parent-window=N` on Windows): `main` turns that into the hidden `canoa native-host ORIGIN`, which is `relay` on standard input and output. On Windows the browser runs it through `cmd.exe /d /s /c` with named pipes for standard streams. One port is one link: the relay ends when the browser closes its input or the door closes.
+- **Native messages** (a `u32` in native byte order, then JSON; to the browser at most 1 MiB, from it at most 1 MiB plus a little): `{"op":"hello"}` answers `{"reply":"hello","running":true,peer,method,name,version,entries:[{name,label,kind,local}],control,home}` from the host's door, or `{"reply":"hello","running":false}` (`"door":false` when a host holds the home with its door shut). `{"op":"open","entry":NAME}` (an entry, `@control`, or `@pair`) answers `{"reply":"open","opened":true}` or `{"reply":"open","error":...}`; after it only `{"d":BASE64}` pieces go either way, and `{"closed":true}` ends the link. `{"op":"start"}` runs `launch.json`'s program, detached (`DETACHED_PROCESS`, plus `CREATE_BREAKAWAY_FROM_JOB` where the browser's job allows it; a new process group on Unix) and only when no host holds the home; it answers `{"reply":"start","started":PID}` or an error. Anything else is `{"error":"unknown op"}`.
+- **The door** (`serve::door`) is bound by `Serving::bind` in the home (`ServeOptions::state_dir`), unless `[host.native] enabled = false`, a portal, or no state directory. A connection's first message is `{"canoa_native":1,"open":NAME,"origin":ORIGIN}` (at most 64 KiB, within 5 s); `@hello` is answered and closed, anything else is answered `{"opened":true}` and then served as `connection` serves any link: the proof of the host's method, the trust store, the entry's `peers`, scope and `max_peers`. `@control` is the control channel with `[host.native] control` for every paired key. A door that cannot be bound is logged and left out. Unproven connections count against `MAX_UNPROVEN`.
+- **`[host.native]`**: `enabled` (default true) and `control`, a list of grant names (default `ledger.read`, `ledger.write`, `worktree`, `store.read`, `folders`, `config.read`, `config.write`). `config.write.sessions`, `overlay.write`, `host.restart` and `upload` are refused there.
+- **Pairing**: `canoa pair --native [--until-stdin-closes] [--method M]` binds `pair_door_name`, prints `{"pin","peer","method","native":true}`, takes one connection at a time that asks for `@pair`, runs the PIN pairing on it, records the origin the browser reported beside the key (`<home>/native/origins.json`) and prints `{"paired":PEER}`. The door then turns that key away from any other origin; a key with no record (`canoa accept`) is bound to none. The host never holds a PIN, so pairing works with the host stopped.
+- **Registration** (`canoa native install [--name NAME] [--extension-id ID]... [--browser chrome|edge|chromium|chrome-for-testing]... [--profile DIR]... [--launch PROGRAM [-- ARGS...]]`, `uninstall`, `status`): `dev.boriken.canoa` (`--name` registers another name the extension does not look for, for trying a registration), `type stdio`, `path` the running executable, `allowed_origins` `KNOWN_EXTENSIONS` plus the given ids. Windows: the manifest at `<home>/native/NAME.json` and `HKCU\Software\{Google\Chrome,Chromium,Microsoft\Edge}\NativeMessagingHosts\NAME`. Linux and macOS: `NativeMessagingHosts/NAME.json` in each browser's profile directory that exists, and in each `--profile`. `--launch` (default this program's `serve`) is recorded in `<home>/native/launch.json`; `status` prints `{name,registered,launch,running,holder}`. Flatpak and Snap browsers cannot start a native host: not handled.
+
 ## The web app (`canoa_host::web`)
 
 ```rust
@@ -1064,7 +1088,9 @@ canoa id [--method noise|webcrypto [--force]]
 canoa peers [--format text|json]
 canoa accept PEER
 canoa revoke PEER
-canoa pair [--listen ADDR] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto [--force]]
+canoa pair [--listen ADDR | --native] [--timeout-seconds N] [--until-stdin-closes] [--method noise|webcrypto [--force]]
+canoa native install [--name NAME] [--extension-id ID]... [--browser BROWSER]... [--profile DIR]... [--launch PROGRAM [-- ARGS...]]
+canoa native uninstall|status [--name NAME] [--profile DIR]...
 canoa provider (--library FILE | --source FILE [--import-search library|path]) --provider ID [--working-root DIR]... [--max-sessions N]
                     [--directory DIR] [--settings-on-stdin [--connect ADDRESS]]
 canoa tool --name NAME --spec JSON

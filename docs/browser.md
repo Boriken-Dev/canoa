@@ -58,6 +58,21 @@ A program then starts the shim as it would any stdio server, and has what an age
 
 **What stays true.** Any program running as that machine's user can read the shim's file, ask you for a tab, and use what that machine holds, and a program you would not trust with a tab should not run as that user there. Another user on it cannot read that file: it has an ACL for its owner alone on Windows, and owner-only modes elsewhere. A chat conversation's token file is not held to that on Windows, where it takes `%LOCALAPPDATA%`'s permissions, and off does not close that way: while a conversation is open, a program running as that user could find its server. A program can only ask, as often as the wait after a refusal lets it, and a person sees each time.
 
+## Canoa on this computer
+
+The extension uses the Canoa on the computer it runs on by default. A browser reaches a program on the computer only through a registered native messaging host, so `canoa native install` registers one, `dev.boriken.canoa`, for Chrome, Edge and Chromium, for this user only (the registry under `HKCU` on Windows, each browser's `NativeMessagingHosts` folder on Linux and macOS). The desktop app registers itself each time it starts. `canoa native status` shows what is registered and what **Start Canoa** would run, and `canoa native uninstall` removes all of it.
+
+The native host is a relay, not a host. The browser starts the program once for each port the extension opens; it moves bytes between the extension and the **door** of the Canoa that holds the home (a named pipe on Windows, `native.sock` in the home elsewhere, owner-only), and exits when either end does. The extension proves the host and the host proves the extension's key over the relay exactly as over any other link, so the relay sees only sealed records and can say nothing for either side. `[host.native] enabled = false` closes the door.
+
+| State | What the extension shows |
+| --- | --- |
+| The native host is not registered | "Canoa is not installed on this computer", with a link to getting started. The extension's own agents work as before |
+| Registered, Canoa not running | "Canoa on this computer is not running" and **Start Canoa**. The button works only from the extension's own pages: it asks the native host to run the program `canoa native install` recorded, only when no host holds the home |
+| Running, this browser not paired | A PIN pairing: the person asks Canoa for a PIN (`canoa pair --native`, or the desktop app's Hosting dialog) and types it in the extension. The key that proves itself through the PIN is the one kept, and it is bound to the extension that paired it: another extension is turned away |
+| Running and paired | The panel's sources are the host's entries, its own sources and the person's own agent commands among them, its sessions the host's ledger and its settings the host's canoa.cfg, over the control channel. Agents added by hand or found nearby stay listed below |
+
+A browser key reaches the control channel through the door with `[host.native] control`, by default `ledger.read`, `ledger.write`, `worktree`, `store.read`, `folders`, `config.read` and `config.write`; installing, restarting the host, uploads and changing what an agent may do are never granted through the door. What the host says in `hello` (its name, its key, its entries) is a claim: it prefills a list, and a key the person did not pair is never trusted from it. A link cut in the middle of a turn ends as a cut link; nothing the agent was asked is sent again.
+
 ## Other browsers
 
 | Browser | Planned implementation |

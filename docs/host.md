@@ -485,6 +485,18 @@ you can read, or reach the host from the browser extension.
 
 The API header lists every setting.
 
+## The browser extension on this computer
+
+`canoa native install` lets the Canoa extension in Chrome, Edge or Chromium use the Canoa on this computer; the desktop app does it each time it starts. The extension then lists the host's entries, its own sources and your own agent commands among them, and its sessions and settings, once you pair it with a PIN: **Hosting, then Pair the browser extension** in the app, or `canoa pair --native`, shows the PIN and you type it in the extension. When Canoa is not running the extension says so and offers **Start Canoa**.
+
+```toml
+[host.native]
+enabled = true                                 # false closes the door the browser's native host reaches
+control = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write"]   # the default
+```
+
+`control` is what a browser key may do on the control channel; it cannot hold `config.write.sessions`, `overlay.write`, `host.restart` or `upload`. A key paired this way works only from the extension that paired it. `canoa native status` shows what is registered and what Start would run, and `canoa native uninstall` removes it. Chrome, Edge and Chromium installed as Flatpak or Snap cannot start a native host. See [browser integration](browser.md#canoa-on-this-computer).
+
 ## A pipe or Unix socket
 
 A native client on the same machine can reach an entry without a port: set its `listen` to `pipe:NAME` on Windows, a named
