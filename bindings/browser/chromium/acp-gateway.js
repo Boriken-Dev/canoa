@@ -126,8 +126,9 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       asking.add(origin);
       let decision;
       try {
-        const known = await store.agents();
         const own = origin === ownOrigin;
+        // The Canoa on this computer is Canoa's own to use; what a page may be given of it is not decided here.
+        const known = (await store.agents()).filter((agent) => own || agent.local !== true);
         decision = await askPerson({
           origin,
           own,
@@ -146,7 +147,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       const added = [];
       for (const agent of decision.add ?? []) added.push(await store.addAgent(agent));
       const keys = [...(decision.allow ?? []), ...added.map((agent) => agent.key)];
-      const agents = await store.agents();
+      const agents = (await store.agents()).filter((agent) => own || agent.local !== true);
       const granted = [];
       for (const key of keys) {
         const agent = agents.find((candidate) => candidate.key === key);
