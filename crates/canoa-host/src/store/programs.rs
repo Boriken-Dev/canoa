@@ -1195,8 +1195,10 @@ mod plan_tests {
     use super::*;
 
     fn programs(per_owner: usize) -> Programs {
-        let mut options = Options::default();
-        options.plans_per_owner = per_owner;
+        let options = Options {
+            plans_per_owner: per_owner,
+            ..Options::default()
+        };
         Programs::new(
             Shelf::unchecked(std::env::temp_dir().join("canoa-plan-tests")),
             Arc::new(Registry::new("test", "0.0.0")),
