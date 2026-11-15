@@ -552,6 +552,7 @@ impl StoreIndex {
                         here: Some(folder.clone()),
                         base: Some(folder.clone()),
                         shown: format!("{}@{}#{folder}", source.repo, source.reference),
+                        origin: json!({"kind": "git", "location": source.repo, "ref": source.reference, "path": folder}),
                         pin: None,
                         description: None,
                         about: None,
@@ -587,6 +588,7 @@ impl StoreIndex {
                 "name": item.name,
                 "summary": item.summary(),
                 "source": item.shown,
+                "origin": item.origin,
                 "version": Value::Null,
                 "tags": item.about_list("tags"),
                 "requirements": [],
@@ -772,6 +774,8 @@ struct Listed {
     /// Where the catalog's own folder is, for the paths of fields that are relative to it.
     base: Option<String>,
     shown: String,
+    /// The source in parts, without user information or query, so a client need not guess what kind of source the text names.
+    origin: Value,
     pin: Option<String>,
     description: Option<String>,
     about: Option<serde_json::Map<String, Value>>,
@@ -796,6 +800,7 @@ impl Listed {
             here,
             base: None,
             shown: entry.source.shown(),
+            origin: origin_of(&entry.source),
             pin: entry.pin.clone(),
             description: entry.description.clone(),
             about: entry.about.clone(),
@@ -810,6 +815,7 @@ impl Listed {
             here: None,
             base: None,
             shown: String::new(),
+            origin: Value::Null,
             pin: None,
             description: None,
             about: None,
@@ -830,6 +836,22 @@ impl Listed {
     fn about_list(&self, field: &str) -> Value {
         list_of(self.about.as_ref().and_then(|about| about.get(field)))
     }
+}
+
+fn origin_of(source: &coqui_aos::Source) -> Value {
+    let kind = match source.kind {
+        coqui_aos::SourceKind::Git => "git",
+        coqui_aos::SourceKind::Url => "url",
+        _ => "directory",
+    };
+    let mut bare = source.clone();
+    bare.path = None;
+    json!({
+        "kind": kind,
+        "location": bare.shown_with(None),
+        "ref": source.reference,
+        "path": source.path,
+    })
 }
 
 fn list_of(value: Option<&Value>) -> Value {

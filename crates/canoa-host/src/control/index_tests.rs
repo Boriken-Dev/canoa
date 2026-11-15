@@ -134,6 +134,10 @@ fn the_first_call_indexes_and_a_second_within_the_ttl_runs_no_git() {
     assert_eq!(alpha["requirements"], json!(["base"]));
     assert_eq!(alpha["contents"]["skills"], json!(["review", "lint"]));
     assert_eq!(alpha["contents"]["hooks"], json!(["session_start"]));
+    assert_eq!(
+        alpha["origin"],
+        json!({"kind": "git", "location": url(&rig.upstream), "ref": "main", "path": "overlays/alpha"})
+    );
     assert!(
         alpha["source"]
             .as_str()
