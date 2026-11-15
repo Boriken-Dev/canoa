@@ -6,6 +6,7 @@
 )]
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use coqui_acp_api::{AccountKindInfo, AccountLoss, AccountRenewal, Credentials};
@@ -19,13 +20,21 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new() -> Self {
+        let dir = Self::fresh_path();
+        fs::create_dir_all(&dir).expect("a directory");
+        Self(dir)
+    }
+
+    fn fresh_path() -> PathBuf {
         let stamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |since| since.as_nanos());
-        let dir =
-            std::env::temp_dir().join(format!("canoa-accounts-{}-{stamp}", std::process::id()));
-        fs::create_dir_all(&dir).expect("a directory");
-        Self(dir)
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let number = NEXT.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "canoa-accounts-{}-{stamp}-{number}",
+            std::process::id()
+        ))
     }
 }
 
@@ -355,4 +364,30 @@ impl Drop for Forget<'_> {
             let _ = self.0.remove(id);
         }
     }
+}
+
+/// The clock behind a directory's name ticks more slowly than tests start, so the name alone is not unique: two tests that
+/// began together shared a directory, and one's cleanup removed the other's files.
+#[test]
+fn directories_made_at_the_same_moment_are_different() {
+    const THREADS: usize = 8;
+    const ROUNDS: usize = 500;
+    let start = std::sync::Barrier::new(THREADS);
+    let made = Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..THREADS {
+            scope.spawn(|| {
+                for _ in 0..ROUNDS {
+                    start.wait();
+                    let path = Dir::fresh_path();
+                    made.lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(path);
+                }
+            });
+        }
+    });
+    let made = made.into_inner().unwrap_or_else(PoisonError::into_inner);
+    let distinct: std::collections::HashSet<_> = made.iter().collect();
+    assert_eq!(distinct.len(), made.len(), "two directories got one name");
 }
