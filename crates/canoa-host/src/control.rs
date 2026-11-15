@@ -95,8 +95,10 @@ pub enum Grant {
     /// `store/apply`, `store/rollback` and `store/remove`, and the probing `store/report`: install, update, roll back and remove an
     /// agent program on the host's programs shelf, which downloads and runs code as this user.
     StorePrograms,
-    /// `accounts/catalog`, `accounts/list`, `accounts/add`, `accounts/login` and `accounts/remove`: sign in to a provider on this
-    /// host, which runs the provider's program as this user and keeps a credential in the host's keyring.
+    /// `accounts/catalog`, `accounts/list`, `accounts/add`, `accounts/login`, `accounts/remove`, `accounts/entries` and
+    /// `accounts/offer`: sign in to a provider on this host, which runs the provider's program as this user and keeps a credential in
+    /// the host's keyring, and choose which accounts an agent entry offers. A key with it can attach any account to any harness entry,
+    /// including an entry whose `peers` leave that key out, and can make an entry for a built-in source.
     Accounts,
 }
 

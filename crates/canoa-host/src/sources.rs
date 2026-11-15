@@ -146,7 +146,25 @@ pub(crate) fn managed_program_in(
 ) -> Option<(PathBuf, Vec<(String, String)>)> {
     let dir = shelf.program(program).ok()?;
     let current = dir.current_checked().ok()??;
-    dir.verify(&current).ok()?;
+    // Every file of the copy is read to verify it, which is not done again while the copy's launch file and its record are as they
+    // were: they are stamped by size and time of change, for as long as this host runs.
+    let stamp = (
+        stamp_of(Path::new(&current.dir)),
+        stamp_of(Path::new(&current.launch.path)),
+        shelf.root().to_path_buf(),
+        program.to_owned(),
+    );
+    let verified = VERIFIED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&stamp);
+    if !verified {
+        dir.verify(&current).ok()?;
+        VERIFIED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(stamp);
+    }
     let path = PathBuf::from(&current.launch.path);
     let inside = path.is_absolute()
         && path.is_file()
@@ -162,6 +180,21 @@ pub(crate) fn managed_program_in(
             .collect();
         (path, environment)
     })
+}
+
+/// What was checked of a copy: its folder and launch file by size and time of change, in which shelf, for which program.
+type Stamp = (
+    Option<(u64, std::time::SystemTime)>,
+    Option<(u64, std::time::SystemTime)>,
+    PathBuf,
+    String,
+);
+
+static VERIFIED: std::sync::Mutex<Vec<Stamp>> = std::sync::Mutex::new(Vec::new());
+
+fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
 }
 
 /// [`managed_program_in`] over this user's programs folder.

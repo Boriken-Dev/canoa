@@ -1590,9 +1590,14 @@ impl Serving {
                         homes: control::Homes::of_this_computer(),
                     });
                     let kept = match (&options.account_layers, &options.state_dir) {
-                        (Some(layers), Some(home)) => kept.with_accounts(
-                            control::accounts::Accounts::new(layers.clone(), home.clone(), secrets),
-                        ),
+                        (Some(layers), Some(home)) => {
+                            kept.with_accounts(control::accounts::Accounts::new(
+                                layers.clone(),
+                                home.clone(),
+                                secrets,
+                                portal_of(options).is_some(),
+                            ))
+                        }
                         _ => kept,
                     };
                     match &options.programs {

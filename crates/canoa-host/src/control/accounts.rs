@@ -39,6 +39,8 @@ pub(crate) struct Accounts {
     layers: Layers,
     home: PathBuf,
     hub: Arc<Hub>,
+    /// Whether this is the host of a portal, whose every socket only the person's own browser reaches.
+    portal: bool,
 }
 
 impl core::fmt::Debug for Accounts {
@@ -51,8 +53,9 @@ impl core::fmt::Debug for Accounts {
 /// takes the name, and the source with it.
 const BUILT_IN_SOURCES: [(&str, &str); 2] = [("Claude", "claude"), ("Codex", "codex")];
 
-/// The entries that run a built-in provider: those canoa.cfg has, then the built-in sources it has not named.
-fn entries_of(config: &Config) -> Vec<Value> {
+/// The entries that run a built-in provider: those canoa.cfg has, then the built-in sources it has not named. A built-in source
+/// reaches only this computer's own application, except on the host of a portal, whose sockets only the person's browser reaches.
+fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
     let mut entries: Vec<Value> = config
         .entries
         .iter()
@@ -71,16 +74,53 @@ fn entries_of(config: &Config) -> Vec<Value> {
     for (name, harness) in BUILT_IN_SOURCES {
         if config.entries.iter().all(|entry| entry.name != name) {
             entries.push(json!({
-                "name": name, "harness": harness, "accounts": [], "open": true,
+                "name": name, "harness": harness, "accounts": [], "open": portal,
             }));
         }
     }
     entries
 }
 
-/// `accounts/offer` `{"entry", "accounts"}`: the entry offers exactly those accounts, in that order, which canoa.cfg then says. The
-/// host reads an entry's offer when it starts, so the answer says it has to start again.
-fn offer(own: &std::path::Path, config: &Config, params: &Value) -> Result<Value, Refusal> {
+/// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title, its bypass, the profile it is
+/// launched with) and reaches no paired key unless the host is a portal's; any other entry the app makes is the app's own, which
+/// no paired key reaches.
+fn made_keys(
+    entry: &str,
+    harness: &str,
+    built_in: bool,
+    portal: bool,
+) -> Vec<(&'static str, toml::Value)> {
+    let title = if built_in {
+        entry.to_owned()
+    } else {
+        let mut letters = harness.chars();
+        let first = letters.next().map(|c| c.to_uppercase().collect::<String>());
+        format!("{}{} accounts", first.unwrap_or_default(), letters.as_str())
+    };
+    let mut keys = vec![("title", toml::Value::String(title))];
+    if built_in {
+        keys.push(("bypass", toml::Value::Boolean(true)));
+    }
+    if !(built_in && portal) {
+        keys.push(("peers", toml::Value::Array(Vec::new())));
+        // The profile is the person's own for a built-in source; a portal host gives it to its harness entries whatever the file
+        // says, and a file may ask for it only of an entry that names its keys.
+        if built_in {
+            keys.push(("own_profile", toml::Value::Boolean(true)));
+        }
+    }
+    keys
+}
+
+/// `accounts/offer` `{"entry", "accounts", "harness"?}`: the entry offers exactly those accounts, in that order, which canoa.cfg
+/// then says. An entry canoa.cfg does not have is made when it is a built-in source, or when `harness` says what it runs. The host
+/// reads an entry's offer when it starts, so the answer says it has to start again.
+fn offer(
+    own: &std::path::Path,
+    config: &Config,
+    portal: bool,
+    params: &Value,
+) -> Result<Value, Refusal> {
     let entry = text(params, "entry")?;
     let names: Vec<String> = match params.get("accounts") {
         Some(Value::Array(items)) => items
@@ -90,15 +130,6 @@ fn offer(own: &std::path::Path, config: &Config, params: &Value) -> Result<Value
             .ok_or((BAD_PARAMS, "accounts is a list of names".to_owned()))?,
         _ => return Err((BAD_PARAMS, "accounts is a list of names".to_owned())),
     };
-    let known = entries_of(config);
-    let harness = known
-        .iter()
-        .find(|each| each["name"] == entry)
-        .and_then(|each| each["harness"].as_str())
-        .ok_or((
-            NOT_FOUND,
-            format!("this host has no entry {entry} that runs an account's provider"),
-        ))?;
     if entry.is_empty()
         || entry.len() > 64
         || !entry
@@ -110,6 +141,23 @@ fn offer(own: &std::path::Path, config: &Config, params: &Value) -> Result<Value
             "an entry's name is 1 to 64 letters, digits, - or _".to_owned(),
         ));
     }
+    let known = entries_of(config, portal);
+    let in_file = config.entries.iter().any(|each| each.name == entry);
+    let built_in = !in_file && BUILT_IN_SOURCES.iter().any(|(name, _)| *name == entry);
+    let harness = match known.iter().find(|each| each["name"] == entry) {
+        Some(each) => each["harness"].as_str().unwrap_or_default().to_owned(),
+        None => {
+            let asked = text(params, "harness").ok();
+            asked
+                .filter(|harness| crate::config::BUILT_IN_HARNESSES.contains(harness))
+                .map(str::to_owned)
+                .ok_or((
+                    NOT_FOUND,
+                    format!("this host has no entry {entry} that runs an account's provider"),
+                ))?
+        }
+    };
+    let harness = harness.as_str();
     for (index, name) in names.iter().enumerate() {
         let account = config
             .accounts
@@ -128,7 +176,8 @@ fn offer(own: &std::path::Path, config: &Config, params: &Value) -> Result<Value
             return Err((BAD_PARAMS, format!("{name} is listed twice")));
         }
     }
-    commands::set_offered(own, entry, harness, &names).map_err(|failed| refusal(&failed))?;
+    let made = made_keys(entry, harness, built_in, portal);
+    commands::set_offered(own, entry, harness, &names, &made).map_err(|failed| refusal(&failed))?;
     Ok(json!({"entry": entry, "accounts": names, "restart": true}))
 }
 
@@ -185,8 +234,13 @@ fn json_of<T: ToValue>(value: &T) -> Result<Value, Refusal> {
 }
 
 impl Accounts {
-    pub(crate) fn new(layers: Layers, home: PathBuf, hub: Arc<Hub>) -> Self {
-        Self { layers, home, hub }
+    pub(crate) fn new(layers: Layers, home: PathBuf, hub: Arc<Hub>, portal: bool) -> Self {
+        Self {
+            layers,
+            home,
+            hub,
+            portal,
+        }
     }
 
     /// canoa.cfg as it is on disk now: an app's earlier sign-in wrote to it after this host started.
@@ -239,8 +293,8 @@ impl Accounts {
                     .map_err(|failed| refusal(&failed))?;
                 Ok(json!({"removed": true}))
             }
-            "accounts/entries" => Ok(json!({"entries": entries_of(&config)})),
-            "accounts/offer" => offer(&self.layers.own, &config, params),
+            "accounts/entries" => Ok(json!({"entries": entries_of(&config, self.portal)})),
+            "accounts/offer" => offer(&self.layers.own, &config, self.portal, params),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
     }
@@ -490,4 +544,81 @@ struct Pending {
     asked: Asked,
     reply: mpsc::Sender<Result<LoginAnswer, String>>,
     since: Instant,
+}
+
+#[cfg(test)]
+mod offer_tests {
+    use super::*;
+
+    const ACCOUNTS: &str = "[host.accounts.c]\nharness = \"codex\"\nkind = \"openai-api-key\"\nid = \"id-c\"\n\n[host.accounts.w]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-w\"\n";
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        let dir =
+            std::env::temp_dir().join(format!("canoa-offer-{name}-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("made");
+        dir
+    }
+
+    fn offered(portal: bool, params: &Value) -> (Result<Value, Refusal>, String, Config) {
+        let dir = scratch(if portal { "portal" } else { "plain" });
+        let path = dir.join("canoa.cfg");
+        std::fs::write(&path, ACCOUNTS).expect("written");
+        let config = Config::from_str_in(ACCOUNTS, &dir).expect("parses");
+        let answer = offer(&path, &config, portal, params);
+        let written = std::fs::read_to_string(&path).expect("read");
+        let after = Config::from_str_in(&written, &dir).expect("the edited file reads");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+        (answer, written, after)
+    }
+
+    fn entry<'a>(config: &'a Config, name: &str) -> &'a crate::config::Entry {
+        config
+            .entries
+            .iter()
+            .find(|each| each.name == name)
+            .expect(name)
+    }
+
+    #[test]
+    fn a_built_in_source_keeps_what_it_was_and_reaches_no_paired_key_until_it_is_the_portals() {
+        let params = json!({"entry": "Codex", "accounts": ["c"]});
+        let (answer, written, after) = offered(false, &params);
+        answer.expect("offered");
+        let codex = entry(&after, "Codex");
+        assert_eq!(codex.peers.as_ref().map(Vec::len), Some(0), "{written}");
+        assert!(codex.own_profile, "{written}");
+        assert!(written.contains("bypass = true"), "{written}");
+        assert!(written.contains("title = \"Codex\""), "{written}");
+        let (answer, written, after) = offered(true, &params);
+        answer.expect("offered");
+        assert!(entry(&after, "Codex").peers.is_none(), "{written}");
+        assert!(!written.contains("own_profile"), "{written}");
+    }
+
+    #[test]
+    fn an_entry_the_app_makes_for_accounts_is_private_and_named_for_its_provider() {
+        let params = json!({"entry": "claude-accounts", "harness": "claude", "accounts": ["w"]});
+        let (answer, written, after) = offered(true, &params);
+        answer.expect("offered");
+        let made = entry(&after, "claude-accounts");
+        assert_eq!(made.peers.as_ref().map(Vec::len), Some(0), "{written}");
+        assert!(written.contains("title = \"Claude accounts\""), "{written}");
+        let (answer, ..) = offered(false, &json!({"entry": "nowhere", "accounts": []}));
+        assert_eq!(answer.expect_err("no such entry").0, NOT_FOUND);
+    }
+
+    #[test]
+    fn a_built_in_source_is_open_only_on_a_portal() {
+        let config = Config::from_str_in(ACCOUNTS, &std::env::temp_dir()).expect("parses");
+        for (portal, open) in [(false, false), (true, true)] {
+            let entries = entries_of(&config, portal);
+            let claude = entries
+                .iter()
+                .find(|each| each["name"] == "Claude")
+                .expect("Claude");
+            assert_eq!(claude["open"], open, "portal {portal}");
+        }
+    }
 }

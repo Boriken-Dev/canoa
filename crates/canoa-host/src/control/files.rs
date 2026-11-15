@@ -291,6 +291,7 @@ impl Files {
             ));
         }
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let _all = crate::accounts::commands::config_writes();
         let (text, existed) = read_cfg(path)?;
         let name = path
             .file_name()

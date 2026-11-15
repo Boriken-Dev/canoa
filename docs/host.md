@@ -371,7 +371,9 @@ canoa accounts remove work                                       # forgets the s
 - The app adds, signs in to and removes accounts over the host's control channel, on the desktop and in a browser alike: a
   sign-in that asks for a typed secret (Claude's code, an API key) puts a form to the app, and the answer comes back sealed to the
   key that asked, so the host opens it and nothing else sees it. The same holds for a paired key whose host grants `accounts`.
-  The app also sets which accounts an agent entry offers (`accounts/offer`), which writes canoa.cfg and has the host start again.
+  The app also sets which accounts an agent entry offers (`accounts/offer`), which writes canoa.cfg. The host does not start again
+  by itself: the offers apply from its next start, and the app asks for one (`host/restart`, which a host run with `--supervised`
+  answers by ending so that its supervisor starts it).
 
 ## Granting a key the Store and accounts
 

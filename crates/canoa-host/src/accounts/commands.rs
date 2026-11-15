@@ -888,6 +888,7 @@ fn edit_document(
 }
 
 fn append_account(path: &Path, name: &str, account: &AccountConfig) -> Result<(), Failed> {
+    let _one = config_writes();
     let mut text = read_cfg(path)?;
     let format = format_of(path, &text)?;
     if format != "toml" {
@@ -931,14 +932,26 @@ fn append_account(path: &Path, name: &str, account: &AccountConfig) -> Result<()
     write_cfg(path, &text)
 }
 
+/// Held while canoa.cfg is read, changed and written back, so that an offer, an account added or removed and a setting saved never
+/// undo one another: each reads the file the one before it wrote.
+static CONFIG_WRITES: Mutex<()> = Mutex::new(());
+
+/// Takes the right to change canoa.cfg, waiting for whoever has it.
+pub(crate) fn config_writes() -> std::sync::MutexGuard<'static, ()> {
+    CONFIG_WRITES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Makes the agent entry `entry`, which runs `harness`, offer exactly `accounts` in the file at `path`, in the file's own format: an
-/// entry the file does not have yet is written with its `harness`, and none left takes the key out.
+/// entry the file does not have yet is written with its `harness` and `made` (the other keys it starts with), and none left takes
+/// the key out.
 pub(crate) fn set_offered(
     path: &Path,
     entry: &str,
     harness: &str,
     accounts: &[String],
+    made: &[(&str, toml::Value)],
 ) -> Result<(), Failed> {
+    let _one = config_writes();
     let mut text = read_cfg(path)?;
     let format = format_of(path, &text)?;
     if format != "toml" {
@@ -952,8 +965,8 @@ pub(crate) fn set_offered(
                 .or_insert_with(|| toml::Value::Table(toml::Table::new()))
                 .as_table_mut()
                 .ok_or_else(|| Failed::run("[host.agents] is not a table".to_owned()))?;
-            let made = !agents.contains_key(entry);
-            if made && accounts.is_empty() {
+            let fresh = !agents.contains_key(entry);
+            if fresh && accounts.is_empty() {
                 return Ok(());
             }
             let one = agents
@@ -961,8 +974,11 @@ pub(crate) fn set_offered(
                 .or_insert_with(|| toml::Value::Table(toml::Table::new()))
                 .as_table_mut()
                 .ok_or_else(|| Failed::run(format!("[host.agents.{entry}] is not a table")))?;
-            if made {
+            if fresh {
                 one.insert("harness".into(), toml::Value::String(harness.to_owned()));
+                for (key, value) in made {
+                    one.insert((*key).to_owned(), value.clone());
+                }
             }
             if accounts.is_empty() {
                 one.remove("accounts");
@@ -1001,7 +1017,14 @@ pub(crate) fn set_offered(
         if !text.is_empty() {
             text.push('\n');
         }
-        text.push_str(&format!("{header}\nharness = {}\n{line}", quote(harness)));
+        let extra: String = made
+            .iter()
+            .map(|(key, value)| format!("{key} = {value}\n"))
+            .collect();
+        text.push_str(&format!(
+            "{header}\nharness = {}\n{extra}{line}",
+            quote(harness)
+        ));
         return write_cfg(path, &text);
     };
     let end = lines[start + 1..]
@@ -1045,6 +1068,7 @@ pub(crate) fn set_offered(
 
 /// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.
 fn remove_account(path: &Path, name: &str) -> Result<(), Failed> {
+    let _one = config_writes();
     let text = read_cfg(path)?;
     let format = format_of(path, &text)?;
     if format != "toml" {
@@ -1174,7 +1198,7 @@ mod format_tests {
                 append_account(&path, who, &made).expect(name);
             }
             let both = vec!["other".to_owned(), "work".to_owned()];
-            set_offered(&path, "Claude", "claude", &both).expect(name);
+            set_offered(&path, "Claude", "claude", &both, &[]).expect(name);
             let written = fs::read_to_string(&path).expect("read");
             assert_eq!(
                 offered(&written, name),
@@ -1188,14 +1212,14 @@ mod format_tests {
             if name == "f.cfg" {
                 assert!(written.contains("# the person's own") && written.contains("Mine"));
             }
-            set_offered(&path, "Claude", "claude", &["work".to_owned()]).expect(name);
+            set_offered(&path, "Claude", "claude", &["work".to_owned()], &[]).expect(name);
             let written = fs::read_to_string(&path).expect("read");
             assert_eq!(
                 offered(&written, name).map(|each| each.1),
                 Some(vec!["work".to_owned()]),
                 "{name}: {written}"
             );
-            set_offered(&path, "Claude", "claude", &[]).expect(name);
+            set_offered(&path, "Claude", "claude", &[], &[]).expect(name);
             let written = fs::read_to_string(&path).expect("read");
             assert_eq!(
                 offered(&written, name).map(|each| each.1),
@@ -1203,6 +1227,46 @@ mod format_tests {
                 "{name}: {written}"
             );
         }
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// Accounts added and offers made at the same moment all reach canoa.cfg: each reads the file the one before it wrote.
+    #[cfg(all(feature = "yaml", feature = "json"))]
+    #[test]
+    fn changes_made_at_the_same_moment_do_not_undo_one_another() {
+        let dir = std::env::temp_dir().join(format!("canoa-writes-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("directory");
+        let path = dir.join("canoa.cfg");
+        fs::write(
+            &path,
+            "[desktop]
+start_hidden = true
+",
+        )
+        .expect("write");
+        std::thread::scope(|scope| {
+            for index in 0..12 {
+                let path = &path;
+                scope.spawn(move || {
+                    let mut made = account();
+                    made.id = format!("id-{index}");
+                    append_account(path, &format!("a{index}"), &made).expect("added");
+                    set_offered(
+                        path,
+                        &format!("E{index}"),
+                        "claude",
+                        &[format!("a{index}")],
+                        &[],
+                    )
+                    .expect("offered");
+                });
+            }
+        });
+        let written = fs::read_to_string(&path).expect("read");
+        let config = Config::from_str_named(&written, "canoa.cfg", Path::new(".")).expect("reads");
+        assert_eq!(config.accounts.len(), 12, "{written}");
+        assert_eq!(config.entries.len(), 12, "{written}");
+        assert!(written.contains("start_hidden"));
         fs::remove_dir_all(dir).expect("cleanup");
     }
 }

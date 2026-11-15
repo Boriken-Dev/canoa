@@ -224,6 +224,12 @@ pub(crate) fn adapt(config: &Config, sockets: &PortalSockets) -> Result<Config, 
         if !entry.local {
             entry.listen = Listen::Pipe(sockets.entry(&entry.name)?);
         }
+        // Whoever reaches a socket here has signed in as the person, so the person's own profile is what their harness entries start
+        // with, as the host's built-in sources do.
+        if matches!(&entry.kind, crate::config::EntryKind::Harness { profiles, .. } if profiles.is_empty())
+        {
+            entry.own_profile = true;
+        }
     }
     let listen = PipeName::at(sockets.dir.join(CONTROL))
         .map_err(|error| pipe_error(crate::control::NAME, error))?;
@@ -355,6 +361,33 @@ mod tests {
     use std::path::Path;
 
     use super::check_account_of;
+
+    #[test]
+    fn a_harness_entry_of_a_portal_host_starts_with_the_persons_own_profile() {
+        let dir = std::env::temp_dir().join(format!("canoa-adapt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("made");
+        let text = "[host.agents.Claude]
+harness = \"claude\"
+
+[host.agents.Mine]
+program = \"agent\"
+listen = \"127.0.0.1:0\"
+";
+        let config = crate::config::Config::from_str_in(text, &dir).expect("parses");
+        assert!(config.entries.iter().all(|entry| !entry.own_profile));
+        let sockets = super::PortalSockets::new(dir.clone(), 1000);
+        let adapted = super::adapt(&config, &sockets).expect("adapted");
+        let own = |name: &str| {
+            adapted
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .map(|entry| entry.own_profile)
+        };
+        assert_eq!(own("Claude"), Some(true));
+        assert_eq!(own("Mine"), Some(false), "a program is not a harness");
+        std::fs::remove_dir_all(&dir).expect("cleaned");
+    }
 
     #[test]
     fn a_host_runs_for_a_portal_only_as_the_account_whose_folder_it_is_and_who_may_have_one() {

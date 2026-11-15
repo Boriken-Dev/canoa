@@ -640,7 +640,10 @@ impl Programs {
         if let Ok(mut plans) = self.plans.lock() {
             let now = Instant::now();
             plans.retain(|p| now.duration_since(p.made) < self.options.plan_ttl);
-            plans.retain(|p| !(p.provider == provider && p.plan.token == plan.token));
+            // The same plan again replaces the caller's own, never another caller's.
+            plans.retain(|p| {
+                !(p.owner == owner && p.provider == provider && p.plan.token == plan.token)
+            });
             let own = self.options.plans_per_owner.max(1);
             while plans.iter().filter(|p| p.owner == owner).count() >= own {
                 if let Some(oldest) = plans.iter().position(|p| p.owner == owner) {
@@ -653,8 +656,10 @@ impl Programs {
                 made: now,
                 plan: plan.clone(),
             });
+            // Past the whole host's limit, the caller that made this plan gives up its own oldest first.
             while plans.len() > self.options.plan_limit.max(1) {
-                plans.remove(0);
+                let at = plans.iter().position(|p| p.owner == owner).unwrap_or(0);
+                plans.remove(at);
             }
         }
     }
@@ -1223,6 +1228,38 @@ mod plan_tests {
             programs.take_plan("key-a", "echo_store", "t1").is_none(),
             "once"
         );
+    }
+
+    #[test]
+    fn a_plan_with_a_token_another_caller_holds_does_not_replace_that_callers() {
+        let programs = programs(8);
+        programs.keep_plan("owner", "echo_store", &plan("same"));
+        programs.keep_plan("key", "echo_store", &plan("same"));
+        assert!(programs.take_plan("owner", "echo_store", "same").is_some());
+        assert!(programs.take_plan("key", "echo_store", "same").is_some());
+    }
+
+    #[test]
+    fn past_the_hosts_limit_the_caller_loses_its_own_plans_first() {
+        let options = Options {
+            plans_per_owner: 4,
+            plan_limit: 4,
+            ..Options::default()
+        };
+        let programs = Programs::new(
+            Shelf::unchecked(std::env::temp_dir().join("canoa-plan-tests")),
+            Arc::new(Registry::new("test", "0.0.0")),
+        )
+        .options(options);
+        programs.keep_plan("owner", "echo_store", &plan("mine"));
+        for token in ["a", "b", "c", "d"] {
+            programs.keep_plan("key", "echo_store", &plan(token));
+        }
+        assert!(
+            programs.take_plan("owner", "echo_store", "mine").is_some(),
+            "the owner's plan, the oldest of all, stays"
+        );
+        assert!(programs.take_plan("key", "echo_store", "a").is_none());
     }
 
     #[test]
