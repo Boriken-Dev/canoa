@@ -152,7 +152,7 @@ mod load_time {
     extern "C" fn enter() {
         if std::env::args_os()
             .nth(1)
-            .is_some_and(|flag| flag == crate::jobs::CHILD_FLAG)
+            .is_some_and(|flag| crate::jobs::starts_as_child(&flag))
         {
             std::process::exit(crate::exports::canoa_ffi_child_main());
         }

@@ -393,6 +393,38 @@ fn as_a_hosts_own_command_it_runs_what_a_host_starts_and_nothing_else() {
     assert_eq!(String::from_utf8_lossy(&ended.stdout).trim(), "given");
 }
 
+/// A browser starts the application as a native messaging host with the extension's origin alone; the entry file runs the relay
+/// then, as it runs a host command for the flag, and opens nothing.
+#[test]
+fn started_by_a_browser_it_is_the_relay_and_answers_native_messages() {
+    let scratch = Scratch::new();
+    let mut relay = Command::new(child_entry())
+        .arg("chrome-extension://lpppofcphpjkedfnpbpabhmiamaicaed/")
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("it starts");
+    let request = br#"{"op":"hello"}"#;
+    let mut input = relay.stdin.take().expect("its input");
+    input
+        .write_all(&u32::try_from(request.len()).expect("short").to_ne_bytes())
+        .and_then(|()| input.write_all(request))
+        .expect("written");
+    let mut output = relay.stdout.take().expect("its output");
+    let mut length = [0_u8; 4];
+    std::io::Read::read_exact(&mut output, &mut length).expect("a reply");
+    let mut body = vec![0; u32::from_ne_bytes(length) as usize];
+    std::io::Read::read_exact(&mut output, &mut body).expect("its body");
+    let reply: Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(reply["reply"], "hello", "{reply}");
+    assert_eq!(reply["running"], false, "{reply}");
+    drop(input);
+    let ended = relay.wait().expect("it ends when the browser's input does");
+    assert!(ended.success(), "{ended:?}");
+}
+
 /// The list of files allowed to hold `unsafe`: the review surface stays as narrow as this says.
 #[test]
 fn unsafe_code_stays_in_the_files_named_here() {

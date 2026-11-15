@@ -11,8 +11,11 @@ namespace {
 int RunAsChildIfAsked() {
   int count = 0;
   wchar_t** args = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+  // The flag, or the extension's origin a browser passes to a native messaging host it starts: then this process is the relay.
   const bool asked =
-      args != nullptr && count >= 2 && ::wcscmp(args[1], L"--canoa-child") == 0;
+      args != nullptr && count >= 2 &&
+      (::wcscmp(args[1], L"--canoa-child") == 0 ||
+       ::wcsncmp(args[1], L"chrome-extension://", 19) == 0);
   if (args != nullptr) {
     ::LocalFree(args);
   }

@@ -7,7 +7,9 @@
 #include <unistd.h>
 
 __attribute__((constructor)) static void RunAsChildIfAsked(int argc, char** argv, char**) {
-  if (argc < 2 || strcmp(argv[1], "--canoa-child") != 0) {
+  // The flag, or the extension's origin a browser passes to a native messaging host it starts: then this process is the relay.
+  if (argc < 2 ||
+      (strcmp(argv[1], "--canoa-child") != 0 && strncmp(argv[1], "chrome-extension://", 19) != 0)) {
     return;
   }
   void* library = dlopen("libcanoa_ffi.so", RTLD_NOW);

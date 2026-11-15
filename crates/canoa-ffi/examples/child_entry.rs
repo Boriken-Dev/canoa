@@ -9,7 +9,7 @@
 fn main() {
     if std::env::args_os()
         .nth(1)
-        .is_some_and(|flag| flag == canoa_ffi::jobs::CHILD_FLAG)
+        .is_some_and(|flag| canoa_ffi::jobs::starts_as_child(&flag))
     {
         std::process::exit(canoa_ffi::exports::canoa_ffi_child_main());
     }

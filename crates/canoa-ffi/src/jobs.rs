@@ -24,6 +24,15 @@ use crate::{log, platform};
 
 /// The first argument that makes an application run as the host's own command when it starts itself.
 pub const CHILD_FLAG: &str = "--canoa-child";
+/// How a browser starts a native messaging host: the extension's origin is the first argument. The application's entry file
+/// treats it as it does [`CHILD_FLAG`], so the browser's own start of the application opens no window.
+pub const BROWSER_ORIGIN_PREFIX: &str = "chrome-extension://";
+
+/// Whether the first argument makes this process one of the host's own commands.
+#[must_use]
+pub fn starts_as_child(first: &std::ffi::OsStr) -> bool {
+    first == CHILD_FLAG || first.to_string_lossy().starts_with(BROWSER_ORIGIN_PREFIX)
+}
 
 /// The most lines of each kind a job keeps unread; past it the oldest go, and `dropped` counts them.
 const MAX_QUEUED: usize = 4096;
@@ -299,7 +308,7 @@ fn run_command(args: &[String], front: &JobFront) -> i32 {
         // They change the process they run in: its directory, its standard input, its end.
         Ok(parsed) if parsed.is_a_hosts_own() => {
             front.say(&format!(
-                "canoa: provider, tool, agent, launch, mcp-bridge, hook-forward and spawner run only as a process of their own, through {CHILD_FLAG}"
+                "canoa: provider, tool, agent, launch, mcp-bridge, hook-forward, native-host and spawner run only as a process of their own, through {CHILD_FLAG}"
             ));
             return STATUS_USAGE;
         }
@@ -417,13 +426,24 @@ pub(crate) fn child_main() -> i32 {
     platform::default_child_signal();
     platform::share_parents_console();
     log::install_for_child();
-    let args = std::env::args_os().skip(2);
-    let line = std::iter::once(OsString::from("canoa")).chain(args);
+    let mut arguments = std::env::args_os().skip(1);
+    let first = arguments.next();
+    // A browser passes the origin and no command: it is the relay.
+    let browser = first
+        .as_ref()
+        .is_some_and(|first| first.to_string_lossy().starts_with(BROWSER_ORIGIN_PREFIX));
+    let command = browser
+        .then(|| OsString::from("native-host"))
+        .into_iter()
+        .chain(first.filter(|_| browser));
+    let line = std::iter::once(OsString::from("canoa"))
+        .chain(command)
+        .chain(arguments);
     let parsed = match Cli::try_parse_from(line) {
         Ok(parsed) if parsed.is_a_hosts_own() => parsed,
         Ok(_) => {
             eprintln!(
-                "canoa: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge, hook-forward or spawner"
+                "canoa: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge, hook-forward, native-host or spawner"
             );
             return STATUS_USAGE;
         }
