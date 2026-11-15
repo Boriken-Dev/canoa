@@ -11,6 +11,7 @@ import 'dart:js_interop_unsafe';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/browser_connect.dart';
 import 'package:canoa/acp/connect.dart';
+import 'package:canoa/accounts/account_models.dart' show accountMeta;
 import 'package:canoa/desktop/host_grants.dart';
 import 'package:canoa/served/served_app.dart';
 import 'package:canoa/store/programs.dart';
@@ -25,9 +26,9 @@ Future<void> _until(bool Function() test, String what, {Duration within = const 
   }
 }
 
-/// The page's only step. [options] holds `entry` (the Claude entry, run by a stand-in program), `name` (the account to add), `key`
-/// (the API key typed into the sealed form) and `store` (the id of the made-up Store).
-Future<String> _run(String options) async {
+/// The page's first step. [options] holds `name` (the account to add), `key` (the API key typed into the sealed form) and `store`
+/// (the id of the made-up Store).
+Future<String> _first(String options) async {
   final asked = jsonDecode(options) as Map<String, Object?>;
   final report = <String, Object?>{};
   final app = (await ServedApp.discover(base: Uri.base.replace(path: '/', query: '', fragment: '')))!;
@@ -83,26 +84,6 @@ Future<String> _run(String options) async {
     final listed = await host.list();
     report['accounts'] = [for (final each in listed) each.name];
 
-    // The entry offers the account, which the host serves from its next start; then a session runs on it.
-    final entry = asked['entry']! as String;
-    final current = (await app.loadConfig())!;
-    final restart = await app.configStore.save(current.withAccountOffered(account: name, harness: 'claude', entry: entry));
-    report['restart'] = restart;
-    if (restart) {
-      await app.files.restart();
-      await app.files.awaitHost();
-    }
-    final listedEntry = app.host.entries.firstWhere((each) => each.name == entry);
-    final client = await connectBrowserAcp(
-      chatEndpoints(webSocket: listedEntry.url),
-      pinnedPeerId: app.host.peer,
-      method: app.host.method,
-      initializeMeta: {'dev.boriken.canoa/account': name},
-    );
-    final cwd = (await app.files.listFolders()).entries.first.path;
-    final opened = await client.openSession(cwd: cwd);
-    report['session'] = opened.id;
-    await client.close();
     report['ok'] = true;
   } on Object catch (error, stack) {
     report['error'] = '$error';
@@ -115,6 +96,46 @@ Future<String> _run(String options) async {
 
 void main() {
   globalContext
-    ..setProperty('canoaRun'.toJS, ((JSString options) => _run(options.toDart).catchError((Object error) => jsonEncode({'error': '$error'})).then((answer) => answer.toJS).toJS).toJS)
+    ..setProperty('canoaFirst'.toJS, ((JSString options) => _guard(_first(options.toDart)).then((answer) => answer.toJS).toJS).toJS)
+    ..setProperty('canoaSecond'.toJS, ((JSString options) => _guard(_second(options.toDart)).then((answer) => answer.toJS).toJS).toJS)
     ..setProperty('canoaReady'.toJS, true.toJS);
 }
+
+/// The page's second step, in a page loaded after the person's canoa.cfg names the account under the entry (the control channel
+/// never writes an entry): a session of the entry, on the account. [options] holds `entry` and `name`.
+Future<String> _second(String options) async {
+  final asked = jsonDecode(options) as Map<String, Object?>;
+  final report = <String, Object?>{};
+  final app = (await ServedApp.discover(base: Uri.base.replace(path: '/', query: '', fragment: '')))!;
+  try {
+    await app.probe();
+    report['reachable'] = app.reachable;
+    final entry = asked['entry']! as String;
+    final listedEntry = app.host.entries.firstWhere((each) => each.name == entry);
+    final client = await connectBrowserAcp(
+      chatEndpoints(webSocket: listedEntry.url),
+      pinnedPeerId: app.host.peer,
+      method: app.host.method,
+      initializeMeta: {accountMeta: asked['name']! as String},
+    );
+    final cwd = (await app.files.listFolders()).entries.first.path;
+    final opened = await client.openSession(cwd: cwd);
+    report['session'] = opened.id;
+    // The stand-in program starts with the first prompt and ends at once for this one: by then the host has run it for the account.
+    try {
+      await client.prompt(opened.id, 'die');
+    } on Object catch (error) {
+      report['prompt'] = '$error';
+    }
+    await client.close();
+    report['ok'] = true;
+  } on Object catch (error, stack) {
+    report['error'] = '$error';
+    report['stack'] = '$stack'.split('\n').take(6).join('\n');
+  } finally {
+    await app.close();
+  }
+  return jsonEncode(report);
+}
+
+Future<String> _guard(Future<String> step) => step.catchError((Object error) => jsonEncode({'error': '$error'}));
