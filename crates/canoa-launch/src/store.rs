@@ -37,6 +37,7 @@ pub struct Payload<'a> {
 
 /// An unpacked, verified app folder.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Installed {
     /// The folder, `<base>/<version>`.
     pub dir: PathBuf,

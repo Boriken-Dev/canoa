@@ -5,6 +5,7 @@ use std::io;
 
 /// Why a launch stopped.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// A file system call failed; `context` says which.
     Io {

@@ -9,10 +9,11 @@ extern crate alloc;
 #[cfg_attr(docsrs, doc(cfg(feature = "store")))]
 pub mod store;
 use alloc::collections::{BTreeMap, BTreeSet};
+use core::borrow::Borrow;
 use core::fmt;
 
 /// An identifier assigned to a service by a trusted registry.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct ServiceId(String);
 
 impl ServiceId {
@@ -30,6 +31,18 @@ impl ServiceId {
 impl fmt::Display for ServiceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for ServiceId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for ServiceId {
+    fn borrow(&self) -> &str {
+        &self.0
     }
 }
 
@@ -102,7 +115,7 @@ impl Service {
 }
 
 /// Identifies a caller as established by the host integration, not a self-asserted claim.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct ClientId(String);
 
 impl ClientId {
@@ -123,6 +136,18 @@ impl fmt::Display for ClientId {
     }
 }
 
+impl AsRef<str> for ClientId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for ClientId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl From<&str> for ClientId {
     fn from(s: &str) -> Self {
         ClientId(s.to_string())
@@ -130,7 +155,7 @@ impl From<&str> for ClientId {
 }
 
 /// A capability that the client is allowed to exercise on an individual service.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub struct Capability(String);
 
 impl Capability {
@@ -148,6 +173,18 @@ impl Capability {
 impl fmt::Display for Capability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for Capability {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for Capability {
+    fn borrow(&self) -> &str {
+        &self.0
     }
 }
 
@@ -217,6 +254,21 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn value_types_are_send_sync_and_hash_as_their_text() {
+        use std::collections::HashSet;
+        assert_send_sync::<ServiceId>();
+        assert_send_sync::<ClientId>();
+        assert_send_sync::<Capability>();
+        assert_send_sync::<Registry>();
+        let mut set = HashSet::new();
+        set.insert(Capability::new("session.prompt"));
+        assert!(set.contains("session.prompt"));
+        assert_eq!(ServiceId::new("a").as_ref() as &str, "a");
+    }
 
     #[test]
     fn discovery_and_grants_do_not_bypass_verification() {

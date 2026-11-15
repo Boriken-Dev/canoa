@@ -39,11 +39,13 @@ pub struct Manifest {
 }
 
 /// Lower-case hex of `bytes`.
+#[must_use]
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// SHA-256 of `bytes`, as hex.
+#[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
@@ -107,6 +109,7 @@ impl Manifest {
     }
 
     /// The canonical text.
+    #[must_use]
     pub fn text(&self) -> String {
         let mut text = format!("{HEADER}\nversion {}\n", self.version);
         for e in &self.entries {
@@ -116,6 +119,7 @@ impl Manifest {
     }
 
     /// SHA-256 of [`text`](Self::text), as hex: the digest that says which build of the app a folder holds.
+    #[must_use]
     pub fn digest(&self) -> String {
         sha256_hex(self.text().as_bytes())
     }
@@ -160,6 +164,7 @@ impl Manifest {
     }
 
     /// The entry named `path`, if any.
+    #[must_use]
     pub fn entry(&self, path: &str) -> Option<&Entry> {
         self.entries
             .binary_search_by(|e| e.path.as_str().cmp(path))
