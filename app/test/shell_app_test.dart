@@ -134,6 +134,79 @@ void main() {
     expect(find.byType(SectionRail), findsOneWidget);
   });
 
+  group('the work panel', () {
+    testWidgets('the right toggle is there for a conversation that has started and not for a new session', (tester) async {
+      final store = _busy();
+      addTearDown(store.dispose);
+      await pumpApp(tester, store);
+      expect(find.byKey(const ValueKey('layout-right')), findsOneWidget);
+      expect(find.byKey(const ValueKey('layout-bottom')), findsNothing, reason: 'no surface offers the bottom panel yet');
+      expect(find.byKey(const ValueKey('layout-left')), findsOneWidget);
+      await newSession(tester);
+      expect(find.byKey(const ValueKey('layout-right')), findsNothing, reason: 'a session with nothing started has nothing to show');
+      expect(find.byKey(const ValueKey('layout-left')), findsOneWidget);
+    });
+
+    testWidgets('it opens on a launcher, Details shows the facts of the session and Changes its diff, and each stays a tab', (tester) async {
+      final store = _busy();
+      addTearDown(store.dispose);
+      await pumpApp(tester, store);
+      await tester.tap(find.byKey(const ValueKey('layout-right')));
+      await frames(tester);
+      expect(find.text('Open a surface'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('launch details')));
+      await frames(tester);
+      expect(find.text('Environment'), findsOneWidget);
+      expect(find.byKey(const ValueKey('tab details')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('panel-add')));
+      await frames(tester);
+      await tester.tap(find.byKey(const ValueKey('open changes')));
+      await frames(tester);
+      expect(find.byKey(const ValueKey('tab changes')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tab details')));
+      await frames(tester);
+      expect(find.text('Environment'), findsOneWidget);
+    });
+
+    testWidgets('Ctrl+Alt+B shows and hides it, and the choice is on the layout that is kept', (tester) async {
+      final store = _busy();
+      addTearDown(store.dispose);
+      final layout = ShellLayout();
+      await pumpApp(tester, store, layout: layout);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await frames(tester);
+      expect(layout.rightOpen, isTrue);
+      expect(find.text('Open a surface'), findsOneWidget);
+    });
+
+    testWidgets('Session details opens Details in the panel, the toggle hides and shows it again, and each conversation has surfaces of its own', (tester) async {
+      final store = _busy();
+      addTearDown(store.dispose);
+      await pumpApp(tester, store);
+      await tester.tap(find.byTooltip('Session details'));
+      await frames(tester);
+      expect(find.text('Environment'), findsOneWidget);
+      // With the panel open the header has less room, and its actions are under one menu.
+      await tester.tap(find.byKey(const ValueKey('layout-right')));
+      await frames(tester);
+      expect(find.text('Environment'), findsNothing);
+      await tester.tap(find.byTooltip('Session details'));
+      await frames(tester);
+      expect(find.text('Environment'), findsOneWidget);
+      expect(find.byKey(const ValueKey('tab details')), findsOneWidget, reason: 'the same surface, not a second one');
+      store.select(store.sessions.first.id);
+      await frames(tester);
+      expect(find.text('Open a surface'), findsOneWidget, reason: 'the other conversation has opened nothing');
+      store.select(store.sessions.last.id);
+      await frames(tester);
+      expect(find.byKey(const ValueKey('tab details')), findsOneWidget);
+    });
+  });
+
   group('goldens', () {
     testWidgets('the shell at desktop width: the selector, the conversations index and the conversation', (tester) async {
       final store = _busy();
@@ -157,6 +230,15 @@ void main() {
       await tester.tap(find.byTooltip('Canoa settings'));
       await frames(tester);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/shell_settings_desktop.png'));
+    });
+
+    testWidgets('the right panel with Details beside a conversation, at desktop width', (tester) async {
+      final store = _busy();
+      addTearDown(store.dispose);
+      await pumpApp(tester, store, size: const Size(1280, 800));
+      await tester.tap(find.byTooltip('Session details'));
+      await frames(tester);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/work_panel_details_desktop.png'));
     });
 
     testWidgets('the shell at phone width with the drawer open: the selector beside the index', (tester) async {

@@ -3,6 +3,7 @@
 import 'dart:convert' show base64Encode, utf8;
 import 'dart:io' show Directory;
 
+import 'package:canoa/shell/work_panel.dart';
 import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption;
 import 'package:canoa/chat/git_changes.dart';
 import 'package:canoa/chat/git_changes_pane.dart';
@@ -412,21 +413,21 @@ void main() {
       expect(find.textContaining('Running commands'), findsNothing);
     });
 
-    testWidgets('on a phone the sheet holds the lineage, a child closes it onto its thread, and the sheet opens again', (tester) async {
+    testWidgets('on a phone the panel holds the lineage across the window, a child closes it onto its thread, and the panel opens again', (tester) async {
       final scene = await openScene(tester, size: const Size(390, 844));
       await scene.fourChildren();
       await details(tester);
-      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byType(WorkPanel), findsOneWidget);
       expect(find.text('Lineage · 4 running'), findsOneWidget);
-      await tester.tap(find.byTooltip('Close details'));
+      await tester.tap(find.byTooltip('Back to the conversation'));
       await tester.pumpAndSettle();
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byType(WorkPanel), findsNothing);
       await details(tester);
-      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byType(WorkPanel), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('lineage c1')));
       await tester.pump(const Duration(milliseconds: 500));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byType(WorkPanel), findsNothing);
       expect(scene.session.openChild, 'c1');
       expect(scene.session.tasks['c1']!.phase, TaskPhase.working);
     });
@@ -490,17 +491,17 @@ void main() {
       });
     }
 
-    testWidgets('on a phone the inspector is a sheet, which closes', (tester) async {
+    testWidgets('on a phone the inspector is a panel across the window, with a way back', (tester) async {
       final (agent, _, _) = await showTask(tester, _phone);
       agent.task();
       await settle(tester);
       await tester.tap(find.byTooltip('Changes'));
       await tester.pumpAndSettle();
-      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byType(WorkPanel), findsOneWidget);
       expect(find.text('Environment'), findsOneWidget);
-      await tester.tap(find.byTooltip('Close details'));
+      await tester.tap(find.byTooltip('Back to the conversation'));
       await tester.pumpAndSettle();
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byType(WorkPanel), findsNothing);
     });
   });
 }

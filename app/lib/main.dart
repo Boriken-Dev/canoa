@@ -42,6 +42,7 @@ import 'chat/cache_lifetime.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
+import 'chat/inspector_surfaces.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/child_thread.dart';
@@ -76,7 +77,10 @@ import 'profile/report.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'shell/layout_backend.dart';
+import 'shell/layout_controls.dart';
 import 'shell/layout_state.dart';
+import 'shell/surface.dart';
+import 'shell/work_panel.dart';
 import 'shell/sections.dart';
 import 'shell/shell.dart';
 import 'rail/session_rail.dart';
@@ -208,11 +212,15 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served, this.layout,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served, this.layout, this.surfaces,
   });
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
   final ShellLayout? layout;
+
+  /// The views the work panel can show; the app's own (details and changes) when none are given.
+  @visibleForTesting
+  final List<WorkSurface>? surfaces;
 
   /// The host that served this page, when one did: where its sources, session list, folders, uploads, canoa.cfg and overlays are,
   /// over the control channel. Null on a desktop, whose host runs in its own process, and for a page nothing served.
@@ -370,6 +378,7 @@ class _CanoaAppState extends State<CanoaApp> {
   String? _settingsFirst;
 
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
+  late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? builtInSurfaces());
 
   /// Hosting is a section of Settings.
   Future<void> _showHosting() => _showSettings(section: 'hosting');
@@ -1602,6 +1611,7 @@ class _CanoaAppState extends State<CanoaApp> {
   void dispose() {
     store.removeListener(_keepSelection);
     if (widget.layout == null) _layout.dispose();
+    _surfaces.dispose();
     _grouping.dispose();
     _popout.dispose();
     _tabs?.dispose();
@@ -1720,7 +1730,7 @@ class _CanoaAppState extends State<CanoaApp> {
           store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
           onHosting: widget.host == null || widget.served != null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
-          layout: _layout, settings: _settingsPage(), loadout: _loadoutPage(),
+          layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(),
           conversation: _conversation,
           localHost: _localHost,
           grouping: _grouping,
@@ -1741,7 +1751,7 @@ class _CanoaHome extends StatelessWidget {
     required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
     this.onHosting, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
-    required this.layout, required this.settings, required this.loadout,
+    required this.layout, required this.surfaces, required this.settings, required this.loadout,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -1749,6 +1759,7 @@ class _CanoaHome extends StatelessWidget {
 
   final ValueNotifier<SessionGrouping> grouping;
   final ShellLayout layout;
+  final WorkSurfaces surfaces;
 
   /// The main views of the Settings and Loadouts sections.
   final Widget settings, loadout;
@@ -1843,6 +1854,12 @@ class _CanoaHome extends StatelessWidget {
   Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
     chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
     chord(LogicalKeyboardKey.keyN): onNewSession,
+    chord(LogicalKeyboardKey.backquote): () {
+      if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.bottom)) layout.toggleBottom();
+    },
+    chord(LogicalKeyboardKey.keyB, alt: true): () {
+      if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
+    },
     // The shell hears it too when focus is inside it; this is for focus above, where nothing in the shell is.
     chord(LogicalKeyboardKey.keyB): () {
       if (layout.section == ShellLayout.conversations) layout.toggleIndex(layout.section);
@@ -1897,6 +1914,8 @@ class _CanoaHome extends StatelessWidget {
               store: store,
               narrow: narrow,
               handle: conversation,
+              layout: layout,
+              surfaces: surfaces,
               kit: kit,
               renderers: renderers,
               welcome: welcome,
@@ -1941,7 +1960,7 @@ final class _ConversationHandle {
 
 class _Conversation extends StatefulWidget {
   const _Conversation({
-    super.key, required this.store, required this.narrow, required this.handle,
+    super.key, required this.store, required this.narrow, required this.handle, required this.layout, required this.surfaces,
     this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome,
   });
 
@@ -1952,7 +1971,8 @@ class _Conversation extends StatefulWidget {
 
   final SessionStore store;
   final bool narrow;
-
+  final ShellLayout layout;
+  final WorkSurfaces surfaces;
 
   @override
   State<_Conversation> createState() => _ConversationState();
@@ -1993,9 +2013,6 @@ class _ConversationState extends State<_Conversation> {
       };
   }
 
-  /// Whether the inspector is beside the conversation, on a wide window.
-  bool _inspectorOpen = false;
-
   /// Adds [text] to the message being written, on a line of its own.
   void _addToComposer(String text) {
     final had = _input.text;
@@ -2003,31 +2020,27 @@ class _ConversationState extends State<_Conversation> {
     _input.value = TextEditingValue(text: joined, selection: TextSelection.collapsed(offset: joined.length));
   }
 
-  /// The inspector: beside the conversation on a wide window, a sheet over it on a narrow one.
-  void _showInspector(ChatSession session) {
-    if (!widget.narrow) {
-      setState(() => _inspectorOpen = !_inspectorOpen);
+  /// Shows the surface [id] in its panel, or hides the panel when that surface is the one it shows. On a narrow window the panel
+  /// takes the whole window, with a way back.
+  void _toggleSurface(ChatSession session, String id) {
+    final surface = widget.surfaces.registry.where((each) => each.id == id).firstOrNull;
+    if (surface == null) return;
+    final mine = widget.surfaces.of(session.id);
+    final open = mine.find(id);
+    final layout = widget.layout;
+    final slot = open?.slot ?? surface.placements.first;
+    final panelOpen = slot == SurfaceSlot.right ? layout.rightOpen : layout.bottomOpen;
+    if (open != null && panelOpen && layout.focus != PanelFocus.main && identical(mine.activeIn(slot), open)) {
+      slot == SurfaceSlot.right ? layout.setRightOpen(false) : layout.setBottomOpen(false);
       return;
     }
-    unawaited(showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (sheet) => Selectable(child: FractionallySizedBox(
-        heightFactor: 0.9,
-        child: SessionInspectorPanel(
-          store: widget.store,
-          session: session,
-          onComment: (text) {
-            _addToComposer(text);
-            Navigator.pop(sheet);
-          },
-          onClose: () => Navigator.pop(sheet),
-          onOpenChild: () => Navigator.pop(sheet),
-        ),
-      )),
-    ));
+    // What the disk holds is read when a surface is shown, so it is not older than the person's last look.
+    widget.store.refreshGit(session);
+    mine.openSurface(surface);
+    slot == SurfaceSlot.right ? layout.showRight() : layout.showBottom();
   }
+
+  void _showInspector(ChatSession session) => _toggleSurface(session, DetailsSurface.surfaceId);
 
   @override
   void dispose() {
@@ -2123,7 +2136,7 @@ class _ConversationState extends State<_Conversation> {
   }
 
   /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
-  List<Widget> _headerActions(ChatSession? session) {
+  List<Widget> _headerActions(ChatSession? session, {bool tight = false}) {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
@@ -2141,7 +2154,7 @@ class _ConversationState extends State<_Conversation> {
           builder: (_) => ProfileReportDialog(report: report),
         ))),
     ];
-    if (!widget.narrow || actions.length < 2) {
+    if (!(widget.narrow || tight) || actions.length < 2) {
       return [
         for (final (tooltip, icon, onPressed) in actions) IconButton(tooltip: tooltip, icon: Icon(icon), onPressed: onPressed),
       ];
@@ -2174,7 +2187,8 @@ class _ConversationState extends State<_Conversation> {
         color: context.look.bar,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(children: [
+          // A header with panels open beside it is narrow though the window is not: its actions go under one menu, as on a phone.
+          child: LayoutBuilder(builder: (context, headerBox) => Row(children: [
             if (widget.narrow)
               Builder(builder: (inner) => IconButton(
                 tooltip: 'Sessions',
@@ -2194,7 +2208,7 @@ class _ConversationState extends State<_Conversation> {
             if (session != null && !session.isDraft)
               if (changeTotals(session) case (final added, final removed)) _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
             if (session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
-            ..._headerActions(session),
+            ..._headerActions(session, tight: headerBox.maxWidth < 680),
             if (session != null)
               IconButton(
                 tooltip: 'Close conversation',
@@ -2205,7 +2219,7 @@ class _ConversationState extends State<_Conversation> {
             // The welcome page, with no session, has no state to name.
             if (session == null)
               const SizedBox.shrink()
-            else if (widget.narrow)
+            else if (widget.narrow || headerBox.maxWidth < 680)
               Tooltip(
                 message: _state(session),
                 child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)),
@@ -2216,7 +2230,15 @@ class _ConversationState extends State<_Conversation> {
                 label: Text(_state(session)),
                 visualDensity: VisualDensity.compact,
               ),
-          ]),
+            if (!widget.narrow)
+              LayoutControls(
+                layout: widget.layout,
+                section: ShellLayout.conversations,
+                hasIndex: true,
+                hasRight: session != null && widget.surfaces.offers(session, SurfaceSlot.right),
+                hasBottom: session != null && widget.surfaces.offers(session, SurfaceSlot.bottom),
+              ),
+          ])),
         ),
       ),
       if (session == null)
@@ -2280,23 +2302,23 @@ class _ConversationState extends State<_Conversation> {
         ),
       ],
     ]);
-    if (widget.narrow || !_inspectorOpen || session == null || session.isDraft) return conversation;
-    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Expanded(child: conversation),
-      const VerticalDivider(width: 1),
-      SizedBox(
-        width: 420,
-        child: SelectionArea(
-          child: SessionInspectorPanel(
-            key: ValueKey('inspector ${session.id}'),
-            store: widget.store,
-            session: session,
-            onComment: _addToComposer,
-            onClose: () => setState(() => _inspectorOpen = false),
-          ),
-        ),
+    if (session == null) return conversation;
+    return PanelFrame(
+      layout: widget.layout,
+      session: session,
+      surfaces: widget.surfaces.of(session.id),
+      registry: widget.surfaces,
+      narrow: widget.narrow,
+      child: conversation,
+      wrap: (panels) => SurfaceEnvironment(
+        store: widget.store,
+        onComment: _addToComposer,
+        onOpenChild: () {
+          if (widget.narrow) widget.layout.setRightOpen(false);
+        },
+        child: panels,
       ),
-    ]);
+    );
   }
 
   /// The composer of [session]: in the middle of a new session's view when [centred], else docked under the conversation.

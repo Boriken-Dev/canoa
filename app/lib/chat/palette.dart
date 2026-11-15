@@ -7,8 +7,8 @@ import '../selectable.dart';
 bool get _onMac => defaultTargetPlatform == TargetPlatform.macOS;
 
 /// A shortcut with the modifier this platform uses.
-SingleActivator chord(LogicalKeyboardKey key, {bool shift = false}) =>
-    SingleActivator(key, control: !_onMac, meta: _onMac, shift: shift);
+SingleActivator chord(LogicalKeyboardKey key, {bool shift = false, bool alt = false}) =>
+    SingleActivator(key, control: !_onMac, meta: _onMac, shift: shift, alt: alt);
 
 /// One line of the help sheet: the keys and what they do.
 typedef ShortcutLine = ({String keys, String what});
@@ -20,6 +20,8 @@ List<ShortcutLine> get shortcutHelp {
     (keys: '$mod+K', what: 'Open the command palette'),
     (keys: '$mod+N', what: 'Start a new session'),
     (keys: '$mod+B', what: 'Hide or show the section index'),
+    (keys: '$mod+Alt+B', what: 'Hide or show the right panel'),
+    (keys: '$mod+`', what: 'Hide or show the bottom panel'),
     (keys: '$mod+,', what: 'Open Settings'),
     (keys: '$mod+V in a message', what: 'Paste: an image or files go with it, long text as a file'),
     (keys: '$mod+A', what: 'Select all of the conversation, or of the message being written'),

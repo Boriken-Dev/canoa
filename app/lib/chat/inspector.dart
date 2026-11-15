@@ -48,7 +48,16 @@ String? modeLabelOf(SessionStore store, ChatSession session) {
 
 /// The inspector's two states: the session's facts, or the diff one of its changes views opens.
 class SessionInspectorPanel extends StatefulWidget {
-  const SessionInspectorPanel({super.key, required this.store, required this.session, required this.onComment, required this.onClose, this.onOpenChild});
+  const SessionInspectorPanel({
+    super.key,
+    required this.store,
+    required this.session,
+    required this.onComment,
+    required this.onClose,
+    this.onOpenChild,
+    this.embedded = false,
+    this.diffOnly = false,
+  });
 
   final SessionStore store;
   final ChatSession session;
@@ -59,6 +68,12 @@ class SessionInspectorPanel extends StatefulWidget {
 
   /// Called after a child's thread is opened from the lineage, for a sheet that has to get out of its way.
   final VoidCallback? onOpenChild;
+
+  /// Whether the panel sits under a tab of the work panel, which has the title and the close button.
+  final bool embedded;
+
+  /// Whether it shows the diff alone, with no way back to the session's facts: the Changes surface.
+  final bool diffOnly;
 
   @override
   State<SessionInspectorPanel> createState() => _SessionInspectorPanelState();
@@ -73,6 +88,7 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
     super.initState();
     // What the disk holds is read when the inspector opens, so it is not older than the person's last look.
     widget.store.refreshGit(widget.session);
+    if (widget.diffOnly) _diff = _scope;
   }
 
   /// The views the session can show: the agent's report where it made one, git's where the folder is a repository it reads.
@@ -94,7 +110,7 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
           scope: scope,
           scopes: scopes,
           onScope: (chosen) => setState(() => _diff = _scope = chosen),
-          onBack: () => setState(() => _diff = null),
+          onBack: widget.diffOnly ? null : () => setState(() => _diff = null),
           onComment: widget.onComment,
         );
       }
@@ -106,6 +122,7 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
         onScope: (chosen) => setState(() => _scope = chosen),
         onOpenDiff: () => setState(() => _diff = scope),
         onClose: widget.onClose,
+        embedded: widget.embedded,
         onOpenChild: (id) {
           widget.store.openChild(widget.session, id);
           widget.onOpenChild?.call();
@@ -128,8 +145,10 @@ class SessionInspector extends StatelessWidget {
     required this.onOpenDiff,
     required this.onClose,
     this.onOpenChild,
+    this.embedded = false,
   });
 
+  final bool embedded;
   final SessionStore store;
   final ChatSession session;
   final List<ChangeScope> scopes;
@@ -156,14 +175,16 @@ class SessionInspector extends StatelessWidget {
     return Material(
       color: context.look.rail,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-          child: Row(children: [
-            Expanded(child: Text('Session', style: Theme.of(context).textTheme.titleMedium)),
-            IconButton(tooltip: 'Close details', onPressed: onClose, icon: const Icon(Icons.close)),
-          ]),
-        ),
-        const Divider(height: 1),
+        if (!embedded) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+            child: Row(children: [
+              Expanded(child: Text('Session', style: Theme.of(context).textTheme.titleMedium)),
+              IconButton(tooltip: 'Close details', onPressed: onClose, icon: const Icon(Icons.close)),
+            ]),
+          ),
+          const Divider(height: 1),
+        ],
         Expanded(
           child: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 16), children: [
             Text('Environment', style: heading),
@@ -393,7 +414,7 @@ class _DiffView extends StatelessWidget {
   final ChangeScope scope;
   final List<ChangeScope> scopes;
   final ValueChanged<ChangeScope> onScope;
-  final VoidCallback onBack;
+  final VoidCallback? onBack;
   final ValueChanged<String> onComment;
 
   @override
@@ -403,7 +424,7 @@ class _DiffView extends StatelessWidget {
       Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
         child: Row(children: [
-          IconButton(tooltip: 'Back to the session', onPressed: onBack, icon: const Icon(Icons.arrow_back)),
+          if (onBack != null) IconButton(tooltip: 'Back to the session', onPressed: onBack, icon: const Icon(Icons.arrow_back)),
           Expanded(
             child: Wrap(spacing: 6, runSpacing: 4, children: [
               for (final each in scopes)
