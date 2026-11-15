@@ -1955,3 +1955,108 @@ mod native {
         assert_eq!(allowed_option(params), None);
     }
 }
+
+/// A lookup whose `PATH` is `path`, everything else the process's.
+fn on_path(path: String) -> impl Fn(&str) -> Option<String> {
+    move |name| {
+        if name == "PATH" {
+            Some(path.clone())
+        } else {
+            real(name)
+        }
+    }
+}
+
+#[test]
+fn a_second_connection_does_not_walk_path_again_for_the_same_value() {
+    use crate::profile::hosted::cache::counted;
+    let temp = Temp::new();
+    temp.install("", &[("pre-env", Arm::Print("{}".to_owned()))]);
+    let bin = temp.0.join("bin");
+    std::fs::create_dir_all(&bin).expect("a directory");
+    let path = bin.to_string_lossy().into_owned();
+    let lookup = on_path(path.clone());
+    connect(&temp, None, &lookup).expect("prepared");
+    assert_eq!(counted::walks(&path), 1);
+    connect(&temp, None, &lookup).expect("prepared");
+    assert_eq!(
+        counted::walks(&path),
+        1,
+        "the same PATH is not walked twice"
+    );
+    // Another value is another walk.
+    let other = format!("{path}{}{path}", if cfg!(windows) { ';' } else { ':' });
+    connect(&temp, None, &on_path(other.clone())).expect("prepared");
+    assert_eq!(counted::walks(&other), 1);
+}
+
+#[test]
+fn an_interpreter_that_went_away_is_looked_for_again() {
+    use crate::profile::hosted::cache::counted;
+    let temp = Temp::new();
+    temp.install("", &[("pre-env", Arm::Print("{}".to_owned()))]);
+    let bin = temp.0.join("bin");
+    std::fs::create_dir_all(&bin).expect("a directory");
+    let program = bin.join(if cfg!(windows) { "node.exe" } else { "node" });
+    std::fs::write(&program, "").expect("written");
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        &program,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("executable");
+    let path = bin.to_string_lossy().into_owned();
+    let lookup = on_path(path.clone());
+    let first = connect(&temp, None, &lookup).expect("prepared");
+    let found = first.hooks.interpreters.get("node").expect("node is found");
+    assert!(found.starts_with(&bin), "{found:?}");
+    std::fs::remove_file(&program).expect("removed");
+    let second = connect(&temp, None, &lookup).expect("prepared");
+    assert_eq!(counted::walks(&path), 2);
+    assert_eq!(second.hooks.interpreters.get("node"), None);
+}
+
+#[test]
+fn a_second_connection_does_not_read_an_unchanged_overlay_and_an_edited_one_is_read_again() {
+    use crate::profile::hosted::cache::counted;
+    let temp = Temp::new();
+    let root = temp.0.join("overlays").join("team");
+    let arms = [("pre-env", Arm::Print(r#"{"PRE_VAR":"one"}"#.to_owned()))];
+    let digest = temp.install("", &arms);
+    let first = connect(&temp, Some(&digest), &real).expect("prepared");
+    assert_eq!(env_of(&first, "PRE_VAR"), Some("one"));
+    assert_eq!(counted::reads(&root), 1);
+    let second = connect(&temp, Some(&digest), &real).expect("prepared");
+    assert_eq!(env_of(&second, "PRE_VAR"), Some("one"));
+    assert_eq!(
+        counted::reads(&root),
+        1,
+        "an unchanged overlay is not read twice"
+    );
+
+    // Edited and installed again: its files and its record differ, so it is read, and what it now says is what runs.
+    let arms = [(
+        "pre-env",
+        Arm::Print(r#"{"PRE_VAR":"two-and-longer"}"#.to_owned()),
+    )];
+    let digest = temp.install("", &arms);
+    let third = connect(&temp, Some(&digest), &real).expect("prepared");
+    assert_eq!(counted::reads(&root), 2);
+    assert_eq!(env_of(&third, "PRE_VAR"), Some("two-and-longer"));
+
+    // Edited under a record that still names the old files: read again, and left out.
+    std::fs::write(root.join("extra.txt"), "x").expect("written");
+    let fourth = connect(&temp, Some(&digest), &real).expect("prepared");
+    assert_eq!(counted::reads(&root), 3);
+    assert_eq!(env_of(&fourth, "PRE_VAR"), None);
+}
+
+#[test]
+fn the_sweep_of_what_a_killed_host_left_is_started_once() {
+    use crate::profile::hosted::cache::counted;
+    let temp = Temp::new();
+    temp.install("", &[("pre-env", Arm::Print("{}".to_owned()))]);
+    connect(&temp, None, &real).expect("prepared");
+    connect(&temp, None, &real).expect("prepared");
+    assert_eq!(counted::sweeps(), 1);
+}

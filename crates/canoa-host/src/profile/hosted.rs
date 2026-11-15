@@ -74,6 +74,7 @@ pub const APPROVE_META: &str = "dev.boriken.canoa/approve";
 /// How long the person has to answer an approval.
 const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
+mod cache;
 mod hooks;
 mod private;
 pub(crate) use hooks::forward as forward_hook;
@@ -569,20 +570,27 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
             continue;
         };
         let root = store.join(identity);
-        let (tree, digest) = match aos::read_tree(&StdFs, &root, &Settings::default()) {
-            Ok(read) => read,
-            Err(error) => {
-                leave_out(&format!(
-                    "its files cannot be read ({}: {})",
-                    error.class, error.subject
-                ));
+        let tree = cache::overlay(&root, expected, || {
+            let (tree, digest) =
+                aos::read_tree(&StdFs, &root, &Settings::default()).map_err(|error| {
+                    format!(
+                        "its files cannot be read ({}: {})",
+                        error.class, error.subject
+                    )
+                })?;
+            if same_digest(&digest.digest.to_string(), expected) {
+                Ok(tree)
+            } else {
+                Err("its files are not those its record's digest names: sync it".to_owned())
+            }
+        });
+        let tree = match tree {
+            Ok(tree) => tree,
+            Err(why) => {
+                leave_out(&why);
                 continue;
             }
         };
-        if !same_digest(&digest.digest.to_string(), expected) {
-            leave_out("its files are not those its record's digest names: sync it");
-            continue;
-        }
         let fetched = fetched_skills(&store, identity, &tree, &layer, &host.skill_pins, notes);
         out.push(ReadOverlay {
             identity: identity.clone(),

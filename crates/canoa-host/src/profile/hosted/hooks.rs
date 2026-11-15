@@ -173,15 +173,18 @@ impl Hooks {
         shared: &IndexMap<String, LayerId>,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Self {
-        let mut interpreters = BTreeMap::new();
-        for name in aos::INTERPRETERS {
-            for program in programs_of(name) {
-                if let Ok(found) = program_of(program, None, lookup) {
-                    interpreters.insert(name, PathBuf::from(found));
-                    break;
+        let interpreters = super::cache::interpreters(lookup("PATH"), lookup("PATHEXT"), || {
+            let mut found = BTreeMap::new();
+            for name in aos::INTERPRETERS {
+                for program in programs_of(name) {
+                    if let Ok(path) = program_of(program, None, lookup) {
+                        found.insert(name, PathBuf::from(path));
+                        break;
+                    }
                 }
             }
-        }
+            found
+        });
         // A Windows search for a program never starts at the folder the hook runs in, which is the session's.
         let base: Vec<(String, String)> = std::env::vars()
             .chain(cfg!(windows).then(|| {
@@ -225,10 +228,7 @@ impl Hooks {
                 hooks: found.hooks,
             });
         }
-        remove_stale(&std::env::temp_dir());
-        if super::private::base() != std::env::temp_dir() {
-            remove_stale(&super::private::base());
-        }
+        super::cache::sweep_once();
         Self {
             overlays: planned,
             settings: Settings::default(),
