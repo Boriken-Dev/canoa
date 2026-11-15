@@ -1658,6 +1658,11 @@ impl Serving {
             "method": self.method().name(),
             "entries": entries,
             "control": true,
+            "home": options
+                .home_dir
+                .clone()
+                .or_else(home_from_environment)
+                .map(|dir| dir.to_string_lossy().into_owned()),
         });
         let control = Arc::new(Served {
             name: control::NAME.to_owned(),
@@ -1669,7 +1674,13 @@ impl Serving {
             },
             running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
         });
-        Some(Door::new(listener, hello, self.local().served, control))
+        Some(Door::new(
+            listener,
+            hello,
+            self.local().served,
+            control,
+            home.clone(),
+        ))
     }
 
     /// Gives the delegation the agents this host serves and the way to open one for a task.
@@ -1859,7 +1870,7 @@ fn accept_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &websocket:
             .name("canoa-peer".to_owned())
             .spawn(move || match pending.handshake() {
                 Ok(channel) => {
-                    connection(&shared, &served, &channel, entered);
+                    connection(&shared, &served, &channel, entered, None);
                     channel.close();
                 }
                 Err(failure) => tracing::debug!("a handshake failed: {failure}"),
@@ -1903,7 +1914,7 @@ fn accept_transport_loop(
         let spawned = thread::Builder::new()
             .name("canoa-peer".to_owned())
             .spawn(move || {
-                connection(&shared, &served, &link, entered);
+                connection(&shared, &served, &link, entered, None);
                 link.close();
             });
         if let Err(error) = spawned {
@@ -1952,7 +1963,7 @@ fn accept_pipe_loop(shared: &Arc<Shared>, served: &Arc<Served>, listener: &pipe:
         let spawned = thread::Builder::new()
             .name("canoa-peer".to_owned())
             .spawn(move || {
-                connection(&shared, &served, &channel, entered);
+                connection(&shared, &served, &channel, entered, None);
                 channel.close();
             });
         if let Err(error) = spawned {
@@ -1982,7 +1993,15 @@ impl Shared {
     }
 }
 
-fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unproven: Entered) {
+/// A connection's proof and what follows it. `admit`, when given, is asked once the key is known and may turn it away: the native
+/// door uses it to bind a browser's key to the extension that paired it.
+fn connection<C: Channel>(
+    shared: &Shared,
+    served: &Served,
+    channel: &C,
+    unproven: Entered,
+    admit: Option<&dyn Fn(&PeerId) -> bool>,
+) {
     let established = match auth::prove(
         &shared.method,
         channel,
@@ -2011,6 +2030,11 @@ fn connection<C: Channel>(shared: &Shared, served: &Served, channel: &C, unprove
     let peer = established.peer;
     if !shared.allows(&peer, served) {
         return tracing::info!(entry = served.name, %peer, "a paired key this entry does not list was turned away");
+    }
+    if let Some(admit) = admit
+        && !admit(&peer)
+    {
+        return tracing::info!(entry = served.name, %peer, "a browser's key was turned away: it was paired by another extension");
     }
     let store = Arc::clone(&shared.store);
     let stopped = Arc::clone(&shared.stopped);

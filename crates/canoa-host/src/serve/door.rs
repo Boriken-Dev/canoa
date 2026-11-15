@@ -5,6 +5,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use coqui_agentic_peer::auth;
@@ -27,6 +28,7 @@ pub(super) struct Door {
     hello: Value,
     served: Vec<Arc<Served>>,
     control: Arc<Served>,
+    home: PathBuf,
 }
 
 impl Door {
@@ -35,12 +37,14 @@ impl Door {
         hello: Value,
         served: Vec<Arc<Served>>,
         control: Arc<Served>,
+        home: PathBuf,
     ) -> Self {
         Self {
             listener,
             hello,
             served,
             control,
+            home,
         }
     }
 
@@ -65,10 +69,11 @@ impl Door {
             let hello = self.hello.clone();
             let served = self.served.clone();
             let control = Arc::clone(&self.control);
+            let home = self.home.clone();
             let spawned = thread::Builder::new()
                 .name("canoa-door".to_owned())
                 .spawn(move || {
-                    meet(&shared, &hello, &served, &control, &channel, entered);
+                    meet(&shared, (&hello, &served, &control), &home, &channel, entered);
                     channel.close();
                 });
             if let Err(error) = spawned {
@@ -84,9 +89,8 @@ fn reply(channel: &pipe::PipeChannel, value: &Value) -> bool {
 
 fn meet(
     shared: &Shared,
-    hello: &Value,
-    served: &[Arc<Served>],
-    control: &Arc<Served>,
+    (hello, served, control): (&Value, &[Arc<Served>], &Arc<Served>),
+    home: &Path,
     channel: &pipe::PipeChannel,
     entered: Entered,
 ) {
@@ -116,5 +120,10 @@ fn meet(
     }
     channel.set_max_message(auth::MAX_PROOF_MESSAGE);
     tracing::debug!(entry = target.name, origin = wanted.origin, "a browser reached the door");
-    connection(shared, target, channel, entered);
+    // A key bound to the extension that paired it is not served to another origin.
+    let origin = wanted.origin;
+    let admit = |peer: &coqui_peer_webcrypto::PeerId| {
+        native::origin_allows(home, &peer.to_string(), &origin)
+    };
+    connection(shared, target, channel, entered, Some(&admit));
 }

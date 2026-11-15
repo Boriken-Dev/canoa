@@ -510,3 +510,96 @@ fn install_status_and_uninstall_leave_nothing_behind() {
     assert!(gone["launch"].is_null(), "{gone}");
     outcome.expect("the registration was as asked");
 }
+
+/// `canoa pair --native` on the host's home: its first line is the PIN it shows.
+fn pairing_door(home: &Path) -> (Child, Value) {
+    use std::io::BufRead as _;
+    let mut child = Command::new(host_binary())
+        .args(["pair", "--native", "--timeout-seconds", "120", "--method", support::method().name()])
+        .env("COQUI_AGENTIC_PEER_HOME", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("pair --native starts");
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.as_mut().expect("its output"))
+        .read_line(&mut line)
+        .expect("it shows a PIN");
+    let shown: Value = serde_json::from_str(&line).expect("one JSON object");
+    (child, shown)
+}
+
+#[test]
+fn a_browser_pairs_by_pin_through_the_relay_and_its_key_is_bound_to_its_extension() {
+    use coqui_agentic_peer::pairing;
+    use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
+
+    let host = host();
+    let (mut pair, shown) = pairing_door(&host.home());
+    assert_eq!(shown["native"], true, "{shown}");
+    assert_eq!(shown["peer"], host.peer.to_string().as_str());
+    let pin = Pin::parse(&CodeAlphabet::pin(), shown["pin"].as_str().expect("a PIN")).expect("a PIN");
+
+    let client = support::key();
+    let client_store = canoa_host::Home::at(host.scratch.0.join("client")).store().expect("a store");
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@pair").expect("the pairing door opens while a PIN is shown");
+    let joined = pairing::join(&link, &client, pin, &client_store, WAIT).expect("the PIN pairs");
+    link.close();
+    assert_eq!(joined.peer.id(), host.peer, "the browser learned the host's key by the PIN, not from hello");
+    assert!(pair.wait().expect("pair ends").success(), "pairing ends once it paired");
+
+    // Served to the extension that paired it...
+    let dir = cwd(&host.scratch);
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "fixture").expect("the door opens the entry");
+    let text = support::with_channel(link, &client, host.peer, |rpc| turn(rpc, &dir, "paired"))
+        .expect("the paired key is served")
+        .expect("the turn ends");
+    assert_eq!(text, "echo: paired");
+
+    // ...and to no other origin.
+    let relay = Relay::start(&host.home(), "chrome-extension://pppppppppppppppppppppppppppppppp/");
+    let link = Link::open(&relay, "fixture").expect("the door opens the entry");
+    let refused = support::with_channel(link, &client, host.peer, |rpc| rpc.initialize());
+    let served = matches!(refused, Ok(Ok(_)));
+    assert!(!served, "a key bound to one extension is turned away from another: {refused:?}");
+}
+
+#[test]
+fn the_pairing_door_is_closed_unless_a_person_asked_for_a_pin() {
+    let host = host();
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let refused = Link::open(&relay, "@pair").err().expect("nothing waits to pair");
+    assert!(refused["error"].as_str().is_some_and(|error| error.contains("PIN")), "{refused}");
+    // And the host's own door does not pair: it has no PIN to give.
+    let again = Relay::start(&host.home(), ORIGIN);
+    let hello = again.ask(&json!({ "op": "hello" }));
+    assert_eq!(hello["running"], true);
+}
+
+#[test]
+fn a_wrong_pin_pairs_nobody() {
+    use coqui_agentic_peer::pairing;
+    use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
+
+    let host = host();
+    let (mut pair, shown) = pairing_door(&host.home());
+    let right = shown["pin"].as_str().expect("a PIN");
+    let mut wrong = right.to_owned();
+    let last = wrong.pop().expect("a PIN has characters");
+    wrong.push(if last == '0' { '1' } else { '0' });
+    let pin = Pin::parse(&CodeAlphabet::pin(), &wrong).expect("a PIN of the same alphabet");
+    let client = support::key();
+    let client_store = canoa_host::Home::at(host.scratch.0.join("client")).store().expect("a store");
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@pair").expect("the pairing door opens");
+    let joined = pairing::join(&link, &client, pin, &client_store, Duration::from_secs(10));
+    link.close();
+    let _ = pair.kill();
+    let _ = pair.wait();
+    assert!(joined.is_err(), "a wrong PIN does not pair");
+    let store = canoa_host::Home::at(host.home()).store().expect("the host's store");
+    assert!(!store.is_accepted(&client.peer_id()), "nobody was paired");
+}

@@ -39,6 +39,8 @@ pub const MAX_PREAMBLE: usize = 64 * 1024;
 pub const MAX_PIECE: usize = 768_000;
 /// What `@hello` is opened as.
 pub const HELLO: &str = "@hello";
+/// What the pairing door is opened as.
+pub const PAIR: &str = "@pair";
 /// How long a relay waits for the door to answer.
 const DOOR_WAIT: Duration = Duration::from_secs(5);
 /// The version of the preamble.
@@ -78,6 +80,19 @@ pub fn read_preamble(bytes: &[u8]) -> Option<Preamble> {
 /// # Errors
 /// When the system has no place for a socket.
 pub fn door_name(home: &Path) -> Result<PipeName, pipe::Error> {
+    name_in(home, "native", "")
+}
+
+/// The pipe `canoa pair --native` waits on while the person has asked to pair a browser: beside the door, never the door itself,
+/// so a host that is not running can still be paired with and the host never holds a PIN.
+///
+/// # Errors
+/// When the system has no place for a socket.
+pub fn pair_door_name(home: &Path) -> Result<PipeName, pipe::Error> {
+    name_in(home, "native-pair", "-pair")
+}
+
+fn name_in(home: &Path, file: &str, suffix: &str) -> Result<PipeName, pipe::Error> {
     let path = fs::canonicalize(home)
         .or_else(|_| std::path::absolute(home))
         .unwrap_or_else(|_| home.to_owned());
@@ -87,11 +102,11 @@ pub fn door_name(home: &Path) -> Result<PipeName, pipe::Error> {
     }
     let digest = Sha256::digest(text.as_bytes());
     let hex: String = digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect();
-    let named = format!("canoa-native-{hex}");
+    let named = format!("canoa-native-{hex}{suffix}");
     if cfg!(windows) {
         return PipeName::named(&named);
     }
-    PipeName::at(path.join("native.sock")).or_else(|_| PipeName::named(&named))
+    PipeName::at(path.join(format!("{file}.sock"))).or_else(|_| PipeName::named(&named))
 }
 
 fn read_frame(stream: &Stream, limit: usize) -> io::Result<Option<Vec<u8>>> {
@@ -116,7 +131,12 @@ fn read_frame(stream: &Stream, limit: usize) -> io::Result<Option<Vec<u8>>> {
 
 /// Connects to the door and says what to open. `Ok(None)` when no host listens.
 fn knock(home: &Path, origin: &str, open: &str) -> io::Result<Option<Stream>> {
-    let name = door_name(home).map_err(|error| io::Error::other(error.to_string()))?;
+    let name = if open == PAIR {
+        pair_door_name(home)
+    } else {
+        door_name(home)
+    }
+    .map_err(|error| io::Error::other(error.to_string()))?;
     let stream = match Stream::connect(&name) {
         Ok(stream) => stream,
         Err(pipe::Error::NotListening) => return Ok(None),
@@ -128,6 +148,57 @@ fn knock(home: &Path, origin: &str, open: &str) -> io::Result<Option<Stream>> {
     (&stream).write_all(&framed)?;
     stream.set_read_timeout(Some(DOOR_WAIT))?;
     Ok(Some(stream))
+}
+
+/// The pairing door's side of its first message: the origin the browser reported, once the connection has asked for `@pair`.
+/// The answer that it is open is sent here.
+pub fn accept_pairing(channel: &pipe::PipeChannel) -> Option<String> {
+    use coqui_transport::Channel as _;
+    let first = channel.receive(Some(DOOR_WAIT)).ok().flatten()?;
+    let wanted = read_preamble(&first).filter(|wanted| wanted.open == PAIR)?;
+    channel.send(br#"{"opened":true}"#).ok()?;
+    channel.set_max_message(coqui_agentic_peer::auth::MAX_PROOF_MESSAGE);
+    Some(wanted.origin)
+}
+
+fn origins_file(home: &Path) -> PathBuf {
+    home.join("native").join("origins.json")
+}
+
+fn origins(home: &Path) -> serde_json::Map<String, Value> {
+    fs::read_to_string(origins_file(home))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Binds a key paired through the door to the origin the browser gave the relay: the key is that extension's, and no other
+/// origin may use it over the door.
+///
+/// # Errors
+/// When the record cannot be written.
+pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()> {
+    let mut map = origins(home);
+    map.insert(peer.to_owned(), origin.into());
+    let file = origins_file(home);
+    fs::create_dir_all(file.parent().unwrap_or(home))?;
+    let temporary = file.with_extension("json.tmp");
+    fs::write(&temporary, serde_json::to_string_pretty(&Value::Object(map)).map_err(io::Error::other)?)?;
+    fs::rename(temporary, file)
+}
+
+/// Whether `peer` may use the door from `origin`: a key bound to an origin only from that one; a key paired another way (by
+/// `canoa accept`) is bound to none and keeps the access its pairing gave it.
+#[must_use]
+pub fn origin_allows(home: &Path, peer: &str, origin: &str) -> bool {
+    origins(home)
+        .get(peer)
+        .and_then(Value::as_str)
+        .is_none_or(|bound| bound == origin)
 }
 
 /// Whether a host holds the home now.
@@ -308,6 +379,9 @@ impl<W: Write + Send + 'static> Relay<W> {
         }
         let stream = match knock(self.home.dir(), &self.origin, entry) {
             Ok(Some(stream)) => stream,
+            Ok(None) if entry == PAIR => {
+                return Err("Canoa is not waiting to pair a browser: ask it to show a PIN first".to_owned());
+            }
             Ok(None) => return Err("Canoa is not running".to_owned()),
             Err(error) => return Err(format!("the door could not be reached: {error}")),
         };
@@ -505,6 +579,8 @@ pub struct Status {
     pub launch: Option<Launch>,
     /// Whether a host holds the home.
     pub running: bool,
+    /// Who holds it, by what it wrote: its name and process id.
+    pub holder: Option<crate::home::Holder>,
 }
 
 /// What is registered for `name` and whether a host runs.
@@ -516,6 +592,7 @@ pub fn status(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<S
         registered: companion::installed(name.unwrap_or(HOST_NAME), Some(&native_dir(home)), profiles)?,
         launch: Launch::read(home).ok(),
         running: running(home),
+        holder: home.holder(),
     })
 }
 
