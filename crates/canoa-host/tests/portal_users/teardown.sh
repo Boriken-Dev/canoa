@@ -11,6 +11,8 @@ systemctl daemon-reload
 rm -rf /opt/canoatest /etc/canoatest /run/canoatest /run/canoatest-portal /var/tmp/canoatest-pam-count
 for name in canoatesta canoatestb canoatestc canoatestportal; do
     if id "$name" >/dev/null 2>&1; then
+        # A host that was just stopped may still be exiting, and userdel refuses an account with a process.
+        for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -u "$name" >/dev/null 2>&1 || break; sleep 1; done
         userdel --remove "$name" 2>/dev/null || userdel "$name"
     fi
 done
