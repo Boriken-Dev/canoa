@@ -51,3 +51,4 @@ Thumbs.db
 /app/web/noise/
 /app/test/noise/
 /app/web_noise/target/
+app/test/failures/
