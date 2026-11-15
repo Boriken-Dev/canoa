@@ -213,7 +213,7 @@ function installLocalHost() {
 async function nearby() {
   try {
     const reply = await chrome.runtime.sendNativeMessage(COMPANION, { op: "discover", seconds: SEARCH_SECONDS });
-    return { candidates: readCandidates(reply, await store.agents()) };
+    return { candidates: readCandidates(reply, await store.stored()) };
   } catch {
     return { candidates: [], noCompanion: true };
   }
@@ -325,7 +325,7 @@ function stayAwake(on) {
 
 const standing = createStanding({
   setting: () => read("local", STANDING, null),
-  agentOf: async (key) => (await store.agents()).find((agent) => agent.key === key),
+  agentOf: async (key) => (await store.stored()).find((agent) => agent.key === key),
   dial: async (agent) => {
     const link = await dialRecord(store, dialAgent, agent, { bare: true, heartbeat: HEARTBEAT });
     await store.markProven(agent.key);
@@ -346,7 +346,7 @@ const standing = createStanding({
 
 /** What the permissions page shows: every agent that has a key to prove, whether it says it can do this, and how it is going. */
 async function standingView() {
-  const agents = await store.agents();
+  const agents = await store.stored();
   const ids = Object.fromEntries(await Promise.all(METHODS.map(async (method) => [method, await ownPeerId(method)])));
   return {
     ids,
@@ -377,7 +377,7 @@ async function forgetPeer(peer) {
 
 /** Turns it on for one agent, or off with null. */
 async function setStanding(key) {
-  const agents = await store.agents();
+  const agents = await store.stored();
   const peerOf = (candidate) => agents.find((agent) => agent.key === candidate)?.peer;
   if (key !== null) {
     const agent = agents.find((candidate) => candidate.key === key);
@@ -404,7 +404,7 @@ async function setStanding(key) {
 /** Whether what a person allows this peer also reaches its machine's programs. */
 async function programsShare(peer) {
   const on = await read("local", STANDING, null);
-  return on !== null && (await store.agents()).find((agent) => agent.key === on)?.peer === peer;
+  return on !== null && (await store.stored()).find((agent) => agent.key === on)?.peer === peer;
 }
 
 function secureOrigin(origin) {
@@ -440,7 +440,7 @@ export async function forgetSite(origin) {
 
 /** The keys of the agents this browser holds, for a grant to check its peer against. */
 export async function pairedPeers() {
-  return (await store.agents()).map((agent) => agent.peer).filter((peer) => typeof peer === "string");
+  return (await store.stored()).map((agent) => agent.peer).filter((peer) => typeof peer === "string");
 }
 
 export function installProvider() {
@@ -509,7 +509,7 @@ export function installProvider() {
       nearby().then(reply);
       return true;
     } else if (message.acp === "manage") {
-      Promise.all([store.agents(), store.allGrants()]).then(([agents, grants]) => reply({ agents, grants }));
+      Promise.all([store.stored(), store.allGrants()]).then(([agents, grants]) => reply({ agents, grants }));
       return true;
     } else if (message.acp === "add") {
       // A refusal, such as a known key named under another method, says why rather than leaving the window waiting.
