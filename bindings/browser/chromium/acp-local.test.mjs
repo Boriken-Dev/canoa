@@ -137,7 +137,7 @@ test("only the extension's own pages may start Canoa, never a web page or a cont
   assert.equal(fromOwnPage(undefined, runtime), false);
 });
 
-const running = (host = {}) => ({ state: "running", host: { ...readHello(runningReply({ home: "C:\Users\p", ...host })) } });
+const running = (host = {}) => ({ state: "running", host: { ...readHello(runningReply({ home: "/home/p", ...host })) } });
 const pinned = { peer: PEER, method: "noise" };
 
 test("the host's agents are listed only once this browser's key is paired with the host that answers", () => {
@@ -159,7 +159,7 @@ test("the host's agents are listed only once this browser's key is paired with t
 test("Canoa's own pages hold those agents with the host's home as their folder, and nobody else's page is given any", () => {
   const grants = localGrants("chrome-extension://me", running(), pinned);
   assert.equal(grants.length, 2);
-  assert.ok(grants.every((grant) => grant.origin === "chrome-extension://me" && grant.cwd === "C:\Users\p" && grant.permissions === true));
+  assert.ok(grants.every((grant) => grant.origin === "chrome-extension://me" && grant.cwd === "/home/p" && grant.permissions === true));
   assert.deepEqual(localGrants("chrome-extension://me", running(), null), []);
 });
 

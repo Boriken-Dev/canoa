@@ -61,11 +61,13 @@ async function request(origin) {
 
 test("a page's window is not offered the local host's agents, and a decision naming one grants nothing", async () => {
   const { asked, grants } = await request(PAGE);
-  assert.deepEqual(asked[0].agents.map((agent) => agent.key), ["hand"]);
+  const { agents: offered } = asked[0];
+  assert.deepEqual(offered.map((agent) => agent.key), ["hand"]);
   assert.deepEqual(grants.map((grant) => grant.agent), ["hand"]);
 });
 
 test("Canoa's own chat is offered them", async () => {
   const { asked } = await request(OWN);
-  assert.deepEqual(asked[0].agents.map((agent) => agent.key), ["hand", "local:claude"]);
+  const { agents: offered } = asked[0];
+  assert.deepEqual(offered.map((agent) => agent.key), ["hand", "local:claude"]);
 });
