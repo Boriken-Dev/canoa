@@ -225,9 +225,9 @@ below makes those agree; a portal asked to start a host for another name would o
 The sockets' mode lets any local user connect. What keeps another account out is the host: it asks the system whose process is
 at the other end of each connection and closes any that is not `--portal-user`, before reading a byte. The portal does the same
 in the other direction: it dials a person's socket for that person's user id and turns away a socket whose maker is anyone
-else, so a link in the person's own folder to another person's socket leads nowhere. Every key the portal introduces is the
-person's own browser, so each holds every page grant on the control channel (see [the host](host.md)) without being named in
-canoa.cfg.
+else, so a link in the person's own folder to another person's socket leads nowhere. Whoever reaches the control socket has signed in
+as that person, so each key it introduces holds every page grant on the control channel (see [the host](host.md)) without being
+named in canoa.cfg: the limit is the portal's sign-in, not the key.
 
 ## Setting it up
 

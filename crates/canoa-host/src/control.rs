@@ -530,7 +530,11 @@ impl Control {
                         })
                         .and_then(|()| self.stores())
                         .and_then(|stores| {
-                            stores.read(method, &params, caller.may(Grant::StorePrograms))
+                            stores.read(
+                                method,
+                                &params,
+                                caller.may(Grant::StorePrograms).then(|| caller.owner()),
+                            )
                         })
                 }
                 Some(method @ ("store/rollback" | "store/remove")) => {
@@ -846,7 +850,9 @@ impl Control {
             return error_line(&id, code, &message);
         }
         match self.stores() {
-            Ok(stores) => stores.apply(&request, channel, &|other| self.handle(caller, other)),
+            Ok(stores) => stores.apply(caller.owner(), &request, channel, &|other| {
+                self.handle(caller, other)
+            }),
             Err((code, message)) => error_line(&id, code, &message),
         }
     }

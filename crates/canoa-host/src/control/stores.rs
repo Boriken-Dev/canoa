@@ -113,7 +113,12 @@ impl Stores {
     }
 
     /// The answer to a read: `store/list`, `store/report`, `store/latest` or `store/plan`.
-    pub(crate) fn read(&self, method: &str, params: &Value, owner: bool) -> Result<Value, Failed> {
+    pub(crate) fn read(
+        &self,
+        method: &str,
+        params: &Value,
+        owner: Option<&str>,
+    ) -> Result<Value, Failed> {
         if method == "store/list" {
             let ids: Vec<&str> = self.providers.iter().map(String::as_str).collect();
             let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;
@@ -157,20 +162,25 @@ impl Stores {
                 )?;
                 let optional =
                     |key: &str| params.get(key).and_then(Value::as_str).map(str::to_owned);
-                // Only the owner applies a plan, so a key's is not kept: it could not replace or push out the owner's.
-                let make = if owner {
-                    Programs::plan
-                } else {
-                    Programs::plan_to_read
-                };
-                let plan = make(
-                    &self.programs,
-                    &provider,
-                    &*store,
-                    action,
-                    optional("channel"),
-                    optional("version"),
-                )
+                // A plan is kept for the caller that may apply it and for no other: a read-only key's is not kept, and one
+                // caller's cannot replace or push out another one's.
+                let plan = match owner {
+                    Some(owner) => self.programs.plan_for(
+                        owner,
+                        &provider,
+                        &*store,
+                        action,
+                        optional("channel"),
+                        optional("version"),
+                    ),
+                    None => self.programs.plan_to_read(
+                        &provider,
+                        &*store,
+                        action,
+                        optional("channel"),
+                        optional("version"),
+                    ),
+                }
                 .map_err(|error| refusal(&error))?;
                 json_of(&plan)
             }
@@ -272,6 +282,7 @@ impl Stores {
     /// the link are answered as they come by `others`.
     pub(crate) fn apply<C: Channel>(
         &self,
+        owner: &str,
         request: &Value,
         channel: &C,
         others: &dyn Fn(&[u8]) -> Option<Vec<u8>>,
@@ -299,8 +310,9 @@ impl Stores {
         });
         let programs = Arc::clone(&self.programs);
         let stop = Arc::clone(&cancel);
+        let owner = owner.to_owned();
         let worker = thread::spawn(move || {
-            let done = programs.apply_store(store, &provider, &plan, sink, stop);
+            let done = programs.apply_store_for(&owner, store, &provider, &plan, sink, stop);
             let _ = out.send(Out::Done(Box::new(done)));
         });
         let mut asking: Option<(Value, mpsc::Sender<Option<LoginAnswer>>)> = None;

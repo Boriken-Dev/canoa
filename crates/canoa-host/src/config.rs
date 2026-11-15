@@ -1791,7 +1791,7 @@ fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
         for name in names {
             set.insert(crate::control::Grant::named(&name).ok_or_else(|| {
                 if name == "store.write" {
-                    refused("store.write is no grant: only the person running this host installs")
+                    refused("store.write is no grant: name store.programs to let a key install programs")
                 } else {
                     refused("a grant is not one this host knows")
                 }

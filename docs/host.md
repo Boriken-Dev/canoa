@@ -368,9 +368,18 @@ canoa accounts remove work                                       # forgets the s
   taken away when the last session on it ends. A credential variable in the host's own environment is logged as replaced.
 - A client chooses the account in `initialize`'s `_meta["dev.boriken.canoa/account"]`; the answer's `_meta` names the
   account and its kind.
-- The desktop app runs these commands as jobs of its own host. A sign-in that asks for a typed secret (Claude's code, an
-  API key) needs a sealed form in the app, which is not built yet, so for now such an account is added with `canoa
-  accounts add` in a terminal.
+- The app adds, signs in to and removes accounts over the host's control channel, on the desktop and in a browser alike: a
+  sign-in that asks for a typed secret (Claude's code, an API key) puts a form to the app, and the answer comes back sealed to the
+  key that asked, so the host opens it and nothing else sees it. The same holds for a paired key whose host grants `accounts`.
+  The app also sets which accounts an agent entry offers (`accounts/offer`), which writes canoa.cfg and has the host start again.
+
+## Granting a key the Store and accounts
+
+`[host.control] grants` names, per key, what that key may do. Two of the grants run programs as the user: **`store.programs` lets
+the key download and run any program as the user** (it installs, updates and removes the programs of the host's Store and
+runs a version probe of what it installs), and `accounts` lets it sign in to a provider, which runs that provider's program and
+keeps a credential on the host. Write them only for a key whose holder you would give a shell. A host run for a portal gives both
+to the person's own browser, because reaching that host needs the person's own sign-in.
 
 ## In the desktop app
 

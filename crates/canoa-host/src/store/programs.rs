@@ -273,6 +273,8 @@ pub struct Options {
     pub plan_ttl: Duration,
     /// How many plans the host keeps at once.
     pub plan_limit: usize,
+    /// How many plans one caller keeps at once; its oldest goes first.
+    pub plans_per_owner: usize,
 }
 
 impl Default for Options {
@@ -291,6 +293,7 @@ impl Default for Options {
             settle: Duration::from_secs(2),
             plan_ttl: Duration::from_secs(15 * 60),
             plan_limit: 32,
+            plans_per_owner: 8,
         }
     }
 }
@@ -400,6 +403,8 @@ pub struct Programs {
 
 /// A plan the host made, for the provider whose store made it.
 struct StoredPlan {
+    /// Who asked for it: only that caller applies it.
+    owner: String,
     provider: String,
     made: Instant,
     plan: InstallPlan,
@@ -553,7 +558,25 @@ impl Programs {
         channel: Option<String>,
         version: Option<String>,
     ) -> Result<InstallPlan, StoreError> {
-        self.plan_kept(provider, store, action, channel, version, true)
+        self.plan_for("", provider, store, action, channel, version)
+    }
+
+    /// As [`plan`](Self::plan), kept for `owner`: only a caller that names the same owner applies it, and one owner keeps at most
+    /// [`Options::plans_per_owner`] plans, so a caller cannot push out another one's.
+    ///
+    /// # Errors
+    ///
+    /// What the store refuses.
+    pub fn plan_for(
+        &self,
+        owner: &str,
+        provider: &str,
+        store: &dyn ProgramStore,
+        action: Action,
+        channel: Option<String>,
+        version: Option<String>,
+    ) -> Result<InstallPlan, StoreError> {
+        self.plan_kept(Some(owner), provider, store, action, channel, version)
     }
 
     /// As [`plan`](Self::plan), for a caller that only reads what an apply would do: the host keeps nothing, so it neither applies
@@ -570,17 +593,17 @@ impl Programs {
         channel: Option<String>,
         version: Option<String>,
     ) -> Result<InstallPlan, StoreError> {
-        self.plan_kept(provider, store, action, channel, version, false)
+        self.plan_kept(None, provider, store, action, channel, version)
     }
 
     fn plan_kept(
         &self,
+        keep: Option<&str>,
         provider: &str,
         store: &dyn ProgramStore,
         action: Action,
         channel: Option<String>,
         version: Option<String>,
-        keep: bool,
     ) -> Result<InstallPlan, StoreError> {
         let info = store.describe()?;
         let mut request = PlanRequest::new(
@@ -605,18 +628,27 @@ impl Programs {
                 )
             );
         }
-        if keep && !plan.token.is_empty() {
-            self.keep_plan(provider, &plan);
+        if let Some(owner) = keep
+            && !plan.token.is_empty()
+        {
+            self.keep_plan(owner, provider, &plan);
         }
         Ok(plan)
     }
 
-    fn keep_plan(&self, provider: &str, plan: &InstallPlan) {
+    fn keep_plan(&self, owner: &str, provider: &str, plan: &InstallPlan) {
         if let Ok(mut plans) = self.plans.lock() {
             let now = Instant::now();
             plans.retain(|p| now.duration_since(p.made) < self.options.plan_ttl);
             plans.retain(|p| !(p.provider == provider && p.plan.token == plan.token));
+            let own = self.options.plans_per_owner.max(1);
+            while plans.iter().filter(|p| p.owner == owner).count() >= own {
+                if let Some(oldest) = plans.iter().position(|p| p.owner == owner) {
+                    plans.remove(oldest);
+                }
+            }
             plans.push(StoredPlan {
+                owner: owner.to_owned(),
                 provider: provider.to_owned(),
                 made: now,
                 plan: plan.clone(),
@@ -628,13 +660,13 @@ impl Programs {
     }
 
     /// The plan made for `provider` under `token`, taken out so that it is applied once.
-    fn take_plan(&self, provider: &str, token: &str) -> Option<InstallPlan> {
+    fn take_plan(&self, owner: &str, provider: &str, token: &str) -> Option<InstallPlan> {
         let mut plans = self.plans.lock().ok()?;
         let now = Instant::now();
         plans.retain(|p| now.duration_since(p.made) < self.options.plan_ttl);
         let at = plans
             .iter()
-            .position(|p| p.provider == provider && p.plan.token == token)?;
+            .position(|p| p.owner == owner && p.provider == provider && p.plan.token == token)?;
         Some(plans.remove(at).plan)
     }
 
@@ -764,17 +796,36 @@ impl Programs {
         sink: Arc<dyn Sink>,
         cancel: Arc<AtomicBool>,
     ) -> Result<Option<Applied>, StoreError> {
+        self.apply_store_for("", store, provider, plan, sink, cancel)
+    }
+
+    /// [`apply_store`](Self::apply_store) of a plan made for `owner` by [`plan_for`](Self::plan_for).
+    ///
+    /// # Errors
+    ///
+    /// As [`apply`](Self::apply).
+    pub fn apply_store_for(
+        &self,
+        owner: &str,
+        store: Arc<dyn ProgramStore>,
+        provider: &str,
+        plan: &InstallPlan,
+        sink: Arc<dyn Sink>,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Option<Applied>, StoreError> {
         let info = store.describe()?;
         // The plan applied is the host's own copy, found by its provider and token, and used once.
         if plan.token.is_empty() && plan.action != Action::Uninstall {
             // An update to the version already current: nothing to do and nothing to switch.
             return Ok(None);
         }
-        let made = self.take_plan(provider, &plan.token).ok_or_else(|| {
-            StoreError::Contract(
-                "this host made no such plan, or it has expired: plan again".to_owned(),
-            )
-        })?;
+        let made = self
+            .take_plan(owner, provider, &plan.token)
+            .ok_or_else(|| {
+                StoreError::Contract(
+                    "this host made no such plan, or it has expired: plan again".to_owned(),
+                )
+            })?;
         let plan = &made;
         self.check_changes(plan, &info.program)?;
         if (!self.options.allow_elevated)
@@ -1136,5 +1187,56 @@ fn registry_allowed(target: &str) -> bool {
             "microsoft" | "classes" | "policies" | "wow6432node"
         ),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    fn programs(per_owner: usize) -> Programs {
+        let mut options = Options::default();
+        options.plans_per_owner = per_owner;
+        Programs::new(
+            Shelf::unchecked(std::env::temp_dir().join("canoa-plan-tests")),
+            Arc::new(Registry::new("test", "0.0.0")),
+        )
+        .options(options)
+    }
+
+    fn plan(token: &str) -> InstallPlan {
+        let mut plan = InstallPlan::new(Action::Install, Some("1.0.0".to_owned()));
+        plan.token = token.to_owned();
+        plan
+    }
+
+    #[test]
+    fn a_plan_is_applied_only_by_the_caller_it_was_made_for() {
+        let programs = programs(8);
+        programs.keep_plan("key-a", "echo_store", &plan("t1"));
+        assert!(programs.take_plan("key-b", "echo_store", "t1").is_none());
+        assert!(programs.take_plan("", "echo_store", "t1").is_none());
+        assert!(programs.take_plan("key-a", "echo_store", "t1").is_some());
+        assert!(
+            programs.take_plan("key-a", "echo_store", "t1").is_none(),
+            "once"
+        );
+    }
+
+    #[test]
+    fn one_caller_cannot_push_out_the_plans_of_another() {
+        let programs = programs(2);
+        programs.keep_plan("owner", "echo_store", &plan("mine"));
+        for token in ["a", "b", "c", "d", "e"] {
+            programs.keep_plan("key", "echo_store", &plan(token));
+        }
+        assert!(
+            programs.take_plan("owner", "echo_store", "mine").is_some(),
+            "the owner's plan stays"
+        );
+        assert!(programs.take_plan("key", "echo_store", "a").is_none());
+        assert!(programs.take_plan("key", "echo_store", "c").is_none());
+        assert!(programs.take_plan("key", "echo_store", "d").is_some());
+        assert!(programs.take_plan("key", "echo_store", "e").is_some());
     }
 }
