@@ -74,7 +74,7 @@ export async function dispatchBrowserTool({ name, args = {}, peerId, trustedPeer
     }
 
     if (name === "browser_read_page") {
-      const page = await inject(tab.id, readPage, [], "ISOLATED");
+      const page = await inject(tab.id, readPage, [origin], "ISOLATED");
       // The tab can have moved on since it was checked, and only what it was checked for may go back.
       if (new URL(page?.url ?? "about:blank").origin !== origin) throw new Error(DENIED);
       return page;
@@ -82,13 +82,13 @@ export async function dispatchBrowserTool({ name, args = {}, peerId, trustedPeer
     if ((name === "browser_click" || name === "browser_fill") && !plainSelector(args.selector)) {
       throw new Error("Use a selector made of ids, classes and element names");
     }
-    if (name === "browser_click") return inject(tab.id, clickElement, [args.selector], "ISOLATED");
-    if (name === "browser_fill") return inject(tab.id, fillElement, [args.selector, args.text], "ISOLATED");
-    if (name === "browser_list_webmcp") return inject(tab.id, listWebMcp, [], "MAIN");
+    if (name === "browser_click") return inject(tab.id, clickElement, [origin, args.selector], "ISOLATED");
+    if (name === "browser_fill") return inject(tab.id, fillElement, [origin, args.selector, args.text], "ISOLATED");
+    if (name === "browser_list_webmcp") return inject(tab.id, listWebMcp, [origin], "MAIN");
     if (name === "browser_call_webmcp") {
-      return inject(tab.id, callWebMcp, [args.name, args.arguments ?? {}], "MAIN");
+      return inject(tab.id, callWebMcp, [origin, args.name, args.arguments ?? {}], "MAIN");
     }
-    if (name === "browser_discover_mcp") return inject(tab.id, discoverMcp, [], "ISOLATED");
+    if (name === "browser_discover_mcp") return inject(tab.id, discoverMcp, [origin], "ISOLATED");
   }
   if (name === "browser_list_tabs") return results;
   throw new Error(DENIED);
@@ -101,7 +101,10 @@ async function inject(tabId, func, args, world) {
   return result[0]?.result ?? null;
 }
 
-function readPage() {
+// Each injected function runs in the page and cannot see this module, so each one checks for itself, first, that the page is still the
+// origin the grant was for: a tab that navigated after the check must not receive the action.
+function readPage(expectedOrigin) {
+  if (location.origin !== expectedOrigin) throw Error("Origin changed");
   const visible = (element) =>
     element.getClientRects().length !== 0 &&
     getComputedStyle(element).visibility !== "hidden";
@@ -121,7 +124,8 @@ function readPage() {
   };
 }
 
-function clickElement(selector) {
+function clickElement(expectedOrigin, selector) {
+  if (location.origin !== expectedOrigin) throw Error("Origin changed");
   if (typeof selector !== "string" || selector.length > 500) throw Error("Invalid selector");
   const element = document.querySelector(selector);
   if (!element || element.getClientRects().length === 0 ||
@@ -132,7 +136,8 @@ function clickElement(selector) {
   return { clicked: true };
 }
 
-function fillElement(selector, value) {
+function fillElement(expectedOrigin, selector, value) {
+  if (location.origin !== expectedOrigin) throw Error("Origin changed");
   if (typeof selector !== "string" || selector.length > 500 ||
       typeof value !== "string" || value.length > 10000) throw Error("Invalid input");
   const element = document.querySelector(selector);
@@ -152,7 +157,8 @@ function fillElement(selector, value) {
   return { filled: true };
 }
 
-async function listWebMcp() {
+async function listWebMcp(expectedOrigin) {
+  if (location.origin !== expectedOrigin) throw Error("Origin changed");
   if (!document.modelContext?.getTools) return { available: false, tools: [] };
   const tools = await document.modelContext.getTools();
   return {
@@ -165,7 +171,8 @@ async function listWebMcp() {
   };
 }
 
-async function callWebMcp(name, input) {
+async function callWebMcp(expectedOrigin, name, input) {
+  if (location.origin !== expectedOrigin) throw Error("Origin changed");
   if (typeof name !== "string" || name.length > 150 ||
       !input || typeof input !== "object" || Array.isArray(input)) throw Error("Invalid tool call");
   if (!document.modelContext?.getTools || !document.modelContext?.executeTool) {
@@ -177,7 +184,8 @@ async function callWebMcp(name, input) {
   return await document.modelContext.executeTool(selected, input);
 }
 
-function discoverMcp() {
+function discoverMcp(expectedOrigin) {
+  if (location.origin !== expectedOrigin) throw Error("Origin changed");
   // Canoa-specific convention. This does not verify or contact any endpoint.
   return Array.from(document.querySelectorAll('link[rel~="mcp"][href]'))
     .slice(0, 25).map((link) => {
