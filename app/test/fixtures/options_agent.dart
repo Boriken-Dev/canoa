@@ -21,6 +21,9 @@ final class OptionsAgent {
   /// Why starting it fails, when it should.
   final String? failStart;
 
+  /// While set and not completed, a new session is not opened: a slow start.
+  Completer<void>? holdSessionNew;
+
   /// Every request each started copy received, in order, as sent.
   final requests = <Map<String, dynamic>>[];
 
@@ -213,6 +216,7 @@ final class OptionsAgent {
               reply(id, usage);
             }
           case 'session/new':
+            if (holdSessionNew case final gate?) await gate.future;
             reply(id, {'sessionId': 'o1', 'configOptions': options});
           case 'session/set_config_option':
             final value = params['value'];

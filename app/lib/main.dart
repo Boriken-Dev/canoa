@@ -2092,17 +2092,18 @@ class _ConversationState extends State<_Conversation> {
     final session = widget.store.selected;
     final attached = session?.attachments.isNotEmpty ?? false;
     if (text.trim().isEmpty && !attached) return;
-    // A draft's first message stays in the composer until its agent has started and taken it, so a start that fails
-    // leaves it to send again.
+    // A draft's first message shows in the conversation while its agent starts; a start that fails puts it back here.
     final starting = session != null && session.isDraft;
     try {
-      if (!starting) _input.clear();
-      unawaited(widget.store.sendText(text).then((_) {
-        if (starting && mounted && _input.text == text) _input.clear();
-      }).catchError((Object error) {
+      _input.clear();
+      unawaited(widget.store.sendText(text).catchError((Object error) {
         if (!mounted) return;
         // Not sent, so it is there to change and send again.
-        if (_input.text.isEmpty) _input.text = text;
+        if (session != null && !identical(widget.store.selected, session)) {
+          widget.store.keepDraftText(session, text);
+        } else if (_input.text.isEmpty) {
+          _input.text = text;
+        }
         final started = session?.remoteSessionId != null;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${starting && !started ? 'Not started' : 'Message not accepted'}: ${reasonOf(error)}')),
@@ -2245,7 +2246,7 @@ class _ConversationState extends State<_Conversation> {
       ),
       if (session == null)
         Expanded(child: widget.welcome)
-      else if (session.isDraft)
+      else if (session.isDraft && !widget.store.isStarting(session))
         Expanded(
           child: _dropping(session, NewSessionView(
             store: widget.store,
@@ -2268,7 +2269,8 @@ class _ConversationState extends State<_Conversation> {
             entries: delegationEntries(session, onOpen: (id) => widget.store.openChild(session, id), now: widget.store.clock),
             terminals: session.terminals,
             plan: session.plan,
-            working: session.status == SessionStatus.working,
+            working: session.status == SessionStatus.working || widget.store.isStarting(session),
+            agentName: session.agent,
             turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
             renderers: delegationRenderers.merge(widget.renderers),
             narrow: widget.narrow,

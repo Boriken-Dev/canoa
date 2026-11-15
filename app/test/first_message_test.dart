@@ -1,9 +1,11 @@
 // A session starts on its first message: nothing runs and no worktree exists before Send, the first Send starts the agent
 // once and delivers the message with the chosen model and effort, a start that fails keeps the message, and a session closed
 // before Send leaves nothing in the ledger or on disk. What is written in one, and what goes with it, outlives the app.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:canoa/chat/new_session_view.dart';
 import 'package:canoa/chat/session_options.dart';
 import 'package:canoa/drafts/draft_backend_io.dart';
 import 'package:canoa/drafts/draft_store.dart';
@@ -11,15 +13,37 @@ import 'package:canoa/ledger/ledger_backend_io.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/sources.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatTranscript;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
+import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 const _source = AgentSource.hosted('Scripted', local: true);
 
 void main() {
+  setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/first_message_test.dart')));
+
+  for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
+    testWidgets('the conversation while the agent starts draws at $label width', (tester) async {
+      final agent = OptionsAgent()..holdSessionNew = Completer<void>();
+      final store = SessionStore();
+      await pumpApp(tester, store, linked: agent.openLink, size: size);
+      await newSession(tester);
+      await chooseSource(tester, 'Scripted');
+      expect(store.addAttachment(store.selected!, 'shot.png', [137, 80, 78, 71]), isNull);
+      await tester.pumpAndSettle();
+      await send(tester, 'Fix the failing test');
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/first_message_starting_$label.png'));
+      agent.holdSessionNew!.complete();
+      await until(tester, () => agent.requests.any((r) => r['method'] == 'session/prompt'), 'the prompt');
+      await finish(tester);
+    });
+  }
+
   testWidgets('the first Send makes the worktree and starts the agent, once, with model and effort set before the message', (tester) async {
     final agent = OptionsAgent();
     final worktrees = CountedWorktrees();
@@ -56,6 +80,54 @@ void main() {
     expect(agent.starts, hasLength(1), reason: 'started once');
     expect(worktrees.made, hasLength(1));
     expect(agent.methods.last, 'session/prompt');
+    await finish(tester);
+  });
+
+  testWidgets('the first Send shows the message and a working row before the agent has started, and the message is shown once after', (tester) async {
+    final agent = OptionsAgent()..holdSessionNew = Completer<void>();
+    final store = SessionStore();
+    await pumpApp(tester, store, linked: agent.openLink);
+    await newSession(tester);
+    await chooseSource(tester, 'Scripted');
+    final session = store.selected!;
+    expect(store.addAttachment(session, 'shot.png', [137, 80, 78, 71]), isNull);
+    await tester.pumpAndSettle();
+    expect(find.byType(NewSessionView), findsOneWidget);
+
+    await send(tester, 'Fix the failing test');
+    expect(session.remoteSessionId, isNull, reason: 'the agent has not opened its session');
+    expect(find.byType(NewSessionView), findsNothing);
+    expect(find.byType(ChatTranscript), findsOneWidget);
+    expect(find.descendant(of: find.byType(ChatTranscript), matching: find.text('Fix the failing test')), findsOneWidget);
+    expect(find.descendant(of: find.byType(ChatTranscript), matching: find.text('Sent with this: shot.png')), findsOneWidget);
+    expect(find.descendant(of: find.byType(ChatTranscript), matching: find.text('Starting Scripted…')), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Fix the failing test'), findsNothing, reason: 'the composer is empty');
+    expect(session.attachments, isEmpty);
+
+    agent.holdSessionNew!.complete();
+    await until(tester, () => agent.requests.any((r) => r['method'] == 'session/prompt'), 'the prompt');
+    expect(find.byType(ChatTranscript), findsOneWidget);
+    expect(find.descendant(of: find.byType(ChatTranscript), matching: find.text('Fix the failing test')), findsOneWidget, reason: 'the held message gave way to the sent one');
+    expect(session.messages.where((m) => m.role == MessageRole.user), hasLength(1));
+    await finish(tester);
+  });
+
+  testWidgets('a start that fails takes the message out of the conversation and gives its text and attachments back', (tester) async {
+    final agent = OptionsAgent(failStart: 'scripted-agent could not start: no such file');
+    final store = SessionStore();
+    await pumpApp(tester, store, linked: agent.openLink);
+    await newSession(tester);
+    await chooseSource(tester, 'Scripted');
+    final session = store.selected!;
+    expect(store.addAttachment(session, 'shot.png', [137, 80, 78, 71]), isNull);
+    await tester.pumpAndSettle();
+    await send(tester, 'Fix the failing test');
+
+    expect(find.byType(NewSessionView), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Fix the failing test'), findsOneWidget);
+    expect(session.attachments.map((item) => item.name), ['shot.png']);
+    expect(session.messages.where((m) => m.role == MessageRole.user), isEmpty);
+    expect(session.chat.heldFirst, isNull);
     await finish(tester);
   });
 

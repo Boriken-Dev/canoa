@@ -1032,6 +1032,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (session.source == null) throw StateError('Choose where its agent comes from first');
     session.status = SessionStatus.connecting;
     _starting.add(session.id);
+    // The conversation shows the message at once; the composer's attachments go with it, and come back if it cannot start.
+    final taken = List.of(session.attachments);
+    session.chat.holdFirst(text, attachments: [for (final item in taken) item.name]);
+    session.attachments.clear();
     final named = session.agentNames && session.title == draftTitle && text.trim().isNotEmpty;
     if (named) {
       session
@@ -1045,6 +1049,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       } catch (error) {
         if (session.remoteSessionId == null) {
           session.status = SessionStatus.draft;
+          session.chat.releaseFirst();
+          session.attachments.addAll(taken);
           if (named) {
             session
               ..title = draftTitle
@@ -1059,11 +1065,21 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       }
       if (!_sessions.contains(session)) return;
       if (_clients[session.id] == null) throw StateError('The agent did not start');
-      await _send(session, text, List.of(session.attachments), onSent: () {
-        // Sent: what follows is queued or sent as usual, even while a v1 agent's first turn runs.
-        _starting.remove(session.id);
-        session.firstSent = text;
-      });
+      try {
+        await _send(session, text, taken, onSent: () {
+          // Sent: what follows is queued or sent as usual, even while a v1 agent's first turn runs.
+          _starting.remove(session.id);
+          session.firstSent = text;
+        });
+      } catch (_) {
+        // The agent runs, but never took the message: it goes back to the composer with what came with it.
+        session.chat.releaseFirst();
+        for (final item in taken) {
+          if (!session.attachments.contains(item)) session.attachments.add(item);
+        }
+        rethrow;
+      }
+      session.chat.releaseFirst();
     } finally {
       _starting.remove(session.id);
       notifyListeners();

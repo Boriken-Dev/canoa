@@ -16,6 +16,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatTranscript;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -110,7 +111,7 @@ void main() {
     await finish(tester);
   });
 
-  testWidgets('leaving while it starts and coming back finds the composer emptied once the message is sent', (tester) async {
+  testWidgets('leaving while it starts and coming back finds the message in the conversation and the composer empty', (tester) async {
     final held = _HeldStart(OptionsAgent());
     final agent = held.agent;
     final store = _remembering();
@@ -124,11 +125,13 @@ void main() {
     await frames(tester);
     store.select(first.id);
     await frames(tester);
-    expect(_written(tester), 'First', reason: 'still on its way, so still shown');
+    expect(_written(tester), isEmpty, reason: 'the message is in the conversation, not the composer');
+    expect(find.descendant(of: find.byType(ChatTranscript), matching: find.text('First')), findsOneWidget);
     held.go();
     await until(tester, () => _prompts(agent) == 1, 'the first message');
     await settle(tester);
     expect(_written(tester), isEmpty, reason: 'the message went, so it is not there to send again');
+    expect(find.descendant(of: find.byType(ChatTranscript), matching: find.text('First')), findsOneWidget);
     await finish(tester);
   });
 
