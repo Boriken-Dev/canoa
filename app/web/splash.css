@@ -1,0 +1,65 @@
+/* Shown from the first byte until Flutter paints; splash.js removes it. */
+:root {
+  --splash-bg: #f6f8f8;
+  --splash-fg: #3a4650;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --splash-bg: #101820;
+    --splash-fg: #b8c4cc;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--splash-bg);
+}
+
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--splash-bg);
+  color: var(--splash-fg);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  transition: opacity 0.2s ease-out;
+}
+
+#splash.done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#splash svg {
+  width: 72px;
+  height: 72px;
+  animation: splash-breathe 1.6s ease-in-out infinite;
+}
+
+#splash p {
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+@keyframes splash-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #splash svg {
+    animation: none;
+  }
+}
