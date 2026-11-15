@@ -10,7 +10,7 @@ use serde::Deserialize;
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Entry {
-    /// The provider's id: `coqui_access_system` and `coqui_access_proxy` are built in; any other comes from `library`.
+    /// The provider's id: `coqui_access_system` is built in; any other comes from `library`.
     pub provider: String,
     /// The Guatiao library that provides it, for a provider that is not built in.
     pub library: Option<PathBuf>,
@@ -84,6 +84,9 @@ pub struct Settings {
     /// `certificate_header`: the header the proxy puts a client certificate in, as base64 DER, leaf first, comma-separated. It
     /// is read only on `socket`, and the proxy must delete any of that name the browser sent.
     pub certificate_header: String,
+    /// `libraries_any_owner`: load a provider's `library` whoever owns it and whoever may write it. By default the file and every
+    /// directory above it must be owned by root and writable by no group or other, since the portal runs the library's code.
+    pub libraries_any_owner: bool,
     /// `enrol_seconds`: how long after a password sign-in a session may pin a certificate. A session opened any other way never
     /// may.
     pub enrol: Duration,
@@ -154,6 +157,7 @@ impl Default for Settings {
             groups: Vec::new(),
             authenticators: vec![Entry::new("coqui_access_system")],
             certificate_header: "x-client-cert".to_owned(),
+            libraries_any_owner: false,
             enrol: Duration::from_secs(10 * 60),
             hosts: Vec::new(),
             trusted_proxies: Vec::new(),
@@ -208,6 +212,7 @@ struct Raw {
     authenticators: Option<Vec<RawEntry>>,
     certificate_header: Option<String>,
     enrol_seconds: Option<u64>,
+    libraries_any_owner: Option<bool>,
     hosts: Option<Vec<String>>,
     trusted_proxies: Option<Vec<String>>,
     client_address_header: Option<String>,
@@ -270,6 +275,9 @@ impl Settings {
             settings.min_uid = value;
         }
         settings.groups = raw.groups.unwrap_or(settings.groups);
+        settings.libraries_any_owner = raw
+            .libraries_any_owner
+            .unwrap_or(settings.libraries_any_owner);
         if let Some(value) = raw.certificate_header {
             settings.certificate_header = value.to_ascii_lowercase();
         }

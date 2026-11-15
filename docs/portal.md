@@ -54,6 +54,12 @@ many addresses add up in the directory's own count. Size `max_failures_per_pair`
 the directory's lockout threshold and observation window (on a domain, read them from its password policy before turning the
 portal on), and watch the log for sign-ins refused for their failures.
 
+**Measure the failure floor.** `failure_floor_seconds` (default 2) hides how long a directory takes to answer only if it is
+longer than the slowest answer. Before turning the portal on, time wrong passwords through the PAM service for an account that
+exists and for one that does not, many times each (`pamtester canoa NAME authenticate`, or a loop over `su`), and set the floor
+above the slowest, with margin: the default was not measured against your directory. A directory that sometimes takes longer
+than the floor shows through those answers.
+
 ## Signing in
 
 `authenticators` lists the providers, in order. Each is a coqui-access provider and the configuration it is built from, checked
@@ -72,13 +78,20 @@ authenticators = [
 - `coqui_access_system` is built in. For the keys it leaves out (`pam_service`, `min_uid`, `groups`) it takes the portal's own
   settings, so the default list, `[{ provider = "coqui_access_system" }]`, signs in as the portal always has.
 - Any other provider is a Guatiao library, named by `library` (an absolute path; the portal's account must be able to read
-  it). The portal runs its code: only name libraries you built or checked. The providers of
+  it). The portal runs its code, so it refuses a library unless the file and every directory above it belong to root and no
+  group or other can write them; `libraries_any_owner = true` lifts that, with a warning in the log at every start. The
+  providers of
   [coqui-access](https://github.com/Boriken-Dev/coqui-access) are `coqui-access-password-plugin`, `coqui-access-mtls-plugin`
   and the others there; build them with `cargo build --release -p coqui-access-mtls-plugin`.
 - Each credential goes to the providers that take it, in list order. A name and a password go to those that take a password:
-  a provider that answers `Unknown` passes the credential on, one that answers `Invalid` ends the try (so put a provider that
-  should override the system's passwords before it). A client certificate goes to those that take a request. A provider that
-  takes bearer keys (`coqui_access_key`) is left out with a note in the log: a key is not a sign-in for the page.
+  a provider that answers `Unknown` passes the credential on, one that answers `Invalid` ends the try. The system provider
+  answers `Unknown` for a name it does not admit and `Invalid` for a wrong password. `coqui_access_password` answers `Invalid`
+  for **every name its file does not hold**, so listed first it refuses all other names before the system provider is asked:
+  with `[password, system]` nobody but the file's accounts signs in. List it after the system provider, where it is reached
+  only for names the system provider does not admit (which the portal then refuses at the account check unless the system
+  entry's own `groups` are narrower than the portal's), or give the system entry no `groups` of its own and keep the file for
+  accounts the system provider does not know of. A client certificate goes to those that take a request. A provider that takes
+  bearer keys (`coqui_access_key`) is left out with a note in the log: a key is not a sign-in for the page.
 - A provider answers with who the credential belongs to. The portal then asks the operating system's directory for that
   account under `min_uid` and `groups`; a name no operating-system account has, or an account outside the groups, is refused
   like a wrong password. A password file or a certificate table can therefore name an operating-system account and nothing else.
@@ -103,6 +116,11 @@ it: `coqui_access_mtls` pins certificates by their SHA-256 fingerprint (`trust =
 (`"ca"`, which needs the chain, so the proxy must forward the intermediates) or either (`"pinned-or-ca"`). Then the account is
 looked up as for a password.
 
+A pinned certificate is refused once it is past its validity dates, whatever the provider says. With `trust = "ca"` or
+`"pinned-or-ca"`, always set the provider's `san` or `subject` globs to the names your CA issues for people, and issue those
+certificates with the `clientAuth` extended key usage only: a CA with no restriction signs for anyone who can get a certificate
+from it, and the provider reads the account's name from the certificate's fields.
+
 `coqui_access_proxy` is not a certificate sign-in here: it trusts whatever the proxy forwarded and checks no CA, which is right
 behind a proxy that verified the certificate and wrong behind one that does not.
 
@@ -112,15 +130,23 @@ and SHA-256 fingerprint and **Use this certificate to sign in**. Confirming pins
 provider's own store (its account kind), under the portal's state directory, never in the person's home; after that the
 certificate alone signs them in. The same page shows whether a certificate is pinned to the account and **Remove it**. The rules:
 
-- Pinning needs a session opened by a password at most `enrol_seconds` ago (default 600). A session a certificate opened can
-  remove a pin and never add one.
-- A certificate pinned to another account cannot be enrolled.
+- Pinning needs the password. The session that pinned it must have been signed in by password at most `enrol_seconds` ago
+  (default 600) **with this same certificate on that request**; for any other certificate, or any other session (one a
+  certificate opened, or a stolen cookie presenting its own certificate), the form asks for the password again, which goes
+  through the sign-in throttle. A session a certificate opened can remove a pin.
+- A certificate pinned to another account cannot be enrolled, an expired one is never pinned, and a pin an administrator
+  disabled cannot be replaced or removed from the page.
+- The pin records the user id the account has. A pin made for another id (the account was deleted and made again under the same
+  name) is not the account's and signs no one in; the person may pin again.
+- Sessions a certificate opened end when the pin they used is removed or replaced. Every pin and removal is logged at `warn` with
+  the certificate's fingerprint and the browser's address.
 - An account has one pinned certificate: enrolling another replaces it, which is how a renewed card is re-enrolled. A key is
   pinned only through the certificate's fingerprint (`coqui_access_mtls` offers no public-key pin), so a renewed certificate
   with the same key has to be enrolled again.
 - Every unknown fingerprint a certificate sign-in presents is also written to the provider's waiting list (a file beside the
-  table, bounded by the provider's own limits), which an administrator can read and accept; unwanted entries do not sign
-  anyone in.
+  table, bounded by the provider's own limits, recorded against the browser's address), which an administrator can read and
+  accept. Never accept a waiting entry on its say-so: first compare its fingerprint, out of band, with the one the person
+  reads from their own certificate. An entry is not the person's.
 - Pin only what the person confirmed on the page: the subject is whatever the certificate's maker wrote.
 
 **What the proxies must do** for the certificate method, when an HAProxy terminates the public TLS and nginx on the
@@ -140,25 +166,40 @@ portal's machine forwards to the portal's socket:
 
    `ssl_c_der` is the leaf only, as DER, and `base64` writes it on one line: that is the portal's encoding (`DER, base64,
    leaf first`). No CA is named anywhere in HAProxy's decision; pinned trust therefore needs nothing else of it.
-3. nginx passes the header to the portal only from HAProxy, and drops it from anyone else, in the `http` context (a `conf.d`
-   file) and the portal's `location`:
+3. nginx passes the header to the portal only from HAProxy, and drops it from anyone else. The `map` goes in the `http`
+   context (a `conf.d` file); every `location` that proxies to the portal sets **all** the proxy headers (see the sample
+   under "The proxy" below, which has `X-Client-Cert` in it).
 
    ```nginx
    map $realip_remote_addr $canoa_client_cert {
-       192.0.2.1  $http_x_client_cert;   # HAProxy
-       default    "";
+       HAPROXY_ADDRESS  $http_x_client_cert;   # replace with HAProxy's address as nginx sees it
+       default          "";
    }
-   # in the location that proxies to the portal:
-   proxy_set_header X-Client-Cert $canoa_client_cert;   # an empty value is not sent at all
    ```
 
-   `$realip_remote_addr` is the address the connection came from before `set_real_ip_from 192.0.2.1; real_ip_header
+   `$realip_remote_addr` is the address the connection came from before `set_real_ip_from HAPROXY_ADDRESS; real_ip_header
    X-Forwarded-For;` replaced `$remote_addr`, so a browser that reaches nginx directly cannot name itself HAProxy. A certificate
    is about 1 to 3 KiB of base64; nginx's default header buffers (4 of 8 KiB) hold it.
+
+   **The inheritance trap.** nginx inherits `proxy_set_header` from the `server` block into a `location` only when the
+   location sets none of its own. A `location` that sets any (the sample's `Host`, say) inherits none, so a
+   `proxy_set_header X-Client-Cert` at server level is silently not sent from it, and the person is never offered the
+   certificate; the reverse, with the certificate header set only in a location, leaves the other locations without it and
+   without the browser's own copy removed. Keep every `proxy_set_header` in one place: all in each proxying location (as in
+   the sample), or all at server level with no location setting any.
 4. In the portal's settings, `certificate_header` is the same name (lower case in the file), `trusted_proxies` is as before, and
    the certificate provider has `enrol = true` and `trust = "pinned"` (add `ca` only when the chain is forwarded). The portal's
-   unit gets `StateDirectory=canoa-portal`, since `ProtectSystem=strict` leaves nothing else writable, and the table lives there
-   (`/var/lib/canoa-portal`). Build the plugin library from coqui-access and install it where `library` says.
+   unit gets `StateDirectory=canoa-portal` and `StateDirectoryMode=0700`, since `ProtectSystem=strict` leaves nothing else
+   writable, and the table lives there (`/var/lib/canoa-portal`): the files hold who may sign in, and the portal warns at start
+   about a `source` or `waiting` file a group or others can read. Build the plugin library from coqui-access and install it
+   where `library` says, owned by root.
+5. **The HAProxy to nginx hop** is where the header is believed, so it must be authenticated, not only encrypted: nginx on
+   the HAProxy-facing server takes TLS 1.3 only (`ssl_protocols TLSv1.3;`) and requires HAProxy's own client certificate
+   (`ssl_verify_client on; ssl_client_certificate HAPROXY-CLIENT-CA.pem;`), and HAProxy's backend line presents it and verifies
+   nginx's (`server portal ADDRESS:PORT ssl crt HAPROXY-CLIENT.pem ca-file NGINX-CA.pem verify required sni str(PORTAL-NAME)
+   ssl-min-ver TLSv1.3`). Without that, anything that can reach nginx's port from HAProxy's address, or become it, can send the
+   header. Terminate the browser's side in HAProxy for the portal's name on a row of its own, with `ssl-min-ver TLSv1.3` there
+   too, so a client that cannot do TLS 1.3 is not offered the certificate at all.
 
 The portal believes the header only because it arrived on `socket`. Anything that can write to that socket (the proxy's group)
 can sign in as anyone whose certificate is pinned, by sending the header itself.
@@ -367,10 +408,17 @@ the portal's account cannot attach to the portal's other processes. (Accounts ca
 proxy's user: put the proxy's user in the group `canoa-proxy`, which is what lets it into `/run/canoa-portal`, and not in `canoa`,
 which would let it into every person's folder under `/run/canoa`.
 
-**The proxy** passes the browser's address and the upgrade, over the socket:
+**The proxy** passes the browser's address and the upgrade, over the socket. Every `proxy_set_header` the portal needs is in the
+location, because a location that sets any inherits none from the server (see the trap under "Signing in by certificate"); the
+last one is for the certificate method and is empty, hence not sent, when `$canoa_client_cert` is empty (leave it out and the
+`map` above with the method off):
 
 ```nginx
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+map $realip_remote_addr $canoa_client_cert {
+    HAPROXY_ADDRESS  $http_x_client_cert;   # replace with the proxy in front of nginx, or leave the map out
+    default          "";
+}
 server {
     server_name canoa.example;
     # ... TLS ...
@@ -382,6 +430,7 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Client-Cert $canoa_client_cert;
         proxy_read_timeout 1h;
     }
 }

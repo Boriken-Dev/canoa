@@ -29,6 +29,8 @@ struct Fixed {
     asked: AtomicUsize,
     /// The certificate header value that is the named account's certificate.
     certificates: Mutex<HashMap<String, String>>,
+    /// The address the last certificate sign-in was asked for.
+    last_client: Mutex<Option<IpAddr>>,
     /// The headers each certificate sign-in was asked with.
     presented: Mutex<Vec<Vec<(String, String)>>>,
 }
@@ -46,6 +48,7 @@ impl Accounts for Fixed {
     fn certificate_status(
         &self,
         user: &str,
+        _uid: u32,
         headers: &[(String, String)],
     ) -> Option<CertificateStatus> {
         let pins = self.certificates.lock().unwrap();
@@ -67,15 +70,20 @@ impl Accounts for Fixed {
                     Presented {
                         subject,
                         fingerprint: format!("sha256:{cert}"),
+                        expired: cert == "MIIB-expired",
                     },
                     state,
                 )
             });
         let pinned = pins.values().any(|owner| owner == user);
-        Some(CertificateStatus { presented, pinned })
+        Some(CertificateStatus {
+            presented,
+            pinned,
+            disabled: false,
+        })
     }
 
-    fn pin(&self, user: &str, headers: &[(String, String)]) -> Result<(), PinError> {
+    fn pin(&self, user: &str, _uid: u32, headers: &[(String, String)]) -> Result<(), PinError> {
         let cert = headers
             .iter()
             .find(|(name, _)| name == "x-client-cert")
@@ -97,8 +105,9 @@ impl Accounts for Fixed {
         Ok(pins.len() != before)
     }
 
-    fn sign_in_certificate(&self, headers: &[(String, String)]) -> SignIn {
+    fn sign_in_certificate(&self, headers: &[(String, String)], client: IpAddr) -> SignIn {
         self.asked.fetch_add(1, Ordering::SeqCst);
+        *self.last_client.lock().unwrap() = Some(client);
         self.presented.lock().unwrap().push(headers.to_vec());
         let value = headers
             .iter()
@@ -329,6 +338,7 @@ fn rig(change: impl FnOnce(&mut Settings), refuse_accepts: usize) -> Rig {
                 .collect(),
         ),
         presented: Mutex::new(Vec::new()),
+        last_client: Mutex::new(None),
     });
     let hosts = Arc::new(Hosts {
         dir: dir.clone(),
@@ -1322,6 +1332,7 @@ fn a_portal_with_no_site_or_a_site_without_an_index_does_not_start() {
             asked: AtomicUsize::new(0),
             certificates: Mutex::new(HashMap::new()),
             presented: Mutex::new(Vec::new()),
+            last_client: Mutex::new(None),
         }),
         Arc::new(Systemd::new()),
     );
@@ -1341,6 +1352,7 @@ fn a_portal_with_no_site_or_a_site_without_an_index_does_not_start() {
             asked: AtomicUsize::new(0),
             certificates: Mutex::new(HashMap::new()),
             presented: Mutex::new(Vec::new()),
+            last_client: Mutex::new(None),
         }),
         Arc::new(Systemd::new()),
     );
@@ -1818,7 +1830,7 @@ fn pinning_needs_a_fresh_password_sign_in_in_the_same_session() {
         "action=enrol",
     );
     assert_eq!(refused.status, 403);
-    assert!(refused.body.contains("Sign in again with your password"));
+    assert!(refused.body.contains("Enter your password"));
     assert!(
         !rig.accounts
             .certificates
@@ -1826,8 +1838,9 @@ fn pinning_needs_a_fresh_password_sign_in_in_the_same_session() {
             .unwrap()
             .contains_key("MIIB-new")
     );
+    // The page asks for the password with the button.
     let page = cert_page(&rig, "GET", &by_certificate, Some("MIIB-new"), "");
-    assert!(!page.body.contains("Use this certificate to sign in"));
+    assert!(page.body.contains("name=\"password\""));
     // A password session whose time is up does not either.
     let stale = rig_with_enrol_window_zero();
     let cookie = signed_in(&stale, "canoatesta");
@@ -1901,7 +1914,7 @@ fn a_certificate_pinned_to_another_account_cannot_be_enrolled() {
         "POST",
         &cookie,
         Some("MIIB-test-cert"),
-        "action=enrol",
+        "action=enrol&password=pw-b",
     );
     assert!(refused.body.contains("belongs to another account"));
     assert_eq!(
@@ -1961,4 +1974,213 @@ fn a_certificates_subject_is_escaped_on_the_page() {
     let page = cert_page(&rig, "GET", &cookie, Some("MIIB-xss"), "");
     assert!(page.body.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
     assert!(!page.body.contains("<script>alert"));
+}
+
+#[test]
+fn a_fresh_password_session_cannot_pin_a_certificate_other_than_the_one_it_signed_in_with() {
+    let rig = rig(|settings| settings.max_failures_per_pair = 3, 0);
+    let to = To::Unix(rig.sock.clone());
+    let signed = request(
+        &to,
+        "POST",
+        LOGIN,
+        &[
+            ("Origin", to.origin()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+            ("X-Forwarded-For", "198.51.100.7".to_owned()),
+            ("X-Client-Cert", "MIIB-mine".to_owned()),
+        ],
+        "user=canoatestb&password=pw-b",
+    );
+    let cookie = signed.cookie().unwrap();
+    // A thief holding the cookie, with a certificate of their own, within the fresh window.
+    let pinned = |cert: &str| rig.accounts.certificates.lock().unwrap().contains_key(cert);
+    let page = cert_page(&rig, "GET", &cookie, Some("MIIB-thief"), "");
+    assert!(page.body.contains("name=\"password\""));
+    let without = cert_page(&rig, "POST", &cookie, Some("MIIB-thief"), "action=enrol");
+    assert_eq!(without.status, 403);
+    assert!(without.body.contains("Enter your password"));
+    assert!(!pinned("MIIB-thief"));
+    // Guessing the password at the form goes through the throttle: three wrong ones and the fourth is not asked.
+    for _ in 0..3 {
+        let wrong = cert_page(
+            &rig,
+            "POST",
+            &cookie,
+            Some("MIIB-thief"),
+            "action=enrol&password=nope",
+        );
+        assert!(wrong.body.contains("That password was not accepted"));
+    }
+    let asked = rig.accounts.asked.load(Ordering::SeqCst);
+    let blocked = cert_page(
+        &rig,
+        "POST",
+        &cookie,
+        Some("MIIB-thief"),
+        "action=enrol&password=pw-b",
+    );
+    assert!(blocked.body.contains("Too many failed attempts"));
+    assert_eq!(rig.accounts.asked.load(Ordering::SeqCst), asked);
+    assert!(!pinned("MIIB-thief"));
+    // The certificate the password was typed with pins with no second password.
+    let own = cert_page(&rig, "POST", &cookie, Some("MIIB-mine"), "action=enrol");
+    assert_eq!(own.status, 200);
+    assert!(pinned("MIIB-mine"));
+}
+
+#[test]
+fn a_person_who_types_the_password_again_may_pin_the_certificate_on_offer() {
+    let rig = rig(|_| {}, 0);
+    let cookie = signed_in(&rig, "canoatestb");
+    let done = cert_page(
+        &rig,
+        "POST",
+        &cookie,
+        Some("MIIB-card"),
+        "action=enrol&password=pw-b",
+    );
+    assert_eq!(done.status, 200);
+    assert_eq!(
+        rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .get("MIIB-card")
+            .map(String::as_str),
+        Some("canoatestb")
+    );
+    // Another account's password does not do.
+    let other = cert_page(
+        &rig,
+        "POST",
+        &cookie,
+        Some("MIIB-card-2"),
+        "action=enrol&password=pw-a",
+    );
+    assert!(other.body.contains("That password was not accepted"));
+    assert!(
+        !rig.accounts
+            .certificates
+            .lock()
+            .unwrap()
+            .contains_key("MIIB-card-2")
+    );
+}
+
+#[test]
+fn what_a_removed_or_replaced_pin_let_in_does_not_outlive_it() {
+    let rig = rig(|_| {}, 0);
+    // A certificate session of canoatesta, whose pin is MIIB-test-cert.
+    let by_certificate = cert_session(&rig);
+    let session = |cookie: &String| {
+        call(
+            rig.addr,
+            "GET",
+            "/portal/session",
+            &[("Cookie", cookie.clone())],
+            "",
+        )
+        .status
+    };
+    assert_eq!(session(&by_certificate), 200);
+    // The account pins another certificate, from a password session: the old pin's session ends.
+    let to = To::Unix(rig.sock.clone());
+    let signed = request(
+        &to,
+        "POST",
+        LOGIN,
+        &[
+            ("Origin", to.origin()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+            ("X-Forwarded-For", "198.51.100.7".to_owned()),
+            ("X-Client-Cert", "MIIB-renewed".to_owned()),
+        ],
+        "user=canoatesta&password=pw-a",
+    );
+    let by_password = signed.cookie().unwrap();
+    assert_eq!(session(&by_certificate), 200, "signing in changes nothing");
+    cert_page(
+        &rig,
+        "POST",
+        &by_password,
+        Some("MIIB-renewed"),
+        "action=enrol",
+    );
+    assert_eq!(session(&by_certificate), 401);
+    assert_eq!(session(&by_password), 200);
+    // A session the new pin opened ends when the pin is removed.
+    let renewed = cert_login(&rig, Some("MIIB-renewed"), "198.51.100.12")
+        .cookie()
+        .unwrap();
+    assert_eq!(session(&renewed), 200);
+    cert_page(&rig, "POST", &by_password, None, "action=remove");
+    assert_eq!(session(&renewed), 401);
+    assert_eq!(session(&by_password), 200);
+}
+
+#[test]
+fn an_expired_certificate_is_said_to_be_and_not_offered_for_pinning() {
+    let rig = rig(|_| {}, 0);
+    let cookie = signed_in(&rig, "canoatestb");
+    let page = cert_page(&rig, "GET", &cookie, Some("MIIB-expired"), "");
+    assert!(page.body.contains("has expired"));
+    assert!(!page.body.contains("Use this certificate to sign in"));
+}
+
+#[test]
+fn the_certificate_sign_in_is_asked_for_the_browsers_address_not_the_proxys() {
+    let rig = rig(|_| {}, 0);
+    cert_login(&rig, Some("MIIB-test-cert"), "198.51.100.77");
+    assert_eq!(
+        *rig.accounts.last_client.lock().unwrap(),
+        Some("198.51.100.77".parse().unwrap())
+    );
+}
+
+#[test]
+fn no_answer_carries_a_header_twice() {
+    let rig = rig(|_| {}, 0);
+    let to = To::Unix(rig.sock.clone());
+    let cookie = signed_in(&rig, "canoatesta");
+    for (path, cookie) in [
+        (LOGIN, ""),
+        (METHODS, ""),
+        ("/portal/login.css", ""),
+        ("/portal/login.js", ""),
+        (CERTIFICATE, cookie.as_str()),
+    ] {
+        let extra: Vec<(&str, String)> = if cookie.is_empty() {
+            vec![]
+        } else {
+            vec![("Cookie", cookie.to_owned())]
+        };
+        let answer = request(&to, "GET", path, &extra, "");
+        let count = |name: &str| {
+            answer
+                .headers
+                .iter()
+                .filter(|(each, _)| each.eq_ignore_ascii_case(name))
+                .count()
+        };
+        for name in [
+            "cache-control",
+            "content-security-policy",
+            "content-type",
+            "referrer-policy",
+        ] {
+            assert!(
+                count(name) <= 1,
+                "{path}: {name} sent {} times",
+                count(name)
+            );
+        }
+        assert_eq!(count("cache-control"), 1, "{path}");
+    }
 }

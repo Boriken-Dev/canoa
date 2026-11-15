@@ -514,6 +514,13 @@ impl Response {
         answer
     }
 
+    /// This header with `value`, in place of any the answer has under that name.
+    fn replacing(mut self, name: &'static str, value: String) -> Self {
+        self.headers.retain(|(each, _)| *each != name);
+        self.headers.push((name, value));
+        self
+    }
+
     fn with(mut self, name: &'static str, value: String) -> Self {
         self.headers.push((name, value));
         self
@@ -686,11 +693,10 @@ fn login_response(
         page::render(&methods_for(inner, conn, address), notice, retry),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
-    .with("Cache-Control", "no-store".to_owned())
 }
 
 fn asset(kind: &'static str, body: &'static str) -> Response {
-    Response::text(200, kind, body).with("Cache-Control", "no-cache".to_owned())
+    Response::text(200, kind, body).replacing("Cache-Control", "no-cache".to_owned())
 }
 
 /// What a browser may ask before it signs in: the ways in this portal accepts here.
@@ -701,7 +707,6 @@ fn methods_response(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         .map(Method::id)
         .collect();
     Response::json(200, &serde_json::json!({ "methods": ids }))
-        .with("Cache-Control", "no-store".to_owned())
 }
 
 fn serve_connection(inner: &Inner, mut conn: Conn) {
@@ -849,11 +854,6 @@ fn after_floor(inner: &Inner, started: Instant, response: Response) -> Response 
     response
 }
 
-/// The throttle's name for a certificate try, which names no account: one per address, so no address can slow another's.
-fn certificate_key(address: IpAddr) -> String {
-    format!("\0certificate@{address}")
-}
-
 /// What the browser sent that a provider may read of a certificate sign-in: every header but the ones that carry the portal's
 /// own or the browser's credentials.
 fn presented(request: &Request) -> Vec<(String, String)> {
@@ -890,7 +890,7 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         return Response::refusal(400);
     }
     let (user, password, key) = match method {
-        Method::Certificate => (String::new(), String::new(), certificate_key(address)),
+        Method::Certificate => (String::new(), String::new(), String::new()),
         _ => {
             let (Some(user), Some(password)) = (
                 form_field(&request.body, "user"),
@@ -908,7 +908,11 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
     };
     // Counted as a failure as it is let through, before the accounts are asked, so that tries made together cannot all pass the
     // limit and a refused try never reaches the directory, where it could lock an account.
-    let Some(attempt) = inner.throttle.begin(address, &key) else {
+    let begun = match method {
+        Method::Certificate => inner.throttle.begin_certificate(address),
+        _ => inner.throttle.begin(address, &key),
+    };
+    let Some(attempt) = begun else {
         tracing::info!("a sign-in from {address} was refused for its failures");
         let wait = inner.settings.failure_window.as_secs();
         return after_floor(
@@ -935,7 +939,9 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
     }
     let result = match method {
-        Method::Certificate => inner.accounts.sign_in_certificate(&presented(request)),
+        Method::Certificate => inner
+            .accounts
+            .sign_in_certificate(&presented(request), address),
         _ => inner.accounts.sign_in(user.trim(), &password),
     };
     inner.signing_in.fetch_sub(1, Ordering::SeqCst);
@@ -953,7 +959,21 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
                 );
             }
             let by_password = method == Method::Password;
-            let Some((token, _)) = inner.sessions.open_by(&user, uid, by_password) else {
+            // What the browser offered with this sign-in: the only certificate a pin from this session may be, unless the
+            // password is typed again.
+            let status = if conn.from_proxy() {
+                inner
+                    .accounts
+                    .certificate_status(&user, uid, &presented(request))
+            } else {
+                None
+            };
+            let seen = status.and_then(|status| status.presented);
+            let fingerprint = seen.as_ref().map(|(cert, _)| cert.fingerprint.clone());
+            let Some((token, _)) = inner
+                .sessions
+                .open_with(&user, uid, Some(method), fingerprint)
+            else {
                 inner.throttle.succeeded(attempt);
                 return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
             };
@@ -961,12 +981,7 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
             tracing::info!("{user} signed in from {address} by {}", method.id());
             // A person who signed in by password with a certificate their account does not use yet is offered to pin it.
             let offered = by_password
-                && conn.from_proxy()
-                && inner
-                    .accounts
-                    .certificate_status(&user, &presented(request))
-                    .and_then(|status| status.presented)
-                    .is_some_and(|(_, state)| state == PinState::Unpinned);
+                && seen.is_some_and(|(cert, state)| state == PinState::Unpinned && !cert.expired);
             Response::redirect(if offered { CERTIFICATE } else { "/" }).with(
                 "Set-Cookie",
                 format!(
@@ -1002,6 +1017,16 @@ fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
     }
 }
 
+/// Whether the password typed to sign this session in, within `enrol`, was typed with the certificate `fingerprint` offered: then
+/// the person has confirmed that very certificate, and needs no second password to pin it.
+fn confirmed(inner: &Inner, session: &Session, fingerprint: &str) -> bool {
+    session.method == Some(Method::Password)
+        && session
+            .password_at
+            .is_some_and(|at| at.elapsed() <= inner.settings.enrol)
+        && session.fingerprint.as_deref() == Some(fingerprint)
+}
+
 /// The page of the signed-in person's certificates: the one their browser offers here, and the one pinned to their account.
 fn certificate_page(
     inner: &Inner,
@@ -1015,10 +1040,13 @@ fn certificate_page(
     } else {
         Vec::new()
     };
-    let status = inner.accounts.certificate_status(&session.user, &headers);
-    let fresh = session
-        .password_at
-        .is_some_and(|at| at.elapsed() <= inner.settings.enrol);
+    let status = inner
+        .accounts
+        .certificate_status(&session.user, session.uid, &headers);
+    let needs_password = status
+        .as_ref()
+        .and_then(|status| status.presented.as_ref())
+        .is_some_and(|(cert, _)| !confirmed(inner, session, &cert.fingerprint));
     let code = match notice {
         Some(page::CertNotice::Problem(_)) => 403,
         _ => 200,
@@ -1026,15 +1054,14 @@ fn certificate_page(
     Response::text(
         code,
         "text/html; charset=utf-8",
-        page::render_certificate(&session.user, status.as_ref(), fresh, notice),
+        page::render_certificate(&session.user, status.as_ref(), needs_password, notice),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
-    .with("Cache-Control", "no-store".to_owned())
 }
 
 /// `POST /portal/certificate`: `action=enrol` pins the request's certificate to the account, `action=remove` takes the pin away.
-/// Pinning needs the session to have been opened by a password not long ago, so a stolen cookie or a certificate alone never adds
-/// a way in.
+/// Pinning needs the password: the one that signed this session in with this very certificate, not long ago, or else the
+/// password typed again into the form, through the throttle. So a stolen cookie, or a certificate alone, never adds a way in.
 fn certificate_action(
     inner: &Inner,
     request: &Request,
@@ -1047,6 +1074,8 @@ fn certificate_action(
     {
         return Response::refusal(400);
     }
+    let started = Instant::now();
+    let address = client_of(inner, request, conn);
     let problem = |text| {
         certificate_page(
             inner,
@@ -1058,18 +1087,39 @@ fn certificate_action(
     };
     match form_field(&request.body, "action").as_deref() {
         Some("enrol") => {
-            let fresh = session
-                .password_at
-                .is_some_and(|at| at.elapsed() <= inner.settings.enrol);
-            if !fresh {
-                return problem("Sign in again with your password to add a certificate.");
-            }
             if !conn.from_proxy() {
                 return problem("This connection carries no certificate.");
             }
-            match inner.accounts.pin(&session.user, &presented(request)) {
+            let headers = presented(request);
+            let offered = inner
+                .accounts
+                .certificate_status(&session.user, session.uid, &headers)
+                .and_then(|status| status.presented);
+            let Some((cert, _)) = offered else {
+                return problem("Your browser did not offer a certificate to this site.");
+            };
+            if !confirmed(inner, session, &cert.fingerprint) {
+                let Some(password) =
+                    form_field(&request.body, "password").filter(|text| !text.is_empty())
+                else {
+                    return problem("Enter your password to add this certificate.");
+                };
+                if let Err(refusal) = confirm_password(inner, session, address, &password, started)
+                {
+                    return problem(refusal);
+                }
+            }
+            match inner.accounts.pin(&session.user, session.uid, &headers) {
                 Ok(()) => {
-                    tracing::info!("{} pinned a certificate", session.user);
+                    tracing::warn!(
+                        "{} pinned certificate {} from {address}",
+                        session.user,
+                        cert.fingerprint
+                    );
+                    // What a replaced pin let in does not outlive it.
+                    inner
+                        .sessions
+                        .close_certificates(&session.user, Some(&cert.fingerprint));
                     certificate_page(
                         inner,
                         request,
@@ -1081,6 +1131,10 @@ fn certificate_action(
                 Err(PinError::NoCertificate) => {
                     problem("Your browser did not offer a certificate to this site.")
                 }
+                Err(PinError::Expired) => problem("That certificate has expired."),
+                Err(PinError::Disabled) => problem(
+                    "The certificate pinned to your account is disabled: ask an administrator.",
+                ),
                 Err(PinError::Taken) => problem("That certificate belongs to another account."),
                 Err(PinError::Unsupported) => problem("This portal does not keep certificates."),
                 Err(PinError::Failed(why)) => {
@@ -1092,7 +1146,21 @@ fn certificate_action(
         Some("remove") => match inner.accounts.unpin(&session.user) {
             Ok(removed) => {
                 if removed {
-                    tracing::info!("{} removed their pinned certificate", session.user);
+                    let offered = if conn.from_proxy() {
+                        inner
+                            .accounts
+                            .certificate_status(&session.user, session.uid, &presented(request))
+                            .and_then(|status| status.presented)
+                            .map(|(cert, _)| cert.fingerprint)
+                    } else {
+                        None
+                    };
+                    tracing::warn!(
+                        "{} removed their pinned certificate from {address} (the browser offered {})",
+                        session.user,
+                        offered.as_deref().unwrap_or("none")
+                    );
+                    inner.sessions.close_certificates(&session.user, None);
                 }
                 certificate_page(
                     inner,
@@ -1102,6 +1170,9 @@ fn certificate_action(
                     Some(page::CertNotice::Done("The pinned certificate is removed.")),
                 )
             }
+            Err(PinError::Disabled) => {
+                problem("The certificate pinned to your account is disabled: ask an administrator.")
+            }
             Err(PinError::Unsupported) => problem("This portal does not keep certificates."),
             Err(error) => {
                 tracing::warn!("removing a pinned certificate failed: {error:?}");
@@ -1109,6 +1180,63 @@ fn certificate_action(
             }
         },
         _ => Response::refusal(400),
+    }
+}
+
+/// Checks the password of `session`'s account typed into the enrolment form, through the same throttle and floor as a sign-in.
+///
+/// # Errors
+///
+/// What to tell the person.
+fn confirm_password(
+    inner: &Inner,
+    session: &Session,
+    address: IpAddr,
+    password: &str,
+    started: Instant,
+) -> Result<(), &'static str> {
+    let key: String = session.user.to_ascii_lowercase().chars().take(64).collect();
+    let Some(attempt) = inner.throttle.begin(address, &key) else {
+        tracing::info!(
+            "a password for {} from {address} was refused for its failures",
+            session.user
+        );
+        thread::sleep(
+            inner
+                .settings
+                .failure_floor
+                .saturating_sub(started.elapsed()),
+        );
+        return Err("Too many failed attempts. Try again later.");
+    };
+    if !attempt.wait.is_zero() {
+        thread::sleep(attempt.wait);
+    }
+    if inner.signing_in.fetch_add(1, Ordering::SeqCst) >= inner.settings.max_sign_ins {
+        inner.signing_in.fetch_sub(1, Ordering::SeqCst);
+        inner.throttle.succeeded(attempt);
+        return Err("Busy. Try again in a moment.");
+    }
+    let result = inner.accounts.sign_in(&session.user, password);
+    inner.signing_in.fetch_sub(1, Ordering::SeqCst);
+    match result {
+        SignIn::Admitted { user, uid } if user == session.user && uid == session.uid => {
+            inner.throttle.succeeded(attempt);
+            Ok(())
+        }
+        SignIn::Failed(why) => {
+            tracing::warn!("the accounts could not be asked: {why}");
+            Err("Sign-in is not available.")
+        }
+        _ => {
+            thread::sleep(
+                inner
+                    .settings
+                    .failure_floor
+                    .saturating_sub(started.elapsed()),
+            );
+            Err("That password was not accepted.")
+        }
     }
 }
 

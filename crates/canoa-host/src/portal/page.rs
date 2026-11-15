@@ -125,13 +125,13 @@ fn post_button(action: &str, label: &str, class: &str) -> String {
     )
 }
 
-/// The page where `user` sees the certificate their browser offered and the one pinned to their account. `fresh` says a
-/// password signed the session in recently enough to pin one.
+/// The page where `user` sees the certificate their browser offered and the one pinned to their account. `needs_password` says
+/// the certificate was not the one a password signed the session in with, so pinning it asks for the password again.
 #[must_use]
 pub fn render_certificate(
     user: &str,
     status: Option<&CertificateStatus>,
-    fresh: bool,
+    needs_password: bool,
     notice: Option<CertNotice>,
 ) -> Vec<u8> {
     let note = match notice {
@@ -157,27 +157,23 @@ pub fn render_certificate(
                         escape(&presented.fingerprint)
                     ));
                     body.push_str(&match state {
-                        PinState::Yours => {
-                            "<p>This certificate signs you in.</p>".to_owned()
-                        }
+                        _ if presented.expired => "<p>This certificate has expired.</p>".to_owned(),
+                        PinState::Yours => "<p>This certificate signs you in.</p>".to_owned(),
                         PinState::Another => {
                             "<p>This certificate is already used by another account.</p>".to_owned()
                         }
-                        _ if fresh => format!(
-                            "<p>{}</p>{}",
-                            if status.pinned {
-                                "It replaces the certificate pinned to your account now."
-                            } else {
-                                "After this, the certificate alone signs you in."
-                            },
-                            post_button("enrol", "Use this certificate to sign in", "")
-                        ),
-                        _ => "<p>To use it, sign in again with your password first.</p><form method=\"post\" action=\"/portal/logout\"><button type=\"submit\" class=\"secondary\">Sign out</button></form>".to_owned(),
+                        _ if status.disabled => {
+                            "<p>The certificate pinned to your account is disabled: ask an administrator.</p>"
+                                .to_owned()
+                        }
+                        _ => enrol_form(status.pinned, needs_password),
                     });
                 }
             }
             body.push_str("<h2>Pinned to your account</h2>");
-            if status.pinned {
+            if status.disabled {
+                body.push_str("<p>A certificate is pinned to your account, and an administrator disabled it.</p>");
+            } else if status.pinned {
                 body.push_str("<p>A certificate is pinned to your account.</p>");
                 body.push_str(&post_button("remove", "Remove it", "secondary"));
             } else {
@@ -190,4 +186,21 @@ pub fn render_certificate(
         escape(user)
     )
     .into_bytes()
+}
+
+/// The form that pins the certificate on offer, with the password again when the session did not confirm this certificate.
+fn enrol_form(replaces: bool, needs_password: bool) -> String {
+    let what = if replaces {
+        "It replaces the certificate pinned to your account now."
+    } else {
+        "After this, the certificate alone signs you in."
+    };
+    let password = if needs_password {
+        "<label for=\"password\">Password</label><input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required>"
+    } else {
+        ""
+    };
+    format!(
+        "<p>{what}</p><form method=\"post\" action=\"{CERTIFICATE}\"><input type=\"hidden\" name=\"action\" value=\"enrol\">{password}<button type=\"submit\">Use this certificate to sign in</button></form>"
+    )
 }

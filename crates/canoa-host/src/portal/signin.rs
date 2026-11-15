@@ -1,5 +1,7 @@
 //! Who may sign in, and as whom: the contract the portal asks of its accounts.
 
+use core::net::IpAddr;
+
 /// The longest password a sign-in takes, in bytes.
 pub const MAX_PASSWORD: usize = 1024;
 
@@ -27,6 +29,8 @@ pub struct Presented {
     pub subject: String,
     /// The fingerprint of the certificate, which is what is pinned.
     pub fingerprint: String,
+    /// Whether the certificate is outside its validity dates now: such a certificate signs no one in and is never pinned.
+    pub expired: bool,
 }
 
 /// Whose a presented certificate is.
@@ -47,8 +51,10 @@ pub enum PinState {
 pub struct CertificateStatus {
     /// The certificate the request carried, with whose it is; none when the request carried none the portal can read.
     pub presented: Option<(Presented, PinState)>,
-    /// Whether a certificate is pinned to the account.
+    /// Whether a certificate is pinned to the account (one pinned to a user id this name had before does not count).
     pub pinned: bool,
+    /// Whether the account's pin is disabled by an administrator: it can then be neither replaced nor removed from here.
+    pub disabled: bool,
 }
 
 /// Why a certificate was not pinned or unpinned.
@@ -59,6 +65,10 @@ pub enum PinError {
     NoCertificate,
     /// It is pinned to another account.
     Taken,
+    /// The certificate is outside its validity dates.
+    Expired,
+    /// The account's pin is disabled by an administrator.
+    Disabled,
     /// This portal pins no certificates.
     Unsupported,
     /// The store could not be read or written; the reason is for the log.
@@ -101,9 +111,10 @@ pub trait Accounts: Send + Sync {
     fn certificate_status(
         &self,
         user: &str,
+        uid: u32,
         headers: &[(String, String)],
     ) -> Option<CertificateStatus> {
-        let _ = (user, headers);
+        let _ = (user, uid, headers);
         None
     }
 
@@ -112,8 +123,8 @@ pub trait Accounts: Send + Sync {
     /// # Errors
     ///
     /// [`PinError`] for no certificate, one pinned to another account, or a store that cannot be written.
-    fn pin(&self, user: &str, headers: &[(String, String)]) -> Result<(), PinError> {
-        let _ = (user, headers);
+    fn pin(&self, user: &str, uid: u32, headers: &[(String, String)]) -> Result<(), PinError> {
+        let _ = (user, uid, headers);
         Err(PinError::Unsupported)
     }
 
@@ -127,10 +138,10 @@ pub trait Accounts: Send + Sync {
         Err(PinError::Unsupported)
     }
 
-    /// Checks the certificate the proxy forwarded in `headers` (the request's, in order, names in lower case). The portal asks
-    /// only for a request that came on the proxy's socket. The default refuses.
-    fn sign_in_certificate(&self, headers: &[(String, String)]) -> SignIn {
-        let _ = headers;
+    /// Checks the certificate the proxy forwarded in `headers` (the request's, in order, names in lower case) for a browser at
+    /// `client`. The portal asks only for a request that came on the proxy's socket. The default refuses.
+    fn sign_in_certificate(&self, headers: &[(String, String)], client: IpAddr) -> SignIn {
+        let _ = (headers, client);
         SignIn::Refused
     }
 

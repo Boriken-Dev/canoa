@@ -8,6 +8,8 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use data_encoding::BASE64URL_NOPAD;
+
+use super::signin::Method;
 use sha2::{Digest, Sha256};
 
 /// How many random bytes a session's token holds.
@@ -26,6 +28,11 @@ pub struct Session {
     pub id: u64,
     /// When a password signed this session in; `None` for a session any other method opened.
     pub password_at: Option<Instant>,
+    /// The method that signed it in; `None` for a session opened with no method named.
+    pub method: Option<Method>,
+    /// The fingerprint of the certificate the sign-in request carried, whatever the method: what a pin from this session may
+    /// be.
+    pub fingerprint: Option<String>,
 }
 
 struct Kept {
@@ -34,6 +41,8 @@ struct Kept {
     id: u64,
     until: Instant,
     password_at: Option<Instant>,
+    method: Option<Method>,
+    fingerprint: Option<String>,
 }
 
 /// The sessions of signed-in browsers, by the digest of the token the browser holds: the token itself is never kept.
@@ -69,11 +78,18 @@ impl Sessions {
     /// A new session for `user`, and the token the browser keeps. An account that holds its share already loses its oldest
     /// session, so one account cannot fill the table. `None` when the whole table is full of live sessions of others.
     pub fn open(&self, user: &str, uid: u32) -> Option<(String, Session)> {
-        self.open_by(user, uid, false)
+        self.open_with(user, uid, None, None)
     }
 
-    /// [`Sessions::open`] for a sign-in that `password` says was, or was not, a password's.
-    pub fn open_by(&self, user: &str, uid: u32, password: bool) -> Option<(String, Session)> {
+    /// [`Sessions::open`] for a sign-in by `method`, whose request carried a certificate with `fingerprint`, if it did.
+    pub fn open_with(
+        &self,
+        user: &str,
+        uid: u32,
+        method: Option<Method>,
+        fingerprint: Option<String>,
+    ) -> Option<(String, Session)> {
+        let password = method == Some(Method::Password);
         let mut bytes = [0_u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes).ok()?;
         let token = BASE64URL_NOPAD.encode(&bytes);
@@ -106,6 +122,8 @@ impl Sessions {
                 id,
                 until: now.checked_add(self.lifetime)?,
                 password_at: password.then_some(now),
+                method,
+                fingerprint: fingerprint.clone(),
             },
         );
         Some((
@@ -115,6 +133,8 @@ impl Sessions {
                 uid,
                 id,
                 password_at: password.then_some(now),
+                method,
+                fingerprint,
             },
         ))
     }
@@ -137,6 +157,8 @@ impl Sessions {
             uid: kept.uid,
             id: kept.id,
             password_at: kept.password_at,
+            method: kept.method,
+            fingerprint: kept.fingerprint.clone(),
         })
     }
 
@@ -154,6 +176,17 @@ impl Sessions {
     pub fn close(&self, token: &str) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.1.remove(&digest(token));
+    }
+
+    /// Ends the sessions of `user` that a certificate signed in, except those of the certificate `keep` names: for when a pin is
+    /// removed or replaced, so that what it let in does not outlive it.
+    pub fn close_certificates(&self, user: &str, keep: Option<&str>) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.1.retain(|_, kept| {
+            kept.user != user
+                || kept.method != Some(Method::Certificate)
+                || (keep.is_some() && kept.fingerprint.as_deref() == keep)
+        });
     }
 
     /// Ends every session of `user`.
@@ -176,9 +209,9 @@ pub struct Throttle {
 #[derive(Default)]
 struct Counts {
     next: u64,
-    pairs: BTreeMap<(String, IpAddr), Vec<(u64, Instant)>>,
+    pairs: BTreeMap<(Subject, IpAddr), Vec<(u64, Instant)>>,
     addresses: BTreeMap<IpAddr, Vec<(u64, Instant)>>,
-    users: BTreeMap<String, Vec<(u64, Instant)>>,
+    users: BTreeMap<Subject, Vec<(u64, Instant)>>,
 }
 
 impl core::fmt::Debug for Throttle {
@@ -187,13 +220,23 @@ impl core::fmt::Debug for Throttle {
     }
 }
 
+/// Whose failures a try counts toward. A certificate names no account, and its count is kept apart from every account's, by
+/// the address it came from, so that no name can collide with it and no address can slow another's.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Subject {
+    /// A password sign-in for the account of this name, lower case.
+    Account(String),
+    /// A certificate sign-in from this address (an IPv6 one by its /64).
+    Certificate(IpAddr),
+}
+
 /// A try that was let through, and counts as a failure until [`Throttle::succeeded`] says it was not.
 #[derive(Debug)]
 #[must_use]
 pub struct Attempt {
-    pair: (String, IpAddr),
+    pair: (Subject, IpAddr),
     address: IpAddr,
-    user: String,
+    user: Subject,
     id: u64,
     /// How long the try waits before the accounts are asked: the account's failures, from anywhere, make it slower.
     pub wait: Duration,
@@ -267,10 +310,19 @@ impl Throttle {
     /// checked the limits, so that tries made together cannot all pass the check before any is counted; a success takes its
     /// count back. Asked before the accounts are, so a refused try costs the directory nothing.
     pub fn begin(&self, address: IpAddr, user: &str) -> Option<Attempt> {
+        self.begin_for(address, Subject::Account(user.to_owned()))
+    }
+
+    /// [`Throttle::begin`] for a certificate sign-in from `address`.
+    pub fn begin_certificate(&self, address: IpAddr) -> Option<Attempt> {
+        self.begin_for(address, Subject::Certificate(key_of(address)))
+    }
+
+    fn begin_for(&self, address: IpAddr, user: Subject) -> Option<Attempt> {
         let now = Instant::now();
         let address = key_of(address);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let pair_key = (user.to_owned(), address);
+        let pair_key = (user.clone(), address);
         let by_pair = state
             .pairs
             .get_mut(&pair_key)
@@ -284,7 +336,7 @@ impl Throttle {
         }
         let by_user = state
             .users
-            .get_mut(user)
+            .get_mut(&user)
             .map_or(0, |times| recent(times, self.window, now));
         let over = by_user.saturating_sub(self.slow_after).min(30);
         state.next += 1;
@@ -295,18 +347,14 @@ impl Throttle {
             .or_default()
             .push((id, now));
         state.addresses.entry(address).or_default().push((id, now));
-        state
-            .users
-            .entry(user.to_owned())
-            .or_default()
-            .push((id, now));
+        state.users.entry(user.clone()).or_default().push((id, now));
         trim(&mut state.pairs, self.window, now);
         trim(&mut state.addresses, self.window, now);
         trim(&mut state.users, self.window, now);
         Some(Attempt {
             pair: pair_key,
             address,
-            user: user.to_owned(),
+            user,
             id,
             wait: self.slow * u32::try_from(over).unwrap_or(30),
         })
@@ -337,6 +385,51 @@ impl Throttle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_certificate_sessions_leaves_the_others_and_the_pin_that_stays() {
+        let sessions = Sessions::new(Duration::from_secs(60), 10, 10);
+        let open = |user: &str, method, fingerprint: Option<&str>| {
+            sessions
+                .open_with(user, 1, Some(method), fingerprint.map(str::to_owned))
+                .unwrap()
+                .0
+        };
+        let by_password = open("a", Method::Password, Some("sha256:new"));
+        let old = open("a", Method::Certificate, Some("sha256:old"));
+        let new = open("a", Method::Certificate, Some("sha256:new"));
+        let other = open("b", Method::Certificate, Some("sha256:old"));
+        sessions.close_certificates("a", Some("sha256:new"));
+        assert!(sessions.get(&old).is_none());
+        assert!(sessions.get(&new).is_some() && sessions.get(&by_password).is_some());
+        assert!(
+            sessions.get(&other).is_some(),
+            "another account's is not touched"
+        );
+        sessions.close_certificates("a", None);
+        assert!(sessions.get(&new).is_none() && sessions.get(&by_password).is_some());
+    }
+
+    #[test]
+    fn a_certificates_failures_never_count_against_an_account_of_any_name() {
+        let throttle = throttle(2, 100, 100);
+        let address: IpAddr = "192.0.2.7".parse().unwrap();
+        let other: IpAddr = "192.0.2.8".parse().unwrap();
+        for _ in 0..2 {
+            assert!(throttle.begin_certificate(address).is_some());
+        }
+        for name in ["certificate", "\0certificate@192.0.2.7", "192.0.2.7"] {
+            assert!(throttle.begin(address, name).is_some(), "{name:?}");
+        }
+        assert!(
+            throttle.begin_certificate(address).is_none(),
+            "the certificate's own pair is full"
+        );
+        assert!(
+            throttle.begin_certificate(other).is_some(),
+            "another address has its own"
+        );
+    }
 
     #[test]
     fn a_session_is_found_by_its_token_and_not_after_it_closes() {

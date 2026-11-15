@@ -218,6 +218,27 @@ await check("a password sign-in offers the browser's new certificate, pinning it
   await signOut();
 });
 
+await check("a certificate that was not offered with the password sign-in asks for the password again before it is pinned", async () => {
+  await header(undefined);
+  await go("/portal/login");
+  await passwordSignIn(user, password);
+  await until("location.pathname === '/'", "the site");
+  await header(untrusted);
+  await go("/portal/certificate");
+  if (!(await page.run("!!document.querySelector('form [name=password]')"))) throw new Error("no password field");
+  // The certificate page's policy allows no fetch, so the bare post comes from the site's own page.
+  await go("/");
+  const bare = await page.run(`fetch('/portal/certificate', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=enrol' }).then(async (r) => r.status + ' ' + (await r.text()))`);
+  if (!bare.startsWith("403") || !bare.includes("Enter your password")) throw new Error(bare.slice(0, 200));
+  await go("/portal/certificate");
+  await fill("password", password);
+  await click("form:has([value=enrol]) button");
+  await until("document.body.innerText.includes('now signs you in')", "the confirmation");
+  await click("form:has([value=remove]) button");
+  await until("document.body.innerText.includes('is removed')", "the removal");
+  await signOut();
+});
+
 await check("failed passwords end in a 429 whose wait counts down and holds the buttons", async () => {
   await header(undefined);
   for (let i = 0; i < 4; i++) {
