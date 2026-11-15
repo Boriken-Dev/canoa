@@ -546,6 +546,22 @@ fn a_key_names_a_source_on_this_computer_only_under_a_working_root_and_with_the_
             "{repo}: {denied}"
         );
     }
+    // A catalog is fetched with the same refusal, before anything is opened.
+    for repo in ["file:////attacker/share/x", "file://///attacker/share"] {
+        let denied = ask(
+            &s.control,
+            &who,
+            "catalog/fetch",
+            json!({"label": "unc", "repo": repo, "ref": "main", "path": ""}),
+        );
+        assert_eq!(denied["error"]["code"], BAD_PARAMS, "{repo}: {denied}");
+        assert!(
+            denied["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("network")),
+            "{repo}: {denied}"
+        );
+    }
     // A folder that is no repository is no source, though a sibling `<folder>.git` would be found by git beside it.
     git(&home, &["init", "--quiet", "--bare", "work.git"]);
     let denied = check(&s, &who, "sibling", &source(&work, ""));
