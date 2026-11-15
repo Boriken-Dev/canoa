@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwto8s+KxrZ5LiE8G5Im2hccKzorfSAJCfAkEZg1RjQoDMnfWnpOb77B1u42FyCMbsOqbuKeWxhwmB/r3IEemVBQosIb8c8O4DOiRpNKkgy1yDoToClH5l3JmMfqUmYn1kjeA+eHOw8+pGZYcGFe8dGIf5eeFDkJRHjvSpGcK3RZzZxB3yd9zlQDDm6hKbNdMwUrhT7v9LC9+mD0GF4bZsi0PlsTXv939Mjw1FB5dY0ahBMe1noRxXYBwDeJ7kQwwAcUFuuE9tyqbxjM58QWdtw3/tToZqu23Afqt1mUBK+Mn6C0DdInsNPA83fD+zl/LS8kIiUDthtwoSK/1qnNocQIDAQAB",
   "name": "Canoa",
   "version": "0.0.1",
   "description": "Canoa browser debugging build with CDP access.",
