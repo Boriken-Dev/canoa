@@ -13,7 +13,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `portal` (feature `portal`, Unix), `portal_link`, `profile`, `provider`, `serve`, `tool`, `web`.
 
-No `unsafe` code (`#![forbid(unsafe_code)]`). Loading a provider library or source runs its code; see `serve_stdio`.
+`#![deny(unsafe_code)]`: the one `unsafe` module is `usage_splice/members/win32.rs` (Windows' Toolhelp snapshot of the process table, through `windows-sys`). Loading a provider library or source runs its code; see `serve_stdio`.
 
 ## canoa.cfg (`canoa_host::config`)
 
@@ -847,7 +847,7 @@ pub fn ServeOptions::with_portal(self, sockets: PortalSockets) -> ServeOptions
 
 ```rust
 pub fn Home::at(dir: impl Into<PathBuf>) -> Home
-pub fn Home::of_user() -> Result<Home, coqui_agentic_peer::Error>   // COQUI_AGENTIC_PEER_HOME, else the platform's place
+pub fn Home::of_user() -> Result<Home, coqui_agentic_peer::Error>   // COQUI_AGENTIC_PEER_HOME, else Canoa's folder: %LOCALAPPDATA%\Canoa, ~/Library/Application Support/Canoa, $XDG_DATA_HOME/Canoa or ~/.local/share/Canoa
 pub fn Home::dir(&self) -> &Path
 pub fn Home::identity(&self, method: Option<Method>) -> Result<Identity, coqui_agentic_peer::Error>   // as coqui_agentic_peer::home, in this directory
 pub fn Home::store(&self) -> Result<TrustStore, coqui_agentic_peer::Error>
@@ -955,7 +955,7 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
 - `shelf::Shelf` (`<programs>/<program>/{lock, current.json, versions/<version>-<nonce>/}`): `Shelf::default_root()` is
   `%LOCALAPPDATA%\Canoa\programs`, `~/Library/Application Support/Canoa/programs` or `$XDG_DATA_HOME/Canoa/programs`. `ProgramDir::lock`
   takes the program's OS lock, refuses a folder another user owns or others can write (Unix; on Windows it inherits `%LOCALAPPDATA%`'s access
-  list, which is not read: no vetted crate checks an owner or an access list, and this crate holds no `unsafe`, so on Windows the folder is only
+  list, which is not read: no vetted crate checks an owner or an access list, and this crate's only `unsafe` reads the process table, so on Windows the folder is only
   refused when it is a link) and removes the version folders `current.json` does not name. `Locked::stage`, `commit` (one rename of
   `current.json` is the atomic switch; the old copy becomes `previous`; folders other than current and previous are pruned, `keep_versions`
   default 2), `abandon`, `rollback`, `remove`. `commit` refuses a launch path that is not a regular file inside the staged folder.
@@ -1113,7 +1113,7 @@ A client that is a webpage has no file system and names no path. Its `session/ne
 | `CANOA_INSTALLED_DIR` | the folder whose `canoa.cfg` is the installed copy | the executable's folder (the portable launcher sets its own) |
 | `CANOA_LOG` | what to log, a `tracing` filter | `info` |
 | `CANOA_WEB_DIST` | at build time, with feature `web`: the absolute directory of the site built in | none; the build stops without it |
-| `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `coqui-agentic-peer` under `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME` or `~/.config` |
+| `COQUI_AGENTIC_PEER_HOME` | the directory of the identities (`identity` for WebCrypto, `identity-noise` for Noise) and trust store (`peers/`) | `Canoa` under `%LOCALAPPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME` or `~/.local/share` (the same folder as `programs/`); no folder named after the peer library is made |
 | `XDG_DOCUMENTS_DIR` | the Documents folder a webpage session's scratch folder is made in (absolute, or from `$HOME`), on any system | the system's: the Documents known folder on Windows, `user-dirs.dirs` then `~/Documents` on Linux, `~/Documents` on macOS |
 | `NO_COLOR` | no colour in the log | colour on a terminal |
 

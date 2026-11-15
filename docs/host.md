@@ -401,8 +401,10 @@ a program to pair with.
 
 ## Pairing
 
-The host proves itself and its clients by the method of this user's `coqui-agentic-peer` identity, Noise or WebCrypto,
-with the trust store `coqui-acp-bridge serve --paired` uses. A home keeps each method's identity in a file of its own:
+The host proves itself and its clients by the method of this host's identity, Noise or WebCrypto, kept with its trust store
+in Canoa's folder (`%LOCALAPPDATA%\Canoa` on Windows, `~/Library/Application Support/Canoa` on macOS, `$XDG_DATA_HOME/Canoa`
+or `~/.local/share/Canoa` elsewhere; `COQUI_AGENTIC_PEER_HOME` names another). `coqui-acp-bridge serve --paired` reads the
+same layout when it is given that folder. A home keeps each method's identity in a file of its own:
 a home paired before Noise keeps its WebCrypto identity and its paired keys, and `--method` names one when a home has
 both. A key is of one method, and a client of the other is refused, which the host's log says. The home records the
 method named last, or its first identity's, so the app's `serve` and `pair`, which name none, use it. **Canoa's app proves
