@@ -16,6 +16,7 @@ pub mod home;
 mod inproc;
 mod kind;
 mod local;
+pub mod native;
 pub mod options;
 pub mod peers;
 pub mod pipe;
@@ -42,7 +43,7 @@ pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
     DelegateConfig, ENTRIES, Entry, EntryKind, HarnessOptions, INSTALLED_DIR_VARIABLE, Layers,
-    Listen, Origin, Settings, StoreConfig, TransportListen, UsageSource, WebConfig,
+    Listen, NativeConfig, Origin, Settings, StoreConfig, TransportListen, UsageSource, WebConfig,
     cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries

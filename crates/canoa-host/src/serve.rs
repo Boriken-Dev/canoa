@@ -15,6 +15,8 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use crate::portal_link::PortalSockets;
+mod door;
+use door::Door;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
@@ -433,8 +435,9 @@ enum Run {
     /// The control channel, for the keys `[host.control]` grants.
     Control {
         grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
-        /// A host run for a portal: every paired key is the user's own browser and gets every page grant.
-        everyone: bool,
+        /// Every paired key gets these grants whatever `grants` says: a host run for a portal gives the user's own browser
+        /// every page grant, and the native door gives a browser key the grants of `[host.native] control`.
+        everyone: Option<BTreeSet<control::Grant>>,
     },
 }
 
@@ -903,6 +906,8 @@ pub struct Serving {
     /// The entries reached over [`Local`] only.
     local_only: Vec<Arc<Served>>,
     listening: Vec<Listening>,
+    /// The pipe a browser's native messaging host relays to, unless `[host.native]` turns it off.
+    door: Option<Door>,
 }
 
 /// What an entry listens on.
@@ -1457,7 +1462,9 @@ impl Serving {
                     delegable: false,
                     run: Run::Control {
                         grants: settings.grants.clone(),
-                        everyone: portal_of(options).is_some(),
+                        everyone: portal_of(options)
+                            .is_some()
+                            .then(|| control::Grant::all().into_iter().collect()),
                     },
                     running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
                 }),
@@ -1590,7 +1597,10 @@ impl Serving {
             listeners,
             local_only,
             listening,
+            door: None,
         };
+        let mut serving = serving;
+        serving.door = serving.open_door(&config, options);
         serving.attach_delegation(&config.remote_agents, dialer);
 
         if let Some(sockets) = &options.portal {
@@ -1605,6 +1615,61 @@ impl Serving {
             )?;
         }
         Ok(serving)
+    }
+
+    /// Binds the native door in the home, when the configuration and the options leave one. A door that cannot be bound is
+    /// logged and left out: the host serves its entries without it.
+    fn open_door(&self, config: &Config, options: &ServeOptions) -> Option<Door> {
+        let home = options.state_dir.as_ref()?;
+        if !config.native.enabled || options.portal.is_some() {
+            return None;
+        }
+        let name = match crate::native::door_name(home) {
+            Ok(name) => name,
+            Err(error) => {
+                tracing::warn!("the native door has no name, so a browser cannot reach this host: {error}");
+                return None;
+            }
+        };
+        let listener = match pipe::Listener::bind(&name) {
+            Ok(listener) => listener,
+            Err(error) => {
+                tracing::warn!("the native door could not be opened, so a browser cannot reach this host: {error}");
+                return None;
+            }
+        };
+        let entries: Vec<serde_json::Value> = self
+            .listening
+            .iter()
+            .filter(|listening| listening.kind != "control")
+            .map(|listening| {
+                serde_json::json!({
+                    "name": listening.name,
+                    "label": listening.title.clone().unwrap_or_else(|| listening.name.clone()),
+                    "kind": listening.kind,
+                    "local": listening.local,
+                })
+            })
+            .collect();
+        let hello = serde_json::json!({
+            "name": "Canoa",
+            "version": env!("CARGO_PKG_VERSION"),
+            "peer": self.peer().to_string(),
+            "method": self.method().name(),
+            "entries": entries,
+            "control": true,
+        });
+        let control = Arc::new(Served {
+            name: control::NAME.to_owned(),
+            restricted: false,
+            delegable: false,
+            run: Run::Control {
+                grants: IndexMap::new(),
+                everyone: Some(config.native.control.clone()),
+            },
+            running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
+        });
+        Some(Door::new(listener, hello, self.local().served, control))
     }
 
     /// Gives the delegation the agents this host serves and the way to open one for a task.
@@ -1700,6 +1765,12 @@ impl Serving {
     pub fn run(self) {
         let stopper = self.stopper();
         let nothing = self.listeners.is_empty();
+        let door = self.door.map(|door| {
+            let shared = Arc::clone(&self.shared);
+            thread::Builder::new()
+                .name("canoa-door".to_owned())
+                .spawn(move || door.run(&shared))
+        });
         let threads: Vec<_> = self
             .listeners
             .into_iter()
@@ -1719,9 +1790,13 @@ impl Serving {
         for thread in threads.into_iter().flatten() {
             let _ = thread.join();
         }
+
         // With no entry there is no listener to wait on, and it still runs until stopped.
         while nothing && !self.shared.stopped.load(Ordering::SeqCst) {
             thread::sleep(STOP_POLL);
+        }
+        if let Some(Ok(door)) = door {
+            let _ = door.join();
         }
         // The stop that ended the listeners may still be ending agents on its own thread.
         stopper.stop_agents();
@@ -2030,8 +2105,8 @@ fn give_agent<C: Channel>(
             line,
         } => return give_provider(shared, served, channel, peer, (program, args), line),
         Run::Control { grants, everyone } => {
-            let grants = if *everyone {
-                control::Grant::all().into_iter().collect()
+            let grants = if let Some(everyone) = everyone {
+                everyone.clone()
             } else {
                 grants
                     .iter()

@@ -258,11 +258,81 @@ enum Command {
         /// What the harness reports: `start`, `pre-compact` or `batch`.
         kind: String,
     },
+    /// Let a browser's extension reach the Canoa on this computer: register, remove or show the native messaging host the
+    /// browser starts, for this user only.
+    Native {
+        #[command(subcommand)]
+        action: NativeAction,
+    },
+    /// What a browser starts as its native messaging host, with the extension's origin as its first argument: relays the
+    /// extension's link to the host that holds the home, over native messaging on standard input and output. The program
+    /// started with that argument alone runs this.
+    #[command(hide = true, name = "native-host")]
+    NativeHost {
+        /// The extension's origin, as the browser passes it.
+        origin: String,
+        /// What else the browser passes (`--parent-window=N` on Windows).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        rest: Vec<String>,
+    },
     /// Start the processes this host asks for, over a socket on standard input, until it closes: the host's own process
     /// starter, for a host that runs inside an application whose process handling collects every child that ends.
     #[cfg(unix)]
     #[command(hide = true)]
     Spawner,
+}
+
+/// What `canoa native` does.
+#[derive(Debug, Subcommand)]
+enum NativeAction {
+    /// Register this program as the native messaging host `dev.boriken.canoa` for Chrome, Edge and Chromium, for this user.
+    /// Prints what it wrote.
+    Install(NativeInstall),
+    /// Remove what `install` wrote.
+    Uninstall(NativeScope),
+    /// Show where it is registered, what Start would run, and whether Canoa runs. Prints one JSON object.
+    Status(NativeScope),
+}
+
+/// A browser `canoa native install` registers for.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum NativeBrowser {
+    Chrome,
+    Edge,
+    Chromium,
+    /// Chrome for Testing reads Chrome's place.
+    ChromeForTesting,
+}
+
+/// Which registration a `native` command is about.
+#[derive(Debug, Args)]
+struct NativeScope {
+    /// The native host's name, `dev.boriken.canoa` unless given. Another name is one the extension does not look for: for
+    /// trying a registration without touching the real one.
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+    /// A browser's --user-data-dir, where Chromium on Linux and macOS reads native hosts when it is started with one.
+    #[arg(long, value_name = "DIR")]
+    profile: Vec<PathBuf>,
+}
+
+/// `canoa native install`.
+#[derive(Debug, Args)]
+struct NativeInstall {
+    #[command(flatten)]
+    scope: NativeScope,
+    /// An extension that may start it, besides the ones this version knows.
+    #[arg(long, value_name = "ID")]
+    extension_id: Vec<String>,
+    /// Only these browsers; every one by default.
+    #[arg(long, value_enum)]
+    browser: Vec<NativeBrowser>,
+    /// What the extension's Start button runs, in place of this program's `serve`.
+    #[arg(long, value_name = "PROGRAM")]
+    launch: Option<PathBuf>,
+    /// Its arguments, after `--`.
+    #[arg(last = true)]
+    launch_args: Vec<String>,
 }
 
 /// What `canoa options` takes.
@@ -960,6 +1030,83 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     Ok(())
 }
 
+/// `canoa native`.
+fn native(action: NativeAction, front: &dyn Front) -> Result<(), Failed> {
+    let home = home_of(front)?;
+    match action {
+        NativeAction::Install(args) => {
+            let program = std::env::current_exe().map_err(Failed::run)?;
+            let launch = match args.launch {
+                Some(program) => Some(crate::native::Launch {
+                    program,
+                    args: args.launch_args,
+                }),
+                None => front.program().ok().map(|program| crate::native::Launch {
+                    program: program.path,
+                    args: program
+                        .args
+                        .iter()
+                        .map(|arg| arg.to_string_lossy().into_owned())
+                        .chain(["serve".to_owned()])
+                        .collect(),
+                }),
+            };
+            let browsers: Vec<_> = args
+                .browser
+                .iter()
+                .map(|browser| match browser {
+                    NativeBrowser::Chrome | NativeBrowser::ChromeForTesting => {
+                        coqui_agentic_peer::companion::Browser::Chrome
+                    }
+                    NativeBrowser::Edge => coqui_agentic_peer::companion::Browser::Edge,
+                    NativeBrowser::Chromium => coqui_agentic_peer::companion::Browser::Chromium,
+                })
+                .collect();
+            let options = crate::native::Install {
+                name: args.scope.name,
+                extensions: args.extension_id,
+                browsers,
+                launch,
+                profiles: args.scope.profile,
+            };
+            for written in crate::native::install(&home, &program, &options).map_err(Failed::run)? {
+                print(front, &written)?;
+            }
+            Ok(())
+        }
+        NativeAction::Uninstall(scope) => {
+            crate::native::uninstall(&home, scope.name.as_deref(), &scope.profile).map_err(Failed::run)
+        }
+        NativeAction::Status(scope) => {
+            let status = crate::native::status(&home, scope.name.as_deref(), &scope.profile)
+                .map_err(Failed::run)?;
+            print(
+                front,
+                &serde_json::json!({
+                    "name": scope.name.as_deref().unwrap_or(crate::native::HOST_NAME),
+                    "registered": status.registered,
+                    "launch": status.launch,
+                    "running": status.running,
+                })
+                .to_string(),
+            )
+        }
+    }
+}
+
+/// What a browser starts: relays native messages on this process's standard streams to the host of the home.
+fn native_host(origin: &str, front: &dyn Front) -> Result<(), Failed> {
+    let home = home_of(front)?;
+    crate::native::relay(
+        &home,
+        origin,
+        &mut std::io::stdin().lock(),
+        std::io::stdout(),
+        || std::process::exit(0),
+    )
+    .map_err(Failed::run)
+}
+
 /// Connections pairing at once; past it a new one is dropped.
 const MAX_PAIRING_RUNS: usize = 16;
 /// How long one connection may take to pair.
@@ -1367,6 +1514,8 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             .map_err(Failed::run)
         }
         Command::Accounts { command } => accounts(command, front),
+        Command::Native { action } => native(action, front),
+        Command::NativeHost { origin, .. } => native_host(&origin, front),
         Command::McpBridge => mcp_bridge(),
         Command::HookForward {
             channel,
@@ -1406,6 +1555,7 @@ impl Cli {
                 | Command::Agent { .. }
                 | Command::Launch { .. }
                 | Command::McpBridge
+                | Command::NativeHost { .. }
                 | Command::HookForward { .. }
         )
     }

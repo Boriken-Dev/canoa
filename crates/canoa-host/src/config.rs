@@ -61,6 +61,8 @@ pub struct Config {
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
     /// such table, which leaves the channel to this process.
     pub control: Option<ControlConfig>,
+    /// `[host.native]`: the door a browser extension's native messaging host reaches this host by.
+    pub native: NativeConfig,
     /// `[host.history]`: whether the host records the sessions it serves, and how much it keeps.
     pub history: HistoryConfig,
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
@@ -180,6 +182,46 @@ impl LocalProfiles {
             chosen_skills: self.chosen_skills.clone(),
             protected: self.protected.clone(),
         })
+    }
+}
+
+/// `[host.native]`: the door on this user's own machine that the browser extension's native messaging host relays to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativeConfig {
+    /// Whether the door is open. On unless the person turns it off.
+    pub enabled: bool,
+    /// What a browser key paired through the door may do on `@control`.
+    pub control: BTreeSet<crate::control::Grant>,
+}
+
+impl NativeConfig {
+    /// The grants a browser key has on the door's control channel when the file says nothing: its own session records, its own
+    /// worktrees, folders, settings of the app's own tables, and what the program stores find. It never installs, restarts the
+    /// host, uploads, or changes what an agent may do.
+    #[must_use]
+    pub fn default_control() -> BTreeSet<crate::control::Grant> {
+        use crate::control::Grant;
+        [
+            Grant::LedgerRead,
+            Grant::LedgerWrite,
+            Grant::Worktree,
+            Grant::StoreRead,
+            Grant::Folders,
+            Grant::ConfigRead,
+            Grant::ConfigWrite,
+        ]
+        .into_iter()
+        .collect()
+    }
+}
+
+impl Default for NativeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            control: Self::default_control(),
+        }
     }
 }
 
@@ -995,9 +1037,18 @@ struct RawHost {
     account_store: Option<String>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
+    native: Option<RawNative>,
     history: Option<RawHistory>,
     store: Option<RawStore>,
     delegate: Option<RawDelegate>,
+}
+
+/// `[host.native]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawNative {
+    enabled: Option<bool>,
+    control: Option<Vec<String>>,
 }
 
 /// `[host.history]`.
@@ -1608,6 +1659,7 @@ impl Config {
             ));
         }
         let control = host.control.map(control_of).transpose()?;
+        let native = host.native.map(native_of).transpose()?.unwrap_or_default();
         let history = host
             .history
             .map(history_of)
@@ -1639,6 +1691,7 @@ impl Config {
             remote_agents,
             local_profiles,
             control,
+            native,
             history,
             store,
             delegate,
@@ -1677,6 +1730,46 @@ fn history_of(raw: RawHistory) -> Result<HistoryConfig, ConfigError> {
         ));
     }
     Ok(config)
+}
+
+/// `[host.native]`. Errors name a key, never a value.
+fn native_of(raw: RawNative) -> Result<NativeConfig, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("host.native: {what}"),
+    };
+    let default = NativeConfig::default();
+    let control = match raw.control {
+        None => default.control,
+        Some(names) => {
+            let mut set = BTreeSet::new();
+            for name in names {
+                set.insert(
+                    crate::control::Grant::named(&name)
+                        .ok_or_else(|| refused("control names a grant that does not exist"))?,
+                );
+            }
+            // Changing what a program may be given or run reaches as far as the agent's own access.
+            if set.iter().any(|grant| {
+                matches!(
+                    grant,
+                    crate::control::Grant::ConfigWriteSessions
+                        | crate::control::Grant::OverlayWrite
+                        | crate::control::Grant::HostRestart
+                        | crate::control::Grant::Upload
+                )
+            }) {
+                return Err(refused(
+                    "control cannot hold config.write.sessions, overlay.write, host.restart or upload: a browser key does not get them through the door",
+                ));
+            }
+            set
+        }
+    };
+    Ok(NativeConfig {
+        enabled: raw.enabled.unwrap_or(default.enabled),
+        control,
+    })
 }
 
 /// `[host.control]`. Errors name a key, never a value.

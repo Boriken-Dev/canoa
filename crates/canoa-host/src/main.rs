@@ -78,7 +78,15 @@ impl Front for Standard {
 }
 
 fn main() -> ExitCode {
-    let parsed = Cli::parse();
+    // A browser starts a native messaging host with the extension's origin as its first argument and no way to name a command.
+    let mut arguments: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if arguments
+        .get(1)
+        .is_some_and(|first| first.to_string_lossy().starts_with("chrome-extension://"))
+    {
+        arguments.insert(1, "native-host".into());
+    }
+    let parsed = Cli::parse_from(arguments);
     let ansi = std::io::stderr().is_terminal()
         && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
     let filter = tracing_subscriber::EnvFilter::try_from_env("CANOA_LOG")
