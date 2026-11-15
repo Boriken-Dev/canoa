@@ -93,9 +93,9 @@ final class SessionMentions implements ComposerMentions {
   String? pick(MentionCandidate candidate) {
     final folder = session.cwd;
     final relative = candidate.key as String? ?? candidate.label;
-    if (folder == null || folder.isEmpty) return 'This session has no folder.';
+    if (folder == null || folder.isEmpty) return 'This session has no workspace.';
     final found = resolve(folder, relative);
-    if (found == null) return '$relative is not in this session\'s folder, so it is not attached.';
+    if (found == null) return '$relative is not in this session\'s workspace, so it is not attached.';
     return store.addMention(session, relative, found.path, found.size, folder: found.folder);
   }
 }

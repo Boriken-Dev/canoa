@@ -88,7 +88,7 @@ class PlaceToggle extends StatelessWidget {
           ButtonSegment(
             value: true,
             enabled: inRepository,
-            tooltip: inRepository ? 'A new git worktree of this folder, on a branch of its own' : 'The folder is not in a git repository',
+            tooltip: inRepository ? 'A new git worktree of this workspace, on a branch of its own' : 'The workspace is not in a git repository',
             label: const Text('Worktree', style: TextStyle(fontSize: 12.5)),
           ),
         ],

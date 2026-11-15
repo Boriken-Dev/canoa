@@ -26,7 +26,7 @@ String? workspaceProblem(String template) {
     }
   }
   if (template.replaceAll(_variable, '').contains(r'${')) return r'a ${ is never closed';
-  if (!template.contains(r'${session}')) return r'it has no ${session}, so two sessions could share a folder';
+  if (!template.contains(r'${session}')) return r'it has no ${session}, so two sessions could share a workspace';
   return null;
 }
 

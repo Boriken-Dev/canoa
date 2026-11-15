@@ -202,17 +202,17 @@ String? _resolved(RealPath real, String cleaned) {
 String? folderProblem(String folder, {PermissionGuards guards = const PermissionGuards(), RealPath? real}) {
   if (real == null) return 'Changes to files are only remembered for sessions on this computer, where links can be followed.';
   final d = cleanPath(folder);
-  if (d == null) return 'The folder has to be an absolute path.';
+  if (d == null) return 'The workspace has to be an absolute path.';
   final rd = _resolved(real, d);
-  if (rd == null) return 'A link in the folder could not be followed.';
+  if (rd == null) return 'A link in the workspace could not be followed.';
   for (final guard in [guards.home, guards.config]) {
     final g = guard == null ? null : cleanPath(guard);
     if (g == null) continue;
     final rg = _resolved(real, g);
     final isHome = guard == guards.home;
     for (final candidate in [g, ?rg]) {
-      if (_under(d, candidate) || _under(rd, candidate)) return isHome ? 'The folder holds your home folder.' : 'The folder holds Canoa\'s own settings.';
-      if (!isHome && (_under(candidate, d) || _under(candidate, rd))) return 'The folder is inside Canoa\'s own settings.';
+      if (_under(d, candidate) || _under(rd, candidate)) return isHome ? 'The workspace holds your home folder.' : 'The workspace holds Canoa\'s own settings.';
+      if (!isHome && (_under(candidate, d) || _under(candidate, rd))) return 'The workspace is inside Canoa\'s own settings.';
     }
   }
   return null;
@@ -562,7 +562,7 @@ class PermissionRules extends ChangeNotifier {
           _under(theirs.folder, mine.folder) ||
           (mine.root != null && mine.root == theirs.root);
       if (related) {
-        return 'A rule of another kind (commands, tools or file changes) already stands in this folder, one next to it or in the same repository, for some source: revoke it before allowing this.';
+        return 'A rule of another kind (commands, tools or file changes) already stands in this workspace, one next to it or in the same repository, for some source: revoke it before allowing this.';
       }
     }
     return null;

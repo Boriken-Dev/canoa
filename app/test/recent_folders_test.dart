@@ -39,6 +39,9 @@ void main() {
     await pumpApp(tester, store);
     await newSession(tester);
     expect(_shown(tester), folders.reversed.take(NewSessionView.recentShown).toList());
+    expect(find.text('RECENT WORKSPACES'), findsOneWidget);
+    expect(find.text('Open a workspace'), findsOneWidget);
+    expect(find.byTooltip('The workspace it works in'), findsOneWidget);
   });
 
   testWidgets('a click puts the new session in that folder and keeps its source', (tester) async {

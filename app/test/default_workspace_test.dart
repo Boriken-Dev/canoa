@@ -61,7 +61,7 @@ void main() {
     final folder = _scratch(documents, draft);
     expect(find.byKey(const Key('new-session-scratch-path')), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const Key('new-session-scratch-path'))).textSpan!.toPlainText(), contains(folder));
-    expect(find.text('Choose a folder'), findsNothing);
+    expect(find.text('Choose a workspace'), findsNothing);
     expect(Directory(folder).existsSync(), isFalse, reason: 'showing it makes nothing');
     expect(Directory('${documents.path}${_sep}Canoa').existsSync(), isFalse);
 

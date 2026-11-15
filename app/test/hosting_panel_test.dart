@@ -121,7 +121,7 @@ void main() {
     await tester.enterText(fields.at(2), 'relative/dir');
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
-    expect(find.text('The folder must be a whole path.'), findsOneWidget);
+    expect(find.text('The workspace must be a whole path.'), findsOneWidget);
     await tester.enterText(fields.at(2), '/home/me/src');
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
@@ -148,7 +148,7 @@ void main() {
       await tester.enterText(fields.at(2), refused);
       await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
-      expect(find.text('The folder must be a whole path.'), findsOneWidget, reason: refused);
+      expect(find.text('The workspace must be a whole path.'), findsOneWidget, reason: refused);
       expect(host.saved, isEmpty);
     }
     await tester.enterText(fields.at(2), r'\\fileserver\projects\app');

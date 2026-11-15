@@ -74,7 +74,7 @@ class _HostFolderDialogState extends State<HostFolderDialog> {
     final path = listing?.path;
     return AlertDialog(
       key: const Key('host-folder-dialog'),
-      title: const Text('Choose a folder'),
+      title: const Text('Choose a workspace'),
       content: SizedBox(
         width: 420,
         height: 380,
@@ -128,7 +128,7 @@ class _HostFolderDialogState extends State<HostFolderDialog> {
         FilledButton(
           key: const Key('host-folder-choose'),
           onPressed: _loading || path == null ? null : () => Navigator.pop(context, path),
-          child: const Text('Choose this folder'),
+          child: const Text('Choose this workspace'),
         ),
       ],
     );

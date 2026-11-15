@@ -46,7 +46,7 @@ void main() {
       await tester.pump();
       await _openInspector(tester);
       expect(_factText(tester, 'Machine'), 'Machine|This computer');
-      expect(_factText(tester, 'Folder'), 'Folder|/work/proj');
+      expect(_factText(tester, 'Workspace'), 'Workspace|/work/proj');
       expect(_factText(tester, 'Mode'), 'Mode|Accept edits');
       expect(_fact('Worktree'), findsNothing);
       expect(_fact('Branch'), findsNothing, reason: 'no branch is known until git has been read');
@@ -66,7 +66,7 @@ void main() {
       await showTask(tester, _desktop, cwd: '/work/proj.worktrees/fix-a1b2c3', worktree: worktree);
       await _openInspector(tester);
       expect(_factText(tester, 'Machine'), 'Machine|This computer');
-      expect(_factText(tester, 'Folder'), 'Folder|/work/proj');
+      expect(_factText(tester, 'Workspace'), 'Workspace|/work/proj');
       expect(_factText(tester, 'Worktree'), 'Worktree|/work/proj.worktrees/fix-a1b2c3');
       expect(_factText(tester, 'Branch'), 'Branch|canoa/fix-a1b2c3');
     });
@@ -76,7 +76,7 @@ void main() {
       await _openInspector(tester);
       expect(_factText(tester, 'Host'), 'Host|build-box.example');
       expect(_fact('Machine'), findsNothing);
-      expect(_factText(tester, 'Folder'), 'Folder|/work/proj');
+      expect(_factText(tester, 'Workspace'), 'Workspace|/work/proj');
     });
 
     testWidgets('the header names the agent and nothing the inspector shows', (tester) async {

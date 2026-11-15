@@ -169,7 +169,7 @@ class SessionInspector extends StatelessWidget {
             Text('Environment', style: heading),
             const SizedBox(height: 6),
             _Fact(machine.label, machine.value),
-            if (folder != null && folder.isNotEmpty) _Fact('Folder', folder),
+            if (folder != null && folder.isNotEmpty) _Fact('Workspace', folder),
             if (branch != null) _Fact('Branch', branch),
             if (worktree != null) _Fact('Worktree', worktree.path),
             if (mode != null) _Fact('Mode', mode),

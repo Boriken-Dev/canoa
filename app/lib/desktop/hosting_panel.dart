@@ -482,7 +482,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
         : parsed == null
         ? 'That is not a command: check its quotes.'
         : folder.isNotEmpty && !isWholeFolderPath(folder)
-        ? 'The folder must be a whole path.'
+        ? 'The workspace must be a whole path.'
         : null;
     if (problem != null) return setState(() => error = problem);
     Navigator.pop(context, _NewAgent(name.text.trim(), parsed!, folder));
@@ -513,7 +513,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
           ),
           TextField(
             controller: root,
-            decoration: const InputDecoration(labelText: 'Only in this folder (optional)', hintText: 'a whole path'),
+            decoration: const InputDecoration(labelText: 'Only in this workspace (optional)', hintText: 'a whole path'),
           ),
           if (error != null)
             Padding(

@@ -106,7 +106,7 @@ class _RememberDialogState extends State<RememberDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
-                  'A command runs whatever the files in this folder make it do: a test or build command runs the scripts and tests '
+                  'A command runs whatever the files in this workspace make it do: a test or build command runs the scripts and tests '
                   'there, as they are when it runs.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
@@ -114,8 +114,8 @@ class _RememberDialogState extends State<RememberDialog> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                'Commands, tools and file changes can each write what another runs, so this folder keeps one kind. The rule applies '
-                'to every source and peer here, and to this folder, the folders around it and the rest of its repository.',
+                'Commands, tools and file changes can each write what another runs, so this workspace keeps one kind. The rule applies '
+                'to every source and peer here, and to this workspace, the folders around it and the rest of its repository.',
                 key: const Key('rule-alone'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
@@ -130,7 +130,7 @@ class _RememberDialogState extends State<RememberDialog> {
             const SizedBox(height: 8),
             Text(
               'Canoa then answers a matching request with allow once, itself, without asking you, until you revoke the rule in '
-              'Settings, Permissions. It never answers an "always", a request from another source or folder, or one the agent '
+              'Settings, Permissions. It never answers an "always", a request from another source or workspace, or one the agent '
               'offers no allow once for.',
               style: Theme.of(context).textTheme.bodySmall,
             ),

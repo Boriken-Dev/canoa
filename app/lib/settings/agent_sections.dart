@@ -417,7 +417,7 @@ class _PermissionsSectionState extends State<PermissionsSection> {
           SettingsRow(
             title: all.isEmpty ? 'Nothing is allowed without asking' : '${all.length} remembered',
             description: all.isEmpty
-                ? '"Always allow here" on a permission card remembers a rule for a source and a folder; it is listed here'
+                ? '"Always allow here" on a permission card remembers a rule for a source and a workspace; it is listed here'
                 : 'Each is answered with allow once',
           ),
           if (rules.problem case final problem?) SettingsRow(title: problem),

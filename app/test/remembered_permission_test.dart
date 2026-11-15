@@ -788,7 +788,7 @@ void main() {
       await _settle(tester);
       await tester.tap(_offer);
       await tester.pumpAndSettle();
-      expect(find.textContaining('runs whatever the files in this folder make it do'), findsOneWidget);
+      expect(find.textContaining('runs whatever the files in this workspace make it do'), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(s.session.pendingPermissions, hasLength(1), reason: 'cancelling keeps nothing and answers nothing');

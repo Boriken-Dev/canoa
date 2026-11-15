@@ -141,13 +141,13 @@ class _GeneralSectionState extends State<GeneralSection> {
             ),
           if (widget.workspacePreview != null)
             SettingsRow(
-              title: 'Folder of a session with none chosen',
+              title: 'Scratch workspace when none is chosen',
               configKey: const ['sessions', 'workspace'],
               onLayerReset: () {
                 widget.controller.change((c) => c.resetKey(const ['sessions', 'workspace']));
                 _setWorkspace(widget.controller.config.sessions.workspace, text: true);
               },
-              description: preview == null ? 'A template; the folder it makes is shown under the field' : 'Now: $preview',
+              description: preview == null ? 'A template; the workspace it makes is shown under the field' : 'Now: $preview',
               machine: true,
               below: TextField(
                 key: const Key('settings-workspace'),

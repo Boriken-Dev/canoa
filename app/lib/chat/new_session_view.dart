@@ -42,7 +42,7 @@ class NewSessionView extends StatelessWidget {
     final notices = session.messages.where((message) => message.role == MessageRole.notice).toList();
     final folder = PopupMenuButton<String>(
       key: const Key('new-session-folder'),
-      tooltip: 'The folder it works in',
+      tooltip: 'The workspace it works in',
       enabled: session.status == SessionStatus.draft,
       onSelected: (chosen) => chosen.isEmpty
           ? unawaited(_open(context))
@@ -62,7 +62,7 @@ class NewSessionView extends StatelessWidget {
           key: const Key('new-session-browse'),
           value: '',
           enabled: kit.pickFolder != null,
-          child: const Text('Open folder…'),
+          child: const Text('Open workspace…'),
         ),
       ],
       child: Container(
@@ -85,7 +85,7 @@ class NewSessionView extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   )
-                : Text(cwd ?? 'Choose a folder', overflow: TextOverflow.ellipsis, maxLines: 1),
+                : Text(cwd ?? 'Choose a workspace', overflow: TextOverflow.ellipsis, maxLines: 1),
           ),
           Icon(Icons.expand_more, size: 18, color: look.muted),
         ]),
@@ -166,7 +166,7 @@ class _RecentFolders extends StatelessWidget {
         if (folders.isNotEmpty) ...[
           Padding(
             padding: const EdgeInsets.only(left: 12, bottom: 4),
-            child: Text('RECENT FOLDERS', style: theme.textTheme.labelSmall?.copyWith(color: look.muted, letterSpacing: 1.2)),
+            child: Text('RECENT WORKSPACES', style: theme.textTheme.labelSmall?.copyWith(color: look.muted, letterSpacing: 1.2)),
           ),
           for (final folder in folders)
             Builder(builder: (context) {
@@ -197,7 +197,7 @@ class _RecentFolders extends StatelessWidget {
               key: const Key('quick-choose-folder'),
               onPressed: onBrowse,
               icon: const Icon(Icons.folder_open_outlined, size: 18),
-              label: const Text('Open a folder'),
+              label: const Text('Open a workspace'),
             ),
           if (onSources != null)
             TextButton.icon(
