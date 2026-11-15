@@ -76,7 +76,7 @@ final class LibraryHostTool implements HostTool {
 
   final CanoaNative _native;
 
-  /// The home to use; this user's own when null.
+  /// The home to use; Canoa's own folder in this user's data folder when null.
   final String? home;
 
   /// What runs the host's own `provider`, `tool` and `launch`; this application, by its own flag, when null.

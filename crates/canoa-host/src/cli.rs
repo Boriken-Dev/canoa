@@ -103,7 +103,7 @@ const AFTER_HELP: &str = "\
 Environment:
   CANOA_CONFIG             canoa.cfg to read, below --config and above the platform's default
   CANOA_LOG                what to log on standard error, as a tracing filter (default: info)
-  COQUI_AGENTIC_PEER_HOME  the directory of this host's identity and trust store, shared with coqui-acp-bridge
+  COQUI_AGENTIC_PEER_HOME  the directory of this host's identity and trust store (default: the Canoa folder in the user's data folder)
   NO_COLOR                 no colour in the log
 
 Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong, 3 another host holds this home.";

@@ -272,3 +272,35 @@ fn a_fixed_address_is_free_once_stop_returns_from_run() {
         run.join().expect("run returned");
     }
 }
+
+/// `canoa id` with `base` as every place the system could name for a user's data, and no home variable.
+fn id_with_base(base: &std::path::Path) -> Output {
+    Command::new(host_binary())
+        .args(["id", "--method", support::method().name()])
+        .env_remove("COQUI_AGENTIC_PEER_HOME")
+        .env("LOCALAPPDATA", base)
+        .env("APPDATA", base)
+        .env("USERPROFILE", base)
+        .env("HOME", base)
+        .env("XDG_DATA_HOME", base)
+        .env("XDG_CONFIG_HOME", base)
+        .stdin(Stdio::null())
+        .output()
+        .expect("canoa runs")
+}
+
+#[test]
+fn a_host_with_no_home_named_keeps_its_identity_in_canoas_folder_and_makes_no_other() {
+    let scratch = Scratch::new();
+    let out = id_with_base(&scratch.0);
+    assert!(out.status.success(), "{out:?}");
+    let home = scratch.0.join("Canoa");
+    assert!(home.join("method").is_file(), "{home:?}");
+    for entry in std::fs::read_dir(&scratch.0).expect("listed") {
+        let name = entry.expect("an entry").file_name();
+        assert_eq!(name, "Canoa", "something else was made: {name:?}");
+    }
+    // The same folder serves the next run: one identity, not one a run.
+    let again = id_with_base(&scratch.0);
+    assert_eq!(out.stdout, again.stdout, "{again:?}");
+}

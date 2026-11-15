@@ -203,25 +203,7 @@ impl Shelf {
     /// else `$XDG_DATA_HOME/Canoa/programs` or `~/.local/share/Canoa/programs`. `None` when no home is known.
     #[must_use]
     pub fn default_root() -> Option<PathBuf> {
-        let env = |name: &str| {
-            std::env::var_os(name)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
-        if cfg!(windows) {
-            return env("LOCALAPPDATA").map(|d| d.join("Canoa").join("programs"));
-        }
-        if cfg!(target_os = "macos") {
-            return env("HOME").map(|d| {
-                d.join("Library")
-                    .join("Application Support")
-                    .join("Canoa")
-                    .join("programs")
-            });
-        }
-        env("XDG_DATA_HOME")
-            .or_else(|| env("HOME").map(|d| d.join(".local").join("share")))
-            .map(|d| d.join("Canoa").join("programs"))
+        crate::home::data_dir().map(|dir| dir.join("programs"))
     }
 
     /// A shelf at `root`, which has to be the default folder or below it: no check yet reads who may write another place, so the
