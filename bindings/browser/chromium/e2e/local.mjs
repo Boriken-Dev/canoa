@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as listen } from "node:net";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -79,12 +80,31 @@ writeFileSync(path.join(unpacked, "ui", "own.html"), '<!doctype html><title>own<
 
 // The folders the host makes for sessions of the extension's own pages go in the run's own Documents.
 const env = { ...process.env, COQUI_AGENTIC_PEER_HOME: home, XDG_DOCUMENTS_DIR: path.join(work, "documents") };
+
+// Two descriptor folders, each naming an agent that is really listening on loopback: the host reads the first, the native host the
+// browser starts (and anything it starts) reads the second, so a result says which of them answered.
+const PEER = `sha256:${"aa".repeat(32)}`;
+const advertised = [];
+async function advertise(label) {
+  const dir = path.join(work, `descriptors-${label}`);
+  mkdirSync(dir);
+  const socket = listen();
+  await new Promise((resolve) => socket.listen(0, "127.0.0.1", resolve));
+  const url = `ws://127.0.0.1:${socket.address().port}/acp`;
+  writeFileSync(path.join(dir, "agent.json"), JSON.stringify({ txtvers: 1, proto: "acp", label, url, peer: PEER, method: "noise" }));
+  advertised.push(socket);
+  return dir;
+}
+const viaHost = await advertise("Found by the host");
+const viaRelay = await advertise("Found by the relay");
+const hostEnv = { ...env, COQUI_ACP_DESCRIPTORS: viaHost };
+const browserEnv = { ...env, COQUI_ACP_DESCRIPTORS: viaRelay };
 const run = (args, options = {}) => execFileSync(canoa, args, { encoding: "utf8", env, ...options });
 
 let hostProcess;
 /** Starts `canoa serve` on the run's home and answers once it says it is ready. */
 async function startHost() {
-  const child = spawn(canoa, ["serve", "--config", config, "--local-sources", "--method", "noise"], { env, stdio: ["pipe", "pipe", "ignore"] });
+  const child = spawn(canoa, ["serve", "--config", config, "--local-sources", "--method", "noise"], { env: hostEnv, stdio: ["pipe", "pipe", "ignore"] });
   let said = "";
   child.stdout.on("data", (chunk) => {
     said += chunk;
@@ -140,7 +160,7 @@ try {
     "--headless=new", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
     `--load-extension=${unpacked}`, `--disable-extensions-except=${unpacked}`,
     "--disable-features=DisableLoadExtensionCommandLineSwitch", "about:blank",
-  ], { stdio: "ignore", env });
+  ], { stdio: "ignore", env: browserEnv });
   debug = await waitFor("the browser", () => {
     try {
       return readFileSync(path.join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
@@ -238,6 +258,25 @@ try {
     assert.ok(labels.every((item) => item.source === "local" && item.peer === hostPeer));
   });
 
+  // The provider's own window asks who is nearby; a tab of that page speaks to the worker as the window does.
+  const lookNearby = async () => {
+    const page = await openTab(`chrome-extension://${id}/acp-request.html`);
+    try {
+      return await page.run("chrome.runtime.sendMessage({ acp: 'nearby' })");
+    } finally {
+      await page.call("Page.close").catch(() => {});
+    }
+  };
+
+  await check("nearby: with Canoa running and paired, look nearby is answered by the host, from its own descriptors", async () => {
+    const found = await lookNearby();
+    const labels = found.candidates.map((candidate) => candidate.label);
+    assert.deepEqual(labels, ["Found by the host"], JSON.stringify(found));
+    assert.equal(found.candidates[0].peer, PEER);
+    assert.equal(found.candidates[0].source, "local");
+    assert.equal(found.needsCanoa, undefined);
+  });
+
   const turn = (label) => `(async () => {
     const agent = (await document.acp.agents()).find((a) => a.label === ${quoted(label)});
     const conn = await document.acp.connect(agent);
@@ -288,6 +327,9 @@ try {
     await waitFor("the host to end", () => hostProcess.exitCode !== null || hostProcess.signalCode !== null, 15_000);
     const stopped = await ask("canoa.host.status");
     assert.equal(stopped.state, "stopped", JSON.stringify(stopped));
+    // With no host running the native host the browser started looks itself.
+    const alone = await lookNearby();
+    assert.deepEqual(alone.candidates.map((candidate) => candidate.label), ["Found by the relay"], JSON.stringify(alone));
     // Nothing a web page's scripts, or the extension's own scripts in that page, send starts it: only the extension's own pages are heard.
     const tab = await openTab(pageUrl);
     await waitFor("the page", () => tab.run("document.readyState === 'complete'"));
@@ -327,6 +369,8 @@ try {
     }));
     run(["native", "uninstall"]);
     registered = false;
+    const none = await lookNearby();
+    assert.deepEqual([none.candidates, none.needsCanoa], [[], true], JSON.stringify(none));
     const view = await ask("canoa.host.status");
     assert.equal(view.state, "not-installed", JSON.stringify(view));
     await sw.run(`chrome.storage.local.set({
@@ -353,6 +397,7 @@ try {
 } finally {
   clearTimeout(watchdog);
   pageServer.close();
+  for (const socket of advertised) socket.close();
   chrome?.kill();
   hostProcess?.kill();
   if (registered) {

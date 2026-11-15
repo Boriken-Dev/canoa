@@ -1,7 +1,5 @@
-// What the companion reports, as the provider's window may show it. Everything here is somebody's claim: a person decides whether
+// What Canoa on this computer reports when asked who is nearby, as the provider's window may show it. Everything here is somebody's claim: a person decides whether
 // to add one, and a proof at connect decides whether it holds the key it named. No chrome.* here, so it can be tested alone.
-export const COMPANION = "dev.boriken.coqui_acp_bridge";
-
 const PEER = /^sha256:[0-9a-f]{64}$/;
 const LOOPBACK = ["localhost", "127.0.0.1", "[::1]"];
 const MAX_CANDIDATES = 64;

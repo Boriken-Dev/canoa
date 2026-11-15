@@ -8,6 +8,8 @@ export const HELLO_MS = 5_000;
 /** How long Start waits for the host to come up, asking every `POLL_MS`. */
 export const START_WAIT_MS = 30_000;
 export const POLL_MS = 500;
+/** The longest a search nearby may take; the host clamps to the same. */
+export const MAX_SEARCH_SECONDS = 10;
 
 const PEER = /^sha256:[0-9a-f]{64}$/;
 const METHODS = ["noise", "webcrypto"];
@@ -109,6 +111,22 @@ export function createLocalHost({
     return { state: "unavailable", why: "the native host answered something else" };
   }
 
+  /**
+   * Asks the native host to look for agents nearby itself, for when the Canoa that holds the home is not reachable over a paired
+   * link: it needs Canoa installed, not running. Resolves { state: "ok", reply } or { state, why } as `hello` does.
+   */
+  async function discover(seconds) {
+    const wait = Math.min(Math.max(Math.trunc(seconds), 1), MAX_SEARCH_SECONDS);
+    const answer = await ask({ op: "discover", seconds: wait }, wait * 1000 + helloMs);
+    if (answer.gone !== undefined) {
+      if (NOT_FOUND.test(answer.gone)) return { state: "not-installed" };
+      if (FORBIDDEN.test(answer.gone)) return { state: "not-installed", forbidden: true };
+      return { state: "unavailable", why: clean(answer.gone, 200) };
+    }
+    if (answer.reply?.reply === "discover" && Array.isArray(answer.reply.candidates)) return { state: "ok", reply: answer.reply };
+    return { state: "unavailable", why: clean(answer.reply?.error, 200) || "the native host answered something else" };
+  }
+
   let starting;
 
   /** Asks the host program to start Canoa, then waits for it to answer. A second call while one runs is that one. */
@@ -131,7 +149,7 @@ export function createLocalHost({
     return starting;
   }
 
-  return { hello, start, get starting() { return starting !== undefined; } };
+  return { hello, start, discover, get starting() { return starting !== undefined; } };
 }
 
 /**

@@ -139,10 +139,11 @@ function searchButton(onFound) {
   search.addEventListener("click", async () => {
     search.disabled = true;
     status.textContent = "Looking…";
-    const { candidates, noCompanion } = await send({ acp: "nearby" });
+    const { candidates, needsCanoa, why } = await send({ acp: "nearby" });
     search.disabled = false;
-    status.textContent = noCompanion
-      ? "That needs coqui-acp-bridge installed: coqui-acp-bridge companion install --extension-id " + chrome.runtime.id
+    status.textContent = needsCanoa
+      ? "That needs Canoa installed on this computer: it looks for agents for the browser."
+      : why ? `Canoa on this computer could not look: ${why}`
       : candidates.length === 0 ? "Nothing found." : "Anyone can claim anything here. Check a key with the agent's owner before you choose it.";
     onFound(candidates);
   });

@@ -173,3 +173,28 @@ test("the view says what a panel needs and nothing else of the claim", () => {
   assert.equal(viewOf({ state: "not-installed" }, pinned).paired, false);
   assert.equal(viewOf(running(), null).paired, false);
 });
+
+test("discover asks the native host to look itself, bounds the wait, and tells not installed from a reply that is not a search", async () => {
+  const log = [];
+  const found = { reply: "discover", candidates: [{ label: "A", url: "ws://127.0.0.1:1/acp" }] };
+  const asked = [];
+  const { connectNative, lastError } = scripted((request) => {
+    asked.push(request);
+    return found;
+  }, log);
+  const local = createLocalHost({ connectNative, lastError, helloMs: 50 });
+  assert.deepEqual(await local.discover(3), { state: "ok", reply: found });
+  assert.deepEqual(asked[0], { op: "discover", seconds: 3 });
+  await local.discover(3600);
+  assert.equal(asked[1].seconds, 10, "a long wait is cut to what the host takes");
+
+  const missing = scripted(() => "Specified native messaging host not found.");
+  assert.deepEqual(await createLocalHost({ ...missing, helloMs: 50 }).discover(3), { state: "not-installed" });
+
+  const odd = scripted(() => ({ error: "unknown op" }));
+  const refused = await createLocalHost({ ...odd, helloMs: 50 }).discover(3);
+  assert.equal(refused.state, "unavailable");
+  assert.equal(refused.why, "unknown op");
+  const wrong = scripted(() => ({ reply: "discover", candidates: "many" }));
+  assert.equal((await createLocalHost({ ...wrong, helloMs: 50 }).discover(3)).state, "unavailable");
+});

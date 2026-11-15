@@ -1,7 +1,7 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
 import { METHODS, dialAgent, ownPeerId, pairWithPin, unreachable } from "./acp-dial.js";
 import { createLocalHost, fromExtensionPage, fromOwnPage, localAgents, localGrants, viewOf } from "./acp-local.js";
-import { COMPANION, addedMethod, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
+import { addedMethod, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
 import { createGateway, dialRecord } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
 import { createTools, OFFER } from "./acp-tools.js";
@@ -223,14 +223,24 @@ function installLocalHost() {
   refreshLocal().catch(() => {});
 }
 
-/** Asks the companion who is around. No companion is an answer too: the person can still add an agent by hand. */
+/**
+ * Asks Canoa on this computer who is around: its running host over this browser's paired link, else the native host itself, which
+ * searches the same way and needs Canoa installed, not running. Not installed is an answer too: the person can still add an agent
+ * by hand. Whatever comes back is a claim: nothing is ticked and the proof at connect decides.
+ */
 async function nearby() {
+  const known = await store.stored();
   try {
-    const reply = await chrome.runtime.sendNativeMessage(COMPANION, { op: "discover", seconds: SEARCH_SECONDS });
-    return { candidates: readCandidates(reply, await store.stored()) };
+    const { state, pinned } = await refreshLocal();
+    if (viewOf(state, pinned).paired) {
+      return { candidates: readCandidates(await controlCall("discover/nearby", { seconds: SEARCH_SECONDS }), known) };
+    }
   } catch {
-    return { candidates: [], noCompanion: true };
+    // A host that does not answer, or a key it gave no discover grant: the native host can still look.
   }
+  const found = await localHost.discover(SEARCH_SECONDS);
+  if (found.state === "ok") return { candidates: readCandidates(found.reply, known) };
+  return { candidates: [], needsCanoa: found.state === "not-installed", why: found.why };
 }
 
 const asking = new Map();
