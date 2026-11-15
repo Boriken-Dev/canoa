@@ -68,6 +68,8 @@ cargo build -p canoa-ffi --lib
 # main.dart's own main in the built app, one step a run on a new empty DIR: first (no canoa.cfg), flag, config, hosted
 (cd app && CANOA_TEST_LAUNCH_STEP=first CANOA_CONFIG=DIR/canoa.cfg COQUI_AGENTIC_PEER_HOME=DIR/home flutter test integration_test/launch_test.dart -d windows)
 (cd bindings/browser/chromium && npm test)
+# the built web app in a real browser: no service worker, every request to its own origin, symbols, emoji and CJK drawn from the fonts `build.py` copies in
+(cd bindings/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_HOST=<canoa> CANOA_E2E_AGENT=<stdio_agent> CANOA_E2E_WEB=../../../app/build/web [CANOA_E2E_SHOT=<png>] node e2e/web_fonts.mjs)
 mkdocs build --strict
 ```
 

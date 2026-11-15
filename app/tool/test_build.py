@@ -336,5 +336,18 @@ class PackagingTests(unittest.TestCase):
                 name,
             )
 
+class FinishWebTests(unittest.TestCase):
+    def test_the_service_worker_goes_and_a_missing_font_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            (dist / "flutter_service_worker.js").write_text("")
+            with patch.object(build.fallback_fonts, "read_list", return_value={"a/v1/b.woff2": "0" * 64}), \
+                    patch.object(build.fallback_fonts, "check_engine"), \
+                    patch.object(build.offline_pub, "find_deps", return_value=None):
+                with self.assertRaisesRegex(RuntimeError, "not all in the deps mirror"):
+                    build.finish_web(dist)
+            self.assertFalse((dist / "flutter_service_worker.js").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

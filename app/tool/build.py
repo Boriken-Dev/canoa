@@ -11,6 +11,10 @@ import sys
 
 import offline_pub
 
+# tools/ is not a package: the fallback-font list and its checks live there, beside the step that mirrors the fonts.
+sys.path.insert(0, str(Path(os.path.abspath(__file__)).parents[2] / "tools"))
+import fallback_fonts
+
 # Not resolve(): a drive made with `subst` (how a long checkout path stays under MSBuild's limit) must stay as typed.
 APP = Path(os.path.abspath(__file__)).parents[1]
 ROOT = APP.parent
@@ -164,6 +168,23 @@ def pub_get_offline(cache: Path, mode: str) -> bool:
     return True
 
 
+def finish_web(dist: Path) -> None:
+    """What a web build gets after Flutter: no service worker, and the fallback fonts the engine asks for.
+
+    The fonts come from the deps checkout's mirror (tools/mirror_deps.py fills it); this never fetches. A missing or
+    changed font stops the build, since a page without them cannot draw a symbol, an emoji or CJK.
+    """
+    (dist / "flutter_service_worker.js").unlink(missing_ok=True)
+    pinned = fallback_fonts.read_list()
+    try:
+        fallback_fonts.check_engine(pinned, fallback_fonts.flutter_root())
+        deps = offline_pub.find_deps(ROOT, SETTINGS)
+        size = fallback_fonts.install(deps, dist, pinned)
+    except fallback_fonts.FontError as error:
+        raise RuntimeError(str(error)) from error
+    print(f"Fallback fonts: {len(pinned)} files, {size} bytes, from the deps mirror")
+
+
 def build_web_for_host(offline: bool = False) -> Path:
     """The web app the host serves, built with a CSP (without it the host's policy refuses the page's code)."""
     subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
@@ -177,6 +198,7 @@ def build_web_for_host(offline: bool = False) -> Path:
     dist = APP / "build" / "web"
     if not (dist / "index.html").is_file():
         raise RuntimeError("flutter build web left no app/build/web/index.html")
+    finish_web(dist)
     return dist
 
 
@@ -337,6 +359,10 @@ def main() -> None:
     subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
     subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
+    try:
+        finish_web(APP / "build" / "web")
+    except RuntimeError as error:
+        sys.exit(f"build.py: {error}")
     if opts.kind == "chromium":
         package_ui(
             APP / "build" / "web",
