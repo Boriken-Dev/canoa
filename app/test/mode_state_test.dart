@@ -5,6 +5,7 @@ import 'package:canoa/chat/modes.dart';
 import 'package:canoa/drafts/draft_store.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
+import 'package:flutter/widgets.dart' show Key;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
@@ -202,8 +203,8 @@ void main() {
       await pick(tester, 'option-mode', 'Bypass');
       expect(agent.mode, 'plan');
       expect(find.text('Bypass over Plan'), findsOneWidget);
-      await tester.tap(find.text('Leave Bypass'));
-      await settle(tester);
+      expect(find.byKey(const Key('bypass-mark')), findsOneWidget);
+      await pick(tester, 'option-mode', 'Bypass');
       expect(store.selected!.bypass, isFalse);
       expect(store.modeOf(store.selected!), 'plan');
       expect(agent.requests.length, sent, reason: "Bypass is Canoa's own: neither choosing it nor leaving it reached the agent");

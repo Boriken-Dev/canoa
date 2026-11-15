@@ -165,7 +165,7 @@ void main() {
       }
     };
     final draft = store.createDraft(source: _source, cwd: '/w');
-    await expectLater(store.sendText('hello'), throwsStateError);
+    await store.sendText('hello');
     expect(cleaned, isTrue);
     expect(store.sessions, isEmpty);
     expect(agent.methods, isNot(contains('session/prompt')));
