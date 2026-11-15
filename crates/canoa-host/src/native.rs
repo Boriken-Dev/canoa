@@ -101,7 +101,11 @@ fn name_in(home: &Path, file: &str, suffix: &str) -> Result<PipeName, pipe::Erro
         text = text.to_lowercase();
     }
     let digest = Sha256::digest(text.as_bytes());
-    let hex: String = digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect();
+    let hex: String = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     let named = format!("canoa-native-{hex}{suffix}");
     if cfg!(windows) {
         return PipeName::named(&named);
@@ -187,7 +191,10 @@ pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()> {
     let file = origins_file(home);
     fs::create_dir_all(file.parent().unwrap_or(home))?;
     let temporary = file.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_string_pretty(&Value::Object(map)).map_err(io::Error::other)?)?;
+    fs::write(
+        &temporary,
+        serde_json::to_string_pretty(&Value::Object(map)).map_err(io::Error::other)?,
+    )?;
     fs::rename(temporary, file)
 }
 
@@ -356,7 +363,10 @@ impl<W: Write + Send + 'static> Relay<W> {
                 None
             }
             Some("open") => {
-                let entry = request.get("entry").and_then(Value::as_str).unwrap_or_default();
+                let entry = request
+                    .get("entry")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 match self.open(entry) {
                     Ok(stream) => Some(stream),
                     Err(error) => {
@@ -380,7 +390,9 @@ impl<W: Write + Send + 'static> Relay<W> {
         let stream = match knock(self.home.dir(), &self.origin, entry) {
             Ok(Some(stream)) => stream,
             Ok(None) if entry == PAIR => {
-                return Err("Canoa is not waiting to pair a browser: ask it to show a PIN first".to_owned());
+                return Err(
+                    "Canoa is not waiting to pair a browser: ask it to show a PIN first".to_owned(),
+                );
             }
             Ok(None) => return Err("Canoa is not running".to_owned()),
             Err(error) => return Err(format!("the door could not be reached: {error}")),
@@ -458,7 +470,9 @@ pub fn relay<W: Write + Send + 'static>(
                     .decode(piece.as_bytes())
                     .ok()
                     .filter(|bytes| bytes.len() <= MAX_PIECE)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "a piece no extension sends"))?;
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "a piece no extension sends")
+                    })?;
                 if (&**stream).write_all(&bytes).is_err() {
                     let _ = relay.say(&json!({ "closed": true }));
                     return Ok(());
@@ -539,13 +553,14 @@ fn registration(home: &Home, program: &Path, options: &Install) -> Result<Regist
 /// When a file or the registry refuses, or no browser profile exists to register in.
 pub fn install(home: &Home, program: &Path, options: &Install) -> Result<Vec<String>, Error> {
     let registration = registration(home, program, options)?;
-    fs::create_dir_all(native_dir(home))
-        .map_err(|error| Error::Discovery(format!("the native folder could not be made: {error}")))?;
+    fs::create_dir_all(native_dir(home)).map_err(|error| {
+        Error::Discovery(format!("the native folder could not be made: {error}"))
+    })?;
     let mut wrote = companion::install(&registration)?;
     if let Some(launch) = &options.launch {
-        launch
-            .write(home)
-            .map_err(|error| Error::Discovery(format!("launch.json could not be written: {error}")))?;
+        launch.write(home).map_err(|error| {
+            Error::Discovery(format!("launch.json could not be written: {error}"))
+        })?;
         wrote.push(launch_file(home).to_string_lossy().into_owned());
     }
     Ok(wrote)
@@ -589,7 +604,11 @@ pub struct Status {
 /// When the registry cannot be read.
 pub fn status(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<Status, Error> {
     Ok(Status {
-        registered: companion::installed(name.unwrap_or(HOST_NAME), Some(&native_dir(home)), profiles)?,
+        registered: companion::installed(
+            name.unwrap_or(HOST_NAME),
+            Some(&native_dir(home)),
+            profiles,
+        )?,
         launch: Launch::read(home).ok(),
         running: running(home),
         holder: home.holder(),
@@ -602,7 +621,10 @@ mod tests {
 
     #[test]
     fn a_preamble_names_what_it_opens_and_nothing_else_passes() {
-        let ok = read_preamble(br#"{"canoa_native":1,"open":"@hello","origin":"chrome-extension://x/"}"#).unwrap();
+        let ok = read_preamble(
+            br#"{"canoa_native":1,"open":"@hello","origin":"chrome-extension://x/"}"#,
+        )
+        .unwrap();
         assert_eq!(ok.open, "@hello");
         assert_eq!(ok.origin, "chrome-extension://x/");
         for bad in [

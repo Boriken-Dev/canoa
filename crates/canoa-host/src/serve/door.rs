@@ -61,7 +61,9 @@ impl Door {
                 }
             };
             let Some(entered) = shared.unproven.enter() else {
-                tracing::warn!("a connection to the native door was dropped: too many are unproven");
+                tracing::warn!(
+                    "a connection to the native door was dropped: too many are unproven"
+                );
                 continue;
             };
             let channel = pipe::PipeChannel::new(stream, MAX_PREAMBLE);
@@ -73,7 +75,13 @@ impl Door {
             let spawned = thread::Builder::new()
                 .name("canoa-door".to_owned())
                 .spawn(move || {
-                    meet(&shared, (&hello, &served, &control), &home, &channel, entered);
+                    meet(
+                        &shared,
+                        (&hello, &served, &control),
+                        &home,
+                        &channel,
+                        entered,
+                    );
                     channel.close();
                 });
             if let Err(error) = spawned {
@@ -119,7 +127,11 @@ fn meet(
         return;
     }
     channel.set_max_message(auth::MAX_PROOF_MESSAGE);
-    tracing::debug!(entry = target.name, origin = wanted.origin, "a browser reached the door");
+    tracing::debug!(
+        entry = target.name,
+        origin = wanted.origin,
+        "a browser reached the door"
+    );
     // A key bound to the extension that paired it is not served to another origin.
     let origin = wanted.origin;
     let admit = |peer: &coqui_peer_webcrypto::PeerId| {

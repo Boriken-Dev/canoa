@@ -15,7 +15,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-
 use coqui_agentic_peer::companion::{read_message_up_to, write_message};
 use coqui_transport::{Channel, Failure};
 use coqui_transport_web::frame;
@@ -87,7 +86,12 @@ impl Relay {
     }
 
     fn close_input(&self) {
-        drop(self.stdin.lock().unwrap_or_else(PoisonError::into_inner).take());
+        drop(
+            self.stdin
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
     }
 
     fn ended_within(&mut self, wait: Duration) -> bool {
@@ -135,7 +139,10 @@ impl<'a> Link<'a> {
     }
 
     fn sizes(&self) -> Vec<usize> {
-        self.pieces.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.pieces
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -165,14 +172,23 @@ impl Channel for Link<'_> {
                     return Ok(Some(body));
                 }
             }
-            let wait = until.map_or(WAIT, |until| until.saturating_duration_since(Instant::now()));
-            let messages = self.relay.messages.lock().unwrap_or_else(PoisonError::into_inner);
+            let wait = until.map_or(WAIT, |until| {
+                until.saturating_duration_since(Instant::now())
+            });
+            let messages = self
+                .relay
+                .messages
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             match messages.recv_timeout(wait) {
                 Ok(message) if message.get("d").is_some() => {
                     let bytes = BASE64
                         .decode(message["d"].as_str().unwrap_or_default().as_bytes())
                         .map_err(|_| Failure::Protocol)?;
-                    self.pieces.lock().unwrap_or_else(PoisonError::into_inner).push(bytes.len());
+                    self.pieces
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(bytes.len());
                     inbox.extend_from_slice(&bytes);
                 }
                 Ok(message) if message["closed"] == true => return Ok(None),
@@ -238,7 +254,10 @@ fn no_host_running_answers_that_it_is_not() {
     assert_eq!(reply["running"], false, "{reply}");
     assert!(reply.get("entries").is_none(), "{reply}");
     let refused = relay.ask(&json!({ "op": "open", "entry": "fixture" }));
-    assert!(refused["error"].is_string() && refused["opened"].is_null(), "{refused}");
+    assert!(
+        refused["error"].is_string() && refused["opened"].is_null(),
+        "{refused}"
+    );
 }
 
 #[test]
@@ -293,20 +312,27 @@ fn a_record_of_three_mebibytes_arrives_whole_in_pieces_under_the_limit() {
     let sizes = std::cell::RefCell::new(Vec::new());
     let outcome = {
         let link_ref = &link;
-        let result = support::with_channel(
-            Spy { link: link_ref },
-            &client,
-            host.peer,
-            |rpc| turn_spy(rpc, &dir, &big),
-        );
+        let result = support::with_channel(Spy { link: link_ref }, &client, host.peer, |rpc| {
+            turn_spy(rpc, &dir, &big)
+        });
         sizes.borrow_mut().extend(link_ref.sizes());
         result
     };
-    let text = outcome.expect("a paired key is served").expect("the turn ends");
-    assert_eq!(text.len(), "echo: ".len() + big.len(), "the record arrived whole");
+    let text = outcome
+        .expect("a paired key is served")
+        .expect("the turn ends");
+    assert_eq!(
+        text.len(),
+        "echo: ".len() + big.len(),
+        "the record arrived whole"
+    );
     let sizes = sizes.into_inner();
     assert!(sizes.iter().all(|size| *size <= MAX_PIECE), "{sizes:?}");
-    assert!(sizes.len() >= 4, "a 3 MiB record came in {} pieces", sizes.len());
+    assert!(
+        sizes.len() >= 4,
+        "a 3 MiB record came in {} pieces",
+        sizes.len()
+    );
 }
 
 /// The same link, lent to a proof that takes its channel by value.
@@ -379,7 +405,9 @@ fn the_door_can_be_turned_off() {
 /// The host's output ends when it is killed; this kills by process id, as a test that started it may.
 fn kill(pid: u64) {
     let _ = if cfg!(windows) {
-        Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output()
+        Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output()
     } else {
         Command::new("kill").arg(pid.to_string()).output()
     };
@@ -393,10 +421,22 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
     std::fs::write(&config, "").expect("a configuration");
     // The program a person registered: this same canoa, serving nothing.
     let install = Command::new(host_binary())
-        .args(["native", "install", "--name", &format!("dev.boriken.canoa_test_{}", std::process::id())])
+        .args([
+            "native",
+            "install",
+            "--name",
+            &format!("dev.boriken.canoa_test_{}", std::process::id()),
+        ])
         .args(["--browser", "edge", "--profile"])
         .arg(scratch.0.join("profile"))
-        .args(["--launch", host_binary(), "--", "serve", "--allow-empty", "--config"])
+        .args([
+            "--launch",
+            host_binary(),
+            "--",
+            "serve",
+            "--allow-empty",
+            "--config",
+        ])
         .arg(&config)
         .env("COQUI_AGENTIC_PEER_HOME", &home)
         .output()
@@ -427,12 +467,18 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
             if reply["running"] == true && reply.get("entries").is_some() {
                 break;
             }
-            assert!(Instant::now() < until, "the started host never came up: {reply}");
+            assert!(
+                Instant::now() < until,
+                "the started host never came up: {reply}"
+            );
             std::thread::sleep(Duration::from_millis(200));
         }
         // A host holds the home now: a second start does nothing.
         let again = relay.ask(&json!({ "op": "start" }));
-        assert!(again["error"].is_string() && again["started"].is_null(), "{again}");
+        assert!(
+            again["error"].is_string() && again["started"].is_null(),
+            "{again}"
+        );
         pid
     });
     if let Ok(pid) = &outcome {
@@ -449,7 +495,10 @@ fn start_without_a_recorded_program_starts_nothing() {
     let scratch = Scratch::new();
     let relay = Relay::start(&scratch.0.join("home"), ORIGIN);
     let reply = relay.ask(&json!({ "op": "start" }));
-    assert!(reply["error"].is_string() && reply["started"].is_null(), "{reply}");
+    assert!(
+        reply["error"].is_string() && reply["started"].is_null(),
+        "{reply}"
+    );
 }
 
 #[test]
@@ -469,33 +518,62 @@ fn install_status_and_uninstall_leave_nothing_behind() {
             .expect("canoa native runs")
     };
     let status = |output: std::process::Output| -> Value {
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         serde_json::from_slice(&output.stdout).expect("a JSON object")
     };
     let mut installed = Command::new(host_binary());
     installed
-        .args(["native", "install", "--name", &name, "--browser", "edge", "--profile"])
+        .args([
+            "native",
+            "install",
+            "--name",
+            &name,
+            "--browser",
+            "edge",
+            "--profile",
+        ])
         .arg(&profile)
         .args(["--extension-id", &"b".repeat(32)])
         .env("COQUI_AGENTIC_PEER_HOME", &home);
     let installed = installed.output().expect("canoa native install runs");
     let outcome = std::panic::catch_unwind(|| {
-        assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
+        assert!(
+            installed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&installed.stderr)
+        );
         let wrote = String::from_utf8_lossy(&installed.stdout).into_owned();
         let after = status(run(&["status"]));
         assert_eq!(after["name"], name.as_str());
-        assert!(!after["registered"].as_array().expect("a list").is_empty(), "{after}");
+        assert!(
+            !after["registered"].as_array().expect("a list").is_empty(),
+            "{after}"
+        );
         assert_eq!(after["running"], false);
-        assert!(after["launch"]["args"].as_array().is_some_and(|args| args.contains(&json!("serve"))), "{after}");
+        assert!(
+            after["launch"]["args"]
+                .as_array()
+                .is_some_and(|args| args.contains(&json!("serve"))),
+            "{after}"
+        );
         let manifest = home.join("native").join(format!("{name}.json"));
-        let profiled = profile.join("NativeMessagingHosts").join(format!("{name}.json"));
+        let profiled = profile
+            .join("NativeMessagingHosts")
+            .join(format!("{name}.json"));
         let text = std::fs::read_to_string(if cfg!(windows) { &manifest } else { &profiled })
             .unwrap_or_else(|error| panic!("the manifest: {error}; wrote {wrote}"));
         let manifest: Value = serde_json::from_str(&text).expect("a manifest");
         assert_eq!(manifest["name"], name.as_str());
         assert_eq!(manifest["type"], "stdio");
         let origins = manifest["allowed_origins"].as_array().expect("origins");
-        assert!(origins.contains(&json!(ORIGIN)), "the known extension: {origins:?}");
+        assert!(
+            origins.contains(&json!(ORIGIN)),
+            "the known extension: {origins:?}"
+        );
         assert!(origins.contains(&json!(format!("chrome-extension://{}/", "b".repeat(32)))));
         assert_eq!(origins.len(), 2);
         assert_eq!(
@@ -506,7 +584,10 @@ fn install_status_and_uninstall_leave_nothing_behind() {
     let removed = run(&["uninstall"]);
     assert!(removed.status.success());
     let gone = status(run(&["status"]));
-    assert!(gone["registered"].as_array().expect("a list").is_empty(), "{gone}");
+    assert!(
+        gone["registered"].as_array().expect("a list").is_empty(),
+        "{gone}"
+    );
     assert!(gone["launch"].is_null(), "{gone}");
     outcome.expect("the registration was as asked");
 }
@@ -515,7 +596,14 @@ fn install_status_and_uninstall_leave_nothing_behind() {
 fn pairing_door(home: &Path) -> (Child, Value) {
     use std::io::BufRead as _;
     let mut child = Command::new(host_binary())
-        .args(["pair", "--native", "--timeout-seconds", "120", "--method", support::method().name()])
+        .args([
+            "pair",
+            "--native",
+            "--timeout-seconds",
+            "120",
+            "--method",
+            support::method().name(),
+        ])
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -539,16 +627,26 @@ fn a_browser_pairs_by_pin_through_the_relay_and_its_key_is_bound_to_its_extensio
     let (mut pair, shown) = pairing_door(&host.home());
     assert_eq!(shown["native"], true, "{shown}");
     assert_eq!(shown["peer"], host.peer.to_string().as_str());
-    let pin = Pin::parse(&CodeAlphabet::pin(), shown["pin"].as_str().expect("a PIN")).expect("a PIN");
+    let pin =
+        Pin::parse(&CodeAlphabet::pin(), shown["pin"].as_str().expect("a PIN")).expect("a PIN");
 
     let client = support::key();
-    let client_store = canoa_host::Home::at(host.scratch.0.join("client")).store().expect("a store");
+    let client_store = canoa_host::Home::at(host.scratch.0.join("client"))
+        .store()
+        .expect("a store");
     let relay = Relay::start(&host.home(), ORIGIN);
     let link = Link::open(&relay, "@pair").expect("the pairing door opens while a PIN is shown");
     let joined = pairing::join(&link, &client, pin, &client_store, WAIT).expect("the PIN pairs");
     link.close();
-    assert_eq!(joined.peer.id(), host.peer, "the browser learned the host's key by the PIN, not from hello");
-    assert!(pair.wait().expect("pair ends").success(), "pairing ends once it paired");
+    assert_eq!(
+        joined.peer.id(),
+        host.peer,
+        "the browser learned the host's key by the PIN, not from hello"
+    );
+    assert!(
+        pair.wait().expect("pair ends").success(),
+        "pairing ends once it paired"
+    );
 
     // Served to the extension that paired it...
     let dir = cwd(&host.scratch);
@@ -560,19 +658,32 @@ fn a_browser_pairs_by_pin_through_the_relay_and_its_key_is_bound_to_its_extensio
     assert_eq!(text, "echo: paired");
 
     // ...and to no other origin.
-    let relay = Relay::start(&host.home(), "chrome-extension://pppppppppppppppppppppppppppppppp/");
+    let relay = Relay::start(
+        &host.home(),
+        "chrome-extension://pppppppppppppppppppppppppppppppp/",
+    );
     let link = Link::open(&relay, "fixture").expect("the door opens the entry");
     let refused = support::with_channel(link, &client, host.peer, |rpc| rpc.initialize());
     let served = matches!(refused, Ok(Ok(_)));
-    assert!(!served, "a key bound to one extension is turned away from another: {refused:?}");
+    assert!(
+        !served,
+        "a key bound to one extension is turned away from another: {refused:?}"
+    );
 }
 
 #[test]
 fn the_pairing_door_is_closed_unless_a_person_asked_for_a_pin() {
     let host = host();
     let relay = Relay::start(&host.home(), ORIGIN);
-    let refused = Link::open(&relay, "@pair").err().expect("nothing waits to pair");
-    assert!(refused["error"].as_str().is_some_and(|error| error.contains("PIN")), "{refused}");
+    let refused = Link::open(&relay, "@pair")
+        .err()
+        .expect("nothing waits to pair");
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("PIN")),
+        "{refused}"
+    );
     // And the host's own door does not pair: it has no PIN to give.
     let again = Relay::start(&host.home(), ORIGIN);
     let hello = again.ask(&json!({ "op": "hello" }));
@@ -592,7 +703,9 @@ fn a_wrong_pin_pairs_nobody() {
     wrong.push(if last == '0' { '1' } else { '0' });
     let pin = Pin::parse(&CodeAlphabet::pin(), &wrong).expect("a PIN of the same alphabet");
     let client = support::key();
-    let client_store = canoa_host::Home::at(host.scratch.0.join("client")).store().expect("a store");
+    let client_store = canoa_host::Home::at(host.scratch.0.join("client"))
+        .store()
+        .expect("a store");
     let relay = Relay::start(&host.home(), ORIGIN);
     let link = Link::open(&relay, "@pair").expect("the pairing door opens");
     let joined = pairing::join(&link, &client, pin, &client_store, Duration::from_secs(10));
@@ -600,6 +713,8 @@ fn a_wrong_pin_pairs_nobody() {
     let _ = pair.kill();
     let _ = pair.wait();
     assert!(joined.is_err(), "a wrong PIN does not pair");
-    let store = canoa_host::Home::at(host.home()).store().expect("the host's store");
+    let store = canoa_host::Home::at(host.home())
+        .store()
+        .expect("the host's store");
     assert!(!store.is_accepted(&client.peer_id()), "nobody was paired");
 }

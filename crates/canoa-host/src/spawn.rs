@@ -747,7 +747,8 @@ mod tests {
 
     #[test]
     fn no_process_is_started_by_std_outside_this_module() {
-        const OWN: [&str; 2] = ["profile/launch.rs", "accounts/private.rs"];
+        // native.rs starts Canoa for the browser from the relay, a process of its own that is not inside an application.
+        const OWN: [&str; 3] = ["profile/launch.rs", "accounts/private.rs", "native.rs"];
         fn scan(dir: &Path, root: &Path, found: &mut Vec<String>) {
             for entry in std::fs::read_dir(dir).expect("a directory") {
                 let path = entry.expect("an entry").path();

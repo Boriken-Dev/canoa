@@ -16,7 +16,6 @@ use std::thread;
 
 use crate::portal_link::PortalSockets;
 mod door;
-use door::Door;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
@@ -28,6 +27,7 @@ use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::{Channel, Failure};
 use coqui_transport_web::Limits;
 use coqui_transport_web::websocket::{self, Frames};
+use door::Door;
 use indexmap::IndexMap;
 
 use crate::accounts::{Accounts, Gated, Held};
@@ -1600,7 +1600,7 @@ impl Serving {
             door: None,
         };
         let mut serving = serving;
-        serving.door = serving.open_door(&config, options);
+        serving.door = serving.open_door(config, options);
         serving.attach_delegation(&config.remote_agents, dialer);
 
         if let Some(sockets) = &options.portal {
@@ -1627,14 +1627,18 @@ impl Serving {
         let name = match crate::native::door_name(home) {
             Ok(name) => name,
             Err(error) => {
-                tracing::warn!("the native door has no name, so a browser cannot reach this host: {error}");
+                tracing::warn!(
+                    "the native door has no name, so a browser cannot reach this host: {error}"
+                );
                 return None;
             }
         };
         let listener = match pipe::Listener::bind(&name) {
             Ok(listener) => listener,
             Err(error) => {
-                tracing::warn!("the native door could not be opened, so a browser cannot reach this host: {error}");
+                tracing::warn!(
+                    "the native door could not be opened, so a browser cannot reach this host: {error}"
+                );
                 return None;
             }
         };

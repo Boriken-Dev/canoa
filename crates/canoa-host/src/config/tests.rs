@@ -1783,3 +1783,52 @@ fn transport_entries_conflict_by_endpoint_and_two_asking_for_port_zero_do_not() 
     );
     assert!(parse(&pipes).is_err());
 }
+
+#[test]
+fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_never_installs() {
+    use crate::control::Grant;
+    let none = Config::from_str_in("", &base()).expect("parses");
+    assert!(none.native.enabled);
+    assert_eq!(none.native.control, NativeConfig::default_control());
+    for never in [
+        Grant::ConfigWriteSessions,
+        Grant::OverlayWrite,
+        Grant::HostRestart,
+        Grant::Upload,
+    ] {
+        assert!(!none.native.control.contains(&never), "{never:?}");
+    }
+    let off = Config::from_str_in("[host.native]\nenabled = false\n", &base()).expect("parses");
+    assert!(!off.native.enabled);
+    let narrow = Config::from_str_in("[host.native]\ncontrol = [\"ledger.read\"]\n", &base())
+        .expect("parses");
+    assert_eq!(
+        narrow.native.control,
+        [Grant::LedgerRead].into_iter().collect()
+    );
+    let empty = Config::from_str_in("[host.native]\ncontrol = []\n", &base()).expect("parses");
+    assert!(
+        empty.native.control.is_empty(),
+        "an empty list grants nothing"
+    );
+    for (text, what) in [
+        (
+            "[host.native]\ncontrol = [\"host.restart\"]\n",
+            "host.native",
+        ),
+        (
+            "[host.native]\ncontrol = [\"config.write.sessions\"]\n",
+            "host.native",
+        ),
+        (
+            "[host.native]\ncontrol = [\"overlay.write\"]\n",
+            "host.native",
+        ),
+        ("[host.native]\ncontrol = [\"upload\"]\n", "host.native"),
+        ("[host.native]\ncontrol = [\"nonsense\"]\n", "host.native"),
+        ("[host.native]\nlisten = \"x\"\n", "native"),
+    ] {
+        let said = parse(text).expect_err(text).to_string();
+        assert!(said.contains(what), "{text}: {said}");
+    }
+}

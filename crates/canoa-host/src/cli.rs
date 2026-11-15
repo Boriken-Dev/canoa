@@ -1080,7 +1080,8 @@ fn native(action: NativeAction, front: &dyn Front) -> Result<(), Failed> {
             Ok(())
         }
         NativeAction::Uninstall(scope) => {
-            crate::native::uninstall(&home, scope.name.as_deref(), &scope.profile).map_err(Failed::run)
+            crate::native::uninstall(&home, scope.name.as_deref(), &scope.profile)
+                .map_err(Failed::run)
         }
         NativeAction::Status(scope) => {
             let status = crate::native::status(&home, scope.name.as_deref(), &scope.profile)
@@ -1163,7 +1164,9 @@ fn pair_native(
         }
         while let Ok(result) = reports.try_recv() {
             match result {
-                Ok(peer) => return print(front, &serde_json::json!({ "paired": peer }).to_string()),
+                Ok(peer) => {
+                    return print(front, &serde_json::json!({ "paired": peer }).to_string());
+                }
                 Err(why) => {
                     tracing::info!("a pairing attempt failed: {why}");
                     if desk.shown_pin().is_none() {
