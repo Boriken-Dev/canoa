@@ -41,6 +41,30 @@ Future<void> _until(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  group('a change of programs', () {
+    ProgramStores over(FakeStoreHost host, List<String> changes) {
+      final shared = host.client();
+      return ProgramStores(control: () async => shared, open: () async => host.client(), afterChange: () async => changes.add('changed'));
+    }
+
+    test('has the app start the host again once a program was installed, and not when the install was refused', () async {
+      final host = FakeStoreHost([claudeLike()]);
+      final changes = <String>[];
+      final programs = over(host, changes);
+      await programs.refresh();
+      final plan = await programs.plan('one_store', 'install');
+      await programs.apply(plan).done;
+      await Future<void>.delayed(Duration.zero);
+      expect(changes, ['changed'], reason: 'the host reads which program a source runs when it starts');
+
+      host.failures['store/apply'] = const ControlFailed(-32002, 'the download was refused');
+      final refused = programs.apply(await programs.plan('one_store', 'install'));
+      await expectLater(refused.done, throwsA(isA<ControlFailed>()));
+      await Future<void>.delayed(Duration.zero);
+      expect(changes, ['changed'], reason: 'nothing changed');
+    });
+  });
+
   group('readiness', () {
     test('a source is ready by what its extension found, with the version, and an update only once the publisher was asked', () async {
       final host = FakeStoreHost([claudeLike(copies: [copyOf('1.2.3')], latest: '1.3.0')]);

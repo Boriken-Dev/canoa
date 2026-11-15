@@ -421,6 +421,7 @@ class ProgramStores extends ChangeNotifier {
     required Future<ControlClient> Function() open,
     DateTime Function()? now,
     this.latestLife = const Duration(hours: 1),
+    this.afterChange,
   }) : _control = control,
        _open = open,
        _now = now ?? DateTime.now;
@@ -431,6 +432,10 @@ class ProgramStores extends ChangeNotifier {
 
   /// How long what the publisher said of the newest version is kept before a page asks again.
   final Duration latestLife;
+
+  /// Runs once a program was installed, updated or removed: the host reads which program a source runs when it starts, so the app has
+  /// it start again here.
+  final Future<void> Function()? afterChange;
 
   final _status = <String, ProgramStatus>{};
   List<String> _order = const [];
@@ -530,6 +535,7 @@ class ProgramStores extends ChangeNotifier {
   /// again once it ends, whatever way.
   ProgramRun apply(ProgramPlan plan) {
     final run = ProgramRun._(plan.provider, plan);
+    var changed = false;
     run.done = (() async {
       try {
         final client = run._client = await _open();
@@ -543,6 +549,7 @@ class ProgramStores extends ChangeNotifier {
           ControlListener(onNotification: run._heard, onRequest: run._asked),
           applyWait,
         );
+        changed = _map(result)['applied'] != false;
         return _map(result);
       } on Object {
         if (run._cancelled) throw const ProgramCancelled();
@@ -553,6 +560,7 @@ class ProgramStores extends ChangeNotifier {
         // Readiness is read again before the run is over, so whoever awaits it sees the program as it now is.
         await _afterChange(plan.provider);
         run.notifyListeners();
+        if (changed) unawaited(afterChange?.call());
       }
     })();
     // The run's owner reads the failure from done; an unread one is not an error of the app.
@@ -562,11 +570,14 @@ class ProgramStores extends ChangeNotifier {
 
   /// Puts the host's copy back to the version before. Throws [ControlFailed].
   Future<String?> rollback(String provider) async {
+    var changed = false;
     try {
       final result = _map(await (await _control()).call('store/rollback', {'provider': provider}));
+      changed = true;
       return _text(result['version']);
     } finally {
       await _afterChange(provider);
+      if (changed) unawaited(afterChange?.call());
     }
   }
 

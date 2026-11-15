@@ -269,34 +269,30 @@ fn provider_for(config: &Config, harness: &str) -> Result<kind::Harness, Failed>
                 settings.as_ref(),
             ),
         ),
-        _ if BUILT_IN_HARNESSES.contains(&harness) => (None, Settings::default()),
+        _ if BUILT_IN_HARNESSES.contains(&harness) => (None, installed_program(harness)),
         _ => {
             return Err(Failed::usage(format!(
                 "no entry runs a provider called {harness}: add an agent entry with harness = \"{harness}\" and its library or source"
             )));
         }
     };
-    let settings = with_managed_program(harness, settings);
     let registry = kind::registry(origin.as_ref()).map_err(Failed::run)?;
     kind::Harness::new(&Arc::new(registry), harness, &settings, false, Vec::new())
         .map_err(|error| Failed::run(format!("the {harness} provider is unusable: {error}")))
 }
 
-/// `settings`, with the program the Store installed as the executable of `claude` or `codex` when nothing names one: what a sign-in
-/// runs is the program a session runs.
-fn with_managed_program(harness: &str, settings: Settings) -> Settings {
-    if !matches!(harness, "claude" | "codex") || settings.as_map().contains_key("executable") {
-        return settings;
+/// The settings of a built-in provider no entry configures: the program the Store installed, when it installed one.
+fn installed_program(harness: &str) -> Settings {
+    let managed = matches!(harness, "claude" | "codex")
+        .then(|| crate::sources::managed_program(harness))
+        .flatten();
+    match managed {
+        Some((path, _)) => Settings::new(serde_json::Map::from_iter([(
+            "executable".to_owned(),
+            serde_json::Value::String(path.to_string_lossy().into_owned()),
+        )])),
+        None => Settings::default(),
     }
-    let Some((path, _)) = crate::sources::managed_program(harness) else {
-        return settings;
-    };
-    let mut map = settings.as_map().clone();
-    map.insert(
-        "executable".to_owned(),
-        serde_json::Value::String(path.to_string_lossy().into_owned()),
-    );
-    Settings::new(map)
 }
 
 fn methods_of(provider: &kind::Harness) -> Result<Vec<LoginMethodInfo>, Failed> {

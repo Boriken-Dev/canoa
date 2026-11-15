@@ -1000,7 +1000,21 @@ class _CanoaAppState extends State<CanoaApp> {
   /// needs it; an install runs only when the person confirms its plan.
   late final ProgramStores? _programsHeld = _control == null
       ? null
-      : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open)..addListener(_programsChanged));
+      : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open, afterChange: _hostReadsPrograms)
+          ..addListener(_programsChanged));
+
+  /// The host reads which program a source runs when it starts: after one was installed, updated or removed it starts again, so the
+  /// source runs the new one. The person is asked first when sessions are open on it.
+  Future<void> _hostReadsPrograms() async {
+    if (!mounted || (widget.served == null && (widget.host == null || _configPath == null))) return;
+    final ending = _endedByRestart();
+    if (ending.isNotEmpty && !await _confirmAccountsRestart(ending)) return;
+    if (widget.served != null) {
+      await _startHostAgain();
+    } else {
+      await widget.host!.apply(configPath: _configPath);
+    }
+  }
 
   /// The programs the host's Store keeps, when the host grants installing them.
   ProgramStores? get _programs => _grants?.may(HostGrants.programs) ?? false ? _programsHeld : null;

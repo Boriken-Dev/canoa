@@ -2457,6 +2457,15 @@ pub(crate) fn harness_settings(
             "executable".to_owned(),
             serde_json::Value::String(executable.to_string_lossy().into_owned()),
         );
+    } else if matches!(harness, "claude" | "codex")
+        && !map.contains_key("executable")
+        && let Some((path, _)) = sources::managed_program(harness)
+    {
+        // Nothing names the program: the one the Store installed runs, as it is when the host starts.
+        map.insert(
+            "executable".to_owned(),
+            serde_json::Value::String(path.to_string_lossy().into_owned()),
+        );
     }
     if let Some(sources) = &asks.setting_sources {
         map.insert(
