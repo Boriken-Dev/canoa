@@ -3,6 +3,7 @@ import 'acp/chat_connection.dart';
 import 'acp/client.dart';
 import 'acp/delegate.dart';
 import 'acp/local_agent.dart' show readLocalFile;
+import 'chat/timing_log.dart';
 import 'acp/secret_wire.dart' show SecretIdentity;
 import 'package:coqui_acp/secret.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as model;
@@ -1039,7 +1040,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     notifyListeners();
     try {
       try {
-        await starter(session);
+        await timed('start', () => starter(session));
       } catch (error) {
         if (session.remoteSessionId == null) {
           session.status = SessionStatus.draft;

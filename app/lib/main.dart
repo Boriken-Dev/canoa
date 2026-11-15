@@ -41,6 +41,7 @@ import 'desktop/host_grants.dart';
 import 'chat/cache_lifetime.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
+import 'chat/timing_log.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/child_thread.dart';
@@ -1131,7 +1132,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _startDraft(ChatSession draft) async {
     final source = draft.source;
     if (source == null) throw StateError('Choose where its agent comes from first');
-    final check = _checks[source] ?? await _check(source);
+    final check = _checks[source] ?? await timed<SourceCheck>('lookup', () => _check(source));
     if (!check.ready) {
       throw StateError(check.describe(source.label)!);
     }
@@ -1319,7 +1320,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _startViaLink(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
     final worktrees = worktree ? (widget.worktrees ?? _localWorktrees)() : null;
     if (worktree && worktrees == null) throw StateError('This build cannot make a worktree');
-    final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(name));
+    final made = worktrees == null ? null : await timed('worktree', () => worktrees.create(folder, worktreeBranch(name)));
     starting
       ..worktrees = worktrees
       ..made = made;
@@ -1330,11 +1331,11 @@ class _CanoaAppState extends State<CanoaApp> {
       // The overlays it starts with are Loadout's defaults unless the person chose; what it starts with is kept with it.
       final chosen = draft.overlays?.where(config.overlays.containsKey).toSet() ?? config.defaultOverlays.toSet();
       if (config.overlays.isNotEmpty) draft.overlays = chosen;
-      client = await _linkAgent(name, {
+      client = await timed<VerifiedAgent>('link_and_initialize', () => _linkAgent(name, {
         ..._cacheMeta(store.cacheLifetimeOf(draft)),
         ..._accountMeta(draft.account),
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
-      });
+      }));
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
       final opened = await client.openSession(cwd: where);

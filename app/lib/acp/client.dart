@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:coqui_acp/coqui_acp.dart';
@@ -5,6 +6,7 @@ import 'package:coqui_acp/page.dart';
 import 'package:coqui_web/coqui_web.dart';
 
 import '../chat/agent_events.dart';
+import '../chat/timing_log.dart';
 import 'delegate.dart';
 import 'link_secret.dart';
 import 'noise_secret.dart';
@@ -303,18 +305,18 @@ final class VerifiedAgent {
   Stream<AcpEvent> get events => _client.events;
   bool get isClosed => _client.isClosed;
   int? get protocolVersion => _client.protocolVersion;
-  Future<void> initialize() => _client.initialize();
+  Future<void> initialize() => timed('initialize', _client.initialize);
   Future<AcpDescription> describe() => _client.describe();
   Future<String> createSession({required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
-      _client.createSession(cwd: cwd, setup: setup);
+      timed('session_new', () => _client.createSession(cwd: cwd, setup: setup));
   Future<AcpOpenedSession> openSession({required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
-      _client.openSession(cwd: cwd, setup: setup);
+      timed('session_new', () => _client.openSession(cwd: cwd, setup: setup));
   bool takesMcp(AcpMcpTransport transport) => _client.takesMcp(transport);
   bool get takesSystemPrompt => _client.takesSystemPrompt;
   bool get takesAdditionalDirectories => _client.takesAdditionalDirectories;
   Future<Map<String, dynamic>> setConfigOption(String sessionId, String configId, String value) =>
-      _client.setConfigOption(sessionId, configId, value);
-  Future<void> setMode(String sessionId, String modeId) => _client.setMode(sessionId, modeId);
+      timed('set_config_option', () => _client.setConfigOption(sessionId, configId, value));
+  Future<void> setMode(String sessionId, String modeId) => timed('set_mode', () => _client.setMode(sessionId, modeId));
   Future<AcpOpenedSession> resumeSession(String id, {required String cwd, bool replayHistory = false}) =>
       _client.resumeSession(id, cwd: cwd, replayHistory: replayHistory);
   bool get takesImages => _client.takesImages;
@@ -323,8 +325,24 @@ final class VerifiedAgent {
   Future<AcpSessionPage> listSessions({String? cwd, String? cursor}) => _client.listSessions(cwd: cwd, cursor: cursor);
   Future<AcpOpenedSession> reopenSession(String id, {required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
       _client.reopenSession(id, cwd: cwd, setup: setup);
-  Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) =>
-      _client.prompt(sessionId, text, attachments: attachments);
+  Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) {
+    if (!timingOn) return _client.prompt(sessionId, text, attachments: attachments);
+    final watch = Stopwatch()..start();
+    var anyUpdate = false;
+    StreamSubscription<AcpSessionUpdate>? seen;
+    seen = _client.updates.listen((update) {
+      if (!anyUpdate) {
+        anyUpdate = true;
+        timingMark('first_update', watch.elapsedMilliseconds);
+      }
+      if (update.kind == 'agent_message_chunk') {
+        timingMark('first_token', watch.elapsedMilliseconds);
+        seen?.cancel();
+      }
+    });
+    // Under ACP v2 the call answers when the agent acknowledges the message, not when the turn ends.
+    return timed('prompt_ack', () => _client.prompt(sessionId, text, attachments: attachments));
+  }
   Future<void> cancel(String sessionId) => _client.cancel(sessionId);
   Future<void> closeSession(String sessionId) => _client.closeSession(sessionId);
   final _afterClose = <Future<void> Function()>[];
