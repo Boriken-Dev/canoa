@@ -57,6 +57,13 @@ permission = true
 question = false
 finished = true
 
+[voice]
+backend = "local"
+model = "small"
+language = "es-PR"
+device = "usb"
+mode = "hold"
+
 [attachments]
 paste_as_file = 100
 embed_limit = 2048
@@ -131,7 +138,7 @@ void main() {
   test('the canoa.cfg used here holds every table, and writes back whole', () {
     final names = tomlOf(every).keys.toSet();
     expect(names, containsAll(['desktop', 'network', 'assets', 'appearance', 'sessions', 'harnesses', 'notifications', 'attachments',
-      'usage', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults']));
+      'usage', 'voice', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults']));
     expect(changedTables(every, CanoaConfig.parse(every.encode())), isEmpty);
   });
 

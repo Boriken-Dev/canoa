@@ -61,6 +61,39 @@ final class NotificationSettings {
   );
 }
 
+/// How a dictation is held: one press starts it and the next ends it, or it lasts while a key is down.
+enum DictationMode { toggle, hold }
+
+/// `[voice]`: where speech is turned into text and how. Nothing is recorded until the person starts a dictation.
+final class VoiceSettings {
+  const VoiceSettings({this.backend = defaultVoiceBackend, this.model, this.language, this.device, this.mode = DictationMode.toggle});
+
+  /// The speech service, by the id it has in the app; [defaultVoiceBackend] is the operating system's.
+  final String backend;
+
+  /// The service's model where it has several; null is the service's own choice.
+  final String? model;
+
+  /// A language tag such as `es-PR`; null is automatic where the service can tell, else the system's.
+  final String? language;
+
+  /// The input device by the id the service gives it; null is the system's default.
+  final String? device;
+  final DictationMode mode;
+
+  VoiceSettings copyWith({String? backend, String? model, bool clearModel = false, String? language, bool clearLanguage = false,
+      String? device, bool clearDevice = false, DictationMode? mode}) => VoiceSettings(
+    backend: backend ?? this.backend,
+    model: clearModel ? null : model ?? this.model,
+    language: clearLanguage ? null : language ?? this.language,
+    device: clearDevice ? null : device ?? this.device,
+    mode: mode ?? this.mode,
+  );
+}
+
+/// The id of the operating system's speech service, which `[voice] backend` names unless the person chose another.
+const defaultVoiceBackend = 'system';
+
 /// Where a [CanoaConfig] was read from: the format and first-line marker of the person's own file, the layers below it (the
 /// installed copy and the system's file, lowest first), and the person's file as it was read. A save writes the person's
 /// file only, in its own format.
@@ -125,6 +158,7 @@ final class CanoaConfig {
     this.allowOnceOnly = false,
     this.protectedPaths,
     this.notifications = const NotificationSettings(),
+    this.voice = const VoiceSettings(),
     this.hiddenSources = const {},
     this.pasteAsFile = defaultPasteAsFile,
     this.embedLimit = defaultEmbedLimit,
@@ -194,6 +228,9 @@ final class CanoaConfig {
 
   final NotificationSettings notifications;
 
+  /// `[voice]`: the speech service and how dictation is held.
+  final VoiceSettings voice;
+
   /// `[sources] hidden`: the presets, by label, that Settings keeps out of the new-session picker.
   final Set<String> hiddenSources;
 
@@ -213,7 +250,7 @@ final class CanoaConfig {
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
       LookId? look, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
-      NotificationSettings? notifications, List<AgentCommand>? agents, Set<String>? hiddenSources, int? warnPermille}) =>
+      NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, int? warnPermille}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -236,6 +273,7 @@ final class CanoaConfig {
         allowOnceOnly: allowOnceOnly ?? this.allowOnceOnly,
         protectedPaths: clearProtectedPaths ? null : protectedPaths ?? this.protectedPaths,
         notifications: notifications ?? this.notifications,
+        voice: voice ?? this.voice,
         hiddenSources: hiddenSources ?? this.hiddenSources,
         pasteAsFile: pasteAsFile,
         embedLimit: embedLimit,
@@ -267,6 +305,7 @@ final class CanoaConfig {
     allowOnceOnly: allowOnceOnly,
     protectedPaths: protectedPaths,
     notifications: notifications,
+    voice: voice,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
@@ -933,6 +972,7 @@ final class CanoaConfig {
     allowOnceOnly: allowOnceOnly,
     protectedPaths: protectedPaths,
     notifications: notifications,
+    voice: voice,
     hiddenSources: hiddenSources,
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
@@ -965,7 +1005,7 @@ final class CanoaConfig {
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'sources', 'attachments', 'usage', 'connections'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'sources', 'attachments', 'usage', 'voice', 'connections'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -990,6 +1030,17 @@ final class CanoaConfig {
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
     final usage = table('usage', {'warn_permille', 'limit_phrases'});
+    final voiceTable = table('voice', {'backend', 'model', 'language', 'device', 'mode'});
+    String? voiceText(String key) {
+      final raw = voiceTable[key];
+      if (raw == null) return null;
+      if (raw is! String || raw.trim().isEmpty) throw FormatException('canoa.cfg: voice.$key must be text');
+      return raw;
+    }
+    final voiceMode = voiceTable['mode'] ?? 'toggle';
+    if (voiceMode is! String || !{'toggle', 'hold'}.contains(voiceMode)) {
+      throw const FormatException('canoa.cfg: voice.mode must be toggle or hold');
+    }
     int limit(String key, int fallback) {
       final raw = attachments[key] ?? fallback;
       if (raw is! int || raw < 0) throw FormatException('canoa.cfg: attachments.$key must be a whole number, 0 or more');
@@ -1181,6 +1232,13 @@ final class CanoaConfig {
       embedLimit: limit('embed_limit', defaultEmbedLimit),
       warnPermille: warn,
       limitPhrases: phrases == null ? null : [for (final phrase in phrases as List) phrase as String],
+      voice: VoiceSettings(
+        backend: voiceText('backend') ?? defaultVoiceBackend,
+        model: voiceText('model'),
+        language: voiceText('language'),
+        device: voiceText('device'),
+        mode: voiceMode == 'hold' ? DictationMode.hold : DictationMode.toggle,
+      ),
       notifications: NotificationSettings(
         permission: flag(notifications, 'permission', true),
         question: flag(notifications, 'question', true),
@@ -1196,6 +1254,18 @@ final class CanoaConfig {
         queueDelivery: queueDelivery,
       ),
     );
+  }
+
+  /// The `[voice]` table, written only when something in it is not the default.
+  String _voiceToml() {
+    final lines = [
+      if (voice.backend != defaultVoiceBackend) 'backend = ${jsonEncode(voice.backend)}',
+      if (voice.model != null) 'model = ${jsonEncode(voice.model)}',
+      if (voice.language != null) 'language = ${jsonEncode(voice.language)}',
+      if (voice.device != null) 'device = ${jsonEncode(voice.device)}',
+      if (voice.mode != DictationMode.toggle) 'mode = ${jsonEncode(voice.mode.name)}',
+    ];
+    return lines.isEmpty ? '' : '\n[voice]\n${lines.join('\n')}\n';
   }
 
   String _encodeToml() => '''
@@ -1231,7 +1301,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${_voiceToml()}${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

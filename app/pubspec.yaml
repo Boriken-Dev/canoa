@@ -57,6 +57,8 @@ dependencies:
   web_socket_channel: ^3.0.3
   # The browser's WebCrypto and IndexedDB, for the web peer bridge.
   web: ^1.1.1
+  # Dictation through the operating system's own speech service (Windows, macOS); no model or cloud service ships with the app.
+  speech_to_text: ^7.5.0
 
 dev_dependencies:
   flutter_test:

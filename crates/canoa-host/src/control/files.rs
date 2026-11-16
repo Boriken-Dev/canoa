@@ -57,6 +57,7 @@ pub const SECTIONS: &[&str] = &[
     "sessions",
     "store",
     "usage",
+    "voice",
 ];
 
 /// The tables that change what an agent may do or is given (the permission mode and protected paths, the overlays and skills
