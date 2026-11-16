@@ -1,8 +1,9 @@
 // The profile vectors canoa is held to as well (crates/canoa-host/tests/profile.rs): each merge's view or first
-// refusal, and each overlay source.
+// refusal, each overlay source, and each loadout a session names.
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:canoa/profile/overlay_layer.dart';
@@ -108,6 +109,27 @@ void main() {
         expect(error.code, expected!['code']);
         expect(error.key, expected['key']);
       }
+    });
+  }
+
+  for (final vector in (vectors['loadouts'] as List).cast<Map<dynamic, dynamic>>()) {
+    test('loadout: ${vector['name']}', () {
+      final CanoaConfig config;
+      try {
+        config = CanoaConfig.parse(vector['config'] as String);
+      } on FormatException catch (error) {
+        if (!vector.containsKey('error')) fail('$error');
+        expect(vector['error'], {'code': 'invalid'}, reason: 'refused, and the vector takes it');
+        return;
+      }
+      final asked = vector['loadout'] as String?;
+      if (vector.containsKey('resolved')) {
+        expect(config.resolveLoadout(asked)?.toJson(), vector['resolved']);
+        return;
+      }
+      final expected = vector['error'] as Map;
+      expect(expected['code'], 'unknown-loadout', reason: 'accepted, and the vector refuses it');
+      expect(() => config.resolveLoadout(asked), throwsA(isA<UnknownLoadout>().having((e) => e.name, 'name', expected['name'])));
     });
   }
 

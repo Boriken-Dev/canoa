@@ -35,7 +35,7 @@ void main() {
   testWidgets('a new session starts with the overlays that are on, tells the host which, and keeps them', (tester) async {
     final agent = OptionsAgent();
     final store = _store();
-    await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse('$overlaysText[loadout]\noff = ["b"]\n'));
+    await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse('$overlaysText[loadouts.main]\noverlays = ["a"]\n[defaults]\nloadout = "main"\n'));
     await newSession(tester);
     await chooseSource(tester, 'Claude');
     await openFolder(tester);
@@ -50,7 +50,7 @@ void main() {
   testWidgets('a person\'s choice in the composer wins over the defaults', (tester) async {
     final agent = OptionsAgent();
     final store = _store();
-    await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse('$overlaysText[loadout]\noff = ["b"]\n'));
+    await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse('$overlaysText[loadouts.main]\noverlays = ["a"]\n[defaults]\nloadout = "main"\n'));
     await newSession(tester);
     await chooseSource(tester, 'Claude');
     await openFolder(tester);
@@ -81,7 +81,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('overlay-default-b')));
     await tester.pumpAndSettle();
-    expect(written.last.loadoutOff, {'b'});
+    expect(written.last.defaultLoadout, 'Default', reason: 'the first change writes the loadout new sessions start with');
+    expect(written.last.loadouts['Default']!.overlays, ['a']);
+    expect(written.last.defaultOverlays, ['a']);
     expect(written.last.overlays.keys, ['a', 'b'], reason: 'it stays installed');
     await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();

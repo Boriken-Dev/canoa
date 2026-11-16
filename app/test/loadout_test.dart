@@ -147,12 +147,12 @@ void main() {
     expect(tester.widget<Switch>(find.byKey(const Key('overlay-default-review'))).value, isTrue);
 
     await tapKey(tester, 'overlay-default-review');
-    expect(saved.last.loadoutOff, {'review'});
+    expect(saved.last.loadouts['Default']!.overlays, isEmpty);
     expect(saved.last.defaultOverlays, isEmpty, reason: 'a new session starts without it');
     expect(saved.last.overlays.keys, ['review'], reason: 'it stays installed');
     expect(find.text('Off for new sessions'), findsOneWidget);
     await tapKey(tester, 'overlay-default-review');
-    expect(saved.last.loadoutOff, isEmpty);
+    expect(saved.last.loadouts['Default']!.overlays, ['review']);
   });
 
   testWidgets('removing what the store installed takes its entry and its default with it', (tester) async {
@@ -163,7 +163,7 @@ void main() {
     await tapKey(tester, 'overlay-remove-review');
     await tapKey(tester, 'overlay-remove-confirm');
     expect(saved.last.overlays, isEmpty);
-    expect(saved.last.loadoutOff, isEmpty);
+    expect(saved.last.loadouts.values.expand((loadout) => loadout.overlays), isEmpty);
     expect(overlays.records, isEmpty);
     expect(find.byKey(const Key('overlays-none')), findsOneWidget);
   });
@@ -283,8 +283,8 @@ void main() {
       final changed = saved.last;
       expect(changed.profile.mcp.keys, ['files']);
       expect(changed.agentMcp, {'Claude': {'files': false}, 'Codex': {'files': false}});
-      expect(changed.loadoutMcp['files']!.server, 'io.github.ana/files');
-      expect(changed.loadoutMcp['files']!.digest, startsWith('sha256:'));
+      expect(changed.storeMcp['files']!.server, 'io.github.ana/files');
+      expect(changed.storeMcp['files']!.digest, startsWith('sha256:'));
       expect(tabText(tester, 'store-tab-mcps'), 'MCPs 1');
       expect(find.textContaining('Off for every agent'), findsOneWidget);
       expect(find.textContaining('from the registry registry.modelcontextprotocol.io'), findsOneWidget);
@@ -338,7 +338,7 @@ void main() {
 
       await tester.enterText(find.byKey(const Key('mcps-registry-address')), 'https://registry.team.test');
       await tapKey(tester, 'mcps-registry-add');
-      expect(saved.last.loadoutRegistries, ['https://registry.team.test']);
+      expect(saved.last.storeRegistries, ['https://registry.team.test']);
       expect(asked.last.host, 'registry.team.test');
       expect(find.byKey(const Key('mcp-entry-dev.team/tracker')), findsOneWidget);
       expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsNothing);
@@ -348,7 +348,7 @@ void main() {
       expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
       await tapKey(tester, 'mcps-registry-registry.team.test');
       await tapKey(tester, 'mcps-registry-remove');
-      expect(saved.last.loadoutRegistries, isEmpty);
+      expect(saved.last.storeRegistries, isEmpty);
       expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget, reason: 'back to the official registry');
     });
 

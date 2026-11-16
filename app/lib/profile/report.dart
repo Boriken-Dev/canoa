@@ -12,6 +12,10 @@ const hostProfileMeta = 'dev.boriken.canoa/profile';
 /// Where `initialize` names the overlays a session starts with: a list of names, which only narrows what the host's profile lists.
 const overlaysMeta = 'dev.boriken.canoa/overlays';
 
+/// Where `initialize` names the loadout a session starts with: one of canoa.cfg's `[loadouts]`, which the host resolves once, when
+/// the session starts.
+const loadoutMeta = 'dev.boriken.canoa/loadout';
+
 /// Each harness's name, by its AOS harness id.
 const harnessLabels = {
   'claude-code': 'Claude Code',

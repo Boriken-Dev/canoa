@@ -96,7 +96,7 @@ void main() {
       expect(env(chosen)?.state, ItemState.applied, reason: chosen.summary);
 
       // A default turned off: a new session starts without it, and the report says it was not chosen.
-      final off = installed.withLoadoutOff({'review'});
+      final off = installed.withStartingOverlay('review', false);
       final without = await reportChoosing({overlaysMeta: off.defaultOverlays});
       expect(env(without), isNull, reason: without.summary);
       final note = without.items.where((item) => item.key == 'overlay' && item.layer == 'overlay:review').single;
@@ -105,6 +105,15 @@ void main() {
 
       // The session that was chosen with it is unchanged by the default being off now: asking again as it did gives it.
       expect(env(await reportChoosing({overlaysMeta: const ['review']}))?.state, ItemState.applied);
+
+      // A named loadout: what a session names is what it starts with, the host reads the file again for the next one, and a name
+      // the file does not hold is refused with the name.
+      final named = installed.withLoadouts({'with': const Loadout(overlays: ['review']), 'without': const Loadout()});
+      await File('${config.path}/canoa.cfg').writeAsString(named.encode());
+      expect(env(await reportChoosing({loadoutMeta: 'with'}))?.state, ItemState.applied);
+      final empty = await reportChoosing({loadoutMeta: 'without'});
+      expect(env(empty), isNull, reason: empty.summary);
+      await expectLater(reportChoosing({loadoutMeta: 'ghost'}), throwsA(predicate((error) => '$error'.contains('ghost'))));
     } finally {
       await host?.stop();
       // The library holds its home until it has let go.

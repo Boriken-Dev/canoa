@@ -110,8 +110,11 @@ catalog_max_bytes = 100000
 [skill_pins]
 helper = "$digest"
 
-[loadout]
-off = ["team"]
+[loadouts.main]
+overlays = ["team"]
+
+[defaults]
+loadout = "main"
 ''';
 
 Map<String, dynamic> tomlOf(CanoaConfig config) => TomlDocument.parse(config.encode()).toMap();
@@ -128,7 +131,7 @@ void main() {
   test('the canoa.cfg used here holds every table, and writes back whole', () {
     final names = tomlOf(every).keys.toSet();
     expect(names, containsAll(['desktop', 'network', 'assets', 'appearance', 'sessions', 'harnesses', 'notifications', 'attachments',
-      'usage', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadout']));
+      'usage', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults']));
     expect(changedTables(every, CanoaConfig.parse(every.encode())), isEmpty);
   });
 

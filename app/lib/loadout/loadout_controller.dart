@@ -102,8 +102,8 @@ class LoadoutController extends ChangeNotifier {
   /// The registry the Discover list reads: [registry] or one the person added.
   late String selectedRegistry = registry;
 
-  /// The registries offered: the official one, then those `[loadout] registries` names.
-  List<String> get registries => [registry, ...config.loadoutRegistries.where((address) => address != registry)];
+  /// The registries offered: the official one, then those `[store] registries` names.
+  List<String> get registries => [registry, ...config.storeRegistries.where((address) => address != registry)];
 
   List<McpRegistryEntry> registryEntries = const [];
   String? registryNext, registryProblem;
@@ -198,12 +198,10 @@ class LoadoutController extends ChangeNotifier {
   // Overlays.
 
   /// Whether new sessions start with the overlay [name].
-  bool isDefaultOn(String name) => !config.loadoutOff.contains(name);
+  bool isDefaultOn(String name) => config.startingLoadout.overlays.contains(name);
 
   Future<void> setDefault(String name, bool on) {
-    final off = {...config.loadoutOff};
-    on ? off.remove(name) : off.add(name);
-    return apply(config.withLoadoutOff(off));
+    return apply(config.withStartingOverlay(name, on));
   }
 
   /// The layer an installed overlay makes, null when it was left out.
@@ -286,7 +284,7 @@ class LoadoutController extends ChangeNotifier {
   /// Every MCP server the profile defines: the person's own, then each overlay's.
   List<InstalledMcp> installedMcp() => [
     for (final MapEntry(:key, :value) in config.profile.mcp.entries)
-      if (value != null) InstalledMcp(name: key, server: value, layer: 'yours', origin: config.loadoutMcp[key]),
+      if (value != null) InstalledMcp(name: key, server: value, layer: 'yours', origin: config.storeMcp[key]),
     for (final layer in layers?.layers ?? const <Layer>[])
       if (layer.id.kind == LayerKind.overlay)
         for (final MapEntry(:key, :value) in layer.profile.mcp.entries)
@@ -301,7 +299,7 @@ class LoadoutController extends ChangeNotifier {
     for (final agent in agents) {
       changed = changed.withAgentMcp(agent, {...?changed.agentMcp[agent], name: on});
     }
-    return apply(changed);
+    return apply(changed.withStartingMcp(name, on));
   }
 
   Future<void> removeMcp(String name) => apply(config.withoutMcp(name));
@@ -313,21 +311,21 @@ class LoadoutController extends ChangeNotifier {
     return apply(config.withInstalledMcp(name, definition, entry.origin(selectedRegistry), agents: agents));
   }
 
-  /// Reads [address] from now on, after adding it to `[loadout] registries`. Gives why it cannot be one, or null.
+  /// Reads [address] from now on, after adding it to `[store] registries`. Gives why it cannot be one, or null.
   Future<String?> addRegistry(String address) async {
     address = address.trim();
     if (registryProblemOf(address) case final why?) return why;
     if (registries.contains(address)) return 'That registry is already here';
     if (registries.length >= 17) return 'Canoa keeps at most 16 registries beside the official one';
-    await apply(config.withLoadoutRegistries([...config.loadoutRegistries, address]));
+    await apply(config.withStoreRegistries([...config.storeRegistries, address]));
     await selectRegistry(address);
     return null;
   }
 
   /// Forgets a registry the person added; the official one stays.
   Future<void> removeRegistry(String address) async {
-    if (!config.loadoutRegistries.contains(address)) return;
-    await apply(config.withLoadoutRegistries([...config.loadoutRegistries]..remove(address)));
+    if (!config.storeRegistries.contains(address)) return;
+    await apply(config.withStoreRegistries([...config.storeRegistries]..remove(address)));
     if (isGitRegistry(address)) await home?.overlays.removeCatalog(gitRegistryLabel(address));
     if (selectedRegistry == address) await selectRegistry(registry);
   }

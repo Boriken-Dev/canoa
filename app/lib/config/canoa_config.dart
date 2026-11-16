@@ -495,17 +495,87 @@ final class CanoaConfig {
     return out;
   }
 
-  /// `[loadout] off`: the overlays by name that new sessions do not start with. An overlay named here stays installed and
-  /// applies to no new session until it is turned on again; sessions already started keep what they started with.
-  Set<String> get loadoutOff => _loadout(tables['loadout']).off;
+  /// `[loadouts.NAME]`: the named collections of whole overlays, chosen skills and MCP servers a session starts with, in the order
+  /// written. A loadout cannot reorder its overlays: they apply in the order `[overlays]` composes them.
+  Map<String, Loadout> get loadouts => _loadouts(tables['loadouts']);
 
-  /// `[loadout.mcp.NAME]`: where each MCP server the store installed came from: the registry's address, the server's name
-  /// and version there, and the digest of the `server.json` that was shown and accepted.
-  Map<String, McpOrigin> get loadoutMcp => _loadout(tables['loadout']).mcp;
+  /// `[defaults] loadout`: the name of the loadout a session that names none starts with; null when none is set, which starts a
+  /// session with every overlay `[overlays]` names and every MCP server, as before there were loadouts.
+  String? get defaultLoadout => _defaultLoadout(tables['defaults'], loadouts);
 
-  /// `[loadout] skills`: the skills the person chose themselves that are on for new sessions, by name. The host delivers each
-  /// from the record the app kept of it, once the record and its files agree.
-  Set<String> get loadoutSkills => _loadout(tables['loadout']).skills;
+  /// What a session that names no loadout starts with: the default loadout, or when there is none, everything the profile
+  /// holds. This is what the editors change, and a `Default` loadout is written the first time one of them does.
+  Loadout get startingLoadout {
+    if (defaultLoadout case final name?) return loadouts[name]!;
+    return Loadout(overlays: overlays.keys.toList(), mcp: [
+      for (final MapEntry(:key, :value) in profile.mcp.entries)
+        if (value != null) key,
+    ]);
+  }
+
+  /// The loadout [name] (the default when null) as this file says it now, the way the host resolves it when a session starts:
+  /// its overlays in the order `[overlays]` composes them, those `[overlays]` lacks apart. Null when none is named and there is
+  /// no default. Throws [UnknownLoadout] for a name `[loadouts]` does not hold.
+  ResolvedLoadout? resolveLoadout([String? name]) {
+    final chosen = name ?? defaultLoadout;
+    if (chosen == null) return null;
+    final loadout = loadouts[chosen];
+    if (loadout == null) throw UnknownLoadout(chosen);
+    return ResolvedLoadout(
+      name: chosen,
+      overlays: [for (final installed in overlays.keys) if (loadout.overlays.contains(installed)) installed],
+      missingOverlays: [for (final named in loadout.overlays) if (!overlays.containsKey(named)) named],
+      skills: loadout.skills,
+      mcp: loadout.mcp,
+    );
+  }
+
+  static Map<String, Loadout> _loadouts(Object? raw) {
+    if (raw == null) return const {};
+    if (raw is! Map) throw const FormatException('canoa.cfg: loadouts must be a table');
+    final out = <String, Loadout>{};
+    for (final MapEntry(:key, :value) in raw.entries) {
+      if (!isEntryName('$key')) {
+        throw FormatException('canoa.cfg: loadouts.$key: a loadout is named with 1 to 64 letters, digits, - or _');
+      }
+      if (value is! Map) throw FormatException('canoa.cfg: loadouts.$key must be a table');
+      out['$key'] = Loadout.read('$key', value);
+    }
+    return out;
+  }
+
+  static String? _defaultLoadout(Object? raw, Map<String, Loadout> loadouts) {
+    if (raw == null) return null;
+    if (raw is! Map || raw.keys.any((key) => key != 'loadout')) {
+      throw const FormatException('canoa.cfg: defaults is a table with the key loadout');
+    }
+    final name = raw['loadout'];
+    if (name == null) return null;
+    if (name is! String || !loadouts.containsKey(name)) {
+      throw const FormatException('canoa.cfg: defaults.loadout is the name of a loadout in loadouts');
+    }
+    return name;
+  }
+
+  /// This configuration with [loadouts] as `[loadouts]`, and [defaultName] as `[defaults] loadout` (kept as it is when omitted;
+  /// dropped when it names a loadout that is gone).
+  CanoaConfig withLoadouts(Map<String, Loadout> loadouts, {String? defaultName}) {
+    final keep = defaultName ?? defaultLoadout;
+    final named = keep != null && loadouts.containsKey(keep) ? keep : null;
+    final defaults = {...((tables['defaults'] as Map?) ?? const {}).cast<String, dynamic>()}..remove('loadout');
+    return _withTable('loadouts', {for (final MapEntry(:key, :value) in loadouts.entries) key: value.toTable()})
+        ._withTable('defaults', {...defaults, 'loadout': ?named});
+  }
+
+  /// This configuration with [change] applied to the loadout a session that names none starts with; the first change writes it
+  /// as `Default`, holding what the session started with until now.
+  CanoaConfig _withStarting(Loadout Function(Loadout loadout) change) {
+    final name = defaultLoadout ?? 'Default';
+    return withLoadouts({...loadouts, name: change(startingLoadout)}, defaultName: name);
+  }
+
+  /// The skills the person chose that a new session starts with, by name.
+  Set<String> get loadoutSkills => startingLoadout.skills.toSet();
 
   /// The person's own layer with the chosen skills that are on, each taken from where the app keeps them. A profile entry the
   /// person wrote for the same name stays.
@@ -518,89 +588,97 @@ final class CanoaConfig {
     });
   }
 
-  /// `[loadout] registries`: the MCP registries the person added beside the official one, in the order added. Each is the address of
+  /// `[store.mcp.NAME]`: where each MCP server the store installed came from: the registry's address, the server's name
+  /// and version there, and the digest of the `server.json` that was shown and accepted.
+  Map<String, McpOrigin> get storeMcp => _storeExtras(tables['store']).mcp;
+
+  /// `[store] registries`: the MCP registries the person added beside the official one, in the order added. Each is the address of
   /// a registry that serves the MCP Registry's API, or a git source (`<repository>@<ref>#<file>`) of a file in that API's list
   /// shape. Whether an address can be read is for the page to say when it is used.
-  List<String> get loadoutRegistries => _loadout(tables['loadout']).registries;
+  List<String> get storeRegistries => _storeExtras(tables['store']).registries;
 
-  static ({Set<String> off, Map<String, McpOrigin> mcp, Set<String> skills, List<String> registries}) _loadout(Object? raw) {
-    if (raw == null) return (off: const {}, mcp: const {}, skills: const {}, registries: const []);
-    if (raw is! Map || raw.keys.any((key) => key != 'off' && key != 'mcp' && key != 'skills' && key != 'registries')) {
-      throw const FormatException('canoa.cfg: loadout is a table with the keys off, mcp, skills and registries');
-    }
+  static ({Map<String, McpOrigin> mcp, List<String> registries}) _storeExtras(Object? raw) {
+    if (raw == null) return (mcp: const {}, registries: const []);
+    if (raw is! Map) throw const FormatException('canoa.cfg: store must be a table');
     final registries = raw['registries'];
     if (registries != null &&
         (registries is! List ||
             registries.length > 16 ||
             registries.toSet().length != registries.length ||
             registries.any((address) => address is! String || address.isEmpty || address.runes.any((rune) => rune <= 0x20 || rune == 0x7f)))) {
-      throw const FormatException('canoa.cfg: loadout.registries is a list of at most 16 different registry addresses');
-    }
-    final skills = raw['skills'];
-    if (skills != null && (skills is! List || skills.any((name) => name is! String || !validSkillName(name)))) {
-      throw const FormatException('canoa.cfg: loadout.skills is a list of skill names');
-    }
-    final off = raw['off'];
-    if (off != null && (off is! List || off.any((name) => name is! String || !isEntryName(name)))) {
-      throw const FormatException('canoa.cfg: loadout.off is a list of overlay names');
+      throw const FormatException('canoa.cfg: store.registries is a list of at most 16 different registry addresses');
     }
     final mcp = <String, McpOrigin>{};
     final rawMcp = raw['mcp'];
-    if (rawMcp != null && rawMcp is! Map) throw const FormatException('canoa.cfg: loadout.mcp must be a table');
+    if (rawMcp != null && rawMcp is! Map) throw const FormatException('canoa.cfg: store.mcp must be a table');
     for (final MapEntry(:key, :value) in ((rawMcp as Map?) ?? const {}).entries) {
       final origin = value is Map ? McpOrigin.fromMap(value) : null;
       if (!isEntryName('$key') || origin == null) {
-        throw FormatException('canoa.cfg: loadout.mcp.$key is a table of registry, server, version and digest');
+        throw FormatException('canoa.cfg: store.mcp.$key is a table of registry, server, version and digest');
       }
       mcp['$key'] = origin;
     }
-    return (
-      off: {for (final name in (off as List?) ?? const []) name as String},
-      mcp: mcp,
-      skills: {for (final name in (skills as List?) ?? const []) name as String},
-      registries: [for (final address in (registries as List?) ?? const []) address as String],
-    );
+    return (mcp: mcp, registries: [for (final address in (registries as List?) ?? const []) address as String]);
   }
 
-  CanoaConfig _withLoadout({Set<String>? off, Map<String, McpOrigin>? mcp, Set<String>? skills, List<String>? registries}) {
-    final now = _loadout(tables['loadout']);
-    final offNow = off ?? now.off, mcpNow = mcp ?? now.mcp, skillsNow = skills ?? now.skills, registriesNow = registries ?? now.registries;
-    return _withTable('loadout', {
+  /// This configuration with [mcp] and [registries] (each left as it is when omitted) in `[store]`, beside its limits.
+  CanoaConfig _withStoreExtras({Map<String, McpOrigin>? mcp, List<String>? registries}) {
+    final now = _storeExtras(tables['store']);
+    final mcpNow = mcp ?? now.mcp, registriesNow = registries ?? now.registries;
+    final table = {...((tables['store'] as Map?) ?? const {}).cast<String, dynamic>()}
+      ..remove('mcp')
+      ..remove('registries');
+    return _withTable('store', {
+      ...table,
       if (registriesNow.isNotEmpty) 'registries': registriesNow,
-      if (offNow.isNotEmpty) 'off': offNow.toList()..sort(),
-      if (skillsNow.isNotEmpty) 'skills': skillsNow.toList()..sort(),
       if (mcpNow.isNotEmpty) 'mcp': {for (final MapEntry(:key, :value) in mcpNow.entries) key: value.toMap()},
     });
   }
 
-  /// This configuration with [off] as `[loadout] off`, sorted so the file does not churn.
-  CanoaConfig withLoadoutOff(Set<String> off) => _withLoadout(off: off);
-
   /// This configuration with the MCP server [name] defined as [definition] in `[profile.mcp]` and [origin] noted in
-  /// `[loadout.mcp]`; with it off for each of [agents], so that no agent starts it until the person allows it.
+  /// `[store.mcp]`; with it off for each of [agents], so that no agent starts it until the person allows it.
   CanoaConfig withInstalledMcp(String name, Map<String, dynamic> definition, McpOrigin origin, {required List<String> agents}) {
     if (!isEntryName(name)) throw ArgumentError.value(name, 'name', 'An MCP server name has 1 to 64 letters, digits, - or _');
-    var out = _withProfileEntry('mcp', name, definition)._withLoadout(mcp: {...loadoutMcp, name: origin});
+    var out = _withProfileEntry('mcp', name, definition)._withStoreExtras(mcp: {...storeMcp, name: origin});
     for (final agent in agents) {
       out = out.withAgentMcp(agent, {...?out.agentMcp[agent], name: false});
     }
-    return out;
+    return out.withStartingMcp(name, true);
   }
 
-  /// This configuration without the MCP server [name]: its definition, its note and every agent's choice for it.
+  /// This configuration without the MCP server [name]: its definition, its note, every agent's choice for it and its place in
+  /// every loadout.
   CanoaConfig withoutMcp(String name) {
-    var out = _withProfileEntry('mcp', name, null)._withLoadout(mcp: {...loadoutMcp}..remove(name));
+    var out = _withProfileEntry('mcp', name, null)._withStoreExtras(mcp: {...storeMcp}..remove(name));
     for (final MapEntry(key: agent, value: choices) in agentMcp.entries) {
       if (choices.containsKey(name)) out = out.withAgentMcp(agent, {...choices}..remove(name));
     }
-    return out;
+    return out._withEachLoadout((loadout) => loadout.withMcp(name, false));
   }
 
-  /// This configuration with [registries] as `[loadout] registries`, in the order given.
-  CanoaConfig withLoadoutRegistries(List<String> registries) => _withLoadout(registries: registries);
+  /// This configuration with [registries] as `[store] registries`, in the order given.
+  CanoaConfig withStoreRegistries(List<String> registries) => _withStoreExtras(registries: registries);
 
-  /// This configuration with [skills] as `[loadout] skills`, sorted so the file does not churn.
-  CanoaConfig withLoadoutSkills(Set<String> skills) => _withLoadout(skills: skills);
+  /// This configuration with [name] in, or out of, the servers a new session starts with. Nothing changes while no loadout is the
+  /// default, since a session then starts with every server the agent allows.
+  CanoaConfig withStartingMcp(String name, bool on) =>
+      defaultLoadout == null ? this : _withStarting((loadout) => loadout.withMcp(name, on));
+
+  /// This configuration with [skills] as the chosen skills a new session starts with, sorted so the file does not churn.
+  CanoaConfig withLoadoutSkills(Set<String> skills) =>
+      _withStarting((loadout) => loadout.copyWith(skills: skills.toList()..sort()));
+
+  /// This configuration with the overlay [name] in, or out of, the overlays a new session starts with.
+  CanoaConfig withStartingOverlay(String name, bool on) =>
+      _withStarting((loadout) => loadout.copyWith(overlays: [
+            for (final each in loadout.overlays) if (each != name) each,
+            if (on) name,
+          ]));
+
+  CanoaConfig _withEachLoadout(Loadout Function(Loadout loadout) change) {
+    if (loadouts.isEmpty) return this;
+    return withLoadouts({for (final MapEntry(:key, :value) in loadouts.entries) key: change(value)});
+  }
 
   CanoaConfig _withProfileEntry(String section, String name, Map<String, dynamic>? entry) {
     final raw = _deepCopy((tables['profile'] as Map?) ?? const {});
@@ -619,8 +697,8 @@ final class CanoaConfig {
         profile: _profile('profile', raw, LayerKind.user), agentProfiles: agentProfiles);
   }
 
-  /// The overlays a new session starts with: every one `[overlays]` names except those `[loadout] off` turns off.
-  List<String> get defaultOverlays => [for (final name in overlays.keys) if (!loadoutOff.contains(name)) name];
+  /// The overlays a new session that names no loadout starts with, in the order `[overlays]` composes them.
+  List<String> get defaultOverlays => resolveLoadout()?.overlays ?? overlays.keys.toList();
 
   /// `[store]`: the store's limits.
   StoreSettings get store => StoreSettings.parse((tables['store'] as Map?) ?? const {});
@@ -637,7 +715,13 @@ final class CanoaConfig {
       if (limits.iconMaxWidth != d.iconMaxWidth) 'icon_max_width': limits.iconMaxWidth,
       if (limits.iconMaxHeight != d.iconMaxHeight) 'icon_max_height': limits.iconMaxHeight,
     };
-    return _withTable('store', table);
+    return _withTable('store', {...table, ...?_storeExtrasTable()});
+  }
+
+  Map<String, dynamic>? _storeExtrasTable() {
+    final raw = tables['store'];
+    if (raw is! Map) return null;
+    return {for (final key in const ['registries', 'mcp']) if (raw[key] != null) key: raw[key]};
   }
 
   /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
@@ -808,15 +892,17 @@ final class CanoaConfig {
     if (!isEntryName(name)) throw ArgumentError.value(name, 'name', 'An overlay name has 1 to 64 letters, digits, - or _');
     final raw = _deepCopy((tables['overlays'] as Map?) ?? const {})
       ..[name] = <String, dynamic>{'source': source.spec, 'pin': pin};
-    return _withTable('overlays', raw, overlays: {...overlays, name: source.pinnedTo(pin)});
+    final added = _withTable('overlays', raw, overlays: {...overlays, name: source.pinnedTo(pin)});
+    // A new overlay starts on, in the loadout new sessions start with, when there is one written.
+    return overlays.containsKey(name) || defaultLoadout == null ? added : added.withStartingOverlay(name, true);
   }
 
   /// This configuration without the overlay [name] in `[overlays]`.
   CanoaConfig withoutOverlay(String name) {
     final removed = _withTable('overlays', _deepCopy((tables['overlays'] as Map?) ?? const {})..remove(name),
         overlays: {for (final MapEntry(:key, :value) in overlays.entries) if (key != name) key: value});
-    // An overlay put back later starts on, not off because an earlier one of its name was.
-    return loadoutOff.contains(name) ? removed.withLoadoutOff({...loadoutOff}..remove(name)) : removed;
+    // An overlay put back later starts as a new one does, not in a loadout because an earlier one of its name was.
+    return removed._withEachLoadout((loadout) => loadout.copyWith(overlays: [for (final each in loadout.overlays) if (each != name) each]));
   }
 
   /// This configuration with another's `[overlays]`, `[profile]` and agent profiles, as they are now.
@@ -879,7 +965,7 @@ final class CanoaConfig {
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadout', 'sources', 'attachments', 'usage', 'connections'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'sources', 'attachments', 'usage', 'connections'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -1051,7 +1137,8 @@ final class CanoaConfig {
     _catalogs(data['catalogs']);
     _connections(data['connections']);
     _skillPins(data['skill_pins']);
-    _loadout(data['loadout']);
+    _defaultLoadout(data['defaults'], _loadouts(data['loadouts']));
+    _storeExtras(data['store']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
@@ -1073,7 +1160,8 @@ final class CanoaConfig {
         'catalogs': ?data['catalogs'],
         'connections': ?data['connections'],
         'skill_pins': ?data['skill_pins'],
-        'loadout': ?data['loadout'],
+        'loadouts': ?data['loadouts'],
+        'defaults': ?data['defaults'],
         'store': ?rawStore,
       },
       agents: agents,
@@ -1206,6 +1294,103 @@ args = ${jsonEncode(agent.args)}
       throw FormatException('canoa.cfg: $where: $error');
     }
   }
+}
+
+/// One `[loadouts.NAME]`: a named collection a session starts with. Its overlays are whole and apply in the order `[overlays]`
+/// composes them.
+final class Loadout {
+  const Loadout({this.description = '', this.overlays = const [], this.skills = const [], this.mcp = const []});
+
+  /// What the loadout is for.
+  final String description;
+
+  /// Overlays by the name `[overlays]` gives them.
+  final List<String> overlays;
+
+  /// The skills the person chose, by name.
+  final List<String> skills;
+
+  /// The servers of `[profile.mcp]` it starts.
+  final List<String> mcp;
+
+  static const _keys = {'description', 'overlays', 'skills', 'mcp'};
+
+  /// The loadout [name] as canoa.cfg has it. Throws [FormatException] for a key it does not have or a name that is not one.
+  factory Loadout.read(String name, Map<dynamic, dynamic> table) {
+    List<String> names(String key, bool Function(String) valid) {
+      final raw = table[key];
+      if (raw == null) return const [];
+      if (raw is! List || raw.any((item) => item is! String || !valid(item))) {
+        throw FormatException('canoa.cfg: loadouts.$name.$key is a list of names');
+      }
+      final out = <String>[];
+      for (final item in raw.cast<String>()) {
+        if (!out.any((held) => held.toLowerCase() == item.toLowerCase())) out.add(item);
+      }
+      return out;
+    }
+
+    for (final key in table.keys) {
+      if (!_keys.contains(key)) {
+        throw FormatException('canoa.cfg: loadouts.$name.$key is not a loadout setting: description, overlays, skills and mcp are');
+      }
+    }
+    final description = table['description'];
+    if (description != null && description is! String) throw FormatException('canoa.cfg: loadouts.$name.description is text');
+    return Loadout(
+      description: (description as String?) ?? '',
+      overlays: names('overlays', validOverlayName),
+      skills: names('skills', validSkillName),
+      mcp: names('mcp', isEntryName),
+    );
+  }
+
+  Loadout copyWith({String? description, List<String>? overlays, List<String>? skills, List<String>? mcp}) => Loadout(
+    description: description ?? this.description,
+    overlays: overlays ?? this.overlays,
+    skills: skills ?? this.skills,
+    mcp: mcp ?? this.mcp,
+  );
+
+  /// This loadout with the server [name] in it, or without.
+  Loadout withMcp(String name, bool on) => copyWith(mcp: [
+        for (final each in mcp) if (each != name) each,
+        if (on) name,
+      ]);
+
+  Map<String, dynamic> toTable() => {
+    if (description.isNotEmpty) 'description': description,
+    if (overlays.isNotEmpty) 'overlays': overlays,
+    if (skills.isNotEmpty) 'skills': skills,
+    if (mcp.isNotEmpty) 'mcp': mcp,
+  };
+}
+
+/// What a session starts with once its loadout is resolved, as the host resolves it when the session starts.
+final class ResolvedLoadout {
+  const ResolvedLoadout({required this.name, required this.overlays, required this.missingOverlays, required this.skills, required this.mcp});
+
+  final String name;
+
+  /// Its installed overlays, in the order `[overlays]` composes them.
+  final List<String> overlays;
+
+  /// Overlays it names that `[overlays]` does not list.
+  final List<String> missingOverlays;
+  final List<String> skills, mcp;
+
+  Map<String, Object?> toJson() =>
+      {'name': name, 'overlays': overlays, 'missing_overlays': missingOverlays, 'skills': skills, 'mcp': mcp};
+}
+
+/// A session named a loadout `[loadouts]` does not hold.
+final class UnknownLoadout implements Exception {
+  const UnknownLoadout(this.name);
+
+  final String name;
+
+  @override
+  String toString() => 'there is no loadout named $name';
 }
 
 /// Where an MCP server the store installed came from: a registry, the server's name and version there, and the digest of the

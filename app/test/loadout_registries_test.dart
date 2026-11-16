@@ -27,18 +27,18 @@ Map<String, Object?> teamServer() => {
 };
 
 void main() {
-  test('registries are a list of addresses in [loadout], in the order added, that the file keeps', () {
+  test('registries are a list of addresses in [store], in the order added, that the file keeps', () {
     final base = CanoaConfig.parse('');
-    expect(base.loadoutRegistries, isEmpty);
-    final two = base.withLoadoutRegistries(['https://registry.team.test', 'https://git.team.test/lists.git@main#servers.json']);
+    expect(base.storeRegistries, isEmpty);
+    final two = base.withStoreRegistries(['https://registry.team.test', 'https://git.team.test/lists.git@main#servers.json']);
     final read = CanoaConfig.parse(two.encode());
-    expect(read.loadoutRegistries, ['https://registry.team.test', 'https://git.team.test/lists.git@main#servers.json']);
-    expect(CanoaConfig.parse(read.withLoadoutRegistries([]).encode()).loadoutRegistries, isEmpty);
+    expect(read.storeRegistries, ['https://registry.team.test', 'https://git.team.test/lists.git@main#servers.json']);
+    expect(CanoaConfig.parse(read.withStoreRegistries([]).encode()).storeRegistries, isEmpty);
     for (final text in [
-      '[loadout]\nregistries = "https://x.test"\n',
-      '[loadout]\nregistries = [1]\n',
-      '[loadout]\nregistries = ["a b"]\n',
-      '[loadout]\nregistries = ["https://x.test", "https://x.test"]\n',
+      '[store]\nregistries = "https://x.test"\n',
+      '[store]\nregistries = [1]\n',
+      '[store]\nregistries = ["a b"]\n',
+      '[store]\nregistries = ["https://x.test", "https://x.test"]\n',
     ]) {
       expect(() => CanoaConfig.parse(text), throwsA(isA<FormatException>().having((e) => e.message, 'message', contains('registries'))), reason: text);
     }
@@ -77,7 +77,7 @@ void main() {
       final address = 'http://127.0.0.1:${server.port}';
       expect(controller.registries, [officialRegistry]);
       expect(await controller.addRegistry(address), isNull);
-      expect(saved.last.loadoutRegistries, [address]);
+      expect(saved.last.storeRegistries, [address]);
       expect(controller.registries, [officialRegistry, address]);
       expect(controller.selectedRegistry, address);
       expect(controller.registryProblem, isNull);
@@ -87,14 +87,14 @@ void main() {
       final entry = controller.registryEntries.single;
       final option = optionsOf(entry.server).single;
       await controller.installMcp(entry, option, 'tracker');
-      final origin = saved.last.loadoutMcp['tracker']!;
+      final origin = saved.last.storeMcp['tracker']!;
       expect(origin.registry, address, reason: 'installed from the registry it was listed by');
       expect(origin.server, 'dev.team/tracker');
 
       expect(await controller.addRegistry(address), 'That registry is already here');
       expect(await controller.addRegistry('http://registry.team.test'), isNotNull);
       await controller.removeRegistry(address);
-      expect(saved.last.loadoutRegistries, isEmpty);
+      expect(saved.last.storeRegistries, isEmpty);
       expect(controller.selectedRegistry, officialRegistry);
     } finally {
       controller.dispose();
@@ -135,7 +135,7 @@ void main() {
 
         final entry = controller.registryEntries.single;
         await controller.installMcp(entry, optionsOf(entry.server).single, 'tracker');
-        expect(saved.last.loadoutMcp['tracker']!.registry, spec);
+        expect(saved.last.storeMcp['tracker']!.registry, spec);
 
         // The file moves on: the next read is of the new commit.
         repo

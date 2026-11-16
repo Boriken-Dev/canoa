@@ -160,7 +160,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
   /// Which registry Discover lists, and a field to add one: an address that serves the registry's API, or a git source of a file in
   /// its list shape.
   Widget _registryRow(BuildContext context) {
-    final added = c.config.loadoutRegistries;
+    final added = c.config.storeRegistries;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
         for (final each in c.registries)
