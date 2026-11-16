@@ -494,7 +494,7 @@ class _SessionPickerState extends State<SessionPicker> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Account', style: TextStyle(fontSize: 11.5, color: look.muted)),
         const SizedBox(height: 2),
-        Wrap(spacing: 6, runSpacing: 6, children: [
+        ConstrainedBox(constraints: const BoxConstraints(maxHeight: 260), child: SingleChildScrollView(child: SizedBox(width: double.infinity, child: Wrap(spacing: 6, runSpacing: 6, children: [
           _accountTile(context, accounts, null, chosen: chosen == null, now: now),
           for (final account in offered) _accountTile(context, accounts, account, chosen: account.name == chosen?.name, now: now),
           ActionChip(
@@ -506,7 +506,12 @@ class _SessionPickerState extends State<SessionPicker> {
               unawaited(accounts.refresh());
             },
           ),
-        ]),
+        ])))),
+        if (accounts.acceptsOf(entry) case final accepts when accepts.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('$entry accepts ${standardsText(accepts)}', key: const Key('picker-accepts'), style: TextStyle(fontSize: 11.5, color: look.muted)),
+          ),
         if (_accountBlock(accounts) case final block? when offered.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -604,7 +609,7 @@ class _SessionPickerState extends State<SessionPicker> {
               Text(name, style: TextStyle(fontSize: 13, color: usable || !draft ? null : look.muted)),
               if (chosen) ...[const SizedBox(width: 4), const Icon(Icons.check, size: 14)],
             ]),
-            Text(state, style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
+            Text(account != null && account.provides.isNotEmpty ? '${standardsText(account.provides)} · $state' : state, key: Key('account-state $name'), style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
             if (summary != null) Text(summary, key: Key('account-left-summary $name'), style: TextStyle(fontSize: 11, color: look.muted)),
             if (offerFirst && draft)
               TextButton(

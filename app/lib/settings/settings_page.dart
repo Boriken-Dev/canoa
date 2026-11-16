@@ -234,7 +234,7 @@ class SettingsPageState extends State<SettingsPage> {
       'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech),
       'shortcuts' => const ShortcutsSection(),
       'sources' => SourcesSection(
-        controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs),
+        controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs, accounts: widget.accounts),
       'profiles' => ProfilesPanel(
         key: const Key('settings-profiles-panel'),
         config: config,

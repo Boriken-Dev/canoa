@@ -82,13 +82,23 @@ class AccountsController extends ChangeNotifier {
     return harness != null && providers.contains(harness) ? harness : null;
   }
 
-  /// Every account a session of [entry] can run on: those the entry lists, in its order, then the rest of its provider's. A key
-  /// the host trusts with accounts may choose any of its provider's, so the choice is not narrowed to what canoa.cfg lists.
+  /// What the host lists of [entry], or null for one it does not list.
+  AccountEntry? hostEntry(String entry) => _entries.where((each) => each.name == entry).firstOrNull;
+
+  /// The credential standards [entry]'s agent accepts, the most preferred first; empty when the host does not say.
+  List<String> acceptsOf(String entry) => hostEntry(entry)?.accepts ?? const [];
+
+  /// Every account a session of [entry] can run on: those the entry lists, in its order, then the others. Which others is the host's
+  /// match of what each account supports to what the agent accepts, whichever provider made the account; a host that does not say
+  /// leaves the entry's provider's own. A key the host trusts with accounts may choose any of them, so the choice is not narrowed to
+  /// what canoa.cfg lists.
   List<AccountInfo> availableTo(String entry) {
     final harness = harnessOf(entry);
     if (harness == null) return const [];
     final listed = offeredBy(entry);
-    return [...listed, for (final each in of(harness)) if (!listed.any((one) => one.name == each.name)) each];
+    final usable = hostEntry(entry)?.usable;
+    final rest = usable == null ? of(harness) : [for (final each in _accounts) if (usable.contains(each.name)) each];
+    return [...listed, for (final each in rest) if (!listed.any((one) => one.name == each.name)) each];
   }
 
   /// Whether the credential of [account] reaches the agent in its environment (an API key or a token, not a login kept in a folder

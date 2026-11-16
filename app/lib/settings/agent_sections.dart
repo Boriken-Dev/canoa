@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../accounts/account_models.dart' show standardsText;
+import '../accounts/accounts_controller.dart';
 import '../acp/agent_commands.dart';
 import '../chat/modes.dart';
 import '../permissions/permission_rules.dart';
@@ -19,7 +21,7 @@ import 'settings_row.dart';
 /// Where a new session's agent comes from, listed as T3 Code lists its providers: the name, the version when it is known,
 /// whether it is ready and a switch. A source's detail holds the programs and the command behind it.
 class SourcesSection extends StatefulWidget {
-  const SourcesSection({super.key, required this.controller, this.presets = const [], this.hosted = const [], this.checkSource, this.programs});
+  const SourcesSection({super.key, required this.controller, this.presets = const [], this.hosted = const [], this.checkSource, this.programs, this.accounts});
 
   final SettingsController controller;
 
@@ -30,6 +32,9 @@ class SourcesSection extends StatefulWidget {
   final List<String> hosted;
   final Future<SourceCheck> Function(AgentSource source)? checkSource;
   final ProgramStores? programs;
+
+  /// The host's accounts, which say what each agent accepts.
+  final AccountsController? accounts;
 
   @override
   State<SourcesSection> createState() => _SourcesSectionState();
@@ -119,6 +124,13 @@ class _SourcesSectionState extends State<SourcesSection> {
     return Text(check.found.isEmpty ? 'Ready' : check.found.entries.map((found) => '${found.key}: ${found.value}').join('\n'));
   }
 
+  /// The line saying which accounts [source]'s agent takes, by what they support; null when the host names none for it.
+  String? _accepts(AgentSource source) {
+    final entry = source.hostEntry;
+    final accepts = entry == null ? null : widget.accounts?.acceptsOf(entry);
+    return accepts == null || accepts.isEmpty ? null : 'Accepts accounts that support ${standardsText(accepts)}';
+  }
+
   Widget _row({
     required AgentSource source,
     required String key,
@@ -172,6 +184,11 @@ class _SourcesSectionState extends State<SourcesSection> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               if (command != null)
                 SelectableText(command, style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12)),
+              if (_accepts(source) case final accepts?)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(accepts, key: Key('source-accepts $key'), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ),
               if (check != null) _state(source, check) else const LinearProgressIndicator(),
               ?detail,
             ]),

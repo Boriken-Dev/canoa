@@ -10,6 +10,24 @@ List<String> _texts(Object? value) => [if (value is List) for (final each in val
 
 String _text(Object? value, [String fallback = '']) => value is String ? value : fallback;
 
+/// What a person reads for a credential standard the host names (`claude-code`, `anthropic-api`). An id this list does not know is
+/// shown as the host wrote it, since a provider may name its own.
+String standardTitle(String id) => switch (id) {
+  'claude-code' => 'Claude Code',
+  'anthropic-api' => 'Anthropic API',
+  'codex' => 'Codex',
+  'openai-api' => 'OpenAI API',
+  'grok' => 'Grok',
+  'xai-api' => 'xAI API',
+  'gemini-api' => 'Gemini API',
+  'antigravity' => 'Antigravity',
+  'pi' => 'Pi',
+  _ => id,
+};
+
+/// [standards] as one line, in the order the host gave them.
+String standardsText(Iterable<String> standards) => standards.map(standardTitle).join(', ');
+
 /// A URL a kind talks to, which the host checks before a session starts.
 final class AccountEndpoint {
   const AccountEndpoint({this.key, required this.purpose, this.fallback});
@@ -66,6 +84,7 @@ final class AccountKindInfo {
     this.stateDir = false,
     this.renews = false,
     this.notices = const [],
+    this.provides = const [],
   });
 
   factory AccountKindInfo.parse(Map<String, Object?> json) => AccountKindInfo(
@@ -79,9 +98,13 @@ final class AccountKindInfo {
     stateDir: json['state_dir'] == true,
     renews: json['renews'] == true,
     notices: _texts(json['notices']),
+    provides: _texts(json['provides']),
   );
 
   final String id, title, description;
+
+  /// The standards an account of this kind provides, which say the agents that can run on it; none when the host does not say.
+  final List<String> provides;
 
   /// A schema of the kind's settings that are not secret (a base URL).
   final Map<String, Object?> settings;
@@ -189,7 +212,7 @@ enum AccountStatus {
 /// An agent entry of the host that runs a provider with accounts, as the host lists it: what it offers a client is the host's to say,
 /// and a built-in source (Claude, Codex) is one before canoa.cfg names it.
 final class AccountEntry {
-  const AccountEntry({required this.name, required this.harness, this.accounts = const [], this.open = true});
+  const AccountEntry({required this.name, required this.harness, this.accounts = const [], this.open = true, this.accepts = const [], this.usable});
 
   /// One object of `accounts/entries`, or null when it is not one.
   static AccountEntry? parse(Object? json) {
@@ -201,10 +224,19 @@ final class AccountEntry {
       harness: harness,
       accounts: [if (accounts is List) for (final each in accounts) if (each is String) each],
       open: json['open'] != false,
+      accepts: _texts(json['accepts']),
+      usable: json['usable'] is List ? _texts(json['usable']) : null,
     );
   }
 
   final String name, harness;
+
+  /// The credential standards its agent accepts, the most preferred first; none when the host does not say.
+  final List<String> accepts;
+
+  /// The accounts of canoa.cfg a session of it can run on, offered by it or not. Null from a host that does not say, which leaves
+  /// the choice to the provider's own accounts.
+  final List<String>? usable;
 
   /// The accounts it offers, the first being the default.
   final List<String> accounts;
@@ -224,6 +256,7 @@ final class AccountInfo {
     this.stateText = '',
     this.revision = 0,
     this.expiresAt,
+    this.provides = const [],
   });
 
   /// One object of `accounts list --format json`, or null when it is not one.
@@ -247,10 +280,14 @@ final class AccountInfo {
       stateText: state,
       revision: map['revision'] is int ? map['revision'] as int : 0,
       expiresAt: map['expires_at'] as String?,
+      provides: _texts(map['provides']),
     );
   }
 
   final String name, harness, kind;
+
+  /// The credential standards the account's kind provides (`claude-code`, `anthropic-api`), which say the agents it can run.
+  final List<String> provides;
 
   /// The host's id for the account, which usage reports are named by. Opaque: shown nowhere.
   final String id;

@@ -6,6 +6,7 @@ library;
 
 import 'dart:io';
 
+import 'package:canoa/accounts/account_models.dart';
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -29,9 +30,9 @@ const _config = CanoaConfig(host: {
 });
 
 FakeAccountsHost _host() => FakeAccountsHost(accounts: [
-  account('work', kind: 'claude-login', id: 'id-work'),
-  account('metered'),
-  account('old', kind: 'claude-login', state: 'needs sign-in'),
+  account('work', kind: 'claude-login', id: 'id-work', provides: ['claude-code']),
+  account('metered', provides: ['anthropic-api']),
+  account('old', kind: 'claude-login', state: 'needs sign-in', provides: ['claude-code']),
 ]);
 
 AccountsController _controller(FakeAccountsHost host, {UsageReport? usage, String? Function(String)? holder}) => AccountsController(
@@ -127,7 +128,7 @@ void main() {
 
   testWidgets('the composer\'s chip lists what the source offers, a held account disabled, desktop', (tester) async {
     final agent = OptionsAgent();
-    final host = _host();
+    final host = _host()..hostEntries.add(const AccountEntry(name: 'Claude', harness: 'claude', accepts: ['claude-code', 'anthropic-api'], usable: ['work', 'metered', 'old']));
     final store = SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
     await app.pumpApp(tester, store, linked: agent.openLink, config: _config, accountsHost: host);
     await app.newSession(tester);

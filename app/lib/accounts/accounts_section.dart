@@ -168,6 +168,22 @@ class _AccountsSectionState extends State<AccountsSection> {
         title: account.name,
         leading: SourceMark.provider(accountMarkId(account.harness, account.kind), size: 24, key: Key('account-mark ${account.name}')),
         description: detail,
+        // The standards it supports say which agents can run on it; the usage opens under them.
+        below: account.provides.isEmpty && !open
+            ? null
+            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (account.provides.isNotEmpty)
+                  Text(
+                    'Supports ${standardsText(account.provides)}',
+                    key: Key('account-supports ${account.name}'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                if (open)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: AccountUsageView(key: Key('account-usage-view ${account.name}'), report: report),
+                  ),
+              ]),
         control: Row(mainAxisSize: MainAxisSize.min, children: [
           if (account.status == AccountStatus.needsSignIn)
             Padding(
@@ -221,12 +237,6 @@ class _AccountsSectionState extends State<AccountsSection> {
             ],
           ),
         ]),
-        below: open
-            ? Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: AccountUsageView(key: Key('account-usage-view ${account.name}'), report: report),
-              )
-            : null,
       ),
     ]);
   }

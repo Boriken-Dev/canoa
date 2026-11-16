@@ -230,6 +230,7 @@ class _MethodTile extends StatelessWidget {
       title: Text(method.title),
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (method.description.isNotEmpty) Text(method.description, style: small),
+        if (kind != null && kind!.provides.isNotEmpty) Text('Supports ${standardsText(kind!.provides)}', style: small),
         if (kind != null)
           for (final notice in kind!.notices) Text(notice, style: small?.copyWith(color: scheme.tertiary)),
       ]),

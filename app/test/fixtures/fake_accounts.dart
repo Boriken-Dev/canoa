@@ -16,6 +16,7 @@ const claudeCatalog = {
   'kinds': [
     {
       'id': 'claude-login',
+      'provides': ['claude-code'],
       'title': 'Claude subscription',
       'rotates': true,
       'state_dir': true,
@@ -23,6 +24,7 @@ const claudeCatalog = {
     },
     {
       'id': 'anthropic-api-key',
+      'provides': ['anthropic-api'],
       'title': 'Anthropic API key',
       'settings': {
         'type': 'object',
@@ -132,7 +134,7 @@ final class FakeAccountsHost implements AccountsHost {
     final at = hostEntries.indexWhere((each) => each.name == entry);
     if (at >= 0) {
       final one = hostEntries[at];
-      hostEntries[at] = AccountEntry(name: one.name, harness: one.harness, accounts: List.of(accounts), open: one.open);
+      hostEntries[at] = AccountEntry(name: one.name, harness: one.harness, accounts: List.of(accounts), open: one.open, accepts: one.accepts, usable: one.usable);
     }
   }
 
@@ -165,5 +167,5 @@ final class FakeAccountsHost implements AccountsHost {
   }
 }
 
-AccountInfo account(String name, {String kind = 'anthropic-api-key', String state = 'signed in', String harness = 'claude', String id = ''}) =>
-    AccountInfo.parse({'name': name, 'harness': harness, 'kind': kind, 'id': id.isEmpty ? 'id-$name' : id, 'state': state})!;
+AccountInfo account(String name, {String kind = 'anthropic-api-key', String state = 'signed in', String harness = 'claude', String id = '', List<String> provides = const []}) =>
+    AccountInfo.parse({'name': name, 'harness': harness, 'kind': kind, 'id': id.isEmpty ? 'id-$name' : id, 'state': state, if (provides.isNotEmpty) 'provides': provides})!;
