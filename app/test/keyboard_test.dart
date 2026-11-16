@@ -203,9 +203,12 @@ void main() {
     await _settle(tester);
     await _press(tester, LogicalKeyboardKey.keyK);
     expect(find.byType(CommandPalette), findsOneWidget);
-    expect(find.text('/review'), findsOneWidget);
     expect(find.text('New session'), findsNWidgets(2), reason: "the rail's entry and the palette's");
     expect(find.text('Go to Agent 0'), findsOneWidget);
+    // The list builds only what is near its 480-pixel window, and the palette's own entries now fill it.
+    await tester.scrollUntilVisible(find.text('/review'), 100,
+        scrollable: find.descendant(of: find.descendant(of: find.byType(CommandPalette), matching: find.byType(ListView)), matching: find.byType(Scrollable)));
+    expect(find.text('/review'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('palette-search')), 'rev');
     await tester.pumpAndSettle();
     expect(find.text('/compact'), findsNothing);
