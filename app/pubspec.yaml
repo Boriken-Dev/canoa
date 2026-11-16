@@ -13,18 +13,18 @@ dependencies:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp
-      ref: 3a027db2be2128e29553c04078b1af8a5cba1551
+      ref: 33cff5404ef88592f6d8bf184cf1f1d28c2cd962
   # The chat's model and widgets, from the same commit as coqui_acp, which they depend on by path.
   coqui_acp_chat:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp_chat
-      ref: 3a027db2be2128e29553c04078b1af8a5cba1551
+      ref: 33cff5404ef88592f6d8bf184cf1f1d28c2cd962
   coqui_acp_chat_ui:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp_chat_ui
-      ref: 3a027db2be2128e29553c04078b1af8a5cba1551
+      ref: 33cff5404ef88592f6d8bf184cf1f1d28c2cd962
   # Agent overlays: reading, validating, digests, composition and the environment, shared with the other consumers.
   coqui_aos:
     git:
