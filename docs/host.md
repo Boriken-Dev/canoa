@@ -413,8 +413,8 @@ a program to pair with.
 ## Pairing
 
 The host proves itself and its clients by the method of this host's identity, Noise or WebCrypto, kept with its trust store
-in `.canoa` in the user's home folder (`%USERPROFILE%\.canoa` on Windows; `COQUI_AGENTIC_PEER_HOME` names another). `coqui-acp-bridge serve --paired` reads the
-same layout when it is given that folder. A home keeps each method's identity in a file of its own:
+in `.canoa` in the user's home folder (`%USERPROFILE%\.canoa` on Windows; `COQUI_AGENTIC_PEER_HOME` names another). `canoa serve --program --paired` reads the
+same layout. A home keeps each method's identity in a file of its own:
 a home paired before Noise keeps its WebCrypto identity and its paired keys, and `--method` names one when a home has
 both. A key is of one method, and a client of the other is refused, which the host's log says. The home records the
 method named last, or its first identity's, so the app's `serve` and `pair`, which name none, use it. **Canoa's app proves
@@ -438,11 +438,11 @@ A browser pairs by connecting once:
    `canoa accept <id>`.
 4. Connect again. Removing the key in Hosting, or `canoa revoke <id>`, ends its links within about a second.
 
-A program with a native key, such as `coqui-acp-bridge`, can pair by PIN instead: **Show a PIN** in Hosting, or
-`canoa pair`, shows six digits and an address, and `coqui-acp-bridge pair-dial ADDRESS` with those digits pairs it.
+A program with a native key, such as another `canoa`, can pair by PIN instead: **Show a PIN** in Hosting, or
+`canoa pair`, shows six digits and an address, and `canoa pair --join ADDRESS` with those digits pairs it.
 One wrong try ends the PIN, and it pairs by the host's method. `canoa pair` refuses a browser, so a page cannot spend
-the PIN; a browser pairs with it by connecting once. The extension and Canoa's web Add connection dialog pair by PIN with
-`coqui-acp-bridge pair-accept --method noise --origin ORIGIN`, the origin each of them shows.
+the PIN, unless `--origin` names it; a browser pairs with it by connecting once. The extension and Canoa's web Add connection dialog pair by PIN with
+`canoa pair --method noise --origin ORIGIN`, the origin each of them shows.
 
 A key's first use is always the person's decision: nothing is accepted automatically, and the app pairs or removes a key
 only from a dialog that shows its whole id.

@@ -105,7 +105,7 @@ canoa provider (--library FILE | --source FILE) --provider ID [--working-root DI
 
 `serve --until-stdin-closes` is for a program running the host as its child, such as Canoa's desktop app: when its input
 closes, the host ends every agent it started, then itself. `pair` shows a PIN that a native client, such as
-`coqui-acp-bridge pair-dial`, uses to pair; it refuses a browser, which pairs by connecting once and being accepted. `--method` names
+`canoa pair --join`, uses to pair; it refuses a browser unless `--origin` names it, and a browser may instead pair by connecting once and being accepted. `--method` names
 the identity's method; without it, the one this user has, or the default for a new one. `serve --web` serves the web app
 on `127.0.0.1:7800` too, from `DIR`, `[host.web]`'s `dir` or the site built in, and prints `{"web": URL}` after the
 entries. `serve` prints `{"ready": true, ...}` last, once up; `--allow-empty` runs it with nothing to serve when canoa.cfg names nothing or does not exist.

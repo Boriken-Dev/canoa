@@ -6,7 +6,7 @@ The shared Flutter UI is in [`app/`](https://github.com/Boriken-Dev/canoa/tree/m
 
 Canoa's Manifest V3 Chromium binding lives at [`bindings/browser/chromium/`](https://github.com/Boriken-Dev/canoa/tree/main/bindings/browser/chromium). The extension has its own tab/origin/peer permission checks, browser tool catalogue and permission-gated tab actions, each of which also checks that the tab is still on the origin the grant was for. The side-panel and full-page entries package the Flutter UI. Agents are reached over a proven link, and the tools are offered as "Remote browser tools" and "A program on a paired machine" below say.
 
-The standard extension does not request `debugger`. An elevated `manifest.debug.json` enables the Chromium `debugger` API in a separately packaged build. The extension now has an MCP JSON-RPC handler and permission-gated CDP commands, tested independently; the remote bridge is `coqui-acp-bridge`, and a person pairs the extension with a host as for any client. Local per-tab browser grants can be managed from the extension's Browser Permissions options page. See [browser MCP and DevTools](browser-mcp.md).
+The standard extension does not request `debugger`. An elevated `manifest.debug.json` enables the Chromium `debugger` API in a separately packaged build. The extension now has an MCP JSON-RPC handler and permission-gated CDP commands, tested independently; the remote bridge is `canoa serve --program`, and a person pairs the extension with a host as for any client. Local per-tab browser grants can be managed from the extension's Browser Permissions options page. See [browser MCP and DevTools](browser-mcp.md).
 
 ## Webpage context
 
@@ -36,9 +36,9 @@ An agent that Canoa's own chat started can use the browser's tools, when its bri
 
 An MCP client that Canoa did not start, such as an IDE or a CLI agent, can ask for a tab the same way, with no ACP session and nothing listening in the browser. It is off unless a person turns it on, for one machine.
 
-1. On that machine, run `coqui-acp-bridge serve --mcp-offers --advertise NAME`, allowing this browser's peer id, with the agent program it asks for after `--`: none starts, since no ACP runs here. Add it under **Canoa agents**.
+1. On that machine, run `canoa serve --program --mcp-offers --advertise NAME`, allowing this browser's peer id, with the agent program it asks for after `--`: none starts, since no ACP runs here. Add it under **Canoa agents**.
 2. Under **Canoa browser permissions**, choose it and turn it on. The worker opens a proven link there and keeps one more stream open than are in use, with no ACP on the link.
-3. On that machine, `coqui-acp-bridge mcp-config --peer <this browser's peer id>` prints the `mcpServers` entry to paste. The permissions page shows that command, filled in. The entry holds no port and no secret: the shim finds them in a file only that user can read, so it stays good when the browser or the bridge restarts.
+3. On that machine, `canoa mcp-config --peer <this browser's peer id>` prints the `mcpServers` entry to paste. The permissions page shows that command, filled in. The entry holds no port and no secret: the shim finds them in a file only that user can read, so it stays good when the browser or the bridge restarts.
 
 A program then starts the shim as it would any stdio server, and has what an agent has: `browser_request_access`, and whatever that peer still holds a grant for. The window says **A program on** the machine, and shows its key, since no agent's name can be proven and Canoa cannot tell which program it is. Everything under "Remote browser tools" holds for it too: browser-local checks decide every call, and a grant ends the same ways.
 

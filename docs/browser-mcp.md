@@ -8,10 +8,10 @@ The handler supports initialize (2025-06-18 and 2025-11-25 profiles), ping, tool
 
 ## A client outside any ACP session
 
-`coqui-acp-bridge mcp-config --peer <browser peer id>` prints an entry for any stdio MCP client, with no secret in it:
+`canoa mcp-config --peer <browser peer id>` prints an entry for any stdio MCP client, with no secret in it:
 
 ```json
-{ "mcpServers": { "canoa-browser": { "type": "stdio", "command": "/abs/path/coqui-acp-bridge", "args": ["mcp-shim", "--peer", "sha256:…"], "env": {} } } }
+{ "mcpServers": { "canoa-browser": { "type": "stdio", "command": "/abs/path/canoa", "args": ["mcp-shim", "--peer", "sha256:…"], "env": {} } } }
 ```
 
 Before a person allows a tab, `tools/list` answers `browser_request_access` alone. With nothing connected, `initialize` is answered with a JSON-RPC error saying so, and the server exits. The official SDK's stdio client and real Claude Code were both run from this entry against real Edge.
