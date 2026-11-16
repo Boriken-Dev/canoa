@@ -377,6 +377,38 @@ impl Overlays {
         Ok(json!({"files": files}))
     }
 
+    /// The tree digest of the plan `caller` holds under `token`, left in place.
+    pub(crate) fn kept_digest(
+        &self,
+        caller: &Caller,
+        token: &str,
+    ) -> Result<String, (i32, String)> {
+        Ok(self.plan(caller, &json!({"token": token}), false)?.digest)
+    }
+
+    /// Gives up the plan `caller` holds under `token`, if it holds one.
+    pub(crate) fn forget_plan(&self, caller: &Caller, token: &str) {
+        let _ = self.plan(caller, &json!({"token": token}), true);
+    }
+
+    /// Whether the app recorded a skill by this name as one the person chose.
+    pub(crate) fn chosen_skill(&self, name: &str) -> bool {
+        if !valid_skill_name(name) {
+            return false;
+        }
+        let Ok(root) = self.root() else {
+            return false;
+        };
+        let key = name.to_ascii_lowercase();
+        let Ok(bytes) = fs::read(root.join(".skills").join(format!("{key}.json"))) else {
+            return false;
+        };
+        serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .and_then(|record| record.get("chosen")?.as_bool())
+            .unwrap_or(false)
+    }
+
     /// `overlay/apply` `{"token", "catalog"?}`: installs exactly what the check showed, the files at its commit checked against
     /// its tree digest as they are written. The overlay's folder is replaced whole.
     pub(crate) fn apply(&self, caller: &Caller, params: &Value) -> Outcome {
@@ -1373,6 +1405,16 @@ pub(crate) fn local_path(repo: &str) -> PathBuf {
         return PathBuf::from(&path[1..]);
     }
     PathBuf::from(path)
+}
+
+/// Whether `name` can be a skill's name, and so a file name of the app's own record of it.
+pub(crate) fn valid_skill_name(name: &str) -> bool {
+    name.len() <= 120
+        && name.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        && !name.contains("..")
 }
 
 fn record_of(root: &Path, name: &str) -> Option<Value> {

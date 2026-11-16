@@ -97,7 +97,18 @@ fn an_opted_in_session_is_given_both_tools_and_they_answer_behind_its_bearer() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names, ["store_search", "store_inspect"]);
+    assert_eq!(
+        names,
+        [
+            "store_search",
+            "store_inspect",
+            "store_install",
+            "store_update",
+            "store_remove",
+            "store_rollback",
+            "loadout_update"
+        ]
+    );
     let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": {"name": "store_search", "arguments": {"query": "anything"}}});
     let (status, body) = post(url, token, &call.to_string());
@@ -119,6 +130,19 @@ fn an_opted_in_session_is_given_both_tools_and_they_answer_behind_its_bearer() {
     assert_eq!(
         answer["result"]["isError"], true,
         "an entry that is not there: {answer}"
+    );
+    // A change to an entry the Store does not list is refused before anyone is asked.
+    let install = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": {"name": "store_install", "arguments": {"kind": "overlay", "id": "nothing"}}});
+    let (_, body) = post(url, token, &install.to_string());
+    let answer: Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
+    assert!(
+        matches!(
+            link.receive(Some(std::time::Duration::from_millis(300))),
+            Err(canoa_host::LinkError::Timeout)
+        ),
+        "no question went to the client"
     );
     // A bearer from nowhere opens nothing.
     assert_eq!(

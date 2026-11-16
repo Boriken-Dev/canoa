@@ -1025,6 +1025,9 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 pub(crate) mod accounts;
+mod changes;
+#[cfg(test)]
+mod changes_tests;
 pub(crate) mod discover;
 mod files;
 #[cfg(test)]

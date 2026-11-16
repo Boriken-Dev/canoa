@@ -19,6 +19,7 @@ pub(crate) mod ask;
 mod http;
 mod layers;
 mod link;
+pub(crate) use link::is_bypass;
 #[cfg(test)]
 mod tests;
 

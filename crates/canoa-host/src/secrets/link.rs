@@ -46,7 +46,7 @@ const BYPASS: [&str; 6] = [
 ];
 
 /// Whether a session in the mode `id` asks for nothing, which is what a secret's use then does too.
-pub(super) fn is_bypass(id: &str) -> bool {
+pub(crate) fn is_bypass(id: &str) -> bool {
     BYPASS.contains(&id.to_ascii_lowercase().as_str())
 }
 

@@ -209,6 +209,65 @@ impl Stores {
     }
 }
 
+impl Stores {
+    /// A program's plan for `action`, kept under `owner` alone so that only `owner` can apply it.
+    pub(crate) fn plan_kept_for(
+        &self,
+        owner: &str,
+        provider: &str,
+        action: &str,
+        version: Option<&str>,
+    ) -> Result<Value, Failed> {
+        let mut params = json!({"provider": provider, "action": action});
+        if let Some(version) = version {
+            params["version"] = json!(version);
+        }
+        self.read("store/plan", &params, Some(owner))
+    }
+
+    /// The plan kept for `owner` under `token`, as it would be applied.
+    pub(crate) fn kept(&self, owner: &str, provider: &str, token: &str) -> Option<Value> {
+        let plan = self.programs.kept_plan(owner, provider, token)?;
+        json_of(&plan).ok()
+    }
+
+    /// Gives up the plan kept for `owner` under `token`.
+    pub(crate) fn forget(&self, owner: &str, provider: &str, token: &str) {
+        self.programs.forget_plan(owner, provider, token);
+    }
+
+    /// The version of the copy the host manages for `provider`'s program.
+    pub(crate) fn managed_version(&self, provider: &str) -> Result<Option<String>, Failed> {
+        let (_, store) = self.store(&json!({"provider": provider}))?;
+        self.programs
+            .managed_version(&*store)
+            .map_err(|error| refusal(&error))
+    }
+
+    /// Carries out the plan kept for `owner` under `token` with no one to ask: an install that needs a typed answer fails.
+    pub(crate) fn apply_kept(
+        &self,
+        owner: &str,
+        provider: &str,
+        token: &str,
+    ) -> Result<Value, Failed> {
+        let (provider, store) = self.store(&json!({"provider": provider}))?;
+        let plan = self.programs.kept_plan(owner, &provider, token).ok_or((
+            REFUSED,
+            "this host holds no such plan any more: plan again".to_owned(),
+        ))?;
+        let done = self.programs.apply_store_for(
+            owner,
+            store,
+            &provider,
+            &plan,
+            Arc::new(crate::store::programs::Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        );
+        applied(&done)
+    }
+}
+
 /// Where the person's answer to a question goes.
 type Reply = mpsc::Sender<Result<LoginAnswer, String>>;
 

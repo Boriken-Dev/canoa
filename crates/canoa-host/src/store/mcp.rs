@@ -1,5 +1,10 @@
-//! The `canoa-store` MCP server: what lets an agent search the Store and read one entry (`store_search`, `store_inspect`), and
-//! nothing that changes anything.
+//! The `canoa-store` MCP server: what lets an agent search the Store and read one entry (`store_search`, `store_inspect`), and,
+//! only with the person's approval of each change, install, update, remove and roll back (`store_install`, `store_update`,
+//! `store_remove`, `store_rollback`, `loadout_update`).
+//!
+//! A change is put to the person as a `session/request_permission` on the client the session belongs to, showing what would be
+//! applied and the digest it is bound to; nothing is applied until their answer comes back from that client, and what is applied
+//! is what was shown. A session the person put in a mode that asks for nothing is not asked, as for any other tool.
 //!
 //! It is offered the way `canoa-delegate` is. A client asks for it in `initialize` (`_meta["dev.boriken.canoa/store"]` true), the
 //! host adds one server to each session request, over loopback HTTP behind a bearer minted for that session or, for an agent
@@ -13,20 +18,30 @@
     reason = "locks, threads and the clock are std's"
 )]
 
+mod approve;
+mod change;
 mod http;
 mod tools;
 
 use core::time::Duration;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
+use std::time::Instant;
 
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+pub(crate) use self::approve::Card;
+use self::approve::{Held, Questions};
+pub(crate) use self::change::{Action, Change, Prepared};
 use crate::control::Grant;
 use crate::delegate::BridgeCommand;
+use crate::delegate::privilege::{Modes, modes_of};
+
+/// How often a read looks up to send what the host added.
+const POLL: Duration = Duration::from_millis(50);
 
 /// The `_meta` key of `initialize` that asks for the store tools.
 pub(crate) const META: &str = "dev.boriken.canoa/store";
@@ -58,6 +73,23 @@ pub(crate) trait Backend: Send + Sync {
     fn plan(&self, provider: &str, action: &str, version: Option<&str>) -> Result<Value, String>;
     /// The overlays and skills canoa.cfg names.
     fn installed(&self) -> Installed;
+    /// Works out `change` for the session `session`, whose key holds `grants`, and keeps what it would apply on the host,
+    /// under that session alone. Nothing is installed, removed or written by it.
+    fn prepare(
+        &self,
+        session: &str,
+        grants: &BTreeSet<Grant>,
+        change: &Change,
+    ) -> Result<Prepared, String>;
+    /// Applies what [`Backend::prepare`] kept, if it is still what `prepared.digest` says; otherwise refuses and changes nothing.
+    fn commit(
+        &self,
+        session: &str,
+        grants: &BTreeSet<Grant>,
+        prepared: &Prepared,
+    ) -> Result<Value, String>;
+    /// Gives up what [`Backend::prepare`] kept, when the change is not going to be applied.
+    fn discard(&self, session: &str, prepared: &Prepared);
 }
 
 /// What is installed on the host, by name.
@@ -67,10 +99,44 @@ pub(crate) struct Installed {
     pub(crate) skills: BTreeSet<String>,
 }
 
-/// What one bearer may do: the grants of the key behind it, kept to those the tools use.
+/// What one bearer may do: the grants of the key behind it, kept to those the tools use, and the session it was minted for.
 pub(crate) struct Access {
     pub(crate) grants: BTreeSet<Grant>,
     calls: AtomicUsize,
+    /// The session the agent named when it opened, which the bearer's changes are asked about and bound to.
+    session: Mutex<Option<String>>,
+    link: Weak<Link>,
+    /// One change at a time for a session, so an agent cannot pile questions on the person.
+    changing: Mutex<()>,
+}
+
+impl Access {
+    /// The session this bearer belongs to, once the agent has named it.
+    pub(crate) fn session(&self) -> Option<String> {
+        lock(&self.session).clone()
+    }
+
+    /// The right to make one change now, or `None` while another of the session's waits for the person.
+    pub(crate) fn begin_change(&self) -> Option<MutexGuard<'_, ()>> {
+        match self.changing.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+
+    /// Puts `card` to the person on the client this session belongs to. Whether they allowed it; an error says why nobody could
+    /// be asked, and then nothing may be applied.
+    pub(crate) fn approve(&self, card: &Card) -> Result<bool, String> {
+        let session = self
+            .session()
+            .ok_or("the host does not know this session yet, so no one can be asked")?;
+        let link = self
+            .link
+            .upgrade()
+            .ok_or("the person's app is gone, so no one can be asked")?;
+        link.approve(&session, card)
+    }
 }
 
 /// The bearers in force, by the digest of the token: the token itself is never kept.
@@ -157,6 +223,8 @@ impl Hub {
                         | Grant::OverlayWrite
                         | Grant::StorePrograms
                         | Grant::StoreRead
+                        | Grant::ConfigWrite
+                        | Grant::ConfigWriteSessions
                 )
             })
             .collect();
@@ -165,11 +233,9 @@ impl Hub {
         }
         Some(Arc::new(Link {
             hub: Arc::clone(self),
-            access: Arc::new(Access {
-                grants: kept,
-                calls: AtomicUsize::new(0),
-            }),
+            grants: kept,
             state: Mutex::new(State::default()),
+            questions: Questions::default(),
             closed: AtomicBool::new(false),
         }))
     }
@@ -196,9 +262,23 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+/// A request of the client's the host remembers until the agent answers it.
 enum Pending {
     Initialize,
-    Open([u8; 32]),
+    Open {
+        digest: [u8; 32],
+        /// The session the request names, for a load or a resume; a new session is named by the agent's answer.
+        known: Option<String>,
+    },
+    Mode {
+        session: String,
+        mode: String,
+    },
+    Option {
+        session: String,
+        id: String,
+        value: String,
+    },
 }
 
 #[derive(Default)]
@@ -211,13 +291,15 @@ struct State {
     stdio: u64,
     pending: HashMap<String, Pending>,
     digests: Vec<[u8; 32]>,
+    sessions: HashMap<String, Arc<Held>>,
 }
 
 /// One client connection that may be given the store tools.
 pub(crate) struct Link {
     hub: Arc<Hub>,
-    access: Arc<Access>,
+    grants: BTreeSet<Grant>,
     state: Mutex<State>,
+    questions: Questions,
     closed: AtomicBool,
 }
 
@@ -226,12 +308,21 @@ impl Link {
         self.closed.load(Ordering::SeqCst)
     }
 
-    /// Ends every bearer of the connection.
+    /// What the host added to the stream to the client.
+    fn drain(&self) -> Vec<Vec<u8>> {
+        self.questions.drain()
+    }
+
+    /// Ends every bearer of the connection and lets a question that waits go.
     pub(crate) fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
-        for digest in lock(&self.state).digests.drain(..) {
+        let mut state = lock(&self.state);
+        for digest in state.digests.drain(..) {
             self.hub.tokens.remove(&digest);
         }
+        state.sessions.clear();
+        drop(state);
+        self.questions.wake();
     }
 
     /// Reads the client's `initialize` before the scope removes its `_meta`.
@@ -241,6 +332,16 @@ impl Link {
         }
     }
 
+    /// A message of the client's as it came off the wire: whether it was the person's answer to a question the host asked, which
+    /// then goes no further.
+    fn taken_from_client(&self, message: &[u8]) -> bool {
+        // JSON may escape any character, so a message with a backslash is read whatever its bytes say.
+        if !(contains(message, approve::ID_PREFIX.as_bytes()) || message.contains(&b'\\')) {
+            return false;
+        }
+        serde_json::from_slice::<Value>(message).is_ok_and(|value| self.questions.answered(&value))
+    }
+
     fn remember(&self, id: String, pending: Pending) {
         let mut state = lock(&self.state);
         if state.pending.len() < MAX_PENDING {
@@ -248,8 +349,36 @@ impl Link {
         }
     }
 
+    fn held(&self, session: &str) -> Option<Arc<Held>> {
+        lock(&self.state).sessions.get(session).cloned()
+    }
+
+    /// Asks the person about a change of `session`, or lets it through when the person put the session in a mode that asks for
+    /// nothing. Whether it may be applied.
+    fn approve(&self, session: &str, card: &Card) -> Result<bool, String> {
+        let held = self
+            .held(session)
+            .ok_or("the host does not hold this session, so no one can be asked")?;
+        if held.bypass.load(Ordering::SeqCst) {
+            tracing::info!(
+                session,
+                "a store change was allowed by the session's mode: {}",
+                card.title
+            );
+            return Ok(true);
+        }
+        tracing::info!(
+            session,
+            "a store change was put to the person: {}",
+            card.title
+        );
+        let allowed = self.questions.ask(session, card, &|| self.is_closed())?;
+        tracing::info!(session, allowed, "a store change was answered");
+        Ok(allowed)
+    }
+
     /// A message from the client after the scope has checked it. A session request gets the host's entry added.
-    fn client_said(&self, message: Vec<u8>) -> Vec<u8> {
+    fn client_said(self: &Arc<Self>, message: Vec<u8>) -> Vec<u8> {
         // JSON may escape any character, so a message with a backslash is read whatever its bytes say.
         if !(contains(&message, b"session/")
             || contains(&message, b"initialize")
@@ -269,20 +398,56 @@ impl Link {
         ) else {
             return message;
         };
-        if method == "initialize" {
-            self.remember(id, Pending::Initialize);
-        } else if matches!(
-            method.as_str(),
-            "session/new" | "session/load" | "session/resume"
-        ) && self.open(&mut value, id)
-        {
-            return serde_json::to_vec(&value).unwrap_or(message);
+        match method.as_str() {
+            "initialize" => self.remember(id, Pending::Initialize),
+            "session/new" | "session/load" | "session/resume" => {
+                if self.open(&mut value, &method, id) {
+                    return serde_json::to_vec(&value).unwrap_or(message);
+                }
+            }
+            "session/set_mode" => {
+                let params = &value["params"];
+                if let (Some(session), Some(mode)) =
+                    (params["sessionId"].as_str(), params["modeId"].as_str())
+                {
+                    let pending = Pending::Mode {
+                        session: session.to_owned(),
+                        mode: mode.to_owned(),
+                    };
+                    self.remember(id, pending);
+                }
+            }
+            "session/set_config_option" => {
+                let params = &value["params"];
+                if let (Some(session), Some(option), Some(chosen)) = (
+                    params["sessionId"].as_str(),
+                    params["configId"].as_str(),
+                    params["value"].as_str(),
+                ) {
+                    let pending = Pending::Option {
+                        session: session.to_owned(),
+                        id: option.to_owned(),
+                        value: chosen.to_owned(),
+                    };
+                    self.remember(id, pending);
+                }
+            }
+            "session/close" => {
+                if let Some(session) = value.pointer("/params/sessionId").and_then(Value::as_str) {
+                    self.end(session);
+                }
+            }
+            _ => {}
         }
         message
     }
 
     /// Adds the host's MCP server, with a bearer of its own, to a session request. Whether the request was changed.
-    fn open(&self, value: &mut Value, id: String) -> bool {
+    fn open(self: &Arc<Self>, value: &mut Value, method: &str, id: String) -> bool {
+        let known = (method != "session/new")
+            .then(|| value.pointer("/params/sessionId").and_then(Value::as_str))
+            .flatten()
+            .map(str::to_owned);
         let (asked, http, stdio, count) = {
             let state = lock(&self.state);
             (state.asked, state.http, state.stdio, state.digests.len())
@@ -333,22 +498,35 @@ impl Link {
         };
         servers.retain(|server| server.get("name").and_then(Value::as_str) != Some(SERVER_NAME));
         servers.push(entry);
-        self.hub.tokens.add(digest, Arc::clone(&self.access));
+        // A load or a resume names its session; a new one is named by the agent's answer.
+        let access = Arc::new(Access {
+            grants: self.grants.clone(),
+            calls: AtomicUsize::new(0),
+            session: Mutex::new(known.clone()),
+            link: Arc::downgrade(self),
+            changing: Mutex::new(()),
+        });
+        self.hub.tokens.add(digest, access);
         lock(&self.state).digests.push(digest);
-        self.remember(id, Pending::Open(digest));
+        self.remember(id, Pending::Open { digest, known });
         tracing::debug!("a session was given the store tools");
         true
     }
 
     /// A message from the agent, before it goes to the client.
     fn agent_said(&self, message: &[u8]) {
-        if lock(&self.state).pending.is_empty() {
+        let marked =
+            contains(message, b"current_mode_update") || contains(message, b"config_option_update");
+        if !marked && lock(&self.state).pending.is_empty() && !message.contains(&b'\\') {
             return;
         }
         let Ok(value) = serde_json::from_slice::<Value>(message) else {
             return;
         };
         if value.get("method").is_some() {
+            if marked {
+                self.mode_notice(&value);
+            }
             return;
         }
         let Some(id) = value.get("id").map(Value::to_string) else {
@@ -375,17 +553,112 @@ impl Link {
                 let stdio = version < 2 || takes(result.pointer("/capabilities/session/mcp/stdio"));
                 state.stdio = if stdio { version } else { 0 };
             }
+            (Some(Pending::Open { digest, known, .. }), Some(result)) => {
+                let named = known.or_else(|| {
+                    result
+                        .get("sessionId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
+                match named {
+                    Some(named) => self.bind(digest, &named, modes_of(result)),
+                    None => self.revoke(&digest),
+                }
+            }
             // A session the agent did not open has no use for its bearer.
-            (Some(Pending::Open(digest)), None) => {
-                self.hub.tokens.remove(&digest);
-                lock(&self.state).digests.retain(|held| *held != digest);
+            (Some(Pending::Open { digest, .. }), None) => self.revoke(&digest),
+            (Some(Pending::Mode { session, mode }), Some(_)) => {
+                if let Some(held) = self.held(&session) {
+                    held.bypass.store(
+                        crate::secrets::is_bypass(&mode) && held.lists(&mode),
+                        Ordering::SeqCst,
+                    );
+                }
+            }
+            (
+                Some(Pending::Option {
+                    session,
+                    id,
+                    value: chosen,
+                }),
+                Some(result),
+            ) => {
+                if let Some(held) = self.held(&session) {
+                    if held.modes.option.as_deref() == Some(id.as_str()) {
+                        held.bypass.store(
+                            crate::secrets::is_bypass(&chosen) && held.lists(&chosen),
+                            Ordering::SeqCst,
+                        );
+                    }
+                    // An echo of the options can only lower it.
+                    if let Some(current) = modes_of(result)
+                        .current
+                        .filter(|_| result.get("configOptions").is_some())
+                    {
+                        held.reported(&current);
+                    }
+                }
             }
             _ => {}
         }
     }
+
+    fn mode_notice(&self, value: &Value) {
+        let Some(id) = value.pointer("/params/sessionId").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(held) = self.held(id) else {
+            return;
+        };
+        let update = &value["params"]["update"];
+        match update.get("sessionUpdate").and_then(Value::as_str) {
+            Some("current_mode_update") => {
+                if let Some(mode) = update.get("currentModeId").and_then(Value::as_str) {
+                    held.reported(mode);
+                }
+            }
+            Some("config_option_update") => {
+                if let Some(current) = modes_of(update).current {
+                    held.reported(&current);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn revoke(&self, digest: &[u8; 32]) {
+        self.hub.tokens.remove(digest);
+        lock(&self.state).digests.retain(|held| held != digest);
+    }
+
+    /// The session the agent has named is given its bearer's name. A session named twice keeps the newer bearer only.
+    fn bind(&self, digest: [u8; 32], session: &str, modes: Modes) {
+        self.end(session);
+        let Some(access) = self.hub.tokens.find(&digest) else {
+            return;
+        };
+        *lock(&access.session) = Some(session.to_owned());
+        lock(&self.state).sessions.insert(
+            session.to_owned(),
+            Arc::new(Held {
+                digest,
+                modes,
+                bypass: AtomicBool::new(false),
+            }),
+        );
+    }
+
+    /// A session ended: its bearer is revoked, so nothing more of it is asked or applied.
+    fn end(&self, session: &str) {
+        let held = lock(&self.state).sessions.remove(session);
+        if let Some(held) = held {
+            self.revoke(&held.digest);
+        }
+    }
 }
 
-/// A channel that reads the client's `initialize` for its opt-in and passes everything on.
+/// A channel on the client's own stream that reads its `initialize` for the opt-in, sends the questions the host puts to the
+/// person, and keeps the person's answers from going any further. Everything else passes on.
 pub(crate) struct StorePeek<'a, C: Channel + ?Sized> {
     inner: &'a C,
     link: Option<Arc<Link>>,
@@ -398,19 +671,54 @@ impl<'a, C: Channel + ?Sized> StorePeek<'a, C> {
             link: link.map(Arc::clone),
         }
     }
+
+    /// Sends what the host added to the client's stream. It goes on the wire as it is: the scope is for what a client and an
+    /// agent say to each other, and these are the host's own words.
+    fn flush(&self) -> Result<(), Failure> {
+        if let Some(link) = &self.link {
+            for message in link.drain() {
+                self.inner.send(&message)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<C: Channel + ?Sized> Channel for StorePeek<'_, C> {
     fn send(&self, message: &[u8]) -> Result<(), Failure> {
-        self.inner.send(message)
+        self.inner.send(message)?;
+        self.flush()
     }
 
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
-        let received = self.inner.receive(timeout)?;
-        if let (Some(message), Some(link)) = (&received, &self.link) {
-            link.peek(message);
+        let Some(link) = &self.link else {
+            return self.inner.receive(timeout);
+        };
+        let until = timeout.map(|timeout| Instant::now() + timeout);
+        loop {
+            self.flush()?;
+            let slice = match until {
+                Some(until) => {
+                    let left = until.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(Failure::Timeout);
+                    }
+                    left.min(POLL)
+                }
+                None => POLL,
+            };
+            match self.inner.receive(Some(slice)) {
+                Ok(Some(message)) => {
+                    link.peek(&message);
+                    if !link.taken_from_client(&message) {
+                        return Ok(Some(message));
+                    }
+                }
+                Ok(None) => return Ok(None),
+                Err(Failure::Timeout) => {}
+                Err(failure) => return Err(failure),
+            }
         }
-        Ok(received)
     }
 
     fn close(&self) {

@@ -181,6 +181,30 @@ impl crate::store::mcp::Backend for ToolsBackend {
             .map_err(|(_, why)| why)
     }
 
+    fn prepare(
+        &self,
+        session: &str,
+        grants: &std::collections::BTreeSet<Grant>,
+        change: &crate::store::mcp::Change,
+    ) -> Result<crate::store::mcp::Prepared, String> {
+        self.0.tool_prepare(session, grants, change)
+    }
+
+    fn commit(
+        &self,
+        session: &str,
+        grants: &std::collections::BTreeSet<Grant>,
+        prepared: &crate::store::mcp::Prepared,
+    ) -> Result<Value, String> {
+        self.0.tool_commit(session, grants, prepared)
+    }
+
+    fn discard(&self, session: &str, prepared: &crate::store::mcp::Prepared) {
+        // The grants only name the caller whose plan it was: dropping a plan needs none.
+        self.0
+            .tool_discard(session, &std::collections::BTreeSet::new(), prepared);
+    }
+
     fn installed(&self) -> crate::store::mcp::Installed {
         let section = |name: &str| {
             self.0
