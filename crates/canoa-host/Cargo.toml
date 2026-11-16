@@ -150,6 +150,9 @@ name = "profile_agent"
 name = "mcp_server"
 
 [[example]]
+name = "mcp_http"
+
+[[example]]
 name = "harness_standin"
 
 [[example]]

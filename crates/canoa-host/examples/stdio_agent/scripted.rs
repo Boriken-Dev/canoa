@@ -26,9 +26,15 @@
 //! does; `Bridge` says its process id and the command line it was started with, and `BridgeClose` closes its input and says
 //! whether it ended. `--marker=PATH` appends the process id
 //! to PATH each time the agent starts, so a test can tell whether one did.
+//!
+//! `Meta` says the `_meta` its session request and that prompt carried, as it received them.
+//!
+//! Any HTTP server a session is given with a bearer is kept by name: `CallOn SERVER TOOL JSON` calls its tool and `PromptOn
+//! SERVER NAME` gets its prompt, each saying what the server answered. An `https` server is reached with rustls trusting only
+//! the certificates in the PEM file `--mcp-ca=` names; without it an `https` server is not reached.
 
 use std::collections::HashMap;
-use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::io::{BufRead as _, BufReader, Write as _};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{Sender, channel};
@@ -49,6 +55,8 @@ enum Answer {
 type Tools = Mutex<HashMap<String, (String, String)>>;
 /// Each session's started stdio server.
 type Bridges = Mutex<HashMap<String, Arc<Mutex<Bridge>>>>;
+/// A session's HTTP servers by name: address and bearer.
+type NamedServers = HashMap<String, (String, String)>;
 
 struct Shared {
     state_path: Option<PathBuf>,
@@ -85,6 +93,12 @@ struct Shared {
     secret_tools: Mutex<HashMap<String, (String, String)>>,
     /// The working directory each session was opened in.
     cwds: Mutex<HashMap<String, String>>,
+    /// The `_meta` each session's `session/new` and latest prompt carried, as this agent received them.
+    metas: Mutex<HashMap<String, (Value, Value)>>,
+    /// Each session's HTTP servers by name: address and bearer.
+    servers: Mutex<HashMap<String, NamedServers>>,
+    /// How an `https` server is reached: trusting only `--mcp-ca=`'s certificates.
+    tls: Option<Arc<rustls::ClientConfig>>,
 }
 
 /// The host's tool server as a stdio MCP server this agent started: a child process and the lines to and from it.
@@ -535,7 +549,7 @@ impl Shared {
         }
         let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": name, "arguments": arguments}});
-        match post(&url, &token, &body.to_string()) {
+        match post(&url, &token, &body.to_string(), self.tls.as_ref()) {
             Ok((200, text)) => {
                 let answer: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
                 let said = answer["result"]["content"][0]["text"]
@@ -549,6 +563,29 @@ impl Shared {
             }
             Ok((status, text)) => format!("http {status}: {text}"),
             Err(error) => format!("no answer: {error}"),
+        }
+    }
+
+    /// One request to an HTTP server the session was given by name, and what it answered, or why there is no answer.
+    fn server_request(
+        &self,
+        session: &str,
+        server: &str,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, String> {
+        let Some((url, token)) = lock(&self.servers)
+            .get(session)
+            .and_then(|named| named.get(server))
+            .cloned()
+        else {
+            return Err(format!("this session has no server {server}"));
+        };
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+        match post(&url, &token, &body.to_string(), self.tls.as_ref()) {
+            Ok((200, text)) => serde_json::from_str(&text).map_err(|_| text),
+            Ok((status, text)) => Err(format!("http {status}: {text}")),
+            Err(error) => Err(format!("no answer: {error}")),
         }
     }
 
@@ -627,6 +664,54 @@ impl Shared {
                 let arguments = serde_json::from_str(arguments).unwrap_or(Value::Null);
                 self.tool_call(session, name, &arguments)
             }
+            "CallOn" => {
+                let mut words = rest.splitn(3, ' ');
+                let (server, tool, arguments) = (
+                    words.next().unwrap_or(""),
+                    words.next().unwrap_or(""),
+                    words.next().unwrap_or("{}"),
+                );
+                let arguments = serde_json::from_str(arguments).unwrap_or(Value::Null);
+                match self.server_request(
+                    session,
+                    server,
+                    "tools/call",
+                    &json!({"name": tool, "arguments": arguments}),
+                ) {
+                    Ok(answer) if answer.get("error").is_some() => format!(
+                        "rpc error: {}",
+                        answer["error"]["message"].as_str().unwrap_or("")
+                    ),
+                    Ok(answer) => {
+                        let said = answer["result"]["content"][0]["text"]
+                            .as_str()
+                            .unwrap_or("");
+                        if answer["result"]["isError"] == true {
+                            format!("error: {said}")
+                        } else {
+                            said.to_owned()
+                        }
+                    }
+                    Err(said) => said,
+                }
+            }
+            "PromptOn" => {
+                let (server, name) = rest.split_once(' ').unwrap_or((rest, ""));
+                match self.server_request(session, server, "prompts/get", &json!({"name": name})) {
+                    Ok(answer) if answer.get("error").is_some() => format!(
+                        "rpc error: {}",
+                        answer["error"]["message"].as_str().unwrap_or("")
+                    ),
+                    Ok(answer) => answer["result"]["messages"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|message| message["content"]["text"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    Err(said) => said,
+                }
+            }
             "Secret" => {
                 let (name, arguments) = rest.split_once(' ').unwrap_or((rest, "{}"));
                 let arguments = serde_json::from_str(arguments).unwrap_or(Value::Null);
@@ -647,6 +732,11 @@ impl Shared {
                 format!("blocks={count} text={text}")
             }
             "Pid" => format!("pid: {}", std::process::id()),
+            "Meta" => {
+                let (opened, prompted) =
+                    lock(&self.metas).get(session).cloned().unwrap_or_default();
+                format!("meta: new={opened} prompt={prompted}")
+            }
             "Cwd" => format!(
                 "cwd: {}",
                 lock(&self.cwds).get(session).cloned().unwrap_or_default()
@@ -996,6 +1086,7 @@ impl Shared {
                     created.clone(),
                     params["cwd"].as_str().unwrap_or("").to_owned(),
                 );
+                lock(&self.metas).insert(created.clone(), (params["_meta"].clone(), Value::Null));
                 for server in params["mcpServers"].as_array().into_iter().flatten() {
                     let bearer = server["headers"]
                         .as_array()
@@ -1005,6 +1096,12 @@ impl Shared {
                         .and_then(|header| header["value"].as_str())
                         .and_then(|value| value.strip_prefix("Bearer "));
                     if let (Some(url), Some(token)) = (server["url"].as_str(), bearer) {
+                        if let Some(name) = server["name"].as_str() {
+                            lock(&self.servers)
+                                .entry(created.clone())
+                                .or_default()
+                                .insert(name.to_owned(), (url.to_owned(), token.to_owned()));
+                        }
                         let kept = match server["name"].as_str() {
                             Some("canoa-delegate") => Some(&self.tools),
                             Some("canoa-secrets") => Some(&self.secret_tools),
@@ -1057,6 +1154,9 @@ impl Shared {
             }
             ("session/prompt", Some(id)) => {
                 self.note(&session, "session/prompt");
+                if let Some(metas) = lock(&self.metas).get_mut(&session) {
+                    metas.1 = params["_meta"].clone();
+                }
                 *lock(&self.turn) = Some(id.clone());
                 let shared = Arc::clone(self);
                 let blocks = params["prompt"].clone();
@@ -1173,6 +1273,9 @@ pub fn run(args: &[String]) {
         bridges: Mutex::new(HashMap::new()),
         secret_bridges: Mutex::new(HashMap::new()),
         cwds: Mutex::new(HashMap::new()),
+        servers: Mutex::new(HashMap::new()),
+        metas: Mutex::new(HashMap::new()),
+        tls: option_of(args, "mcp-ca").and_then(|file| trusting(&file)),
     });
     if let Some(marker) = option_of(args, "marker")
         && let Ok(mut file) = std::fs::OpenOptions::new()
@@ -1190,23 +1293,86 @@ pub fn run(args: &[String]) {
     }
 }
 
-/// One HTTP POST to the host's tool server with a bearer, on a connection of its own: the status and the body.
-fn post(url: &str, token: &str, body: &str) -> std::io::Result<(u16, String)> {
-    let rest = url.strip_prefix("http://").unwrap_or(url);
+/// The client configuration that trusts only the certificates in a PEM file, or nothing when it holds none.
+fn trusting(file: &str) -> Option<Arc<rustls::ClientConfig>> {
+    use rustls::pki_types::CertificateDer;
+    use rustls::pki_types::pem::PemObject as _;
+    let pem = std::fs::read(file).ok()?;
+    let mut roots = rustls::RootCertStore::empty();
+    for certificate in CertificateDer::pem_slice_iter(&pem).flatten() {
+        roots.add(certificate).ok()?;
+    }
+    if roots.is_empty() {
+        return None;
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .ok()?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Some(Arc::new(config))
+}
+
+/// Everything a connection sends before it ends; a peer that ends without TLS's goodbye has still said what it said.
+fn read_all(stream: &mut impl std::io::Read) -> std::io::Result<String> {
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => bytes.extend_from_slice(&chunk[..count]),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::UnexpectedEof && !bytes.is_empty() =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// One HTTP POST to a tool server with a bearer, on a connection of its own: the status and the body. `https` needs `tls`.
+fn post(
+    url: &str,
+    token: &str,
+    body: &str,
+    tls: Option<&Arc<rustls::ClientConfig>>,
+) -> std::io::Result<(u16, String)> {
+    let (secure, rest) = match url.strip_prefix("https://") {
+        Some(rest) => (true, rest),
+        None => (false, url.strip_prefix("http://").unwrap_or(url)),
+    };
     let (authority, path) = match rest.split_once('/') {
         Some((authority, path)) => (authority, format!("/{path}")),
         None => (rest, "/".to_owned()),
     };
-    let mut stream = std::net::TcpStream::connect(authority)?;
-    write!(
-        stream,
+    let tcp = std::net::TcpStream::connect(authority)?;
+    let request = format!(
         "POST {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\n\
          Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
-    )?;
-    let mut answer = String::new();
-    stream.read_to_string(&mut answer)?;
+    );
+    let answer = if secure {
+        let config = tls.ok_or_else(|| std::io::Error::other("https needs --mcp-ca"))?;
+        let host = authority
+            .rsplit_once(':')
+            .map_or(authority, |(host, _)| host);
+        let name = rustls::pki_types::ServerName::try_from(host.to_owned())
+            .map_err(std::io::Error::other)?;
+        let connection = rustls::ClientConnection::new(Arc::clone(config), name)
+            .map_err(std::io::Error::other)?;
+        let mut stream = rustls::StreamOwned::new(connection, tcp);
+        stream.write_all(request.as_bytes())?;
+        stream.flush()?;
+        read_all(&mut stream)?
+    } else {
+        let mut stream = tcp;
+        stream.write_all(request.as_bytes())?;
+        read_all(&mut stream)?
+    };
     let status = answer
         .split(' ')
         .nth(1)
