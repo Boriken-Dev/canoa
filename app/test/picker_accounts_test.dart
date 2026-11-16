@@ -39,10 +39,10 @@ Map<Object?, Object?> _meta(OptionsAgent agent) {
   return (initialize['params'] as Map)['_meta'] as Map<Object?, Object?>;
 }
 
-FakeAccountsHost _host() => FakeAccountsHost(accounts: [account('work', kind: 'claude-login'), account('metered')]);
+FakeAccountsHost _host() => FakeAccountsHost(accounts: [account('work', kind: 'claude-login'), account('other', kind: 'claude-login'), account('metered')]);
 
-Future<void> _open(WidgetTester tester, String source, {OptionsAgent? agent, SessionStore? store, CanoaConfig config = _config}) async {
-  await pumpApp(tester, store ?? _store(), linked: (agent ?? OptionsAgent()).openLink, config: config, accountsHost: _host());
+Future<void> _open(WidgetTester tester, String source, {OptionsAgent? agent, SessionStore? store, CanoaConfig config = _config, FakeAccountsHost? host}) async {
+  await pumpApp(tester, store ?? _store(), linked: (agent ?? OptionsAgent()).openLink, config: config, accountsHost: host ?? _host());
   await newSession(tester);
   await chooseSource(tester, source);
   await openFolder(tester);
@@ -73,13 +73,13 @@ void main() {
     await _open(tester, 'Claude', agent: agent, store: store);
     await tester.tap(find.byKey(const Key('option-account')));
     await frames(tester);
-    await tester.tap(find.byKey(const Key('account-choice metered')));
+    await tester.tap(find.byKey(const Key('account-choice other')));
     await frames(tester);
     await closePicker(tester);
     await send(tester, 'Say hello');
     await settle(tester, 150);
-    expect(_meta(agent)[accountMeta], 'metered');
-    expect(store.ledger!.entries.single.account, 'metered');
+    expect(_meta(agent)[accountMeta], 'other');
+    expect(store.ledger!.entries.single.account, 'other');
     await finish(tester);
   });
 
@@ -105,6 +105,64 @@ void main() {
     await settle(tester, 150);
     expect(_meta(agent).containsKey(accountMeta), isTrue);
     expect(_meta(agent)[accountMeta], isNull);
+    await finish(tester);
+  });
+
+  testWidgets('an unlisted account whose key reaches the agent says so, cannot be chosen, and can be offered to the agent', (tester) async {
+    final host = _host();
+    final store = _store();
+    await _open(tester, 'Claude', host: host, store: store);
+    await tester.tap(find.byKey(const Key('option-account')));
+    await frames(tester);
+    expect(tester.widget<InkWell>(find.byKey(const Key('account-choice metered'))).onTap, isNull);
+    expect(find.text('Its key reaches the agent; offer it to this agent first'), findsOneWidget);
+    expect(find.byKey(const Key('account-offer metered')), findsOneWidget);
+    expect(find.byKey(const Key('account-offer other')), findsNothing, reason: 'a login kept in a folder of its own needs no offer');
+    await tester.tap(find.byKey(const Key('account-offer metered')));
+    await settle(tester, 100);
+    // An agent open to every paired key says so first.
+    if (find.byKey(const Key('offer-here-confirm')).evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const Key('offer-here-confirm')));
+      await settle(tester, 100);
+    }
+    expect(host.offers.last.$1, 'Claude');
+    expect(host.offers.last.$2, ['metered']);
+    expect(store.selected!.account, 'metered', reason: 'and it is chosen once offered');
+    await finish(tester);
+  });
+
+  testWidgets('a running conversation moves to the machine login, and from it to an unlisted account', (tester) async {
+    final agent = OptionsAgent(modes: OptionsAgent.claudeModes)..resetsChoicesOnLoad = true;
+    final host = _host();
+    final store = _store();
+    await pumpApp(tester, store, linked: agent.openLink, config: _listing, accountsHost: host);
+    await newSession(tester);
+    await chooseSource(tester, 'Claude');
+    await openFolder(tester);
+    await settle(tester);
+    await send(tester, 'Say hello');
+    await settle(tester, 150);
+    final session = store.selected!;
+    expect(session.account, 'work');
+    await tester.tap(find.byKey(const Key('session-account')));
+    await frames(tester);
+    expect(tester.widget<InkWell>(find.byKey(const Key('account-machine'))).onTap, isNotNull, reason: 'the machine login can be moved to');
+    await tester.tap(find.byKey(const Key('account-machine')));
+    await settle(tester, 200);
+    expect(host.moves.last.from, 'work');
+    expect(host.moves.last.to, machineLogin);
+    expect(session.account, machineLogin);
+    expect(find.textContaining("Account: work → this machine's login"), findsOneWidget);
+    final initializes = [for (final request in agent.requests) if (request['method'] == 'initialize') request];
+    expect((initializes.last['params'] as Map)['_meta'], containsPair(accountMeta, null));
+
+    await tester.tap(find.byKey(const Key('session-account')));
+    await frames(tester);
+    await tester.tap(find.byKey(const Key('account-choice other')));
+    await settle(tester, 200);
+    expect(host.moves.last.from, machineLogin);
+    expect(host.moves.last.to, 'other');
+    expect(session.account, 'other');
     await finish(tester);
   });
 

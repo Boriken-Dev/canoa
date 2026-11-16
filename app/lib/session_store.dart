@@ -21,7 +21,7 @@ import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretCardEnvironment, shortLine;
 import 'drafts/draft_store.dart';
-import 'accounts/account_models.dart' show AccountMove;
+import 'accounts/account_models.dart' show AccountMove, machineLogin;
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
 import 'profile/report.dart';
@@ -1718,7 +1718,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return null;
   }
 
-  /// Moves the running [session] to [account]. Its agent ends, [move] carries the conversation to the account's own folder when
+  /// An account as a note names it: its name, or what the login the agent has where it runs is called.
+  String _accountWords(String account) => account == machineLogin ? "this machine's login" : account;
+
+  /// Moves the running [session] to [account], which is [machineLogin] for the login the agent has where it runs. Its agent ends, [move] carries the conversation to the account's own folder when
   /// the accounts keep theirs apart (answering the id it has there), [start] starts the agent again for the account, and the
   /// conversation is opened on it with the model, effort and mode it was in. Where the accounts share a folder it is the same
   /// conversation, resumed as it is. If any step fails the agent is started again on the account it had and the conversation is
@@ -1734,7 +1737,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (before == account) return true;
     final block = accountSwitchBlock(session);
     if (block != null) {
-      session.chat.note('Account: not moved to $account. $block');
+      session.chat.note('Account: not moved to ${_accountWords(account)}. $block');
       return false;
     }
     final old = _clients[session.id]!;
@@ -1783,9 +1786,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       session.account = before;
       try {
         await reopenOn(oldId);
-        session.chat.note('Account: not moved to $account: ${reasonOf(error)}. This conversation stays on ${before ?? 'its first account'}.');
+        session.chat.note('Account: not moved to ${_accountWords(account)}: ${reasonOf(error)}. This conversation stays on ${before == null ? 'its first account' : _accountWords(before)}.');
       } catch (again) {
-        session.chat.note('Account: not moved to $account: ${reasonOf(error)}. Its agent could not be started again on ${before ?? 'its first account'} either: ${reasonOf(again)}. Open it again from Earlier conversations.');
+        session.chat.note('Account: not moved to ${_accountWords(account)}: ${reasonOf(error)}. Its agent could not be started again on ${before == null ? 'its first account' : _accountWords(before)} either: ${reasonOf(again)}. Open it again from Earlier conversations.');
       }
       notifyListeners();
       return false;
@@ -1793,7 +1796,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final how = moved != null && moved.moved
         ? 'moved to that account\'s own folder (${moved.via == 'record' ? 'from what this host recorded of it' : 'by the agent\'s own export'}) and picked up'
         : 'picked up as it was';
-    session.chat.note('Account: ${before ?? 'the first'} → $account. The conversation was $how.');
+    session.chat.note('Account: ${before == null ? 'the first' : _accountWords(before)} → ${_accountWords(account)}. The conversation was $how.');
     notifyListeners();
     return true;
   }

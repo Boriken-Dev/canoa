@@ -492,6 +492,33 @@ class _SessionPickerState extends State<SessionPicker> {
     );
   }
 
+  /// Has this agent offer [account], the person's own choice written to canoa.cfg, then chooses it. An agent open to every paired
+  /// key says so first, as Settings does.
+  Future<void> _offerHere(BuildContext context, AccountsController accounts, AccountInfo account) async {
+    final entry = session.source?.hostEntry ?? session.agent;
+    if (accounts.isOpen(entry)) {
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          key: const Key('offer-here-open'),
+          title: Text('Offer ${account.name} to $entry?'),
+          content: Text(
+            '$entry has no list of keys, so every key paired with this host can start a session on it, running the agent as the user '
+            'who runs this host, and a session there may run on ${account.name}. Add the keys that may use it to its peers in canoa.cfg, '
+            'or keep ${account.name} to an agent only this computer reaches.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Do not offer it')),
+            FilledButton(key: const Key('offer-here-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Offer it to every paired key')),
+          ],
+        ),
+      );
+      if (sure != true) return;
+    }
+    await accounts.setOffered(account, entry, offered: true);
+    store.setAccount(session, account.name);
+  }
+
   /// Why a running session cannot go on under another account now; null when it can, or when it has not started.
   String? _accountBlock(AccountsController accounts) {
     if (draft) return null;
@@ -506,13 +533,17 @@ class _SessionPickerState extends State<SessionPicker> {
     final holder = account == null ? null : accounts.heldBy(account.name);
     final usable = (account?.usable ?? true) && holder == null;
     final block = _accountBlock(accounts);
-    final canMove = account != null && !draft && !chosen && block == null && kit.switchAccount != null;
-    final enabled = usable && (draft || canMove);
+    final canMove = !draft && !chosen && block == null && kit.switchAccount != null;
+    final entry = session.source?.hostEntry ?? session.agent;
+    final offerFirst = account != null && accounts.needsOffer(entry, account);
+    final enabled = usable && !offerFirst && (draft || canMove);
     final state = !draft && chosen
         ? 'This conversation'
         : account == null
             ? 'The login on this computer'
-            : holder == null ? account.statusLabel : 'In use by "$holder"';
+            : offerFirst
+                ? 'Its key reaches the agent; offer it to this agent first'
+                : holder == null ? account.statusLabel : 'In use by "$holder"';
     final summary = account == null ? null : windowSummary(accounts.usageOf(account), now);
     return Tooltip(
       message: draft || chosen || block == null ? state : block,
@@ -525,7 +556,7 @@ class _SessionPickerState extends State<SessionPicker> {
                 ? () => store.setAccount(session, account?.name ?? machineLogin)
                 : () {
                     _close();
-                    unawaited(kit.switchAccount!(session, account!.name));
+                    unawaited(kit.switchAccount!(session, account?.name ?? machineLogin));
                   },
         child: Container(
           constraints: const BoxConstraints(minWidth: 120),
@@ -543,6 +574,12 @@ class _SessionPickerState extends State<SessionPicker> {
             ]),
             Text(state, style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
             if (summary != null) Text(summary, key: Key('account-left-summary $name'), style: TextStyle(fontSize: 11, color: look.muted)),
+            if (offerFirst && draft)
+              TextButton(
+                key: Key('account-offer $name'),
+                onPressed: () => unawaited(_offerHere(context, accounts, account)),
+                child: const Text('Offer to this agent'),
+              ),
           ]),
         ),
       ),

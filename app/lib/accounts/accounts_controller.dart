@@ -86,6 +86,16 @@ class AccountsController extends ChangeNotifier {
     return [...listed, for (final each in of(harness)) if (!listed.any((one) => one.name == each.name)) each];
   }
 
+  /// Whether the credential of [account] reaches the agent in its environment (an API key or a token, not a login kept in a folder
+  /// of its own), so a repository's settings could redirect it unless the entry that runs it lists it and limits them.
+  bool keyReachesAgent(AccountInfo account) {
+    final kind = catalogIfKnown(account.harness)?.kind(account.kind);
+    return kind != null && !kind.stateDir && kind.endpoints.any((each) => each.purpose == 'model_api' && each.key != null);
+  }
+
+  /// Whether a session of [entry] cannot start on [account] until the entry offers it: its key reaches the agent.
+  bool needsOffer(String entry, AccountInfo account) => !offeredBy(entry).any((each) => each.name == account.name) && keyReachesAgent(account);
+
   /// The agent entries that run the provider [harness], which can offer its accounts.
   List<String> entriesRunning(String harness) => _view.hostEntriesRunning(harness);
 

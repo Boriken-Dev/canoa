@@ -139,6 +139,7 @@ abstract interface class AccountsHost {
 
   /// Carries the conversation [session] of [entry], which worked in [cwd], from the account [from] (the entry's first when null)
   /// to [to]: nothing when the accounts keep their conversations in one place, else through the provider's own export and import.
+  /// [machineLogin] for either is the login the agent has where it runs.
   Future<AccountMove> moveSession({required String entry, required String session, required String cwd, String? from, required String to});
 
   /// Signs in by [method] and makes the account [name], or signs in again to it when [again].
@@ -175,7 +176,14 @@ final class ControlAccountsHost implements AccountsHost {
 
   @override
   Future<AccountMove> moveSession({required String entry, required String session, required String cwd, String? from, required String to}) async =>
-      AccountMove.parse(await _call('history/account', {'entry': entry, 'session': session, 'cwd': cwd, 'from': ?from, 'to': to}));
+      AccountMove.parse(await _call('history/account', {
+        'entry': entry,
+        'session': session,
+        'cwd': cwd,
+        // The empty name is the login the agent has where it runs, which the host reads as null.
+        if (from != null) 'from': from == machineLogin ? null : from,
+        'to': to == machineLogin ? null : to,
+      }));
 
   @override
   Future<List<AccountEntry>> entries() async {
