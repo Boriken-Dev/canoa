@@ -488,34 +488,59 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Asks the host for a source's models and efforts before its agent runs; set by the app. Without it nothing is asked.
   ChoicesLoader? choicesLoader;
 
+  /// Asks for a source's choices as one of its accounts, so that a signed-in account lists what it may use; set by the app. When
+  /// it is not set or says nothing, [choicesLoader] asks as the machine's own login.
+  AccountChoicesLoader? accountChoicesLoader;
+
+  /// The account to ask as while a draft has chosen none: the source's first usable one; set by the app.
+  String? Function(AgentSource source)? defaultAccountOf;
+
   /// What each source's provider listed, by [sourceKey], as last asked.
   final Map<String, SourceChoices> _choices = {};
+  final Map<String, String?> _askedAs = {};
+  final Map<String, int> _asks = {};
   final Set<String> _asking = {};
   bool _disposed = false;
 
   /// What [source]'s provider listed before a session starts; null while it has not said.
   SourceChoices? choicesOf(AgentSource source) => _choices[sourceKey(source)];
 
-  /// Asks for [source]'s choices unless they are held and recent or being asked now. A source whose provider cannot say, or a
-  /// host that cannot be asked, leaves the composer saying its choices come after the agent starts.
-  void _askChoices(AgentSource? source) {
-    final load = choicesLoader;
-    if (load == null || source == null) return;
+  /// Whether the host is being asked for [source]'s choices now: the composer says it is listing them.
+  bool isAskingChoices(AgentSource source) => _asking.contains(sourceKey(source));
+
+  Future<SourceChoices?> _loadChoices(AgentSource source, String? account) async {
+    if (account != null && accountChoicesLoader != null) {
+      final got = await accountChoicesLoader!(source, account);
+      if (got != null) return got;
+    }
+    return choicesLoader?.call(source);
+  }
+
+  /// Asks for [source]'s choices as [account] (the source's default when null) unless they are held for that account and
+  /// recent, or being asked now. A source whose provider cannot say, or a host that cannot be asked, leaves the composer
+  /// saying why, or that its choices come after the agent starts.
+  void _askChoices(AgentSource? source, {String? account}) {
+    if (choicesLoader == null || source == null) return;
     final key = sourceKey(source);
+    final as = account ?? defaultAccountOf?.call(source);
     final held = _choices[key];
-    if (_asking.contains(key) || (held != null && DateTime.now().difference(held.fetchedAt) < choicesLife)) return;
+    final same = _askedAs.containsKey(key) && _askedAs[key] == as;
+    if (same && _asking.contains(key)) return;
+    if (same && held != null && DateTime.now().difference(held.fetchedAt) < choicesLife) return;
+    _askedAs[key] = as;
+    final mine = _asks[key] = (_asks[key] ?? 0) + 1;
     _asking.add(key);
     unawaited(() async {
       try {
-        final got = await load(source);
-        if (got != null && !_disposed) {
+        final got = await _loadChoices(source, as);
+        if (got != null && !_disposed && _asks[key] == mine) {
           _choices[key] = got.at(DateTime.now());
-          notifyListeners();
         }
       } catch (error) {
         debugPrint('Canoa: choices of ${source.label} could not be asked: ${reasonOf(error)}');
       } finally {
-        _asking.remove(key);
+        if (_asks[key] == mine) _asking.remove(key);
+        if (!_disposed) notifyListeners();
       }
     }());
   }
@@ -523,11 +548,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Asks the host for [source]'s choices again now, whatever is held, and tells whoever listens; what it answers, or what was
   /// held when the host cannot be asked.
   Future<SourceChoices?> askChoicesAgain(AgentSource source) async {
-    final load = choicesLoader;
-    if (load == null) return choicesOf(source);
+    if (choicesLoader == null) return choicesOf(source);
     final key = sourceKey(source);
     try {
-      final got = await load(source);
+      final as = _askedAs.containsKey(key) ? _askedAs[key] : defaultAccountOf?.call(source);
+      _askedAs[key] = as;
+      final got = await _loadChoices(source, as);
       if (got != null && !_disposed) {
         _choices[key] = got.at(DateTime.now());
         notifyListeners();
@@ -871,6 +897,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (!session.isDraft) return;
     session.account = account;
     _keepDraft(session);
+    // What an account may use is what its own login lists: the choices are asked again as the one chosen.
+    _askChoices(session.source, account: account);
     notifyListeners();
   }
 

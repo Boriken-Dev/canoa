@@ -206,5 +206,8 @@ final class SourceChoices {
 /// not be asked.
 typedef ChoicesLoader = Future<SourceChoices?> Function(AgentSource source);
 
+/// Asks the host for [source]'s choices as its account [account].
+typedef AccountChoicesLoader = Future<SourceChoices?> Function(AgentSource source, String account);
+
 /// How long the choices asked of a source are kept before a new draft of it asks again.
 const Duration choicesLife = Duration(hours: 1);

@@ -1197,8 +1197,17 @@ class _CanoaAppState extends State<CanoaApp> {
     if (mounted && _checked) unawaited(_checkSources());
   }
 
+  /// [_askChoices] as the entry's account [account], which lists what that account may use; null for a source the host does not
+  /// run from canoa.cfg.
+  Future<SourceChoices?> _askChoicesAs(AgentSource source, String account) async {
+    final tool = widget.host?.tool;
+    if (tool == null || source.hostEntry == null || _configPath == null) return null;
+    final ran = await tool.run(['options', source.hostEntry!, '--entry', ...hostConfigArgs(_configPath!), '--account', account, '--format', 'json']);
+    return ran.exitCode == 0 ? SourceChoices.parse(ran.stdout) : null;
+  }
+
   /// What `canoa options` says of [source]: the models and efforts its provider lists with no session. A preset the host runs
-  /// is asked by its harness, a hosted entry by its name in canoa.cfg; any other source lists them only once it has started.
+  /// is asked by its harness, a hosted entry by its name in canoa.cfg; a program entry is asked through a short session of its own.
   Future<SourceChoices?> _askChoices(AgentSource source) async {
     if (widget.askChoices case final ask?) return ask(source);
     final tool = widget.host?.tool;
@@ -1746,6 +1755,8 @@ class _CanoaAppState extends State<CanoaApp> {
     store.queueDelivery = config.sessions.queueDelivery;
     store.starter = _startDraft;
     store.choicesLoader = _askChoices;
+    store.accountChoicesLoader = _askChoicesAs;
+    store.defaultAccountOf = (source) => source.hostEntry == null ? null : _accounts?.offeredBy(source.hostEntry!).where((each) => each.usable).firstOrNull?.name;
     store.gitReader = _gitReaderFor;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
@@ -1823,6 +1834,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.removeListener(_noteLast);
     if (identical(store.starter, _startDraft)) store.starter = null;
     if (identical(store.choicesLoader, _askChoices)) store.choicesLoader = null;
+    if (identical(store.accountChoicesLoader, _askChoicesAs)) store.accountChoicesLoader = null;
     if (identical(store.gitReader, _gitReaderFor)) store.gitReader = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_control?.close());

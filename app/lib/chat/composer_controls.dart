@@ -139,13 +139,22 @@ class ModelEffortChooser extends StatelessWidget {
     if (!known && !draft) return const SizedBox.shrink();
     // A source that could not be started says why in its own chip, and has no list to wait for.
     final source = session.source;
-    if (!known && draft && source != null && store.choicesOf(source)?.unknownKind != null) return const SizedBox.shrink();
-    // Nothing is known of this agent's list until it runs: say so, rather than offer a lone Default.
-    if (!known) {
+    final asked = source == null ? null : store.choicesOf(source);
+    if (!known && draft && asked != null && (asked.unknownKind != null || asked.signedOut)) return const SizedBox.shrink();
+    // The host is asking the agent for its list now.
+    if (!known && draft && source != null && store.isAskingChoices(source)) {
       return const Tooltip(
         key: Key('option-model'),
-        message: 'Its model and effort choices are listed once the agent has started',
-        child: ComposerPill(label: 'Model: after start', icon: Icons.memory, enabled: false),
+        message: 'Asking the agent for its models and efforts',
+        child: ComposerPill(label: 'Listing models…', icon: Icons.memory, enabled: false),
+      );
+    }
+    // Nothing is known of this agent's list until it runs: say so, with the agent's reason when it gave one.
+    if (!known) {
+      return Tooltip(
+        key: const Key('option-model'),
+        message: asked?.unknownBecause ?? 'Its model and effort choices are listed once the agent has started',
+        child: const ComposerPill(label: 'Model: after start', icon: Icons.memory, enabled: false),
       );
     }
     final parts = [
