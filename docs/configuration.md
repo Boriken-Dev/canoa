@@ -540,6 +540,8 @@ What has been run, by platform:
 
 The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage) and Overlays (Catalogs), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
 
+Where the host grants the key `usage`, the app also has a Usage section of its own (its selector icon, with an index of All accounts and each account under its provider). Its Limits view shows each account's allowances as the host last heard them: how much is left, a bar, the reset, the pace and when the figure was read, with a warning in words once a reading is half an hour old. An account that several hosts report under the same identity is one allowance, the newest reading; Host, Provider and Account filters share the index's selection. The section holds the `[usage] warn_permille` choice, so Settings does not list Usage then. Accounts are still managed in Settings.
+
 The default launch is visible, with close-to-tray enabled. The start-hidden option takes effect on the next launch.
 
 ## When a conversation needs you
