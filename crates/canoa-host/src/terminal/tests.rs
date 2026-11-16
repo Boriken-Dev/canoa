@@ -487,3 +487,92 @@ fn the_grant_has_a_name_and_the_owner_holds_it() {
     });
     assert_eq!(told["result"]["grants"], json!(["terminal"]));
 }
+
+/// A link whose queue is full for its first `refusals` sends, as a WebSocket's is when output outpaces it.
+struct Slow {
+    refusals: core::sync::atomic::AtomicUsize,
+    sent: Mutex<Vec<u8>>,
+}
+
+impl Channel for Slow {
+    fn send(&self, message: &[u8]) -> Result<(), coqui_transport::Failure> {
+        let left = self.refusals.load(Ordering::SeqCst);
+        if left > 0 {
+            self.refusals.store(left - 1, Ordering::SeqCst);
+            return Err(coqui_transport::Failure::NoProgress);
+        }
+        let message: Value = serde_json::from_slice(message).expect("JSON");
+        if message["method"] == "terminal/output" {
+            let data = message["params"]["data"].as_str().expect("data");
+            lock(&self.sent).extend(BASE64.decode(data.as_bytes()).expect("base64"));
+        }
+        Ok(())
+    }
+
+    fn receive(&self, _: Option<Duration>) -> Result<Option<Vec<u8>>, coqui_transport::Failure> {
+        Err(coqui_transport::Failure::Timeout)
+    }
+
+    fn close(&self) {}
+}
+
+#[test]
+fn a_link_that_is_full_for_a_while_does_not_end_the_shell() {
+    let host = terminals();
+    let slow = Slow {
+        refusals: core::sync::atomic::AtomicUsize::new(6),
+        sent: Mutex::new(Vec::new()),
+    };
+    std::thread::scope(|scope| {
+        let link = Link::new(scope, &slow, &host);
+        let opened = link.call("terminal/open", &json!({})).expect("opened");
+        let id = opened["id"].clone();
+        let typed = BASE64.encode(say("slow_link").as_bytes());
+        link.call("terminal/write", &json!({"id": id, "data": typed}))
+            .expect("typed");
+        wait_until("the output never reached a link that was only slow", || {
+            String::from_utf8_lossy(&lock(&slow.sent)).contains("canoa_slow_link")
+        });
+        assert!(link.any_running(), "the shell was ended for a full queue");
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn a_bare_shell_name_is_found_on_path_as_an_absolute_path_and_never_in_the_working_folder() {
+    let found = resolve(std::ffi::OsStr::new("cmd")).expect("cmd is on PATH");
+    assert!(found.is_absolute() && found.is_file(), "{found:?}");
+    assert!(resolve(std::ffi::OsStr::new("canoa-no-such-shell-3117")).is_none());
+    // A name with a folder in it that is not absolute is looked for nowhere.
+    assert!(resolve(std::ffi::OsStr::new(r".\cmd.exe")).is_none());
+    // A program in a folder that is not on PATH is not found by its bare name, whatever the working folder holds.
+    let folder = std::env::temp_dir().join("canoa-resolve-3117");
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(folder.join("canoa-only-here-3117.exe"), b"").expect("file");
+    assert!(resolve(std::ffi::OsStr::new("canoa-only-here-3117")).is_none());
+    assert!(resolve(folder.join("canoa-only-here-3117").as_os_str()).is_some());
+    std::fs::remove_dir_all(&folder).expect("removed");
+}
+
+#[test]
+fn a_shell_whose_path_has_spaces_starts() {
+    let folder = std::env::temp_dir().join("canoa shell 3117");
+    std::fs::create_dir_all(&folder).expect("folder");
+    let name = if cfg!(windows) {
+        "my shell.exe"
+    } else {
+        "my shell"
+    };
+    std::fs::copy(shell(), folder.join(name)).expect("copied");
+    let spaced = folder.join(name);
+    let control = control(Terminals::new(
+        Some(spaced.to_string_lossy().into_owned()),
+        Some(std::env::temp_dir()),
+    ));
+    let ((), _) = on_a_link(&control, &Caller::Owner, |page| {
+        let id = page.open(&json!({}));
+        page.type_in(id, &say("spaced"));
+        page.until_output("canoa_spaced");
+    });
+    std::fs::remove_dir_all(&folder).expect("removed");
+}

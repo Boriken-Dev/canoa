@@ -810,8 +810,13 @@ impl Local {
         entry: &str,
         context: Option<delegate::ChildContext>,
     ) -> Result<Link, LocalError> {
-        if reaches_control(entry, context.as_ref()) {
-            return self.open_control();
+        if entry == control::NAME {
+            // Only this process's own link opens it; a task's connection has no entry of that name, whatever the list holds.
+            return if reaches_control(entry, context.as_ref()) {
+                self.open_control()
+            } else {
+                Err(LocalError::NoEntry)
+            };
         }
         let served = self
             .served

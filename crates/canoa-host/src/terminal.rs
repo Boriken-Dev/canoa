@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{Builder, Scope};
 use std::time::Duration;
 
-use coqui_transport::Channel;
+use coqui_transport::{Channel, Failure};
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 
@@ -92,25 +92,36 @@ impl Terminals {
         }
     }
 
-    /// The shell to start: the one canoa.cfg names, else the person's own.
-    fn program(&self) -> OsString {
-        if let Some(shell) = &self.shell {
-            return OsString::from(shell);
-        }
+    /// The shell to start: the one canoa.cfg names, else the person's own. On Windows it is an absolute path: a bare name is
+    /// looked for on `PATH` and never in the folder the host happens to be in, where a cloned repository could have put one.
+    fn program(&self) -> Result<OsString, String> {
         #[cfg(windows)]
         {
+            if let Some(shell) = &self.shell {
+                return resolve(std::ffi::OsStr::new(shell))
+                    .map(PathBuf::into_os_string)
+                    .ok_or_else(|| format!("the shell {shell} was not found on PATH"));
+            }
             for name in ["pwsh.exe", "powershell.exe"] {
-                if on_path(name) {
-                    return OsString::from(name);
+                if let Some(found) = resolve(std::ffi::OsStr::new(name)) {
+                    return Ok(found.into_os_string());
                 }
             }
-            std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe"))
+            std::env::var_os("COMSPEC")
+                .map(PathBuf::from)
+                .filter(|comspec| comspec.is_absolute())
+                .or_else(|| resolve(std::ffi::OsStr::new("cmd.exe")))
+                .map(PathBuf::into_os_string)
+                .ok_or_else(|| "no shell was found: name one in [host] shell".to_owned())
         }
         #[cfg(not(windows))]
         {
-            std::env::var_os("SHELL")
-                .filter(|shell| !shell.is_empty())
-                .unwrap_or_else(|| OsString::from("/bin/sh"))
+            Ok(self
+                .shell
+                .as_ref()
+                .map(OsString::from)
+                .or_else(|| std::env::var_os("SHELL").filter(|shell| !shell.is_empty()))
+                .unwrap_or_else(|| OsString::from("/bin/sh")))
         }
     }
 
@@ -128,10 +139,27 @@ impl Terminals {
     }
 }
 
+/// The program `name` stands for as an absolute path: itself when it is one, else the first match in a folder of `PATH` that is
+/// itself absolute (so never the working folder), with `.exe` added when it has no extension. `None` when there is none.
 #[cfg(windows)]
-fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(name).is_file()))
+fn resolve(name: &std::ffi::OsStr) -> Option<PathBuf> {
+    let with_extension = |path: PathBuf| {
+        if path.extension().is_some() {
+            return path.is_file().then_some(path);
+        }
+        let exe = path.with_extension("exe");
+        exe.is_file().then_some(exe)
+    };
+    let path = std::path::Path::new(name);
+    if path.is_absolute() {
+        return with_extension(path.to_path_buf());
+    }
+    if path.components().count() != 1 {
+        return None;
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .filter(|dir| dir.is_absolute())
+        .find_map(|dir| with_extension(dir.join(name)))
 }
 
 /// One place of the host's `max` terminals, given back when it is dropped.
@@ -294,7 +322,7 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
                 "this host runs at most {MAX_PER_HOST} terminals at once"
             ))
         })?;
-        let program = self.host.program();
+        let program = self.host.program().map_err(Fail::Refused)?;
         let started = pty::open(&program, &cwd, size).map_err(|error| {
             Fail::Refused(format!(
                 "the shell {} could not be started: {error}",
@@ -386,6 +414,7 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
                             channel,
                             "terminal/output",
                             &json!({"id": id, "data": BASE64.encode(&buf[..n]), "end": end}),
+                            &terminal.quiet,
                         );
                         if !sending {
                             // Nobody is listening any more: the shell is not left running for no one.
@@ -398,7 +427,12 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
                 terminal.process.end();
                 let code = exit_code_rx.recv_timeout(EXIT_WAIT).unwrap_or(-1);
                 if sending && !terminal.quiet.load(Ordering::SeqCst) {
-                    notify(channel, "terminal/exit", &json!({"id": id, "code": code}));
+                    notify(
+                        channel,
+                        "terminal/exit",
+                        &json!({"id": id, "code": code}),
+                        &terminal.quiet,
+                    );
                 }
             })?;
         Ok(())
@@ -471,10 +505,28 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
     }
 }
 
-/// Sends one notification; whether the link took it.
-fn notify<C: Channel>(channel: &C, method: &str, params: &Value) -> bool {
-    serde_json::to_vec(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
-        .is_ok_and(|bytes| channel.send(&bytes).is_ok())
+/// How long to wait before offering a notification again to a link whose queue is full.
+const RETRY: Duration = Duration::from_millis(50);
+
+/// Sends one notification and says whether the link took it. A link whose queue is full is waited for, so a shell that writes
+/// faster than the link carries is slowed and not ended; the answer is `false` only once the link has ended or `stop` is set.
+fn notify<C: Channel>(channel: &C, method: &str, params: &Value, stop: &AtomicBool) -> bool {
+    let Ok(bytes) =
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
+    else {
+        return false;
+    };
+    loop {
+        match channel.send(&bytes) {
+            Ok(()) => return true,
+            Err(Failure::NoProgress | Failure::Timeout)
+                if !channel.is_closed() && !stop.load(Ordering::SeqCst) =>
+            {
+                std::thread::sleep(RETRY);
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 fn text<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, Fail> {

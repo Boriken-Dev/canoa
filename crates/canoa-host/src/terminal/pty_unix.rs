@@ -46,6 +46,9 @@ pub(super) struct Process {
     /// The shell's process id, which is also its process group's and its session's.
     group: Option<Pid>,
     master: OwnedFd,
+    /// Held while the tree is ended and while the shell is collected, so that the shell's process id is never used after it
+    /// could belong to another process.
+    tree: Mutex<()>,
     /// Written to wake the reader once the terminal is over, so that it takes what is left and ends.
     wake: OwnedFd,
     ended: AtomicBool,
@@ -102,6 +105,7 @@ pub(super) fn open(program: &OsStr, cwd: &Path, size: Size) -> io::Result<Pty> {
             child: Mutex::new(child),
             group,
             master,
+            tree: Mutex::new(()),
             wake: wake_write,
             ended: AtomicBool::new(false),
         },
@@ -192,12 +196,24 @@ impl Input {
 impl Process {
     /// Waits for the shell to end, ends what it left running, and tells the reader to finish. Its exit code, or 128 and the signal.
     pub(super) fn wait(&self) -> i32 {
-        let status = self
-            .child
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .wait();
+        // Learn that it ended without collecting it, so that its process id, which the tree below is found by, stays its own.
+        if let Some(group) = self.group {
+            while let Err(rustix::io::Errno::INTR) = rustix::process::waitid(
+                rustix::process::WaitId::Pid(group),
+                rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOWAIT,
+            ) {}
+        }
         self.end();
+        let status = {
+            let _tree = self
+                .tree
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.child
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .wait()
+        };
         match status {
             Ok(status) => status
                 .code()
@@ -209,10 +225,16 @@ impl Process {
 
     /// Ends the shell and the process group it leads with no signal they can catch, and wakes the reader. Safe to call again.
     pub(super) fn end(&self) {
-        if !self.ended.swap(true, Ordering::SeqCst)
-            && let Some(group) = self.group
         {
-            end_tree(group, &self.master);
+            let _tree = self
+                .tree
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !self.ended.swap(true, Ordering::SeqCst)
+                && let Some(group) = self.group
+            {
+                end_tree(group, &self.master);
+            }
         }
         // One byte, left unread, so that the reader sees it whenever it looks.
         let _ = rustix::io::write(&self.wake, &[1]);

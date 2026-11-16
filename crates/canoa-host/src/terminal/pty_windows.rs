@@ -143,6 +143,7 @@ fn start(program: &OsStr, cwd: &Path, console: HPCON) -> io::Result<Process> {
     startup.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
     startup.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
     startup.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
+    let application: Vec<u16> = program.encode_wide().chain([0]).collect();
     let mut line: Vec<u16> = Vec::new();
     line.push(u16::from(b'"'));
     line.extend(program.encode_wide());
@@ -155,7 +156,7 @@ fn start(program: &OsStr, cwd: &Path, console: HPCON) -> io::Result<Process> {
     // SAFETY: `line` and `directory` end in a zero and outlive the call; `startup` holds a live list; `info` is written.
     let created = unsafe {
         CreateProcessW(
-            null(),
+            application.as_ptr(),
             line.as_mut_ptr(),
             null(),
             null(),
@@ -236,6 +237,8 @@ impl Output {
 
 impl Process {
     /// Waits for the shell to end, ends what it left running, and closes the console so that the reader finishes. Its exit code.
+    /// This is the only place the console is closed while a terminal runs: closing it can wait for its output to be read, which
+    /// the reader does for as long as this has not returned.
     pub(super) fn wait(&self) -> i32 {
         let mut code = 0_u32;
         // SAFETY: the shell's handle stays open as long as this value does; the code is written on success.
@@ -244,6 +247,7 @@ impl Process {
                 && GetExitCodeProcess(self.shell.as_raw_handle(), &raw mut code) != 0
         };
         self.end();
+        self.close_console();
         if waited {
             // A code above `i32::MAX` is an NTSTATUS, which reads as a negative number.
             i32::from_ne_bytes(code.to_ne_bytes())
@@ -252,7 +256,7 @@ impl Process {
         }
     }
 
-    /// Ends the shell and everything in its job, and closes the console. Safe to call again.
+    /// Ends the shell and everything in its job; [`Process::wait`] then sees it end and closes the console. Safe to call again.
     pub(super) fn end(&self) {
         drop(
             self.job
@@ -260,6 +264,9 @@ impl Process {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take(),
         );
+    }
+
+    fn close_console(&self) {
         let console = self
             .console
             .lock()
@@ -293,5 +300,6 @@ impl Process {
 impl Drop for Process {
     fn drop(&mut self) {
         self.end();
+        self.close_console();
     }
 }
