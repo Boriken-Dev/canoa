@@ -148,6 +148,10 @@ Future<void> _tap(WidgetTester tester, Key key) async {
 Finder _tiles() => find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key! as ValueKey<String>).value.startsWith('site-session '));
 
 void main() {
+  test('the app marks its sessions as its own person\'s, not a webpage\'s', () {
+    expect(siteSetup('example.com').meta, {siteMeta: {'site': 'example.com', 'own': true}});
+  });
+
   testWidgets('a session from https://example.com/a works in scratch/example.com/<id>, which the ledger notes with its site', (tester) async {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final provider = _Provider();

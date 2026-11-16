@@ -8,8 +8,9 @@ const siteMeta = 'dev.boriken.canoa/site';
 const siteStandInFolder = '/';
 
 /// What a session for [site] (a host name as `siteFqdn` writes it) is opened with, or opened again with: the host checks the name
-/// and makes or finds the folder.
-AcpSessionSetup siteSetup(String site) => AcpSessionSetup(meta: {siteMeta: {'site': site}});
+/// and makes or finds the folder. The app is the person's own, which the host is told so that it does not hold the app's sessions to
+/// what it holds a webpage's (a page's own request reaches the host by way of the extension, which removes this mark).
+AcpSessionSetup siteSetup(String site) => AcpSessionSetup(meta: {siteMeta: {'site': site, 'own': true}});
 
 /// The folder the host made for a webpage's session and its id, from the answer to `session/new`; null when it said none.
 ({String id, String folder})? madeFolder(Map<String, dynamic> answer) {

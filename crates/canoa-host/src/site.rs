@@ -30,8 +30,22 @@ const MAX_LABEL: usize = 63;
 const NEW: &str = "session/new";
 const REOPEN: [&str; 2] = ["session/load", "session/resume"];
 
-/// Words in a mode or option value that name one which skips the agent's permission prompts.
-const UNPROMPTED: [&str; 5] = ["bypass", "danger", "full-access", "full_access", "yolo"];
+/// The only modes a client may choose for a session a site opened: each still asks. Anything else, a mode that does not ask
+/// (`bypassPermissions`, `auto`, an agent's own name for one) and any value that is not a string, is refused.
+const MODES_THAT_ASK: [&str; 6] = [
+    "plan",
+    "manual",
+    "default",
+    "accept_edits",
+    "acceptEdits",
+    "dontAsk",
+];
+/// The `_meta` key of an answer to `initialize` that carries this connection's approval token, and of a mode change that
+/// carries it back. The token is made for the connection and given only in the sealed answer: the extension keeps it and removes
+/// it before a page sees the answer, and removes every `_meta` a page sends, so only the extension can send a change with it.
+pub const APPROVAL_META: &str = "dev.boriken.canoa/approval";
+/// Option categories that cannot change whether the agent asks.
+const OPEN_CATEGORIES: [&str; 2] = ["model", "thought_level"];
 
 /// One connection's webpage sessions: the folders made for `session/new` requests the agent has not answered yet, and the
 /// sessions the host has placed, whose mode a client may not change to one that skips permission prompts.
@@ -40,6 +54,12 @@ pub(crate) struct Sites {
     documents: Option<PathBuf>,
     pending: Mutex<BTreeMap<String, Value>>,
     placed: Mutex<BTreeSet<String>>,
+    /// The category the agent gave each configuration option, learned from its answers and updates.
+    categories: Mutex<BTreeMap<String, String>>,
+    /// This connection's approval token (see [`APPROVAL_META`]); none when the host could not make one, and then none is accepted.
+    approval: Option<String>,
+    /// The ids of `initialize` requests waiting for their answer, which is where the token goes.
+    initializing: Mutex<BTreeSet<String>>,
 }
 
 /// A client message that names a site.
@@ -48,6 +68,9 @@ struct Request {
     method: String,
     /// What the client called the site, untrusted.
     site: Option<String>,
+    /// Canoa's own pages in the browser extension, which the extension marks itself and a page cannot: a person's own chat, not a
+    /// site. Its sessions are not held to what a site's are.
+    own: bool,
     value: Value,
 }
 
@@ -70,6 +93,7 @@ impl Request {
             id: value.get("id").cloned(),
             method: method.to_owned(),
             site: named.get("site").and_then(Value::as_str).map(str::to_owned),
+            own: named.get("own") == Some(&Value::Bool(true)),
             value,
         })
     }
@@ -92,10 +116,14 @@ impl Sites {
             documents,
             pending: Mutex::new(BTreeMap::new()),
             placed: Mutex::new(BTreeSet::new()),
+            categories: Mutex::new(BTreeMap::new()),
+            approval: new_id(),
+            initializing: Mutex::new(BTreeSet::new()),
         }
     }
 
-    /// A request to change a placed session's mode or an option to a value that skips permission prompts, refused.
+    /// A request to change a placed session's mode, or an option that could be one, to anything but a mode that still asks. A
+    /// category the agent never gave is taken to be a mode's, as the scope does.
     fn unprompted_mode(&self, message: &[u8]) -> Option<Verdict> {
         let text = core::str::from_utf8(message).ok()?;
         if !text.contains("session/set_mode") && !text.contains("session/set_config_option") {
@@ -103,30 +131,83 @@ impl Sites {
         }
         let value: Value = serde_json::from_str(text).ok()?;
         let method = value.get("method")?.as_str()?;
-        if method != "session/set_mode" && method != "session/set_config_option" {
-            return None;
-        }
         let params = value.get("params")?;
+        let chosen = match method {
+            "session/set_mode" => params.get("modeId"),
+            "session/set_config_option" => {
+                let option = params.get("configId").and_then(Value::as_str);
+                let category = option.and_then(|id| lock(&self.categories).get(id).cloned());
+                if category.is_some_and(|name| OPEN_CATEGORIES.contains(&name.as_str())) {
+                    return None;
+                }
+                params.get("value")
+            }
+            _ => return None,
+        };
         if !lock(&self.placed).contains(params.get("sessionId")?.as_str()?) {
             return None;
         }
-        let chosen = ["modeId", "value"]
-            .iter()
-            .filter_map(|key| params.get(*key).and_then(Value::as_str))
-            .map(str::to_ascii_lowercase)
-            .collect::<Vec<_>>();
-        if !chosen
-            .iter()
-            .any(|name| UNPROMPTED.iter().any(|word| name.contains(word)))
+        // The person was asked, in the extension's own window, and the extension says so with this connection's token.
+        let approved = params
+            .pointer("/_meta")
+            .and_then(|meta| meta.get(APPROVAL_META))
+            .and_then(Value::as_str);
+        if approved.is_some() && approved == self.approval.as_deref() {
+            return None;
+        }
+        if chosen
+            .and_then(Value::as_str)
+            .is_some_and(|name| MODES_THAT_ASK.contains(&name))
         {
             return None;
         }
         let reply = value.get("id").map(|id| {
-            let why = "a session a site opened cannot be set to a mode that skips permission prompts";
+            let why = "a session a site opened can be set only to a mode that still asks for permission";
             serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "error": {"code": INVALID_PARAMS, "message": why}}))
                 .unwrap_or_default()
         });
         Some(Verdict::Refuse(reply))
+    }
+
+    /// Remembers the id of an `initialize` request, whose answer carries the approval token.
+    fn note_initialize(&self, message: &[u8]) {
+        if !message.windows(10).any(|window| window == b"initialize") {
+            return;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(message) else {
+            return;
+        };
+        if value.get("method").and_then(Value::as_str) == Some("initialize")
+            && let Some(id) = value.get("id")
+        {
+            let mut waiting = lock(&self.initializing);
+            if waiting.len() < 16 {
+                waiting.insert(id.to_string());
+            }
+        }
+    }
+
+    /// Notes the category the agent gave each option in an answer or an update.
+    fn learn_categories(&self, value: &Value) {
+        let lists = [
+            value.pointer("/result/configOptions"),
+            value.pointer("/params/update/configOptions"),
+        ];
+        let mut known = lock(&self.categories);
+        for option in lists
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_array)
+            .flatten()
+        {
+            if let (Some(id), Some(category)) = (
+                option.get("id").and_then(Value::as_str),
+                option.get("category").and_then(Value::as_str),
+            ) && known.len() < 256
+            {
+                known.insert(id.to_owned(), category.to_owned());
+            }
+        }
     }
 
     /// What becomes of a client's message: [`Scope::check`], except that a session request naming a site gets the folder the
@@ -136,6 +217,7 @@ impl Sites {
         if let Some(refused) = self.unprompted_mode(message) {
             return refused;
         }
+        self.note_initialize(message);
         let Some(request) = Request::read(message) else {
             return scope.check(message);
         };
@@ -153,7 +235,9 @@ impl Sites {
         if let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) {
             // A site names no directories of its own, which an agent may make writable without asking; the profile's skills
             // folders are added after this check.
-            params.remove("additionalDirectories");
+            if !request.own {
+                params.remove("additionalDirectories");
+            }
             params.insert(
                 "cwd".to_owned(),
                 Value::String(placed.folder.to_string_lossy().into_owned()),
@@ -166,6 +250,7 @@ impl Sites {
             return scope.check(&rewritten);
         };
         if request.method != NEW
+            && !request.own
             && let Some(session) = request
                 .value
                 .pointer("/params/sessionId")
@@ -182,7 +267,7 @@ impl Sites {
             if let Some(key) = key {
                 pending.insert(
                     key,
-                    json!({"site": placed.site, "id": placed.id, "folder": placed.folder.to_string_lossy()}),
+                    json!({"site": placed.site, "id": placed.id, "folder": placed.folder.to_string_lossy(), "own": request.own}),
                 );
             }
         }
@@ -242,31 +327,59 @@ impl Sites {
         let named = message
             .windows(SITE_META.len())
             .any(|window| window == SITE_META.as_bytes());
-        if !named && lock(&self.pending).is_empty() {
+        let options = message.windows(13).any(|window| window == b"configOptions");
+        if !named
+            && !options
+            && lock(&self.pending).is_empty()
+            && lock(&self.initializing).is_empty()
+        {
             return Cow::Borrowed(message);
         }
         let Ok(mut value) = serde_json::from_slice::<Value>(message) else {
             return Cow::Borrowed(message);
         };
+        if options {
+            self.learn_categories(&value);
+        }
         if value.get("method").is_some() {
             return Cow::Borrowed(message);
         }
+        let initialized = value
+            .get("id")
+            .is_some_and(|id| lock(&self.initializing).remove(&id.to_string()));
         let told = value
             .get("id")
             .and_then(|id| lock(&self.pending).remove(&id.to_string()));
         let Some(result) = value.get_mut("result").and_then(Value::as_object_mut) else {
             return Cow::Borrowed(message);
         };
-        if told.is_some()
+        let told = told.map(|mut told| {
+            (
+                told.as_object_mut().and_then(|fields| fields.remove("own"))
+                    == Some(Value::Bool(true)),
+                told,
+            )
+        });
+        if let Some((own, _)) = &told
+            && !own
             && let Some(session) = result.get("sessionId").and_then(Value::as_str)
         {
             lock(&self.placed).insert(session.to_owned());
         }
         let mut changed = false;
-        if let Some(meta) = result.get_mut("_meta").and_then(Value::as_object_mut) {
-            changed = meta.remove(SITE_META).is_some();
+        if initialized && let Some(token) = &self.approval {
+            let meta = result
+                .entry("_meta")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if let Some(meta) = meta.as_object_mut() {
+                meta.insert(APPROVAL_META.to_owned(), Value::String(token.clone()));
+                changed = true;
+            }
         }
-        if let Some(told) = told {
+        if let Some(meta) = result.get_mut("_meta").and_then(Value::as_object_mut) {
+            changed |= meta.remove(SITE_META).is_some();
+        }
+        if let Some((_, told)) = told {
             let meta = result
                 .entry("_meta")
                 .or_insert_with(|| Value::Object(Map::new()));
