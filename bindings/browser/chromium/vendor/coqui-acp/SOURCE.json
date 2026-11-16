@@ -1,9 +1,9 @@
 {
   "source": "https://github.com/Boriken-Dev/coqui-acp",
-  "commit": "b995fa7d7bdc327534433452bcd6fe367782616a",
+  "commit": "2c19e24ca2c5fe8a30c54ee7da39da9ba6081481",
   "path": "bindings/js/src",
   "files": {
-    "scope.mjs": "ab36bf67e2a07b564f2f33db58556defd186d4db",
+    "scope.mjs": "99c7df6f8f7f1b12041261f7420618ac4030cc8a",
     "registry.mjs": "9c37f748dc2f72e4a525fd5be3d4e33e532cf65d",
     "conformance.mjs": "fd29f33489c85a0a76003b5d609613364e4126a1"
   }
