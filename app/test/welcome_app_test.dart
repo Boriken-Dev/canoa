@@ -1,121 +1,141 @@
-// The first screen: with no session yet the window shows each source with its readiness, not two offline preview sessions.
+// The first screen: the window lands on the page of choices for a new session, which exists only as that page until Send. With no
+// agent installed it says so and links to the Store, which is where an agent is installed.
 import 'dart:io' show Directory;
 
+import 'package:canoa/chat/new_session_view.dart';
+import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/rail/session_rail.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
+import 'fixtures/options_agent.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
-import 'fixtures/store_link.dart';
 
 Finder _row(String label) => find.byKey(Key('welcome-source $label'));
 
-FakeStoreHost _storeHost({List<Map<String, Object?>> copies = const []}) => FakeStoreHost([
-  FakeStore(
-    'claude_like_store',
-    title: 'Program One',
-    serves: [
-      {'provider': 'claude', 'when': <String, Object?>{}},
-    ],
-    copies: copies,
-    plan: {'install': planOf('install', '1.0.0', bytes: 1024 * 1024)},
-  ),
-]);
+/// Every program the host's own sources need, so that no agent can start.
+const _noAgents = {'claude', 'codex', 'agy', 'grok', 'pi'};
 
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/welcome_app_test.dart')));
 
-  testWidgets('a first run with a ready source lists it, with no preview session and no peer to connect', (tester) async {
+  testWidgets('launch lands on the page of choices for a new session, with nothing in the side list and nothing started', (tester) async {
     final store = SessionStore();
     addTearDown(store.dispose);
-    await pumpApp(tester, store);
-    expect(store.sessions, isEmpty);
-    expect(find.byKey(const Key('welcome')), findsOneWidget);
-    expect(_row('Claude'), findsOneWidget);
-    expect(find.descendant(of: _row('Claude'), matching: find.text('Ready')), findsOneWidget);
-    expect(find.descendant(of: _row('Codex'), matching: find.text('Ready')), findsOneWidget);
-    expect(find.text('Getting started'), findsNothing);
-    expect(find.text('Another conversation'), findsNothing);
+    final agent = OptionsAgent();
+    await pumpApp(tester, store, linked: agent.openLink);
+    expect(find.byType(NewSessionView), findsOneWidget);
+    expect(find.byKey(const Key('welcome')), findsNothing);
+    expect(store.selected?.isDraft, isTrue);
+    expect(store.sessions, hasLength(1));
+    expect(store.listed, isEmpty, reason: 'the page is not a session until Send');
+    expect(find.descendant(of: find.byType(SessionRail), matching: find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key! as ValueKey<String>).value.startsWith('row '))), findsNothing);
+    expect(agent.starts, isEmpty);
     expect(find.textContaining('Preview'), findsNothing);
-    expect(find.textContaining('verified ACP peer'), findsNothing);
-    expect(find.text('Create a conversation to begin.'), findsNothing);
+    await finish(tester);
   });
 
-  testWidgets('a source whose program is missing says what it needs', (tester) async {
+  testWidgets('choosing the agent, the place and the folder makes no session and starts nothing', (tester) async {
     final store = SessionStore();
     addTearDown(store.dispose);
-    await pumpApp(tester, store, missing: {'codex'});
-    expect(find.descendant(of: _row('Claude'), matching: find.text('Ready')), findsOneWidget);
-    expect(find.descendant(of: _row('Codex'), matching: find.textContaining('needs codex on PATH')), findsOneWidget);
-    expect(find.descendant(of: _row('Codex'), matching: find.text('Ready')), findsNothing);
+    final agent = OptionsAgent();
+    await pumpApp(tester, store, linked: agent.openLink);
+    await chooseSource(tester, 'Scripted');
+    await openFolder(tester);
+    expect(store.sessions, hasLength(1));
+    expect(store.listed, isEmpty);
+    expect(agent.starts, isEmpty);
+    await finish(tester);
   });
 
-  testWidgets('a source the Store serves shows its version, or Install when the program is not found', (tester) async {
+  testWidgets('New session beside the page of choices shows the same page, not a second one', (tester) async {
     final store = SessionStore();
     addTearDown(store.dispose);
-    final host = _storeHost(copies: [copyOf('1.0.0')]);
-    await pumpApp(tester, store, linked: (name) => name == '@control' ? host.open() : throw StateError('nothing starts: $name'));
-    expect(find.descendant(of: _row('Claude'), matching: find.textContaining('1.0.0')), findsOneWidget);
-    expect(find.byKey(const Key('program-install-claude_like_store')), findsNothing);
+    await pumpApp(tester, store, linked: OptionsAgent().openLink);
+    await newSession(tester);
+    await newSession(tester);
+    expect(store.sessions, hasLength(1));
+    expect(store.listed, isEmpty);
+    await finish(tester);
   });
 
-  testWidgets('Install from the welcome page asks for the plan first, and makes the source ready', (tester) async {
+  testWidgets('Send makes the session, its row appears in the side list, and the view becomes the conversation', (tester) async {
     final store = SessionStore();
     addTearDown(store.dispose);
-    final host = _storeHost();
-    host.afterApply = (store, plan) => store.copies = [copyOf('1.0.0')];
-    await pumpApp(
-      tester, store, missing: {'claude'}, size: const Size(1280, 1000),
-      linked: (name) => name == '@control' ? host.open() : throw StateError('nothing starts: $name'),
-    );
-    expect(find.descendant(of: _row('Claude'), matching: find.textContaining('Not installed')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('program-install-claude_like_store')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('plan-dialog')), findsOneWidget);
-    expect(host.calls.where((call) => call.startsWith('store/apply')), isEmpty);
-    await tester.tap(find.byKey(const Key('plan-confirm')));
-    for (var i = 0; i < 40 && find.byKey(const Key('program-done')).evaluate().isEmpty; i++) {
-      await tester.pump(const Duration(milliseconds: 50));
-    }
-    await tester.tap(find.byKey(const Key('program-close')));
-    await tester.pumpAndSettle();
-    expect(find.descendant(of: _row('Claude'), matching: find.textContaining('1.0.0')), findsOneWidget);
+    final agent = OptionsAgent();
+    await pumpApp(tester, store, linked: agent.openLink);
+    await chooseSource(tester, 'Scripted');
+    await openFolder(tester);
+    expect(store.listed, isEmpty);
+    await send(tester, 'Say hello');
+    await until(tester, () => store.selected != null && !store.selected!.isDraft, 'the session to start');
+    expect(agent.starts, hasLength(1));
+    expect(store.listed, hasLength(1));
+    expect(find.byKey(ValueKey('row ${store.selected!.id}')), findsOneWidget);
+    expect(find.byType(NewSessionView), findsNothing);
+    expect(find.text('Say hello'), findsWidgets);
+    await finish(tester);
   });
 
-  testWidgets('New session on the welcome page opens a draft, and the page goes', (tester) async {
+  testWidgets('closing the last session lands on the page of choices again', (tester) async {
     final store = SessionStore();
     addTearDown(store.dispose);
-    await pumpApp(tester, store);
-    // The page scrolls: beside the section selector its text wraps more, and the button can lie below the window.
-    await tester.ensureVisible(find.byKey(const Key('welcome-new-session')));
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('welcome-new-session')));
+    await pumpApp(tester, store, linked: OptionsAgent().openLink);
+    await chooseSource(tester, 'Scripted');
+    await openFolder(tester);
+    await send(tester, 'Say hello');
+    await until(tester, () => store.selected != null && !store.selected!.isDraft, 'the session to start');
+    await closeSession(tester, store, store.selected!);
     await frames(tester);
     expect(store.selected?.isDraft, isTrue);
-    expect(find.byKey(const Key('welcome')), findsNothing);
+    expect(store.listed, isEmpty);
+    expect(find.byType(NewSessionView), findsOneWidget);
+    await finish(tester);
   });
 
-  testWidgets('with a session open there is no welcome page', (tester) async {
+  testWidgets('with no agent installed the page says so and links to the Store, which it is not', (tester) async {
     final store = SessionStore();
     addTearDown(store.dispose);
-    store.createDraft(title: 'Work');
-    await pumpApp(tester, store);
-    expect(find.byKey(const Key('welcome')), findsNothing);
+    await pumpApp(tester, store, missing: _noAgents, config: const CanoaConfig(), linked: OptionsAgent().openLink);
+    expect(find.byKey(const Key('welcome')), findsOneWidget);
+    expect(find.byKey(const Key('welcome-title')), findsOneWidget);
+    expect(find.byType(NewSessionView), findsNothing);
+    expect(find.byKey(const Key('welcome-new-session')), findsNothing);
+    expect(find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key! as ValueKey<String>).value.startsWith('program-install')), findsNothing);
+    expect(_row('Claude'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('welcome-store')));
+    await tester.tap(find.byKey(const Key('welcome-store')));
+    await frames(tester);
+    expect(find.byKey(const Key('store-tabs')), findsOneWidget);
+    await finish(tester);
   });
 
-  // One source found by the Store with its version, one missing, the rest the host's own and ready.
+  testWidgets('a source whose program is missing says what it needs, while another is ready the page of choices shows', (tester) async {
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    await pumpApp(tester, store, missing: {'codex'}, linked: OptionsAgent().openLink);
+    expect(find.byType(NewSessionView), findsOneWidget);
+    expect(find.byKey(const Key('welcome')), findsNothing);
+    await finish(tester);
+  });
+
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
-    testWidgets('the welcome page draws at $label width with nothing overflowing', (tester) async {
+    testWidgets('the no-agent page draws at $label width with nothing overflowing', (tester) async {
       final store = SessionStore();
       addTearDown(store.dispose);
-      final host = _storeHost(copies: [copyOf('1.0.0')]);
-      await pumpApp(
-        tester, store, missing: {'codex'}, size: size,
-        linked: (name) => name == '@control' ? host.open() : throw StateError('nothing starts: $name'),
-      );
+      await pumpApp(tester, store, missing: _noAgents, config: const CanoaConfig(), size: size, linked: OptionsAgent().openLink);
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/welcome_$label.png'));
+    });
+
+    testWidgets('the page of choices a launch lands on draws at $label width', (tester) async {
+      final store = SessionStore();
+      addTearDown(store.dispose);
+      await pumpApp(tester, store, size: size, linked: OptionsAgent().openLink);
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/landing_$label.png'));
     });
   }
 }

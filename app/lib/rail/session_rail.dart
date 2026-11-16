@@ -141,11 +141,11 @@ class _SessionRailState extends State<SessionRail> {
     // The groups to show, each with its key, label, sessions and whether it folds.
     final groups = switch (grouping) {
       SessionGrouping.status => [
-        for (final MapEntry(key: group, value: sessions) in groupSessions(store.sessions).entries)
+        for (final MapEntry(key: group, value: sessions) in groupSessions(store.listed).entries)
           (key: group.name, label: group.label, sessions: sessions, folds: group.folds, header: 'group ${group.name}'),
       ],
       SessionGrouping.workspace => [
-        for (final group in groupByWorkspace(store.sessions))
+        for (final group in groupByWorkspace(store.listed))
           (key: group.key, label: group.label, sessions: group.sessions, folds: group.folds, header: 'workspace ${group.key}'),
       ],
     };

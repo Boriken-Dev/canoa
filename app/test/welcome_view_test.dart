@@ -40,7 +40,6 @@ Future<void> _show(WidgetTester tester, WelcomeView view, {double width = 1000})
 WelcomeView _view({HistoryImport? historyImport, Map<AgentSource, SourceCheck>? checks, List<AgentSource>? sources}) => WelcomeView(
   sources: sources ?? [_claude, _codex],
   checks: checks ?? {_claude: const SourceCheck(), _codex: const SourceCheck()},
-  onNewSession: () {},
   historyImport: historyImport,
 );
 

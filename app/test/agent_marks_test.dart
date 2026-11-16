@@ -147,7 +147,8 @@ void main() {
       AgentSource.hosted('Grok', local: true),
     ];
     for (final (index, source) in sources.indexed) {
-      store.createDraft(source: source, title: 'Session ${index + 1}');
+      // Started sessions: a new one has no row until it is sent.
+      store.createDraft(source: source, title: 'Session ${index + 1}').status = SessionStatus.connected;
     }
     await pumpApp(tester, store, size: const Size(900, 640));
     await frames(tester);

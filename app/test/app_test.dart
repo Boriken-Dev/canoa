@@ -31,7 +31,7 @@ void main() {
     final store = SessionStore();
     await tester.pumpWidget(CanoaApp(store: store));
     expect(find.text('Canoa'), findsWidgets);
-    expect(find.text('Welcome to Canoa'), findsOneWidget);
+    expect(find.text('No agent is installed yet'), findsOneWidget);
     expect(find.byIcon(Icons.add_comment_outlined), findsOneWidget);
     store.dispose();
   });

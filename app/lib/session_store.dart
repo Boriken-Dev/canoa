@@ -724,6 +724,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   String? _selectedId;
 
   List<ChatSession> get sessions => List.unmodifiable(_sessions);
+
+  /// The sessions the side list shows: every one that exists. A new session that has not been sent a first message is a page
+  /// of choices, not a session, so it has no row until Send; one that is starting has its row from then.
+  List<ChatSession> get listed => List.unmodifiable([for (final session in _sessions) if (session.status != SessionStatus.draft) session]);
   String? get selectedId => _selectedId;
 
   ChatSession? get selected {

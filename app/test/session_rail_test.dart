@@ -28,6 +28,9 @@ ChatSession _open(SessionStore store, String title, {String? cwd, Duration ago =
   return session;
 }
 
+/// A session that is neither busy nor settled, so it has a row in the group of the rest: the offline preview.
+ChatSession _starting(SessionStore store, String title, {String? cwd}) => store.createPreviewSession(title: title);
+
 /// The rail in a column [width] wide, with a clock that stands still. Nothing here starts an agent.
 Future<List<String>> _show(WidgetTester tester, SessionStore store,
     {double width = 260, double height = 800, List<String>? closed, Brightness brightness = Brightness.dark, bool unfold = false}) async {
@@ -105,7 +108,7 @@ void main() {
       testWidgets(word, (tester) async {
         final store = SessionStore();
         final session = _open(store, title, cwd: '/work/app');
-        store.createDraft(title: 'Draft');
+        _starting(store, 'Draft');
         put(store, session);
         // Another session is the one chosen, so looking is not what clears a mark.
         await _show(tester, store, unfold: true);
@@ -115,12 +118,12 @@ void main() {
       });
     }
 
-    testWidgets('New for a session not started, Preview for the offline preview', (tester) async {
+    testWidgets('a session not started has no row, and the offline preview shows Preview', (tester) async {
       final store = SessionStore();
       store.createDraft(title: 'Draft');
       store.createPreviewSession(title: 'Offline view');
       await _show(tester, store);
-      expect(find.descendant(of: _row('Draft'), matching: find.text('New')), findsOneWidget);
+      expect(find.text('Draft'), findsNothing, reason: 'a new session is a page of choices until Send');
       expect(find.descendant(of: _row('Offline view'), matching: find.text('Preview')), findsOneWidget);
       store.dispose();
     });
@@ -130,7 +133,7 @@ void main() {
       _open(store, 'Asks').asking();
       _open(store, 'Runs').status = SessionStatus.working;
       _open(store, 'Ended').unread = true;
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store);
       expect(find.descendant(of: _row('Asks'), matching: find.byTooltip('Needs you')), findsOneWidget);
       expect(find.descendant(of: _row('Runs'), matching: find.byTooltip('Working')), findsOneWidget);
@@ -144,7 +147,7 @@ void main() {
       _open(store, 'On a branch', cwd: '/home/ana/devel/canoa', ago: const Duration(hours: 3)).worktree =
           const SessionWorktree(path: '/w/canoa-x', branch: 'canoa/x', repo: '/home/ana/devel/canoa');
       _open(store, 'Old one', ago: const Duration(days: 2));
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store, unfold: true);
       expect(_under(tester, 'Fix the build'), 'Idle| · canoa · Claude Code| · 7m');
       expect(_under(tester, 'On a branch'), 'Idle| · canoa/x · Claude Code| · 3h');
@@ -155,7 +158,7 @@ void main() {
     testWidgets('a title is one line however long', (tester) async {
       final store = SessionStore();
       _open(store, 'A title that goes on and on and on and on, well past the width of the rail');
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store, unfold: true);
       final height = tester.getSize(find.ancestor(of: find.textContaining('A title that goes on'), matching: find.byType(ListTile)).first).height;
       expect(height, lessThanOrEqualTo(64), reason: 'two lines of a dense tile');
@@ -171,7 +174,7 @@ void main() {
       _open(store, 'Runs').status = SessionStatus.working;
       _open(store, 'Asks').asking();
       _open(store, 'Ended').unread = true;
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store);
       expect(find.text('Working'), findsWidgets);
       expect(find.text('Sessions'), findsOneWidget);
@@ -194,7 +197,7 @@ void main() {
 
     testWidgets('a group with nothing in it is not shown', (tester) async {
       final store = SessionStore();
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store);
       expect(find.text('Sessions'), findsOneWidget);
       expect(find.text('Working'), findsNothing);
@@ -207,7 +210,7 @@ void main() {
       final store = SessionStore();
       final quiet = _open(store, 'Quiet one');
       _open(store, 'Quiet two');
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store);
       expect(find.text('Quiet one'), findsNothing);
       store.select(quiet.id);
@@ -221,7 +224,7 @@ void main() {
       _open(store, 'Runs').status = SessionStatus.working;
       _open(store, 'Asks').asking();
       _open(store, 'Asks too').asking();
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store);
       final needs = find.byKey(const ValueKey('group needsYou'));
       final working = find.byKey(const ValueKey('group working'));
@@ -252,7 +255,7 @@ void main() {
       _open(store, 'Asks in canoa', cwd: '/home/ana/devel/canoa').asking();
       _open(store, 'In coqui', cwd: '/home/ana/devel/coqui-acp');
       _open(store, 'Nowhere');
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store, unfold: true);
       expect(find.byKey(const ValueKey('group sessions')), findsOneWidget);
       await tester.tap(find.byTooltip('Group sessions'));
@@ -306,7 +309,7 @@ void main() {
       final store = SessionStore();
       final first = _open(store, 'First');
       _open(store, 'Second');
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       store.select(first.id);
       await _show(tester, store);
       await _openMenu(tester, 'First');
@@ -328,7 +331,7 @@ void main() {
       final store = SessionStore();
       final first = _open(store, 'First');
       _open(store, 'Second');
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       store.select(first.id);
       await _show(tester, store);
       await _openMenu(tester, 'First');
@@ -353,7 +356,7 @@ void main() {
     testWidgets('an archived session that needs the person is not hidden', (tester) async {
       final store = SessionStore();
       final first = _open(store, 'First')..archived = true;
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       await _show(tester, store);
       expect(find.text('Archived 1'), findsOneWidget);
       first.asking();
@@ -493,7 +496,7 @@ void main() {
     testWidgets('a right click opens the same menu', (tester) async {
       final store = SessionStore();
       final first = _open(store, 'First');
-      store.createDraft(title: 'Draft');
+      _starting(store, 'Draft');
       store.select(first.id);
       await _show(tester, store);
       final click = await tester.createGesture(kind: PointerDeviceKind.mouse, buttons: kSecondaryButton);
@@ -548,7 +551,7 @@ void main() {
         ..status = SessionStatus.working;
       _open(store, 'Review the diff', cwd: '/home/ana/devel/canoa', ago: const Duration(minutes: 1))
           .asking();
-      store.createDraft(title: 'Draft', cwd: '/home/ana/devel/canoa');
+      _starting(store, 'Draft', cwd: '/home/ana/devel/canoa');
       store.select(pinned.id);
       return store;
     }

@@ -167,7 +167,7 @@ void main() {
     expect(find.textContaining('npx'), findsNothing);
   });
 
-  testWidgets('a new session is in the list at once, with no agent started and no worktree made', (tester) async {
+  testWidgets('a new session has no row until Send, with no agent started and no worktree made', (tester) async {
     final (store, starts, worktrees, _) = await _app(tester);
     await newSession(tester);
     expect(find.byType(NewSessionView), findsOneWidget);
@@ -186,7 +186,8 @@ void main() {
     expect(session.remoteSessionId, isNull);
     expect(starts.opened, isEmpty, reason: 'no process before the first message');
     expect(worktrees.made, isEmpty, reason: 'no worktree before the first message');
-    expect(find.descendant(of: find.byType(ListTile), matching: find.text('New')), findsOneWidget);
+    expect(store.listed, isEmpty, reason: 'a page of choices, not a session, until Send');
+    expect(find.descendant(of: find.byType(ListTile), matching: find.text('New')), findsNothing);
   });
 
   testWidgets('Worktree can be chosen only for a folder in a git repository', (tester) async {
@@ -201,12 +202,13 @@ void main() {
     await newSession(tester);
     await tester.tap(find.byTooltip('Close conversation'));
     await tester.pumpAndSettle();
-    expect(store.sessions, isEmpty);
+    expect(store.listed, isEmpty);
+    expect(store.sessions.single.isDraft, isTrue, reason: 'the window lands on a fresh page of choices');
     expect(starts.opened, isEmpty);
     expect(worktrees.made, isEmpty);
   });
 
-  testWidgets('Ctrl+N and the palette open a new session with the last source, as a Chat, one at a time', (tester) async {
+  testWidgets('Ctrl+N and the palette show the page of choices already waiting, with what was written, never a second', (tester) async {
     final (store, _, _, _) = await _app(tester);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -218,22 +220,30 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
-    expect(store.sessions, hasLength(2));
-    final second = store.selected!;
-    expect((second.source?.label, second.cwd, second.kind), ('Scripted', null, SessionKind.chat), reason: 'a folder chosen is for its own session');
+    expect(store.sessions, hasLength(1));
+    expect(find.widgetWithText(TextField, 'Something to keep'), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('new-session-source')), matching: find.text('Scripted')), findsOneWidget);
-    expect(find.byKey(const Key('new-session-folder')), findsNothing);
-    await chooseWorkspace(tester);
-    expect(await menuOf(tester, 'new-session-folder'), contains('/work/repo'), reason: 'one click away');
-
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
     await tester.tap(find.text('New session').last);
     await tester.pumpAndSettle();
-    expect(store.sessions, hasLength(2), reason: 'an untouched new session is shown again rather than another made');
-    expect(store.selected, second);
+    expect(store.sessions, hasLength(1), reason: 'the waiting page is shown again rather than another made');
+  });
+
+  testWidgets('a waiting page switched to Workspace offers the folder chosen last, one click away', (tester) async {
+    final (store, _, _, _) = await _app(tester);
+    await newSession(tester);
+    await chooseSource(tester, 'Scripted');
+    await openFolder(tester);
+    expect(store.selected?.cwd, '/work/repo');
+    // Back to a chat and to Workspace again: the folder chosen last is in the menu without browsing.
+    await tester.tap(find.descendant(of: find.byKey(const Key('new-session-kind')), matching: find.text('Chat')));
+    await frames(tester);
+    await chooseWorkspace(tester);
+    expect(await menuOf(tester, 'new-session-folder'), contains('/work/repo'), reason: 'one click away');
+    expect(store.sessions, hasLength(1));
   });
 
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {

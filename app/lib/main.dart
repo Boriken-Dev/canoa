@@ -1246,7 +1246,26 @@ class _CanoaAppState extends State<CanoaApp> {
   /// What the session started last was, so that the next one begins as it did; null until one started here.
   SessionKind? _lastKind;
 
+  /// Whether the drafts the last run kept have been put back, so that the window does not make a new one first.
+  bool _restored = false;
+  bool _landing = false;
+
+  /// The window with no session lands on the page of choices for a new one, once there is a source to start it from: the draft
+  /// is made here and is no session, with no row, until its first message is sent.
+  void _land() {
+    if (!_restored || _landing || !mounted || store.selected != null || _sources.isEmpty) return;
+    _landing = true;
+    scheduleMicrotask(() {
+      _landing = false;
+      if (mounted && store.selected == null && _sources.isNotEmpty) _newSession();
+    });
+  }
+
+  /// Whether no agent can start here: every source has been looked at and none is ready (or there is none).
+  bool get _noAgent => _sources.every((source) => _checks[source] != null && !_checks[source]!.ready);
+
   void _noteLast() {
+    _land();
     final session = store.selected;
     if ((session == null || session.isDraft) && !_checked) unawaited(_checkSources());
     if (session == null || session.source == null) return;
@@ -1272,9 +1291,9 @@ class _CanoaAppState extends State<CanoaApp> {
       store.createPreviewSession();
       return;
     }
+    // The page of choices is one at a time: a draft already waiting, touched or not, is shown instead of another.
     for (final session in store.sessions) {
-      if (session.status == SessionStatus.draft && session.messages.isEmpty && session.draftText.trim().isEmpty &&
-          session.attachments.isEmpty) {
+      if (session.status == SessionStatus.draft && session.messages.isEmpty) {
         store.select(session.id);
         return;
       }
@@ -1664,6 +1683,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _serving = serving;
     store.resolveKeptSources((label) =>
         _sources.where((source) => source.label == label).firstOrNull);
+    _land();
     if (_checked) {
       unawaited(_checkSources());
     } else if (mounted) {
@@ -1766,7 +1786,10 @@ class _CanoaAppState extends State<CanoaApp> {
     });
     if (store.secretIdentity == null) unawaited(_loadSecretIdentity());
     unawaited(store.restoreDrafts((label) =>
-        _sources.where((source) => source.label == label).firstOrNull));
+        _sources.where((source) => source.label == label).firstOrNull).whenComplete(() {
+      _restored = true;
+      _land();
+    }));
     // Closing a window to the tray keeps its agents. Quitting does not, and `dispose` does not run when the window is destroyed.
     widget.shell?.beforeQuit = _endAgents;
     _conversation.close = _closeSession;
@@ -1985,8 +2008,10 @@ class _CanoaAppState extends State<CanoaApp> {
           grouping: _grouping,
           kit: _kit,
           renderers: widget.renderers,
+          noAgent: _noAgent,
           welcome: _withSite(WelcomeView(
-            sources: _sources, checks: _checks, programs: _programs, onNewSession: _newSession, historyImport: _historyImport(),
+            sources: _sources, checks: _checks, programs: _programs, historyImport: _historyImport(),
+            onStore: () => unawaited(_showLoadout()),
             onSettings: () => unawaited(_showSettings(section: 'sources')),
           )),
         ),
@@ -1999,7 +2024,7 @@ class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onNewSession, required this.onSettings,
     this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
-    this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
+    this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
     required this.hostsIndex, required this.hostsPage, this.usageIndex, this.usagePage, this.sessionSpend,
   });
@@ -2024,6 +2049,9 @@ class _CanoaHome extends StatelessWidget {
   final SessionStore store;
   final Widget welcome;
 
+  /// Whether no agent can start here, which the page of choices for a new session gives way to the welcome page for.
+  final bool noAgent;
+
   /// Opens a new session's empty view.
   final VoidCallback onNewSession;
   final ComposerKit kit;
@@ -2038,7 +2066,7 @@ class _CanoaHome extends StatelessWidget {
 
   /// The session [step] places from the one chosen, going round the list.
   void _step(int step) {
-    final sessions = listOrder(store.sessions, grouping.value);
+    final sessions = listOrder(store.listed, grouping.value);
     if (sessions.isEmpty) return;
     final at = sessions.indexWhere((session) => session.id == store.selectedId);
     store.select(sessions[(at + step) % sessions.length].id);
@@ -2076,7 +2104,7 @@ class _CanoaHome extends StatelessWidget {
     return showSelectableDialog<void>(
       context: context,
       builder: (_) => CommandPalette(items: sessionsOnly ? [
-        for (final other in listOrder(store.sessions, grouping.value))
+        for (final other in listOrder(store.listed, grouping.value))
           PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
       ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
@@ -2093,7 +2121,7 @@ class _CanoaHome extends StatelessWidget {
         if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
         if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
         PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
-        for (final other in store.sessions)
+        for (final other in store.listed)
           if (other.id != store.selectedId)
             PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
         for (final command in session?.commands ?? const <AgentCommandInfo>[])
@@ -2124,7 +2152,7 @@ class _CanoaHome extends StatelessWidget {
       LogicalKeyboardKey.digit7, LogicalKeyboardKey.digit8, LogicalKeyboardKey.digit9,
     ].indexed)
       chord(key): () {
-        final ordered = listOrder(store.sessions, grouping.value);
+        final ordered = listOrder(store.listed, grouping.value);
         if (index < ordered.length) store.select(ordered[index].id);
       },
     chord(LogicalKeyboardKey.tab): () => _step(1),
@@ -2172,6 +2200,7 @@ class _CanoaHome extends StatelessWidget {
               kit: kit,
               renderers: renderers,
               welcome: welcome,
+              noAgent: noAgent,
               sessionSpend: sessionSpend,
             ),
           ),
@@ -2218,10 +2247,11 @@ final class _ConversationHandle {
 class _Conversation extends StatefulWidget {
   const _Conversation({
     super.key, required this.store, required this.narrow, required this.handle, required this.layout, required this.surfaces,
-    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome, this.sessionSpend,
+    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.sessionSpend,
   });
 
   final Widget welcome;
+  final bool noAgent;
 
   /// What the host recorded a session spending, for the inspector; null where the host does not grant usage.
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
@@ -2454,7 +2484,9 @@ class _ConversationState extends State<_Conversation> {
 
   @override
   Widget build(BuildContext context) {
-    final session = widget.store.selected;
+    final chosen = widget.store.selected;
+    // With no agent to start one, a new session's page of choices gives way to the welcome page, which is no session's.
+    final session = chosen != null && widget.noAgent && chosen.isDraft && !widget.store.isStarting(chosen) ? null : chosen;
     // A first message shown here once its agent has taken it, sent from another view of this session, goes.
     if (session?.firstSent case final sent? when _input.text == sent && !widget.store.isStarting(session!)) {
       session.firstSent = null;
@@ -2497,7 +2529,7 @@ class _ConversationState extends State<_Conversation> {
                 onPressed: () => unawaited((widget.handle.close ?? widget.store.close)(session)),
               ),
             // On a phone the state is an icon whose tooltip names it, which leaves the conversation's name room to be read.
-            // The welcome page, with no session, has no state to name.
+            // The welcome page, with no session or no agent to start one, has no state to name.
             if (session == null)
               const SizedBox.shrink()
             else if (widget.narrow || headerBox.maxWidth < 680)

@@ -18,7 +18,6 @@ import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatTranscript;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
@@ -250,9 +249,9 @@ void main() {
     await tester.runAsync(keeper.flush);
     expect(held.agent.links.single.closed, isTrue);
     expect(held.agent.methods, isNot(contains('session/prompt')));
-    expect(await (keeper.backend as MemoryDraftBackend).ids(), isEmpty);
+    expect(await (keeper.backend as MemoryDraftBackend).ids(), hasLength(1), reason: 'only the fresh page of choices the window landed on');
     expect(store.ledger!.entries, isEmpty);
-    expect(store.sessions, isEmpty);
+    expect(store.listed, isEmpty);
     await finish(tester);
   });
 
@@ -320,11 +319,9 @@ void main() {
 
     await tester.runAsync(host.stop);
     await settle(tester, 100);
-    await tester.tap(find.byKey(const Key('new-session-source')));
     await frames(tester);
-    expect(find.byKey(const Key('source outside')), findsNothing, reason: 'the host serves nothing now');
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await frames(tester);
+    expect(find.byKey(const Key('new-session-source')), findsNothing, reason: 'the host serves nothing now, so there is no agent to choose');
+    expect(find.byKey(const Key('welcome-title')), findsOneWidget);
     await finish(tester);
   });
 

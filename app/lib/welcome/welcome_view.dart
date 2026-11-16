@@ -8,7 +8,6 @@ import '../history/session_import.dart';
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart';
-import '../store/programs_view.dart';
 import '../theme/canoa_mark.dart';
 
 /// Earlier sessions of the person's agents that Canoa could bring in, offered on the first screen. [from] names the sources
@@ -27,14 +26,15 @@ final class HistoryImport {
   final Future<ImportOutcome> Function(List<ImportChoice> chosen) bring;
 }
 
-/// What a window with no session shows: each agent source with its readiness (what it needs when it is not ready, and the
-/// Store's Install where its program is missing), a way to start, and the offer to import earlier sessions.
+/// What the window shows when no agent can start a session: each agent source with what it needs, a link to the Store, where
+/// agents are installed, and the offer to import earlier sessions. It installs nothing itself; the page of choices for a new
+/// session is what the window shows once an agent is ready.
 class WelcomeView extends StatefulWidget {
   const WelcomeView({
     super.key,
     required this.sources,
     required this.checks,
-    required this.onNewSession,
+    this.onStore,
     this.programs,
     this.onSettings,
     this.historyImport,
@@ -44,9 +44,11 @@ class WelcomeView extends StatefulWidget {
 
   /// What each source needs, as last checked; a source not in it is still being looked at.
   final Map<AgentSource, SourceCheck> checks;
-  final VoidCallback onNewSession;
 
-  /// The Store's programs, for a source's Install and its version.
+  /// Opens the Store, where an agent is installed.
+  final VoidCallback? onStore;
+
+  /// The Store's programs, for a source's version.
   final ProgramStores? programs;
 
   /// Opens Settings at its sources, where a source is added or hidden.
@@ -180,11 +182,7 @@ class _WelcomeViewState extends State<WelcomeView> {
     final programs = widget.programs;
     final status = check.store == null ? null : programs?.status(check.store!);
     if (programs != null && status != null && status.reported && status.problem == null && status.copy == null) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Not installed: ${status.info.title} is not on this computer.', style: TextStyle(color: theme.colorScheme.error)),
-        const SizedBox(height: 6),
-        ProgramButtons(programs: programs, status: status),
-      ]);
+      return Text('Not installed: ${status.info.title} is not on this computer.', style: TextStyle(color: theme.colorScheme.error));
     }
     final problem = check.describe(source.label);
     if (problem != null) return Text(problem, style: TextStyle(color: theme.colorScheme.error));
@@ -283,11 +281,23 @@ class _WelcomeViewState extends State<WelcomeView> {
             Row(children: [
               CanoaMark(size: 40, color: look.accent),
               const SizedBox(width: 14),
-              Expanded(child: Text('Welcome to Canoa', style: theme.textTheme.headlineSmall)),
+              Expanded(child: Text('No agent is installed yet', key: const Key('welcome-title'), style: theme.textTheme.headlineSmall)),
             ]),
             const SizedBox(height: 8),
-            Text('Your agents, in one place. These are the ones Canoa found on this computer.',
+            Text('Canoa runs the agents you install, and a new session starts from this page once one is ready. This is what Canoa found on this computer.',
                 style: TextStyle(color: look.muted)),
+            const SizedBox(height: 20),
+            Wrap(spacing: 12, runSpacing: 8, children: [
+              if (widget.onStore != null)
+                FilledButton.icon(
+                  key: const Key('welcome-store'),
+                  onPressed: widget.onStore,
+                  icon: const Icon(Icons.storefront_outlined),
+                  label: const Text('Open the Store'),
+                ),
+              if (widget.onSettings != null)
+                TextButton(key: const Key('welcome-sources'), onPressed: widget.onSettings, child: const Text('Manage sources')),
+            ]),
             const SizedBox(height: 20),
             const Divider(height: 1),
             sources,
@@ -296,17 +306,6 @@ class _WelcomeViewState extends State<WelcomeView> {
               Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: _offer(context, offer)),
               const Divider(height: 1),
             ],
-            const SizedBox(height: 20),
-            Wrap(spacing: 12, runSpacing: 8, children: [
-              FilledButton.icon(
-                key: const Key('welcome-new-session'),
-                onPressed: widget.onNewSession,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('New session'),
-              ),
-              if (widget.onSettings != null)
-                TextButton(key: const Key('welcome-sources'), onPressed: widget.onSettings, child: const Text('Manage sources')),
-            ]),
           ]),
         ),
       ),
