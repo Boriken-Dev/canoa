@@ -182,12 +182,14 @@ enum Command {
         /// is bound to the key it pairs.
         #[arg(long)]
         native: bool,
-        /// A browser origin allowed to pair, such as chrome-extension://ID for an extension's page. Repeat for more. Without
-        /// one a browser is refused before its handshake, so a page cannot spend the PIN; a native client sends no origin.
+        /// The one browser origin allowed to pair, as scheme://host[:port], such as chrome-extension://ID for an extension's
+        /// page; the key it pairs is recorded as that origin's. Without it a browser is refused before its handshake, so a page
+        /// cannot spend the PIN; a native client sends no origin.
         #[arg(long = "origin", value_name = "ORIGIN", conflicts_with_all = ["native", "join"])]
         origins: Vec<String>,
         /// Join the `pair` waiting at URL with its PIN, under this host's own identity, and print its peer id. The PIN is read
-        /// from --pin-file, else from standard input, never from an argument.
+        /// from --pin-file, else from standard input, never from an argument. The server is kept as one this host dials (`dial
+        /// --paired`, `forward --paired`), apart from the keys it serves: it is not let in to this host's entries.
         #[arg(long, value_name = "URL", conflicts_with_all = ["native", "until_stdin_closes"])]
         join: Option<String>,
         /// With --join: a file holding the PIN.
@@ -214,6 +216,8 @@ enum Command {
     /// until stopped, connecting again when the link goes.
     Forward(Box<coqui_acp_bridge::forward::Forward>),
     /// Let a peer this user paired with open a protocol, or with --revoke no longer. It counts at once, on a live link too.
+    /// The grants are in the home's grants.json, which `serve --program --paired` reads (a paired key has acp/1 and mcp-offer/1
+    /// there, and what is granted here); canoa.cfg's entries and `serve` of canoa.cfg never read them.
     Grant {
         /// The peer id.
         peer: String,
@@ -731,6 +735,10 @@ struct ServeArgs {
     /// The web app's address, in place of [host.web]'s listen. Beyond loopback it needs [host.web]'s cert and key.
     #[arg(long, value_name = "ADDRESS")]
     web_listen: Option<SocketAddr>,
+    /// Which of the library's flags the command line gave. Before them, since each field takes its values out of the matches
+    /// as it is read.
+    #[command(flatten)]
+    given: bridge::Given,
     /// The proof's method and session settings, which both forms of `serve` take, and with --program the program's own flags.
     #[command(flatten)]
     bridge: coqui_acp_bridge::serve::Serve,
@@ -1481,6 +1489,16 @@ fn pair(
     let mut limits = Limits::default();
     limits.max_message = auth::MAX_PROOF_MESSAGE;
     limits.pending = 8;
+    if origins.len() > 1
+        || origins
+            .iter()
+            .any(|origin| !coqui_acp_bridge::valid_origin(origin))
+    {
+        return Err(Failed::usage(
+            "--origin is one origin, scheme://host or scheme://host:port with no path, and never null",
+        ));
+    }
+    let recorded_origin = origins.first().cloned();
     let origins = if origins.is_empty() {
         vec![NO_BROWSER.to_owned()]
     } else {
@@ -1553,6 +1571,7 @@ fn pair(
             report.clone(),
             Arc::clone(&running),
         );
+        let (dir, origin) = (home.dir().to_owned(), recorded_origin.clone());
         std::thread::spawn(move || {
             let result = pending
                 .handshake()
@@ -1563,7 +1582,25 @@ fn pair(
                     channel.close();
                     paired.map_err(|error| error.to_string())
                 })
-                .map(|paired| paired.peer.id().to_string());
+                .and_then(|paired| {
+                    let peer = paired.peer.id();
+                    // The one origin that may pair is the one the key is bound to, as a key paired through the door is.
+                    match &origin {
+                        Some(origin) => crate::native::record_origin(
+                            &dir,
+                            &peer.to_string(),
+                            origin,
+                        )
+                        .map(|()| peer.to_string())
+                        .map_err(|error| {
+                            let _ = store.remove(&peer);
+                            format!(
+                                "the origin could not be recorded, so the key was not kept: {error}"
+                            )
+                        }),
+                        None => Ok(peer.to_string()),
+                    }
+                });
             running.fetch_sub(1, Ordering::SeqCst);
             let _ = report.send(result);
         });
@@ -1821,7 +1858,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::McpConfig { peer, name } => {
             print(front, &bridge::mcp_config(&peer, &name, front)?)
         }
-        Command::McpShim { peer } => bridge::mcp_shim(peer.as_deref()),
+        Command::McpShim { peer } => bridge::mcp_shim(peer.as_deref(), front),
         Command::AgentGuard { pid } => {
             bridge::agent_guard(pid);
             Ok(())
@@ -1950,13 +1987,20 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
 
 impl Cli {
     /// Whether this is one of the commands a host starts for itself, which take the process's own standard streams:
-    /// `provider`, `tool`, `agent`, `launch`, `mcp-bridge` or, on Unix, `spawner`. An application that runs as one when it starts
+    /// `provider`, `tool`, `agent`, `launch`, `mcp-bridge`, the library's `serve --program`, `dial`, `forward`, `discover`,
+    /// `mcp-shim`, `agent-guard` and `pair --join`, or, on Unix, `spawner`. An application that runs as one when it starts
     /// itself takes nothing else on that command line.
     #[must_use]
-    pub const fn is_a_hosts_own(&self) -> bool {
+    pub fn is_a_hosts_own(&self) -> bool {
         #[cfg(unix)]
         if matches!(self.command, Command::Spawner) {
             return true;
+        }
+        // These run until stopped, end the process (a short-lived certificate does), or print and read the process's own streams.
+        match &self.command {
+            Command::Serve(args) if args.program => return true,
+            Command::Pair { join: Some(_), .. } => return true,
+            _ => {}
         }
         matches!(
             self.command,
@@ -1967,6 +2011,9 @@ impl Cli {
                 | Command::McpBridge
                 | Command::NativeHost { .. }
                 | Command::McpShim { .. }
+                | Command::Dial(_)
+                | Command::Forward(_)
+                | Command::Discover { .. }
                 | Command::AgentGuard { .. }
                 | Command::HookForward { .. }
         )
@@ -2131,6 +2178,33 @@ mod tests {
             panic!("serve");
         };
         assert!(args.allow_empty);
+    }
+
+    #[test]
+    fn serve_knows_which_library_flags_the_command_line_gave() {
+        let given = |line: &[&str]| {
+            let cli = Cli::try_parse_from(line).expect("parses");
+            let Command::Serve(args) = cli.command else {
+                panic!("serve");
+            };
+            args.given.0.clone()
+        };
+        assert!(given(&["canoa", "serve"]).is_empty());
+        assert!(given(&["canoa", "serve", "--method", "noise", "--key-limit", "5"]).is_empty());
+        assert_eq!(
+            given(&["canoa", "serve", "--max-peers", "4"]),
+            ["--max-peers"]
+        );
+        assert_eq!(
+            given(&[
+                "canoa",
+                "serve",
+                "--no-peer-proof",
+                "--listen",
+                "127.0.0.1:1"
+            ]),
+            ["--listen", "--no-peer-proof"]
+        );
     }
 
     #[test]

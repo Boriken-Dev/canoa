@@ -328,6 +328,31 @@ fn a_hosts_own_command_is_refused_as_a_job() {
     assert_eq!(std::env::current_dir().expect("a directory"), before);
 }
 
+/// The bridge library's commands print and read the process's own streams, or run until stopped, or end the process: an
+/// application's process runs none of them as a job.
+#[test]
+fn the_bridge_librarys_commands_are_refused_as_a_job() {
+    let scratch = Scratch::new();
+    for args in [
+        json!(["discover", "--seconds", "0"]),
+        json!(["pair", "--join", "ws://127.0.0.1:1"]),
+        json!(["serve", "--program", "--no-peer-proof", "--", "none"]),
+        json!(["dial", "ws://127.0.0.1:1", "--no-peer-proof", "--", "none"]),
+        json!([
+            "forward",
+            "ws://127.0.0.1:1",
+            "--paired",
+            "--local",
+            "127.0.0.1:1=127.0.0.1:2"
+        ]),
+    ] {
+        let job = start(&json!({"args": args, "home": scratch.0}));
+        let said = to_end(job);
+        assert_eq!(said.exit, Some(2), "{args}: {said:?}");
+        assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
+    }
+}
+
 /// An application that leaves `SIGPIPE` as the system gives it would end the first time the host writes to an agent that has
 /// died: hosting sets it aside.
 #[cfg(unix)]

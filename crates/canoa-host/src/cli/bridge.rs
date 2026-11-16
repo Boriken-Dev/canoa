@@ -3,13 +3,17 @@
 
 use std::path::{Path, PathBuf};
 
-use clap::{Args as _, FromArgMatches as _};
+use clap::Args as _;
 use coqui_acp_bridge::helper::Helper;
 use coqui_acp_bridge::{
     MethodArgs, dial, discover, forward, grant, keygen, mcp_shim, pairing, serve,
 };
 use coqui_agentic_peer::auth::{self, Method};
 use url::Url;
+
+use crate::config::Config;
+use crate::home::Home;
+use coqui_peer_webcrypto::PeerId;
 
 use super::{Failed, Front, ServeArgs, home_of};
 
@@ -46,6 +50,31 @@ fn helper(front: &dyn Front) -> Result<Helper, Failed> {
     ))
 }
 
+/// The keys canoa.cfg limits to entries with `peers`: a key an entry names is that entry's and no program's.
+fn limited_keys(
+    args: &ServeArgs,
+    front: &dyn Front,
+) -> Result<std::collections::HashSet<PeerId>, Failed> {
+    let layers = super::layers_of(&args.config, front, false)?;
+    let config = match Config::load_layers(&layers) {
+        Ok(config) => config,
+        Err(crate::ConfigError::Read { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            return Ok(std::collections::HashSet::new());
+        }
+        // Unreadable is not "limits nobody": a rule that cannot be read is not dropped.
+        Err(error) => return Err(Failed::usage(error)),
+    };
+    Ok(config
+        .entries
+        .iter()
+        .filter_map(|entry| entry.peers.as_ref())
+        .flatten()
+        .copied()
+        .collect())
+}
+
 /// `serve --program`: one stdio agent on the network, with no canoa.cfg.
 pub(super) fn serve_program(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     if args.web.is_some()
@@ -61,36 +90,99 @@ pub(super) fn serve_program(args: &ServeArgs, front: &dyn Front) -> Result<(), F
         ));
     }
     let mut bridge = args.bridge.clone();
-    bridge.home = Some(home_dir(front)?);
+    let home = home_of(front)?;
+    if bridge.paired {
+        method_unless_running(&home, bridge.method.method)?;
+    }
+    bridge.home = Some(home.dir().to_owned());
     bridge.helper = Some(helper(front)?);
+    // A key paired for this host reaches an entry its canoa.cfg limits it to with `peers`, and not a program: whoever is limited
+    // is not served this one.
+    let limited = limited_keys(args, front)?;
+    bridge.admit = Some(serve::Admit::new(move |peer| !limited.contains(peer)));
     ended(serve::run(&bridge))
+}
+
+/// The method a command names while a host runs on the home: the same refusal `id` and `pair` give.
+fn method_unless_running(home: &Home, method: Option<Method>) -> Result<(), Failed> {
+    super::MethodArg { method }
+        .identity_unless_running(home, super::ForceArg { force: false })
+        .map(drop)
+}
+
+/// Which of `serve`'s library flags a command line gave, by the way clap knows it: a flag named on the command line, even at its
+/// default, and never a guess from what it holds.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Given(pub(super) Vec<String>);
+
+/// `serve`'s proof settings, which both forms take.
+const SHARED: [&str; 3] = ["method", "key_limit", "no_rekey"];
+
+impl clap::Args for Given {
+    fn augment_args(command: clap::Command) -> clap::Command {
+        command
+    }
+
+    fn augment_args_for_update(command: clap::Command) -> clap::Command {
+        command
+    }
+}
+
+impl clap::FromArgMatches for Given {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        let known: Vec<String> = serve::Serve::augment_args(clap::Command::new("serve"))
+            .get_arguments()
+            .map(|argument| argument.get_id().as_str().to_owned())
+            .filter(|id| !SHARED.contains(&id.as_str()))
+            .collect();
+        let given = known
+            .iter()
+            .filter(|id| matches.try_contains_id(id).unwrap_or(false))
+            .filter(|id| matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine))
+            .map(|id| format!("--{}", id.replace('_', "-")))
+            .collect();
+        Ok(Self(given))
+    }
+
+    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
 }
 
 /// A `serve` with the library's flags and no `--program`: they would be taken for settings of canoa.cfg's host, and are not.
 pub(super) fn refuse_program_flags(args: &ServeArgs) -> Result<(), Failed> {
-    let defaults =
-        serve::Serve::augment_args(clap::Command::new("serve")).get_matches_from(["serve"]);
-    let Ok(mut baseline) = serve::Serve::from_arg_matches(&defaults) else {
-        return Ok(());
-    };
-    // What `serve` has of its own, which the library's arguments share.
-    baseline.method = args.bridge.method;
-    baseline.session = args.bridge.session;
-    if format!("{baseline:?}") == format!("{:?}", args.bridge) {
+    if args.given.0.is_empty() {
         return Ok(());
     }
-    Err(Failed::usage(
-        "those flags belong to --program, which serves one program with no canoa.cfg",
-    ))
+    Err(Failed::usage(format!(
+        "{} belong to --program, which serves one program with no canoa.cfg",
+        args.given.0.join(", ")
+    )))
+}
+
+/// The keys this host dials, apart from the keys its entries serve: pairing with a server does not let that server in.
+fn dialed_store(home: &Path) -> PathBuf {
+    home.join("dialed")
 }
 
 pub(super) fn dial(mut args: dial::Dial, front: &dyn Front) -> Result<(), Failed> {
-    args.home = Some(home_dir(front)?);
+    let home = home_of(front)?;
+    if args.paired {
+        method_unless_running(&home, args.method.method)?;
+    }
+    args.home = Some(home.dir().to_owned());
+    args.paired_store = Some(dialed_store(home.dir()));
     ended(dial::run(&args))
 }
 
 pub(super) fn forward(mut args: forward::Forward, front: &dyn Front) -> Result<(), Failed> {
-    args.home = Some(home_dir(front)?);
+    let home = home_of(front)?;
+    if args.paired {
+        method_unless_running(&home, args.method.method)?;
+    }
+    args.home = Some(home.dir().to_owned());
+    args.paired_store = Some(dialed_store(home.dir()));
     ended(forward::run(&args))
 }
 
@@ -111,8 +203,8 @@ pub(super) fn mcp_config(peer: &str, name: &str, front: &dyn Front) -> Result<St
     mcp_shim::config(&helper(front)?, Some(&home_dir(front)?), peer, name).map_err(Failed::usage)
 }
 
-pub(super) fn mcp_shim(peer: Option<&str>) -> Result<(), Failed> {
-    ended(mcp_shim::run(peer))
+pub(super) fn mcp_shim(peer: Option<&str>, front: &dyn Front) -> Result<(), Failed> {
+    ended(mcp_shim::run(peer, Some(&home_dir(front)?)))
 }
 
 pub(super) fn agent_guard(pid: u32) {
@@ -143,14 +235,17 @@ pub(super) fn pair_join(
 ) -> Result<(), Failed> {
     let url =
         Url::parse(url).map_err(|error| Failed::usage(format!("--join is a URL: {error}")))?;
+    let home = home_of(front)?;
+    method_unless_running(&home, method)?;
     ended(pairing::join(&pairing::PairDial {
         url,
         identity: None,
-        store: None,
+        // The server joined is dialed, not served: it is not let in to this host's entries.
+        store: Some(dialed_store(home.dir())),
         pin_file,
         ca_file,
         timeout_seconds,
         method: MethodArgs { method },
-        home: Some(home_dir(front)?),
+        home: Some(home.dir().to_owned()),
     }))
 }

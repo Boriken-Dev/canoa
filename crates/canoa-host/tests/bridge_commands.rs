@@ -379,3 +379,248 @@ fn the_commands_keep_their_files_in_this_hosts_own_home_when_none_is_named() {
         "and nowhere the library would have put them"
     );
 }
+
+fn agent_entry(extra: &str) -> String {
+    format!(
+        "[host.agents.fixture]\nprogram = {}\n{extra}\n",
+        support::quoted(&example("stdio_agent", false).to_string_lossy())
+    )
+}
+
+fn accept(home: &Path, identity: &coqui_agentic_peer::auth::Identity) {
+    let store = coqui_peer_webcrypto::TrustStore::open(&home.join("peers")).expect("a store");
+    store
+        .accept_key(&identity.key_material())
+        .expect("the key is accepted");
+}
+
+#[test]
+fn serve_program_paired_leaves_out_a_key_canoa_cfg_limits_to_entries() {
+    let scratch = Scratch::new();
+    let home = scratch.0.join("home");
+    let limited = support::key();
+    let free = support::key();
+    accept(&home, &limited);
+    accept(&home, &free);
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(
+        &config,
+        agent_entry(&format!("peers = [\"{}\"]", limited.peer_id())),
+    )
+    .expect("canoa.cfg");
+    let port = free_port();
+    let mut command = canoa(&home);
+    command
+        .env("COQUI_AGENTIC_PEER_HOME", &home)
+        .args([
+            "serve",
+            "--program",
+            "--paired",
+            "--method",
+            support::method().name(),
+            "--config",
+        ])
+        .arg(&config)
+        .args(["--listen", &format!("127.0.0.1:{port}"), "--"])
+        .arg(example("stdio_agent", false));
+    let mut server = Running::start(command);
+    let host = server.until("sha256:");
+    server.until("listening on");
+    let host: coqui_peer_webcrypto::PeerId = host.trim().parse().expect("the host's id");
+    let url = format!("ws://127.0.0.1:{port}");
+    let turned_away = support::with_link(&url, &limited, host, |rpc| rpc.initialize());
+    assert!(
+        !matches!(turned_away, Ok(Ok(_))),
+        "a key limited to an entry is not served the program: {turned_away:?}"
+    );
+    let served = support::with_link(&url, &free, host, |rpc| rpc.initialize());
+    assert!(matches!(served, Ok(Ok(_))), "{served:?}");
+}
+
+#[test]
+fn pair_join_records_the_server_apart_from_the_keys_this_host_serves() {
+    let host = Scratch::new();
+    let joiner = Scratch::new();
+    let mut waiting = Running::start({
+        let mut command = canoa(&host.0);
+        command.args(["pair", "--listen", "127.0.0.1:0", "--timeout-seconds", "60"]);
+        command
+    });
+    let shown: Value = serde_json::from_str(&waiting.until("\"pin\"")).expect("the PIN line");
+    let file = joiner.0.join("pin.txt");
+    std::fs::write(
+        &file,
+        format!("{}\n", shown["pin"].as_str().expect("a PIN")),
+    )
+    .expect("pin");
+    let joined = run(canoa(&joiner.0)
+        .args([
+            "pair",
+            "--join",
+            shown["url"].as_str().expect("url"),
+            "--pin-file",
+        ])
+        .arg(&file));
+    assert!(joined.status.success(), "{}", text(&joined.stderr));
+    let server: coqui_peer_webcrypto::PeerId =
+        shown["peer"].as_str().expect("peer").parse().expect("id");
+    let dialed = coqui_peer_webcrypto::TrustStore::open(&joiner.0.join("dialed")).expect("store");
+    assert!(
+        dialed.is_accepted(&server),
+        "the dial-only store holds the server"
+    );
+    let served = coqui_peer_webcrypto::TrustStore::open(&joiner.0.join("peers")).expect("store");
+    assert!(
+        !served.is_accepted(&server),
+        "this host's entries do not admit it"
+    );
+}
+
+#[test]
+fn a_flag_of_the_library_is_refused_without_program_even_at_its_default() {
+    let scratch = Scratch::new();
+    let refused = run(canoa(&scratch.0).args(["serve", "--max-peers", "4"]));
+    assert_eq!(refused.status.code(), Some(2), "{}", text(&refused.stderr));
+    assert!(
+        text(&refused.stderr).contains("--program"),
+        "{}",
+        text(&refused.stderr)
+    );
+}
+
+#[test]
+fn an_origin_must_be_scheme_host_and_port() {
+    let scratch = Scratch::new();
+    for bad in [
+        "null",
+        "https://example.com/path",
+        "example.com",
+        "https://",
+    ] {
+        let pair = run(canoa(&scratch.0).args(["pair", "--origin", bad, "--timeout-seconds", "5"]));
+        assert_eq!(pair.status.code(), Some(2), "{bad}: {}", text(&pair.stderr));
+        let serve = run(canoa(&scratch.0)
+            .args([
+                "serve",
+                "--program",
+                "--no-peer-proof",
+                "--origin",
+                bad,
+                "--",
+            ])
+            .arg(example("stdio_agent", false)));
+        assert_eq!(
+            serve.status.code(),
+            Some(2),
+            "{bad}: {}",
+            text(&serve.stderr)
+        );
+    }
+    let two = run(canoa(&scratch.0).args([
+        "pair",
+        "--origin",
+        "https://a.example",
+        "--origin",
+        "https://b.example",
+        "--timeout-seconds",
+        "5",
+    ]));
+    assert_eq!(two.status.code(), Some(2), "{}", text(&two.stderr));
+}
+
+#[test]
+fn pair_origin_records_the_origin_beside_the_key_it_paired() {
+    let host = Scratch::new();
+    let joiner = Scratch::new();
+    let origin = "https://app.example";
+    let mut waiting = Running::start({
+        let mut command = canoa(&host.0);
+        command.args([
+            "pair",
+            "--listen",
+            "127.0.0.1:0",
+            "--origin",
+            origin,
+            "--timeout-seconds",
+            "60",
+        ]);
+        command
+    });
+    let shown: Value = serde_json::from_str(&waiting.until("\"pin\"")).expect("the PIN line");
+    let file = joiner.0.join("pin.txt");
+    std::fs::write(
+        &file,
+        format!("{}\n", shown["pin"].as_str().expect("a PIN")),
+    )
+    .expect("pin");
+    let joined = run(canoa(&joiner.0)
+        .args([
+            "pair",
+            "--join",
+            shown["url"].as_str().expect("url"),
+            "--pin-file",
+        ])
+        .arg(&file));
+    assert!(joined.status.success(), "{}", text(&joined.stderr));
+    waiting.until("paired");
+    let joiner_peer = text(&run(canoa(&joiner.0).arg("id")).stdout);
+    let recorded =
+        std::fs::read_to_string(host.0.join("native").join("origins.json")).expect("origins");
+    assert!(
+        recorded.contains(&joiner_peer) && recorded.contains(origin),
+        "{recorded}"
+    );
+}
+
+#[test]
+fn the_library_commands_hold_to_the_method_a_running_host_keeps() {
+    let host = support::Host::start(&agent_entry(""), 1);
+    let other = coqui_agentic_peer::auth::Method::ALL
+        .into_iter()
+        .find(|method| *method != support::method())
+        .expect("another method");
+    let refused = run(canoa(&host.home()).args([
+        "pair",
+        "--join",
+        "ws://127.0.0.1:1",
+        "--method",
+        other.name(),
+    ]));
+    assert_eq!(refused.status.code(), Some(3), "{}", text(&refused.stderr));
+}
+
+#[test]
+fn mcp_shim_looks_for_its_door_in_this_hosts_home() {
+    let scratch = Scratch::new();
+    let person = scratch.0.join("person");
+    let offers = person.join(".canoa").join("offers");
+    std::fs::create_dir_all(&offers).expect("offers");
+    let peer = format!("sha256:{}", "ab".repeat(32));
+    let door = offers.join(format!("standing-{}.json", "ab".repeat(32)));
+    std::fs::write(
+        &door,
+        r#"{"address":"10.0.0.1:9","token":"x","answer":"y"}"#,
+    )
+    .expect("a door");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&offers, std::fs::Permissions::from_mode(0o700)).expect("mode");
+        std::fs::set_permissions(&door, std::fs::Permissions::from_mode(0o600)).expect("mode");
+    }
+    let mut command = Command::new(host_binary());
+    command
+        .env_remove("COQUI_AGENTIC_PEER_HOME")
+        .env("HOME", &person)
+        .env("USERPROFILE", &person)
+        .env("LOCALAPPDATA", scratch.0.join("elsewhere"))
+        .env("XDG_CONFIG_HOME", scratch.0.join("elsewhere"))
+        .args(["mcp-shim", "--peer", &peer])
+        .stdin(Stdio::null());
+    let output = run(&mut command);
+    let said = format!("{}{}", text(&output.stderr), text(&output.stdout));
+    assert!(
+        said.contains("not on this machine"),
+        "the shim read the door in this host's home: {said}"
+    );
+}
